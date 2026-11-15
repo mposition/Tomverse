@@ -41,6 +41,18 @@ const okStream = stream({ type: "system", subtype: "init" },
   resultEvent);
 const sha = (text) => createHash("sha256").update(text).digest("hex");
 
+/** A preservation stand-in: leftovers are clean; a run's change is written
+ * to the patch file the sidecar names, as the real one streams it. */
+const fakePreserve = (patchBody, commit, names = []) => async (_worktree, name, options = {}) => {
+  names.push(name);
+  if (name.startsWith("leftover-")) return { ok: true, changed: false };
+  const { writeFile: write } = await import("node:fs/promises");
+  if (options.patchPath) await write(options.patchPath, patchBody);
+  return { ok: true, changed: true, ref: `refs/amux-v22-preserved/${name}`, commit,
+    ...(options.patchPath ? { patchPath: options.patchPath, patchDigest: sha(patchBody),
+      patchBytes: Buffer.byteLength(patchBody) } : {}) };
+};
+
 /** A fake CLI: `chunks` are written `everyMs` apart, then it exits 0; with
  * `hang` it never exits by itself. */
 function fakeSpawn({ chunks = [okStream], everyMs = 0, hang = false, exitCode = 0 } = {}) {
@@ -66,10 +78,14 @@ function fakeSpawn({ chunks = [okStream], everyMs = 0, hang = false, exitCode = 
       chunks.forEach((chunk, index) => timers.push(setTimeout(() =>
         child.stdout.write(chunk), everyMs * index)));
       if (hang) return;
+      // Like a real process, "close" comes only once stdout has been read to
+      // its end (a paused reader holds it back).
       timers.push(setTimeout(() => {
+        child.stdout.once("end", () => {
+          child.exitCode = exitCode;
+          child.emit("close", exitCode, null);
+        });
         child.stdout.end();
-        child.exitCode = exitCode;
-        child.emit("close", exitCode, null);
       }, everyMs * chunks.length + 1));
     });
     return child;
@@ -203,6 +219,119 @@ test("CPU time in the process tree keeps a quiet run alive; with none, and nothi
   }
 });
 
+test("a run that keeps writing a file it already changed is alive even without /proc", async () => {
+  const { execFileSync, execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const { appendFile, writeFile: write } = await import("node:fs/promises");
+  const { probeAmuxV22CheckoutActivity } = await import("../lib/amux/v22OneShotSidecar.mjs");
+  const hostRun = (binary, args, options) => promisify(execFile)(binary,
+    ["-c", "core.autocrlf=false", ...args], { ...options, env: process.env });
+  const repo = await mkdtemp(join(tmpdir(), "amux-v22-flow-activity-"));
+  const git = (...args) => execFileSync("git", ["-c", "user.email=t@example.invalid",
+    "-c", "user.name=t", "-c", "core.autocrlf=false", ...args], { cwd: repo }).toString();
+  try {
+    git("init", "-q");
+    await write(join(repo, "a.txt"), "one\n");
+    git("add", "."); git("commit", "-q", "-m", "base");
+    await write(join(repo, "a.txt"), "one\ntwo\n");
+    await write(join(repo, "log.txt"), "start\n");
+    const probe = () => probeAmuxV22CheckoutActivity(repo, { run: hostRun });
+    const first = await probe();
+    // The same paths and states, but the files keep growing.
+    await appendFile(join(repo, "a.txt"), "three\n");
+    const second = await probe();
+    assert.notEqual(second, first, "an already-modified file written again is progress");
+    await appendFile(join(repo, "log.txt"), "more\n");
+    assert.notEqual(await probe(), second, "an untracked file written again is progress");
+    assert.equal(await probe(), await probe(), "no write, no progress");
+    // The stall watch with no CPU reading: a writer keeps the run alive...
+    const writer = setInterval(() => { appendFile(join(repo, "log.txt"), "tick\n").catch(() => {}); }, 20);
+    const controller = new AbortController();
+    const kept = runAmuxV22OneShot(request, config, { syntheticPlatform: true,
+      spawnChild: fakeSpawn({ chunks: [], hang: true }).spawnChild, localCliFlow: true,
+      stallMs: 1_500, progressPollMs: 40, signal: controller.signal, probeCpu: () => null,
+      probeActivity: probe });
+    setTimeout(() => controller.abort(), 4_000);
+    const keptResult = await kept;
+    clearInterval(writer);
+    assert.equal(keptResult.failure, "operator_stop", "never stalled while it kept writing");
+    // ...and once nothing writes, it stalls.
+    const idle = await runAmuxV22OneShot(request, config, { syntheticPlatform: true,
+      spawnChild: fakeSpawn({ chunks: [], hang: true }).spawnChild, localCliFlow: true,
+      stallMs: 1_500, progressPollMs: 40, probeCpu: () => null, probeActivity: probe });
+    assert.equal(idle.failure, "stalled");
+  } finally { await rm(repo, { recursive: true, force: true }); }
+});
+
+test("a transcript of hundreds of MB is read back in a small heap without losing the result", {
+  timeout: 300_000,
+}, async () => {
+  const { spawn } = await import("node:child_process");
+  const { createReadStream } = await import("node:fs");
+  const { pathToFileURL } = await import("node:url");
+  const dir = await mkdtemp(join(tmpdir(), "amux-v22-flow-big-"));
+  const transcriptPath = join(dir, `${attemptId}.transcript.jsonl`);
+  try {
+    const lines = 300_000;
+    const writer = `const line=JSON.stringify({type:"user",message:{content:"y".repeat(1000)}})+"\\n";` +
+      `let n=${lines};const out=process.stdout;` +
+      `function go(){while(n>0){n--;if(!out.write(line))return out.once("drain",go);}` +
+      `out.end(${JSON.stringify(stream(resultEvent))});}go();`;
+    const sidecar = pathToFileURL(join(process.cwd(), "lib", "amux", "v22OneShotSidecar.mjs")).href;
+    // The sidecar half runs with a 96 MB heap: holding the stream as one
+    // string, as the earlier read did, cannot fit.
+    const script = `import { spawn } from "node:child_process";` +
+      `const { runAmuxV22OneShot } = await import(${JSON.stringify(sidecar)});` +
+      `const result = await runAmuxV22OneShot(${JSON.stringify(request)}, ${JSON.stringify(config)},` +
+      `{ syntheticPlatform: true, localCliFlow: true, transcriptPath: ${JSON.stringify(transcriptPath)},` +
+      ` spawnChild: (b, a, o) => spawn(process.execPath, ["-e", ${JSON.stringify(writer)}], { ...o, cwd: process.cwd(), env: process.env }) });` +
+      `process.stdout.write(JSON.stringify({ kind: result.kind, failure: result.failure ?? null,` +
+      ` resultText: result.resultText, outputDigest: result.outputDigest,` +
+      ` heapMb: Math.round(process.memoryUsage().heapUsed / 1048576) }));`;
+    const child = spawn(process.execPath, ["--max-old-space-size=96", "--conditions=react-server",
+      "--import", "tsx", "--input-type=module", "-e", script],
+    { cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"] });
+    let out = ""; let err = "";
+    child.stdout.on("data", (part) => { out += part; });
+    child.stderr.on("data", (part) => { err += part; });
+    const code = await new Promise((resolve) => child.once("close", resolve));
+    assert.equal(code, 0, err.slice(-2000));
+    const summary = JSON.parse(out);
+    assert.deepEqual([summary.kind, summary.failure], ["succeeded", null]);
+    assert.equal(summary.resultText, resultEvent.result);
+    const hash = createHash("sha256");
+    let bytes = 0;
+    for await (const chunk of createReadStream(transcriptPath)) { hash.update(chunk); bytes += chunk.length; }
+    assert.ok(bytes > 300_000_000, `transcript is ${bytes} bytes`);
+    assert.equal(summary.outputDigest, hash.digest("hex"));
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test("the stream scan matches the whole-text readers line for line", async () => {
+  const { scanAmuxV22Output } = await import("../lib/amux/v22OneShotSidecar.mjs");
+  const { amuxV22OutputShape, createAmuxV22ChannelOutputParser, parseAmuxV22ChannelOutput } =
+    await import("../lib/amux/v22ChannelRun.mjs");
+  const text = [{ type: "turn.started" },
+    { type: "item.completed", item: { type: "command_execution", command: "npm test" } },
+    { type: "item.completed", item: { type: "agent_message", text: "Ran the tests: é ok." } },
+    { type: "turn.completed", usage: { input_tokens: 9, cached_input_tokens: 0, output_tokens: 3 } }]
+    .map((event) => JSON.stringify(event)).join("\n") + "\n";
+  const bytes = Buffer.from(text, "utf8");
+  // Split inside the multi-byte character and across lines.
+  const at = bytes.indexOf(Buffer.from("é", "utf8")) + 1;
+  const parser = createAmuxV22ChannelOutputParser("openai", { role: "investigate" });
+  const seen = [];
+  const scanned = await scanAmuxV22Output([bytes.subarray(0, 7), bytes.subarray(7, at),
+    bytes.subarray(at)], (line) => { seen.push(line); parser.push(line); });
+  assert.deepEqual(seen, text.split("\n").slice(0, -1));
+  assert.equal(scanned.digest, sha(bytes));
+  assert.equal(scanned.shape, amuxV22OutputShape(text));
+  assert.deepEqual(parser.finish({ exitCode: 0 }), parseAmuxV22ChannelOutput("openai", text,
+    { exitCode: 0, role: "investigate" }));
+  const broken = await scanAmuxV22Output([Buffer.from([0x7b, 0xff, 0x7d, 0x0a])], () => {});
+  assert.equal(broken.undecodable, true);
+});
+
 test("the process-tree CPU reading sums the CLI, its descendants and its group only", async () => {
   const { readAmuxV22ProcessTreeCpuTicks } = await import("../lib/amux/v22OneShotSidecar.mjs");
   // pid (comm) state ppid pgrp session tty tpgid flags minflt cminflt majflt cmajflt
@@ -229,7 +358,7 @@ test("on Linux a real quiet busy child is kept and a real sleeping one stalls", 
 }, async () => {
   const { spawn } = await import("node:child_process");
   const real = (script) => (_binary, _args, options) =>
-    spawn(process.execPath, ["-e", script], { ...options, env: process.env });
+    spawn(process.execPath, ["-e", script], { ...options, cwd: process.cwd(), env: process.env });
   const busy = `const end=Date.now()+900;while(Date.now()<end){}` +
     `process.stdout.write(${JSON.stringify(stream(resultEvent))})`;
   const kept = await runAmuxV22OneShot(request, config, { syntheticPlatform: true,
@@ -248,10 +377,7 @@ test("a stopped run keeps its checkout change and writes it beside the journal",
     const patchBody = "diff --git a/lib/a.ts b/lib/a.ts\n" + "+partial work\n".repeat(10_000);
     let discarded = 0;
     const preserved = [];
-    const preserveWorkingTree = async (_worktree, name) => { preserved.push(name);
-      return name.startsWith("leftover-") ? { ok: true, changed: false } :
-        { ok: true, changed: true, ref: `refs/amux-v22-preserved/${name}`,
-          commit: "c".repeat(40), patch: patchBody }; };
+    const preserveWorkingTree = fakePreserve(patchBody, "c".repeat(40), preserved);
     const controller = new AbortController();
     const waiting = fakeSpawn({ chunks: [], hang: true });
     const pending = runAmuxV22OneShot(request, config, { syntheticPlatform: true,
@@ -265,7 +391,8 @@ test("a stopped run keeps its checkout change and writes it beside the journal",
     assert.deepEqual(preserved, [`leftover-${attemptId}`, attemptId]);
     assert.deepEqual(stopped.preserved, { changed: true,
       ref: `refs/amux-v22-preserved/${attemptId}`, commit: "c".repeat(40),
-      changedPaths: ["lib/a.ts"], patchDigest: sha(patchBody) });
+      changedPaths: ["lib/a.ts"], patchDigest: sha(patchBody),
+      patchBytes: Buffer.byteLength(patchBody) });
     assert.equal(await readFile(join(dir, `${attemptId}.preserved.patch`), "utf8"), patchBody);
     assert.equal(discarded, 0, "a stop never discards the checkout");
   } finally { await rm(dir, { recursive: true, force: true }); }
@@ -277,7 +404,7 @@ test("an earlier run's leftovers are preserved before the base sync, or the run 
     spawnChild: fakeSpawn().spawnChild, localCliFlow: true,
     preserveWorkingTree: async (_worktree, name) => { order.push(`preserve:${name}`);
       return { ok: true, changed: true, ref: `refs/amux-v22-preserved/${name}`,
-        commit: "d".repeat(40), patch: "diff --git a/x b/x\n" }; },
+        commit: "d".repeat(40) }; },
     syncBase: async () => { order.push("sync"); return { ok: true, baseSha: "a".repeat(40) }; } });
   assert.deepEqual(order.slice(0, 2), [`preserve:leftover-${attemptId}`, "sync"]);
   assert.deepEqual(ok.leftoverPreserved, { ref: `refs/amux-v22-preserved/leftover-${attemptId}`,
@@ -315,11 +442,19 @@ test("the working tree is preserved whole in a ref that a reset and clean cannot
     await write(join(repo, "a.txt"), "one\ntwo\n");
     await write(join(repo, "big.txt"), "x".repeat(200_000));
     await write(join(repo, "ignored.txt"), "never kept");
-    const kept = await preserveAmuxV22WorkingTree(repo, "attempt-1", { run: hostRun });
+    const patchPath = join(repo, "..", `${repo.split(/[\\/]/).at(-1)}.preserved.patch`);
+    const kept = await preserveAmuxV22WorkingTree(repo, "attempt-1", { run: hostRun,
+      patchPath, pathEnv: process.env.PATH });
     assert.equal(kept.ok, true);
     assert.equal(kept.ref, "refs/amux-v22-preserved/attempt-1");
-    assert.match(kept.patch, /big\.txt/);
-    assert.doesNotMatch(kept.patch, /ignored\.txt/);
+    // The diff is streamed to the file; only its digest and size come back.
+    const patch = await readFile(patchPath, "utf8");
+    await rm(patchPath, { force: true });
+    assert.equal(kept.patch, undefined);
+    assert.equal(kept.patchDigest, sha(patch));
+    assert.equal(kept.patchBytes, Buffer.byteLength(patch));
+    assert.match(patch, /big\.txt/);
+    assert.doesNotMatch(patch, /ignored\.txt/);
     // The real index and the working tree are untouched.
     assert.match(git("status", "--porcelain"), /\?\? big\.txt/);
     git("reset", "-q", "--hard"); git("clean", "-fdq");
@@ -424,20 +559,21 @@ test("a verify (investigate) run can install packages, run tests and report what
   const fake = fakeSpawn();
   const patchBody = "diff --git a/tests/__snapshots__/a.snap b/tests/__snapshots__/a.snap\n+x\n";
   let restored = 0;
+  const dir = await mkdtemp(join(tmpdir(), "amux-v22-flow-read-"));
   const result = await runAmuxV22OneShot({ ...request, role: "investigate",
     gradeGuard: true, executionGrade: "advanced" }, config, {
     syntheticPlatform: true, spawnChild: fake.spawnChild, localCliFlow: true,
+    preservedPatchPath: join(dir, `${attemptId}.preserved.patch`),
     ensureDependencies: async (worktree, home, options) => { deps.push(options); return { ok: true }; },
     createShellJail: async (paths) => { jails.push(paths);
       return { binPath: "/jail/bin", prefixPath: "/jail/prefix", cleanup: async () => {} }; },
     captureBaseline: async () => ({ ok: true, baseSha: "a".repeat(40) }),
     captureChangedPaths: async () => ({ ok: true, files: ["tests/__snapshots__/a.snap"],
       contractPaths: [] }),
-    preserveWorkingTree: async (_worktree, name) => name.startsWith("leftover-") ?
-      { ok: true, changed: false } : { ok: true, changed: true,
-        ref: `refs/amux-v22-preserved/${name}`, commit: "e".repeat(40), patch: patchBody },
+    preserveWorkingTree: fakePreserve(patchBody, "e".repeat(40)),
     capturePatch: async () => { throw new Error("a read role has no publication patch"); },
     discardAttemptChanges: async () => { restored += 1; return true; } });
+  await rm(dir, { recursive: true, force: true });
   assert.deepEqual(deps, [{ localCliFlow: true }]);
   assert.equal(jails.length, 1);
   const { env, } = fake.calls[0].spawnOptions;
@@ -452,7 +588,7 @@ test("a verify (investigate) run can install packages, run tests and report what
   assert.equal(result.readRoleChangesRestored, true);
   assert.deepEqual(result.readRolePreserved, { changed: true,
     ref: `refs/amux-v22-preserved/${attemptId}`, commit: "e".repeat(40),
-    patchDigest: sha(patchBody) });
+    patchDigest: sha(patchBody), patchBytes: Buffer.byteLength(patchBody) });
   assert.equal(restored, 1);
   assert.equal(result.patchBody, undefined);
   assert.ok(result.resultText.includes("+x"));
