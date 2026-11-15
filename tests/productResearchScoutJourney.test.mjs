@@ -19,7 +19,7 @@ import {
   journeyTask,
   scoutJourneyWrites,
 } from "../lib/productResearchScoutBrowserPolicy.mjs";
-import { walkJourney } from "../lib/productResearchScoutJourney.mjs";
+import { fitSignals, walkJourney } from "../lib/productResearchScoutJourney.mjs";
 import {
   JOURNEY_FAMILIES,
   JOURNEY_JUDGE_CALLS,
@@ -436,4 +436,13 @@ test("with answers on screen and no conversation named, an attach step adds noth
   );
   assert.match(subject.signals, /Step 3 -- attach "chart\.png", but the address names no conversation while answers are on screen, so the walker did not add it/);
   assert.ok(!seen.some((request) => request.method === "PATCH"), "nothing was uploaded");
+});
+
+test("a long journey keeps its setup and its latest steps", () => {
+  const facts = ["setup line", ...Array.from({ length: 40 }, (_, index) => `Step ${index} ${"x".repeat(150)}`), "The walker's own rule refused these writes: DELETE /api/conversations/c1."];
+  const signals = fitSignals(facts);
+  assert.ok(signals.length <= 4_000);
+  assert.ok(signals.startsWith("setup line"));
+  assert.match(signals, /\[earlier steps cut to fit\][^]*Step 39[^]*refused these writes/);
+  assert.equal(fitSignals(["a", "b"]), "a\nb");
 });
