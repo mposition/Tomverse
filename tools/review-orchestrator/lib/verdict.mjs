@@ -185,8 +185,9 @@ export function parseReviewerOutput(text) {
       : { verdict: "reject", reason: stated === "accept" ? "blocking_finding_overrides_accept" : "blocking_finding_without_verdict", findings };
   }
   if (stated === null) return { verdict: "unknown", reason: "verdict_value_invalid", findings };
-  // Findings were listed but none could be read: an accept next to them is not trusted.
-  if (stated === "accept" && listed.length > 0 && findings.length === 0) {
+  // A listed finding that could not be read, next to an accept: the accept is not trusted,
+  // however many others could be read (the unread one may be a blocker).
+  if (stated === "accept" && findings.length < listed.length) {
     return { verdict: "unknown", reason: "findings_unreadable", findings };
   }
   return { verdict: stated, findings };
