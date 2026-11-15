@@ -459,6 +459,125 @@ test("leaving routes out never hides a changed approved route or an invalid appr
   assert.equal(v4TaskReceiptForApprovedRoutes(approved, { ...current, grade: "advanced" }, on).routes.length, 2);
 });
 
+test("the over-ceiling switch reads only an exact enabled and never applies to a recovery", async () => {
+  const { AMUX_V4_NEW_MODEL_ROUTE_ENV, AMUX_V4_NEW_MODEL_ROUTE_OVER_CEILING_ENV,
+    amuxV4NewModelRouteOverCeiling, amuxV4NewModelRouteOptions } =
+    await import("../lib/amux/v4TaskNewModelRouteSwitch.ts");
+  assert.equal(AMUX_V4_NEW_MODEL_ROUTE_OVER_CEILING_ENV, "TOMVERSE_AMUX_V4_NEW_MODEL_ROUTE_OVER_CEILING");
+  for (const value of [undefined, "", "true", "1", "Enabled", "disabled"]) {
+    assert.deepEqual(amuxV4NewModelRouteOverCeiling(value),
+      { newModelRouteOverCeiling: false }, String(value));
+  }
+  assert.deepEqual(amuxV4NewModelRouteOverCeiling("enabled"), { newModelRouteOverCeiling: true });
+  assert.deepEqual(amuxV4NewModelRouteOptions({}, false),
+    { newModelRouteWithinCeiling: false, newModelRouteOverCeiling: false }, "both default off");
+  const bothOn = { [AMUX_V4_NEW_MODEL_ROUTE_ENV]: "enabled",
+    [AMUX_V4_NEW_MODEL_ROUTE_OVER_CEILING_ENV]: "enabled" };
+  assert.deepEqual(amuxV4NewModelRouteOptions(bothOn, false),
+    { newModelRouteWithinCeiling: true, newModelRouteOverCeiling: true });
+  // An owner-approved recovery, the read-only API retry among them, keeps
+  // every cost condition; the within-ceiling switch reads as it did before.
+  assert.deepEqual(amuxV4NewModelRouteOptions(bothOn, true),
+    { newModelRouteWithinCeiling: true, newModelRouteOverCeiling: false });
+});
+
+test("an approved Task runs on a new model route over its ceiling only behind the switch, and the overrun is recorded", async () => {
+  const { v4TaskCeilingDecision, v4TaskReceiptForApprovedRoutes } =
+    await import("../lib/amux/v4TaskCostCeilingCore.ts");
+  const { AMUX_V4_NEW_MODEL_ROUTE_ENV, AMUX_V4_NEW_MODEL_ROUTE_OVER_CEILING_ENV,
+    amuxV4NewModelRouteOptions } = await import("../lib/amux/v4TaskNewModelRouteSwitch.ts");
+  const { amuxApprovedCeilingOverrun } = await import("../lib/amux/executionBudgetCore.ts");
+  // What readiness, claim and execution start each compute: a recovery keeps
+  // the whole receipt, an ordinary Task only the routes its approval admits.
+  const judge = (approved, current, env, recovery) => {
+    const options = amuxV4NewModelRouteOptions(env, recovery);
+    const runnable = recovery ? current : v4TaskReceiptForApprovedRoutes(approved, current, options);
+    return { runnable, decision: v4TaskCeilingDecision(checkV4TaskApprovedCeiling(approved,
+      { ok: true, receipt: runnable }, options), recovery) };
+  };
+  const approved = calculateV4TaskCostCeiling(input()).receipt;
+  assert.equal(approved.ceilingMicroUsd, "7250");
+  // 2026-11-14 shape: the new model costs less than the ceiling per attempt
+  // but more across the attempt bound (5000 x 2 > 7250).
+  const argon = (overrides = {}) => route({ routeId: "gemini-standard",
+    workerName: "antigravity-impl", provider: "google", modelId: "gemini-4-argon-medium",
+    routePolicyDigest: "e".repeat(64), outputMicroUsdPerMillion: 3_375_000, ...overrides });
+  const current = calculateV4TaskCostCeiling(input({ routes: [route(), argon()] })).receipt;
+  const argonRoute = current.routes.find((r) => r.routeId === "gemini-standard");
+  assert.equal(argonRoute.perAttemptMicroUsd, "5000");
+  const ids = (receipt) => receipt.routes.map((r) => r.routeId).sort();
+
+  // Off, or only the within-ceiling switch on: unchanged, the route is left out.
+  for (const env of [{}, { [AMUX_V4_NEW_MODEL_ROUTE_ENV]: "enabled" },
+    { [AMUX_V4_NEW_MODEL_ROUTE_OVER_CEILING_ENV]: "true" }]) {
+    const off = judge(approved, current, env, false);
+    assert.deepEqual(ids(off.runnable), ["codex-standard"], JSON.stringify(env));
+    assert.equal(off.decision, "allow", JSON.stringify(env));
+    assert.deepEqual(checkV4TaskApprovedCeiling(approved, { ok: true, receipt: current },
+      amuxV4NewModelRouteOptions(env, false)),
+    { decision: "reconfirm", reason: "task_route_changed" }, JSON.stringify(env));
+  }
+
+  // On: the route is runnable, so readiness counts it, the claim may choose
+  // it and execution start finds it; the higher ceiling reads as such and
+  // never stops an ordinary Task.
+  const over = { [AMUX_V4_NEW_MODEL_ROUTE_OVER_CEILING_ENV]: "enabled" };
+  const on = judge(approved, current, over, false);
+  assert.equal(on.runnable, current, "nothing is left out");
+  assert.deepEqual(ids(on.runnable), ["codex-standard", "gemini-standard"]);
+  assert.equal(on.decision, "allow");
+  assert.deepEqual(checkV4TaskApprovedCeiling(approved, { ok: true, receipt: on.runnable },
+    amuxV4NewModelRouteOptions(over, false)), { decision: "reconfirm", reason: "ceiling_increased" });
+  assert.ok(on.runnable.routes.find((candidate) => candidate.routeId === "gemini-standard" &&
+    candidate.workerName === "antigravity-impl" && candidate.provider === "google" &&
+    candidate.modelId === "gemini-4-argon-medium" &&
+    candidate.routePolicyDigest === "e".repeat(64)), "execution start finds the assigned route");
+  // Turned off between claim and start: start no longer finds the route.
+  assert.equal(judge(approved, current, {}, false).runnable.routes
+    .some((r) => r.routeId === "gemini-standard"), false);
+  // Both switches on: the same outcome.
+  assert.deepEqual(ids(judge(approved, current,
+    { ...over, [AMUX_V4_NEW_MODEL_ROUTE_ENV]: "enabled" }, false).runnable),
+  ["codex-standard", "gemini-standard"]);
+
+  // Recorded, never refused: the first attempt stays under the approved
+  // ceiling, the second crosses it.
+  assert.equal(amuxApprovedCeilingOverrun({ approvedReceipt: approved,
+    priorReservedMicroUsd: BigInt(0), nextAttemptMicroUsd: BigInt(argonRoute.perAttemptMicroUsd) }), null);
+  assert.deepEqual(amuxApprovedCeilingOverrun({ approvedReceipt: approved,
+    priorReservedMicroUsd: BigInt(5000), nextAttemptMicroUsd: BigInt(argonRoute.perAttemptMicroUsd) }),
+  { ceilingMicroUsd: "7250", priorReservedMicroUsd: "5000", projectedMicroUsd: "10000" });
+
+  // A recovery keeps every condition even with the switch on.
+  assert.equal(judge(approved, current, over, true).decision, "reconfirm");
+
+  // Grown token or attempt bounds still ask, switch on or not.
+  for (const caps of [{ outputTokens: 1_001 }, { maxAttempts: 3 }, { uncachedInputTokens: 1_001 },
+    { cacheReadTokens: 501 }, { cacheWriteTokens: 501 }]) {
+    const grown = calculateV4TaskCostCeiling(input({ caps: { ...input().caps, ...caps },
+      routes: [route(), argon()] })).receipt;
+    const judged = judge(approved, grown, over, false);
+    assert.deepEqual(ids(judged.runnable), ["codex-standard"], JSON.stringify(caps));
+    assert.deepEqual(checkV4TaskApprovedCeiling(approved, { ok: true, receipt: grown },
+      amuxV4NewModelRouteOptions(over, false)),
+    { decision: "reconfirm", reason: "task_route_changed" }, JSON.stringify(caps));
+  }
+
+  // A route the approval named that changed its worker, model or policy
+  // still asks, switch on or not.
+  for (const changed of [{ modelId: "different-model" }, { routePolicyDigest: "c".repeat(64) },
+    { workerName: "renamed-worker" }]) {
+    const drifted = calculateV4TaskCostCeiling(input({ routes: [route(changed), argon()] })).receipt;
+    const judged = judge(approved, drifted, over, false);
+    assert.equal(judged.decision, "reconfirm", JSON.stringify(changed));
+  }
+
+  // Another role or grade is never an approved Task's route.
+  assert.deepEqual(checkV4TaskApprovedCeiling(approved,
+    { ok: true, receipt: { ...current, grade: "advanced" } }, amuxV4NewModelRouteOptions(over, false)),
+  { decision: "reconfirm", reason: "task_route_changed" });
+});
+
 test("readiness, claim and execution start judge and offer only the narrowed routes", async () => {
   const { readFileSync } = await import("node:fs");
   const ready = readFileSync("lib/amux/v4TaskReadyService.ts", "utf8");
@@ -473,4 +592,8 @@ test("readiness, claim and execution start judge and offer only the narrowed rou
   const start = readFileSync("lib/amux/execution.ts", "utf8");
   assert.match(start, /const runnable = assignment\.recoveryApprovalId \? cost\.receipt :/);
   assert.match(start, /const route = runnable\.routes\.find/);
+  // The three read the same switches, each with its own recovery flag.
+  assert.match(ready, /amuxV4NewModelRouteOptions\(process\.env,\s+expectedStatus === "blocked" \|\| !!recovery\)/);
+  assert.match(claim, /amuxV4NewModelRouteOptions\(process\.env, !!recovery\)/);
+  assert.match(start, /amuxV4NewModelRouteOptions\(process\.env, !!assignment\.recoveryApprovalId\)/);
 });
