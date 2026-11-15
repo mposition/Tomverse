@@ -59,7 +59,7 @@ test("Chat error cards offer a direct retry and a model picker beside restore", 
   assert.doesNotMatch(html, /Send separately to request a new answer/);
   assert.ok(html.indexOf("retry-chat-question") < html.indexOf("restore-chat-question"));
   // A resend carries no files: that question is only restored.
-  const withFile = renderChat([{ ...question, attachments: [{ id: "f", name: "f.pdf", mediaType: "application/pdf", size: 1 }] }, failed]);
+  const withFile = renderChat([{ ...question, attachments: [{ id: "f", name: "f.pdf", mediaType: "application/pdf", size: 1, kind: "file" }] }, failed]);
   assert.doesNotMatch(withFile, /retry-chat-question/);
   assert.match(withFile, /restore-chat-question/);
   // A trailing unanswered question and the legacy surface are unchanged.
