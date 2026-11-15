@@ -427,6 +427,7 @@ let autoSelectionCalls = 0;
 let forcedRouterOutput: Record<string, unknown> | null = null;
 let forcedImageIntent = false;
 let imageIntentCalls = 0;
+let imageIntentText: string | null = null;
 let routerDecisionKept: boolean | null = null;
 const routerCore = require(resolve(ROOT, "lib/autoLlmRouterCore.ts")) as typeof import("../../lib/autoLlmRouterCore");
 const realLlmRouter = require(resolve(ROOT, "lib/autoLlmRouter.ts")) as typeof import("../../lib/autoLlmRouter");
@@ -444,8 +445,9 @@ mock.module(mod("lib/autoLlmRouter.ts"), { namedExports: {
 const realImageIntent = require(resolve(ROOT, "lib/chatImageIntent.ts")) as typeof import("../../lib/chatImageIntent");
 mock.module(mod("lib/chatImageIntent.ts"), { namedExports: {
   ...realImageIntent,
-  createChatTurnImageRouting: (input: unknown) => {
+  createChatTurnImageRouting: (input: { text?: string } | null) => {
     if (input) imageIntentCalls += 1;
+    imageIntentText = input?.text ?? null;
     return {
       context: undefined,
       accept: () => {},
@@ -455,6 +457,42 @@ mock.module(mod("lib/chatImageIntent.ts"), { namedExports: {
     };
   },
 } });
+
+/*
+  A Prompt Refiner decision the browser held before the send. In an existing
+  Auto Chat conversation the product Refiner prepares every send, so a
+  follow-up such as "make it night" arrives carrying one (G4 recording,
+  2026-11-15, trace 72eeb69c). Inert unless a test sends a decision.
+*/
+const refinerEvents: string[] = [];
+mock.module(mod("lib/promptRefinerChatExecutionRelease.ts"), { namedExports: {
+  promptRefinerChatExecutionRelease: async () => ({ explicitEnabled: false, autoEnabled: true }),
+} });
+mock.module(mod("lib/promptRefinerChatExecutionStore.ts"), { namedExports: {
+  previewPromptRefinerChatExecution: async (input: { messages: Array<{ role: string; content: string }> }) => {
+    refinerEvents.push("preview");
+    return { executionMessages: input.messages.map((message, index) => index === input.messages.length - 1
+      ? { ...message, content: "Refined execution prompt" } : message),
+      mode: "auto" as const, provenance: { decision: "accepted" as const } };
+  },
+  consumePreviewedPromptRefinerChatExecution: async (_input: unknown, preview: unknown) => {
+    refinerEvents.push("consume");
+    return preview;
+  },
+} });
+mock.module(mod("lib/chatDurableRecoveryAccess.ts"), { namedExports: {
+  authorizeChatRecoveryScope: async () => ({ ok: true, conversationId: CONVERSATION_ID }),
+} });
+const realApiSecurity = require(resolve(ROOT, "lib/apiSecurity.ts")) as Record<string, unknown>;
+mock.module(mod("lib/apiSecurity.ts"), { namedExports: {
+  ...realApiSecurity,
+  consumeApiRateLimit: async (...args: unknown[]) => args[2] === "chat-durable-attempt"
+    ? undefined
+    : (realApiSecurity.consumeApiRateLimit as (...rest: unknown[]) => Promise<unknown>)(...args),
+} });
+const SOURCE_USER_MESSAGE_ID = "22222222-3333-4444-8555-666666666666";
+const REFINER_DECISION = { suggestionId: "33333333-4444-4555-8666-777777777777",
+  scopeId: "44444444-5555-4666-8777-888888888888", epoch: 1, decision: "accepted" };
 
 const routedSelection = (modelId: string) => ({
   routed: true,
@@ -612,11 +650,15 @@ const ask = async (
     autoRoutedTo = null,
     routerOutput = null,
     imageIntent = false,
-    messages = [{ role: "user", content: "이 PPT를 웹페이지로 만들어줘" }],
+    refinerDecision = false,
+    prompt = null,
+    messages = [{ role: "user", content: prompt ?? "이 PPT를 웹페이지로 만들어줘" }],
     expectedStatus = 200,
   }: { modelId?: string; autoRoutedTo?: string | null; routerOutput?: Record<string, unknown> | null; imageIntent?: boolean;
+    refinerDecision?: boolean; prompt?: string | null;
     messages?: Array<{ role: string; content: string; attachments?: Array<{ uploadId: string }> }>; expectedStatus?: number } = {}
 ) => {
+  refinerEvents.length = 0;
   forcedAutoRoute = autoRoutedTo;
   forcedRouterOutput = routerOutput;
   forcedImageIntent = imageIntent;
@@ -643,18 +685,24 @@ const ask = async (
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        messages,
+        // A held Refiner decision names its source message, so the last
+        // user turn carries that id.
+        messages: refinerDecision
+          ? messages.map((m, i) => (i === messages.length - 1 ? { ...m, id: SOURCE_USER_MESSAGE_ID } : m))
+          : messages,
         modelId,
         conversationId: CONVERSATION_ID,
         assistantMessageId: ASSISTANT_MESSAGE_ID,
+        ...(refinerDecision ? { sourceUserMessageId: SOURCE_USER_MESSAGE_ID, promptRefinerDecision: REFINER_DECISION } : {}),
       }),
     })
   );
   if (response.status !== expectedStatus) {
     throw new Error(`status ${response.status}: ${await response.text()}`);
   }
+  const mode = response.headers.get("X-Chat-Response-Mode");
   const body = await response.text();
-  return { body, trailer: response.status === 200 ? readTrailer(body) : null };
+  return { body, mode, trailer: response.status === 200 ? readTrailer(body) : null };
 };
 
 /**
@@ -1077,6 +1125,32 @@ test("file intent with no capable candidate keeps the refusal in Chat despite a 
   assert.match(promptText(), /sending the same request again: Auto routes a file request/);
   assert.match(promptText(), /do not tell them to turn Auto off/);
   assert.deepEqual(world.artifactRows, []);
+});
+
+/*
+  G4 recording, 2026-11-15 (trace 72eeb69c): in an existing Auto Chat the
+  product Refiner holds a decision on every send, and the route then skipped
+  the image classification entirely -- "Make it night, with snow falling."
+  after an image answer was answered as text.
+*/
+test("a follow-up that carries a held Refiner decision still gets the image classification", async () => {
+  const { mode } = await ask({}, { autoRoutedTo: MODEL_ID, imageIntent: true, refinerDecision: true,
+    prompt: "Make it night, with snow falling." });
+  assert.equal(imageIntentCalls, 1, "the Refiner decision must not switch the image classification off");
+  assert.equal(imageIntentText, "Make it night, with snow falling.",
+    "the image classification reads the authored message, not the Refiner's execution text");
+  assert.equal(mode, "image-turn");
+  assert.equal(lastStreamTextOptions, null, "an image turn calls no chat model");
+  assert.deepEqual(refinerEvents, ["preview"], "an image turn ends before the Refiner decision is consumed");
+});
+
+test("an ordinary follow-up with a held Refiner decision stays a text turn and consumes it once", async () => {
+  const { mode } = await ask({}, { autoRoutedTo: MODEL_ID, refinerDecision: true, prompt: "Why is snow white?" });
+  assert.equal(imageIntentCalls, 1);
+  assert.notEqual(mode, "image-turn");
+  assert.ok(lastStreamTextOptions, "the text turn reaches the chat model");
+  assert.match(promptText(), /Refined execution prompt/, "the text turn still runs the Refiner's execution view");
+  assert.deepEqual(refinerEvents, ["preview", "consume"]);
 });
 
 test("a manual turn on an unverified model keeps the plain remedy, with no mention of Auto", async () => {

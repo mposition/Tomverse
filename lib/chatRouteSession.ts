@@ -4,7 +4,7 @@ import type { Session } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { requireMobileBearer, mobileAuthRefusal } from "@/lib/mobileAuthRoute";
 import { MOBILE_AUTH_ERROR_CODES } from "@/lib/mobileAuthContract";
-import { nativeChatBearerRoute, nativeParityBearerRoute, nativeArtifactRevisionBearerRoute } from "@/lib/nativeBearerGate";
+import { nativeChatBearerRoute, nativeParityBearerRoute, nativeArtifactRevisionBearerRoute, nativeWorkspaceBearerRoute } from "@/lib/nativeBearerGate";
 import { isNativeAppOrigin } from "@/lib/nativeAppCors";
 import { prisma } from "@/lib/prisma";
 import { generatedArtifactRevisionEnabled } from "@/lib/generatedArtifactRevisionCore";
@@ -17,16 +17,20 @@ export async function resolveChatRouteSession(request: Request): Promise<
   const origin = request.headers.get("origin");
   const path = new URL(request.url).pathname;
   const parityEnabled = process.env.TOMVERSE_NATIVE_PARITY_ENABLED === "true";
+  const workspaceEnabled = process.env.TOMVERSE_NATIVE_WORKSPACE_ENABLED === "true";
+  if (nativeWorkspaceBearerRoute(path, request.method, true) && !workspaceEnabled) {
+    return { response: Response.json({ code: "NATIVE_WORKSPACE_UNAVAILABLE" }, { status: 503, headers: { "Cache-Control": "no-store" } }) };
+  }
   const revisionEnabled = generatedArtifactRevisionEnabled();
   if (nativeArtifactRevisionBearerRoute(path, request.method, true) && (!parityEnabled || !revisionEnabled)) {
     return { response: Response.json({ code: "NATIVE_PARITY_UNAVAILABLE" }, { status: 503, headers: { "Cache-Control": "no-store" } }) };
   }
-  if (nativeParityBearerRoute(path, request.method, true) && !parityEnabled) {
+  if (nativeParityBearerRoute(path, request.method, true, workspaceEnabled) && !parityEnabled) {
     return { response: Response.json({ code: "NATIVE_PARITY_UNAVAILABLE" }, { status: 503, headers: { "Cache-Control": "no-store" } }) };
   }
   const enrolled = nativeChatBearerRoute(path, request.method, process.env.TOMVERSE_NATIVE_CHAT_ENABLED === "true") ||
     (process.env.TOMVERSE_NATIVE_CHAT_ENABLED === "true" &&
-      (nativeParityBearerRoute(path, request.method, parityEnabled) ||
+      (nativeParityBearerRoute(path, request.method, parityEnabled, workspaceEnabled) ||
         parityEnabled && nativeArtifactRevisionBearerRoute(path, request.method, revisionEnabled)));
   if (!enrolled || (origin && !isNativeAppOrigin(origin))) {
     return { response: mobileAuthRefusal(MOBILE_AUTH_ERROR_CODES.tokenInvalid) };

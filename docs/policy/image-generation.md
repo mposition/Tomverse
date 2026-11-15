@@ -1102,7 +1102,10 @@ ID, 상태 매트릭스, 릴리스 차단 기준)는 그쪽이 정본이고, 두
     `detectChatTurnImage`를 실행하므로, 대기 시간은 두 호출의 합이 아니라 긴 쪽이다.
     대상은 저장된 대화가 Auto(`selectionMode = auto`)인 로그인 단일 패널 Chat 턴이다.
     router가 routed했는지와 관계없이 판정하고(fallback 턴 포함), 보내는 메시지 자체에
-    첨부(편집할 사진은 예외, 위 "첨부 사진 편집")·Refiner 제안·deep research가 없어야 한다. 앞선 메시지의 첨부는 판정을 막지 않는다. 관문은 `/api/chat/image-intent`와 같다(플랜, 이미지 flag, 운영 접근, Admin
+    첨부(편집할 사진은 예외, 위 "첨부 사진 편집")·deep research가 없어야 한다. 앞선 메시지의 첨부는 판정을 막지 않는다.
+    보류된 Refiner 결정은 판정을 막지 않는다(2026-11-15): 기존 Auto 대화는 전송마다 Refiner 결정을 싣기 때문에, 막으면
+    "밤으로 바꿔 줘" 같은 후속 이미지 요청이 모두 텍스트로 답해졌다. 판정은 Refiner 실행문이 아니라 작성 원문으로 하고,
+    이미지 턴은 Refiner 소비 전에 끝나므로 그 결정은 소비되지 않고 만료된다. 텍스트 턴은 전처럼 한 번 소비한다. 관문은 `/api/chat/image-intent`와 같다(플랜, 이미지 flag, 운영 접근, Admin
     스위치). 이미지면 소유권·잠금·kind·context 검사를 모두 통과한 뒤, Refiner 소비·durable
     attempt·context bundle 사용·크레딧/lease/usage hold가 일어나기 **전에**
     `X-Chat-Response-Mode: image-turn`으로 끝난다. 그래서 반납할 것이 없다. 클라이언트는 같은

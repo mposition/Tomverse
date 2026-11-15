@@ -40,13 +40,43 @@ answer (`POST /api/feedback`), polling existing Deep Research jobs, reading the 
 through the existing owner-scoped service. The client calls title generation at
 most once after the first successful answer, retaining the saved interim title on
 failure. Compare-and-set preserves subsequent web renames. Title/usage capability
-fields prevent calling older cookie-only deployments. No administration, sharing, publishing, profile creation or bulk deletion
-route is enrolled.
+fields prevent calling older cookie-only deployments. The workspace additions
+below have a separate activation switch; administration, assistant-package import
+and bulk deletion are not enrolled.
 
 An old or inactive server answers the capability probe without invalidating an
 otherwise valid native session. The client checks this probe before calling a
 legacy cookie-only endpoint. Activation, remote push, merge and deployment are
 separate from local implementation and require the applicable owner approval.
+
+## Native assistant editing and external imports
+
+Owner request (2026-11-15): connect the iOS workspace already bundled in
+TestFlight 1.0.21 (12). `TOMVERSE_NATIVE_WORKSPACE_ENABLED` defaults off and
+additionally requires both native Chat and parity switches. The exact 14
+method/path pairs live in `nativeWorkspaceBearerRoute`: profile creation,
+detail/identity editing, version publication, knowledge listing/upload,
+external-import capacity/create/batch/seal/finalize, private source listing/read
+and Chat continuation creation. Package imports, exports, deletion and lock
+management are excluded.
+
+Converted handlers use `resolveChatRouteSession`; a supplied bearer never falls
+back to a cookie. Existing owner checks, quotas, model resolution, revision
+conflicts, feature switches and request limits run in their original services.
+Signed knowledge uploads carry bytes and signed headers only. Knowledge
+processing and import-finalize memory scheduling retain their existing behavior.
+Locked imported sources remain unavailable without the existing unlock contract.
+
+`GET /api/products/mobile/capabilities` derives `workspace.assistantEditing`,
+`assistantKnowledge` and `externalImport` from the three deployment switches and
+their existing feature settings. Rollback sets only the workspace switch false;
+base native Chat/parity and web cookie flows remain available. The client refreshes
+capabilities after application restart; no new iOS binary is required.
+
+Before activation, run the workspace and existing native regression tests and
+obtain the required independent authentication-boundary review. Deploy through
+the normal server release path, then enable the workspace switch for the intended
+environment. This implementation does not itself merge, deploy or enable it.
 
 ## Device authentication and files
 

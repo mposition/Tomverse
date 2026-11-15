@@ -297,7 +297,7 @@ export function proxy(request: NextRequest) {
   // and verify live session state. Operational activation is a separate step.
   const nativeChat = process.env.TOMVERSE_NATIVE_CHAT_ENABLED === "true" &&
     (nativeChatBearerRoute(request.nextUrl.pathname, request.method, true) ||
-      nativeParityBearerRoute(request.nextUrl.pathname, request.method, process.env.TOMVERSE_NATIVE_PARITY_ENABLED === "true") ||
+      nativeParityBearerRoute(request.nextUrl.pathname, request.method, process.env.TOMVERSE_NATIVE_PARITY_ENABLED === "true", process.env.TOMVERSE_NATIVE_WORKSPACE_ENABLED === "true") ||
       (process.env.TOMVERSE_NATIVE_PARITY_ENABLED === "true" && nativeArtifactRevisionBearerRoute(request.nextUrl.pathname, request.method, generatedArtifactRevisionEnabled())));
   const nativeBilling = process.env.MOBILE_BILLING_ENABLED === "true" && request.method === "POST" && request.nextUrl.pathname === "/api/mobile/billing";
   const bearer = nativeBearerVerdict({
