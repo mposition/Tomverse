@@ -237,6 +237,14 @@ test("verdict parsing never guesses a verdict, reads what it can, and blocking f
   const fence = "```";
   assert.equal(parseReviewerOutput(`${accept}\n${fence}json\n{"verdict": "reject", broken\n${fence}`).verdict, "unknown");
   assert.equal(parseReviewerOutput(`${accept}\n{"verdict":"reject","findings":[{"severity":"major","summary":"late"}]}`).verdict, "reject");
+  // A final block that never closes, fenced or not, is unknown, not the accept before it.
+  assert.equal(parseReviewerOutput(`${accept}\n{"verdict":"reject","findings":[`).verdict, "unknown");
+  assert.equal(parseReviewerOutput(`${accept}\n${fence}json\n{"verdict":"reject","findings":[]}`).verdict, "unknown");
+  // Keys in any order: a nested object before the verdict does not hide it.
+  assert.equal(parseReviewerOutput(`${accept}\n{"findings":[{"severity":"major","summary":"bad"}],"verdict":"reject"}`).verdict, "reject");
+  assert.equal(parseReviewerOutput(`${accept}\n${fence}json\n{"findings":[{"severity":"nit","summary":"x"}],"verdict":"reject"}\n${fence}`).verdict, "reject");
+  // A later json block with no verdict is the later answer, and says nothing: unknown.
+  assert.equal(parseReviewerOutput(`${accept}\n${fence}json\n{"note":"see above"}\n${fence}`).verdict, "unknown");
   // A code block after the verdict is not mistaken for a verdict.
   assert.equal(parseReviewerOutput(`${accept}\n${fence}ts\nconst a = {;\n${fence}`).verdict, "accept");
   // A long answer of braces cannot stall the parser.

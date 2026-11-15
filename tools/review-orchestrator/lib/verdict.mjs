@@ -22,9 +22,9 @@ const SEVERITY_SYNONYMS = new Map([
 ]);
 
 const FENCE = /```[ \t]*([A-Za-z0-9_-]*)[ \t]*\r?\n([\s\S]*?)\r?\n?[ \t]*```/g;
-// Unfenced objects are looked for around the last few mentions of "verdict" only,
-// so a long answer full of braces cannot make the scan slow.
-const MAX_UNFENCED_MENTIONS = 20;
+// How many `{` positions are tried outward from the final "verdict" key to find
+// the object that holds it, so a long answer full of braces cannot make the scan slow.
+const MAX_ENCLOSING_STARTS = 20;
 
 const unknown = (reason) => ({ verdict: "unknown", reason, findings: [] });
 
@@ -53,10 +53,8 @@ function normaliseFinding(raw) {
 
 const asObject = (value) => (value !== null && typeof value === "object" && !Array.isArray(value) ? value : null);
 
-/** The balanced {...} around `at`, or null: starts at the nearest `{` before it. */
-function objectAround(text, at) {
-  const start = text.lastIndexOf("{", at);
-  if (start < 0) return null;
+/** The span of the balanced {...} that starts at `start`, or null when it never closes. */
+function balancedFrom(text, start) {
   let depth = 0;
   let inString = false;
   for (let i = start; i < text.length; i += 1) {
@@ -68,46 +66,71 @@ function objectAround(text, at) {
     else if (char === "{") depth += 1;
     else if (char === "}") {
       depth -= 1;
-      if (depth === 0) return { start, end: i + 1 };
+      if (depth === 0) return i + 1;
     }
   }
   return null;
 }
 
-/**
- * The places the reviewer wrote a verdict, in order: fenced blocks that parse
- * as an object (or are marked json, or mention a verdict, and do not parse),
- * and unfenced objects around a "verdict" key. A candidate that does not parse
- * is kept as one with `parsed: null`: the LAST candidate decides, so a broken
- * final block is not replaced by an earlier accept.
- */
-function candidates(text) {
+/** Every ``` fence, closed or not (an unclosed last one runs to the end of the text). */
+function fences(text) {
   const found = [];
-  const spans = [];
+  let end = 0;
   for (const match of text.matchAll(FENCE)) {
-    spans.push([match.index, match.index + match[0].length]);
-    let parsed = null;
-    try { parsed = asObject(JSON.parse(match[2])); } catch { /* not valid JSON */ }
-    if (parsed || match[1].toLowerCase() === "json" || match[2].includes('"verdict"')) {
-      found.push({ start: match.index, parsed });
+    found.push({ start: match.index, end: match.index + match[0].length, tag: match[1].toLowerCase(),
+      body: match[2], closed: true });
+    end = match.index + match[0].length;
+  }
+  const open = text.indexOf("```", end);
+  if (open >= 0) {
+    const lineEnd = text.indexOf("\n", open);
+    found.push({ start: open, end: text.length, tag: text.slice(open + 3, lineEnd < 0 ? text.length : lineEnd).trim().toLowerCase(),
+      body: lineEnd < 0 ? "" : text.slice(lineEnd + 1), closed: false });
+  }
+  return found;
+}
+
+/**
+ * The place the reviewer wrote its FINAL verdict, and what it parses to:
+ * `{ parsed }` where parsed is the object or null when that place cannot be
+ * read. The last written verdict decides -- the last fenced json block or the
+ * last unfenced object holding a "verdict" key, whichever comes later -- so a
+ * broken, unclosed or oddly ordered final block is never replaced by an
+ * earlier accept. Null when no verdict was written at all.
+ */
+function finalVerdict(text) {
+  const keyAt = text.lastIndexOf('"verdict"');
+  const all = fences(text);
+  const marked = all.filter((fence) => fence.tag === "json" || fence.body.includes('"verdict"'));
+  const lastMarked = marked.at(-1) ?? null;
+  const holding = keyAt >= 0 ? all.find((fence) => keyAt >= fence.start && keyAt < fence.end) ?? null : null;
+  // A json fence that comes after the key (with no key of its own) is the later answer.
+  const fence = holding ? (lastMarked && lastMarked.start > holding.start ? lastMarked : holding)
+    : lastMarked && (keyAt < 0 || lastMarked.end > keyAt) ? lastMarked : null;
+  if (fence) {
+    if (!fence.closed) return { parsed: null };
+    try { return { parsed: asObject(JSON.parse(fence.body)) }; } catch { return { parsed: null }; }
+  }
+  if (keyAt < 0) return null;
+  // Unfenced: the object that holds the key, found outward from it. An object
+  // that closes before the key (a nested finding) does not hold it; keys may
+  // come in any order.
+  let from = keyAt;
+  for (let step = 0; step < MAX_ENCLOSING_STARTS; step += 1) {
+    const start = text.lastIndexOf("{", from);
+    if (start < 0) break;
+    const end = balancedFrom(text, start);
+    if (end !== null && end > keyAt) {
+      try {
+        const parsed = asObject(JSON.parse(text.slice(start, end)));
+        if (parsed && "verdict" in parsed) return { parsed };
+      } catch { /* an enclosing object that is not JSON: the final block is unreadable */ }
+      return { parsed: null };
     }
+    from = start - 1;
+    if (from < 0) break;
   }
-  const inFence = (position) => spans.some(([from, to]) => position >= from && position < to);
-  const mentions = [];
-  for (let at = text.indexOf('"verdict"'); at >= 0; at = text.indexOf('"verdict"', at + 1)) {
-    if (!inFence(at)) mentions.push(at);
-  }
-  let covered = -1;
-  for (const at of mentions.slice(-MAX_UNFENCED_MENTIONS)) {
-    if (at < covered) continue;
-    const span = objectAround(text, at);
-    if (!span || span.end <= at) continue;
-    covered = span.end;
-    let parsed = null;
-    try { parsed = asObject(JSON.parse(text.slice(span.start, span.end))); } catch { /* not valid JSON */ }
-    found.push({ start: span.start, parsed });
-  }
-  return found.sort((x, y) => x.start - y.start);
+  return { parsed: null };
 }
 
 function verdictOf(value) {
@@ -120,11 +143,10 @@ function verdictOf(value) {
 
 export function parseReviewerOutput(text) {
   if (typeof text !== "string" || text.length === 0) return unknown("empty_output");
-  const found = candidates(text);
-  if (found.length === 0) return unknown("no_verdict_block");
+  const last = finalVerdict(text);
+  if (last === null) return unknown("no_verdict_block");
   // The last place a verdict was written is the answer, even when it cannot be
   // read or says unknown: an earlier accept is not revived.
-  const last = found.at(-1);
   if (last.parsed === null) return unknown("verdict_not_json");
   const parsed = last.parsed;
   const findings = (Array.isArray(parsed.findings) ? parsed.findings : [])
