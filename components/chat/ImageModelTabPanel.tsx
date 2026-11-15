@@ -2,7 +2,7 @@
 
 import { ChevronRight, LockKeyhole } from "lucide-react";
 import { ModelLogo } from "@/components/chat/ModelLogo";
-import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
+import { UsageMeter } from "@/components/credits/UsageMeter";
 import { useLanguage } from "@/components/LanguageProvider";
 import {
   imageModelBrandParts,
@@ -228,14 +228,7 @@ export function ImageModelTabPanel({
                     </span>
                     <span className="flex shrink-0 items-center gap-2">
                       {fromCredits !== null && (
-                        <CreditCostBadge
-                          credits={fromCredits}
-                          size="xs"
-                          testId="image-model-credit-badge"
-                          label={interpolate(t("chat.imageModelCreditsFrom"), {
-                            credits: fromCredits,
-                          })}
-                        />
+                        <UsageMeter credits={fromCredits} kind="image" testId="image-model-credit-badge" />
                       )}
                       <ChevronRight
                         className="h-4 w-4 text-zinc-400"
