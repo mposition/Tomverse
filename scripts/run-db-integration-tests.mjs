@@ -657,6 +657,7 @@ run(
     "tests/integration/apple-account-deletion.db.test.ts",
     "tests/integration/conversation-title.db.test.ts",
     "tests/integration/conversation-lock-migration.db.test.ts",
+    "tests/integration/conversation-password-version.db.test.ts",
     // Durable Chat recovery is a database coordination contract: duplicate
     // claims, draft/checkpoint CAS, DB-clock leases and deletion cascades can
     // all look correct in one process while failing under PostgreSQL races.

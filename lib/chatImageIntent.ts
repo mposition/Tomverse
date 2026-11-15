@@ -92,11 +92,11 @@ export async function readPreviousImagePrompt(
     try {
         const conversation = await prisma.conversation.findFirst({
             where: { id: conversationId, userId },
-            select: { password: true },
+            select: { password: true, passwordVersion: true },
         });
         if (
             !conversation ||
-            !hasConversationUnlockGrant(request, userId, conversationId, conversation.password)
+            !hasConversationUnlockGrant(request, userId, conversationId, conversation.password == null ? null : conversation.passwordVersion)
         ) {
             return null;
         }

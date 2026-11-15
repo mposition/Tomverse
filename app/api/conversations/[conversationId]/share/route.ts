@@ -96,7 +96,7 @@ export async function POST(
     where: { id: conversationId },
     select: {
       userId: true,
-      password: true,
+      password: true, passwordVersion: true,
       kind: true,
       shareToken: true,
       shareEnabled: true,
@@ -151,7 +151,7 @@ export async function POST(
       req,
       userId,
       conversationId,
-      accessConversation.password
+      accessConversation.password == null ? null : accessConversation.passwordVersion
     )
   ) {
     logSecurityAuditEvent("conversation.share.create", {
@@ -361,7 +361,7 @@ export async function DELETE(
 
   const conversation = await prisma.conversation.findUnique({
     where: { id: conversationId },
-    select: { userId: true, password: true },
+    select: { userId: true, password: true, passwordVersion: true },
   });
 
   if (!conversation || conversation.userId !== userId) {
@@ -379,7 +379,7 @@ export async function DELETE(
       req,
       userId,
       conversationId,
-      conversation.password
+      conversation.password == null ? null : conversation.passwordVersion
     )
   ) {
     logSecurityAuditEvent("conversation.share.revoke", {

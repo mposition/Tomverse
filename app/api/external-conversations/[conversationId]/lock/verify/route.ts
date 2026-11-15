@@ -52,7 +52,7 @@ export async function POST(
 
         const row = await prisma.externalConversation.findUnique({
             where: { id: conversationId },
-            select: { userId: true, finalized: true, password: true },
+            select: { userId: true, finalized: true, password: true, passwordVersion: true },
         });
         if (!row || row.userId !== userId || !row.finalized) {
             return NextResponse.json(
@@ -102,14 +102,15 @@ export async function POST(
         // introduced already hashed -- but the branch is kept rather than
         // asserted away, so that if a future path ever writes one, unlocking
         // upgrades it instead of leaving it in place.
-        let effectivePassword = row.password;
+        let effectiveVersion = row.passwordVersion;
         if (verification.needsUpgrade) {
             const upgraded = await hashConversationPassword(password);
-            await prisma.externalConversation.updateMany({
-                where: { id: conversationId, password: row.password },
+            const updated = await prisma.externalConversation.updateMany({
+                where: { id: conversationId, password: row.password, passwordVersion: row.passwordVersion },
                 data: { password: upgraded },
             });
-            effectivePassword = upgraded;
+            if (updated.count !== 1) return NextResponse.json({ success: false, error: "Lock changed. Try again." }, { status: 409 });
+            effectiveVersion += 1;
         }
 
         await clearLockVerificationAttempts(attempt);
@@ -130,7 +131,7 @@ export async function POST(
                 "external_conversation",
                 userId,
                 conversationId,
-                effectivePassword
+                effectiveVersion
             )
         );
         return response;

@@ -89,7 +89,7 @@ const authorizeReview = async (
   }
   const conversation = await prisma.conversation.findFirst({
     where: { id: conversationId, userId },
-    select: { password: true },
+    select: { password: true, passwordVersion: true },
   });
   if (!conversation) {
     return { response: jsonError("Review not found.", "NOT_FOUND", 404) };
@@ -99,7 +99,7 @@ const authorizeReview = async (
       request,
       userId,
       conversationId,
-      conversation.password
+      conversation.password == null ? null : conversation.passwordVersion
     )
   ) {
     return { response: conversationLockedResponse() };

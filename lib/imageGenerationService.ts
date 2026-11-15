@@ -2107,7 +2107,7 @@ export const retryImageGenerationTarget = async (
       groupId: true,
       provider: true,
       modelId: true,
-      group: { select: { userId: true, conversationId: true, conversation: { select: { productKey: true, password: true, continuationBridge: { select: { id: true } } } } } },
+      group: { select: { userId: true, conversationId: true, conversation: { select: { productKey: true, password: true, passwordVersion: true, continuationBridge: { select: { id: true } } } } } },
       currentGeneration: {
         select: {
           id: true,
@@ -2131,7 +2131,7 @@ export const retryImageGenerationTarget = async (
   const current = target.currentGeneration;
   const host = target.group.conversation;
   if (host?.password &&
-      (!input.request || !hasConversationUnlockGrant(input.request, input.userId, target.group.conversationId!, host.password))) {
+      (!input.request || !hasConversationUnlockGrant(input.request, input.userId, target.group.conversationId!, host.password == null ? null : host.passwordVersion))) {
     throw new ChatAccessError(403, "CONVERSATION_LOCKED", "Unlock this conversation before retrying images.");
   }
   if (!current) {

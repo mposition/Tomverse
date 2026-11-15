@@ -550,6 +550,7 @@ model Conversation {
   /// no more than that column does.
   pinSeq           Float     @default(0)
   password         String?
+  passwordVersion  Int     @default(0)
   importedGuestKey String?
 
   @@unique([userId, importedGuestKey])
@@ -3753,6 +3754,7 @@ model ExternalConversation {
   /// the same `lib/conversationLock.ts` helpers. Locking a snapshot suspends
   /// the memories it is the last reachable evidence for (§7.1).
   password String?
+  passwordVersion Int @default(0)
 
   messages            ExternalMessage[]
   continuationBridges ConversationContinuationBridge[]

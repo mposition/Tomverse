@@ -103,7 +103,7 @@ export async function GET(req: Request) {
                 title: true,
                 createdAt: true,
                 productKey: true,
-                password: true,
+                password: true, passwordVersion: true,
                 // Read for the title and the §9 provenance lines, the two
                 // things the single export also writes for a continuation
                 // (lib/continuationDisplayTitle.ts,
@@ -123,7 +123,7 @@ export async function GET(req: Request) {
                 req,
                 userId,
                 conversation.id,
-                conversation.password
+                conversation.password == null ? null : conversation.passwordVersion
             )
         );
         const lockedCount = conversations.length - exportable.length;
