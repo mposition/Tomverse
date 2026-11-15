@@ -8,7 +8,7 @@ import {
   SCOUT_IMAGE_FOLLOW_UP_TASK_ENV,
   scoutTurnWrites,
 } from "../lib/productResearchScoutBrowserPolicy.mjs";
-import { generateImageFollowUp } from "../lib/productResearchScoutGeneration.mjs";
+import { generateImageFollowUp, readAnswerImage } from "../lib/productResearchScoutGeneration.mjs";
 import { requestedScoutGenerations, scoutSubjectInfo } from "../lib/productResearchScoutSubjects.ts";
 import { SCOUT_SYSTEM_PROMPT } from "../lib/productResearchScoutCore.ts";
 
@@ -183,4 +183,11 @@ test("the follow-up generation is off unless its app switch is set, and the Admi
 test("the judging prompt treats a text answer to a follow-up and a shown internal id as findings", () => {
   assert.match(SCOUT_SYSTEM_PROMPT, /follow-up that asks to change the previous image[^.]*answered in text/);
   assert.match(SCOUT_SYSTEM_PROMPT, /internal identifier shown to a user is a finding/);
+});
+
+test("an answer picture is read only from a web address, and an oversized one is stopped while it arrives", async () => {
+  assert.ok((await readAnswerImage(`${assetsOrigin}/fox.png`)).base64);
+  assert.deepEqual(await readAnswerImage(`${assetsOrigin}/fox.png`, 10), { note: "it is larger than the walker reads" });
+  assert.deepEqual(await readAnswerImage("data:image/png;base64,AAAA"), { note: "the card gave no web address for it" });
+  assert.deepEqual(await readAnswerImage(undefined), { note: "the card gave no web address for it" });
 });

@@ -174,9 +174,14 @@ test("the journey route keeps a call free for the judge and does not exist until
  * A small phone chat with the two defects people found by using Chat on
  * 2026-11-15: picking a conversation leaves the history drawer open, and New chat
  * from another conversation drops the new-chat draft. It also offers a delete
- * that the walker must refuse.
+ * that the walker must refuse. Like the studio, a New task button sits behind the
+ * drawer's full-screen backdrop: the walker must use the drawer's own.
  */
-const chatPage = `<!doctype html><html lang="ko"><body>
+const chatPage = `<!doctype html><html lang="ko"><head><style>
+#drawer { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.4); }
+#drawer[hidden] { display: none; }
+</style></head><body>
+<button class="review-new-task" onclick="document.title = 'background clicked'">새 작업</button>
 <button data-testid="mobile-sidebar-open">menu</button>
 <div id="drawer" role="dialog" aria-modal="true" hidden>
   <ul data-testid="sidebar-conversation-list"><li data-testid="sidebar-conversation-item" id="row">지난 대화</li></ul>
@@ -266,6 +271,7 @@ test("a journey records every step, so a drawer left open and a draft gone reach
   assert.match(step(2), /click "conversation:1": at \/chat\/c1;[^]*1 open dialog\(s\) or drawer\(s\)/, "the drawer stayed open");
   assert.match(step(3), /click "삭제"/);
   assert.match(step(4), /click "new-chat": at \/chat; composer holds ""/, "the draft is gone");
+  assert.doesNotMatch(step(4), /failed|nothing visible/, "the drawer's own New chat, not the covered one behind it");
   assert.match(step(6), /send: [^]*1 answer\(s\)[^]*답변입니다/);
   assert.match(subject.signals, /refused these writes[^]*DELETE \/api\/conversations\/c1/);
   assert.ok(!seen.some((request) => request.method === "DELETE"), "the delete never left the browser");
