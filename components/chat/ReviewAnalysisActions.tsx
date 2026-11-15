@@ -8,6 +8,7 @@ import { ReviewChatAction, useReviewResultAccess } from "./ReviewChatHandoff";
 import { buildReviewAnalysisReport, reviewReportLabels, reviewReportSelection } from "@/lib/reviewAnalysisReport";
 import type { ReviewChatSource } from "@/lib/reviewToChat";
 import { filenameFromContentDisposition, saveBlobAsFile } from "@/lib/browserDownload";
+import { discardResponseBody } from "@/lib/discardResponseBody";
 import "./review-analysis-actions.css";
 
 export function ReviewAnalysisActions({ source, ready, scope = "", onClose, closeDisabled = false, disclaimer, className = "" }: {
@@ -62,7 +63,7 @@ export function ReviewAnalysisActions({ source, ready, scope = "", onClose, clos
         headers: { "Content-Type": "application/json" },
         ...(action === "revoke" ? {} : { body: JSON.stringify({ analysis, ...(action === "export" ? { format } : {}) }) }),
       });
-      if (!current()) return;
+      if (!current()) { await discardResponseBody(response); return; }
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
         if (!current()) return;
@@ -86,7 +87,11 @@ export function ReviewAnalysisActions({ source, ready, scope = "", onClose, clos
         const url = new URL(data.url);
         if (!["https:", "http:"].includes(url.protocol) || !url.pathname.startsWith("/share/")) throw Error("INVALID_SHARE_URL");
         setShare({ identity, conversationId, key, uncertain: false, url: url.href });
-      } else setShare({ identity, conversationId, key, uncertain: false });
+      } else {
+        await discardResponseBody(response);
+        if (!current()) return;
+        setShare({ identity, conversationId, key, uncertain: false });
+      }
     } catch { if (current()) setMessage(t("reviewActions.failed")); }
     finally { if (request.current === controller) { request.current = null; setBusy(false); } }
   };
