@@ -61,8 +61,8 @@ clients or making requests. Execution separately requires a matching approval,
 single-use journal commits intent before dispatch and prevents automatic retry
 after a crash or unknown outcome. Production processes are refused.
 
-The selected comparison is Gemini 4 Argon at low thinking and GPT 6 Luna at low
-thinking on one identical public brief. It allows six model calls, ten Brave
+The prepared, unexecuted comparison is Gemini 4 Argon at low thinking and GPT 6
+Luna at low thinking on one identical public brief. It allows six model calls, ten Brave
 attempts, four page reads and one optional Rerank 5 Fast side experiment over
 captured public snippets. The conservative reservation is US$4.701131 including
 rerank, beneath the US$10 ceiling. Argon uses the standard US$4/US$20 rate in
@@ -79,12 +79,32 @@ or a real latency/cost comparison. Page selection by rerank is a side experiment
 it does not rewrite a report or add a model judge.
 
 This is a functional preview evaluation, not evidence that one provider's
-model is generally better. The owner supplied operating model output limits:
-Astra and Fable 5.2 at 128,000, Argon at 32,768. The product's shared 4,096-token
-run cap is independent of those model limits. There is no measured basis for
-excluding Astra or Fable on output-limit or completion-quality grounds; those
-earlier selection claims were withdrawn. Quality/total-cost ranking requires
-an explicitly pinned, comparable evaluation of those candidates.
+model is generally better. The owner supplied the following operating DB
+output limits; this session did not query the production DB to verify them:
+
+| Candidate | Owner-supplied configured output limit | Evaluation status |
+| --- | --- | --- |
+| GPT Astra | 128,000 | Candidate; exact operating API ID, pricing and reasoning configuration not yet captured |
+| Claude Fable 5.2 | 128,000 | Candidate; exact operating API ID, pricing and reasoning configuration not yet captured |
+| Gemini 4 Argon | 32,768 | Development clone prepared; no live result |
+
+The product's shared 4,096-token run cap is independent of those model limits.
+There is no measured basis for excluding Astra or Fable on output-limit,
+reasoning-token consumption or completion-quality grounds; those earlier
+selection claims were withdrawn. Published token rates alone do not establish
+cost per successful investigation. The current CLI does not yet support the
+operating Astra/Fable 5.2 profiles; their IDs must not be guessed from older
+compiled catalogue entries.
+
+A comparable follow-up should pin each actual API model, pricing snapshot,
+reasoning setting and the same question and application limits, then record
+observed terminal outcome, citation support, latency, actual token usage and
+cost. Full-pipeline runs can discover different evidence even with the same
+question; they must not be described as an identical-evidence comparison.
+One brief per model is a smoke evaluation and cannot establish a general
+completion rate or quality ranking. A 4,096-token product-cap experiment also
+does not measure the models' long-output capability. Adding all candidates
+must not silently increase the approved six-generation execution scope.
 
 ## Verification
 
@@ -107,6 +127,7 @@ existing integration runner's test-target checks and migration/drift setup.
 | Pricing, accent tokens, enum constraints and data-domain registry | Passed |
 | Code/DB model registry | 46 rows, Command A+ credit/token settings agree |
 | Worker CLI with durable feature disabled | Expected exit 1 at the feature guard |
+| Worker CLI with `--once` and an empty dedicated test DB | Exit 0; no provider credentials or model dispatch |
 | Whitespace check | Passed |
 
 The checks caught and fixed the API's `{run}` envelope mismatch, an empty-body
@@ -114,9 +135,22 @@ placeholder hiding the saved-run card, an incompatible Cohere provider protocol
 version and the worker CLI's CommonJS top-level-await failure. The final browser
 run uses the fixed build and a dedicated server port without reusing another
 session's server.
+The final empty-queue CLI smoke also verified that the unchanged real worker
+command terminates with exit 0.
 
-Independent review is requested for the finished changed financial, migration
-and credential boundaries. Its outcome is recorded separately from local checks.
+Independent review job `r-20261115-003827-22b1dd` covered implementation commit
+`6d57b5e796fbe18012e93545241d5770256e9e59`. One reviewer returned a parsed
+`accept`; the other wrote an approving review but omitted the required verdict
+block. The orchestrator therefore returned `unknown` / `no_verdict_block`,
+which is not a completed aggregate approval. No blocker/major finding was
+reported. Non-blocking observations cover cancel-route error mapping, Native
+list-read error visibility, the resume-route lock-code comparison and the
+Google fetch guard's JSON-only assumption.
+
+The job has not been resubmitted: repository instructions require a human to
+decide whether to retry an unknown review. Protected live evaluation remains
+unexecuted. Review parsing, local verification and real model quality are
+separate outcomes.
 
 ## Git and release state
 
