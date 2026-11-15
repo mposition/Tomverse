@@ -97,8 +97,9 @@ export function parseReviewerOutput(text) {
   if (typeof text !== "string" || text.length === 0) return unknown("empty_output");
   const objects = candidateObjects(text);
   if (objects.length === 0) return unknown("no_verdict_block");
-  // The last object that states a verdict or lists findings is the answer.
-  const parsed = objects.find((item) => verdictOf(item.verdict) !== null || Array.isArray(item.findings)) ?? objects[0];
+  // The last object that carries a verdict or findings is the answer, even when
+  // its verdict is unreadable or says unknown: an earlier accept is not revived.
+  const parsed = objects.find((item) => "verdict" in item || Array.isArray(item.findings)) ?? objects[0];
   const findings = (Array.isArray(parsed.findings) ? parsed.findings : [])
     .flatMap((raw) => { const finding = normaliseFinding(raw); return finding ? [finding] : []; });
   // A blocker or major finding rejects whatever the reviewer concluded.

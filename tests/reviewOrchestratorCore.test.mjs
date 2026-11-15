@@ -228,6 +228,10 @@ test("verdict parsing never guesses a verdict, reads what it can, and blocking f
   const bare = parseReviewerOutput(`I checked {the parser}.\n{"verdict":"reject","findings":[{"severity":"major","summary":"bad {x}"}]}`);
   assert.deepEqual([bare.verdict, bare.findings[0].summary], ["reject", "bad {x}"]);
   assert.deepEqual(parseReviewerOutput(block({ verdict: "accept", findings: [] })), { verdict: "accept", findings: [] });
+  // An earlier accept is not revived by a final block that says unknown or cannot be read.
+  const finalUnknown = parseReviewerOutput(`${block({ verdict: "accept", findings: [] })}\n${block({ verdict: "unknown", reason: "cannot tell" })}`);
+  assert.equal(finalUnknown.verdict, "unknown");
+  assert.equal(parseReviewerOutput(`${block({ verdict: "accept", findings: [] })}\n${block({ verdict: "maybe", findings: [] })}`).verdict, "unknown");
   const overridden = parseReviewerOutput(block({ verdict: "accept", findings: [{ severity: "major", summary: "bad" }] }));
   assert.equal(overridden.verdict, "reject");
   // The last block wins: a quoted example earlier in the answer is not the verdict.

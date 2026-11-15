@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 import { detectSecrets } from "../engineeringAgentSecretPatterns.ts";
 
 /**
@@ -327,14 +325,15 @@ const utf8Prefix = (text: string, maxBytes: number) => {
 
 /**
  * The section a retried attempt's prompt carries: its Task's earlier
- * rejections, newest first, in whatever room the prompt has left. The digest
- * is of the exact section, so the delivery record names what the worker read.
- * Null when there is nothing to say or not even the heading fits.
+ * rejections, newest first, in whatever room the prompt has left. The caller
+ * digests the exact section, so the delivery record names what the worker
+ * read (this module is also read by a client component, so it takes no Node
+ * crypto). Null when there is nothing to say or not even the heading fits.
  */
 export function buildAmuxV52PriorReviewSection(input: {
   entries: readonly AmuxV52ReviewEntry[];
   budgetBytes: number;
-}): { section: string; digest: string; included: number; truncated: boolean } | null {
+}): { section: string; included: number; truncated: boolean } | null {
   const budget = Math.min(AMUX_V52_PRIOR_REVIEW_MAX_BYTES, Math.floor(input.budgetBytes));
   if (input.entries.length === 0 || !Number.isFinite(budget)) return null;
   const headBytes = Buffer.byteLength(PRIOR_REVIEW_HEAD, "utf8") + 2;
@@ -354,8 +353,7 @@ export function buildAmuxV52PriorReviewSection(input: {
     section = `${utf8Prefix(section, budget - 12)} [truncated]\n`;
     formatted = { ...formatted!, truncated: true };
   }
-  return { section, digest: createHash("sha256").update(section, "utf8").digest("hex"),
-    included: input.entries.length, truncated: formatted!.truncated };
+  return { section, included: input.entries.length, truncated: formatted!.truncated };
 }
 
 /** What Admin reads about one attempt's v52 review. */

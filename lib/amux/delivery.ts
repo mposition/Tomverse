@@ -1,6 +1,6 @@
 import "server-only";
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
@@ -589,11 +589,12 @@ export async function pullAmuxWorkDelivery(input: {
           throw new Error("v52 review scope invalid");
         reviewScope = formatAmuxV52ReviewScope(titleText, criteria);
         const newest = reviewHistory?.[0];
-        // The findings ride in the prompt below. Only when none could be read
-        // (an older record, a purged or unopenable body) does the box read the
-        // review server by job id, as before.
+        // The findings ride in the prompt below. When the newest rejection's own
+        // findings could not be read (an older record, a purged or unopenable
+        // body) the box reads that review from the review server by job id, as
+        // before, whatever older rejections could be read.
         if (newest?.verdict === "reject" && newest.jobId &&
-            !reviewOpened.some((row) => row.opened?.doc))
+            !reviewOpened[0]?.opened?.doc)
           reviewFeedbackJobId = newest.jobId;
       }
       // The fixed HTTPS executor of a read-only API retry has no checkout,
@@ -646,7 +647,8 @@ export async function pullAmuxWorkDelivery(input: {
       return {
         prompt: head + resumeSection + priorSection + reviewSection + tail,
         priorConclusionDigest: prior?.digest ?? null,
-        reviewFeedbackDigest: review?.digest ?? null,
+        reviewFeedbackDigest: review ?
+          createHash("sha256").update(review.section, "utf8").digest("hex") : null,
         // The sidecar runs the execution role; the assignment keeps the Task's.
         v22Execution: { modelId: assignment.modelId,
           role: amuxV22ExecutionRole(assignment.role),

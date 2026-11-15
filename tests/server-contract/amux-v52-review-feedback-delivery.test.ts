@@ -219,7 +219,7 @@ test("a record's plain summary from before the findings were sealed still reache
   assert.equal(got.v22Execution?.reviewFeedbackJobId, undefined);
 });
 
-test("a purged or unopenable body leaves its run out; the others still go, and the box fills the gap only when none can be read", async () => {
+test("a purged or unopenable body leaves its run out; the box reads the newest rejection itself when that one is unreadable", async () => {
   reset();
   history = [reviewRow(3, { findings: sealedRow({ purged: true }) }), reviewRow(2), reviewRow(1)];
   sealedBodies.set("attempt-2", new Error("key store unavailable"));
@@ -227,13 +227,21 @@ test("a purged or unopenable body leaves its run out; the others still go, and t
   const partial = await pull();
   assert.match(partial.prompt, /Attempt 1 \(rejected by moonshot\)/);
   assert.doesNotMatch(partial.prompt, /Attempt 2|Attempt 3/);
-  assert.equal(partial.v22Execution?.reviewFeedbackJobId, undefined);
+  // The newest rejection could not be read here, so the box reads it from the
+  // review server even though an older one went into the prompt.
+  assert.equal(partial.v22Execution?.reviewFeedbackJobId, JOB);
 
   sealedBodies.set("attempt-1", new Error("gone"));
   const none = await pull();
   assert.doesNotMatch(none.prompt, /Prior independent review findings/);
-  assert.equal(none.v22Execution?.reviewFeedbackJobId, JOB,
-    "the newest rejection could not be read here, so the box reads it from the review server");
+  assert.equal(none.v22Execution?.reviewFeedbackJobId, JOB);
+
+  // With the newest readable, the box fetches nothing.
+  history = [reviewRow(2), reviewRow(1)];
+  sealedBodies.set("attempt-2", await body([["major", "Newest readable.", "lib/x.ts", 2]]));
+  const newestReadable = await pull();
+  assert.match(newestReadable.prompt, /Attempt 2 \(rejected by moonshot\)/);
+  assert.equal(newestReadable.v22Execution?.reviewFeedbackJobId, undefined);
 });
 
 test("a long findings list is cut to the room left and says so", async () => {
