@@ -111,6 +111,14 @@ async function publishOne(candidate: AmuxV22KeptResultCandidate, patch: Patch): 
       if (!(error instanceof EngineeringAgentStoreRefusedError)) throw error;
       return { taskId, attemptId, outcome: "waiting" as const, reason: `run_admission_${error.code}` };
     }
+    // A Decision Maker settlement filed for this card before its result was
+    // kept (one filed before this change shipped, say) is not answered now:
+    // its answers include running the Task again, and the result is being
+    // published instead. The relay closes its card as it closes any no longer open.
+    const settlements = await tx.amuxDmOwnerSettlement.updateMany({
+      where: { taskId, state: "open" },
+      data: { state: "cancelled", cancelReason: "kept_result_published" },
+    });
     if (verdict.moveToReview) {
       const moved = await tx.amuxWorkItem.updateMany({
         where: { id: taskId, status: "blocked", owner: null, archivedAt: null, v22AssignmentId: null },
@@ -141,7 +149,8 @@ async function publishOne(candidate: AmuxV22KeptResultCandidate, patch: Patch): 
       summary: "Put a kept AMUX v22 result on its publication path.",
       metadata: { attemptId, runId, productId: product.id, productKind: product.kind,
         patchDigest: patch.sha256, baseSha: patch.baseSha, tierPending: verdict.tierPending,
-        fromStatus: again.taskStatus, toStatus: verdict.moveToReview ? "review" : again.taskStatus },
+        fromStatus: again.taskStatus, toStatus: verdict.moveToReview ? "review" : again.taskStatus,
+        settlementsCancelled: settlements.count },
     });
     return { taskId, attemptId, outcome: "published" as const };
   });

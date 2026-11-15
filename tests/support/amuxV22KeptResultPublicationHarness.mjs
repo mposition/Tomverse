@@ -31,6 +31,7 @@ const fakeTx = {
     return [];
   },
   amuxWorkItem: { updateMany: async (args) => { calls.push(["task", args]); return { count: 1 }; } },
+  amuxDmOwnerSettlement: { updateMany: async (args) => { calls.push(["settlement", args]); return { count: 1 }; } },
 };
 
 mock.module(mod("lib/amux/dbBoundary.ts"), {
@@ -129,7 +130,10 @@ const kinds = () => calls.map(([kind]) => kind);
 reset();
 assert.deepEqual(await round(), [{ taskId: "card", attemptId: "attempt-3", outcome: "published" }]);
 assert.deepEqual(kinds(), ["boundary", "candidates", "boundary", "sql", "lock", "sql", "candidates", "admission",
-  "run_start", "product", "run_end", "audit"]);
+  "settlement", "run_start", "product", "run_end", "audit"]);
+// A Decision Maker settlement still open for the card is cancelled: its answers include a retry.
+assert.deepEqual(calls.find(([kind]) => kind === "settlement")[1],
+  { where: { taskId: "card", state: "open" }, data: { state: "cancelled", cancelReason: "kept_result_published" } });
 // The attempt is locked shared before the audit chain, the card after it (AMUX's lock order).
 assert.deepEqual(calls.filter(([kind]) => kind === "sql").map(([, sql]) => sql),
   ["AmuxExecutionAttempt SHARE", "AmuxWorkItem UPDATE"]);
@@ -185,7 +189,7 @@ for (const [setup, reason] of [
   setup();
   assert.deepEqual(await round(),
     [{ taskId: "card", attemptId: "attempt-3", outcome: "waiting", reason }], reason);
-  for (const write of ["task", "run_start", "product", "run_end", "audit"])
+  for (const write of ["settlement", "task", "run_start", "product", "run_end", "audit"])
     assert.equal(kinds().includes(write), false, `${reason}: ${write}`);
 }
 
