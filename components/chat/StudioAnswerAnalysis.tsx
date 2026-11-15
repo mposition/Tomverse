@@ -164,13 +164,13 @@ export function StudioAnswerAnalysis({
   if (!active) return null;
 
   return <>
-    <div className="studio-analysis-entry" data-testid="studio-analysis-entry" data-state={review ? busy ? "partial" : "done" : "new"}>
+    <div className="studio-analysis-entry" data-testid="studio-analysis-entry" data-state={entry?.phase === "error" ? "error" : review ? busy ? "partial" : "done" : "new"}>
       <button type="button" onClick={show} disabled={!ready && !review && !busy} aria-haspopup="dialog" aria-expanded={open}>
-        {review ? <Check size={17} /> : <Sparkles size={17} />}
-        <span>{review ? copy.view : entry?.phase === "checking" ? copy.checking : busy ? copy.running : copy.start}</span><ChevronRight size={16} />
+        {review && entry?.phase !== "error" ? <Check size={17} /> : <Sparkles size={17} />}
+        <span>{entry?.phase === "error" ? copy.retry : review ? copy.view : entry?.phase === "checking" ? copy.checking : busy ? copy.running : copy.start}</span><ChevronRight size={16} />
       </button>
       {busy && <div className="studio-analysis-progress" role="progressbar" aria-label={copy.running}><span /></div>}
-      <p>{review ? copy.reuse : !ready ? copy.wait : copy.ready}</p>
+      <p>{entry?.phase === "error" ? copy.failed : review ? copy.reuse : !ready ? copy.wait : copy.ready}</p>
     </div>
     {openScope === scope && createPortal(
       <div ref={dialogRef} className="studio-analysis-overlay" style={{ display: open ? undefined : "none" }}

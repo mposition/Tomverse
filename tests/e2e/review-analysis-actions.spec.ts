@@ -22,9 +22,9 @@ async function setup(page: Page, baseURL: string, appearance: "studio" | "classi
   return api;
 }
 
-test("first review is readable before the final event and all transfer actions await completion", async ({ page, baseURL }, info) => {
+for (const finalizes of [true, false]) test(`first review is readable before ${finalizes ? "completion" : "a recoverable finalization failure"} and transfer waits for a saved result`, async ({ page, baseURL }, info) => {
   test.skip(info.project.name !== "desktop-chromium");
-  await page.addInitScript(() => {
+  await page.addInitScript(({ finalizes }) => {
     const original = window.fetch;
     window.fetch = async (...args) => {
       const response = await original(...args);
@@ -33,11 +33,11 @@ test("first review is readable before the final event and all transfer actions a
       const encoder = new TextEncoder();
       const stream = new ReadableStream({ start(controller) {
         controller.enqueue(encoder.encode(JSON.stringify({ type: "primary", data: { ...complete, id: "", persisted: false, result: { ...complete.result, secondary: null } } }) + "\n"));
-        Object.assign(window, { finishAnalysis: () => { controller.enqueue(encoder.encode(JSON.stringify({ type: "complete", data: complete }) + "\n")); controller.close(); } });
+        Object.assign(window, { finishAnalysis: () => { controller.enqueue(encoder.encode(JSON.stringify(finalizes ? { type: "complete", data: complete } : { type: "error", data: { code: "COMPARISON_REVIEW_FAILED" } }) + "\n")); controller.close(); } });
       } });
       return new Response(stream, { headers: { "Content-Type": "application/x-ndjson" } });
     };
-  });
+  }, { finalizes });
   const api = await setup(page, baseURL!);
   await expect(page.getByTestId("studio-analysis-entry")).toHaveAttribute("data-state", "partial");
   await expect(page.getByRole("heading", { name: "우선순위", exact: true })).toBeVisible();
@@ -48,6 +48,11 @@ test("first review is readable before the final event and all transfer actions a
   await page.getByTestId("studio-analysis-entry").getByRole("button").click();
   expect(api.getRunCount()).toBe(1);
   await page.evaluate(() => (window as unknown as { finishAnalysis(): void }).finishAnalysis());
+  if (!finalizes) {
+    await expect(page.getByTestId("studio-analysis-entry")).toHaveAttribute("data-state", "error");
+    await expect(page.getByTestId("review-analysis-export")).toBeDisabled();
+    await page.getByRole("dialog").getByRole("button", { name: "다시 시도", exact: true }).click();
+  }
   await expect(page.getByTestId("review-analysis-export")).toBeEnabled();
   await expect(page.getByTestId("review-chat-continue")).toBeEnabled();
   await expect(page.getByTestId("studio-analysis-entry")).toHaveAttribute("data-state", "done");
@@ -190,6 +195,11 @@ test("Quick Summary uses the same footer and previews its own question, quotes a
   await expect(page.getByTestId("review-report-preview")).toContainText("Quick original question");
   await expect(page.getByTestId("review-report-preview")).toContainText("Quick unresolved matter");
   await expect(page.getByTestId("review-report-preview")).toContainText("first quote");
+  await page.setViewportSize({ width: 320, height: 844 });
+  await page.addStyleTag({ content: "html { font-size: 200%; }" });
+  expect(await page.getByRole("dialog", { name: "내보내기", exact: true }).evaluate(element => element.scrollWidth <= innerWidth)).toBe(true);
   await page.keyboard.press("Escape");
   await expect(footer.getByTestId("review-analysis-export")).toBeFocused();
+  expect(await footer.evaluate(element => element.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: ".tmp-review-analysis-mobile-footer.png" });
 });

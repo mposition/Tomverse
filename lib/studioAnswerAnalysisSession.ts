@@ -77,7 +77,7 @@ export class StudioAnswerAnalysisSession {
       this.put(scope, { phase: "done", setup, review });
     }).catch((error) => {
       this.put(scope, { ...this.get(scope), phase: "error",
-        executionStarted: error instanceof StudioAnalysisKnownFailure ? false : this.get(scope)?.executionStarted });
+        executionStarted: error instanceof StudioAnalysisKnownFailure && !this.get(scope)?.review ? false : this.get(scope)?.executionStarted });
     }).finally(() => this.openings.delete(scope));
     this.openings.set(scope, job);
     return job;

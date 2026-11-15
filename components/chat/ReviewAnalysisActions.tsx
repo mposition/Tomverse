@@ -18,7 +18,8 @@ export function ReviewAnalysisActions({ source, ready, scope = "", onClose, clos
   const access = useReviewResultAccess();
   const key = JSON.stringify([access?.identity, access?.supported, ready, scope, source]);
   const eligible = Boolean(access?.supported && access.identity?.startsWith("account:") && ready && source?.review.id &&
-    (source.kind === "quick" || (!source.review.guest && source.review.persisted !== false)));
+    source.setup.source?.question && source.review.responseMap.length >= 2 &&
+    (source.kind === "quick" || (!source.review.guest && source.review.persisted !== false && source.review.result[source.reviewer])));
   const [opened, setOpened] = useState<{ key: string; mode: "share" | "export"; source: ReviewChatSource } | null>(null);
   const [format, setFormat] = useState("pdf");
   const [busy, setBusy] = useState(false);
@@ -33,7 +34,10 @@ export function ReviewAnalysisActions({ source, ready, scope = "", onClose, clos
   }, [key]);
   const open = opened?.key === key && eligible;
   const labels = useMemo(() => reviewReportLabels(t), [t]);
-  const report = open && opened ? buildReviewAnalysisReport(opened.source, labels) : null;
+  const report = useMemo(() => {
+    if (!open || !opened) return null;
+    try { return buildReviewAnalysisReport(opened.source, labels); } catch { return null; }
+  }, [open, opened, labels]);
   const shared = share && share.identity === access?.identity && share.conversationId === source?.conversationId ? share : null;
   const sharedUrl = shared?.key === key ? shared.url : undefined;
   const close = () => { request.current?.abort(); request.current = null; setOpened(null); setBusy(false); };
@@ -100,6 +104,7 @@ export function ReviewAnalysisActions({ source, ready, scope = "", onClose, clos
     <div className="review-analysis-action-note"><p>{disclaimer}</p>
       {!ready && <p role="status">{t("reviewActions.partialUnavailable")}</p>}
       {!access?.supported && <p>{t("reviewHandoff.unsupported")}</p>}
+      {open && !report && <p role="alert">{t("reviewActions.failed")}</p>}
     </div>
     <div className="review-analysis-action-buttons">
       <button type="button" disabled={!eligible} onClick={() => show("share")} data-testid="review-analysis-share">{t("reviewActions.share")}</button>

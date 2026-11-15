@@ -91,3 +91,13 @@ test("a terminal server failure allows an explicit retry after a fresh saved-res
   await session.open("known", load, async () => { calls++; return review; });
   assert.equal(reads, 2); assert.equal(calls, 2); assert.equal(session.get("known").phase, "done");
 });
+
+test("a terminal finalization failure preserves the partial result and requires saved-result recovery", async () => {
+  const session = new StudioAnswerAnalysisSession(); let calls = 0;
+  await session.open("failed-save", async () => setup(), async (_setup, publish) => {
+    calls++; publish({ id: "", persisted: false }); throw new StudioAnalysisKnownFailure("save failed");
+  });
+  assert.equal(session.get("failed-save").executionStarted, true);
+  await session.recover("failed-save", async () => ({ ...setup(), storedReview: review }));
+  assert.equal(session.get("failed-save").phase, "done"); assert.equal(calls, 1);
+});
