@@ -9,16 +9,21 @@ import { CONVENTION_VERSIONS, isCanonicalRepoPath } from
 import type { TreeEntry } from "@/lib/engineeringAgentTreeVerify";
 import { gitObjectId } from "@/lib/engineeringAgentTreeVerify";
 import type { WorkflowFile } from "@/lib/agentCredentialReachability";
+import { AMUX_V22_FILE_MAX_BYTES } from "@/lib/amux/v22PatchLimit";
 
 // Source, data and documents, and the text gates the slice reads (shell,
 // container and deploy configuration).
 const ANALYSIS_TEXT = /(?:\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs|json|ya?ml|md|sh|ps1|toml)|(?:^|\/)Dockerfile[^/]*)$/;
-const MAX_FILE_BYTES = 2 * 1024 * 1024;
-const MAX_TOTAL_BYTES = 128 * 1024 * 1024;
+// One file up to GitHub's file limit (lib/amux/v22PatchLimit.ts). There is
+// no total: until 2026-11-15 a 128 MiB cap stood here, and the texts this
+// reads had grown to about 122 MiB, past which every tier read would have
+// failed. The base repository bounds the total.
+const MAX_FILE_BYTES = AMUX_V22_FILE_MAX_BYTES;
 // Production runs `main`, not the `develop` base, so some image files differ
 // from the base tree, and the test helpers the image leaves out are not in it
-// at all. Those come from GitHub by OID, up to this many.
-const MAX_FETCHED_BLOBS = 1000;
+// at all. Those come from GitHub by OID, as many as differ (1,000 until
+// 2026-11-15). A read GitHub refuses -- its rate limit, say -- throws, so the
+// tier round tries again later rather than settling for T2.
 // Test code that is not a test body: helpers and fixtures a gate script may
 // import, so the slice must read them (policy v6 item 2).
 const TEST_HELPER_CODE = /^(?!.*\.(?:test|spec)\.[A-Za-z]+$).*\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
@@ -106,8 +111,6 @@ export async function loadEngineeringAgentV22BaseEvidence(input: {
   const workflows: WorkflowFile[] = [];
   const policyDocuments: string[] = [];
   let lockText: string | null = null;
-  let totalBytes = 0;
-  let fetched = 0;
   const baseBytes = async (entry: TreeEntry): Promise<Uint8Array | null> => {
     const path = resolve(root, entry.path);
     if (!path.startsWith(`${root}${sep}`)) return null;
@@ -118,12 +121,9 @@ export async function loadEngineeringAgentV22BaseEvidence(input: {
             gitObjectId("blob", bytes) === entry.oid) return bytes;
       }
     } catch { /* not in the image: read the base blob instead */ }
-    if (!input.fetchBlob || fetched >= MAX_FETCHED_BLOBS) return null;
-    fetched += 1;
-    try {
-      const bytes = await input.fetchBlob(entry.oid, MAX_FILE_BYTES);
-      return gitObjectId("blob", bytes) === entry.oid ? bytes : null;
-    } catch { return null; }
+    if (!input.fetchBlob) return null;
+    const bytes = await input.fetchBlob(entry.oid, MAX_FILE_BYTES);
+    return gitObjectId("blob", bytes) === entry.oid ? bytes : null;
   };
   const decode = (bytes: Uint8Array) => {
     try { return new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
@@ -144,18 +144,19 @@ export async function loadEngineeringAgentV22BaseEvidence(input: {
     (entry.mode === "100644" || entry.mode === "100755") &&
     !excluded.has(entry.path) && !entry.path.startsWith("vendor/amux/") &&
     ANALYSIS_TEXT.test(entry.path));
-  // Any missing text or the byte cap fails the whole read, so the first of
-  // them stops new reads.
+  // Any missing text fails the whole read, so the first stops new reads.
   const texts = new Map<string, Uint8Array>();
   let next = 0;
-  let readBytes = 0;
   let stopped = false;
   await Promise.all(Array.from({ length: READ_CONCURRENCY }, async () => {
     while (!stopped && next < toRead.length) {
       const entry = toRead[next++];
-      const bytes = await baseBytes(entry);
-      readBytes += bytes?.byteLength ?? 0;
-      if (!bytes || readBytes > MAX_TOTAL_BYTES) stopped = true;
+      // A read that throws stops the others too, then fails the whole read.
+      const bytes = await baseBytes(entry).catch((error: unknown) => {
+        stopped = true;
+        throw error;
+      });
+      if (!bytes) stopped = true;
       else texts.set(entry.path, bytes);
     }
   }));
@@ -186,8 +187,6 @@ export async function loadEngineeringAgentV22BaseEvidence(input: {
     }
     const bytes = texts.get(entry.path);
     if (!bytes) return null;
-    totalBytes += bytes.byteLength;
-    if (totalBytes > MAX_TOTAL_BYTES) return null;
     const text = decode(bytes);
     if (text === null) return null;
     baseFiles.push({ path: entry.path, text });
