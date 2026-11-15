@@ -248,6 +248,9 @@ test("verdict parsing never guesses a verdict, reads what it can, and blocking f
   assert.equal(keyed.verdict, "reject");
   assert.equal(parseReviewerOutput(block({ verdict: "accept", findings: [null, 7] })).reason, "findings_unreadable");
   assert.equal(parseReviewerOutput(block({ verdict: "accept", findings: 42 })).reason, "findings_unreadable");
+  assert.equal(parseReviewerOutput(block({ verdict: "accept", findings: { severity: "major" } })).reason, "findings_unreadable",
+    "a bare finding object is one finding, not its values");
+  assert.equal(parseReviewerOutput(block({ verdict: "accept", findings: { file: "a.ts", line: 3 } })).reason, "findings_unreadable");
   assert.equal(parseReviewerOutput(block({ verdict: "accept", findings: [{ severity: "major", summary: 3 }, { severity: "nit", summary: "style" }] })).reason,
     "findings_unreadable", "one readable finding does not vouch for an unreadable one");
   assert.equal(parseReviewerOutput(block({ verdict: "accept", findings: null })).verdict, "accept");

@@ -163,7 +163,11 @@ function findingList(value) {
   if (Array.isArray(value)) return value;
   if (typeof value === "string") return value.trim() === "" ? [] : [value];
   if (typeof value !== "object") return [value];
-  if ("summary" in value || "message" in value || "description" in value || "text" in value) return [value];
+  // An object that has any field of a finding is ONE finding, readable or not (a bare
+  // {"severity":"major"} must not be taken apart into its values); only an object of
+  // other keys is a map of findings.
+  const FINDING_FIELDS = ["severity", "summary", "message", "description", "text", "file", "line", "repeats_earlier", "repeatsEarlier"];
+  if (FINDING_FIELDS.some((field) => field in value)) return [value];
   return Object.values(value);
 }
 
