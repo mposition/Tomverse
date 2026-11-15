@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { memoryRetrievalTerms } from "../../lib/memoryRetrievalTerms";
 import { buildMemoryQueryPlan } from "../../lib/memoryQueryPlan";
 import {
-  memoryRerankCandidates, memoryTier, selectMemoryContext, type RetrievableMemory,
+  memoryRerankCandidates, memoryTier, selectMemoryContext, contextualRankingDisplacesCurrentQuery, type RetrievableMemory,
 } from "../../lib/memoryRetrievalScoring";
 import { evaluateRetrieval, retrievalTargetFailures, summarizeRetrieval } from "./evaluator";
 import { corpusSchema, retrievalCorpusSchema, type QualityCase } from "./schema";
@@ -54,13 +54,29 @@ export function rerankDocuments(retrieval: QualityCase["retrieval"]) {
     .map((memory) => ({ id: memory.id, text: memory.statement }));
 }
 
-export function productSelection(
+function productSelectionDetailed(
   retrieval: QualityCase["retrieval"], externalRelevance?: ReadonlyMap<string, number>,
+  hasHistory = false,
 ) {
-  return selectMemoryContext({
-    memories: productMemories(retrieval), query: retrieval.query, now: NOW,
+  const input = { memories: productMemories(retrieval), query: retrieval.query, now: NOW };
+  let selection = selectMemoryContext({
+    ...input,
     ...(externalRelevance ? { externalRelevance } : {}),
-  }).selected.map((candidate) => ({ id: candidate.memory.id, tier: candidate.tier }));
+  });
+  let historyDisplacedCurrentQuery = false;
+  if (hasHistory && externalRelevance) {
+    const lexical = selectMemoryContext(input);
+    historyDisplacedCurrentQuery = contextualRankingDisplacesCurrentQuery(lexical, selection);
+    if (historyDisplacedCurrentQuery) selection = lexical;
+  }
+  return { selection, historyDisplacedCurrentQuery };
+}
+
+export function productSelection(
+  retrieval: QualityCase["retrieval"], externalRelevance?: ReadonlyMap<string, number>, hasHistory = false,
+) {
+  return productSelectionDetailed(retrieval, externalRelevance, hasHistory).selection.selected
+    .map(candidate => ({ id: candidate.memory.id, tier: candidate.tier }));
 }
 
 type RelevanceFor = (caseId: string) => ReadonlyMap<string, number> | undefined;
@@ -69,10 +85,13 @@ export function measureProductRetrieval(cases: readonly RetrievalCase[], relevan
   return measureProductRetrievalDetailed(cases, relevanceFor).result;
 }
 
-export function measureProductRetrievalDetailed(cases: readonly RetrievalCase[], relevanceFor?: RelevanceFor) {
+export function measureProductRetrievalDetailed(cases: readonly RetrievalCase[], relevanceFor?: RelevanceFor,
+  historyFor?: (caseId: string) => boolean) {
   const rows = cases.map((testCase) => {
     const { relevantIds } = testCase.retrieval;
-    const injected = productSelection(testCase.retrieval, relevanceFor?.(testCase.id));
+    const { selection, historyDisplacedCurrentQuery } = productSelectionDetailed(
+      testCase.retrieval, relevanceFor?.(testCase.id), historyFor?.(testCase.id));
+    const injected = selection.selected.map(candidate => ({ id: candidate.memory.id, tier: candidate.tier }));
     // Recall@5 is read off the prompt order: core first, then relevant, then style.
     const topItems = injected.slice(0, RECALL_K);
     const top = topItems.map((item) => item.id);
@@ -81,7 +100,7 @@ export function measureProductRetrievalDetailed(cases: readonly RetrievalCase[],
     const fullGated = injected.filter((item) => item.tier === "relevant");
     const { pool } = testCase.retrieval;
     return {
-      ...evaluateRetrieval(testCase, top), tag: testCase.tag, top,
+      ...evaluateRetrieval(testCase, top), tag: testCase.tag, top, historyDisplacedCurrentQuery,
       recalledInjected: relevantIds.filter((id) => injected.some((item) => item.id === id)).length,
       missed: relevantIds.filter((id) => !top.includes(id)),
       // Core and style are never relevance-gated

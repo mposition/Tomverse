@@ -4,7 +4,8 @@
  * not enable the feature or make a provider call.
  */
 
-export const MEMORY_RERANK_QUERY_POLICY = "memory-query-v3" as const;
+/** Contextual adoption changes must invalidate prior signed plans and evaluation provenance. */
+export const MEMORY_RERANK_QUERY_POLICY = "memory-query-v4" as const;
 export const MEMORY_RELEVANCE_CONTEXT_ENV = "MEMORY_RELEVANCE_CONTEXT_ENABLED" as const;
 
 export type MemorySemanticHistory = { id: string; content: string; digest: string };

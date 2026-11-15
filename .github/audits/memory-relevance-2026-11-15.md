@@ -143,10 +143,11 @@ Advanced retrieval models 탭에서 확인한 가격이며, 협상된 계정 계
   개선하고, 별도 승인 범위에서 독립 사례로 재평가**하는 것이다. 추가 유료 호출은 하지 않았다.
 
 [재현 가능한 점수·provenance와 측정 기록](artifacts/memory-relevance-2026-11-15/report.json)을
-커밋했다. 세 점수 파일 모두 query/history/model/candidate/corpus identity 검증과 CLI
-오프라인 replay를 통과했고 live 결과와 일치했다. replay의 provider 호출은 0이다.
+커밋했다. 세 점수 파일 모두 당시 구현에서 query/history/model/candidate/corpus identity 검증과
+CLI 오프라인 replay를 통과했고 live 결과와 일치했다. replay의 provider 호출은 0이다.
 
-재현 위치: 로컬 PC / PowerShell / repository root. production credential 불필요,
+과거 평가 재현 위치: 로컬 PC / PowerShell / **`bff86e393`의 별도 checkout** repository root.
+후속 v4 선택 규칙에서는 이 v3 provenance를 묵시 재해석하지 않고 거절한다. production credential 불필요,
 저장 artifact 읽기와 stdout 출력만 하며 아래 명령은 유료 전송을 하지 않는다.
 
 ```powershell
@@ -162,3 +163,59 @@ PR Fast Gate 한 건만 중지했다. 일부 외부 시작 CI는 이미 완료�
 
 기능은 기본 꺼짐이다. 운영 모델·단가·예산 설정, 제품 고지 gate 활성화, 병합·배포는
 하지 않았다. 독립 검토 unknown도 그대로이며 재제출하지 않았다.
+
+## 후속 수정: 이력이 현재 질문의 직접 일치를 전부 대체하는 실패
+
+사용자의 후속 요청으로 관측된 `irrelevant_history` 실패를 우선 수정했다.
+[Cohere Rerank 5의 한계](https://docs.cohere.com/docs/rerank)는 관련성 판단을 바꾸는
+지시문을 지원하지 않는다고 명시한다. 새 classifier·scoring engine이나 두 번째 모델 호출을
+추가하지 않고 기존 selector의 선택 결과와 `termHits`를 이용한 작은 결과 검사를 적용했다.
+
+- 현재 질문만의 lexical 선택에 ordinary relevant memory가 있고, 실제 이력을 채택한
+  rerank가 non-empty ordinary 선택을 만들면서 현재 질문과 일치하는 후보를 전부
+  term overlap 0인 후보로 바꾸면 **기존 lexical 결과 전체로 복귀**한다.
+  `semanticFallbackReason`은 `history_displaced_current_query`다. 점수를 혼합하지 않는다.
+- 선택 전후 모두 기존 core/pinned/style, 만료·중복·source cap·token budget을 적용한다.
+  core/style의 term 일치가 ordinary memory의 대체를 가리지 않는다. 기권(빈 ordinary 선택),
+  lexical 직접 일치가 없는 참조, 이력 없는 current-only와 legacy는 이 검사를 적용하지 않는다.
+- 거절한 결과는 semantic 사용으로 표시하지 않고 extra·history anchor·contextual effective
+  plan을 버린다. 기존 current-only lexical fingerprint를 서명하므로 현재 질문 저장·전송과
+  사용되지 않은 이력의 수정 후에도 추가 provider 호출 없이 재현한다. 이미 발생한 기존
+  호출의 비용·cache 기록은 유지하며 예약·청구·정산 코드는 변경하지 않았다.
+- `memory-query-v4`로 기존 full-query bundle/평가 provenance의 묵시 재해석을 막는다.
+  provider query 문자열과 후보·cache·wire·비용 계약은 바꾸지 않았다. 평가 harness도 같은
+  검사와 실제 historyCount를 사용하며 거절 사례를 coverage에 별도 표시한다.
+
+[저장 점수 재처리 기록](artifacts/memory-relevance-2026-11-15/history-displacement-replay.json)은
+기존 provider 응답의 10사례 query/history/candidate identity를 모두 대조했다. 새 provider
+전송·지출은 **0**이다. 이는 새 모델 실행이나 독립 holdout의 품질 측정이 아니다.
+
+| 같은 저장 응답의 선택 | 관련 기억 회수 | 무관 주입 / 전체 주입 |
+|---|---:|---:|
+| 수정 전 | 6/7 | 7/13 |
+| 수정 후 | 7/7 | 6/13 |
+
+변경된 사례는 `irrelevant_history` 하나이며 Atlas 대신 coffee를 선택한다. 기존 기권과
+copied-user-material의 Atlas 회수는 유지했다. 프로젝트 혼입·assistant 참조·일부 후보만
+대체하는 실패와 lexical 직접 일치가 없는 경우의 잘못된 의미 판단까지 해결하지 않는다.
+보수적인 복귀가 유효한 zero-overlap 의미 매치를 배제할 수도 있으므로 다음 품질 검증은
+이 tradeoff를 포함한 별도 독립 사례 평가가 우선이다. 추가 유료 평가 승인을 사용하지 않았다.
+
+후속 로컬 검증:
+
+| 검사 | 결과 |
+|---|---|
+| focused selector/query/input/cost/quality unit | 207 통과 |
+| 추가 harness·bundle·send 회귀 (위 unit과 일부 중복) | 80 통과 |
+| source snapshot·retrieval server contract | 11 통과 |
+| 전용 PostgreSQL 17 DB | 기존 bundle/semantic 회귀 44 + 신규 재현 1 통과 |
+| quality 도구 자체 typecheck | 통과 |
+| 변경 파일 scoped lint | 통과 |
+
+신규 DB 회귀는 실제 cache·서명·source 조회를 사용하고 provider만 로컬 stand-in으로
+대체한다. 커피 선택, lexical fingerprint 일치, 거절한 history anchor 부재, 현재 질문
+저장·사용되지 않은 source 변경 후 전송 검증, 준비·동일 snapshot 반복 조회·전송에서 provider 호출이
+1회인 것을 확인했다. 전용 DB는 loopback `tomverse_memory_precedence_test`이고 운영 DB를
+사용하지 않았다. 실행 후 전용 PostgreSQL을 정상 중지했다.
+
+운영 스위치·예산·고지 gate, 독립 검토 unknown, draft·`ci:hold`, 병합·배포 상태는 유지한다.

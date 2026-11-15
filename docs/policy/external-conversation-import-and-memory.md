@@ -666,7 +666,14 @@ UTF-8 bytes를 token의 보수적 상한으로만 사용하고, 상한으로 검
 같은 Conversation의 현재 owner·passwordVersion 잠금 검증을 통과한 저장 user 본문 최대
 2개를 보조 query data로 사용할 수 있습니다. assistant/system/tool, 첨부·OCR, 별도
 External/Review 원문은 조회하지 않습니다. user 본문 안에 사용자가 붙여넣은 외부·Review
-자료는 포함될 수 있습니다. 이력은 주입 prompt에 다시 붙이지 않습니다. 준비 때 실제 채택한
+자료는 포함될 수 있습니다. 이력은 주입 prompt에 다시 붙이지 않습니다.
+현재 질문의 lexical 결과에 관련 후보가 있는데, 이력을 사용한 rerank가 그 후보들을 모두
+제외하고 현재 질문과 term overlap이 없는 ordinary memory만 선택하면 기존 lexical 결과로
+복귀합니다(`history_displaced_current_query`). 점수를 혼합하거나 provider를 다시 부르지
+않으며 거절한 이력 anchor는 서명하지 않습니다. 빈 선택(기권), 현재 질문과 직접 일치가
+없는 참조, 현재-only/legacy 경로는 이 검사를 적용하지 않습니다. 이는 무관한 이력의
+전면 대체를 막는 보수적 검사이며 의미상의 모든 주제 전환을 판별하는 것은 아닙니다.
+현재 질문·이력의 query 문자열과 전송 범위는 유지합니다. 준비 때 실제 채택한
 source ID·content digest와 query 정책만 기존 bundle에 서명하고 원문을 token·로그·새 DB에
 넣지 않습니다. 전송은 envelope 검증 뒤 같은 subset과 cache만 재사용합니다. 빈/없는
 anchor는 current-only이며 새 이력을 채우지 않습니다. source 변경·삭제는 stale이고, 정상

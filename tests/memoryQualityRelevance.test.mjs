@@ -3,8 +3,9 @@ import test from "node:test";
 import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { main } from "../tools/memory-quality/cli.ts";
-import { loadRetrievalCases, rerankDocuments } from "../tools/memory-quality/productRetrieval.ts";
+import { loadRetrievalCases, rerankDocuments, productSelection } from "../tools/memory-quality/productRetrieval.ts";
 import {
     compareMemory, memoryEvaluationInputIdentity, memoryEvaluationCorpusDigest,
     memoryEvaluationQueryPlan, loadMemoryScores,
@@ -14,6 +15,32 @@ import { digest } from "../tools/memory-quality/schema.ts";
 
 const modes = ["current-query", "full-query", "full-query+history"];
 const cases = await loadRetrievalCases("relevance");
+const recordedHistoryFile = new URL("../.github/audits/artifacts/memory-relevance-2026-11-15/scores-full-query+history.json", import.meta.url);
+
+test("recorded provider displacement falls back to the current-query selection without a new model call", async () => {
+    const recorded = JSON.parse(await readFile(recordedHistoryFile, "utf8"));
+    const coffee = cases.find(row => row.id === "irrelevant_history");
+    const scores = new Map(Object.entries(recorded.scores[coffee.id]));
+    const ids = hasHistory => productSelection(coffee.retrieval, scores, hasHistory).map(row => row.id);
+    assert.deepEqual(ids(false), ["atlas"], "the historical response reproduces the observed displacement");
+    assert.deepEqual(ids(true), ["coffee"], "contextual validation restores the complete lexical fallback");
+    const bareScores = Object.assign(new Map([[coffee.id, scores]]), { corpus: "relevance" });
+    const comparison = compareMemory("relevance", [coffee], bareScores, "full-query+history");
+    assert.deepEqual(comparison.coverage.casesRejectedForHistoryDisplacement, [coffee.id]);
+    assert.deepEqual(comparison.coverage.casesFallingBackToLexical, [coffee.id]);
+    assert.equal(comparison.semantic.recalled, 1);
+    assert.equal(comparison.scoreEvidence.semanticRetrievalMeasured, false, "a local reprocessing is not a new provider measurement");
+    for (const [id, expected] of [["candidate_absent", []], ["copied_user_material", ["atlas"]]]) {
+        const testCase = cases.find(row => row.id === id);
+        assert.deepEqual(productSelection(testCase.retrieval, new Map(Object.entries(recorded.scores[id])), true)
+            .map(row => row.id), expected, id);
+    }
+});
+
+test("historical v3 score provenance cannot silently claim the revised contextual selection policy", async () => {
+    const scores = await loadMemoryScores(fileURLToPath(recordedHistoryFile));
+    assert.throws(() => compareMemory("relevance", cases, scores, "full-query+history"), { code: "scores_corpus_mismatch" });
+});
 const withTemp = async (body) => {
     const directory = await mkdtemp(join(tmpdir(), "memory-relevance-"));
     try { return await body(directory); } finally { await rm(directory, { recursive: true, force: true }); }

@@ -1060,6 +1060,62 @@ const fullQueryFixture = async () => {
     return { ...access, query, sources: sources.slice(-2), buildInput, prepare, sign, append, rebuild };
 };
 
+test("history displacement returns the current lexical result and replays without an unused anchor or another call", () => withFullMemoryQuery(async () => {
+    const user = await createUser();
+    const conversation = await prisma.conversation.create({ data: {
+        userId: user.id, title: "Current query precedence", selectedModels: JSON.stringify([MODEL]), memoryMode: "on",
+    } });
+    const source = await prisma.message.create({ data: {
+        conversationId: conversation.id, role: "user", content: "아틀라스 일정 이야기를 마쳤다.", createdAt: NOW,
+    } });
+    const coffee = await createMemory(user.id, "preference", "사용자는 커피를 마시지 않는다.");
+    await createMemory(user.id, "project", "아틀라스 프로젝트에서 사용자는 출시 QA를 맡고 마감은 11월 28일이다.");
+    await prisma.appSetting.create({ data: { key: MEMORY_INJECTION_FLAG_KEY, value: "true" } });
+    await turnOn("memoryRerank");
+    // Recorded V5 failure: history elevated Atlas and suppressed coffee.
+    provider.state.rerankScore = (_query, document) => document.includes("커피") ? 0.0757 : 0.1268;
+    const query = "커피 대신 뭘 마실까요?";
+    const request = new Request("http://localhost/api/chat/context");
+    const access = { request, userId: user.id, conversationId: conversation.id };
+    const loadHistory = prepareMemoryHistoryContext({ ...access, query, modelIds: [MODEL] });
+    assert.ok(loadHistory);
+    const memorySemanticContext = await loadHistory();
+    const input = { userId: user.id, query, conversationMode: "on", now: NOW, memorySemanticContext };
+    const baseline = await buildChatTurnContext({ ...input, semantic: "off" });
+    const prepared = await buildChatTurnContext(input);
+    assert.equal(provider.state.calls.length, 1);
+    assert.deepEqual(JSON.parse(String(provider.state.calls[0].body.query)), {
+        current_query: query, previous_user_messages: [source.content],
+    });
+    assert.equal(prepared.semanticSteps.memoryRerank, false);
+    assert.equal(prepared.memory.memoryHistorySources, undefined);
+    assert.equal(prepared.fingerprint, baseline.fingerprint);
+    assert.ok(prepared.memory.prompt.data?.includes(coffee.statement));
+    assert.ok(!prepared.memory.prompt.data?.includes("아틀라스"));
+
+    const retrieval = await retrieveMemoryContext({ userId: user.id, query, now: NOW, memorySemanticContext });
+    assert.equal(retrieval.semanticFallbackReason, "history_displaced_current_query");
+    assert.equal(retrieval.algorithmVersion, MEMORY_RETRIEVAL_ALGORITHM_VERSION);
+    assert.deepEqual(retrieval.selected.map(row => row.memory.id), [coffee.id]);
+    assert.equal(provider.state.calls.length, 1, "repeated preparation validates the cached response without dispatch");
+    const token = issueChatContextBundle({ subjectKey: user.id, conversationId: conversation.id,
+        modelIds: [MODEL], context: prepared }).token;
+    const envelope = verifyChatContextBundle(token, { subjectKey: user.id, conversationId: conversation.id, modelId: MODEL });
+    assert.ok(envelope.ok);
+    assert.equal(envelope.payload.memoryHistory, undefined);
+    await prisma.message.create({ data: { conversationId: conversation.id, role: "user", content: query } });
+    await prisma.message.update({ where: { id: source.id }, data: { content: "Changed unused history" } });
+    const replayed = await replayMemoryHistoryContext({ ...access, query, payload: envelope.payload });
+    assert.ok(replayed);
+    assert.deepEqual(replayed.history, []);
+    const sent = await buildChatTurnContext({ ...input, memorySemanticContext: replayed,
+        semantic: verifyingSemanticModes(envelope.payload.semanticSteps) });
+    assert.equal(sent.fingerprint, prepared.fingerprint);
+    assert.equal(verifyChatContextBundle(token, { subjectKey: user.id, conversationId: conversation.id,
+        modelId: MODEL, currentFingerprint: sent.fingerprint }).ok, true);
+    assert.equal(provider.state.calls.length, 1, "send cannot dispatch or bind the rejected history");
+}));
+
 test("full Memory query preserves Korean middle conditions and the signed history across save, append and sibling answers", () => withFullMemoryQuery(async () => {
     const fixture = await fullQueryFixture();
     const context = await fixture.prepare();

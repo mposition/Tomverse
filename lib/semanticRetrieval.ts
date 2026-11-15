@@ -33,6 +33,7 @@ import { readSemanticRetrievalSwitch } from "@/lib/semanticRetrievalSettings";
 import {
     memoryRelevanceContextEnabled,
     prepareMemorySemanticInput,
+    MEMORY_RERANK_QUERY_POLICY,
     type MemorySemanticFallbackReason,
 } from "@/lib/memorySemanticInput";
 
@@ -415,7 +416,7 @@ export type MemoryRerankResult = {
     adopted: {
         effectiveQuery: string;
         historyCount: number;
-        policy: "memory-query-v3";
+        policy: typeof MEMORY_RERANK_QUERY_POLICY;
         model: string;
     } | null;
     fallbackReason: MemoryRerankFallbackReason | null;

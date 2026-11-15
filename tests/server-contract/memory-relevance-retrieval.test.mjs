@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { buildMemoryQueryPlan, memorySemanticQuery } from "../../lib/memoryQueryPlan.ts";
 import { memoryHistoryContentDigest } from "../../lib/memoryHistorySnapshotCore.ts";
+import { MEMORY_RERANK_QUERY_POLICY } from "../../lib/memorySemanticInput.ts";
 
 // These adapters never read a database or call a provider.
 const root = resolve(import.meta.dirname, "../..");
@@ -42,7 +43,7 @@ mock.module(mod("lib/semanticRetrieval.ts"), { namedExports: {
         const used = input.history.slice(-historyCount);
         return { scores: new Map([[memory.id, 0.9]]), adopted: {
             effectiveQuery: memorySemanticQuery(input.currentQuery, used),
-            historyCount: used.length, model: "rerank-v4.0-fast", policy: "memory-query-v3",
+            historyCount: used.length, model: "rerank-v4.0-fast", policy: MEMORY_RERANK_QUERY_POLICY,
         }, fallbackReason: null };
     },
 } });

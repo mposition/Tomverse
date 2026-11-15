@@ -11,6 +11,7 @@ import {
     MEMORY_SEMANTIC_DEFAULTS,
     MEMORY_SEMANTIC_RETRIEVAL_ALGORITHM_VERSION,
     memoryRerankCandidates,
+    contextualRankingDisplacesCurrentQuery,
     selectMemoryContext,
     type MemoryContextBudget,
     type MemoryContextSelection,
@@ -361,7 +362,7 @@ export async function retrieveMemoryContext(input: {
               mode: input.semantic,
           })
         : null;
-    const externalRelevance = memoryQueryPolicy === "full" ? fullRanking?.scores ?? null
+    let externalRelevance = memoryQueryPolicy === "full" ? fullRanking?.scores ?? null
         : rerank ? await rerankForRetrieval({
               feature: "memoryRerank",
               userId: input.userId,
@@ -371,6 +372,27 @@ export async function retrieveMemoryContext(input: {
               mode: input.semantic,
           })
         : null;
+    const selectionInput = {
+        query: queryTerms, now, styleEnabled: settings.styleEnabled, budget: input.budget,
+    };
+    const receivedRelevance = externalRelevance;
+    let selection = selectMemoryContext({
+        ...selectionInput,
+        memories: receivedRelevance
+            ? [...memories, ...extras.filter(memory => receivedRelevance.has(memory.id))]
+            : memories,
+        ...(externalRelevance ? { externalRelevance } : {}),
+    });
+    let semanticFallbackReason = fullRanking?.fallbackReason;
+    if (externalRelevance && fullRanking?.adopted && fullRanking.adopted.historyCount > 0) {
+        const lexical = selectMemoryContext({ ...selectionInput, memories });
+        if (contextualRankingDisplacesCurrentQuery(lexical, selection)) {
+            // Reuse the existing fallback, not a second call or a hybrid score.
+            selection = lexical;
+            externalRelevance = null;
+            semanticFallbackReason = "history_displaced_current_query";
+        }
+    }
     const adopted = externalRelevance ? fullRanking?.adopted : null;
     const memoryHistorySources = adopted && adopted.historyCount > 0
         ? input.memorySemanticContext?.history.slice(-adopted.historyCount)
@@ -382,18 +404,6 @@ export async function retrieveMemoryContext(input: {
         model: adopted.model,
         ...(memoryHistorySources ? { historySources: memoryHistorySources } : {}),
     } : queryPlan;
-
-    const selection = selectMemoryContext({
-        // Without a ranking the extras were never candidates.
-        memories: externalRelevance
-            ? [...memories, ...extras.filter(memory => externalRelevance.has(memory.id))]
-            : memories,
-        query: queryTerms,
-        now,
-        styleEnabled: settings.styleEnabled,
-        budget: input.budget,
-        ...(externalRelevance ? { externalRelevance } : {}),
-    });
 
     return {
         ...selection,
@@ -407,6 +417,6 @@ export async function retrieveMemoryContext(input: {
         effectiveQueryPlan,
         memoryQueryPolicy,
         memoryHistorySources,
-        semanticFallbackReason: fullRanking?.fallbackReason,
+        semanticFallbackReason,
     };
 }

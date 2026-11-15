@@ -168,6 +168,9 @@ export function compareMemory(corpus: string, cases: readonly RetrievalCase[], s
   const semantic = measureProductRetrievalDetailed(cases, (caseId) => {
     const testCase = cases.find((row) => row.id === caseId)!;
     return usableScores(testCase);
+  }, (caseId) => {
+    const testCase = cases.find(row => row.id === caseId)!;
+    return evaluationInput(testCase, mode, preparation).history.length > 0;
   });
   const tags = [...new Set([...Object.keys(lexical.result.byTag), ...Object.keys(semantic.result.byTag)])];
   const byTag = Object.fromEntries(tags.map((tag) => {
@@ -220,7 +223,9 @@ export function compareMemory(corpus: string, cases: readonly RetrievalCase[], s
     coverage: {
       casesWithRerankRequest: requested.length,
       casesScored: requested.filter((testCase) => usableScores(testCase)).length,
-      casesFallingBackToLexical: requested.filter((testCase) => !usableScores(testCase)).map((testCase) => testCase.id),
+      casesFallingBackToLexical: requested.filter((testCase) => !usableScores(testCase) ||
+        semantic.rows.find(row => row.caseId === testCase.id)?.historyDisplacedCurrentQuery).map((testCase) => testCase.id),
+      casesRejectedForHistoryDisplacement: semantic.rows.filter(row => row.historyDisplacedCurrentQuery).map(row => row.caseId),
       casesWithIncompleteScores: requested.filter((row) => scores.has(row.id) && !usableScores(row)).map(row => row.id),
       documentsWithoutScore: covered.reduce((n, testCase) => n + rerankDocuments(testCase.retrieval)
         .filter((doc) => !scores.get(testCase.id)!.has(doc.id)).length, 0),
