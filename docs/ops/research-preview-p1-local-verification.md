@@ -421,3 +421,25 @@ low reasoning and app-managed search. Its frozen maximum reservation for one
 three-generation case is US$4.440248; earlier full reservations plus this case
 are US$16.282508, within the proposed cumulative US$16.50 ceiling. This is
 preparation, not evidence of an executed UI case or a successful deployment.
+
+The current integration review `r-20261115-030651-f58ad2` rejected two
+settlement paths. An undispatched queued cancellation could fall back to the
+full reservation. A 24-hour checkpoint could expire without terminalization,
+allowing the generic reservation sweep to refund work whose provider cost was
+already known. Both are fixed: no-dispatch cancellation stores explicit known
+zero counters; checkpoint expiry preserves the saved usage and clears private
+state. Generic reservation reconciliation resolves Research ownership and
+usage under its existing settlement lock and locks the run row before changing
+it. A valid active checkpoint cannot be refunded by that sweep. Terminal
+accounting can read an expired hold; paid resume still requires an unexpired
+hold. Three real-DB regressions verify zero cancellation and expiry through
+both worker recovery and generic reconciliation. The durable suite passes
+11/11; existing Perplexity/search settlement suites and 43 focused accounting
+tests pass. Failed Brave attempts retain their backend request count, and
+cancellation errors use the sibling routes' structured response mapping.
+
+The review's Cohere default-off suggestion conflicts with the owner's explicit
+default-on instruction recorded above; the exact hosted zero-price profile and
+opt-out remain unchanged. One reviewer in the rejected job was unknown; this
+is a changed-diff submission after fixing the other reviewer's major findings,
+not a blind retry of an unchanged unknown review.
