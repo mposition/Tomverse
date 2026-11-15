@@ -2,6 +2,7 @@ import { appendRouterSearchEvidence, prepareRouterSearch, withGroundedSourceGuid
 import { createGroundedCitationStream } from "@/lib/groundedCitationLinks";
 import { createChatSearchObservation, type ChatSearchObservation } from "@/lib/chatSearchObservation";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
+import { copyGeneratedArtifactForRevision, generatedArtifactCopySchema, GeneratedArtifactRevisionError } from "@/lib/generatedArtifactRevision";
 import { stepCountIs, streamText, type FilePart, type ModelMessage } from "ai";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { parseChatLocation } from "@tomverse/chat-core";
@@ -181,7 +182,10 @@ import {
     buildGeneratedArtifactToolConfig,
     GeneratedArtifactCollector,
     GENERATED_ARTIFACT_MAX_STEPS,
+    type ArtifactRevisionSource,
 } from "@/lib/generatedArtifactTool";
+import { generatedArtifactRevisionEnabled } from "@/lib/generatedArtifactRevisionCore";
+import { parseCanonicalWorkbookSpec } from "@/lib/generatedArtifactWorkbookRevision";
 import { ArtifactToolCallTracker } from "@/lib/generatedArtifactTurnTracker";
 import { ArtifactToolRejectionLog } from "@/lib/generatedArtifactRejectionLog";
 import { persistArtifactRows } from "@/lib/generatedArtifactStorage";
@@ -205,7 +209,8 @@ import {
     submitDeepResearchJob,
 } from "@/lib/perplexityDeepResearch";
 import { assertModelRuntimeAvailable } from "@/lib/modelAvailability";
-import { parseOfficeSafely } from "@/lib/officeSecurity";
+import { OfficeTextOverflowError, parseOfficeSafely } from "@/lib/officeSecurity";
+import { MAX_EXTRACTED_ATTACHMENT_CHARACTERS } from "@/lib/chatAttachmentLimits";
 import { extractLegacyOfficeText, type LegacyOfficeFormatId } from "@/lib/legacyOfficeText";
 import { legacyOfficeValidationCode } from "@/lib/chatAttachmentValidation";
 import {
@@ -479,7 +484,6 @@ const MAX_CONVERSATION_ATTACHMENTS = 30;
 const GUEST_MAX_CONVERSATION_ATTACHMENTS = 5;
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
 const MAX_TOTAL_ATTACHMENT_SIZE = 25 * 1024 * 1024;
-const MAX_EXTRACTED_ATTACHMENT_CHARACTERS = 300_000;
 const MAX_STORED_MESSAGE_CHARACTERS = 100_000;
 type IncomingAttachment = {
     name?: unknown;
@@ -642,6 +646,7 @@ const GOOGLE_EXPORT_TYPES: Record<
     },
 };
 const uploadPreparationSchema = z.union([
+    generatedArtifactCopySchema,
     z
         .object({
             action: z.literal("google-drive-import"),
@@ -752,6 +757,17 @@ export async function PUT(req: Request) {
             16 * 1024,
             uploadPreparationSchema
         );
+        if (body.action === "generated-artifact-copy") {
+            const registered = await copyGeneratedArtifactForRevision({
+                ...body,
+                userId,
+                email: session.user.email,
+                request: req,
+                maxBytes: MAX_ATTACHMENT_SIZE,
+                reserveBytes: (bytes) => reserveDailyUploadBytes(userId, bytes),
+            });
+            return Response.json(registered, { headers: { "Cache-Control": "private, no-store" } });
+        }
         if (body.action === "google-drive-import") {
             const fileId = body.fileId;
             const name = body.name;
@@ -900,7 +916,10 @@ export async function PUT(req: Request) {
     } catch (error) {
         const securityResponse = apiSecurityResponse(error);
         if (securityResponse) return securityResponse;
-        console.error("R2 upload URL creation failed:", error);
+        if (error instanceof GeneratedArtifactRevisionError || error instanceof ChatAttachmentValidationError) {
+            return Response.json({ error: "Failed to prepare attachment.", code: error.code }, { status: error.status });
+        }
+        console.error("R2 upload URL creation failed:", { name: error instanceof Error ? error.name : "UnknownError" });
         return Response.json(
             { error: "Failed to prepare attachment upload." },
             { status: 500 }
@@ -1064,7 +1083,9 @@ export async function PATCH(req: Request) {
 }
 
 export async function DELETE(req: Request) {
-    const session = await getServerSession(authOptions);
+    const routeAuth = await resolveChatRouteSession(req);
+    if (routeAuth.response) return routeAuth.response;
+    const session = routeAuth.session;
     const userId = (session?.user as { id?: string } | undefined)?.id;
     if (!session?.user?.email || !userId) {
         return Response.json({ error: "Unauthorized" }, { status: 401 });
@@ -2863,6 +2884,8 @@ async function handleChatPost(
             string,
             { name: string; mediaType: string; bytes: Uint8Array }
         >();
+        const revisionEnabled = generatedArtifactRevisionEnabled() && Boolean(session?.user?.id && conversationId && assistantMessageId);
+        const revisionSources = new Map<string, ArtifactRevisionSource>();
         if (latestMessageAttachmentCount > MAX_ATTACHMENTS) {
             throw new ChatAccessError(
                 413,
@@ -3826,7 +3849,9 @@ async function handleChatPost(
 
                 const remainingCharacters =
                     MAX_EXTRACTED_ATTACHMENT_CHARACTERS - totalExtractedCharacters;
-                if (remainingCharacters <= 64) {
+                const strictLatestText = isLatestMessage &&
+                    (format.category === "office" || format.category === "text");
+                if (remainingCharacters <= (strictLatestText ? 0 : 64)) {
                     throw new ChatAccessError(
                         413,
                         "ATTACHMENT_TEXT_TOO_LARGE",
@@ -4048,15 +4073,27 @@ async function handleChatPost(
                         extractedText = await parseOfficeSafely(
                             buffer,
                             format.mediaType,
-                            remainingCharacters - 64
+                            isLatestMessage ? remainingCharacters : remainingCharacters - 64,
+                            { strictOverflow: isLatestMessage }
                         );
                     } catch (error) {
+                        if (error instanceof OfficeTextOverflowError) {
+                            throw new ChatAccessError(
+                                413,
+                                "ATTACHMENT_TEXT_TOO_LARGE",
+                                "Extracted attachment text exceeds the request limit."
+                            );
+                        }
                         if (fromArchive) return "unreadable";
                         throw error;
                     }
                     if (!extractedText) {
                         if (fromArchive) return "no-text";
-                        throw new Error(`No readable text found in ${name}.`);
+                        throw new ChatAccessError(
+                            400,
+                            "ATTACHMENT_NO_TEXT",
+                            "The attached document has no readable text."
+                        );
                     }
                     addExtractedText(format.promptKind, extractedText);
                     return "ok";
@@ -4327,6 +4364,13 @@ async function handleChatPost(
                   because the prompt needs them; nothing is read twice for this.
                 */
                 if (isLatestMessage) {
+                    if (revisionEnabled && resolved?.sourceLineageId && resolved.sourceConversationId === conversationId) {
+                        revisionSources.set(turnAttachmentHandle(attachmentIndex), {
+                            sourceArtifactId: resolved.sourceArtifactId ?? null,
+                            lineageId: resolved.sourceLineageId,
+                            canonicalSpec: resolved.sourceCanonicalSpec,
+                        });
+                    }
                     turnAttachmentBytes.set(
                         turnAttachmentHandle(attachmentIndex),
                         {
@@ -4346,6 +4390,21 @@ async function handleChatPost(
                 }
 
                 if (format.category !== "archive") {
+                    if (revisionEnabled && format.id === "xlsx" && resolved?.sourceLineageId) {
+                        const workbook = parseCanonicalWorkbookSpec(resolved.sourceCanonicalSpec);
+                        if (!workbook) throw new ChatAccessError(400, "ATTACHMENT_UNREADABLE",
+                            "The attached workbook revision source cannot be read completely.");
+                        const structured = JSON.stringify(workbook.spec);
+                        totalExtractedCharacters += structured.length;
+                        if (totalExtractedCharacters > MAX_EXTRACTED_ATTACHMENT_CHARACTERS) {
+                            throw new ChatAccessError(413, "ATTACHMENT_TEXT_TOO_LARGE",
+                                "Extracted attachment text exceeds the request limit.");
+                        }
+                        textAttachments.push({ name: attachment.name,
+                            kind: workbook.fidelity === "values" ? "spreadsheet typed value grid (original layout unavailable)" : "spreadsheet specification",
+                            text: structured });
+                        continue;
+                    }
                     await ingestAttachmentFile({
                         format,
                         name: attachment.name,
@@ -5069,6 +5128,8 @@ async function handleChatPost(
                       conversationId: conversationId ?? null,
                       modelId: modelConfig.id,
                       traceId,
+                      revisionEnabled,
+                      revisionSources,
                       noteRejection: (toolCallId, toolName, input, rejectionCode, diagnostics) =>
                           artifactToolRejectionLog?.record(
                               toolCallId,
@@ -7433,7 +7494,7 @@ async function handleChatPost(
                                     const persistedRows =
                                         await prisma.messageArtifact.findMany({
                                             where: { messageId: assistantMessageId },
-                                            select: { id: true, ordinal: true },
+                                            select: { id: true, ordinal: true, parentArtifactId: true, lineageId: true },
                                         });
                                     artifactsForTrailer =
                                         artifactCollector.withPersistedIds(persistedRows);

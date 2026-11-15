@@ -69,6 +69,7 @@ import { HELP_FLAG_KEYS } from "@/lib/helpNavigationIntents";
 import { reviewEasyEnabled } from "@/lib/reviewRouting";
 import { chatImageTriageModelId } from "@/lib/chatImageIntent";
 import { imageEditEnabled } from "@/lib/imageEditSource";
+import { generatedArtifactRevisionEnabled } from "@/lib/generatedArtifactRevisionCore";
 import { voiceConversationConfig } from "@tomverse/chat-core";
 
 // The chat UI itself is a Client Component (state, storage, streaming), so
@@ -237,8 +238,10 @@ export async function ReviewWorkspaceShell({
   const fixtureMode = isE2EFixtureMode();
   let reviewEasyFixtureOffered = false;
   let imageTriageFixtureOffered = false;
+  let artifactRevisionFixtureOffered = false;
   if (fixtureMode) {
     const jar = await cookies();
+    artifactRevisionFixtureOffered = jar.get("__tomverse_e2e_artifact_revision")?.value === "1";
     if (!process.env.VOICE_CONVERSATION_KILL_SWITCH) {
       voiceConversationEnabled ||= jar.get("__tomverse_e2e_voice_conversation")?.value === "1";
     }
@@ -393,6 +396,7 @@ export async function ReviewWorkspaceShell({
         guestDefaultModelId={guestDefaultModelId}
         guestBrandTrioModelIds={guestBrandTrioModelIds}
         imageGenerationEnabled={imageGenerationEnabled}
+        generatedArtifactRevisionEnabled={generatedArtifactRevisionEnabled() || artifactRevisionFixtureOffered}
         chatImageIntentEnabled={chatImageIntentEnabled || imageTriageFixtureOffered}
         chatLocationIntentEnabled={process.env.TOMVERSE_CHAT_LOCATION_INTENT_ENABLED === "true"}
         chatParallelPreparationEnabled={process.env.CHAT_PARALLEL_PREPARATION_ENABLED === "true"}
