@@ -612,9 +612,9 @@ export async function pullAmuxWorkDelivery(input: {
       // The local CLI flow (v22LocalCliFlowCore.ts): a CLI run with a checkout
       // gets its brief, resume answer, previous change and prior conclusions
       // as whole files in that checkout, and a prompt that points at them. No
-      // byte budget leaves anything out. The read-only API executor has no
-      // checkout and keeps the inline prompt.
-      if (localCliFlow && workspace !== "") {
+      // byte budget leaves anything out. A risk-accepted read-only retry (CLI
+      // or API) keeps its exact earlier launch and inline prompt.
+      if (localCliFlow && workspace !== "" && !readOnlyRetry) {
         const contextFiles: AmuxV22ContextFile[] = [
           { name: AMUX_V22_CONTEXT_FILES.brief, text: plain.toString("utf8") }];
         if (resume) {
