@@ -61,7 +61,7 @@ clients or making requests. Execution separately requires a matching approval,
 single-use journal commits intent before dispatch and prevents automatic retry
 after a crash or unknown outcome. Production processes are refused.
 
-The prepared functional comparison is Gemini 4 Argon at low thinking and GPT 6
+The original prepared functional comparison is Gemini 4 Argon at low thinking and GPT 6
 Luna at low thinking on one identical public brief. It allows six model calls, ten Brave
 attempts, four page reads and one optional Rerank 5 Fast side experiment over
 captured public snippets. The conservative reservation is US$4.701131 including
@@ -86,7 +86,7 @@ output limits; this session did not query the production DB to verify them:
 | --- | --- | --- |
 | GPT Astra | 128,000 | Candidate; exact operating API ID, pricing and reasoning configuration not yet captured |
 | Claude Fable 5.2 | 128,000 | Candidate; exact operating API ID, pricing and reasoning configuration not yet captured |
-| Gemini 4 Argon | 32,768 | First generation completed; second dispatched outcome unknown; no final report |
+| Gemini 4 Argon | 32,768 | Original outcome unknown; owner-authorized retry confirms HTTP 400 on step 2; no final report |
 
 The product's shared 4,096-token run cap is independent of those model limits.
 There is no measured basis for excluding Astra or Fable on output-limit,
@@ -139,17 +139,85 @@ verified offline; it has not been exercised with a new paid call.
 Neither this incomplete attempt nor the mock tests support a provider quality,
 completion-rate, reasoning-efficiency or successful-investigation-cost ranking.
 
+### Owner-authorized recovery and completed Luna evaluation
+
+The owner reported no provider logs for the original unknown call and explicitly
+authorized retry, raising the cumulative generation-intent limit to eight while
+retaining US$10. The old outcome remains unknown; a later similar failure does
+not retrospectively establish its status or cost. All original journal data was
+preserved. Each additional run used a matching new approval and a reduced USD
+ceiling after retaining every earlier run's full maximum reservation.
+
+An isolated local observer recorded response status, request/response IDs where
+available, numeric usage and redacted provider error messages. It recorded no
+request content, authentication headers or successful generated text. This
+observer was checked offline before use. Browser log access was stopped by the
+computer-use URL safety check, and no browser workaround or logging-setting
+change was attempted.
+
+| Run | Generation intents | Result |
+| --- | --- | --- |
+| Original Argon (`1c5a72503dd3...`) | 2 | First checkpoint known; second outcome unrecoverable |
+| Argon retry (`66f893521ea0...`) | 2 | First response HTTP 200; second HTTP 400 `INVALID_ARGUMENT`, generic error message |
+| Initial Luna (`cc0a3783012d...`) | 1 | HTTP 400: forced custom `web_search` was translated to missing native `web_search_preview` |
+| Corrected Luna (`9c1a82df784d...`) | 3 | Three HTTP 200 responses and validated `partial` report; Rerank HTTP 200 |
+
+The Luna fix keeps exactly one active first-step tool and uses required function
+choice, avoiding the SDK's reserved native-search name mapping. The underlying
+Brave adapter, source registry, dispatch ledger, output allowance, retries and
+terminal validation are unchanged. A regression uses the actual OpenAI SDK and
+asserts the wire request contains only the custom function. Another actual
+Google SDK test verifies signed parallel calls survive JSON checkpoint restore.
+
+The corrected run finished report submission in 12.823 seconds at 11:26:58 AEST
+on 2026-11-15. It used 5,070 input and 733 output tokens, zero reported reasoning
+tokens and 4,100 cache-write tokens. Two Brave searches and two page-read
+attempts were recorded. Both pages returned `response_too_large`; the report
+correctly disclosed that it had only snippets and did not answer the requested
+Active/Maintenance LTS distinction. Successful full-page acquisition was not
+demonstrated in this run.
+
+Frozen-rate cost: Luna including search US$0.011769; Rerank 690 input tokens
+US$0.000014; combined US$0.011783. All known-usage subtotals across the four
+runs sum to US$0.045583. Unknown/refused calls with no supplied usage are not
+assigned zero, and this subtotal is not a complete provider invoice. Retaining
+all four maximum reservations gives US$9.924484, below the unchanged US$10 cap.
+Total generation intents are exactly eight; no further generation was executed.
+Known successful searches total seven; allowing all three remaining searches
+and both page reads in the original unknown step still keeps the overall maxima
+within ten searches and four page reads. Rerank ran once.
+
+Manual review found four reachable official cited URLs and one date mismatch:
+the report says Node 26 entered LTS on October 27, while its cited
+[26.13.0 announcement](https://nodejs.org/en/blog/release/v26.13.0) is dated
+October 28 and identifies that release as the transition. Original snippets
+were not retained, so attribution to the model versus a stale search excerpt
+is unresolved. Other checked release/codename/support-period claims were
+supported by their current cited pages. The report remains unchanged and
+`partial`; it was not edited into a correct complete answer.
+
+Rerank returned three source-bound results with the official release overview
+first. This one side experiment establishes API integration, not an improvement
+in report quality. Four separate non-generation token-counting probes accepted
+synthetic request variants; that does not prove generation-schema acceptance or
+explain Argon's HTTP 400. No specific Gemini fix is claimed. There is no live
+Astra/Fable result and no cross-provider quality ranking.
+
 ## Verification
 
 The checks use independent lockfile dependencies, mocked provider transports,
 blocked external network for the Next build/browser fixture and a dedicated
 local PostgreSQL 17 database outside the worktree. Database suites use the
 existing integration runner's test-target checks and migration/drift setup.
+The original implementation checks below are retained as such. Recovery reran
+the 81 focused regressions, whole-repository TypeScript and scoped ESLint; the
+unchanged UI and database suites were not rerun for the tool-choice correction.
 
 | Check | Result |
 | --- | --- |
 | Research/search/page/evaluation focused tests | 120/120 passed |
 | Post-attempt evaluator diagnostics and existing offline evaluation guards | 15/15 passed |
+| Recovery Research/page/report/evaluation and Cohere focused regressions | 81/81 passed |
 | Cohere adapter, protocol types and existing provider regressions | 71/71 passed |
 | Offer and Native authentication boundary tests | 36/36 passed |
 | Native transport regressions | 15/15 passed |

@@ -240,10 +240,9 @@ export function createResearchPreviewExecution(input: {
       if (currentStep === 0) {
         return {
           activeTools: [APP_MANAGED_WEB_SEARCH_TOOL_NAME] as const,
-          toolChoice: {
-            type: "tool" as const,
-            toolName: "web_search" as const,
-          },
+          // Only this function is active. Explicitly naming web_search makes
+          // the OpenAI Responses SDK select its unrelated built-in search.
+          toolChoice: "required" as const,
           maxOutputTokens: remaining,
         };
       }
