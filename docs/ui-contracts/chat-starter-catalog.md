@@ -85,6 +85,13 @@
 다른 것은 배지뿐이다(`docs/ui-contracts/image-generation-workspace.md`의 "not
 quieter").
 
+`sign_in_required` 카드를 클릭해 열리는 로그인 모달은 **그 사람이 고른 결과를
+이름 대고 로그인이 요구사항이라고 말한다**(`lockedSignInTitle`,
+`lockedSignInReason`의 `{starter}` 자리에 카드의 `labelKey` 문구가 들어간다).
+게스트 모달의 일반 문구("더 다양한 모델…")로 대신하지 않는다 — 방금 누른 카드와
+무관한 설명은 클릭이 왜 로그인으로 이어졌는지 말해 주지 않는다. 두 문구도 위의
+copy 규칙과 7개 locale 검사를 똑같이 받는다.
+
 ### fail-closed
 
 판정할 수 없는 것은 전부 `hidden`이다. 추측하지 않는다.
