@@ -22,8 +22,10 @@ import { finalSignalIsSuccess, reportedHalt } from "../lib/engineeringAgentCore.
 import { readGitHubList, runRunnerCycle } from "./engineering-agent-runner-core.mjs";
 import { isSupervisedWorker, superviseCycle } from "./engineering-agent-supervisor.mjs";
 
-/** The hard deadline of one cycle (§12); the supervisor kills the process group there. */
-export const RUNNER_HARD_DEADLINE_MS = 20 * 60 * 1000;
+/** The hard deadline of one cycle (§12); the supervisor kills the process group
+ * there. Railway skips a scheduled run while the last one still runs. Twenty
+ * minutes until 2026-11-15. */
+export const RUNNER_HARD_DEADLINE_MS = 60 * 60 * 1000;
 const APP_TIMEOUT_MS = 25_000;
 const REPOSITORY_URL = "https://github.com/mposition/Tomverse.git";
 const API_REPO = "https://api.github.com/repos/mposition/Tomverse";

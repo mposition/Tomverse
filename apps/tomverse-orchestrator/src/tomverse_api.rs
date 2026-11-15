@@ -18,6 +18,13 @@ use crate::worker::{CandidateRoutingSignals, RoutingTaskProfile};
 /// exactly what they were (tests/fixtures and main_wire_compat.rs pin them).
 pub const REQUEST_ID_HEADER: &str = "x-amux-request-id";
 pub const INSTANCE_ID_HEADER: &str = "x-amux-instance-id";
+/// The one v22 patch bound, as lib/amux/v22PatchLimit.ts states it (owner
+/// decision 2026-11-15; 64 KiB until then): the most that fits, JSON-escaped
+/// with its Task result, in the 10 MB request body Next.js buffers through
+/// the app's proxy.
+pub const V22_PATCH_MAX_BYTES: usize = 4 * 1024 * 1024;
+/// A JSON body or sidecar answer carrying one such patch with its result.
+pub const V22_PATCH_ENVELOPE_MAX_BYTES: usize = 2 * V22_PATCH_MAX_BYTES + 1024 * 1024;
 
 /// A new request id for every write call, the process's instance id on each.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1418,7 +1425,7 @@ impl TomverseApi {
             bail!("invalid v22 result envelope");
         }
         if let Some((body, digest, base)) = patch {
-            if body.is_empty() || body.len() > 65_536 ||
+            if body.is_empty() || body.len() > V22_PATCH_MAX_BYTES ||
                 !body.starts_with("diff --git ") || body.contains('\0') ||
                 digest.len() != 64 || !digest.bytes().all(|byte| byte.is_ascii_hexdigit()) ||
                 base.len() != 40 || !base.bytes().all(|byte| byte.is_ascii_hexdigit()) {
@@ -1446,8 +1453,12 @@ impl TomverseApi {
                     serde_json::json!(publish_files_digest);
             }
         }
+        // A large patch takes longer to send: one more second per 512 KiB
+        // (about 23 seconds at the bound, inside the 90-second lease).
+        let upload = Duration::from_secs(
+            (patch.map_or(0, |(text, _, _)| text.len()) / (512 * 1024)) as u64);
         let response = self.client.post(&path)
-            .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT)
+            .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT + upload)
             .bearer_auth(&self.secret)
             .json(&payload).send().await;
         let mut definitely_rejected = false;

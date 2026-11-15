@@ -10,6 +10,8 @@ export const workspaceWelcomeCopy = {
         lockedPlan: "Needs the {plan} plan",
         lockedSignInShort: "Sign in required",
         lockedPlanShort: "{plan} required",
+        lockedSignInTitle: "Sign in to continue",
+        lockedSignInReason: "“{starter}” needs a signed-in account. Sign in to use it.",
         cards: {
             compareAnswers: {
                 label: "Compare three answers side by side",
@@ -99,6 +101,8 @@ export const workspaceWelcomeCopy = {
         lockedPlan: "{plan} 플랜이 필요합니다",
         lockedSignInShort: "로그인 필요",
         lockedPlanShort: "{plan} 필요",
+        lockedSignInTitle: "로그인하면 계속할 수 있습니다",
+        lockedSignInReason: "“{starter}”에는 로그인이 필요합니다. 로그인하면 바로 쓸 수 있습니다.",
         cards: {
             compareAnswers: {
                 label: "세 모델 답 나란히 비교",
@@ -188,6 +192,8 @@ export const workspaceWelcomeCopy = {
         lockedPlan: "需要 {plan} 方案",
         lockedSignInShort: "需要登录",
         lockedPlanShort: "需要 {plan}",
+        lockedSignInTitle: "登录后继续",
+        lockedSignInReason: "“{starter}”需要登录账户。登录后即可使用。",
         cards: {
             compareAnswers: {
                 label: "并排比较三个回答",
@@ -277,6 +283,8 @@ export const workspaceWelcomeCopy = {
         lockedPlan: "需要 {plan} 方案",
         lockedSignInShort: "需要登入",
         lockedPlanShort: "需要 {plan}",
+        lockedSignInTitle: "登入後繼續",
+        lockedSignInReason: "「{starter}」需要登入帳戶。登入後即可使用。",
         cards: {
             compareAnswers: {
                 label: "並排比較三個回答",
@@ -366,6 +374,8 @@ export const workspaceWelcomeCopy = {
         lockedPlan: "Erfordert den Tarif {plan}",
         lockedSignInShort: "Anmeldung nötig",
         lockedPlanShort: "{plan} nötig",
+        lockedSignInTitle: "Zum Fortfahren anmelden",
+        lockedSignInReason: "„{starter}“ braucht ein angemeldetes Konto. Melden Sie sich an, um es zu nutzen.",
         cards: {
             compareAnswers: {
                 label: "Drei Antworten nebeneinander lesen",
@@ -455,6 +465,8 @@ export const workspaceWelcomeCopy = {
         lockedPlan: "Nécessite le forfait {plan}",
         lockedSignInShort: "Connexion requise",
         lockedPlanShort: "{plan} requis",
+        lockedSignInTitle: "Connectez-vous pour continuer",
+        lockedSignInReason: "« {starter} » nécessite un compte connecté. Connectez-vous pour l'utiliser.",
         cards: {
             compareAnswers: {
                 label: "Comparez trois réponses côte à côte",
@@ -544,6 +556,8 @@ export const workspaceWelcomeCopy = {
         lockedPlan: "Requiere el plan {plan}",
         lockedSignInShort: "Requiere iniciar sesión",
         lockedPlanShort: "Requiere {plan}",
+        lockedSignInTitle: "Inicia sesión para continuar",
+        lockedSignInReason: "«{starter}» requiere una cuenta con sesión iniciada. Inicia sesión para usarlo.",
         cards: {
             compareAnswers: {
                 label: "Compara tres respuestas en paralelo",
@@ -633,6 +647,8 @@ export const workspaceWelcomeCopy = {
         lockedPlan: "Requer o plano {plan}",
         lockedSignInShort: "Requer login",
         lockedPlanShort: "Requer {plan}",
+        lockedSignInTitle: "Entre na conta para continuar",
+        lockedSignInReason: "“{starter}” precisa de uma conta com login. Entre na conta para usar.",
         cards: {
             compareAnswers: {
                 label: "Compare três respostas lado a lado",

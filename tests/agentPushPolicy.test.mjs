@@ -94,37 +94,32 @@ test("non-text, symlinks, submodules and executable bits are T2", () => {
   }
 });
 
-test("only the T1 file types, and JSON only as locale or fixture data", () => {
-  assert.ok(
-    reasons(decideTier(clean([change({ path: "lib/data.yaml" })]))).includes(
-      "extension_not_allowed",
-    ),
-  );
-  assert.ok(
-    reasons(decideTier(clean([change({ path: "lib/Makefile" })]))).includes(
-      "extension_not_allowed",
-    ),
-  );
-  assert.ok(
-    reasons(decideTier(clean([change({ path: "lib/data.json" })]))).includes(
-      "json_outside_data_paths",
-    ),
-  );
-  assert.equal(decideTier(clean([change({ path: "tests/fixtures/x.json" })])).tier, "T1");
+// Owner decision 2026-11-15: an internal development flow carries no size,
+// count or extension rule; paths and content decide the tier.
+test("no file type, count or size moves a change to T2 by itself", () => {
+  for (const path of ["lib/data.yaml", "lib/Makefile", "lib/data.json",
+    "lib/amux/report.sql", "docs/notes.txt", "tests/fixtures/x.json"]) {
+    const verdict = decideTier(clean([change({ path })]));
+    assert.ok(!reasons(verdict).some((reason) =>
+      /extension|json_outside|too_many|too_large/.test(reason)), path);
+  }
+  assert.equal(decideTier(clean([change({ path: "lib/data.yaml" })])).tier, "T1");
+  const many = Array.from({ length: 300 }, (_, i) =>
+    change({ path: `lib/a${i}.ts`, addedLines: 400, removedLines: 400 }));
+  assert.deepEqual(decideTier(clean(many)), { tier: "T1", findings: [] });
+  assert.deepEqual(decideTier(clean([change({ sizeBytes: 534 * 1024 })])),
+    { tier: "T1", findings: [] });
+  // AMUX's own paths stay T2 for being control plane, not for their size.
+  const amux = decideTier(clean([change({ path: "lib/amux/big.ts", sizeBytes: 534 * 1024 })]));
+  assert.deepEqual(reasons(amux), ["control_plane_path"]);
 });
 
-test("the size limits hold at their edges", () => {
-  const five = Array.from({ length: 5 }, (_, i) => change({ path: `lib/a${i}.ts`, addedLines: 60, removedLines: 0 }));
-  assert.equal(decideTier(clean(five)).tier, "T1");
-  const six = [...five, change({ path: "lib/a5.ts", addedLines: 0, removedLines: 0 })];
-  assert.ok(reasons(decideTier(clean(six))).includes("too_many_files"));
-  const lines = [change({ addedLines: 301, removedLines: 0 })];
-  assert.ok(reasons(decideTier(clean(lines))).includes("too_many_lines"));
-  assert.ok(
-    reasons(decideTier(clean([change({ sizeBytes: 200 * 1024 + 1 })]))).includes(
-      "file_too_large",
-    ),
-  );
+test("what tree verification does not support is a T2 finding, never silence", () => {
+  const verdict = decideTier({ ...clean([change()]), unsupported: [
+    { reason: "gitattributes_applies", path: "lib/a.ts" }] });
+  assert.deepEqual(verdict, { tier: "T2", findings: [{
+    reason: "unsupported_tree_change", path: "lib/a.ts",
+    detail: "gitattributes_applies" }] });
 });
 
 test("a new file at a framework entry convention is T2; editing an existing one is judged by path", () => {

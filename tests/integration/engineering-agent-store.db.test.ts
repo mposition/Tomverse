@@ -24,6 +24,7 @@ import {
   decideEngineeringAgentT2Draft,
   endEngineeringAgentRun,
   rejudgeEngineeringAgentV22Draft,
+  rejudgeEngineeringAgentV22DraftsAfterDeploy,
   heartbeatEngineeringAgentRun,
   issueEngineeringAgentCapability,
   moveEngineeringAgentBinding,
@@ -444,6 +445,66 @@ test("a person sends a kept v22 draft back to the tier round, once, bound to wha
   }
   await refusedWith(inTx((tx) => rejudgeEngineeringAgentV22Draft(tx, input)),
     "draft_not_open");
+});
+
+// Owner decision 2026-11-15: a draft the tier round kept for a reason the next
+// build may answer is judged again after a deploy, without a person.
+test("after a deploy the drafts an earlier build kept go back to the tier round once, as the system", async () => {
+  const sweep = (before: Date) => inTx((tx) =>
+    rejudgeEngineeringAgentV22DraftsAfterDeploy(tx, { before, limit: 100 }));
+  const later = () => new Date(Date.now() + 60_000);
+  const close = async (pending: Awaited<ReturnType<typeof pendingDraftFor>>) =>
+    inTx((tx) => decideEngineeringAgentT2Draft(tx, {
+      session: owner, workItemId: pending.draft.id, decision: "rejected",
+      patchDigest: pending.patch.sha256, baseSha: pending.patch.baseSha,
+    }));
+  // Two at a time: the owner queue holds eight, runs included.
+  for (const [[first, firstReason, firstSent], [second, secondReason, secondSent]] of [
+    [["kept unbuilt patch", "base_blob_missing", true], ["kept judged patch", "tier_two", false]],
+    [["kept evidence patch", "tier_evidence_unavailable", true], ["kept secret patch", "secret_detected", false]],
+  ] as const) {
+    const one = await pendingDraftFor(first, true);
+    const two = await pendingDraftFor(second, true);
+    for (const [pending, reason] of [[one, firstReason], [two, secondReason]] as const) {
+      assert.deepEqual(await inTx((tx) => resolveEngineeringAgentV22Product(tx,
+        { ...promotionInput(pending), reason, candidate: null })), { kept: true });
+    }
+    const ours = [one.draft.id, two.draft.id];
+    // A process that started after these were kept leaves them as they are.
+    assert.deepEqual((await sweep(new Date(Date.now() - 60 * 60_000))).workItemIds
+      .filter((id) => ours.includes(id)), []);
+    // One that started before sends back only what the next build may answer:
+    // never a T2 verdict, never a secret.
+    const sent = (await sweep(later())).workItemIds.filter((id) => ours.includes(id));
+    assert.deepEqual(sent, [...(firstSent ? [one.draft.id] : []),
+      ...(secondSent ? [two.draft.id] : [])]);
+    for (const [pending, reason, wasSent] of [[one, firstReason, firstSent],
+      [two, secondReason, secondSent]] as const) {
+      const row = await prisma.engineeringAgentWorkItem.findUniqueOrThrow({
+        where: { id: pending.draft.id } });
+      assert.deepEqual([row.state, row.reason], ["open", wasSent ? "tier_pending" : reason]);
+      if (!wasSent) continue;
+      const audit = await prisma.adminAuditLog.findFirstOrThrow({
+        where: { action: ENGINEERING_AGENT_AUDIT_ACTIONS.v22DraftRejudged,
+          targetId: pending.draft.id } });
+      assert.equal(audit.actorUserId, null);
+      const metadata = audit.metadata as Record<string, unknown>;
+      assert.equal(metadata[SYSTEM_AUDIT_ACTOR_METADATA_KEY], "engineering-agent-runner");
+      assert.equal(metadata.previousReason, reason);
+      assert.equal(metadata.trigger, "deploy");
+    }
+    // Pending, none is sent back again.
+    assert.deepEqual((await sweep(later())).workItemIds.filter((id) => ours.includes(id)), []);
+    await close(one);
+    await close(two);
+  }
+  // A legacy run's draft is not a v22 draft the button could send back.
+  const legacy = await pendingDraftFor("kept legacy patch");
+  assert.deepEqual(await inTx((tx) => resolveEngineeringAgentV22Product(tx,
+    { ...promotionInput(legacy), reason: "base_blob_missing", candidate: null })),
+  { kept: true });
+  assert.ok(!(await sweep(later())).workItemIds.includes(legacy.draft.id));
+  await close(legacy);
 });
 
 test("a T2 draft promoted for the owner's review opens a review item only a review-draft publisher writes", async () => {

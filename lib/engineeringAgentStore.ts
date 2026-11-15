@@ -47,6 +47,7 @@ import type { EngineeringAgentSystemAuditActor } from "@/lib/adminAuditSystemAct
 import type { AmuxAttachedTransaction } from "@/lib/amux/dbBoundary";
 import { lockAmuxAdmissionAndReadIncident } from "@/lib/amux/incident";
 import { isAmuxCardDisplayKey } from "@/lib/amux/cardDisplayKeyCore";
+import { AMUX_V22_PATCH_MAX_BYTES } from "@/lib/amux/v22PatchLimit";
 import { AMUX_V22_ENGINEERING_PUBLICATION_ENV,
   amuxV22EngineeringPublicationEnabled } from
   "@/lib/amux/v22TaskExecutionCore";
@@ -93,7 +94,7 @@ import {
   type ObservedHaltSubject,
   ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_AFTER_MS,
   ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_ENV,
-  ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_MAX_DECISIONS,
+  ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_MAX_DOUBLINGS,
   engineeringAgentUnknownAutoLookupEnabled,
   WRITE_ITEM_KINDS,
   decideArmedGate,
@@ -813,8 +814,9 @@ export async function endEngineeringAgentRun(
 /* Work items                                                                 */
 /* ------------------------------------------------------------------------- */
 
-/** The largest patch body the table holds (the migration's CHECK). */
-export const ENGINEERING_AGENT_PATCH_BODY_MAX_BYTES = 65_536;
+/** The largest patch body the table holds (the migration's CHECK): one
+ * v22 patch (lib/amux/v22PatchLimit.ts; 64 KiB until 2026-11-15). */
+export const ENGINEERING_AGENT_PATCH_BODY_MAX_BYTES = AMUX_V22_PATCH_MAX_BYTES;
 
 const CAUSE_KEY = /^[a-z0-9_]{1,20}:[!-~]{1,200}$/;
 const REASON = /^[a-z_]{1,64}$/;
@@ -1092,8 +1094,11 @@ export async function claimEngineeringAgentWorkItem(
 /** How many lapsed claims one next-work call moves to a lookup. */
 export const ENGINEERING_AGENT_LAPSED_CLAIM_SWEEP = 5;
 
-/** Proposed: how long a publisher's claim may run before only a lookup may follow. */
-export const ENGINEERING_AGENT_PUBLISH_CLAIM_LEASE_MS = 10 * 60 * 1000;
+/** How long a publisher's claim may run before only a lookup may follow:
+ * past the publisher's hard deadline (scripts/engineering-agent-publisher.mjs)
+ * and its kill grace, so no push outlives its lease. Ten minutes until
+ * 2026-11-15, when a large change's cycle got room to finish. */
+export const ENGINEERING_AGENT_PUBLISH_CLAIM_LEASE_MS = 45 * 60 * 1000;
 
 export type EngineeringAgentPublishWork =
   | {
@@ -1184,10 +1189,10 @@ export async function claimNextEngineeringAgentPublishWork(
   const now = await databaseNow(tx);
   const cardScoped = engineeringAgentMismatchCardScoped(process.env[ENGINEERING_AGENT_LEGACY_HALTS_ENV]);
   // A lookup only reads: with the switch on, a decision that has waited its
-  // time no longer holds it, up to a bound on the decisions one item opens.
+  // time no longer holds it -- a time that doubles with each decision the
+  // item opened (engineeringAgentUnknownAutoLookupWaitMs), never a count.
   const autoLookup = engineeringAgentUnknownAutoLookupEnabled(
     process.env[ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_ENV]);
-  const autoLookupBefore = new Date(now.getTime() - ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_AFTER_MS);
   const candidates = await tx.$queryRaw<Array<{ id: string; state: string; reason: string | null }>>`
     SELECT w."id", w."state", w."reason"
     FROM "EngineeringAgentWorkItem" w
@@ -1205,11 +1210,14 @@ export async function claimNextEngineeringAgentPublishWork(
               SELECT 1 FROM "EngineeringAgentWorkItem" d
               WHERE d."kind" = 'decision' AND d."state" = 'open'
                 AND d."causeKey" LIKE ${UNKNOWN_OUTCOME_DECISION_CAUSE_PREFIX} || w."id" || ':%'
-                AND d."createdAt" > ${autoLookupBefore})
-            AND (SELECT COUNT(*) FROM "EngineeringAgentWorkItem" d
-              WHERE d."kind" = 'decision'
-                AND d."causeKey" LIKE ${UNKNOWN_OUTCOME_DECISION_CAUSE_PREFIX} || w."id" || ':%')
-              < ${ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_MAX_DECISIONS}))
+                AND d."createdAt" + interval '1 millisecond'
+                  * ${ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_AFTER_MS}::double precision
+                  * power(2::double precision, LEAST(GREATEST((
+                    SELECT COUNT(*) FROM "EngineeringAgentWorkItem" e
+                    WHERE e."kind" = 'decision'
+                      AND e."causeKey" LIKE ${UNKNOWN_OUTCOME_DECISION_CAUSE_PREFIX} || w."id" || ':%'
+                  ) - 1, 0), ${ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_MAX_DOUBLINGS})::double precision)
+                  > ${now})))
           AND (
             w."reason" IS DISTINCT FROM ${ENGINEERING_AGENT_PR_RESUME_APPROVED_REASON}
             OR (
@@ -1672,6 +1680,66 @@ export async function rejudgeEngineeringAgentV22Draft(
   await tx.engineeringAgentWorkItem.update({ where: { id: item.id },
     data: { reason: ENGINEERING_AGENT_V22_TIER_PENDING_REASON } });
   return { auditLogId };
+}
+
+/**
+ * Why a tier round kept a v22 draft private without judging its tier: it
+ * could not build the candidate (the earlier builder's reasons and this
+ * one's), or could not read the evidence. A deploy may change either, so
+ * these are judged again after one (`secret_detected` is not: a secret in the
+ * patch stays there).
+ */
+export const ENGINEERING_AGENT_V22_REJUDGE_AFTER_DEPLOY_REASONS = [
+  "base_blob_missing", "files_invalid", "patch_unsupported",
+  "patch_does_not_apply", "unsupported_tree_change", "tree_verification_failed",
+  "base_invalid", "result_invalid",
+  "patch_unreadable", "path_invalid", "path_conflict", "base_mismatch",
+  "patch_mismatch", "patch_over_limit", "tree_invalid",
+  "tier_evidence_unavailable",
+] as const;
+
+/**
+ * After a deploy, the v22 drafts a tier round kept private for one of those
+ * reasons go back to `tier_pending` once, so the code now running judges them
+ * without a person pressing "Judge again" (owner decision 2026-11-15). Only a
+ * draft the button may send back qualifies, and only one last changed before
+ * `before` -- this process's start: a draft this code itself kept stays kept,
+ * so none is read again and again. Each is the system's own audited action.
+ * Nothing is published here; the next round repeats every gate.
+ */
+export async function rejudgeEngineeringAgentV22DraftsAfterDeploy(
+  tx: EngineeringAgentTransaction,
+  input: { before: Date; limit: number },
+): Promise<{ workItemIds: string[] }> {
+  const reasons: readonly string[] = ENGINEERING_AGENT_V22_REJUDGE_AFTER_DEPLOY_REASONS;
+  const where: Prisma.EngineeringAgentWorkItemWhereInput = {
+    kind: "t2_draft", state: "open", reason: { in: [...reasons] },
+    updatedAt: { lt: input.before }, patchBody: { not: null },
+    run: { modeAtStart: "t1", amuxAttemptId: { not: "" },
+      card: { sourceSystem: "admin-idea-v4" } },
+  };
+  const rows = await tx.engineeringAgentWorkItem.findMany({
+    where, orderBy: { id: "asc" }, take: input.limit, select: { id: true },
+  });
+  // Every row is locked before the first audit entry: the audit chain's lock
+  // comes after a work item's, never before another's.
+  for (const row of rows) await lockWorkItem(tx, row.id);
+  const drafts = await tx.engineeringAgentWorkItem.findMany({
+    where: { id: { in: rows.map((row) => row.id) }, ...where },
+    orderBy: { id: "asc" },
+    select: { id: true, reason: true, patchDigest: true, baseSha: true },
+  });
+  for (const draft of drafts) {
+    await tx.engineeringAgentWorkItem.update({ where: { id: draft.id },
+      data: { reason: ENGINEERING_AGENT_V22_TIER_PENDING_REASON } });
+    await systemAudit(tx, "engineering-agent-runner",
+      ENGINEERING_AGENT_AUDIT_ACTIONS.v22DraftRejudged,
+      "engineering_agent_work_item", draft.id, {
+        previousReason: draft.reason, patchDigest: draft.patchDigest,
+        baseSha: draft.baseSha, trigger: "deploy",
+      });
+  }
+  return { workItemIds: drafts.map((draft) => draft.id) };
 }
 
 /**
