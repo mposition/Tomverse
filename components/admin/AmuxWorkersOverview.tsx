@@ -43,6 +43,8 @@ import {
   type AdminApiFailure,
 } from "@/lib/adminApiOutcome";
 import { adminFetch } from "@/lib/adminFetch";
+import { formatAestDateTime } from "@/lib/adminUiCore";
+import type { AmuxWorkerHealthView } from "@/lib/amux/workerHealthCore";
 import { adminAmuxWorkerCapabilityMessages } from "@/lib/adminMessages/amuxWorkerCapability";
 import { adminAmuxWorkersMessages } from "@/lib/adminMessages/amuxWorkers";
 import type { AmuxCliModelCatalogAdminView } from "@/lib/amux/cliModelCatalogCore";
@@ -128,9 +130,28 @@ export function amuxWorkerAgeText(m: Messages, seconds: number | null): string |
 }
 
 /** The one sentence under a worker's status: what is true and what to do about it. */
-export function amuxWorkerReasonText(m: Messages, row: Pick<AmuxWorkerOverviewRow, "status" | "heartbeatAgeSeconds">): string {
+export function amuxWorkerReasonText(m: Messages, row: Pick<AmuxWorkerOverviewRow, "status" | "heartbeatAgeSeconds"> &
+  Partial<Pick<AmuxWorkerOverviewRow, "health" | "healthNotice">>): string {
   const reason = m.reason[row.status] as (age: string | null) => string;
-  return reason(amuxWorkerAgeText(m, row.heartbeatAgeSeconds));
+  const parts = [reason(amuxWorkerAgeText(m, row.heartbeatAgeSeconds))];
+  // The claim's own view of the worker (owner decision 2026-11-15): why it is
+  // held, and a warning beside one that still takes work.
+  const health = row.health ?? null;
+  if (health && row.status === "infra_quarantined" && health.circuit.lastKind) {
+    parts.push(m.health.failures(health.circuit.consecutive,
+      m.health.kind[health.circuit.lastKind] ?? health.circuit.lastKind) +
+      (health.circuit.retryAt ? ` · ${m.health.retryAt(formatAestDateTime(health.circuit.retryAt) ?? health.circuit.retryAt)}` : ""));
+  }
+  if (row.healthNotice === "probing") parts.push(m.health.probing);
+  if (row.healthNotice === "relogin_soon") {
+    const expiry = health?.signals.find((signal) => signal.signal === "relogin_soon")?.expiresAt ?? null;
+    parts.push(m.health.reloginSoon(expiry ? formatAestDateTime(expiry) ?? expiry : null));
+  }
+  if (health && (row.status === "login_required" || row.healthNotice === "relogin_soon")) {
+    for (const signal of health.signals) parts.push(m.health.signal(m.health.source[signal.source] ?? signal.source,
+      m.health.signalText[signal.signal] ?? signal.signal, formatAestDateTime(signal.observedAt) ?? signal.observedAt));
+  }
+  return parts.join(" ");
 }
 
 const providerCounts = (counts: readonly AmuxWorkerProviderCount[]) =>
@@ -819,6 +840,8 @@ export function AmuxWorkersOverviewPanel({
   live,
   readAtMs,
   isOwner,
+  health = null,
+  nonClaudeQuotaGate = false,
 }: {
   registry: AmuxWorkerRegistryAdminView | null;
   capabilities: AmuxWorkerCapabilityAdminView | null;
@@ -826,6 +849,9 @@ export function AmuxWorkersOverviewPanel({
   /** When the server read the three sources; ages are counted from here. */
   readAtMs: number;
   isOwner: boolean;
+  /** Each worker's quarantine, usage reading and box signals; null when unread. */
+  health?: Readonly<Record<string, AmuxWorkerHealthView>> | null;
+  nonClaudeQuotaGate?: boolean;
 }) {
   const m = useAdminMessages(adminAmuxWorkersMessages) as Messages;
   const cm = useAdminMessages(adminAmuxWorkerCapabilityMessages) as CapabilityMessages;
@@ -856,8 +882,9 @@ export function AmuxWorkersOverviewPanel({
   const returnFocus = useRef<HTMLElement | null>(null);
 
   const overview = useMemo(
-    () => buildAmuxWorkerOverview({ registry: registryView, capabilities: capabilityView, live, nowMs: readAtMs }),
-    [registryView, capabilityView, live, readAtMs],
+    () => buildAmuxWorkerOverview({ registry: registryView, capabilities: capabilityView, live,
+      nowMs: readAtMs, health, nonClaudeQuotaGate }),
+    [registryView, capabilityView, live, readAtMs, health, nonClaudeQuotaGate],
   );
 
   const applyRegistry = (changes: AmuxWorkerRegistryUpdate) => {

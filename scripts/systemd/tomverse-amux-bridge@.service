@@ -30,9 +30,12 @@ ExecStartPre=/usr/bin/curl --silent --show-error --fail --insecure --max-time 5 
 ExecStart=/usr/local/libexec/tomverse-wsl-bridge --worker %i
 Restart=on-failure
 RestartSec=60
-# Exit 3 is a halt on an unknown outcome. It waits for a person (version 20,
-# section 11), or for the auto-restart's approved causes
-# (docs/ops/amux/bridge-monitoring.md, section 5).
+# Exit 3 is a halt on a paid API call's unknown outcome. It waits for a
+# person (version 20, section 11), or for the auto-restart's approved causes
+# (docs/ops/amux/bridge-monitoring.md, section 5). Since 2026-11-15 every
+# other halt exits 75 and is restarted here: the new process reads back
+# what it left open (TOMVERSE_AMUX_BRIDGE_READ_BACK_PROCEED=disabled
+# restores exit 3 for every halt).
 RestartPreventExitStatus=3
 TimeoutStopSec=10
 KillMode=control-group

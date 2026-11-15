@@ -65,8 +65,10 @@ test("engineering agent: a card-scoped mismatch holds no other card; an unbound 
 
 test("the stalled card sweep reads only a promoted todo Task whose budget is spent", async () => {
   const sweep = await import("../lib/amux/stalledCardSweep.ts");
-  assert.equal(sweep.amuxStalledCardSweepEnabled(undefined), false);
+  // Owner direction 2026-11-15: on unless disabled.
+  assert.equal(sweep.amuxStalledCardSweepEnabled(undefined), true);
   assert.equal(sweep.amuxStalledCardSweepEnabled("enabled"), true);
+  assert.equal(sweep.amuxStalledCardSweepEnabled("disabled"), false);
   const calls = [];
   const tx = { $queryRaw: async (strings, ...values) => {
     calls.push({ sql: strings.join("?").replace(/\s+/g, " "), values });
@@ -80,7 +82,8 @@ test("the stalled card sweep reads only a promoted todo Task whose budget is spe
   assert.ok(sql.includes(`w."status" = 'todo' AND w."v22ReceiptId" IS NOT NULL`),
     "only a promoted card, which the settlement can file");
   assert.ok(!sql.includes("backlog"), "a backlog card is not swept: the settlement cannot file it");
-  assert.ok(values.includes(5) && values.includes("attempt_budget_exhausted"));
+  // The claim's own budget: infrastructure failures left out, their own bound kept.
+  assert.ok(values.includes(30) && values.includes(12) && values.includes("attempt_budget_exhausted"));
 });
 
 test("DM merge keeps its allow list: lib code and API routes stay a person's", async () => {

@@ -16,7 +16,7 @@ import { resolveV4TaskApiExecutionBasis } from "./v4TaskCostCatalogCore.ts";
 import { evaluateAmuxV4TaskReadyInTransaction, loadAmuxV4TaskReadyContext } from "./v4TaskReadyService.ts";
 import { lockAmuxResourcePolicies, evaluateLockedAmuxCostAdmission } from "./resourcePolicy.ts";
 import { amuxResourceRefs } from "./resourcePolicyCore.ts";
-import { AMUX_MAX_EXECUTION_ATTEMPTS, decideAmuxAttemptBudget } from "./executionBudgetCore.ts";
+import { amuxDefaultMaxAttempts, decideAmuxAttemptBudget } from "./executionBudgetCore.ts";
 import { AMUX_WORKER_RUNTIME_LEASE_MS } from "./workerRuntime.ts";
 import { recordAmuxV22RecoveryEvidenceAudit,
   recordAmuxV22SafeStopEvidenceAudit, recordAmuxV22ReadOnlyLaunchCheckAudit,
@@ -116,7 +116,7 @@ async function priorBudget(tx: Prisma.TransactionClient, taskId: string) {
   const prior = await tx.amuxExecutionAttempt.aggregate({ where: { taskId },
     _count: { _all: true }, _max: { attemptNumber: true }, _sum: { reservedCostMicrousd: true } });
   const used = Math.max(prior._count._all, prior._max.attemptNumber ?? 0);
-  if (used >= AMUX_MAX_EXECUTION_ATTEMPTS) throw new BoardImportError("attempt_budget_exhausted", 409);
+  if (used >= amuxDefaultMaxAttempts()) throw new BoardImportError("attempt_budget_exhausted", 409);
   return { historicalAttempts: prior._count._all, nextAttemptNumber: used + 1,
     reserved: prior._sum.reservedCostMicrousd ?? BigInt(0) };
 }

@@ -174,3 +174,58 @@ only; no geographic or data-processing expansion; synthetic checks then
 review/CI before installation; existing Ubuntu sidecar/bridge split; app DB
 and Admin remain authoritative. Publishing and deployment of Task results
 are outside this repair.
+
+## Box health signals and infrastructure failures (owner decision 2026-11-15)
+
+The sign-in stage (`scripts/amux-v22-stage-auth.mjs`) and the Claude login
+keepalive (`scripts/amux-v22-claude-login-keepalive.mjs`) now also write one
+small file each next to the worker's sign-in copy:
+`/var/lib/tomverse-amux-v22-<worker>/cli/amux-health-auth_stage.json` and
+`amux-health-login_keepalive.json` (mode 0600, written atomically). A file
+holds `version`, `source`, `signal` (`ok`, `auth_stage_failed`,
+`relogin_soon`, `login_required`, `refresh_failed`, `login_missing`,
+`login_unreadable`), `observedAt` and, for the keepalive,
+`expiresAt` (the refresh token's expiry). Never a token. A failed write
+leaves the round's outcome as it was; the journal line is still written.
+
+The worker's sidecar answers a new `health` operation with those signals
+(`lib/amux/v22WorkerHealthFile.mjs`), and the bridge forwards them every five
+minutes, with the quota probe, to `/api/internal/amux/v22/worker-health`. An
+old sidecar refuses the operation and an old bridge never asks; either way
+nothing else changes. The app keeps the newest signal per worker and source
+(`AmuxWorkerHealthSignal`), shows it on Admin › AMUX settings › Workers, and
+raises `login_required`, `refresh_failed`, `auth_stage_failed` and
+`relogin_soon` as an operational incident the first time each arrives.
+
+The sidecar also adds the CLI's exit code and run time to an unreadable result
+(`invalid_result`), and the bridge sends the sidecar's failure code with an
+unverified settlement. The app classifies the run as an infrastructure
+failure (no card attempt used, another worker first, the worker quarantined
+after three in a row) or as the card's own; see
+`docs/policy/development-agent-orchestration.md`, "v22 인프라 실패, 워커 격리,
+멈춘 이유". Before the new bridge is installed the app still classifies a run
+with no usage at all as `no_result` and a partial one as `usage_unreported`.
+
+Installation (operator, after the app is deployed; nothing here changes
+until it is):
+
+1. Rebuild and install the bridge binary from `apps/tomverse-orchestrator`
+   (`/usr/local/libexec/tomverse-wsl-bridge`), then restart each
+   `tomverse-amux-bridge@<worker>`. Install the updated
+   `scripts/systemd/tomverse-amux-bridge@.service` too (comment only; exit 3
+   stays in `RestartPreventExitStatus`, exit 75 now restarts).
+2. Rebuild and install the v22 sidecar bundle (it carries
+   `lib/amux/v22OneShotSidecar.mjs`, `lib/amux/v22WorkerHealthFile.mjs` and
+   `scripts/amux-v22-task-sidecar.mjs`), then restart each
+   `tomverse-amux-v22-sidecar@<worker>`.
+3. Install the updated `scripts/amux-v22-stage-auth.mjs` with its
+   `lib/amux/v22WorkerHealthFile.mjs` where the stage timer runs it.
+4. As the operator user, copy the updated
+   `scripts/amux-v22-claude-login-keepalive.mjs` to
+   `~/.local/lib/tomverse-amux-v22/` (it stays self-contained).
+5. Check: `ls -l /var/lib/tomverse-amux-v22-<worker>/cli/amux-health-*.json`
+   after the next stage or keepalive round, and the worker's row on Admin ›
+   AMUX settings › Workers.
+
+`TOMVERSE_AMUX_INFRA_FAILURE_ROUTING=disabled` on the app turns the whole
+change off (the route answers 409 and the bridge only logs it).

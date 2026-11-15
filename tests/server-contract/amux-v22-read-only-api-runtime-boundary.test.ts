@@ -68,6 +68,10 @@ const tx = {
       reviewSpecialty: null, executionBrief: "sealed",
       executionBriefDigest: "b".repeat(64),
     }];
+    // readAmuxAttemptBudgetFacts (2026-11-15): the aggregate below, in one statement.
+    if (sql.includes('COUNT(*)::int AS "rows"')) return recoveryAuthority ?
+      [{ rows: 1, greatest: 1, infra: 0, reserved: BigInt("3400000") }] :
+      [{ rows: 0, greatest: null, infra: 0, reserved: null }];
     throw new Error(`unexpected SQL: ${sql}`);
   },
   amuxWorkItem: {

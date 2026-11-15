@@ -36,6 +36,14 @@ const requestSchema = z.object({ attempt_id: z.string().uuid(),
   invocation_ids: z.array(z.string().uuid()).max(128),
   changed_paths: z.array(z.string().max(32 * 1024)).max(4_096).optional(),
   read_only_retry: readOnlyRetrySchema.optional(),
+  // What the sidecar said about a run with no verified result (owner
+  // decision 2026-11-15, lib/amux/infraFailureCore.ts). Codes only.
+  failure: z.object({
+    code: z.string().regex(/^[a-z0-9_]{1,64}$/),
+    cli_started: z.boolean().nullable().optional(),
+    exit_code: z.number().int().min(-1_000).max(1_000).nullable().optional(),
+    elapsed_ms: z.number().int().min(0).max(86_400_000).nullable().optional(),
+  }).strict().optional(),
 }).strict();
 
 export async function POST(request: Request) {
@@ -55,6 +63,11 @@ export async function POST(request: Request) {
         taskRevision: body.task_revision, outcome: body.outcome,
         invocationIds: body.invocation_ids,
         ...(body.changed_paths ? { changedPaths: body.changed_paths } : {}),
+        // Only an unverified settlement carries it; any other is judged on its receipt.
+        ...(body.failure && body.outcome === "blocked" ? { failure: {
+          code: body.failure.code, cliStarted: body.failure.cli_started ?? null,
+          exitCode: body.failure.exit_code ?? null,
+          elapsedMs: body.failure.elapsed_ms ?? null } } : {}),
         readOnlyRetry: body.read_only_retry ? {
           version: body.read_only_retry.version,
           launchBindingId: body.read_only_retry.launch_binding_id,

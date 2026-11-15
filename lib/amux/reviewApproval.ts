@@ -28,7 +28,7 @@ import {
   type AmuxReviewOutcome,
   type AmuxReviewSubject,
 } from "@/lib/amux/reviewApprovalCore";
-import { AMUX_MAX_EXECUTION_ATTEMPTS, decideAmuxAttemptBudget } from "@/lib/amux/executionBudgetCore";
+import { amuxDefaultMaxAttempts, decideAmuxAttemptBudget } from "@/lib/amux/executionBudgetCore";
 import { amuxV52RejectedTwiceReviewAttemptId } from "@/lib/amux/v52ReviewRejections";
 import { normalizeAmuxUntrustedReason, openAmuxHumanEscalation, publicAmuxEscalationReasonCode } from "@/lib/amux/escalation";
 import { readAmuxReviewPullRequest, type AmuxReviewPullRequest } from "@/lib/amux/reviewGitHub";
@@ -450,7 +450,7 @@ export async function getAmuxReviewDetail(escalationId: string) {
     publication_hold: publicationHold,
     // Why no decision is open at all; null while the server offers one.
     decision_hold: decisionHold,
-    retry: { used, limit: AMUX_MAX_EXECUTION_ATTEMPTS, remaining: Math.max(0, AMUX_MAX_EXECUTION_ATTEMPTS - used) },
+    retry: { used, limit: amuxDefaultMaxAttempts(), remaining: Math.max(0, amuxDefaultMaxAttempts() - used) },
     proposed_transitions: {
       approve: outcomes.includes("approve") ? "done" : null,
       retry: outcomes.includes("retry") ? "todo" : null,

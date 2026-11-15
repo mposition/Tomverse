@@ -2,7 +2,9 @@ import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/amux/auditContract";
 import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import { openAmuxHumanEscalation } from "@/lib/amux/escalation";
-import { AMUX_MAX_EXECUTION_ATTEMPTS } from "@/lib/amux/executionBudgetCore";
+import { amuxDefaultMaxAttempts } from "@/lib/amux/executionBudgetCore";
+import { AMUX_INFRA_FAILURE_REASONS, AMUX_MAX_INFRA_FAILURES_PER_TASK,
+  amuxInfraFailureRoutingEnabled } from "@/lib/amux/infraFailureCore";
 
 /**
  * One definition of a stopped card (owner decision 2026-11-14, AMUX process
@@ -20,13 +22,17 @@ import { AMUX_MAX_EXECUTION_ATTEMPTS } from "@/lib/amux/executionBudgetCore";
  * This sweep moves each to `blocked` with an open escalation, so it joins the
  * same queue and the same Decision Maker path as every other stopped card,
  * where retry, done, close or remake settles it. It only moves a card's state
- * the way settlement already does; it deletes nothing and runs nothing. Off
- * unless TOMVERSE_AMUX_STALLED_CARD_SWEEP=enabled.
+ * the way settlement already does; it deletes nothing and runs nothing.
+ *
+ * On unless TOMVERSE_AMUX_STALLED_CARD_SWEEP=disabled (owner direction
+ * 2026-11-15: a card no screen shows is never acceptable; it was off unless
+ * `enabled`). The budget it reads is the claim's own (executionBudgetCore.ts):
+ * infrastructure failures do not count, and their own bound does.
  */
 export const AMUX_STALLED_CARD_SWEEP_ENV = "TOMVERSE_AMUX_STALLED_CARD_SWEEP";
 export const amuxStalledCardSweepEnabled = (
   value: string | undefined = process.env[AMUX_STALLED_CARD_SWEEP_ENV],
-) => value?.trim() === "enabled";
+) => value?.trim() !== "disabled";
 
 export const AMUX_STALLED_BUDGET_REASON = "attempt_budget_exhausted";
 export const AMUX_STALLED_CARD_SWEPT_ACTION = "amux.v22.stalled_card.blocked";
@@ -42,6 +48,8 @@ export async function readAmuxStalledCards(
   tx: { $queryRaw: <T>(strings: TemplateStringsArray, ...values: unknown[]) => Promise<T> },
   limit: number, taskId: string | null = null,
 ): Promise<AmuxStalledCardCandidate[]> {
+  const infra = amuxInfraFailureRoutingEnabled() ? [...AMUX_INFRA_FAILURE_REASONS] : [];
+  const max = amuxDefaultMaxAttempts();
   return tx.$queryRaw<AmuxStalledCardCandidate[]>`
     SELECT w."id", ${AMUX_STALLED_BUDGET_REASON}::text AS "reason"
     FROM "AmuxWorkItem" w
@@ -51,9 +59,12 @@ export async function readAmuxStalledCards(
       AND NOT EXISTS (SELECT 1 FROM "AmuxHumanEscalation" e
         WHERE e."taskId" = w."id" AND e."status" IN ('open', 'acknowledged'))
       AND w."status" = 'todo' AND w."v22ReceiptId" IS NOT NULL
-      AND (SELECT GREATEST(COUNT(*), COALESCE(MAX(a."attemptNumber"), 0))
-        FROM "AmuxExecutionAttempt" a WHERE a."taskId" = w."id")
-        >= ${AMUX_MAX_EXECUTION_ATTEMPTS}
+      AND EXISTS (SELECT 1 FROM (
+          SELECT GREATEST(COUNT(*), COALESCE(MAX(a."attemptNumber"), 0)) AS "numbered",
+            COUNT(*) FILTER (WHERE a."reason" = ANY(${infra}::text[])) AS "infra"
+          FROM "AmuxExecutionAttempt" a WHERE a."taskId" = w."id") b
+        WHERE b."numbered" - b."infra" >= ${max}
+          OR b."infra" >= ${AMUX_MAX_INFRA_FAILURES_PER_TASK})
     ORDER BY w."updatedAt", w."id"
     LIMIT ${limit}`;
 }

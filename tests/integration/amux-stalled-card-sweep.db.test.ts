@@ -22,9 +22,10 @@ async function spentTodoCard(tx: LifecycleTx) {
     { taskRole: "implement", settlementReason: "review_server_accepted" }) as {
     taskId: string; priorAttemptId: string };
   // The fixture leaves the card after one settled run; the budget is spent
-  // as production's was: five attempts, the card back in todo, unassigned.
+  // the way it still can be since 2026-11-15: the runaway guard's thirty
+  // attempts, the card back in todo, unassigned.
   await withoutTriggers(tx, async () => {
-    await tx.$executeRaw`UPDATE "AmuxExecutionAttempt" SET "attemptNumber" = 5
+    await tx.$executeRaw`UPDATE "AmuxExecutionAttempt" SET "attemptNumber" = 30
       WHERE "id" = ${seed.priorAttemptId}`;
     await tx.$executeRaw`UPDATE "AmuxWorkItem" SET "status" = 'todo', "owner" = NULL,
       "v22AssignmentId" = NULL WHERE "id" = ${seed.taskId}`;
@@ -40,11 +41,13 @@ test("a todo Task with its budget spent joins the owner queue once, with its rea
     const taskId = await spentTodoCard(tx);
     const { readAmuxStalledCards, sweepAmuxStalledCards, AMUX_STALLED_CARD_SWEEP_ENV } =
       await import("@/lib/amux/stalledCardSweep");
-    assert.deepEqual(await sweepAmuxStalledCards(), [], "off by default");
+    process.env[AMUX_STALLED_CARD_SWEEP_ENV] = "disabled";
+    assert.deepEqual(await sweepAmuxStalledCards(), [], "off only when disabled");
     const found = await readAmuxStalledCards(tx, 20);
     assert.ok(found.some((row) => row.id === taskId && row.reason === "attempt_budget_exhausted"));
 
-    process.env[AMUX_STALLED_CARD_SWEEP_ENV] = "enabled";
+    // Owner direction 2026-11-15: on by default.
+    delete process.env[AMUX_STALLED_CARD_SWEEP_ENV];
     try {
       const moved = await sweepAmuxStalledCards(20);
       assert.ok(moved.includes(taskId), JSON.stringify(moved));

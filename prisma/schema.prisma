@@ -8172,6 +8172,7 @@ model AmuxWorkItem {
   v22OwnerQuestions AmuxV22TaskQuestion[]
   v22ResultReviews  AmuxV22ResultReview[]
   dmOwnerSettlements AmuxDmOwnerSettlement[]
+  waitReason        AmuxCardWaitReason?
   v52ReviewRecords  AmuxV52ReviewRecord[]
   humanEscalations  AmuxHumanEscalation[]
   costLedgerEntries AmuxCostLedgerEntry[]
@@ -8436,6 +8437,46 @@ model AmuxV22ResultReview {
   @@unique([attemptId, taskId])
   @@index([state, createdAt])
   @@index([taskId, createdAt])
+}
+
+/// Why one card is not running (owner decision 2026-11-15,
+/// lib/amux/cardWaitReasonStore.ts): the reason the automatic promotion or
+/// the claim passed it over, as a code with structured detail (codes and card
+/// keys only, never worker text). Replaced on every pass, removed when the
+/// card is claimed. `firstSeenAt` is when the same stage and code began;
+/// `reportedAt` when a long wait was raised as an operational incident.
+model AmuxCardWaitReason {
+  taskId      String       @id
+  /// promotion | claim
+  stage       String
+  code        String
+  detail      Json
+  firstSeenAt DateTime
+  lastSeenAt  DateTime
+  seenCount   Int          @default(1)
+  reportedAt  DateTime?
+  task        AmuxWorkItem @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([lastSeenAt])
+}
+
+/// The latest box health signal per worker and source, forwarded by the
+/// worker's bridge (owner decision 2026-11-15,
+/// lib/amux/workerHealthSignalStore.ts): the Claude login keepalive, the
+/// sign-in stage and the sidecar. Non-secret facts only. `firstSeenAt` is
+/// when the current signal began; `reportedAt` when it was raised.
+model AmuxWorkerHealthSignal {
+  workerName  String
+  /// login_keepalive | auth_stage | sidecar
+  source      String
+  signal      String
+  detail      Json
+  observedAt  DateTime
+  firstSeenAt DateTime
+  receivedAt  DateTime
+  reportedAt  DateTime?
+
+  @@id([workerName, source])
 }
 
 /// One AMUX process analysis report (owner request 2026-11-14,

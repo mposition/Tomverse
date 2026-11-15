@@ -121,6 +121,8 @@ export const adminAmuxOwnerQueueMessages = defineAdminMessages({
         cli_turn_limit: "The worker hit its turn limit and stopped.",
         cli_execution_error: "The worker's command line tool failed.",
         cli_budget_limit: "The worker hit its budget limit and stopped.",
+        infra_attempts_exhausted: "This card kept failing on the platform, never on its own work, on every worker that tried it. Check the workers' sign-ins, then retry or stop it.",
+        repeated_failure: "The worker's result failed the same way three runs in a row, so another run would likely fail again. Decide whether to change the card, retry or stop it.",
       } as Record<string, string>,
     },
     recovery: {
@@ -339,6 +341,8 @@ export const adminAmuxOwnerQueueMessages = defineAdminMessages({
         cli_turn_limit: "워커가 턴 한도에 도달해서 멈췄어요.",
         cli_execution_error: "워커의 명령줄 도구가 실패했어요.",
         cli_budget_limit: "워커가 비용 한도에 도달해서 멈췄어요.",
+        infra_attempts_exhausted: "이 카드는 맡은 워커마다 카드 자체가 아니라 플랫폼에서 실패했어요. 워커 로그인을 확인한 뒤 다시 시도하거나 멈춰 주세요.",
+        repeated_failure: "워커의 결과가 세 번 연달아 같은 방식으로 실패해서, 다시 돌려도 같을 가능성이 커요. 카드를 고칠지, 다시 시도할지, 멈출지 정해 주세요.",
       } as Record<string, string>,
     },
     recovery: {
