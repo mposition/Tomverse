@@ -92,6 +92,7 @@ export function ReviewChatHandoffProvider({ identity, supported, sourceScope, na
   };
   return <HandoffContext.Provider value={{ supported, identity, open: next => {
     if (!identity?.startsWith("account:") || !supported) return;
+    // Repeated activation while the modal owns this offer is the same attempt.
     if (offerRef.current?.isCurrent()) return;
     pending.current?.abort(); pending.current = null; setBusy(false);
     journeyStep(offerRef.current?.journey, "invalidated", "superseded");

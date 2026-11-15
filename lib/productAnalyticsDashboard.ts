@@ -238,10 +238,14 @@ export async function getProductAnalyticsDashboard(): Promise<ProductAnalyticsDa
           productAnalyticsEvents: { none: { eventName: "signup_completed" } },
         },
       }),
-      // Read the complete event/time-bounded cohort, never a truncated take.
+      // Full cohort plus one observation window: older valid starts keep their
+      // in-window follow-up stages from appearing as orphans. No truncated take.
       prisma.productAnalyticsEvent.findMany({
-        where: { eventName: "connected_journey_step", occurredAt: { gte: thirtyDaysAgo, lte: now } },
+        where: { eventName: "connected_journey_step", occurredAt: { gte: new Date(thirtyDaysAgo.getTime() - 24 * 60 * 60 * 1000), lte: now } },
         select: { userId: true, occurredAt: true, properties: true },
+      }).catch((error: unknown) => {
+        console.error("Connected journey query failed", { errorName: error instanceof Error ? error.name : "UnknownError" });
+        return null;
       }),
     ]);
 
@@ -351,7 +355,7 @@ export async function getProductAnalyticsDashboard(): Promise<ProductAnalyticsDa
       reviewCompletedUsers > 0 ? (count / reviewCompletedUsers) * 100 : 0;
 
     return {
-      connectedJourneys: summarizeConnectedJourneys(journeyRows, now),
+      connectedJourneys: journeyRows === null ? null : summarizeConnectedJourneys(journeyRows, now),
       available: true,
       generatedAt: now.toISOString(),
       configured: {

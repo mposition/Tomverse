@@ -35,12 +35,12 @@ test("dashboard reads the full 30-day cohort and returns no ratio without mature
   assert.equal(dashboard.connectedJourneys.groups[0].rate, null);
   assert.equal(dashboard.connectedJourneys.groups[0].pending, 1);
   assert.equal(queries[0].take, undefined);
-  assert.equal(+queries[0].where.occurredAt.lte - +queries[0].where.occurredAt.gte, 30 * 86400000);
+  assert.equal(+queries[0].where.occurredAt.lte - +queries[0].where.occurredAt.gte, 31 * 86400000);
 });
 test("query failure is unavailable, never a zero-percent connected journey result", async () => {
   fail = true;
   const dashboard = await getProductAnalyticsDashboard();
-  assert.equal(dashboard.available, false);
+  assert.equal(dashboard.available, true);
   assert.equal(dashboard.connectedJourneys, null);
 });
 test("server recording excludes journey events and fields from both GA4 fanout paths", async () => {

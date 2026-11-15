@@ -8,7 +8,7 @@ import { analyticsClientEventSchema, analyticsPropertiesForGa4, shouldSendCustom
 import { summarizeConnectedJourneys } from "../lib/connectedJourneyAggregation.ts";
 import { isProductAnalyticsAllowed } from "../lib/analyticsConsentPolicy.ts";
 const { syncJourneyIdentity } = require("../lib/connectedJourneyIdentity.ts");
-const { configureAnalyticsClient, disableAnalyticsClient } = require("../lib/productAnalyticsClient.ts");
+const { configureAnalyticsClient, disableAnalyticsClient, flushConnectedJourneyEvents } = require("../lib/productAnalyticsClient.ts");
 const { beginConnectedJourney, journeyStep, applyJourneyToDraft, captureJourneyDraft, bindJourneyFirstSource, observeJourneyDispatch, observeJourneyReply, invalidateJourneyDraft, moveJourneyDraft, observeJourneyWorkspace } = require("../lib/connectedJourneyAnalytics.ts");
 
 const props = (stage = "started", extra = {}) => ({ journey_key: randomUUID(), journey_kind: "review_chat", journey_entry: "review_studio", journey_stage: stage, ...extra });
@@ -106,14 +106,18 @@ test("A to B to A fences markers, late callbacks and queued retries without chan
 test("stored journey queue waits for auth resolution and drops mismatched owners on flush", () => {
   const p = props();
   const queued = owner => ({ eventId: randomUUID(), eventName: "connected_journey_step", occurredAt: new Date().toISOString(), modelCount: 0, properties: p, journeyOwner: owner });
-  window.sessionStorage.setItem("tomverse_analytics_pending_events_v1", JSON.stringify([queued("account:A"), queued("account:B")]));
+  window.sessionStorage.setItem("tomverse_analytics_pending_events_v1", JSON.stringify([queued("account:A"), queued("account:B"), { ...queued("account:A"), eventName: "signup_started", properties: {}, journeyOwner: undefined }]));
   syncJourneyIdentity(undefined, null);
   configureAnalyticsClient({ country: "AU", language: "en", measurementId: null, plan: "Free" });
-  assert.equal(delivered.length, 0);
-  syncJourneyIdentity("account:A", true);
-  configureAnalyticsClient({ country: "AU", language: "en", measurementId: null, plan: "Free" });
   assert.equal(delivered.length, 1);
-  assert.equal(delivered[0].journeyOwner, undefined);
+  assert.equal(delivered[0].event_name, "signup_started");
+  const configurations = ga4.filter(args => args[0] === "config").length;
+  syncJourneyIdentity("account:A", true);
+  flushConnectedJourneyEvents();
+  assert.equal(ga4.filter(args => args[0] === "config").length, configurations);
+  assert.equal(delivered.length, 2);
+  assert.equal(delivered[1].event_name, "connected_journey_step");
+  assert.equal(delivered[1].journeyOwner, undefined);
   assert.equal(analyticsClientEventSchema.safeParse(delivered[0]).success, true);
 });
 
@@ -189,4 +193,16 @@ test("observation window rejects late success and separates new/existing cohorts
   assert.equal(result.groups.length, 2);
   assert.equal(result.diagnostics.outsideWindow, 2);
   assert.ok(result.groups.every(group => group.mature === 1 && group.sent === 1 && group.replied === 0 && group.unobserved === 1));
+});
+
+
+test("valid stages crossing the 30-day cohort boundary are not false orphans", () => {
+  const now = new Date(); const p = props();
+  const result = summarizeConnectedJourneys([
+    { userId: "A", occurredAt: new Date(+now - 30.5 * day), properties: p },
+    { userId: "A", occurredAt: new Date(+now - 29.8 * day), properties: { ...p, journey_stage: "reply_observed" } },
+    { userId: "B", occurredAt: new Date(+now - 30.7 * day), properties: { ...p, journey_stage: "ready" } },
+  ], now);
+  assert.deepEqual(result.groups, []);
+  assert.equal(result.diagnostics.orphan, 0);
 });

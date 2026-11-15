@@ -30,8 +30,8 @@ export function summarizeConnectedJourneys(rows: ConnectedJourneyRow[], now = ne
   for (const events of journeys.values()) {
     events.sort((a, b) => a.time - b.time);
     const begun = events.find(e => e.p.journey_stage === "started");
-    if (!begun) { diagnostics.orphan += events.length; continue; }
-    if (begun.time < start || begun.time > end) { diagnostics.outsideWindow++; continue; }
+    if (!begun) { diagnostics.orphan += events.filter(e => e.time >= start && e.time <= end).length; continue; }
+    if (begun.time < start || begun.time > end) continue;
     const groupKey = JSON.stringify([begun.p.journey_kind, begun.p.journey_entry, begun.p.continuation_kind]);
     const group = groups.get(groupKey) ?? {
       kind: begun.p.journey_kind, entry: begun.p.journey_entry, continuation: begun.p.continuation_kind ?? null,

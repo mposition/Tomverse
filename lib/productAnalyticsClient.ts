@@ -494,6 +494,17 @@ onJourneyIdentityInvalidated(() => {
 
 export const syncAnalyticsJourneyIdentity = syncJourneyIdentity;
 
+/** Resolve held journeys without reconfiguring GA4 or replaying page_view. */
+export function flushConnectedJourneyEvents() {
+  if (!runtime) return;
+  try {
+    const events = mergePendingEvents(readPendingEvents(), pendingEvents);
+    persistPendingEvents(events.filter(event => event.eventName !== "connected_journey_step"));
+    for (const event of events) if (event.eventName === "connected_journey_step") sendIntent(event);
+  } catch { /* Optional analytics must not affect session resolution. */ }
+}
+
+
 export function trackConnectedJourneyEvent(properties: ConnectedJourneyProperties, binding: { owner: string; epoch: number }) {
   try {
     if (journeyIdentity().epoch !== binding.epoch || journeyOwnerDisposition(binding.owner) !== "send" || analyticsConsent() === "declined") return;

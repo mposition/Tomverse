@@ -1,3 +1,4 @@
+import { buildChatStreamTrailerChunk } from "../../lib/webSearchStreamTrailer";
 import { observeConnectedJourneyEvents } from "./support/connected-journey-fixtures";
 import { expect, test, type Page } from "@playwright/test";
 import { mockAuthenticatedApi, prepareGuestPage, expectNoHorizontalOverflow } from "./support/app-fixtures";
@@ -303,8 +304,7 @@ for (const completion of ["incomplete", "empty"] as const) {
     await mockAuthenticatedApi(page, { productKey: "chat", selectedModels: [reviewModels[0]] });
     await page.getByRole("button", { name: "채팅 초안 열기", exact: true }).click();
     await expect(draftInput(page)).toHaveValue(/Compare these approaches/);
-    const { buildChatStreamTrailerChunk } = await import("../../lib/webSearchStreamTrailer");
-    await page.route("**/api/chat", route => route.fulfill({ contentType: "text/plain; charset=utf-8", body: completion === "empty" ? " " : "Truncated answer" + buildChatStreamTrailerChunk({ completion: { status: "incomplete", incompleteReason: "length" } }) }));
+    await page.route("**/api/chat", route => route.fulfill({ contentType: "text/plain; charset=utf-8", body: completion === "empty" ? " " : "Truncated answer" + buildChatStreamTrailerChunk({ searchMetadata: null, completion: { status: "incomplete", incompleteReason: "length" } }) }));
     await page.getByTestId("chat-send-button").click();
     await expect.poll(() => api.journeys.map(e => e.journey_stage)).toEqual(["started", "preview_ready", "ready", "send_dispatched", "issue"]);
     expect(api.journeys.at(-1)?.journey_reason).toBe(completion === "empty" ? "empty_response" : "response_incomplete");

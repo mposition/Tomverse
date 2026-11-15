@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "migrationSqlSha256": "cedd87661ba79c36541905a9468f79d325cd880e190aaf9d85aff261c6695acc",
+  "replacedChecks": [
+    {
+      "table": "ProductAnalyticsEvent",
+      "constraint": "ProductAnalyticsEvent_name_check",
+      "previousDefinitionSha256": "7c39aba2544dd539635a5b3019f1094831a831c0e3a1d65d623b04e679113123"
+    }
+  ]
+}

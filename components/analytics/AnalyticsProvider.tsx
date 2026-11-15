@@ -16,6 +16,7 @@ import {
   analyticsConsent,
   configureAnalyticsClient,
   syncAnalyticsJourneyIdentity,
+  flushConnectedJourneyEvents,
   consumeSignupStarted,
   disableAnalyticsClient,
   observeMarketingTouch,
@@ -715,7 +716,11 @@ export function AnalyticsProvider({
     return () => {
       cancelled = true;
     };
-  }, [analyticsEnabled, disabled, initialPlan, lang, measurementId, resolvedPolicy, userCreatedAt, sessionStatus, sessionUserId]);
+  }, [analyticsEnabled, disabled, initialPlan, lang, measurementId, resolvedPolicy, userCreatedAt]);
+
+  useEffect(() => {
+    if (!disabled && analyticsEnabled && analyticsClientReady) flushConnectedJourneyEvents();
+  }, [sessionStatus, sessionUserId, disabled, analyticsEnabled, analyticsClientReady]);
 
   // GA4 User-ID (docs/policy/marketing-automation.md §10.2): asked for only
   // when the notice is published, the switch is on, the visitor explicitly

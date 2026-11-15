@@ -43,7 +43,9 @@ follow-up messages or another Review fork cannot do so for the old source.
 
 An account-bound local queue field is never transmitted. Unresolved auth holds
 journey delivery. Owner and generation are checked at flush and each retry;
-A to B to A cannot revive old work. The server uses authenticated actor + kind +
+A to B to A cannot revive old work. Revocation/account changes clear local state
+without sending a final event under revoked permission or another account; these
+attempts can therefore remain unobserved. The server uses authenticated actor + kind +
 key + stage through the existing HMAC unique dedupe path. An already in-flight
 request cannot be recalled.
 
@@ -57,7 +59,8 @@ Native, another tab/device, tab closure and pre-send reload remain outside P0.
 ## Admin interpretation
 
 The existing Product analytics panel reads the complete event/time-bounded
-30-day started cohort without a row `take`. Main n/d uses starts at least 24
+30-day started cohort without a row `take`, with one extra day of start lookback
+to avoid labeling valid boundary-crossing stages as orphans. Main n/d uses starts at least 24
 hours old and matching stages within 24 hours of their start. Pending starts
 and early replies are separate. The observation window does not restrict
 product execution or cost. Entry and new/existing continuation groups remain
@@ -84,3 +87,11 @@ PostgreSQL 17 cluster: all 422 migrations applied; existing `marketing_touch`
 and new `connected_journey_step` inserts succeeded, and an unknown name was
 rejected. Test inserts were rolled back and the cluster stopped. This is
 separate from the passing static CHECK tests, and is not a production migration.
+
+The existing-database deployment guard was exercised separately: the isolated
+cluster was placed at the preceding CHECK/history state, then `npm run db:migrate`
+verified the exact previous constraint through `baseline-check.json` and applied
+the pending migration. The sidecar binds the migration SQL checksum, constraint
+target and the prior `pg_get_constraintdef` digest. Constraint tests (5) and the
+migration baseline suite (37) passed. No `migrate resolve --applied` shortcut was
+used for the new constraint.

@@ -12,12 +12,13 @@ export const onJourneyIdentityInvalidated = (listener: () => void) => {
   return () => { listeners.delete(listener); };
 };
 export function syncJourneyIdentity(nextOwner: string | null | undefined, nextAllowed: boolean | null) {
+  const signedOut = nextOwner === null && owner !== null;
   const changed = nextOwner !== undefined && lastOwner !== undefined && nextOwner !== lastOwner;
   const revoked = nextAllowed === false && allowed !== false;
   owner = nextOwner;
   if (nextOwner !== undefined) lastOwner = nextOwner;
   allowed = nextAllowed;
-  if (changed || revoked || nextOwner === null) {
+  if (changed || revoked || signedOut) {
     epoch++;
     for (const listener of listeners) listener();
   }
