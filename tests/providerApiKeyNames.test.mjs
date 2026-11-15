@@ -81,6 +81,27 @@ test("any accepted name counts as configured", () => {
   assert.equal(isProviderApiKeyConfigured("google", {}), false);
 });
 
+test("Cohere is available by default and an explicit false opt-out hides its key", () => {
+  assert.equal(
+    resolveProviderApiKey("cohere", { COHERE_API_KEY: "co-test" }),
+    "co-test"
+  );
+  assert.equal(
+    resolveProviderApiKey("cohere", {
+      COHERE_API_KEY: "co-test",
+      COHERE_CHAT_ENABLED: "false",
+    }),
+    undefined
+  );
+  assert.equal(
+    isProviderApiKeyConfigured("cohere", {
+      COHERE_API_KEY: "co-test",
+      COHERE_CHAT_ENABLED: "false",
+    }),
+    false
+  );
+});
+
 test("blank and whitespace-only values are not a key", () => {
   assert.equal(resolveProviderApiKey("openai", { OPENAI_API_KEY: "   " }), undefined);
   assert.equal(resolveProviderApiKey("openai", { OPENAI_API_KEY: "" }), undefined);

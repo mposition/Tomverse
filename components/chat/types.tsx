@@ -81,6 +81,7 @@ export type ChatAttachment = {
 export type Message = {
   /** Request/attempt-scoped metadata; excluded by all message serializers. */
   continuationReceipt?: ContinuationReceipt;
+  researchRunId?: string | null;
   id: string;
   role: "user" | "assistant";
   content: string;

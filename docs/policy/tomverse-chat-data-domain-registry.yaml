@@ -254,6 +254,24 @@ domains:
     implementationStatus: implemented
     inUnifiedExport: included
 
+  - domain: researchPreviewRun
+    prismaModel: ResearchPreviewRun
+    userLinkageRole: subject
+    owner: backend-ai
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+    note: >-
+      Durable Research Preview orchestration owned by the account and
+      conversation. Account or conversation deletion cascades the row and its
+      transient checkpoint immediately. Unified export includes the public run
+      lifecycle, selected model, bounded counters and timestamps; it withholds
+      the restart checkpoint and page bodies, provider/API binding, reservation,
+      lease, digest, settlement usage and internal error fields. Terminal runs
+      purge the checkpoint independently of account deletion.
+
   - domain: conversationProject
     prismaModel: ConversationProject
     userLinkageRole: subject

@@ -1,5 +1,7 @@
 "use client";
 
+import type { ResearchPreviewControls } from "@/components/chat/useResearchPreview";
+
 import type { ChatPanelLocationIntent, RouterLocationTurn } from "@/lib/chatLocationClient";
 
 import type { PendingSendEcho } from "@/components/chat/ChatMessageList";
@@ -131,6 +133,8 @@ type PromptPayload = {
   /** The models this send was made for; other panels must not consume it. */
   modelIds: string[];
   attachments: ChatAttachment[];
+  researchDurable?: boolean;
+    researchMode?: "preview";
   deepResearchDepth?: "quick" | "standard" | "deep";
   admissionToken?: string | null;
   contextBundle?: string | null;
@@ -347,6 +351,7 @@ type MobileChatShellProps = {
   accountMemoryDefault?: "on" | "off" | null;
   accountMemoryMasterEnabled?: boolean | null;
   onMemorySettingsRefresh?: () => void;
+  researchPreview?: ResearchPreviewControls;
   onOpenDeepResearchSetup: () => void;
   isDeepResearchPending: boolean;
   onDismissDeepResearchChip: () => void;
@@ -559,6 +564,7 @@ export function MobileChatShell({
   accountMemoryDefault,
   accountMemoryMasterEnabled,
   onMemorySettingsRefresh,
+  researchPreview,
   onOpenDeepResearchSetup,
   isDeepResearchPending,
   onDismissDeepResearchChip,
@@ -1964,6 +1970,7 @@ export function MobileChatShell({
             accountMemoryDefault={accountMemoryDefault}
             accountMemoryMasterEnabled={accountMemoryMasterEnabled}
             onMemorySettingsRefresh={onMemorySettingsRefresh}
+            researchPreview={researchPreview}
             onOpenDeepResearchSetup={onOpenDeepResearchSetup}
             isDeepResearchPending={isDeepResearchPending}
             onDismissDeepResearchChip={onDismissDeepResearchChip}

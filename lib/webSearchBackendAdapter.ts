@@ -1,4 +1,5 @@
 import "server-only";
+import { readResponseToBuffer } from "@/lib/boundedBuffer";
 
 /**
  * The one place an application-managed web search leaves this process.
@@ -50,6 +51,8 @@ import {
 } from "@/lib/webSearchBackendRuntime";
 
 const BRAVE_WEB_SEARCH_URL = "https://api.search.brave.com/res/v1/web/search";
+/** Raw decompressed JSON is bounded before parsing, independently of snippets. */
+export const WEB_SEARCH_MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 
 export type { WebSearchBackendResult };
 
@@ -327,6 +330,7 @@ export const runWebSearchBackendRequest = async (
   request: WebSearchBackendRequest,
   env: NodeJS.ProcessEnv = process.env
 ): Promise<WebSearchBackendOutcome> => {
+  if (request.signal?.aborted) return { ok: false, failure: "backend_timeout" };
   if (webSearchFakeBackendEnabled(env)) {
     const bounded = boundSearchResults(fakeWebSearchResults(request.query));
     return { ok: true, results: bounded.results, truncated: bounded.truncated };
@@ -365,9 +369,8 @@ export const runWebSearchBackendRequest = async (
   const abortFromCaller = () => controller.abort();
   request.signal?.addEventListener("abort", abortFromCaller, { once: true });
 
-  let response: Response;
   try {
-    response = await fetch(url, {
+    const response = await fetch(url, {
       method: "GET",
       headers: {
         Accept: "application/json",
@@ -377,6 +380,27 @@ export const runWebSearchBackendRequest = async (
       signal: controller.signal,
       cache: "no-store",
     });
+    let bytes: Buffer;
+    try {
+      bytes = await readResponseToBuffer(response, WEB_SEARCH_MAX_RESPONSE_BYTES, controller.signal);
+    } catch {
+      return { ok: false, failure: controller.signal.aborted
+        ? "backend_timeout"
+        : !response.ok ? failureForStatus(response.status) : "backend_invalid_response" };
+    }
+    if (!response.ok) return { ok: false, failure: failureForStatus(response.status) };
+    let body: unknown;
+    try { body = JSON.parse(bytes.toString("utf8")); }
+    catch { return { ok: false, failure: "backend_invalid_response" }; }
+
+    const extraSnippets = request.extraSnippets === true ? new Map<WebSearchBackendResult, unknown[]>() : undefined;
+    const parsed = parseBraveWebSearchBody(body, extraSnippets);
+    if (parsed === null) return { ok: false, failure: "backend_invalid_response" };
+    const bounded = boundSearchResults(parsed, extraSnippets);
+    const enriched = extraSnippets && bounded.results.some((result, i) => result !== parsed[i]);
+    return { ok: true, ...bounded,
+      ...(enriched ? { descriptionOnlyResults: parsed.slice(0, bounded.results.length) } : {}),
+    };
   } catch {
     // Deliberately not the caught error. A fetch rejection can carry the
     // request headers on some runtimes, and this value goes into a tool result
@@ -387,28 +411,4 @@ export const runWebSearchBackendRequest = async (
     request.signal?.removeEventListener("abort", abortFromCaller);
   }
 
-  if (!response.ok) {
-    // Drained and dropped. The vendor's error prose must not reach the model
-    // or the user; the status is enough to act on.
-    await response.text().catch(() => "");
-    return { ok: false, failure: failureForStatus(response.status) };
-  }
-
-  let body: unknown;
-  try {
-    body = await response.json();
-  } catch {
-    return { ok: false, failure: "backend_invalid_response" };
-  }
-
-  const extraSnippets = request.extraSnippets === true ? new Map<WebSearchBackendResult, unknown[]>() : undefined;
-  const parsed = parseBraveWebSearchBody(body, extraSnippets);
-  if (parsed === null) return { ok: false, failure: "backend_invalid_response" };
-  const bounded = boundSearchResults(parsed, extraSnippets);
-  // boundSearchResults clones only entries it enriched. Original entries
-  // cover the same retained prefix, including sources without a description.
-  const enriched = extraSnippets && bounded.results.some((result, i) => result !== parsed[i]);
-  return { ok: true, ...bounded,
-    ...(enriched ? { descriptionOnlyResults: parsed.slice(0, bounded.results.length) } : {}),
-  };
 };

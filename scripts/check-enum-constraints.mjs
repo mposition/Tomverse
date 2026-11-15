@@ -263,6 +263,27 @@ const REGISTRY = {
     reason:
       "A deliberately coarse public-safe failure vocabulary. It prevents provider messages, exception text, credentials or request fragments from entering durable recovery state and later leaving through GET or account export.",
   },
+  ResearchPreviewRun_status_check: {
+    owner: "list",
+    module: "lib/researchPreviewRunTypes.ts",
+    list: "RESEARCH_PREVIEW_RUN_STATUSES",
+    reason:
+      "The durable Research Preview lifecycle. Unknown dispatches are terminal attention states and only completed safe checkpoints may resume, so database and worker branches must share one list.",
+  },
+  ResearchPreviewRun_stop_reason_check: {
+    owner: "list",
+    module: "lib/researchPreviewRunTypes.ts",
+    list: "RESEARCH_PREVIEW_RUN_STOP_REASONS",
+    reason:
+      "Public-safe terminal classifications only. Raw provider or tool errors never enter the durable row or its account export.",
+  },
+  ResearchPreviewGeneration_status_check: {
+    owner: "list",
+    module: "lib/researchPreviewRunTypes.ts",
+    list: "RESEARCH_PREVIEW_GENERATION_STATUSES",
+    reason:
+      "The provider dispatch boundary depends on intent, dispatch_started and outcome_unknown remaining exact; drift could permit an unsafe retry or lose already-spent provider cost.",
+  },
   PromptRefinerShadowRun_status_check: {
     owner: "list",
     module: "lib/promptRefinerShadowRunContract.ts",

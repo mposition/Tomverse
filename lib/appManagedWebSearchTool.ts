@@ -45,6 +45,7 @@ import {
 import {
   createAppManagedSearchSession,
   type AppManagedSearchSession,
+  type AppManagedSearchSnapshot,
 } from "@/lib/appManagedWebSearchCore";
 import { utcDateString } from "@/lib/chatCurrentDatePrompt";
 import {
@@ -241,6 +242,7 @@ export type AppManagedWebSearchToolConfig = {
   serializeOriginalDescriptions?: (result: AppManagedSearchToolResult | AppManagedSearchBatchResult) => string | undefined;
   /** The counter and collected sources. Read after the turn settles. */
   session: AppManagedSearchSession;
+  successfulCacheSnapshot?: () => Promise<Array<{ key: string; result: AppManagedSearchToolResult }>>;
 };
 
 /**
@@ -254,6 +256,9 @@ export const buildAppManagedWebSearchTool = (input: {
   backend: WebSearchBackend;
   /** The ceiling from the capability the reservation was sized on. */
   maxQueries: number;
+  initialSnapshot?: AppManagedSearchSnapshot;
+  /** Successful, completed tool results only; pending calls are never replayed. */
+  initialSuccessfulCache?: readonly { key: string; result: AppManagedSearchToolResult }[];
   /** Aborts an in-flight backend request when the turn ends. */
   signal?: AbortSignal;
   /**
@@ -264,6 +269,12 @@ export const buildAppManagedWebSearchTool = (input: {
   defaultSearchLang?: string;
   /** Owned by the server; the model cannot change it for a tool call. */
   extraSnippets?: boolean;
+  /** Refuse a new backend dispatch after a terminal Research report wins. */
+  canDispatch?: () => boolean;
+  /** Project the bounded result before it is returned to the model. */
+  transformResult?: (
+    result: AppManagedSearchToolResult | AppManagedSearchBatchResult
+  ) => AppManagedSearchToolResult | AppManagedSearchBatchResult;
   /** Structured observation. Never given the query text. */
   onOutcome?: (event: {
     status: AppManagedSearchToolResult["status"];
@@ -279,10 +290,15 @@ export const buildAppManagedWebSearchTool = (input: {
   const session = createAppManagedSearchSession({
     backend: input.backend,
     maxQueries: input.maxQueries,
+    initialSnapshot: input.initialSnapshot,
   });
   // Attempt-local single flight: identical concurrent calls share one backend
   // request and one settlement. Only successful results remain reusable.
   const requests = new Map<string, Promise<AppManagedSearchToolResult>>();
+  for (const entry of input.initialSuccessfulCache ?? []) {
+    if (entry.result.status !== "ok" || requests.size >= input.maxQueries) throw new Error("Invalid Research query cache");
+    requests.set(entry.key, Promise.resolve(entry.result));
+  }
   const originalResults = input.extraSnippets === true
     ? new WeakMap<WebSearchBackendResult[], WebSearchBackendResult[]>() : undefined;
   let toolCallIndex = 0;
@@ -309,6 +325,14 @@ export const buildAppManagedWebSearchTool = (input: {
       return result;
     };
 
+    if (input.canDispatch && !input.canDispatch()) {
+      const refused: AppManagedSearchToolResult = {
+        status: "failed",
+        reason: "terminal_report_accepted",
+        searchesRemaining: session.remaining(),
+      };
+      return input.transformResult?.(refused) ?? refused;
+    }
     if (Array.isArray(raw?.query) && (batchSize === 0 || batchSize > APP_MANAGED_SEARCH_LIMITS.maxQueriesPerRequest)) {
       session.recordRefusal("invalid_query");
       return report({ status: "invalid_query", reason: "invalid_batch_size", searchesRemaining: session.remaining() }, 0);
@@ -405,15 +429,19 @@ export const buildAppManagedWebSearchTool = (input: {
         throw error;
       }
     };
-    if (!Array.isArray(raw?.query)) return runQuery(raw?.query);
+    if (!Array.isArray(raw?.query)) {
+      const result = await runQuery(raw?.query);
+      return input.transformResult?.(result) ?? result;
+    }
     // Claims happen synchronously before the first await, across this
     // batch AND other concurrent calls. The existing attempt cap applies.
     const searches = await Promise.all(raw.query.map(runQuery));
-    return {
+    const result: AppManagedSearchBatchResult = {
       status: "batch",
       searchesRemaining: session.remaining(),
       searches: searches.map(result => ({ ...result, searchesRemaining: session.remaining() })),
     };
+    return input.transformResult?.(result) ?? result;
   };
   // Only the presearch sizer can ask for this view. SDK tool output and the
   // request cache continue to carry the enriched results and no metadata.
@@ -428,7 +456,12 @@ export const buildAppManagedWebSearchTool = (input: {
     const projection = result.status === "batch" ? { ...result, searches: result.searches.map(restore) } : restore(result);
     return changed ? JSON.stringify(projection) : undefined;
   } : undefined;
-  return { session, search, ...(serializeOriginalDescriptions ? { serializeOriginalDescriptions } : {}), tools: {
+  return { session, search,
+    successfulCacheSnapshot: async () => {
+      const entries = await Promise.all([...requests].map(async ([key, pending]) => ({ key, result: await pending })));
+      return entries.filter((entry) => entry.result.status === "ok");
+    },
+    ...(serializeOriginalDescriptions ? { serializeOriginalDescriptions } : {}), tools: {
     [APP_MANAGED_WEB_SEARCH_TOOL_NAME]: tool({
       description: SEARCH_TOOL_DESCRIPTION,
       inputSchema: searchToolInputSchema,

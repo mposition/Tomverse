@@ -66,6 +66,16 @@ export const SHARED_STRING_ALLOWLIST = [
       "Deep Research is the feature's name, used untranslated in the UI and in the model catalogue.",
   },
   {
+    key: "chat.researchPreviewTitle",
+    locales: "all",
+    reason: "Research Preview is the feature's name, shared across the start control, saved-run status and report heading.",
+  },
+  {
+    key: "chat.researchReportTitle",
+    locales: "all",
+    reason: "Same Research Preview feature name as chat.researchPreviewTitle; report details and status text are translated.",
+  },
+  {
     key: "chat.toolsAssistantRevision",
     locales: ["de"],
     reason:

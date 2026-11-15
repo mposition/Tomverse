@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { AVAILABLE_MODELS, DEFAULT_MODEL_ID } from "../lib/models.ts";
 import { benchmarkDigest, parseDevelopmentCorpus } from "../lib/routerDevelopmentBenchmark.ts";
 import { buildDevelopmentPlan } from "../lib/routerDevelopmentBenchmarkPlan.ts";
-import { buildCollectionManifest } from "../lib/routerDevelopmentCollector.ts";
+import { buildCollectionManifest, isCollectionProviderSupported } from "../lib/routerDevelopmentCollector.ts";
 
 export const corpusText = readFileSync(new URL("../docs/ops/router-development-benchmark/development-v1.json", import.meta.url), "utf8");
 export const corpus = parseDevelopmentCorpus(corpusText);
@@ -25,7 +25,7 @@ export function savedReplayRow(plan, rowId, overrides = {}) {
 
 export function makeReplayFixture({ source = fixtureSource, collectorSource = source, allCases = false, models = AVAILABLE_MODELS } = {}) {
   const plan = buildDevelopmentPlan({ corpus, models, source, plan: "Pro", requestedModelId: DEFAULT_MODEL_ID, createdAt: "2026-09-10T00:00:00.000Z" });
-  const selected = plan.rows.filter((row) => row.benchmarkEligibility.eligible && (allCases || observedCaseIds.includes(row.caseId)));
+  const selected = plan.rows.filter((row) => row.benchmarkEligibility.eligible && isCollectionProviderSupported(row.provider) && (allCases || observedCaseIds.includes(row.caseId)));
   const manifest = buildCollectionManifest({
     plan, models, collectorSource, selectedRowIds: selected.map((row) => row.rowId),
     limits: { maxTotalMicroUsd: 900_000_000_000, maxRequestMicroUsd: 900_000_000_000, maxCalls: 1008, requestTimeoutMs: 60000, runTimeoutMs: 60000, expiresAt: "2026-09-11T00:00:00.000Z" },

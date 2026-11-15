@@ -3,6 +3,7 @@ import { resolveModelPricing } from "@/lib/modelPricing";
 export type AiProvider =
     | "openai"
     | "anthropic"
+    | "cohere"
     | "google"
     | "groq"
     | "xai"
@@ -233,6 +234,11 @@ export const AVAILABLE_MODELS = [
     // the app's own input ceiling is 128K (lib/chatSecurity.ts), so this only
     // ever guards the combined input+output check.
     { id: "gpt-5-4-mini", name: "GPT-5.4 mini", apiModel: "gpt-5.4-mini", provider: "openai", icon: "🤖", bestFor: "Fast everyday questions and concise document work", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled", contextWindowTokens: 400_000, inputCapabilities: FULL_BINARY_INPUT },
+
+    // Cohere hosts Command A+ at its fixed public v2 endpoint without token
+    // charges for trial and production keys until the documented rate limit.
+    // This exact model/host contract does not apply to private deployments.
+    { id: "command-a-plus", name: "Command A+", apiModel: "command-a-plus-05-2026", provider: "cohere", icon: "C", bestFor: "Long-form enterprise analysis and tool-assisted work", minimumPlan: "Free", usageClass: "advanced", creditWeight: 1, publiclyListed: true, enabled: true, status: "enabled", reasoning: "none", contextWindowTokens: 128_000, inputCapabilities: { image: false, nativePdf: false }, webSearchOverride: "app-managed", maxOutputTokens: 64_000, reservationOutputTokens: 4_096 },
 
     { id: "claude-fable-5", name: "Claude Fable 5", apiModel: "claude-fable-5", provider: "anthropic", icon: "🧠", bestFor: "Polished writing, planning, and long-form analysis", minimumPlan: "Pro", usageClass: "premium-reasoning", creditWeight: 20, enabled: true, status: "enabled", reasoning: "high", contextWindowTokens: 1_000_000, inputCapabilities: FULL_BINARY_INPUT },
     // Stable Tomverse ID upgraded in place. Stored conversations and historic

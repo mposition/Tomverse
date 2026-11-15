@@ -127,12 +127,7 @@ test("sources are de-duplicated and bounded", () => {
 // branch.
 // ---------------------------------------------------------------------------
 
-const braveResponse = (results) => ({
-  ok: true,
-  status: 200,
-  json: async () => ({ web: { results } }),
-  text: async () => "",
-});
+const braveResponse = (results) => Response.json({ web: { results } });
 
 let fetchCalls;
 let originalFetch;
@@ -288,7 +283,7 @@ test("batch failures and invalid queries preserve successful evidence and allow 
     const query = new URL(url).searchParams.get("q");
     if (query === "retry" && !failed) {
       failed = true;
-      return { ok: false, status: 429, text: async () => "" };
+      return new Response("", { status: 429 });
     }
     return braveResponse([{ title: query, url: `https://example.com/${query}` }]);
   };
@@ -378,7 +373,7 @@ test("different search hints stay distinct and cached evidence survives the requ
 test("failed searches can be retried and never consume more than the attempt ceiling", async () => {
   globalThis.fetch = async () => {
     fetchCalls.push({});
-    return { ok: false, status: 429, text: async () => "" };
+    return new Response("", { status: 429 });
   };
   const config = toolFor();
   for (let i = 0; i < 5; i++) assert.equal((await run(config, { query: "retry" })).status, "failed");
@@ -436,7 +431,7 @@ test("an unusable query costs nothing from the turn's allowance", async () => {
 test("a backend failure is reported to the model, not thrown", async () => {
   globalThis.fetch = async () => {
     fetchCalls.push({});
-    return { ok: false, status: 429, text: async () => "slow down" };
+    return new Response("slow down", { status: 429 });
   };
   const config = toolFor();
   const result = await run(config, { query: "current price" });
@@ -611,14 +606,7 @@ test("an oversized or malformed response never becomes an unbounded payload", as
 });
 
 test("a body that is not JSON is an invalid response, not a crash", async () => {
-  globalThis.fetch = async () => ({
-    ok: true,
-    status: 200,
-    json: async () => {
-      throw new SyntaxError("Unexpected token < in JSON");
-    },
-    text: async () => "<html>",
-  });
+  globalThis.fetch = async () => new Response("<html>");
   const config = toolFor();
   const result = await run(config, { query: "a question" });
   assert.equal(result.status, "failed");

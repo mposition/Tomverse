@@ -17,16 +17,17 @@ const at = "2026-09-10T00:00:00.000Z";
 const now = () => Date.parse(at);
 const source = { commit: "a".repeat(40), dirty: false, files: { "synthetic-test": "b".repeat(64) } };
 const plan = buildDevelopmentPlan({ corpus, models: AVAILABLE_MODELS, source, createdAt: at, plan: "Pro", requestedModelId: DEFAULT_MODEL_ID });
-const eligible = plan.rows.filter((row) => row.benchmarkEligibility.eligible);
+const staticallyEligibleCount = plan.rows.filter((row) => row.benchmarkEligibility.eligible).length;
+const eligible = plan.rows.filter((row) => row.benchmarkEligibility.eligible && isCollectionProviderSupported(row.provider));
 const limits = { maxTotalMicroUsd: 1_000_000_000, maxRequestMicroUsd: 1_000_000_000, maxCalls: 1008, requestTimeoutMs: 1000, runTimeoutMs: 60000, expiresAt: "2026-09-10T01:00:00.000Z" };
 const manifestFor = (rows, overrides = {}) => buildCollectionManifest({ plan, models: AVAILABLE_MODELS, collectorSource: source, selectedRowIds: rows.map((row) => row.rowId), limits: { ...limits, ...overrides } });
 const approvalFor = (manifest, approvalId) => ({ schemaVersion: COLLECTION_VERSION, status: "approved", approvalId, manifestDigest: manifest.manifestDigest, approvedBy: "SYNTHETIC TEST; NOT HUMAN AUTHORIZATION", approvedAt: at, expiresAt: manifest.limits.expiresAt, acknowledgements: [...COLLECTION_ASSUMPTIONS] });
 
-test("full 42x24 manifest stays within existing JSON byte and node limits", () => {
+test("full supported-provider manifest retains the complete catalogue within existing JSON byte and node limits", () => {
   const manifest = manifestFor(eligible, { maxTotalMicroUsd: 1_000_000_000_000, maxRequestMicroUsd: 1_000_000_000_000 });
   const text = canonicalBenchmarkJson(manifest);
   assert.ok(Buffer.byteLength(text) < 16_777_216);
-  assert.equal(manifest.plan.rows.length, 1080);
+  assert.equal(manifest.plan.rows.length, corpus.cases.length * AVAILABLE_MODELS.length);
   assert.equal(manifest.calls.length, 432);
   assert.equal(manifest.plan.summary.refusedRows, 648);
   assert.equal(manifest.status, "proposal");
@@ -38,15 +39,18 @@ test("full 42x24 manifest stays within existing JSON byte and node limits", () =
 
 test("a new catalogue context window cannot silently admit an unparsed provider family", () => {
   assert.deepEqual(COLLECTION_SUPPORTED_PROVIDERS, ["openai", "deepseek", "xai", "mistral", "moonshot", "anthropic", "minimax", "google"]);
-  for (const provider of ["qwen", "groq", "zhipu", "perplexity", "OpenAI", "openai ", "unknown", ""]) assert.equal(isCollectionProviderSupported(provider), false);
+  for (const provider of ["cohere", "qwen", "groq", "zhipu", "perplexity", "OpenAI", "openai ", "unknown", ""]) assert.equal(isCollectionProviderSupported(provider), false);
   // Only this in-memory fixture gains a context window; the real catalogue and plan remain unchanged.
   const models = AVAILABLE_MODELS.map((model) => model.id === "qwen3.7-max" ? { ...model, contextWindowTokens: 1_000_000 } : model);
   const futurePlan = buildDevelopmentPlan({ corpus, models, source, createdAt: at, plan: "Pro", requestedModelId: DEFAULT_MODEL_ID });
   const selected = futurePlan.rows.find((row) => row.modelId === "qwen3.7-max" && row.benchmarkEligibility.eligible);
   assert.ok(selected, "the fixture must pass the original static benchmark admission");
-  assert.equal(futurePlan.rows.length, 1080);
+  assert.equal(futurePlan.rows.length, corpus.cases.length * AVAILABLE_MODELS.length);
   assert.throws(() => buildCollectionManifest({ plan: futurePlan, models, collectorSource: source, selectedRowIds: [selected.rowId], limits }), /collector_provider_family_unsupported/);
-  assert.equal(plan.rows.filter((row) => row.benchmarkEligibility.eligible).length, 432);
+  const cohereRows = plan.rows.filter((row) => row.provider === "cohere" && row.benchmarkEligibility.eligible);
+  assert.equal(cohereRows.length, corpus.cases.length);
+  assert.throws(() => manifestFor(cohereRows.slice(0, 1)), /collector_provider_family_unsupported/);
+  assert.equal(eligible.length, 432);
   assert.equal(plan.rows.filter((row) => !row.benchmarkEligibility.eligible).length, 648);
 });
 
@@ -62,8 +66,8 @@ test("unavailable unsupported-provider observations remain held and block resume
   assert.equal(report.stopReason, "measurement_or_execution_unknown");
   assert.equal(report.terminalRecords, 1);
   assert.equal(report.committedReservationMicroUsd, manifest.calls[0].reserve.reservedMicroUsd);
-  assert.equal(report.rows.length, 1080);
-  assert.equal(report.rows.filter((row) => row.outcome === "not_run").length, 431);
+  assert.equal(report.rows.length, corpus.cases.length * AVAILABLE_MODELS.length);
+  assert.equal(report.rows.filter((row) => row.outcome === "not_run").length, staticallyEligibleCount - 1);
   await collectDevelopment(input);
   assert.equal(calls, 1);
   await assert.rejects(exportDevelopmentCollection(input), /collector_export_uncertain_or_unsupported/);
@@ -81,12 +85,12 @@ test("permanent reservations stop a selected population explicitly and completed
   assert.equal(report.dispatchIntents, 1);
   assert.equal(report.terminalRecords, 1);
   assert.equal(report.actualInvoiceMicroUsd, null);
-  assert.equal(report.rows.length, 1080);
-  assert.equal(report.rows.filter((row) => row.outcome === "not_run").length, 431);
+  assert.equal(report.rows.length, corpus.cases.length * AVAILABLE_MODELS.length);
+  assert.equal(report.rows.filter((row) => row.outcome === "not_run").length, staticallyEligibleCount - 1);
   assert.equal(report.rows.filter((row) => row.selected).length, 2);
   assert.equal(report.rows.filter((row) => row.selected && row.outcome === "returned").length, 1);
   assert.equal(report.rows.filter((row) => row.selected && row.outcome === "not_run").length, 1);
-  assert.equal(report.rows.filter((row) => !row.selected && row.outcome === "not_run").length, 430);
+  assert.equal(report.rows.filter((row) => !row.selected && row.outcome === "not_run").length, staticallyEligibleCount - 2);
   assert.equal(report.rows.filter((row) => row.outcome === "refused").length, 648);
   assert.ok(report.rows.filter((row) => row.outcome === "refused").every((row) => row.selected === false));
   assert.ok(report.rows.every((row) => typeof row.selected === "boolean"));
@@ -99,7 +103,7 @@ test("permanent reservations stop a selected population explicitly and completed
   const results = await exportDevelopmentCollection(input);
   assert.equal(results.rows[0].metrics.providerCostUsd, null);
   const score = scoreDevelopmentResults(corpus, plan, results);
-  assert.equal(score.summary.notRun, 431);
+  assert.equal(score.summary.notRun, staticallyEligibleCount - 1);
   assert.equal(score.summary.correctnessRate, null);
 });
 
@@ -113,7 +117,7 @@ test("confirmed blank and invalid JSON answers remain returned records for the f
   assert.equal(score.summary.blank, 1);
   assert.equal(score.summary.invalidJson, 1);
   assert.equal(score.summary.submitted, 2);
-  assert.equal(score.summary.notRun, 430);
+  assert.equal(score.summary.notRun, staticallyEligibleCount - 2);
 });
 
 test("unsupported billing on any terminal stops later rows and resume and refuses the whole export", async () => {
@@ -129,7 +133,7 @@ test("unsupported billing on any terminal stops later rows and resume and refuse
   const report = await collectDevelopment(input);
   assert.equal(report.stopReason, "measurement_or_execution_unknown");
   assert.equal(calls, 1);
-  assert.equal(report.rows.filter((row) => row.outcome === "not_run").length, 431);
+  assert.equal(report.rows.filter((row) => row.outcome === "not_run").length, staticallyEligibleCount - 1);
   await collectDevelopment(input);
   assert.equal(calls, 1);
   await assert.rejects(exportDevelopmentCollection(input), /collector_export_uncertain_or_unsupported/);
@@ -156,8 +160,8 @@ for (const [name, counters] of [
   assert.equal(report.terminalRecords, 1);
   assert.equal(report.committedReservationMicroUsd, first.reserve.reservedMicroUsd);
   assert.equal(report.actualInvoiceMicroUsd, null);
-  assert.equal(report.rows.length, 1080);
-  assert.equal(report.rows.filter((row) => row.outcome === "not_run").length, 431);
+  assert.equal(report.rows.length, corpus.cases.length * AVAILABLE_MODELS.length);
+  assert.equal(report.rows.filter((row) => row.outcome === "not_run").length, staticallyEligibleCount - 1);
   const state = replayCollectionJournal(readFileSync(collectorPaths(temporary, approval.approvalId).ledger, "utf8"), manifest, approval);
   const terminal = state.attempts.get(first.rowId).terminal;
   assert.equal(terminal.tokenUsageAtFrozenRatesMicroUsd, null);

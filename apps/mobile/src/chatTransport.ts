@@ -1,5 +1,6 @@
 export type ChatMessage = {
   continuationReceipt?: import("../../../lib/continuationReceipt").ContinuationReceipt;
+  researchRunId?: string | null;
   id: string;
   role: "user" | "assistant";
   content: string;
@@ -9,7 +10,7 @@ export type ChatMessage = {
   status?: string;
   pendingJobId?: string | null;
   artifacts?: import("../../../lib/generatedArtifactCore").ChatStreamArtifact[];
-  searchMetadata?: { citations: Array<{ url: string; title?: string }> };
+  searchMetadata?: { citations: Array<{ url: string; title?: string }> } | null;
   attachments?: import("../../../components/chat/types").ChatAttachment[];
   imageTurn?: { groupId: string; modelIds: string[] };
 };
@@ -45,7 +46,7 @@ export type MobileImageGroup = {
   generations: Array<{ generationId: string; status: string; prompt: string; quality?: string; preset?: string; assets: Array<{ role: string; url: string; urlExpiresAt?: string }> }>;
 };
 export type MobileImageModel = { id: string; name: string; provider: string; pricingVersion: string; prices: Array<{ quality: "low" | "medium" | "high"; size: "1024x1024" | "1536x1024" | "1024x1536"; credits: number }> };
-export type MobileCapabilities = { generatedFileRevisions?: boolean; workspace?: import("./iosWorkspaceContract").WorkspaceFeatures; historyFeatures?: { sharing: boolean; downloads: boolean }; historyActions?: boolean; conversationTitles?: boolean; accountUsage?: boolean; chatImageTurns?: boolean; chatImageEdits?: boolean; reviewEasy: boolean; maxModels: number; assistants: boolean; images?: { enabled: boolean; maxModels: number; models: MobileImageModel[] }; plan: import("../../../lib/models").ModelTier | "Guest" };
+export type MobileCapabilities = { researchPreview?: { enabled: boolean; pageReading: boolean; durableRuns: boolean }; generatedFileRevisions?: boolean; workspace?: import("./iosWorkspaceContract").WorkspaceFeatures; historyFeatures?: { sharing: boolean; downloads: boolean }; historyActions?: boolean; conversationTitles?: boolean; accountUsage?: boolean; chatImageTurns?: boolean; chatImageEdits?: boolean; reviewEasy: boolean; maxModels: number; assistants: boolean; images?: { enabled: boolean; maxModels: number; models: MobileImageModel[] }; plan: import("../../../lib/models").ModelTier | "Guest" };
 export type AccountUsage = { plan: string; usage: { creditsMonth: number }; limits: { creditsMonth: number } };
 export type UserPreferences = { reviewEasyEffectiveProviders?: string[]; reviewEasyProviderOptions?: string[]; reviewEasyMaxProviders?: number; theme: "system" | "light" | "dark"; language: string; defaultModel: string; timeZone: string; timeZoneChangeAllowedAt?: string | null; imageHandoffAutoGenerate: boolean };
 export type MemoryPreferences = { masterEnabled: boolean; styleEnabled: boolean; defaultConversationMode: "on" | "off" };
@@ -77,6 +78,10 @@ export type ContinuationTurnContext = {
 export type PreparedArtifactRevision = MobileAttachment & { revisionMode?: "workbook" | "workbook-values" };
 export type MobileModel = { id: string; name: string; provider: string; minimumPlan: import("../../../lib/models").AiModel["minimumPlan"] };
 export interface ChatTransport {
+  researchPreviewOffer?(input: import("../../../components/chat/useResearchPreview").ResearchPreviewOfferInput, signal?: AbortSignal, locale?: string): Promise<unknown>;
+  researchRuns?: import("../../../lib/researchPreviewRunClient").ResearchPreviewRunTransport;
+  sendResearchPreview?(conversation: Conversation, text: string, files: MobileAttachment[], signal: AbortSignal, progress: (text: string) => void, options: { durable: boolean; locale: string }): Promise<void>;
+
   workspace?: import("./iosWorkspaceContract").WorkspaceTransport;
   location?: ReturnType<typeof import("@tomverse/chat-core").createChatLocationSession>;
   history?: HistoryTransport;
