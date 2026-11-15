@@ -81,6 +81,27 @@ each `/var/lib/tomverse-amux-v22-<worker>/cli` in `ReadWritePaths`. A refused
 login leaves the current copy unchanged and the unit fails; check it with
 `journalctl -u tomverse-amux-v22-auth-stage.service`.
 
+The operator's Claude login refreshes only when the operator's own Claude CLI
+is used near the access token's expiry, and its refresh token also expires
+(`refreshTokenExpiresAt`). On 2026-11-15 nobody had used it on the box: the
+refresh token ran out at 04:05Z, the CLI cleared the login at 05:10Z, and every
+Claude worker and the anthropic Decision Maker stopped. The operator user's
+`amux-v22-claude-login-keepalive.timer` (user unit, every 5 min,
+`scripts/amux-v22-claude-login-keepalive.mjs`, units and `.env.example` in
+`scripts/systemd/`) closes that gap: when the access token has 10 min or less
+left it runs `claude auth status`, then if that did not refresh it a one-line
+`claude -p` on Haiku, and on a refresh restages the Claude copies at once. It
+reads only `expiresAt`/`refreshTokenExpiresAt` and never prints a token. A
+cleared login logs `login_required` and fails the unit; that one still needs
+the operator's `claude auth login` as the operator user. Install as that user
+(no sudo): copy `scripts/amux-v22-claude-login-keepalive.mjs` under the same
+name to `~/.local/lib/tomverse-amux-v22/`, the `.service` and `.timer` to
+`~/.config/systemd/user/`, and the `.env.example` as
+`~/.config/tomverse-amux-v22/claude-login-keepalive.env` (mode 0600), then
+`systemctl --user daemon-reload && systemctl --user enable --now
+amux-v22-claude-login-keepalive.timer`; read it with
+`journalctl --user -u amux-v22-claude-login-keepalive.service`.
+
 Cursor (`cursor:<worker>`, from `~/.config/cursor/auth.json` to
 `<worker>/cli/cursor/auth.json`, added 2026-11-10) keeps the access token and
 the v19 channel's fixed refresh placeholder, and is staged only with at least
