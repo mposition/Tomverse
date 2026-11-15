@@ -126,6 +126,7 @@ export async function runResearchEvaluationCli(args, seams = {}) {
           if (measuredCostMicroUsd === null || measuredCostMicroUsd > entry.reservedMicroUsd) throw new Error("Evaluation cost is unknown or exceeds its authorization");
           measuredTotalMicroUsd += measuredCostMicroUsd;
           record({ kind: "terminal", runKey: entry.runKey, modelId: entry.modelId, caseId: entry.id, stopReason: checkpoint.stopReason,
+            reportRejection: result.reportRejection ?? null,
             outcome: result.report?.outcome ?? null, citedSources: (result.report?.citedSources ?? []).map(source => ({
               sourceId: source.sourceId, url: source.url, ...(source.pageRead ? { pageRead: curateResearchPageEvidence(source.pageRead) } : {}) })),
             content: result.report?.content ?? null, latencyMs: now() - startedAt, usage: checkpoint.usage, measuredCostMicroUsd, qualityVerdict: "manual_review_pending" });

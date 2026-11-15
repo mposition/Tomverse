@@ -144,5 +144,5 @@ export async function runResearchPreviewStep(input: {
   const next = parseResearchPreviewCheckpoint({ ...identity, completedSteps, messages: [...checkpoint.messages, ...responseMessages], sources: execution.registry.snapshot(),
     search: execution.session.snapshot(), successfulCache: await execution.successfulCacheSnapshot?.() ?? [], pageReads: await execution.pageReadsSnapshot(), usage: aggregateUsage,
     stopReason: finished ? report ? "report_submitted" : Number(aggregateUsage.outputTokens) >= input.totalOutputTokens ? "budget_exhausted" : execution.stopReason() : null });
-  return { checkpoint: next, report, usage, finished };
+  return { checkpoint: next, report, usage, finished, reportRejection: report ? null : execution.reportRejection() };
 }

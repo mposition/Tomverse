@@ -127,7 +127,10 @@ function fixture(t, { manifest: manifestInput, scenario = "success" } = {}) {
             pageReads: scenario === "pages" && completedSteps >= 2 ? [{ sourceId: "R1", url: "https://nodejs.org/en/about/previous-releases",
               status: "read", readAt: "2026-11-15T00:00:00Z", truncated: false, contentType: "text/plain", content: "RAW_PAGE_MUST_STAY_PRIVATE" }] : [],
             sources: [{ sourceId: "R1", url: "https://nodejs.org/en/about/previous-releases", snippet: "Official public runtime release schedule" }], stopReason: "completed" };
-          return { checkpoint, finished: completedSteps === 3 && scenario !== "no_terminal", report: { content: "Offline structured report" } };
+          if (scenario === "report_invalid") checkpoint.stopReason = "invalid_report";
+          return { checkpoint, finished: completedSteps === 3 && scenario !== "no_terminal",
+            report: scenario === "report_invalid" ? null : { content: "Offline structured report" },
+            reportRejection: scenario === "report_invalid" ? { code: "schema_invalid", issues: [{ code: "too_big", path: ["findings"] }] } : null };
         },
         rerank: async input => { await input.onBeforeDispatch(); counts.reranks++; return { model: "rerank-v5.0-fast", inputTokens: 100, measuredCostMicroUsd: 2,
           ranking: [{ sourceId: "R1", url: input.sources[0].url, relevanceScore: 0.9 }] }; },
@@ -213,6 +216,16 @@ test("the evaluation journal proves page-read outcomes without persisting origin
   assert.equal(checkpoint.pageReads[0].contentCharacters, "RAW_PAGE_MUST_STAY_PRIVATE".length);
   assert.equal(checkpoint.pageReads[0].contentDigest, researchEvaluationDigest("RAW_PAGE_MUST_STAY_PRIVATE"));
   assert.equal(readFileSync(f.journal, "utf8").includes("RAW_PAGE_MUST_STAY_PRIVATE"), false);
+});
+
+test("rejected terminal records the bounded validation reason without claiming an accepted report", async t => {
+  const f = fixture(t, { scenario: "report_invalid" });
+  await runResearchEvaluationCli(f.args, f.seams);
+  const terminal = f.events().find(event => event.kind === "terminal");
+  assert.equal(terminal.stopReason, "invalid_report");
+  assert.equal(terminal.content, null);
+  assert.equal(terminal.outcome, null);
+  assert.deepEqual(terminal.reportRejection, { code: "schema_invalid", issues: [{ code: "too_big", path: ["findings"] }] });
 });
 
 test("optional Cohere side experiment is one separate dispatch after six report generations", async t => {

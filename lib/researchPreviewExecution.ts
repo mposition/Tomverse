@@ -14,9 +14,11 @@ import type { WebSearchBackend } from "./webSearchBackends";
 import {
   createResearchEvidenceRegistry,
   researchPreviewReportSchema,
+  researchReportSchemaRejection,
   validateAndRenderResearchReport,
   type RenderedResearchPreviewReport,
   type ResearchEvidenceSource,
+  type ResearchReportRejection,
 } from "./researchPreviewReport";
 import {
   RESEARCH_PREVIEW_MAX_SEARCH_ATTEMPTS,
@@ -130,6 +132,7 @@ export function createResearchPreviewExecution(input: {
   const searchAbort = new AbortController();
   const searchSignal = AbortSignal.any([input.signal, searchAbort.signal]);
   let terminal: Extract<RenderedResearchPreviewReport, { ok: true }> | null = null;
+  let reportRejection: ResearchReportRejection | null = null;
   let allowedSourceIds: readonly string[] = [];
   let allowedEvidenceSources: readonly ResearchEvidenceSource[] = [];
   let currentStep = input.stepNumberOffset ?? 0;
@@ -167,6 +170,7 @@ export function createResearchPreviewExecution(input: {
         allowedSourceIds,
         locale: input.locale,
         allowedEvidenceSources,
+        onRejected: diagnostic => { reportRejection = diagnostic; },
       });
       if (!rendered.ok) {
         rejectedReportStopReason =
@@ -176,6 +180,7 @@ export function createResearchPreviewExecution(input: {
         return { status: "rejected" as const, reason: rendered.reason };
       }
       terminal = rendered;
+      reportRejection = null;
       searchAbort.abort(new DOMException("terminal report accepted", "AbortError"));
       return { status: "accepted" as const, outcome: rendered.outcome };
     },
@@ -207,17 +212,15 @@ export function createResearchPreviewExecution(input: {
     [RESEARCH_PREVIEW_REPORT_TOOL_NAME]: reportTool,
     ...(input.pageReadingEnabled ? { [RESEARCH_PREVIEW_READ_TOOL_NAME]: readTool } : {}),
   };
-  const invalidTerminalAttempted = (
-    steps: readonly StepResult<typeof tools>[]
-  ) => steps.some((step) =>
-    step.content.some((part) =>
-      part.type === "tool-error" &&
-      "toolName" in part &&
-      part.toolName === RESEARCH_PREVIEW_REPORT_TOOL_NAME
-    )
-  );
   const observeCompletedSteps = (steps: readonly StepResult<typeof tools>[]) => {
-    if (invalidTerminalAttempted(steps)) { rejectedReportStopReason = "invalid_report"; return true; }
+    for (const step of steps) for (const part of step.content) {
+      if (part.type !== "tool-error" || part.toolName !== RESEARCH_PREVIEW_REPORT_TOOL_NAME) continue;
+      let report: unknown = part.input;
+      if (typeof report === "string") { try { report = JSON.parse(report); } catch { /* Invalid JSON remains a schema failure. */ } }
+      reportRejection = researchReportSchemaRejection(report) ?? { code: "tool_execution_error" };
+      rejectedReportStopReason = "invalid_report";
+      return true;
+    }
     return terminal !== null;
   };
 
@@ -273,6 +276,7 @@ export function createResearchPreviewExecution(input: {
       ({ steps }: { steps: Array<StepResult<typeof tools>> }) => observeCompletedSteps(steps),
     ],
     finalReport: () => terminal,
+    reportRejection: () => reportRejection,
     stopReason: () =>
       terminal
         ? ("report_submitted" as const)

@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import {
   createResearchEvidenceRegistry,
   researchPreviewReportSchema,
+  researchReportSchemaRejection,
   validateAndRenderResearchReport,
 } from "../lib/researchPreviewReport.ts";
 
@@ -20,6 +21,24 @@ const report = (sourceIds = ["R1"], status = "complete") => ({
   findings: [{ heading: "Findings", statements: [{ text: "A source states this.", sourceIds, kind: "fact" }] }],
   contradictions: [], limitations: ["Only search excerpts were available."],
   nextQuestions: ["What changed since the source was published?"],
+});
+
+test("rejection diagnostics distinguish schema and unread page citations without retaining report text", () => {
+  const registry = createResearchEvidenceRegistry();
+  registry.addToolResult(batch());
+  const secret = "private-marker-must-not-be-logged";
+  const malformed = { ...report(), summary: secret, [secret]: secret };
+  const schemaDiagnostic = researchReportSchemaRejection(malformed);
+  assert.deepEqual(schemaDiagnostic, { code: "schema_invalid", issues: [{ code: "unrecognized_keys", path: [] }] });
+  assert.equal(JSON.stringify(schemaDiagnostic).includes(secret), false);
+  const pageReport = report();
+  pageReport.findings[0].statements[0].evidenceLevel = "page_text";
+  let diagnostic;
+  assert.deepEqual(validateAndRenderResearchReport({ report: pageReport, registry,
+    allowedSourceIds: registry.sourceIds(), onRejected: value => { diagnostic = value; } }),
+  { ok: false, reason: "invalid_report" });
+  assert.deepEqual(diagnostic, { code: "page_text_source_unread" });
+  assert.equal(researchReportSchemaRejection(report()), null);
 });
 
 test("stable registry covers all 25 model-visible sources and citations renumber the last ten", () => {

@@ -278,8 +278,55 @@ No fourth repair call or fabricated report was produced.
 Known frozen-rate costs for this round: accepted diagnostic responses
 US$0.026816 and the original-page case including search US$0.071328, subtotal
 US$0.098144. HTTP refusals without usage are not assigned zero. The known-usage
-subtotal across every round is US$0.143727, not a complete provider invoice.
+subtotal through this repair round is US$0.143727, not a complete provider invoice.
 The original unknown call remains unknown and all earlier journals are intact.
+
+### Argon final-report submission verified
+
+The owner authorized a further six generations and US$1.10 for at most two
+RFC 1149 investigations, with cumulative ceilings of 21 generations and
+US$12.50. The first investigation succeeded, so the second was not executed.
+Manifest `54cd962ee702abaf68bd4879082ee7aa7e7b97d79a8540c3d125d3fa6defe181`
+binds the unchanged strict server validation, explicit report cardinality and
+page-citation instructions, and the smaller 32,768-token request input ceiling.
+
+At 12:27:48–12:28:22 AEST on 2026-11-15, all three Google generation requests
+returned HTTP 200. Two Brave searches preceded the page reads. The official
+RFC 1149 HTML source R2 was read without truncation: 3,407 characters, with the
+same content digest as the earlier reader proof. R3's plain-text read remained
+unavailable with `unsupported_content`, and the model disclosed that failure.
+The final tool call passed the original Zod schema and immutable source-binding
+checks: `stopReason=report_submitted`, `outcome=complete`, nonempty server-rendered
+content (6,188 characters), four findings and five cited sources. All ten
+`page_text` statements cite successfully read prior-step evidence; unavailable
+R3 is used only at `search_snippets` level.
+
+The operator retained the public report tool input and curated source snapshot
+outside the repository, without raw page bodies, hidden reasoning, credentials
+or arbitrary provider errors. An offline replay of that exact input produced
+identical serialized report content, citations and cited sources. A separate
+reader-only check matched the original page digest, and manual reading supported
+the report's identity, publication date, stated purpose and operational limits.
+This is one successful case, not a provider quality ranking.
+
+The old rejected report was not retained, so its precise historical validation
+failure cannot be identified. The explicit report-limit/page-citation guidance
+was present in the successful run; this result does not prove which instruction
+caused the difference. Rejection diagnostics now distinguish schema locations,
+unread page citations, unknown sources, missing citations and rendering limits.
+SDK schema failures before tool execution are included. Only bounded codes and
+allowlisted schema paths reach the evaluation journal; server acceptance rules
+and paid-call limits are unchanged. Regression fixtures retain rejection of
+oversized reports and unsupported page-text claims, rather than accepting them
+to manufacture a successful result.
+
+The successful run used 7,714 input and 1,478 output tokens, zero reported
+reasoning tokens, two searches and 33.842 seconds. Frozen-rate known cost is
+US$0.070416 including search. Cumulative generation intents are 18 of the
+authorized 21; retaining all maximum reservations gives US$11.842260, below
+US$12.50. The cumulative known-usage subtotal is US$0.214143, not an invoice
+total; the original unknown request remains unknown. No second investigation
+or additional paid judge was run.
 
 ## Verification
 
@@ -297,6 +344,8 @@ unchanged UI and database suites were not rerun for the tool-choice correction.
 | Post-attempt evaluator diagnostics and existing offline evaluation guards | 15/15 passed |
 | Recovery Research/page/report/evaluation and Cohere focused regressions | 81/81 passed |
 | Argon maximum-hint repair, lower input reservation, private-page journal and focused regressions | 84/84 passed |
+| Final-report diagnostics, strict rejection, checkpoint and evaluator regressions | 52/52 passed |
+| Exact accepted Argon tool input replay and original-page digest match | Passed, no model/search calls |
 | Cohere adapter, protocol types and existing provider regressions | 71/71 passed |
 | Offer and Native authentication boundary tests | 36/36 passed |
 | Native transport regressions | 15/15 passed |

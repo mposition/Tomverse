@@ -110,9 +110,11 @@ test("same-step page text cannot support the terminal report before a subsequent
   const first = await step(model, { pageReadingEnabled: true, pageReader });
   const second = await step(model, { pageReadingEnabled: true, pageReader, checkpoint: first.checkpoint });
   assert.equal(second.report, null);
+  assert.deepEqual(second.reportRejection, { code: "page_text_source_unread" });
   assert.match(JSON.stringify(second.checkpoint.messages), /invalid_report/);
   const third = await step(model, { pageReadingEnabled: true, pageReader, checkpoint: second.checkpoint });
   assert.equal(third.report?.outcome, "partial");
+  assert.equal(third.reportRejection, null);
   assert.equal(model.doGenerateCalls.length, 3);
 });
 

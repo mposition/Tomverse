@@ -127,12 +127,35 @@ export type RenderedResearchPreviewReport = {
   outcome: ResearchPreviewReport["status"]; citedSources: ResearchEvidenceSource[];
 } | { ok: false; reason: "invalid_report" | "unknown_source" | "too_many_sources" | "insufficient_evidence" };
 
+export type ResearchReportRejection = {
+  code: "schema_invalid" | "evidence_snapshot_invalid" | "unknown_citation" | "too_many_citations" |
+    "page_text_source_unread" | "missing_citations" | "render_limit" | "tool_execution_error";
+  issues?: Array<{ code: string; path: Array<string | number> }>;
+};
+
+/** Diagnostics contain schema locations, never model text or validation messages. */
+export function researchReportSchemaRejection(report: unknown): ResearchReportRejection | null {
+  const parsed = researchPreviewReportSchema.safeParse(report);
+  if (parsed.success) return null;
+  const fields = new Set(["status", "summary", "findings", "heading", "statements", "text", "sourceIds",
+    "kind", "evidenceLevel", "contradictions", "limitations", "nextQuestions"]);
+  return { code: "schema_invalid", issues: parsed.error.issues.slice(0, 16).map(issue => ({
+    code: issue.code,
+    path: issue.path.slice(0, 8).map(part => typeof part === "number" ? part : fields.has(String(part)) ? String(part) : "?"),
+  })) };
+}
+
 export function validateAndRenderResearchReport(input: {
   report: unknown; registry: ResearchEvidenceRegistry; allowedSourceIds: readonly string[]; locale?: string;
   allowedEvidenceSources?: readonly ResearchEvidenceSource[];
+  onRejected?: (diagnostic: ResearchReportRejection) => void;
 }): RenderedResearchPreviewReport {
+  const reject = (reason: Extract<RenderedResearchPreviewReport, { ok: false }>["reason"], diagnostic: ResearchReportRejection): RenderedResearchPreviewReport => {
+    input.onRejected?.(diagnostic);
+    return { ok: false, reason };
+  };
   const parsed = researchPreviewReportSchema.safeParse(input.report);
-  if (!parsed.success) return { ok: false, reason: "invalid_report" };
+  if (!parsed.success) return reject("invalid_report", researchReportSchemaRejection(input.report)!);
   const report = parsed.data;
   const copy = researchPreviewCopy[languageFromTag(input.locale) ?? "en"];
   const currentSources = input.registry.snapshot();
@@ -143,25 +166,25 @@ export function validateAndRenderResearchReport(input: {
         return !researchEvidenceSourceSchema.safeParse(source).success || !actual ||
           source.url !== actual.url || source.title !== actual.title || source.snippet !== actual.snippet ||
           source.publishedAt !== actual.publishedAt || source.retrievedAt !== actual.retrievedAt;
-      })) return { ok: false, reason: "unknown_source" };
+      })) return reject("unknown_source", { code: "evidence_snapshot_invalid" });
   const sources = new Map(allowedSources.map((source) => [source.sourceId, source]));
   const allowed = new Set(input.allowedSourceIds);
   const citedIds = [...new Set([
     ...report.findings.flatMap((finding) => finding.statements.flatMap((statement) => statement.sourceIds)),
     ...report.contradictions.flatMap((contradiction) => contradiction.sourceIds),
   ])];
-  if (citedIds.some((id) => !allowed.has(id) || !sources.has(id))) return { ok: false, reason: "unknown_source" };
-  if (citedIds.length > 15) return { ok: false, reason: "too_many_sources" };
+  if (citedIds.some((id) => !allowed.has(id) || !sources.has(id))) return reject("unknown_source", { code: "unknown_citation" });
+  if (citedIds.length > 15) return reject("too_many_sources", { code: "too_many_citations" });
   if (report.findings.some((finding) => finding.statements.some((statement) =>
     statement.evidenceLevel === "page_text" && (!statement.sourceIds.length ||
       statement.sourceIds.some((id) => sources.get(id)?.pageRead?.status !== "read"))))) {
-    return { ok: false, reason: "invalid_report" };
+    return reject("invalid_report", { code: "page_text_source_unread" });
   }
   if (report.findings.some((finding) => finding.statements.some((statement) =>
       (statement.kind === "fact" || statement.kind === "inference") && !statement.sourceIds.length)) ||
       report.contradictions.some((contradiction) => !contradiction.sourceIds.length) ||
       (report.status !== "insufficient_evidence" && !citedIds.length)) {
-    return { ok: false, reason: "insufficient_evidence" };
+    return reject("insufficient_evidence", { code: "missing_citations" });
   }
   const citedSources = citedIds.map((id) => sources.get(id)!);
   const citations = sanitizeWebSearchCitations(citedSources.map((source, index) => ({
@@ -193,6 +216,6 @@ export function validateAndRenderResearchReport(input: {
   let content = citationStream.write(lines.join("\n")) + citationStream.finish();
   if (citations.length) content += `\n\n### ${copy.researchReportSources}\n\n` + citations.map((citation) =>
     `${citation.referenceNumber}. [${researchPlainText(citation.title || `Source ${citation.referenceNumber}`)}](<${citation.url.replaceAll("&", "&amp;")}>)`).join("\n");
-  if (content.length > 100_000) return { ok: false, reason: "invalid_report" };
+  if (content.length > 100_000) return reject("invalid_report", { code: "render_limit" });
   return { ok: true, content, citations, outcome: report.status, citedSources };
 }

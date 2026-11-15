@@ -59,6 +59,8 @@ test("Argon omits only report array maximum hints while original server bounds s
     assert.equal(schema.properties.summary.maxLength, 1600);
     assert.deepEqual(schema.required, Object.keys(researchPreviewReportSchema.shape));
     assert.ok(result.steps[0].content.some(part => part.type === "tool-error"));
+    execution.observeCompletedSteps(result.steps);
+    assert.deepEqual(execution.reportRejection(), { code: "schema_invalid", issues: [{ code: "too_big", path: ["findings"] }] });
     assert.equal(execution.finalReport(), null);
     assert.equal(researchPreviewReportSchema.safeParse(oversized).success, false);
     // Other tools and other Google models retain their own schema bounds.
