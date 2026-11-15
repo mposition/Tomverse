@@ -197,6 +197,7 @@ const drawer = document.getElementById("drawer");
 const out = document.getElementById("out");
 fetch("/api/products/chat/drafts/new").then((r) => r.json()).then(({ draft }) => { if (draft) box.value = draft.text; });
 box.oninput = () => fetch("/api/products/chat/drafts/new", { method: "PUT", body: box.value }).catch(() => {});
+box.onkeydown = (event) => { if (event.key === "Enter") { event.preventDefault(); document.querySelector('[data-testid="chat-send-button"]').click(); } };
 document.querySelector('[data-testid="mobile-sidebar-open"]').onclick = () => { drawer.hidden = false; };
 document.getElementById("row").onclick = () => { history.pushState(null, "", "/chat/c1"); box.value = ""; };
 document.querySelector('[data-testid="sidebar-new-chat"]').onclick = () => { history.pushState(null, "", "/chat"); drawer.hidden = true; box.value = ""; };
@@ -291,4 +292,19 @@ test("a step that matches nothing is recorded and the journey goes on", async (c
   assert.match(subject.signals, /Step 1 -- click "없는 버튼", but nothing visible matched it/);
   assert.match(subject.signals, /Step 2 -- press "Escape"/);
   assert.doesNotMatch(subject.signals, /Before step 0/);
+});
+
+test("Enter in the composer sends like the send button: counted, written and waited for", async (context) => {
+  if (!browser) return context.skip("no browser can start here");
+  seen.length = 0;
+  const subject = await walkJourney(
+    browser,
+    rules,
+    admitJourney({ ...journey, start: { text: "", attachments: [] }, steps: [{ action: "type", value: "엔터로 보내기" }, { action: "press", value: "Enter" }] }),
+    place(),
+  );
+  assert.match(subject.signals, /Step 2 -- press "Enter", which sent the message: [^]*1 answer\(s\)/);
+  assert.equal(seen.filter((request) => request.method === "POST" && request.pathname === "/api/chat").length, 1);
+  assert.doesNotMatch(subject.signals, /refused these writes/);
+  assert.equal(rules.allowWrite, null);
 });
