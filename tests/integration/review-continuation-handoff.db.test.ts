@@ -52,7 +52,7 @@ async function fixture() {
       conversationDigest: randomUUID(),
       digestVersion: 1,
       messageCount: 2,
-      contentBytes: 64n,
+      contentBytes: BigInt(64),
       finalized: true,
     },
   });
