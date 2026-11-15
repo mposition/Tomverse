@@ -1,6 +1,8 @@
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
+import { z } from "zod";
+import { loadReviewAnalysisReport, reviewReportSelectionSchema, ReviewReportSourceChanged } from "@/lib/reviewAnalysisReportServer";
 import { conversationKindNotSupportedResponse, isChatConversationKind } from "@/lib/conversationKindGuard";
 import { continuationShareRefusal } from "@/lib/continuationSharingPolicy";
 import { prisma } from "@/lib/prisma";
@@ -20,6 +22,7 @@ import {
 import {
   apiSecurityResponse,
   consumeApiRateLimit,
+  readLimitedJson,
 } from "@/lib/apiSecurity";
 import { logSecurityAuditEvent } from "@/lib/securityAudit";
 import {
@@ -96,7 +99,7 @@ export async function POST(
     where: { id: conversationId },
     select: {
       userId: true,
-      password: true,
+      password: true, passwordVersion: true,
       kind: true,
       shareToken: true,
       shareEnabled: true,
@@ -151,7 +154,7 @@ export async function POST(
       req,
       userId,
       conversationId,
-      accessConversation.password
+      accessConversation.password == null ? null : accessConversation.passwordVersion
     )
   ) {
     logSecurityAuditEvent("conversation.share.create", {
@@ -174,6 +177,17 @@ export async function POST(
 
   if (!conversation) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  let requestedAnalysis: z.infer<typeof reviewReportSelectionSchema> | undefined;
+  if (req.body) {
+    try {
+      requestedAnalysis = (await readLimitedJson(req, 4096, z.object({ analysis: reviewReportSelectionSchema.optional() }).strict())).analysis;
+    } catch (error) {
+      const response = apiSecurityResponse(error);
+      if (response) return response;
+      throw error;
+    }
   }
 
   const sharedAt = new Date();
@@ -247,6 +261,43 @@ export async function POST(
     if (!messageCursor) break;
   }
 
+  // The transcript is the concurrency guard even when only the analysis is
+  // published. It never becomes part of the public report snapshot.
+  const sourceMessages = snapshot.messages;
+  let analysisGuard = Prisma.sql`TRUE`;
+  if (requestedAnalysis) {
+    try {
+      const { source, stored, prompt, report } = await loadReviewAnalysisReport(userId, conversationId, requestedAnalysis);
+      if (sourceMessages.find(message => message.id === prompt.id)?.content !== source.setup.source?.question ||
+          source.setup.source?.responses.some(response => sourceMessages.find(message => message.id === response.messageId)?.content !== response.content)) {
+        throw new ReviewReportSourceChanged();
+      }
+      snapshot.title = report.title;
+      snapshot.contentKind = "analysis";
+      snapshot.messages = [
+        { id: "analysis-notice", role: "assistant", content: report.preamble, modelId: null, createdAt: sharedAt.toISOString() },
+        ...report.sections.map((section, index) => ({ id: `analysis-${index}`,
+          role: (index === 0 ? "user" : "assistant") as "user" | "assistant",
+          content: `${section.heading}\n\n${section.text}`, modelId: index === 0 ? null : source.kind === "review" ? source.review.result[source.reviewer]!.reviewerModelId : source.review.reviewerModelId,
+          createdAt: sharedAt.toISOString() })),
+      ];
+      // ComparisonReview is upserted. Recheck this captured version in the same
+      // statement that publishes, as well as the existing transcript/lock CAS.
+      analysisGuard = Prisma.sql`EXISTS (
+        SELECT 1 FROM "ComparisonReview" review
+        WHERE review."id" = ${stored.id} AND review."userId" = ${userId}
+          AND review."conversationId" = ${conversationId} AND review."isStale" = false
+          AND review."inputHash" = ${stored.inputHash}
+          AND review."promptMessageId" = ${stored.promptMessageId}
+          AND review."reviewerModelId" = ${stored.reviewerModelId}
+          AND review."assistantMessageIds" = ${JSON.stringify(stored.assistantMessageIds)}::jsonb
+          AND review."result" = ${JSON.stringify(stored.result)}::jsonb
+      )`;
+    } catch (error) {
+      if (error instanceof ReviewReportSourceChanged) return NextResponse.json({ code: "REVIEW_REPORT_SOURCE_CHANGED", error: error.message }, { status: 409 });
+      throw error;
+    }
+  }
   const parsedSnapshot = shareSnapshotSchema.safeParse(snapshot);
   if (
     !parsedSnapshot.success ||
@@ -267,7 +318,7 @@ export async function POST(
   const shareToken = createShareToken();
   const updated = await prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
     WITH prepared_messages AS (
-      SELECT * FROM jsonb_to_recordset(${JSON.stringify(parsedSnapshot.data.messages)}::jsonb)
+      SELECT * FROM jsonb_to_recordset(${JSON.stringify(sourceMessages)}::jsonb)
         AS message("id" text, "role" text, "content" text, "modelId" text, "createdAt" timestamp(3))
     ), current_messages AS (
       SELECT "id", "role", "content", "modelId", "createdAt"
@@ -290,6 +341,7 @@ export async function POST(
       AND conversation."shareEnabled" = ${accessConversation.shareEnabled}
       AND conversation."shareRevokedAt" IS NOT DISTINCT FROM ${accessConversation.shareRevokedAt?.toISOString() ?? null}::timestamp(3)
       AND conversation."chatRecoveryEpoch" = ${accessConversation.chatRecoveryEpoch}
+      AND ${analysisGuard}
       AND NOT EXISTS (
         SELECT 1 FROM "ConversationContinuationBridge" bridge
         WHERE bridge."conversationId" = conversation."id"
@@ -361,7 +413,7 @@ export async function DELETE(
 
   const conversation = await prisma.conversation.findUnique({
     where: { id: conversationId },
-    select: { userId: true, password: true },
+    select: { userId: true, password: true, passwordVersion: true },
   });
 
   if (!conversation || conversation.userId !== userId) {
@@ -379,7 +431,7 @@ export async function DELETE(
       req,
       userId,
       conversationId,
-      conversation.password
+      conversation.password == null ? null : conversation.passwordVersion
     )
   ) {
     logSecurityAuditEvent("conversation.share.revoke", {

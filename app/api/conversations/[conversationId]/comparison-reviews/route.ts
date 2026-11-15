@@ -89,7 +89,7 @@ const authorizeConversation = async (
 ) => {
   const conversation = await prisma.conversation.findUnique({
     where: { id: conversationId },
-    select: { id: true, userId: true, password: true, title: true, kind: true },
+    select: { id: true, userId: true, password: true, passwordVersion: true, title: true, kind: true },
   });
   if (!conversation || conversation.userId !== userId) {
     return { response: jsonError("Conversation not found.", "NOT_FOUND", 404) };
@@ -99,7 +99,7 @@ const authorizeConversation = async (
       request,
       userId,
       conversationId,
-      conversation.password
+      conversation.password == null ? null : conversation.passwordVersion
     )
   ) {
     return { response: conversationLockedResponse() };

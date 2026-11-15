@@ -3,6 +3,7 @@ import { generateText } from "ai";
 import { getActiveAiModel } from "./activeAiModel";
 import { getEnabledRuntimeModel } from "./modelRegistry";
 import { modelSupportsImageInput } from "./models";
+import { resolveProviderApiKey } from "./modelRegistryShared";
 import {
   readScoutSettings,
   startScoutCall,
@@ -39,7 +40,8 @@ export async function sampleMemoryTrial(
   const base = "memory.continuation.compare." + locale + ".";
   const key =
     process.env.PRODUCT_RESEARCH_SCOUT_COHERE_API_KEY ||
-    process.env.COHERE_API_KEY;
+    // Rerank has its own approval gate; the Chat opt-out does not control it.
+    resolveProviderApiKey("cohere", { ...process.env, COHERE_CHAT_ENABLED: "true" });
   if (arm === "cohere" && !key)
     return { judged: false, reason: "cohere_key_missing" };
   const start = performance.now();

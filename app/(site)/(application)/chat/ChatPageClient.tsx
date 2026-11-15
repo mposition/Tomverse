@@ -1,9 +1,12 @@
 ﻿"use client";
 
 import { ReviewChatHandoffProvider, ReviewChatAction } from "@/components/chat/ReviewChatHandoff";
+import { AvailableCreditsProvider } from "@/components/credits/UsageMeter";
+import { ReviewAnalysisActions } from "@/components/chat/ReviewAnalysisActions";
 import { ReviewChatDraftReceiver } from "@/components/chat/ReviewChatDraftReceiver";
 import { REVIEW_CHAT_PARAM, type ReviewChatSource } from "@/lib/reviewToChat";
 
+import { useResearchPreview } from "@/components/chat/useResearchPreview";
 
 import { requestChatLocationIntent } from "@tomverse/api-client";
 import { chatLocationSession, prepareFreshChatLocationIntent, type ChatPanelLocationIntent, type FreshChatLocationPreparation, type RouterLocationTurn } from "@/lib/chatLocationClient";
@@ -716,6 +719,8 @@ function ChatShellSkeleton({ label }: { label: string }) {
  * and persistence for itself.
  */
 type GlobalSubmitOptions = {
+  researchDurable?: boolean;
+  researchMode?: "preview";
   submittedAtMonotonicMs?: number;
   /** The image-intent call already answered for this exact draft. */
   imageIntentChecked?: boolean;
@@ -1842,6 +1847,8 @@ export function ChatPageClient({
      */
     modelIds: string[];
     attachments: ChatAttachment[];
+    researchDurable?: boolean;
+    researchMode?: "preview";
     deepResearchDepth?: "quick" | "standard" | "deep";
     /**
      * Web search for this send only, when the web-search offer made it. Absent
@@ -5863,6 +5870,13 @@ export function ChatPageClient({
     status,
   ]);
 
+  const researchPreview = useResearchPreview({
+    identityKey, conversationId: currentChatId, modelId: selectedModels[0], question: inputValue.trim(), locale: lang, assistantProfileId: currentChatId ? undefined : pendingProfileId,
+    revision: JSON.stringify([assistantProfile, assistantProfileRemovedAt, accountUsage?.plan]),
+    enabled: mountedSurface === "chat" && !isGuestMode && selectionMode === "manual" &&
+      selectedModels.length === 1 && activeModelCount === 1 && !isImageDraftActive,
+  });
+
   // STG-F003: nothing marks the composer busy until well after the submit
   // path has awaited a conversation create, the model-settings flush and the
   // preflight, so a second Enter -- or an Enter racing the send button --
@@ -6499,16 +6513,16 @@ export function ChatPageClient({
         return;
       }
     }
-    const productResolution = !isOverrideSend
+    const productResolution = !isOverrideSend && !options?.researchMode
       ? promptRefinerResolutionRef.current
       : null;
-    const productProposal = !isOverrideSend
+    const productProposal = !isOverrideSend && !options?.researchMode
       ? promptRefinerProductProposalRef.current
       : null;
-    const productDecision = !isOverrideSend
+    const productDecision = !isOverrideSend && !options?.researchMode
       ? promptRefinerProductDecisionRef.current
       : null;
-    const explicitProductSend = promptRefinerProductSelection !== "none"
+    const explicitProductSend = !options?.researchMode && promptRefinerProductSelection !== "none"
       ? resolvePromptRefinerExplicitSend({
           proposal: productProposal,
           resolution: productResolution,
@@ -6530,7 +6544,7 @@ export function ChatPageClient({
     const explicitPromptRefinerClientRequestId = explicitProductDecisionIsCurrent
       ? explicitProductSend!.clientRequestId
       : null;
-    const autoProductConversationEligible = !isOverrideSend &&
+    const autoProductConversationEligible = !options?.researchMode && !isOverrideSend &&
       mountedSurface === "chat" && !isGuestMode && Boolean(currentChatId) &&
       selectionMode === "auto" && promptRefinerProductRelease.autoEnabled &&
       Boolean(promptRefinerProductScope) && !explicitPromptRefinerDecision;
@@ -6828,7 +6842,7 @@ export function ChatPageClient({
       }
       const comparisonId = Date.now().toString();
       const picked = pickedRef.current;
-      const sourcePassages = mountedSurface === "chat" && picked && picked.owner === identityKey && picked.chat === activeChatId && picked.parts.length
+      const sourcePassages = !options?.researchMode && mountedSurface === "chat" && picked && picked.owner === identityKey && picked.chat === activeChatId && picked.parts.length
         ? encodePassages(picked.parts) : undefined;
       // Resolved before the preflight, not after it: the preflight prices this
       // set and hands back the admission slots for it, so it has to be asked
@@ -6923,7 +6937,7 @@ export function ChatPageClient({
       const imageTurnSend = (Boolean(imageTurn) && activeModelIds.length === 1) ||
         (Boolean(options?.imageTurnsByModel) && activeModelIds.every(id => Object.hasOwn(options!.imageTurnsByModel!, id)));
       const finishPreflight = preparation.stage("preflightMs");
-      const preflight = imageTurnSend
+      const preflight = (imageTurnSend || options?.researchMode === "preview")
         ? { allowed: true as const, admissionToken: null, contextBundle: null }
         : await runComparisonPreflight({
             comparisonId,
@@ -6949,7 +6963,7 @@ export function ChatPageClient({
       // alongside that read; message consumption and paid Refiner/Chat work
       // remain behind both results and the unchanged identity/selection fence.
       const preparedInputs = await prepareChatSendInputs({
-        context: () => imageTurnSend ? Promise.resolve(null)
+        context: () => (imageTurnSend || options?.researchMode === "preview") ? Promise.resolve(null)
           : contextLayout === "comparison" ? Promise.resolve(preflight.contextBundle)
           : preparation.measure("contextPrepareMs", () => prepareChatContextBundle({
               conversationId: isGuestMode ? null : activeChatId,
@@ -6972,7 +6986,7 @@ export function ChatPageClient({
       // Only the semantic call overlaps Refiner. Device permission and GPS
       // stay in ChatApp, after the question is durably saved. Guests retain
       // their existing single-use verification sequence.
-      const canFuseLocation = !freshLocation && chatLocationIntentEnabled && identityKey && status === "authenticated" &&
+      const canFuseLocation = !options?.researchMode && !freshLocation && chatLocationIntentEnabled && identityKey && status === "authenticated" &&
         mountedSurface === "chat" && selectionMode === "auto" && !isOverrideSend && !imageTurnSend &&
         promptAttachments.length === 0 && activeModelIds.length === 1;
       const existingFusion = canFuseLocation && existingChatRouterLocationFusion && autoSelectionOffered && submitOwner.originConversationId === activeChatId &&
@@ -7416,7 +7430,7 @@ export function ChatPageClient({
         for the moment the model is later deselected.
       */
       setDeepResearchSuggestionTurn(
-        options?.deepResearchDepth ||
+        options?.researchMode || options?.deepResearchDepth ||
           activeModelIds.includes(DEEP_RESEARCH_MODEL_ID) ||
           !authoredPrompt.trim()
           ? null
@@ -7446,7 +7460,7 @@ export function ChatPageClient({
         it has never heard of is indistinguishable from no turn at all.
       */
       const sendWebSearchRequested =
-        options?.webSearchOverride === "always" ||
+        options?.researchMode === "preview" || options?.webSearchOverride === "always" ||
         isWebSearchEnabled(webSearchMode);
       setWebSearchSuggestionTurn(
         authoredPrompt.trim()
@@ -7535,6 +7549,7 @@ export function ChatPageClient({
         ...(options?.webSearchOverride
           ? { webSearchMode: options.webSearchOverride }
           : {}),
+        ...(options?.researchMode ? { researchMode: options.researchMode, researchDurable: options.researchDurable === true } : {}),
         ...(options?.deepResearchDepth
           ? { deepResearchDepth: options.deepResearchDepth }
           : {}),
@@ -7564,6 +7579,7 @@ export function ChatPageClient({
           ? { imageTurnsByModel: options.imageTurnsByModel }
           : {}),
       });
+      if (options?.researchMode) researchPreview.onSelectedChange(false);
       if (explicitPromptRefinerDecision) resetPromptRefinerState();
       // The single point where a draft is cleared by sending: the prompt is
       // now on its way, so this conversation's draft is spent. Every earlier
@@ -8914,6 +8930,10 @@ export function ChatPageClient({
     `handleGlobalSubmit` go through its ref and never come back here.
   */
   const handleComposerSubmit = async () => {
+    if (researchPreview.selected && (!researchPreview.offered || attachments.length > 0 || !inputValue.trim() || inputValue.trim().length > 4000)) {
+      showToast(t(attachments.length > 0 ? "chat.researchPreviewAttachments" : !inputValue.trim() || inputValue.trim().length > 4000 ? "chat.researchPreviewQuestionLimit" : "chat.researchPreviewUnavailable"), "info");
+      return;
+    }
     const active = sendEchoRef.current;
     if (active && active.ticket === conversationSelectionTicketRef.current) return;
     const text = inputValue.trim();
@@ -8928,7 +8948,7 @@ export function ChatPageClient({
       setSendEcho(mine);
     }
     try {
-      await handleGlobalSubmit();
+      await handleGlobalSubmit(researchPreview.selected ? { researchMode: "preview", researchDurable: researchPreview.features?.durableRuns === true, imageIntentChecked: true } : undefined);
     } finally {
       if (mine && sendEchoRef.current === mine) {
         sendEchoRef.current = null;
@@ -10526,6 +10546,10 @@ export function ChatPageClient({
     // composer's chip and credit estimate, the picker's badge and "Web search"
     // filter, and the per-message badge. One provider rather than a prop through
     // five intermediate components that do not use it.
+    // The model lists say how many uses the credits left would cover
+    // (components/credits/UsageMeter.tsx); the picker is several components
+    // below this one, none of which use the balance themselves.
+    <AvailableCreditsProvider value={comparisonAvailableCredits}>
     <ReviewChatHandoffProvider identity={identityKey}
       supported={routeSurface === "workspace" && !isGuestMode && Boolean(currentChatId)}
       sourceScope={reviewChatSourceScope}
@@ -10678,6 +10702,7 @@ export function ChatPageClient({
           onAssistantProfileChange={
             assistantProfileOptions ? handleAssistantProfileChange : undefined
           }
+          researchPreview={researchPreview}
           onOpenDeepResearchSetup={() => setIsDeepResearchSetupOpen(true)}
           isDeepResearchPending={isDeepResearchPending}
           onDismissDeepResearchChip={dismissDeepResearchChip}
@@ -10871,6 +10896,7 @@ export function ChatPageClient({
           onAssistantProfileChange={
             assistantProfileOptions ? handleAssistantProfileChange : undefined
           }
+          researchPreview={researchPreview}
           onOpenDeepResearchSetup={() => setIsDeepResearchSetupOpen(true)}
           isDeepResearchPending={isDeepResearchPending}
           onDismissDeepResearchChip={dismissDeepResearchChip}
@@ -11389,7 +11415,7 @@ export function ChatPageClient({
           aria-modal="true"
           aria-labelledby="model-comparison-title"
           aria-describedby="model-comparison-note"
-          className="flex max-h-full w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-900"
+          className="review-quick-summary-panel flex max-h-full w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-900"
         >
           <div className="flex shrink-0 items-start justify-between gap-4 border-b border-zinc-200 p-4 dark:border-zinc-800 sm:p-5">
             <div className="min-w-0">
@@ -11431,8 +11457,7 @@ export function ChatPageClient({
               {t("auth.cancel")}
             </button>
           </div>
-          <div className="grid min-h-0 flex-1 touch-pan-y gap-4 overflow-y-auto overscroll-contain p-4 [scrollbar-gutter:stable] sm:p-5">
-            <ReviewChatAction source={compareSummarySource} ready={!isCompareSummaryLoading && !isGuestMode && compareSummarySource?.scope === reviewChatSourceScope} />
+          <div className="review-quick-summary-body grid min-h-0 flex-1 touch-pan-y gap-4 overflow-y-auto overscroll-contain p-4 [scrollbar-gutter:stable] sm:p-5">
             <section data-testid="quick-summary-consensus" className="rounded-xl border border-blue-200 bg-blue-50/70 p-4 dark:border-blue-900/70 dark:bg-blue-950/30">
               <h3 className="text-sm font-bold text-blue-950 dark:text-blue-100">
                 {t("chat.quickSummaryCommonConclusions")}
@@ -11605,6 +11630,8 @@ export function ChatPageClient({
               </section>
             )}
           </div>
+          <ReviewAnalysisActions source={compareSummarySource} ready={!isCompareSummaryLoading && !isGuestMode && compareSummarySource?.scope === reviewChatSourceScope}
+            scope={reviewChatSourceScope} onClose={() => setCompareSummary(null)} />
         </section>
       </div>
     )}
@@ -11783,5 +11810,6 @@ export function ChatPageClient({
     </GeneratedArtifactRevisionContext.Provider>
     </WebSearchBackendReadinessProvider>
     </ReviewChatHandoffProvider>
+    </AvailableCreditsProvider>
   );
 }

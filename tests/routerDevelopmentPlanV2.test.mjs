@@ -20,7 +20,10 @@ const nodes = (value) => 1 + (value && typeof value === "object" ? Object.values
 
 test("shared calculation preserves the exact fixed-input v1 plan bytes and digest", () => {
   const oldCorpus = parseDevelopmentCorpus(read("development-v1.json"));
-  const legacy = buildDevelopmentPlan({ ...common, corpus: oldCorpus, ...options });
+  // Preserve the historical 45-model input for the v1 extraction equivalence
+  // check. Current-catalogue coverage, including Cohere, is exercised below.
+  const legacyCommon = { ...common, models: common.models.filter((model) => model.provider !== "cohere") };
+  const legacy = buildDevelopmentPlan({ ...legacyCommon, corpus: oldCorpus, ...options });
   // Snapshot-specific regression captured before extraction at base 8646fcb50f868268bc90bf47fe0032c171251b45.
   // A reviewed catalogue/pricing change needs a new baseline; this is not a generic catalogue capacity claim.
   //
@@ -80,7 +83,7 @@ test("shared calculation preserves the exact fixed-input v1 plan bytes and diges
     benchmarkDigest(JSON.stringify({ ...asBefore, planDigest: beforePlanDigest })),
     "4c74f29bdf473c237e1449f955a77fd3d9150ec4f5102bfb0144466aaeef34a7"
   );
-  assert.deepEqual(validateDevelopmentPlan(legacy, { ...common, corpus: oldCorpus }), legacy);
+  assert.deepEqual(validateDevelopmentPlan(legacy, { ...legacyCommon, corpus: oldCorpus }), legacy);
   assert.throws(() => buildDevelopmentPlan({ ...common, ...options }), /corpus_version_or_purpose/);
   assert.throws(() => validateDevelopmentPlan(plan, { ...common, corpus: oldCorpus }), /plan:unexpected_or_missing_fields/);
   assert.throws(() => validateDevelopmentPlanV2(legacy, common), /plan_v2:unexpected_or_missing_fields/);

@@ -9,7 +9,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { usageBucketCount } from "@/lib/chatUsageBucketCount";
 import { hashChatSubject, userChatUsageKey } from "@/lib/chatUsageKey";
-import { findDeepResearchHandoff } from "@/lib/deepResearchSettlementHandoff";
+import { findDeepResearchHandoff, researchPreviewSettlementForExpiry } from "@/lib/deepResearchSettlementHandoff";
 import { isE2EDatabaseDisabled } from "@/lib/e2eTestMode";
 import {
     AVAILABLE_MODELS,
@@ -947,6 +947,19 @@ export const createChatBudget = (
         additionalToolInputTokens?: number;
         /** Server-selected model passes; used only for internal cost holds. */
         toolInputPasses?: number;
+        /** Keep the deterministic tool envelope outside the authored-input
+         * clamp so a multi-step run cannot silently under-reserve it. */
+        toolInputAboveAuthoredLimit?: boolean;
+        /**
+         * One aggregate output allowance shared by every paid tool pass.
+         *
+         * Ordinary Chat omits this and keeps the model pricing profile's
+         * request/reservation values. Research Preview supplies its smaller
+         * run-wide ceiling: the provider may receive several sequential
+         * requests, but their combined output (reasoning included) may never
+         * reserve or consume more than this value.
+         */
+        totalOutputTokenCap?: number;
     }
 ): ChatBudget => {
     const maxInputTokens =
@@ -1001,17 +1014,26 @@ export const createChatBudget = (
         0,
         Math.trunc(options?.reservationOnlyInputTokens ?? 0)
     );
-    const contextInputTokens =
-        Math.min(
-            maxInputTokens,
-            toReservedInputTokens(estimatedInput, {
-                toolOverheadTokens: estimateToolInputTokenOverhead({
-                    nativeSearchEnabled: options?.nativeSearchEnabled === true,
-                    appManagedSearchEnabled:
-                        options?.appManagedSearchEnabled === true,
-                }) + Math.max(0, Math.trunc(options?.additionalToolInputTokens ?? 0)),
-            })
-        ) + reservationOnlyInputTokens;
+    const toolInputTokens =
+        estimateToolInputTokenOverhead({
+            nativeSearchEnabled: options?.nativeSearchEnabled === true,
+            appManagedSearchEnabled:
+                options?.appManagedSearchEnabled === true,
+        }) + Math.max(0, Math.trunc(options?.additionalToolInputTokens ?? 0));
+    // The authored-input limit applies to authored input. Tool definitions and
+    // bounded tool results are provider input too, so they stay outside that
+    // clamp; otherwise a large deterministic tool envelope would be silently
+    // under-reserved at exactly the point the limit was reached.
+    const contextInputTokens = options?.toolInputAboveAuthoredLimit
+        ? Math.min(maxInputTokens, toReservedInputTokens(estimatedInput)) +
+          toolInputTokens +
+          reservationOnlyInputTokens
+        : Math.min(
+              maxInputTokens,
+              toReservedInputTokens(estimatedInput, {
+                  toolOverheadTokens: toolInputTokens,
+              })
+          ) + reservationOnlyInputTokens;
     const passes = Math.max(1, Math.min(4, Math.trunc(options?.toolInputPasses ?? 1)));
     let pricing = resolveModelRequestPricing(model, {
         estimatedPromptTokens: contextInputTokens,
@@ -1021,7 +1043,14 @@ export const createChatBudget = (
     });
     // Every paid step re-sends its context. Earlier assistant output can also
     // be re-sent; reserve it without changing authored-input credit weight.
-    const reservedInputTokens = contextInputTokens * passes + pricing.maxOutputTokens * (passes - 1);
+    const requestedTotalOutputCap = options?.totalOutputTokenCap;
+    const totalOutputTokens =
+        Number.isSafeInteger(requestedTotalOutputCap) &&
+        requestedTotalOutputCap! > 0
+            ? Math.min(pricing.maxOutputTokens, requestedTotalOutputCap!)
+            : pricing.maxOutputTokens;
+    const reservedInputTokens =
+        contextInputTokens * passes + totalOutputTokens * (passes - 1);
 
     return {
         modelId: model.id,
@@ -1035,9 +1064,12 @@ export const createChatBudget = (
             (options?.webSearchSurchargeCredits || 0),
         inputTokens: reservedInputTokens,
         ...(passes > 1 ? { contextInputTokens } : {}),
-        maxOutputTokens: pricing.maxOutputTokens,
+        maxOutputTokens: totalOutputTokens,
         providerMaxOutputTokens: pricing.providerMaxOutputTokens,
-        reservedOutputTokens: pricing.reservationOutputTokens,
+        reservedOutputTokens:
+            requestedTotalOutputCap === undefined
+                ? pricing.reservationOutputTokens
+                : totalOutputTokens,
         inputUsdPerMillionTokens: pricing.inputUsdPerMillionTokens,
         outputUsdPerMillionTokens: pricing.outputUsdPerMillionTokens,
         cachedInputPriceMultiplier: pricing.cachedInputPriceMultiplier,
@@ -4027,6 +4059,141 @@ export const acquireChatAccess = async (
     };
 };
 
+/**
+ * Re-enters only the concurrency boundary for a durable run whose financial
+ * reservation already exists. It deliberately does not consume another
+ * request quota, credit hold or provider/search hold: a resumed Research
+ * Preview generation is part of the original capped turn, not a new turn.
+ */
+export const acquireReservedChatAccess = async (
+    access: ChatAccess,
+    input: { reservationId: string; modelId: string }
+): Promise<{ leaseId: string; setCookie: string | undefined }> => {
+    try {
+        await assertOperationalFeatureEnabled("aiChatEnabled");
+    } catch (error) {
+        if (error instanceof OperationalFeatureDisabledError) {
+            throw new ChatAccessError(
+                503,
+                "AI_CHAT_DISABLED_BY_ADMIN",
+                "AI chat is temporarily paused for operational maintenance."
+            );
+        }
+        throw error;
+    }
+    if (access.kind !== "user" || !access.userId) {
+        throw new ChatAccessError(
+            401,
+            "AUTHENTICATION_REQUIRED",
+            "Authentication is required."
+        );
+    }
+    await assertUserOperationalAccess(access.userId);
+
+    const leaseId = randomUUID();
+    const now = new Date();
+    const plan = resolveChatConcurrencyPlan(access);
+    await prisma.$transaction(async (tx) => {
+        // The same lock order as acquireChatAccess: credit account, subject,
+        // concurrency scopes, then rows.
+        await lockCreditAccount(tx, access.userId!);
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${access.subjectKey}))`;
+        await lockConcurrencyScopes(tx, plan);
+        await sweepExpiredLeasesForScopes(tx, {
+            subjectKey: plan.subject.key,
+            ipKey: plan.ip?.key ?? null,
+        });
+        const reservation = await tx.chatCreditReservation.findUnique({
+            where: { id: input.reservationId },
+            select: {
+                userId: true,
+                subjectKey: true,
+                modelId: true,
+                source: true,
+                status: true,
+                expiresAt: true,
+            },
+        });
+        if (
+            !reservation ||
+            reservation.userId !== access.userId ||
+            reservation.subjectKey !== access.subjectKey ||
+            reservation.modelId !== input.modelId ||
+            reservation.source !== "chat" ||
+            reservation.status !== "reserved" ||
+            reservation.expiresAt <= now
+        ) {
+            throw new ChatAccessError(
+                409,
+                "CHAT_RESERVATION_NOT_OPEN",
+                "The Research reservation can no longer be resumed."
+            );
+        }
+        await assertConcurrencyCapacity(tx, plan, 1);
+        await insertLeases(tx, [
+            {
+                id: leaseId,
+                subjectKey: plan.subject.key,
+                ipKey: plan.ip?.key ?? null,
+                modelId: input.modelId,
+                admissionId: null,
+                claimedAt: now,
+                expiresAt: new Date(
+                    now.getTime() + resolveLeaseTtlSeconds() * 1_000
+                ),
+            },
+        ]);
+    });
+    return { leaseId, setCookie: access.setCookie };
+};
+
+/** Restores the frozen pricing/budget receipt from its canonical durable row. */
+const readReservedChatUsageReservation = async (
+    reservationId: string,
+    userId: string,
+    requireUnexpired: boolean
+): Promise<ChatUsageReservation> => {
+    const row = await prisma.chatCreditReservation.findUnique({
+        where: { id: reservationId },
+        select: {
+            userId: true,
+            source: true,
+            status: true,
+            expiresAt: true,
+            reservationPayload: true,
+        },
+    });
+    if (
+        !row ||
+        row.userId !== userId ||
+        row.source !== "chat" ||
+        row.status !== "reserved" ||
+        (requireUnexpired && row.expiresAt <= new Date())
+    ) {
+        throw new ChatAccessError(
+            409,
+            "CHAT_RESERVATION_NOT_OPEN",
+            "The Research reservation can no longer be resumed."
+        );
+    }
+    const reservation = deserializeReservation(row.reservationPayload);
+    if (
+        reservation.reservationId !== reservationId ||
+        reservation.userId !== userId ||
+        reservation.source !== "chat"
+    ) {
+        throw new Error("Durable chat credit reservation identity mismatch.");
+    }
+    return reservation;
+};
+
+export const readOpenChatUsageReservation = (reservationId: string, userId: string) =>
+    readReservedChatUsageReservation(reservationId, userId, true);
+
+/** Terminal accounting may consume an expired hold; paid resume still requires an open one. */
+export const readChatUsageReservationForSettlement = (reservationId: string, userId: string) =>
+    readReservedChatUsageReservation(reservationId, userId, false);
+
 export const settleChatUsage = async (
     reservation: ChatUsageReservation,
     callerTurnUsage: {
@@ -5575,9 +5742,10 @@ export const reconcileExpiredChatCreditReservations = async (
             // `startScheduledJob` records a run rather than holding a lock --
             // so the read moves to where nothing can settle around it.
             //
-            // Only deep research reservations pay for the lookup. Nothing else
-            // can have a PerplexityAsyncJob, and the sweep's page is up to a
-            // thousand rows of which almost none are this model.
+            // Research Preview owns its reservation through queued/running
+            // checkpoints. Resolve that ownership under the same lock before
+            // a generic expiry refund can discard paid work.
+            let researchHandoff = false;
             let handoff: Awaited<
                 ReturnType<typeof findDeepResearchHandoff>
             > = null;
@@ -5587,8 +5755,10 @@ export const reconcileExpiredChatCreditReservations = async (
                 {
                     reconciled: true,
                     reason: "reservation_expired",
-                    resolveTurnUsage: isDeepResearchReservation(row.modelId)
-                        ? async (tx) => {
+                    resolveTurnUsage: async (tx) => {
+                              const researchUsage = await researchPreviewSettlementForExpiry(tx, reservation.reservationId, now);
+                              if (researchUsage) { researchHandoff = true; return { turnUsage: researchUsage }; }
+                              if (!isDeepResearchReservation(row.modelId)) return null;
                               handoff = await findDeepResearchHandoff(
                                   reservation.reservationId,
                                   tx
@@ -5608,11 +5778,10 @@ export const reconcileExpiredChatCreditReservations = async (
                                           .providerUsageSnapshot as never) ??
                                       null,
                               };
-                          }
-                        : undefined,
+                          },
                 }
             );
-            if (result.applied && handoff) settledFromHandoff += 1;
+            if (result.applied && (handoff || researchHandoff)) settledFromHandoff += 1;
             else if (result.applied && result.status === "refunded") refunded += 1;
             else alreadyFinalized += 1;
         } catch (error) {
@@ -5744,6 +5913,7 @@ export const validateChatPayload = (body: unknown) => {
         promptRefinerDecision?: unknown;
         guestAutoCapability?: unknown;
         guestClientTurnId?: unknown;
+        researchMode?: unknown;
     };
     if (payload.mcpConnectionId !== undefined && (typeof payload.mcpConnectionId !== "string" || !/^[A-Za-z0-9_-]{1,100}$/.test(payload.mcpConnectionId))) {
         throw new ChatAccessError(400, "INVALID_CONNECTOR_SELECTION", "Invalid connector selection.");
@@ -5888,6 +6058,16 @@ export const validateChatPayload = (body: unknown) => {
         );
     }
     if (
+        payload.researchMode !== undefined &&
+        payload.researchMode !== "preview"
+    ) {
+        throw new ChatAccessError(
+            400,
+            "INVALID_RESEARCH_MODE",
+            "Invalid Research mode."
+        );
+    }
+    if (
         payload.webSearchMode !== undefined &&
         !isWebSearchMode(payload.webSearchMode)
     ) {
@@ -5896,6 +6076,45 @@ export const validateChatPayload = (body: unknown) => {
             "INVALID_WEB_SEARCH_MODE",
             "Invalid web search mode."
         );
+    }
+    if (payload.researchMode === "preview") {
+        const allowedKeys = new Set([
+            "messages",
+            "modelId",
+            "conversationId",
+            "assistantMessageId",
+            "sourceUserMessageId",
+            "webSearchMode",
+            "researchMode",
+        ]);
+        const unknownKey = Object.keys(body as Record<string, unknown>).find(
+            (key) => !allowedKeys.has(key)
+        );
+        const message = payload.messages[0] as {
+            role?: unknown;
+            content?: unknown;
+            attachments?: unknown;
+        } | undefined;
+        if (
+            unknownKey ||
+            payload.messages.length !== 1 ||
+            message?.role !== "user" ||
+            typeof message.content !== "string" ||
+            message.content.trim().length < 1 ||
+            message.content.length > 4_000 ||
+            (Array.isArray(message.attachments) && message.attachments.length > 0) ||
+            !payload.modelId ||
+            !payload.conversationId ||
+            !payload.assistantMessageId ||
+            !payload.sourceUserMessageId ||
+            payload.webSearchMode !== "always"
+        ) {
+            throw new ChatAccessError(
+                400,
+                "INVALID_RESEARCH_PREVIEW_REQUEST",
+                "Research Preview requires one saved, attachment-free question."
+            );
+        }
     }
     // Shape only. A token that is well-formed but forged, expired, issued to
     // another subject or already consumed is rejected where it is used, and
@@ -6041,6 +6260,7 @@ export const validateChatPayload = (body: unknown) => {
         promptRefinerDecision?: PromptRefinerChatDecision;
         guestAutoCapability?: string;
         guestClientTurnId?: string;
+        researchMode?: "preview";
     };
 };
 

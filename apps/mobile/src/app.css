@@ -1,6 +1,7 @@
 @import "@tomverse/ui-tokens/tokens.css";
 @import "@tomverse/ui-tokens/wordmark.css";
 @import "@tomverse/chat-ui/voice.css";
+@import "../../../components/chat/researchPreviewRun.css";
 @font-face{font-family:"Noto Sans KR";src:url("../../../lib/fonts/noto-sans-kr-400-subset.ttf") format("truetype");font-weight:400;font-display:swap}
 .native-voice-dialog{padding:0;border:0;width:100%;height:100%;max-width:none;max-height:none;background:transparent;overflow:hidden}
 .native-voice-dialog[open]{display:flex;align-items:center;justify-content:center}.native-voice-dialog::backdrop{background:#080c1680}

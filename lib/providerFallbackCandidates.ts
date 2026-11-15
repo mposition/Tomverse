@@ -21,6 +21,7 @@ export type ProviderFallback = {
 export const PROVIDER_FALLBACKS: Record<AiProvider, ProviderFallback> = {
   openai: { reason: "General model fallback", recommendedModelIds: ["gemini-2-5-flash", "claude-haiku-4-5", "mistral-small-4"] },
   anthropic: { reason: "Writing and analysis fallback", recommendedModelIds: ["gpt-5-6-luna", "gemini-2-5-flash", "mistral-small-4"] },
+  cohere: { reason: "Multilingual analysis fallback", recommendedModelIds: ["mistral-small-4", "gemini-2-5-flash", "gpt-5-6-luna"] },
   google: { reason: "Fast general fallback", recommendedModelIds: ["gpt-5-6-luna", "mistral-small-4", "qwen3.6-flash"] },
   // Groq has no publicly listed model left -- Llama was retired along with
   // Groq's public hosting of it -- so this entry exists only for a future

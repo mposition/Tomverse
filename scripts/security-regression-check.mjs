@@ -755,7 +755,8 @@ const checks = [
       // would be the same skip this check exists to catch -- it would silently
       // fall back to the largest margin for every request.
       source.includes("toReservedInputTokens(estimatedInput,") &&
-      source.includes("toolOverheadTokens: estimateToolInputTokenOverhead"),
+      source.includes("toolOverheadTokens: toolInputTokens") &&
+      /const toolInputTokens =\s*estimateToolInputTokenOverhead\(/.test(source),
   },
   {
     // Class identity belongs to the module instance. A second evaluation of
@@ -982,13 +983,13 @@ const checks = [
       // Both lock columns are read, inside the one snapshot the candidates are
       // read from...
       /readOnlySnapshotTransaction\(/.test(source) &&
-      /where:\s*\{\s*userId,\s*password:\s*\{\s*not:\s*null\s*\}\s*\},\s*select:\s*\{\s*id:\s*true,\s*password:\s*true\s*\}/.test(
+      /where:\s*\{\s*userId,\s*password:\s*\{\s*not:\s*null\s*\}\s*\},\s*select:\s*\{(?=[^}]*\bpassword:\s*true)(?=[^}]*\bpasswordVersion:\s*true)[^}]*\}/.test(
         source
       ) &&
-      /externalConversation:\s*\{\s*select:\s*\{\s*password:\s*true\s*\}\s*\}/.test(source) &&
+      /externalConversation:\s*\{\s*select:\s*\{(?=[^}]*\bpassword:\s*true)(?=[^}]*\bpasswordVersion:\s*true)[^}]*\}\s*\}/.test(source) &&
       // ...each is passed to its own grant check...
-      /resourceUnlockAccess\(\s*"conversation"[^)]*row\.password[^)]*\)/.test(source) &&
-      /resourceUnlockAccess\(\s*"external_conversation"[^)]*bridge\.externalConversation\.password[^)]*\)/.test(
+      /resourceUnlockAccess\(\s*"conversation"[^)]*row\.passwordVersion[^)]*\)/.test(source) &&
+      /resourceUnlockAccess\(\s*"external_conversation"[^)]*bridge\.externalConversation\.passwordVersion[^)]*\)/.test(
         source
       ) &&
       // ...and the decision is inside the candidate queries, before any cap:
@@ -2422,12 +2423,15 @@ const checks = [
       const searchIndex = panel.indexOf('data-testid="model-search-input"');
       const catalogueBranchIndex = panel.indexOf("showCatalogue ? (");
       return (
+        // Owner decision 2026-11-15: a model row shows how heavy the model is
+        // on credits as a five-step meter and a count of remaining uses, not a
+        // credit number. The picker's estimated-usage summary keeps the number.
         catalogue.includes('testId="model-credit-badge"') &&
-        catalogue.includes("CreditCostBadge") &&
+        catalogue.includes("UsageMeter") &&
+        !catalogue.includes("CreditCostBadge") &&
+        panel.includes('testId="recommended-model-credit-badge"') &&
         panel.includes("CreditCostBadge") &&
-        read("components/credits/CreditCostBadge.tsx").includes(
-          'data-testid="credit-coin-icon"'
-        ) &&
+        read("components/credits/UsageMeter.tsx").includes("data-usage-level") &&
         catalogue.includes("getModelPickerDescription") &&
         catalogue.includes("getModelPickerFeatures") &&
         // Recommendation reasons come from the task-language label table, never

@@ -39,6 +39,8 @@ export const getModelBrand = (provider: AiProvider | string): ModelBrand => {
         className: "bg-red-700 from-red-600 to-red-800",
       };
     default:
-      return { mark: provider.slice(0, 2).toUpperCase(), className: "from-zinc-500 to-zinc-700" };
+      // A solid surface under the gradient, as for MiniMax: contrast checks read
+      // the background colour, and the shared white letter mark needs one.
+      return { mark: provider.slice(0, 2).toUpperCase(), className: "bg-zinc-600 from-zinc-500 to-zinc-700" };
   }
 };

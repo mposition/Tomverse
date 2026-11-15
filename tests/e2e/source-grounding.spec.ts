@@ -367,7 +367,7 @@ test("the explanation is reachable by keyboard and dismissed with Escape", async
   await expect(popover).toBeVisible();
 
   // Moving focus away also closes it.
-  await dialog.getByRole("button", { name: "닫기" }).focus();
+  await dialog.getByTestId("review-analysis-actions").getByRole("button", { name: "닫기", exact: true }).focus();
   await expect(popover).toHaveCount(0);
 });
 

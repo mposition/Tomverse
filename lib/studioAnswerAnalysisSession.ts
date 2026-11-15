@@ -4,7 +4,11 @@ export type StudioAnalysisEntry = {
   phase: "checking" | "ready" | "running" | "done" | "error";
   setup?: ReviewSetup;
   review?: ComparisonReview;
+  executionStarted?: boolean;
 };
+
+/** A terminal server refusal is distinct from an unknown network outcome. */
+export class StudioAnalysisKnownFailure extends Error {}
 
 /** Component-owned session. Dismissal and tabs never own or cancel a request. */
 export class StudioAnswerAnalysisSession {
@@ -44,7 +48,7 @@ export class StudioAnswerAnalysisSession {
   open(
     scope: string,
     load: () => Promise<ReviewSetup>,
-    execute: (setup: ReviewSetup) => Promise<ComparisonReview>,
+    execute: (setup: ReviewSetup, publish: (review: ComparisonReview) => void) => Promise<ComparisonReview>,
   ): Promise<void> {
     const pending = this.openings.get(scope);
     if (pending) return pending;
@@ -58,19 +62,37 @@ export class StudioAnswerAnalysisSession {
       // A changed answer must never reuse the old analysis. Identity is scoped
       // by the owner of this session; the server independently validates its hash.
       const input = JSON.stringify({ source: setup.source, prompt: setup.promptMessageId, ids: setup.assistantMessageIds });
-      this.put(scope, { phase: "running", setup });
+      this.put(scope, { phase: "running", setup, executionStarted: true });
       let analysis = this.analyses.get(input);
       if (!analysis) {
-        analysis = Promise.resolve().then(() => execute(setup));
+        analysis = Promise.resolve().then(() => execute(setup, (review) => {
+          // Useful output is visible immediately; only the final response is
+          // saved/shareable. Dismissal keeps this component-owned request alive.
+          this.put(scope, { phase: "running", setup, executionStarted: true, review: { ...review, persisted: false } });
+        }));
         this.analyses.set(input, analysis);
         void analysis.catch(() => this.analyses.delete(input));
       }
       const review = await analysis;
       this.put(scope, { phase: "done", setup, review });
-    }).catch(() => {
-      this.put(scope, { phase: "error", setup: this.get(scope)?.setup });
+    }).catch((error) => {
+      this.put(scope, { ...this.get(scope), phase: "error",
+        executionStarted: error instanceof StudioAnalysisKnownFailure && !this.get(scope)?.review ? false : this.get(scope)?.executionStarted });
     }).finally(() => this.openings.delete(scope));
     this.openings.set(scope, job);
     return job;
+  }
+
+  /** An interrupted stream may still finish on the server. Never rerun it. */
+  async recover(scope: string, load: () => Promise<ReviewSetup>) {
+    const previous = this.get(scope);
+    if (this.openings.has(scope)) return;
+    this.put(scope, { ...previous, phase: "checking" });
+    try {
+      const setup = await load();
+      this.put(scope, setup.storedReview
+        ? { phase: "done", setup, review: setup.storedReview }
+        : { ...previous, phase: "error" });
+    } catch { this.put(scope, { ...previous, phase: "error" }); }
   }
 }

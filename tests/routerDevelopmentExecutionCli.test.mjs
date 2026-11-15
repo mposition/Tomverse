@@ -62,9 +62,9 @@ test("offline mock spans collect, durable restart, journal, export, grader, Repl
   assert.equal(report.legacyImportWithoutJournal.disposition, "hold");
   assert.deepEqual({ passed: report.score.summary.passed, incorrect: report.score.summary.incorrect, blank: report.score.summary.blank,
     invalidJson: report.score.summary.invalidJson, failed: report.score.summary.failed }, { passed: 4, incorrect: 1, blank: 1, invalidJson: 1, failed: 1 });
-  assert.equal(report.score.summary.catalogueRows, 1080);
+  assert.equal(report.score.summary.catalogueRows, corpus.cases.length * AVAILABLE_MODELS.length);
   assert.equal(report.score.summary.refused, 648);
-  assert.equal(report.score.summary.notRun, 424);
+  assert.equal(report.score.summary.notRun, report.score.summary.planned - report.score.summary.submitted);
   assert.equal(report.score.summary.correctnessRate, null);
   assert.equal(report.score.reportedMetrics.latencyMs.total, null);
   assert.equal(report.score.reportedMetrics.providerCostUsd.total, null);
@@ -72,7 +72,10 @@ test("offline mock spans collect, durable restart, journal, export, grader, Repl
   assert.equal(report.metricCoverage.ttftMs, null);
   assert.equal(report.replay.evidenceStatus, "fixture_validation_only");
   assert.equal(report.replay.benchmarkDomain.paired.populationCases, 24);
-  assert.equal(report.replay.benchmarkDomain.paired.commonObservedCases, 4);
+  // Command A+ is in the catalogue but has no observation from the supported
+  // collector adapters. Its new Auto choices remain explicitly unavailable.
+  assert.equal(report.replay.benchmarkDomain.paired.commonObservedCases, 0);
+  assert.equal(report.replay.benchmarkDomain.baseline.unavailableCases, corpus.cases.length);
   assert.equal(report.replay.benchmarkDomain.paired.wholePopulationCorrectOutcomeShareDelta, null);
   assert.equal(report.productExecutionVerified, false);
   assert.ok(report.compatibility.every((row) => row.productExecutionVerified === false && row.provenance === "mock-only"));

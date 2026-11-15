@@ -1,9 +1,12 @@
+import { reviewActionsCopy } from "./reviewActions";
 import { reviewHandoffCopy } from "./reviewHandoff";
+import { researchPreviewCopy } from "./researchPreview";
 import { workspaceWelcomeCopy } from "./workspaceWelcome";
 import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 import { en } from "./en";
 
 export const de = {
+    reviewActions: reviewActionsCopy.de,
     reviewHandoff: reviewHandoffCopy.de,
     journey: {
         receiptSent: "Quelle in diesem Versuch: {selected} ausgewählt + {recent} aktuell ({unique} eindeutige Nachrichten)",
@@ -201,6 +204,7 @@ export const de = {
     },
     chat: {
        ...en.chat,
+        ...researchPreviewCopy["de"],
         draftConflictTitle: "Dieser Entwurf wurde in einem anderen Tab geändert",
         draftConflictBody: "Wähle den Serverentwurf oder überschreibe ihn ausdrücklich mit dem in diesem Tab behaltenen Entwurf.",
         draftConflictUseServer: "Serverentwurf verwenden",
@@ -252,7 +256,12 @@ export const de = {
         imageModelTabTitle: "Bildgenerierungsmodelle",
         imageModelTabSubtitle: "Modelle, die aus einer Beschreibung Bilder erzeugen. Chat-Modelle, die ein angehängtes Bild nur lesen, bleiben im Chat-Tab.",
         imageModelTabFooterHint: "Bei Auswahl öffnet sich der Bildbereich.",
-        imageModelCreditsFrom: "Ab {credits} Credits",
+        usageMeterLevel: "Nutzungsstufe {level} von {levels}",
+        usageMeterAnswers: "etwa {count} Antworten",
+        usageMeterImages: "etwa {count} Bilder",
+        usageMeterNotEnough: "Nicht genug Guthaben übrig",
+        usageMeterRemaining: "{uses} mit deinem restlichen Guthaben",
+        usageMeterShortRequests: "Für kurze Anfragen geschätzt; lange Chats und Dateien verbrauchen mehr.",
         imageModelViaGateway: "über {gateway}",
         imageModelLatencyFast: "Schnell",
         imageModelLatencyBalanced: "Ausgewogen",
@@ -2390,6 +2399,7 @@ export const de = {
         changes: "Wir können diese Richtlinie aktualisieren, wenn sich der Dienst oder rechtliche Anforderungen ändern, und zeigen das geänderte Datum an.",
         providerTableTitle: "Wohin jeder Anbieter Chat-Inhalte erhält",
         providerTableIntro: "Diese Tabelle nennt das Unternehmen, das Chat-Inhalte erhält, wo sie gespeichert und verarbeitet werden, ob sie zum Trainieren von Modellen dienen, wie lange sie aufbewahrt werden, und ob Verkauf oder Werbung untersagt ist. Nennt ein Vertrag keinen Ort und keine Frist, sagt die Tabelle das.",
+        providerUnverifiedNotice: "Die kontospezifischen Verarbeitungsorte, Einstellungen zum Modelltraining und Aufbewahrungsbedingungen dieses Anbieters sind nicht verifiziert. Sie lassen sich nicht aus den Einstellungen anderer Anbieter ableiten.",
         providerTableScrollHint: "Diese Tabelle ist breiter als ein schmaler Bildschirm: Scrollen Sie seitwärts, um die übrigen Spalten zu lesen.",
         colProvider: "Anbieter",
         colRecipient: "Empfänger",

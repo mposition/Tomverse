@@ -1,4 +1,6 @@
+import { reviewActionsCopy } from "./reviewActions";
 import { reviewHandoffCopy } from "./reviewHandoff";
+import { researchPreviewCopy } from "./researchPreview";
 import { workspaceWelcomeCopy } from "./workspaceWelcome";
 import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 import { en } from "./en";
@@ -21,6 +23,7 @@ import { en } from "./en";
  * in review rather than a key quietly going missing.
  */
 export const zh = {
+    reviewActions: reviewActionsCopy.zh,
     reviewHandoff: reviewHandoffCopy.zh,
     journey: {
         receiptSent: "本次尝试的输入包含原文：已选 {selected} 个 + 最近 {recent} 个（去重后 {unique} 条消息）",
@@ -217,7 +220,8 @@ export const zh = {
         projectDeleteFailed: "无法删除项目。",
     },
     chat: {
-       ...en.chat,
+        ...en.chat,
+        ...researchPreviewCopy["zh"],
         aiReviewComparedQuestion: "对比的问题",
         aiReviewFindings: "审查发现",
         aiReviewViewSource: "在原始回答中查看",
@@ -280,7 +284,12 @@ export const zh = {
         imageModelTabTitle: "图像生成模型",
         imageModelTabSubtitle: "根据描述生成图像的模型。只能读取所附图片的聊天模型仍在“聊天”标签页中。",
         imageModelTabFooterHint: "选择后将进入图像工作区。",
-        imageModelCreditsFrom: "{credits} 积分起",
+        usageMeterLevel: "用量等级 {level}/{levels}",
+        usageMeterAnswers: "约 {count} 次",
+        usageMeterImages: "约 {count} 张",
+        usageMeterNotEnough: "剩余额度不足",
+        usageMeterRemaining: "按剩余额度可用{uses}",
+        usageMeterShortRequests: "按简短请求估算；长对话和文件会消耗更多。",
         imageModelViaGateway: "经由 {gateway}",
         imageModelLatencyFast: "快速",
         imageModelLatencyBalanced: "均衡",
@@ -2369,6 +2378,7 @@ export const zh = {
         changes: "当服务或法律要求发生变化时，我们可能更新本政策，并显示修订后的生效日期。",
         providerTableTitle: "各提供方接收聊天内容的情况",
         providerTableIntro: "本表列出接收聊天内容的公司、内容的存储地和处理地、是否用于模型训练、内容保留多久，以及是否禁止出售或广告。合同未写明地点或期限时，表中也照此写明。",
+        providerUnverifiedNotice: "尚未核实此服务商针对本账户的处理地点、模型训练设置或保留条款，不能根据其他服务商的设置推断这些信息。",
         providerTableScrollHint: "本表宽于窄屏：横向滚动即可查看其余列。",
         colProvider: "提供方",
         colRecipient: "接收方",

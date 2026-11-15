@@ -128,6 +128,19 @@ export const PROVIDER_MODEL_DOC_SOURCES: Record<
         humanUrl: "https://platform.claude.com/docs/en/about-claude/pricing",
         collects: PRICES_ONLY,
     },
+    cohere: {
+        // Command A+ publishes its current hosted-free and token-limit facts
+        // on a rendered product page. Keep this human-only so a prose change
+        // cannot silently rewrite a billing profile.
+        host: "docs.cohere.com",
+        pricingUrl: null,
+        modelPageUrl: (apiModel) =>
+            apiModel === "command-a-plus-05-2026"
+                ? "https://docs.cohere.com/docs/command-a-plus"
+                : null,
+        humanUrl: "https://docs.cohere.com/docs/command-a-plus",
+        collects: NOTHING,
+    },
     zhipu: {
         expectedPriceHeaders: [
             "model | input | cached input | cached input storage | output",

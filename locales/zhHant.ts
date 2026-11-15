@@ -1,4 +1,6 @@
+import { reviewActionsCopy } from "./reviewActions";
 import { reviewHandoffCopy } from "./reviewHandoff";
+import { researchPreviewCopy } from "./researchPreview";
 import { workspaceWelcomeCopy } from "./workspaceWelcome";
 import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 import { en } from "./en";
@@ -12,6 +14,7 @@ import { en } from "./en";
  * in `lib/localeLaunchPolicy.ts`. A string fixed in `zh` needs fixing here.
  */
 export const zhHant = {
+    reviewActions: reviewActionsCopy.zhHant,
     reviewHandoff: reviewHandoffCopy.zhHant,
     journey: {
         receiptSent: "本次嘗試的輸入包含原文：已選 {selected} 個 + 最近 {recent} 個（去重後 {unique} 則訊息）",
@@ -213,6 +216,7 @@ export const zhHant = {
     },
     chat: {
        ...en.chat,
+        ...researchPreviewCopy["zh-Hant"],
         aiReviewComparedQuestion: "比較的問題",
         aiReviewFindings: "審查發現",
         aiReviewViewSource: "在原始回答中查看",
@@ -275,7 +279,12 @@ export const zhHant = {
         imageModelTabTitle: "圖片生成模型",
         imageModelTabSubtitle: "根據描述生成圖片的模型。只能讀取所附圖片的聊天模型仍在「聊天」分頁中。",
         imageModelTabFooterHint: "選擇後將進入圖片工作區。",
-        imageModelCreditsFrom: "{credits} 點數起",
+        usageMeterLevel: "用量等級 {level}/{levels}",
+        usageMeterAnswers: "約 {count} 次",
+        usageMeterImages: "約 {count} 張",
+        usageMeterNotEnough: "剩餘額度不足",
+        usageMeterRemaining: "以剩餘額度可用{uses}",
+        usageMeterShortRequests: "以簡短請求估算；長對話與檔案會消耗更多。",
         imageModelViaGateway: "經由 {gateway}",
         imageModelLatencyFast: "快速",
         imageModelLatencyBalanced: "均衡",

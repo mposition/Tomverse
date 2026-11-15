@@ -69,7 +69,7 @@ const LANE_RULES = [
   // generated artifacts. This lane was `import` until then.
   [
     "conversations",
-    /^(external-import|external-conversation-|context-manifest-retention|public-share-route|default-model-reconciliation|conversation-(lock-migration|pin|search|title)|continuation-source-export|chat-durable-recovery|message-attachment|generated-artifacts)/,
+    /^(external-import|external-conversation-|context-manifest-retention|public-share-route|default-model-reconciliation|conversation-(lock-migration|password-version|pin|search|title)|continuation-source-export|chat-durable-recovery|message-attachment|generated-artifacts)/,
   ],
   // Routing: the run, its attempts, the manifest boundary, and the product and
   // selection-mode attribution the ROUTE gates are written against.

@@ -1,6 +1,7 @@
 "use client";
 
 import { ReviewChatAction } from "./ReviewChatHandoff";
+import { ReviewAnalysisActions } from "./ReviewAnalysisActions";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
@@ -931,7 +932,6 @@ export function ComparisonReviewDialog({
                     )}
                   </div>
 
-                  <ReviewChatAction source={handoffSource} ready={!running && !loading && !isGuestReview} />
                   {(["primary", "secondary"] as const).map((reviewer) => {
                     const entry = review.result[reviewer];
                     if (!entry) return null;
@@ -1263,6 +1263,8 @@ export function ComparisonReviewDialog({
           )}
         </div>
 
+        {review && <ReviewAnalysisActions source={handoffSource} ready={!running && !loading && review.persisted !== false && !isGuestReview} scope={activeReviewer}
+          onClose={requestClose} closeDisabled={running} disclaimer={t("chat.aiReviewDisclaimer")} />}
         {!loading && !review && setup?.available && (
           <footer className="shrink-0 border-t border-zinc-200 bg-white px-5 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-4 dark:border-zinc-800 dark:bg-zinc-900 sm:px-6 sm:pb-4">
             <p className="mb-3 text-xs leading-5 text-zinc-500">

@@ -1,9 +1,12 @@
+import { reviewActionsCopy } from "./reviewActions";
 import { reviewHandoffCopy } from "./reviewHandoff";
+import { researchPreviewCopy } from "./researchPreview";
 import { workspaceWelcomeCopy } from "./workspaceWelcome";
 import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 import { en } from "./en";
 
 export const fr = {
+    reviewActions: reviewActionsCopy.fr,
     reviewHandoff: reviewHandoffCopy.fr,
     journey: {
         receiptSent: "Source incluse dans cet essai : {selected} choisis + {recent} récents ({unique} messages uniques)",
@@ -201,6 +204,7 @@ export const fr = {
     },
     chat: {
        ...en.chat,
+        ...researchPreviewCopy["fr"],
         aiReviewComparedQuestion: "Question comparée",
         aiReviewFindings: "Constats de la revue",
         aiReviewViewSource: "Voir dans la réponse originale",
@@ -263,7 +267,12 @@ export const fr = {
         imageModelTabTitle: "Modèles de génération d'images",
         imageModelTabSubtitle: "Modèles qui créent des images à partir d'une description. Les modèles de discussion qui se contentent de lire une image jointe restent dans l'onglet Discussion.",
         imageModelTabFooterHint: "En choisir un ouvre l'espace image.",
-        imageModelCreditsFrom: "À partir de {credits} crédits",
+        usageMeterLevel: "Niveau d'utilisation {level} sur {levels}",
+        usageMeterAnswers: "environ {count} réponses",
+        usageMeterImages: "environ {count} images",
+        usageMeterNotEnough: "Crédits restants insuffisants",
+        usageMeterRemaining: "{uses} avec vos crédits restants",
+        usageMeterShortRequests: "Estimation pour des demandes courtes ; les longues conversations et les fichiers consomment davantage.",
         imageModelViaGateway: "via {gateway}",
         imageModelLatencyFast: "Rapide",
         imageModelLatencyBalanced: "Équilibré",
@@ -2386,6 +2395,7 @@ export const fr = {
         changes: "Nous pouvons mettre à jour cette politique lorsque le service ou les exigences légales changent et afficherons la nouvelle date d'entrée en vigueur.",
         providerTableTitle: "Où chaque fournisseur reçoit le contenu du chat",
         providerTableIntro: "Ce tableau nomme la société qui reçoit le contenu du chat, où ce contenu est stocké et traité, s'il sert à entraîner des modèles, combien de temps il est conservé, et si la vente ou la publicité est interdite. Quand un contrat ne nomme ni un lieu ni une durée, le tableau le dit.",
+        providerUnverifiedNotice: "Les lieux de traitement, les paramètres d’entraînement des modèles et les conditions de conservation propres à ce compte n’ont pas été vérifiés pour ce fournisseur. Ils ne doivent pas être déduits des paramètres d’autres fournisseurs.",
         providerTableScrollHint: "Ce tableau est plus large qu'un écran étroit : faites défiler horizontalement pour lire les autres colonnes.",
         colProvider: "Fournisseur",
         colRecipient: "Destinataire",

@@ -15,9 +15,8 @@ import {
 
 /**
  * The chat-provider notice states what Tomverse controls, then the
- * per-provider table. The table is printed only when every enrolled row is
- * disclosable. Country names in the table come from the registry, not from
- * the transfer sentences.
+ * per-provider table. Reviewed facts and explicit unverified-provider notices
+ * share the table. Country names come from the registry, not transfer text.
  */
 
 const LOCALES = { ko, en, zh, fr, de, es, pt };
@@ -74,16 +73,19 @@ test("the notice says the provider request omits account id, email, and client I
     assert.match(de.privacyPolicy.providerTransfer1, /Kontokennung/);
 });
 
-test("the privacy page renders the provider table only when every row is disclosable", () => {
+test("the privacy page preserves known disclosures and explicitly names unverified providers", () => {
     const source = readFileSync("components/legal/PrivacyPolicy.tsx", "utf8");
     assert.match(source, /PROVIDER_TRANSFER_ITEMS/);
-    assert.match(source, /disclosableDataDestinations/);
-    assert.match(source, /destinations\.length === PROVIDER_DATA_DESTINATIONS\.length/);
-    assert.equal(disclosableDataDestinations().length, PROVIDER_DATA_DESTINATIONS.length);
+    assert.match(source, /const destinations = PROVIDER_DATA_DESTINATIONS/);
+    assert.match(source, /const showProviderTable = destinations\.length > 0/);
+    const undisclosed = PROVIDER_DATA_DESTINATIONS.filter((entry) => entry.status !== "proven");
+    assert.deepEqual(undisclosed.map((entry) => entry.provider), ["cohere"]);
+    assert.ok(disclosableDataDestinations().length < PROVIDER_DATA_DESTINATIONS.length);
     assert.ok(PROVIDER_DATA_DESTINATIONS.length > 0);
     const labels = [
         "providerTableTitle",
         "providerTableIntro",
+        "providerUnverifiedNotice",
         "providerTableScrollHint",
         "colProvider",
         "colRecipient",
@@ -144,8 +146,9 @@ test("the privacy page renders the provider table only when every row is disclos
  * measured in tests/e2e/privacy-provider-table-reflow.spec.ts.
  */
 test("the wide provider table scrolls on its own without widening the section", () => {
-    const source = readFileSync("components/legal/PrivacyPolicy.tsx", "utf8");
-    assert.match(source, /className="min-w-0 text-sm/);
+    const policy = readFileSync("components/legal/PrivacyPolicy.tsx", "utf8");
+    const source = readFileSync("components/legal/ProviderDestinationTable.tsx", "utf8");
+    assert.match(policy, /className="min-w-0 text-sm/);
     const scroller = source.match(/<div\s+className="mt-3 overflow-x-auto[\s\S]*?>/);
     assert.ok(scroller, "the table is not inside a horizontal scroller");
     assert.match(scroller[0], /role="region"/);

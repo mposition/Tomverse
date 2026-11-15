@@ -1,4 +1,6 @@
+import { reviewActionsCopy } from "./reviewActions";
 import { reviewHandoffCopy } from "./reviewHandoff";
+import { researchPreviewCopy } from "./researchPreview";
 import { workspaceWelcomeCopy } from "./workspaceWelcome";
 import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 import { en } from "./en";
@@ -6,6 +8,7 @@ import { en } from "./en";
 // UX-020. Korean is a primary locale and is complete; this check is what keeps
 // it that way. It was the only complete locale with nothing enforcing it.
 export const ko = {
+    reviewActions: reviewActionsCopy.ko,
     reviewHandoff: reviewHandoffCopy.ko,
     journey: {
         receiptSent: "이번 시도 입력에 원문 포함: 선택 {selected}개 + 최근 {recent}개 (고유 메시지 {unique}개)",
@@ -201,6 +204,7 @@ export const ko = {
         projectDeleteFailed: "프로젝트를 삭제하지 못했습니다.",
     },
    chat: {
+        ...researchPreviewCopy["ko"],
         sendPreparationChanged: "답변 준비 중 대화 또는 모델이 변경되었습니다. 질문을 확인한 뒤 다시 전송해 주세요.",
         savedQuestionNotSent: "질문은 저장되었지만 답변 요청은 전송되지 않았습니다. 다시 시도하기 전에 이 대화를 새로고침해 상태를 확인해 주세요.",
         conversationOpenFailed: "이 대화를 열지 못했습니다. 현재 대화는 그대로 유지됩니다.",
@@ -218,7 +222,7 @@ export const ko = {
         messageReceiptRecoveryReload: "대화 새로고침",
         restoreQuestion: "질문 복원",
         restoreQuestionHint: "질문을 입력창에 복원합니다. 새 답변을 요청하려면 별도로 전송하세요.",
-        compareInReview: "Review로 비교",
+        compareInReview: "여러 모델로 비교",
         compareInReviewLabel: "이 질문을 새 Review에서 여러 모델로 비교",
         compareInReviewContext: "이전 질문:",
         compareInReviewBlocked: "보내는 중이거나 저장되지 않은 초안이 있어 Review를 열 수 없습니다. 잠시 후 다시 시도하세요.",
@@ -252,7 +256,12 @@ export const ko = {
         imageModelTabTitle: "이미지 생성 모델",
         imageModelTabSubtitle: "설명으로 이미지를 만드는 모델입니다. 첨부한 이미지를 읽기만 하는 채팅 모델은 채팅 탭에 있습니다.",
         imageModelTabFooterHint: "모델을 고르면 이미지 화면으로 이동합니다.",
-        imageModelCreditsFrom: "{credits}크레딧부터",
+        usageMeterLevel: "사용량 {levels}단계 중 {level}단계",
+        usageMeterAnswers: "약 {count}회",
+        usageMeterImages: "약 {count}장",
+        usageMeterNotEnough: "남은 양 부족",
+        usageMeterRemaining: "남은 양으로 {uses}",
+        usageMeterShortRequests: "짧은 요청 기준이며, 긴 대화나 파일은 더 많이 사용합니다.",
         imageModelViaGateway: "{gateway} 경유",
         imageModelLatencyFast: "빠름",
         imageModelLatencyBalanced: "보통",
@@ -1757,11 +1766,11 @@ export const ko = {
     accountDataExport: {
         dataTabTitle: "내 계정 데이터",
         dataTabDescription:
-            "Tomverse가 보관 중인 계정 데이터 전체 — 대화, 메모리, 가져온 기록, 결제, 사용량 — 를 파일 하나로 내려받습니다.",
+            "내보내기 가능한 계정 데이터 — 대화, 메모리, 가져온 기록, 결제, 사용량 — 를 파일 하나로 내려받습니다. 운영자 기록 등 사용자 데이터가 아닌 항목은 제외됩니다.",
         dataTabOpen: "내 데이터 내려받기",
         pageTitle: "계정 데이터 내려받기",
         pageDescription:
-            "Tomverse가 보관 중인 계정 데이터 전체가 담긴 파일 하나입니다. 무엇이 들어 있고 무엇이 빠져 있는지, 그 이유까지 파일 안에 적혀 있습니다.",
+            "내보내기 가능한 계정 데이터를 하나의 파일로 제공합니다. 대화, 메모리, 가져온 기록, 결제, 사용량이 포함되며 운영자 기록 등 사용자 데이터가 아닌 항목은 제외됩니다. 포함·제외 항목과 그 이유는 파일 안에 적혀 있습니다.",
         securityNote:
             "내려받으려면 최근에 다시 로그인해야 합니다. 링크는 한 번만 사용할 수 있으며 발급 후 5분 뒤 만료됩니다. 사용 전에는 다른 사람에게 공유하지 마세요.",
         prepareDownload: "다운로드 준비",
@@ -1776,7 +1785,7 @@ export const ko = {
         historyDescription:
             "이 계정의 모든 요청·다운로드·거부 기록이며 90일간 보관됩니다. 거부는 시스템이 이 계정의 링크를 통한 다운로드 요청을 허용하지 않았다는 뜻입니다. 이 기록만으로 누가 시도했는지는 알 수 없습니다.",
         historyLoading: "불러오는 중...",
-        historyEmpty: "아직 계정 데이터를 내려받은 적이 없습니다.",
+        historyEmpty: "최근 90일간 계정 데이터 다운로드 기록이 없습니다.",
         refusedExpired: "링크가 만료되어 시스템이 다운로드 요청을 거절했습니다. 새 링크를 준비해 주세요.",
         refusedUsed: "이미 사용된 일회용 링크를 다시 사용하려는 다운로드 요청을 시스템이 거절했습니다.",
         refusedAccountMismatch: "요청한 계정이 링크 소유 계정과 달라 시스템이 다운로드를 거절했습니다.",
@@ -2315,10 +2324,10 @@ export const ko = {
         providerTransferTitle: "채팅 공급자에게 보내는 내용",
         providerTransfer1: "이전되는 정보: 질문, 그 답을 만드는 데 필요한 이전 대화, 첨부한 파일. 계정 기억이나 어시스턴트를 켜 둔 경우에는 해당 절에 적힌 참고 자료도 포함됩니다. Tomverse는 이 요청에 계정 식별자, 이메일, 클라이언트 IP를 붙이지 않습니다. 현재 위치를 켜면 해당 턴에 기기의 대략적인 위치도 포함되며, 대체 공급자가 답변할 때도 전달됩니다.",
         providerTransfer2: "이전 시점과 방법: 응답을 생성할 때, 암호화된 HTTPS API 요청으로 전송합니다.",
-        providerTransfer3: "이전받는 자: 그 답을 생성한 모델의 공급자입니다. 모델을 고르는 것이 그 공급자를 고르는 것입니다. 여러 모델을 비교하면 고른 모델마다 그 공급자에게 전송됩니다.",
+        providerTransfer3: "이전받는 자: 특정 모델을 직접 고르면 그 모델의 공급자에게 전송됩니다. 여러 모델을 비교하면 고른 모델마다 그 공급자에게 전송됩니다. 자동 대체 기능이 켜진 경우 Auto는 첫 시도가 실패하거나 멈추면 같은 텍스트 턴을 다른 적격 모델의 공급자에게 전송할 수 있습니다. 첫 공급자와 대체 공급자 모두 질문, 필요한 이전 대화와 켜 둔 기억·어시스턴트·위치의 참고 정보를 받을 수 있습니다. 첨부파일·도구·웹 검색·심층 리서치가 있는 턴에는 자동 대체를 적용하지 않습니다.",
         providerTransfer4: "이용 목적: 그 응답을 생성하는 것. Tomverse가 그 밖의 목적으로 공급자에게 보내지 않습니다.",
         providerTransfer5: "이전 거부 방법: 그 모델을 고르지 않으면 됩니다.",
-        providerTransfer6: "거부 시 효과: 그 모델의 답을 받을 수 없습니다. 다른 모델을 고르면 그 모델의 공급자에게만 전송됩니다. 그 밖의 기능은 그대로 이용할 수 있습니다.",
+        providerTransfer6: "거부 시 효과: 그 모델의 답을 받을 수 없습니다. 대체 공급자로의 자동 전송을 피하려면 Auto 대신 특정 모델을 직접 선택하세요. 직접 고른 모델을 다른 공급자의 모델로 자동 교체하지 않습니다. 그 밖의 기능은 그대로 이용할 수 있습니다.",
         providerTransfer7: "웹 검색: 앱이 직접 검색을 수행하는 턴에서는 검색에 쓰는 문구를 현재 Brave Search에 암호화된 HTTPS로 보냅니다. 이 요청에도 계정 식별자, 이메일, 클라이언트 IP는 붙이지 않습니다. 웹 검색을 끄면 그 전송은 없습니다. 모델 공급자가 검색을 수행하는 경우에는 그 문구가 위의 공급자 요청에 포함됩니다. 현재 위치를 켜면 검색 문구에 대략적인 좌표나 그 좌표를 바탕으로 한 주변 장소가 포함될 수 있습니다.",
         voiceInputTitle: "음성 입력",
         voiceInput: "입력창의 마이크를 사용하면 녹음은 텍스트 변환이라는 목적에만 사용되도록 음성 인식 제공업체(현재 OpenAI)로 전송되며, 이전받는 법인은 미국에 소재한 OpenAI OpCo, LLC입니다. 다만 OpenAI의 Global API를 사용하므로 실제 처리 인프라는 미국으로 한정되지 않으며, OpenAI와 그 하위처리자가 서비스를 제공하는 환경에서 처리될 수 있습니다. Tomverse는 음성을 저장하지 않습니다. 녹음은 해당 요청이 처리되는 동안에만 메모리에 존재하고 데이터베이스·파일 저장소·로그·오류 추적 어디에도 기록되지 않으며, 취소한 녹음은 어디로도 전송되지 않습니다. 변환된 문장은 입력창에 들어가므로 보내기 전에 읽고 고치거나 지울 수 있습니다. 보내기 전까지 그 문장은 사용자의 기기에 있는 초안이고 Tomverse는 아무것도 저장하지 않습니다. 보낸 뒤에는 일반 메시지가 되며 이 방침의 나머지 내용이 적용됩니다. 음성 입력은 로그인하지 않아도 사용할 수 있습니다. 로그인하지 않은 경우 해당 요청은 다른 게스트 이용과 동일한 익명 식별자에 귀속되며, 녹음은 어느 경우에도 저장되지 않습니다.",
@@ -2386,6 +2395,7 @@ export const ko = {
         changes: "서비스 또는 법적 요구사항이 변경되면 이 방침을 업데이트하고 개정된 시행일을 표시할 수 있습니다.",
         providerTableTitle: "공급자별 채팅 내용의 이전",
         providerTableIntro: "이 표는 채팅 내용을 받는 법인, 저장 위치와 처리 위치, 모델 학습에 쓰는지, 내용을 얼마나 보관하는지, 판매나 광고가 금지되는지를 적습니다. 계약이 장소나 기간을 정하지 않으면 표에도 그렇게 적습니다.",
+        providerUnverifiedNotice: "이 공급자의 계정별 처리 위치, 모델 학습 설정과 보관 조건은 확인되지 않았습니다. 다른 공급자의 설정을 근거로 이 정보를 추정해서는 안 됩니다.",
         providerTableScrollHint: "이 표는 좁은 화면보다 넓습니다. 가로로 스크롤하면 나머지 열을 읽을 수 있습니다.",
         colProvider: "공급자",
         colRecipient: "수신자",

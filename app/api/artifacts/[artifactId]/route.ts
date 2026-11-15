@@ -78,7 +78,7 @@ export async function GET(
         byteSize: true,
         status: true,
         objectKey: true,
-        conversation: { select: { password: true, userId: true } },
+        conversation: { select: { password: true, passwordVersion: true, userId: true } },
       },
     });
 
@@ -101,7 +101,7 @@ export async function GET(
         req,
         userId,
         artifact.conversationId,
-        artifact.conversation.password
+        artifact.conversation.password == null ? null : artifact.conversation.passwordVersion
       )
     ) {
       return conversationLockedResponse();

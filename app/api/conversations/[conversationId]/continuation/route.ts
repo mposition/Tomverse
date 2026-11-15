@@ -65,7 +65,7 @@ export async function GET(
         // continues it.
         const conversation = await prisma.conversation.findFirst({
             where: { id: conversationId, userId },
-            select: { id: true, password: true },
+            select: { id: true, password: true, passwordVersion: true },
         });
         if (!conversation) {
             return NextResponse.json({ error: "Not found." }, { status: 404 });
@@ -75,7 +75,7 @@ export async function GET(
                 req,
                 userId,
                 conversation.id,
-                conversation.password
+                conversation.password == null ? null : conversation.passwordVersion
             )
         ) {
             return conversationLockedResponse();

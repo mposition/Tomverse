@@ -120,6 +120,8 @@ export const createAppManagedSearchSession = (input: {
    * together, not two constants that agree today.
    */
   maxQueries?: number;
+  /** A server-owned completed Research checkpoint; never supplied by a model. */
+  initialSnapshot?: AppManagedSearchSnapshot;
 }): AppManagedSearchSession => {
   const maxQueries = Math.max(
     0,
@@ -127,11 +129,18 @@ export const createAppManagedSearchSession = (input: {
       ? (input.maxQueries as number)
       : APP_MANAGED_SEARCH_LIMITS.maxQueriesPerRequest
   );
-  let claimed = 0;
-  let succeeded = 0;
-  let refused = 0;
-  let failureCode: string | undefined;
+  const initial = input.initialSnapshot;
+  if (initial && (initial.backend !== input.backend || initial.maxQueries !== maxQueries ||
+      !Number.isSafeInteger(initial.backendRequestCount) || initial.backendRequestCount < 0 || initial.backendRequestCount > maxQueries ||
+      !Number.isSafeInteger(initial.succeededRequestCount) || initial.succeededRequestCount < 0 || initial.succeededRequestCount > initial.backendRequestCount ||
+      !Number.isSafeInteger(initial.refusedCallCount) || initial.refusedCallCount < 0 ||
+      initial.sources.length > APP_MANAGED_MAX_SOURCES)) throw new Error("Invalid Research search checkpoint");
+  let claimed = initial?.backendRequestCount ?? 0;
+  let succeeded = initial?.succeededRequestCount ?? 0;
+  let refused = initial?.refusedCallCount ?? 0;
+  let failureCode: string | undefined = initial?.failureCode;
   const sources = new Map<string, AppManagedSearchSource>();
+  for (const source of initial?.sources ?? []) sources.set(source.url, { ...source });
 
   return {
     backend: input.backend,

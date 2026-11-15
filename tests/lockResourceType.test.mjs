@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createHash, createHmac } from "node:crypto";
 import { resourceUnlockAccess } from "../lib/conversationLock.ts";
 import {
     LOCK_RESOURCE_TYPES,
@@ -23,15 +24,14 @@ import {
  *      containing the prefix could forge one. The types are separated by
  *      *key*, not by string shape.
  *
- *   2. **The native path is unchanged.** Existing unlock cookies were minted
- *      before this change and must keep working, so the conversation cookie
- *      name and signature are asserted byte-for-byte, not merely "still
- *      verifies".
+ *   2. **The native adapter uses the same version-bound grant.** Cookie names
+ *      and owner/resource isolation remain stable. Fingerprint-based grants
+ *      are deliberately invalidated once at rollout.
  */
 
 process.env.NEXTAUTH_SECRET ||= "lock-resource-type-test-secret";
 
-const PASSWORD_HASH = "scrypt$1$c2FsdA$aGFzaA";
+const PASSWORD_VERSION = 0;
 const USER = "user-1";
 const ID = "shared-id";
 
@@ -40,12 +40,24 @@ const requestWith = (cookie) =>
 
 const cookieValue = (setCookie) => setCookie.split(";")[0];
 
+test("password-derived legacy grants and missing or invalid versions fail closed", () => {
+    const expiresAt = Math.floor(Date.now() / 1000) + 60;
+    const fingerprint = createHash("sha256").update("old-fixture-hash").digest("base64url");
+    const signature = createHmac("sha256", process.env.NEXTAUTH_SECRET).update(`${USER}:${ID}:${expiresAt}:${fingerprint}`).digest("base64url");
+    const legacy = requestWith(`tomverse_unlock_${ID}=${expiresAt}.${fingerprint}.${signature}`);
+    assert.equal(hasConversationUnlockGrant(legacy, USER, ID, 0), false);
+    for (const version of [undefined, -1, NaN, 1.5, "0"]) {
+        assert.equal(hasConversationUnlockGrant(requestWith(""), USER, ID, version), false);
+        assert.throws(() => createConversationUnlockCookie(USER, ID, version), /Invalid lock version/);
+    }
+});
+
 /* -------------------------------------------------------- native unchanged */
 
 test("the conversation cookie keeps the name existing grants were minted with", () => {
     // Pinned literally: a rename would silently log every unlocked user out of
     // every locked conversation, and "it still verifies" would not catch it.
-    const setCookie = createConversationUnlockCookie(USER, "conv-1", PASSWORD_HASH);
+    const setCookie = createConversationUnlockCookie(USER, "conv-1", PASSWORD_VERSION);
     assert.ok(setCookie.startsWith("tomverse_unlock_conv-1="));
     assert.ok(clearConversationUnlockCookie("conv-1").startsWith("tomverse_unlock_conv-1="));
 });
@@ -53,14 +65,14 @@ test("the conversation cookie keeps the name existing grants were minted with", 
 test("a conversation grant minted through either entry point is the same grant", () => {
     // The native helper is now an adapter. If it drifted from the general
     // form, existing cookies would stop verifying.
-    const viaAdapter = createConversationUnlockCookie(USER, "conv-1", PASSWORD_HASH);
+    const viaAdapter = createConversationUnlockCookie(USER, "conv-1", PASSWORD_VERSION);
     const request = requestWith(cookieValue(viaAdapter));
     assert.equal(
-        hasResourceUnlockGrant("conversation", request, USER, "conv-1", PASSWORD_HASH),
+        hasResourceUnlockGrant("conversation", request, USER, "conv-1", PASSWORD_VERSION),
         true
     );
     assert.equal(
-        hasConversationUnlockGrant(request, USER, "conv-1", PASSWORD_HASH),
+        hasConversationUnlockGrant(request, USER, "conv-1", PASSWORD_VERSION),
         true
     );
 });
@@ -69,9 +81,9 @@ test("one read answers both whether a grant opens a resource and until when", ()
     // The two questions come from the same cookie and the same clock reading,
     // so a caller that shows something derived from a grant cannot be told
     // "yes" and "no expiry" across a second boundary (CONT-SEARCH-01).
-    const setCookie = createConversationUnlockCookie(USER, "conv-1", PASSWORD_HASH);
+    const setCookie = createConversationUnlockCookie(USER, "conv-1", PASSWORD_VERSION);
     const request = requestWith(cookieValue(setCookie));
-    const granted = resourceUnlockAccess("conversation", request, USER, "conv-1", PASSWORD_HASH);
+    const granted = resourceUnlockAccess("conversation", request, USER, "conv-1", PASSWORD_VERSION);
     assert.equal(granted.granted, true);
     assert.equal(
         granted.expiresAt,
@@ -88,7 +100,7 @@ test("one read answers both whether a grant opens a resource and until when", ()
     // No grant, and a grant for another resource: refused with no expiry.
     for (const request of [requestWith(""), requestWith(cookieValue(setCookie))]) {
         assert.deepEqual(
-            resourceUnlockAccess("conversation", request, USER, "conv-2", PASSWORD_HASH),
+            resourceUnlockAccess("conversation", request, USER, "conv-2", PASSWORD_VERSION),
             { granted: false, expiresAt: null }
         );
     }
@@ -107,11 +119,11 @@ test("an unlocked resource needs no grant at all", () => {
 /* ------------------------------------------------------- no cross-type use */
 
 test("a conversation grant does not open an external conversation of the same id", () => {
-    const native = createConversationUnlockCookie(USER, ID, PASSWORD_HASH);
+    const native = createConversationUnlockCookie(USER, ID, PASSWORD_VERSION);
     // Same id, same user, same password: only the type differs.
     const request = requestWith(cookieValue(native));
     assert.equal(
-        hasResourceUnlockGrant("conversation", request, USER, ID, PASSWORD_HASH),
+        hasResourceUnlockGrant("conversation", request, USER, ID, PASSWORD_VERSION),
         true
     );
     assert.equal(
@@ -120,7 +132,7 @@ test("a conversation grant does not open an external conversation of the same id
             request,
             USER,
             ID,
-            PASSWORD_HASH
+            PASSWORD_VERSION
         ),
         false,
         "the external resource must stay locked"
@@ -132,7 +144,7 @@ test("an external grant does not open the conversation of the same id", () => {
         "external_conversation",
         USER,
         ID,
-        PASSWORD_HASH
+        PASSWORD_VERSION
     );
     const request = requestWith(cookieValue(external));
     assert.equal(
@@ -141,12 +153,12 @@ test("an external grant does not open the conversation of the same id", () => {
             request,
             USER,
             ID,
-            PASSWORD_HASH
+            PASSWORD_VERSION
         ),
         true
     );
     assert.equal(
-        hasConversationUnlockGrant(request, USER, ID, PASSWORD_HASH),
+        hasConversationUnlockGrant(request, USER, ID, PASSWORD_VERSION),
         false,
         "the conversation must stay locked"
     );
@@ -156,7 +168,7 @@ test("a grant relabelled onto the other type's cookie name still fails", () => {
     // The separation is the signing key, not the cookie name. Moving the value
     // to the name the other type reads must not make it verify — otherwise the
     // whole guarantee would rest on the name.
-    const native = createConversationUnlockCookie(USER, ID, PASSWORD_HASH);
+    const native = createConversationUnlockCookie(USER, ID, PASSWORD_VERSION);
     const value = cookieValue(native).split("=").slice(1).join("=");
     const relabelled = requestWith(
         `tomverse_unlock_external_conversation_${ID}=${value}`
@@ -167,7 +179,7 @@ test("a grant relabelled onto the other type's cookie name still fails", () => {
             relabelled,
             USER,
             ID,
-            PASSWORD_HASH
+            PASSWORD_VERSION
         ),
         false
     );
@@ -175,31 +187,31 @@ test("a grant relabelled onto the other type's cookie name still fails", () => {
 
 test("each type reads its own cookie name", () => {
     const native = cookieValue(
-        createConversationUnlockCookie(USER, ID, PASSWORD_HASH)
+        createConversationUnlockCookie(USER, ID, PASSWORD_VERSION)
     );
     const external = cookieValue(
-        createResourceUnlockCookie("external_conversation", USER, ID, PASSWORD_HASH)
+        createResourceUnlockCookie("external_conversation", USER, ID, PASSWORD_VERSION)
     );
     assert.notEqual(native.split("=")[0], external.split("=")[0]);
 
     // Both present at once — the ordinary state for a user who unlocked one of
     // each — and each still resolves to its own.
     const both = requestWith(`${native}; ${external}`);
-    assert.equal(hasConversationUnlockGrant(both, USER, ID, PASSWORD_HASH), true);
+    assert.equal(hasConversationUnlockGrant(both, USER, ID, PASSWORD_VERSION), true);
     assert.equal(
-        hasResourceUnlockGrant("external_conversation", both, USER, ID, PASSWORD_HASH),
+        hasResourceUnlockGrant("external_conversation", both, USER, ID, PASSWORD_VERSION),
         true
     );
 });
 
 /* ------------------------------------------------ the other bindings hold  */
 
-test("a grant is still bound to its user, its id and the stored password", () => {
+test("a grant is still bound to its user, its id and the password version", () => {
     const external = createResourceUnlockCookie(
         "external_conversation",
         USER,
         ID,
-        PASSWORD_HASH
+        PASSWORD_VERSION
     );
     const request = requestWith(cookieValue(external));
     const check = (userId, resourceId, password) =>
@@ -211,11 +223,11 @@ test("a grant is still bound to its user, its id and the stored password", () =>
             password
         );
 
-    assert.equal(check(USER, ID, PASSWORD_HASH), true);
-    assert.equal(check("user-2", ID, PASSWORD_HASH), false, "another user");
-    assert.equal(check(USER, "other-id", PASSWORD_HASH), false, "another id");
+    assert.equal(check(USER, ID, PASSWORD_VERSION), true);
+    assert.equal(check("user-2", ID, PASSWORD_VERSION), false, "another user");
+    assert.equal(check(USER, "other-id", PASSWORD_VERSION), false, "another id");
     assert.equal(
-        check(USER, ID, "scrypt$1$c2FsdA$b3RoZXI"),
+        check(USER, ID, 1),
         false,
         "the password changed, so the grant is void"
     );
@@ -223,7 +235,7 @@ test("a grant is still bound to its user, its id and the stored password", () =>
 
 test("a tampered or truncated grant is refused rather than parsed loosely", () => {
     const external = cookieValue(
-        createResourceUnlockCookie("external_conversation", USER, ID, PASSWORD_HASH)
+        createResourceUnlockCookie("external_conversation", USER, ID, PASSWORD_VERSION)
     );
     const [name, value] = [external.split("=")[0], external.split("=").slice(1).join("=")];
     const [expires, fingerprint, signature] = value.split(".");
@@ -242,7 +254,7 @@ test("a tampered or truncated grant is refused rather than parsed loosely", () =
                 requestWith(variant),
                 USER,
                 ID,
-                PASSWORD_HASH
+                PASSWORD_VERSION
             ),
             false,
             `${variant} must not verify`
@@ -252,7 +264,7 @@ test("a tampered or truncated grant is refused rather than parsed loosely", () =
 
 test("an expired grant is refused", () => {
     const external = cookieValue(
-        createResourceUnlockCookie("external_conversation", USER, ID, PASSWORD_HASH)
+        createResourceUnlockCookie("external_conversation", USER, ID, PASSWORD_VERSION)
     );
     const [name, value] = [external.split("=")[0], external.split("=").slice(1).join("=")];
     const [, fingerprint, signature] = value.split(".");
@@ -263,7 +275,7 @@ test("an expired grant is refused", () => {
             requestWith(stale),
             USER,
             ID,
-            PASSWORD_HASH
+            PASSWORD_VERSION
         ),
         false
     );
@@ -292,12 +304,12 @@ test("a resource id that forges the other type's cookie name still opens nothing
     // makes the collision happen naturally, which is the direction an id
     // format change would take.
     const collidingNativeId = `external_conversation_${ID}`;
-    const native = createConversationUnlockCookie(USER, collidingNativeId, PASSWORD_HASH);
+    const native = createConversationUnlockCookie(USER, collidingNativeId, PASSWORD_VERSION);
     const external = createResourceUnlockCookie(
         "external_conversation",
         USER,
         ID,
-        PASSWORD_HASH
+        PASSWORD_VERSION
     );
     assert.equal(
         cookieValue(native).split("=")[0],
@@ -312,7 +324,7 @@ test("a resource id that forges the other type's cookie name still opens nothing
             requestWith(cookieValue(native)),
             USER,
             ID,
-            PASSWORD_HASH
+            PASSWORD_VERSION
         ),
         false,
         "a conversation grant must not open the external conversation it collides with"
@@ -322,7 +334,7 @@ test("a resource id that forges the other type's cookie name still opens nothing
             requestWith(cookieValue(external)),
             USER,
             collidingNativeId,
-            PASSWORD_HASH
+            PASSWORD_VERSION
         ),
         false,
         "an external grant must not open the conversation it collides with"
@@ -335,7 +347,7 @@ test("a resource id that forges the other type's cookie name still opens nothing
             requestWith(cookieValue(native)),
             USER,
             collidingNativeId,
-            PASSWORD_HASH
+            PASSWORD_VERSION
         ),
         true
     );
@@ -345,7 +357,7 @@ test("a resource id that forges the other type's cookie name still opens nothing
             requestWith(cookieValue(external)),
             USER,
             ID,
-            PASSWORD_HASH
+            PASSWORD_VERSION
         ),
         true
     );

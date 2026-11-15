@@ -38,6 +38,9 @@ const ALLOWED_SNAPSHOT_KEYS = [
     "conversationCreatedAt",
     "sharedAt",
     "messages",
+    // A public content discriminator for transcript versus analysis reports,
+    // never a fact about the author's memory or private account context.
+    "contentKind",
     // §13.3's notice flag. Admissible because it is a single boolean about the
     // *service* — whether injection was possible at share time — and says
     // nothing about this author: it is the same value for every share minted
@@ -104,6 +107,16 @@ test("the share snapshot shape is exactly the allowed keys", () => {
     assert.deepEqual(Object.keys(parsed.messages[0]).sort(), [
         ...ALLOWED_MESSAGE_KEYS,
     ].sort());
+});
+
+test("share content kind is optional and limited to public report types", () => {
+    assert.equal(shareSnapshotSchema.parse(validSnapshot()).contentKind, undefined);
+    for (const contentKind of ["conversation", "analysis"]) {
+        assert.equal(shareSnapshotSchema.parse({ ...validSnapshot(), contentKind }).contentKind, contentKind);
+    }
+    for (const contentKind of ["memory", "private-account-context", { memoryIds: ["mem-1"] }]) {
+        assert.equal(shareSnapshotSchema.safeParse({ ...validSnapshot(), contentKind }).success, false);
+    }
 });
 
 test("no share snapshot field is named after anything memory carries", () => {

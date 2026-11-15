@@ -127,7 +127,7 @@ export async function GET(
     const { conversationId } = await context.params;
     const conversation = await prisma.conversation.findUnique({
       where: { id: conversationId },
-      select: { userId: true, password: true, title: true, kind: true },
+      select: { userId: true, password: true, passwordVersion: true, title: true, kind: true },
     });
     if (!conversation || conversation.userId !== session.user.id) {
       return jsonError("Conversation not found.", "NOT_FOUND", 404, traceId);
@@ -140,7 +140,7 @@ export async function GET(
         request,
         session.user.id,
         conversationId,
-        conversation.password
+        conversation.password == null ? null : conversation.passwordVersion
       )
     ) {
       return conversationLockedResponse();
@@ -276,7 +276,7 @@ export async function POST(
     const { conversationId } = await context.params;
     const conversation = await prisma.conversation.findUnique({
       where: { id: conversationId },
-      select: { userId: true, password: true, title: true, kind: true },
+      select: { userId: true, password: true, passwordVersion: true, title: true, kind: true },
     });
     if (!conversation || conversation.userId !== session.user.id) {
       return jsonError("Conversation not found.", "NOT_FOUND", 404, traceId);
@@ -289,7 +289,7 @@ export async function POST(
         request,
         session.user.id,
         conversationId,
-        conversation.password
+        conversation.password == null ? null : conversation.passwordVersion
       )
     ) {
       return conversationLockedResponse();

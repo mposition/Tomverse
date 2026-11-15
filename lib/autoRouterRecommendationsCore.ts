@@ -122,6 +122,7 @@ export type RecommendationStatusEntry = {
      * same recommendation never lands on a later one.
      */
     claimId?: string;
+    attempts?: number;
     /** pr_opened only. */
     prUrl?: string;
     /** failed only. */
@@ -163,6 +164,7 @@ export const recommendationStatusEntries = (summary: unknown): Map<number, Recom
             by: value.by,
             ...(typeof value.leaseUntil === "string" ? { leaseUntil: value.leaseUntil } : {}),
             ...(typeof value.claimId === "string" ? { claimId: value.claimId } : {}),
+            ...(value.attempts !== undefined ? { attempts: typeof value.attempts === "number" ? value.attempts : NaN } : {}),
             ...(typeof value.prUrl === "string" ? { prUrl: value.prUrl } : {}),
             ...((RECOMMENDATION_FAILURE_REASONS as readonly unknown[]).includes(value.reason)
                 ? { reason: value.reason as RecommendationFailureReason }
@@ -276,8 +278,11 @@ export const nextClaimableRecommendation = (
     now: number
 ): (ActionableRecommendation & { cycleId: string; createdAt: string }) | null => {
     for (const cycle of [...cycles].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))) {
+        const stored = record(record(cycle.summary)?.recommendationStatus);
+        const entries = recommendationStatusEntries(cycle.summary);
         const item = actionableRecommendations(cycle.summary, now).find(
-            (candidate) => candidate.kind === "code" && candidate.status === "open"
+            (candidate) => candidate.kind === "code" && candidate.status === "open" &&
+                (!Object.prototype.hasOwnProperty.call(stored ?? {}, String(candidate.index)) || entries.get(candidate.index)?.status === "open")
         );
         if (item) return { ...item, cycleId: cycle.id, createdAt: cycle.createdAt };
     }

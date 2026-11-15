@@ -174,6 +174,23 @@ not activate these routes or perform real data exports/deletions.
 The native file adapter only writes through an explicit system document picker.
 It accepts bounded bytes and a filename, never an arbitrary filesystem path.
 
+## Research Preview native entry (default off)
+
+`RESEARCH_PREVIEW_NATIVE_ENABLED` independently enrolls the exact Research
+Preview offer, saved-run create/list/status, resume and cancel API methods.
+The existing native Chat and native parity switches are also required. Bearer
+identity, revocation, active-account, conversation ownership and unlock checks
+remain mandatory; an invalid bearer never falls back to a web cookie. The
+mobile capability response advertises enrollment, while the shared offer
+endpoint decides whether the current manual model and public question qualify.
+
+Research is an explicit request choice. It sends only the current public
+question, preserves an unsupported attachment draft, and does not change the
+selected model, product or standing web-search setting. Saved-run status reads
+and reload discovery never dispatch model work. Resume and cancel are explicit
+mutations; an unconfirmed outcome is read back before another action. Legacy
+Perplexity jobs retain their separate status path.
+
 ## Deliberately excluded
 
 - **No password authentication**, on any surface. Adding one to serve the app

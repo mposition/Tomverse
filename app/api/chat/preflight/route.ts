@@ -249,7 +249,7 @@ export async function POST(request: Request) {
                 where: { id: payload.conversationId },
                 select: {
                     userId: true,
-                    password: true,
+                    password: true, passwordVersion: true,
                     selectedModels: true,
                     kind: true,
                     memoryMode: true,
@@ -280,7 +280,7 @@ export async function POST(request: Request) {
                     request,
                     session.user.id,
                     payload.conversationId,
-                    conversation.password
+                    conversation.password == null ? null : conversation.passwordVersion
                 )
             ) {
                 return conversationLockedResponse();

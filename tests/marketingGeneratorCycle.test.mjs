@@ -347,7 +347,7 @@ test("the shipped worker asks the app for its model and does nothing while none 
   try {
     const child = spawn(
       process.execPath,
-      ["--experimental-strip-types", "--no-warnings", resolve("scripts/marketing-generator-worker.mjs")],
+      [...(process.features.typescript ? ["--experimental-strip-types"] : ["--import=tsx"]), "--no-warnings", resolve("scripts/marketing-generator-worker.mjs")],
       {
         env: {
           PATH: process.env.PATH,

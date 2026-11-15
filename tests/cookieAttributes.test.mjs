@@ -48,7 +48,7 @@ const buildAll = async (nodeEnv) => {
       unlockGrant: conversationLock.createConversationUnlockCookie(
         "user-1",
         "conversation-1",
-        "stored-password-hash"
+          0
       ),
       unlockClear: conversationLock.clearConversationUnlockCookie("conversation-1"),
       oauthStateClear: oauthLink.clearOAuthLinkStateCookie(),
