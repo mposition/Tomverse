@@ -113,7 +113,8 @@ type PromptPayload = {
   /** The models this send was made for; other panels must not consume it. */
   modelIds: string[];
   attachments: ChatAttachment[];
-  researchMode?: "preview";
+  researchDurable?: boolean;
+    researchMode?: "preview";
   deepResearchDepth?: "quick" | "standard" | "deep";
   admissionToken?: string | null;
   contextBundle?: string | null;

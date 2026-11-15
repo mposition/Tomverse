@@ -3442,7 +3442,8 @@ export function ChatInput({
                 </button>
               </div>
               <p className="line-clamp-2 break-words whitespace-pre-wrap" data-testid="research-preview-question">{value.trim() || t("chat.researchPreviewQuestion")}</p>
-              <details><summary className="min-h-11 cursor-pointer py-2">{t("chat.researchPreviewDescription")}</summary><p>{t("chat.researchPreviewScope")}</p></details>
+              <details><summary className="min-h-11 cursor-pointer py-2">{t("chat.researchPreviewDescription")}</summary><p>{t(researchPreview.features?.pageReading ? "chat.researchPreviewScopeWithPages" : "chat.researchPreviewScope")}</p>{researchPreview.features?.pageReading && <p>{t("chat.researchPreviewPageLimits")}</p>}{researchPreview.features?.durableRuns && <p>{t("chat.researchPreviewRunLimits")}</p>}</details>
+              {researchPreview.features?.durableRuns && <p>{t("chat.researchPreviewDurableHint")}</p>}
               {researchPreview.estimatedCredits !== undefined && <p data-testid="research-preview-estimate">{t("chat.researchPreviewEstimate").replace("{credits}", String(researchPreview.estimatedCredits))}</p>}
               {isResearchPreviewBlocked && <p className="font-semibold" data-testid="research-preview-blocked">{t(hasResearchPreviewAttachments ? "chat.researchPreviewAttachments" : !value.trim() || value.trim().length > 4000 ? "chat.researchPreviewQuestionLimit" : researchPreview.pending ? "chat.researchPreviewChecking" : "chat.researchPreviewUnavailable")}</p>}
             </div>

@@ -2,6 +2,9 @@ import { ContinuationReceipt } from "../../../components/continuations/Continuat
 import type { ContinuationReceipt as SourceReceipt } from "../../../lib/continuationReceipt";
 import type { Passage } from "../../../lib/continuationPassages";
 import { mobileSourceContextCopy } from "../../../locales/mobileSourceContext";
+import { useResearchPreview } from "../../../components/chat/useResearchPreview";
+import { ResearchPreviewRunCard } from "../../../components/chat/ResearchPreviewRunCard";
+import { researchRunMessage } from "../../../lib/researchPreviewRunClient";
 import { providerName } from "./ModelChoices";
 import { isIosWorkspace, type AssistantEntry, type IosPanel } from "./iosWorkspaceContract";
 import { IosNavigation, IosWelcome, IosWorkspacePanel, IosAssistantBadge } from "./IosWorkspace";
@@ -81,6 +84,8 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
   const [settingsTab, setSettingsTab] = useState<AccountSettingsTab>("account");
   const [modelPicker, setModelPicker] = useState(false);
   const [draftAutoOffered, setDraftAutoOffered] = useState(false);
+  const [draftModelId, setDraftModelId] = useState<string>();
+  const [draftCapabilityReady, setDraftCapabilityReady] = useState(false);
   const [iosEntry, setIosEntry] = useState<AssistantEntry | null>(null);
   const [iosImageEnabled, setIosImageEnabled] = useState(false);
   const [iosImportsEnabled, setIosImportsEnabled] = useState(false);
@@ -109,6 +114,14 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
   const revisionDraft = useArtifactRevisionDraft({ owner, conversationId: conversation?.id ?? null,
     text: draft, setText: setDraft, transport, language,
     enabled: signedIn && fileRevisionOffer.owner === owner && fileRevisionOffer.enabled && !loading && !streaming && !uncertain });
+  const researchPreview = useResearchPreview({
+    identityKey: owner, conversationId: conversation?.id ?? null,
+    modelId: conversation?.selectedModels[0] ?? draftModelId, question: draft.trim(), locale: language,
+    assistantProfileId: conversation?.assistantProfileId, requestOffer: transport.researchPreviewOffer,
+    revision: JSON.stringify([conversation?.assistantProfileId]),
+    enabled: Boolean(transport.researchPreviewOffer && signedIn && product === "chat" &&
+      (conversation ? conversation.selectionMode === "manual" && conversation.selectedModels.length === 1 && conversation.surface !== "continuation" : draftCapabilityReady && !draftAutoOffered)),
+  });
   const [accountOpen, setAccountOpen] = useState(false);
   const [reportFor, setReportFor] = useState<{ messageId: string; modelId?: string } | null>(null);
   // Only a finished answer has a saved Message row the report can be linked to;
@@ -153,7 +166,9 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
   useEffect(() => {
     if (!signedIn || conversation) return;
     let active = true;
-    void transport.capabilities().then((value) => { if (active) setDraftAutoOffered(value.offered); }).catch(() => { if (active) setDraftAutoOffered(false); });
+    void Promise.all([transport.capabilities(), transport.preferences?.()]).then(([value, preferences]) => {
+      if (active) { setDraftAutoOffered(value.offered); setDraftModelId(preferences?.defaultModel); setDraftCapabilityReady(true); }
+    }).catch(() => { if (active) { setDraftAutoOffered(false); setDraftCapabilityReady(false); } });
     return () => { active = false; };
   }, [transport, signedIn, conversation]);
   useEffect(() => transport.onSessionLost?.(() => {
@@ -176,6 +191,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
         const profile = await transport.account();
         if (!isCurrent()) return;
         setOwner(profile.id);
+        await transport.mobileCapabilities?.().catch(() => undefined);
         const list = await transport.list();
         if (!isCurrent()) return;
         setChats(list);
@@ -259,7 +275,8 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
       if (current === requestEpoch.current) setConversation(updated);
     } catch (error) { if (current === requestEpoch.current) { setUncertain(true); setError(mobileErrorText(error, language, copy.error)); } throw error; }
   }
-  async function send(text: string, files: MobileAttachment[], fromVoice = false) {
+  async function send(text: string, files: MobileAttachment[], fromVoice = false, research = false) {
+    if (research && (!researchPreview.offered || files.length || !text.trim() || text.trim().length > 4000 || !transport.sendResearchPreview)) return false;
     if (streaming || uncertain) { if (fromVoice) throw Error("CHAT_TURN_BUSY"); return false; }
     const current = ++requestEpoch.current;
     const titleEpoch = epoch.current;
@@ -280,11 +297,14 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
       if (!fromVoice) setSourcePick(null);
       const receipt = fromVoice ? await transport.sendVoice!(item, text, controller.signal, (value) => {
         if (current === requestEpoch.current) setPartial(value);
-      }) : await transport.send(item, text, files, controller.signal, (value) => {
+      }) : research ? await transport.sendResearchPreview!(item, text, files, controller.signal, value => {
+        if (current === requestEpoch.current) setPartial(value);
+      }, { durable: researchPreview.features?.durableRuns === true, locale: language }) : await transport.send(item, text, files, controller.signal, (value) => {
         if (current === requestEpoch.current) setPartial(value);
       }, { ...(picked ? { sourcePassages: picked } : {}), onReceipt: receipt => {
         if (current === requestEpoch.current && !controller.signal.aborted) setSourceDelivery({ owner, id: item!.id, receipt });
       } });
+      if (research) researchPreview.onSelectedChange(false);
       const restored = await transport.load(item.id);
       if (current !== requestEpoch.current) return;
       setConversation(restored); setPartial(null); setSourceDelivery(null);
@@ -299,10 +319,13 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
     } catch (error) {
       if (current !== requestEpoch.current) return;
       setPartial(value => value || null);
+      const questionUnsent = (error as { questionPersisted?: boolean }).questionPersisted === false;
       if (!dispatched) setDraft(text);
-      setUncertain(dispatched); setError(mobileErrorText(error, language, dispatched ? copy.disconnected : copy.error));
+      else if (questionUnsent) setDraft(text, item?.id ?? null);
+      else if (research) researchPreview.onSelectedChange(false);
+      setUncertain(dispatched && !questionUnsent); setError(mobileErrorText(error, language, dispatched ? copy.disconnected : copy.error));
       if (fromVoice) throw error;
-      if (!dispatched) return false;
+      if (!dispatched || questionUnsent) return false;
     } finally { if (current === requestEpoch.current) { setStreaming(false); setPendingQuestion(null); } }
   }
 
@@ -420,7 +443,10 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
         {!conversation?.messages.length && !streaming && conversation?.surface !== "continuation" && (isIosWorkspace ? <IosWelcome importsEnabled={iosImportsEnabled} language={language} automatic={conversation ? conversation.selectionMode === "auto" && conversation.autoSelection?.offered === true : draftAutoOffered} imageEnabled={iosImageEnabled} onPanel={openIosPanel} onSeed={seedIosWorkspace} /> : <WorkspaceWelcome product="chat" language={language} automatic={conversation ? conversation.selectionMode === "auto" && conversation.autoSelection?.offered === true : draftAutoOffered} />)}
         {isIosWorkspace && conversation?.surface === "continuation" && !conversation.messages.length && !streaming && <div className="ios-continuation-start"><h2>{mobileIosWorkspaceCopy(language).disclosure}</h2><p>{mobileIosWorkspaceCopy(language).readOnly}</p><button onClick={() => setDraft(language === "ko" ? "지난 대화를 바탕으로 다음 할 일을 정리해줘." : "Based on our previous conversation, help me plan the next steps.")}>{language === "ko" ? "다음 할 일부터 정리해줘" : "Help me plan the next steps"}</button></div>}
         {pendingQuestion !== null && <article className="message user"><AnswerContent content={pendingQuestion} transport={transport} language={language} /></article>}
-        {conversation?.messages.map((message) => <article key={message.id} className={`message ${message.role}`}>{message.role === "assistant" && <span className="message-label response-identity"><AppIcon name="logo" />Tomverse</span>}<AnswerContent copyable={message.role === "assistant"} content={message.content} imageTurn={message.imageTurn} artifacts={message.artifacts} onRevise={revisionDraft.prepare} citations={message.searchMetadata?.citations} transport={transport} language={language} />{message.continuationReceipt && <ContinuationReceipt receipt={message.continuationReceipt} t={sourceT} />}{message.role === "assistant" && ((reportable(message)) || comparable(message) || message.routedModelId || message.modelId) && <div className="answer-footer">{reportable(message) && <button type="button" className="answer-report" data-testid="answer-report" onClick={() => setReportFor({ messageId: message.id, modelId: message.modelId })}><AppIcon name="report" />{workspaceCopy.report}</button>}{comparable(message) && <button type="button" className="answer-report" data-testid="chat-compare-in-review" aria-label={mobileCompareInReviewCopy(language).aria} disabled={streaming || reviewBusy || uncertain} onClick={() => compareInReview(message.id)}>{mobileCompareInReviewCopy(language).label}</button>}<AnswerAttribution message={message} language={language} /></div>}{message.attachments?.map((file) => <span className="saved-attachment" key={file.id}><AppIcon name="file" />{file.name}</span>)}{["failed", "cancelled"].includes(message.status ?? "") && <p className="response-state">{workspaceCopy.failed}<button onClick={() => { const questions = conversation.messages.filter((item) => item.role === "user"); setDraft(questions.at(-1)?.content ?? ""); }}>{workspaceCopy.retry}</button></p>}</article>)}
+        {conversation?.messages.map((message) => <article key={message.id} className={`message ${message.role}`}>{message.role === "assistant" && <span className="message-label response-identity"><AppIcon name="logo" />Tomverse</span>}{message.researchRunId && conversation && transport.researchRuns && <ResearchPreviewRunCard
+          runId={message.researchRunId} conversationId={conversation.id} assistantMessageId={message.id} language={language} transport={transport.researchRuns}
+          onMessage={run => setConversation(item => item?.id === run.conversationId ? { ...item, messages: item.messages.map(existing => existing.id === run.assistantMessageId ? researchRunMessage(run) : existing) } : item)} />}
+<AnswerContent copyable={message.role === "assistant"} content={message.content} imageTurn={message.imageTurn} artifacts={message.artifacts} onRevise={revisionDraft.prepare} citations={message.searchMetadata?.citations} transport={transport} language={language} />{message.continuationReceipt && <ContinuationReceipt receipt={message.continuationReceipt} t={sourceT} />}{message.role === "assistant" && ((reportable(message)) || comparable(message) || message.routedModelId || message.modelId) && <div className="answer-footer">{reportable(message) && <button type="button" className="answer-report" data-testid="answer-report" onClick={() => setReportFor({ messageId: message.id, modelId: message.modelId })}><AppIcon name="report" />{workspaceCopy.report}</button>}{comparable(message) && <button type="button" className="answer-report" data-testid="chat-compare-in-review" aria-label={mobileCompareInReviewCopy(language).aria} disabled={streaming || reviewBusy || uncertain} onClick={() => compareInReview(message.id)}>{mobileCompareInReviewCopy(language).label}</button>}<AnswerAttribution message={message} language={language} /></div>}{message.attachments?.map((file) => <span className="saved-attachment" key={file.id}><AppIcon name="file" />{file.name}</span>)}{["failed", "cancelled"].includes(message.status ?? "") && <p className="response-state">{workspaceCopy.failed}<button onClick={() => { const questions = conversation.messages.filter((item) => item.role === "user"); setDraft(questions.at(-1)?.content ?? ""); }}>{workspaceCopy.retry}</button></p>}</article>)}
         {partial !== null && <article className="message assistant"><span className="message-label response-identity"><AppIcon name="logo" />Tomverse</span><AnswerContent content={partial || copy.waiting} transport={transport} language={language} /><span className="stream-caret" aria-hidden="true" /></article>}
         {sourceDelivery?.owner === owner && sourceDelivery.id === conversation?.id && <ContinuationReceipt receipt={sourceDelivery.receipt} t={sourceT} />}
         {conversation && <VoiceHistory transport={transport} conversationId={conversation.id} revision={voiceRevision} language={language} />}
@@ -428,9 +454,9 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
       </section>
       </div>
       {uncertain && conversation && <button className="restore" onClick={() => void open(conversation.id)}>{copy.restore} ↻</button>}
-      <Composer extraTools={iosExtraTools} product="chat" onProductChange={switchProduct} productBusy={streaming || loading || uncertain} productLoading={loading}
+      <Composer researchPreview={researchPreview} extraTools={iosExtraTools} product="chat" onProductChange={switchProduct} productBusy={streaming || loading || uncertain} productLoading={loading}
         selectionControl={<button type="button" className="model-trigger" disabled={streaming || loading || uncertain} onClick={() => setModelPicker(true)}><span>{conversation?.selectionMode === "auto" || (!conversation && draftAutoOffered) ? "Smart Adaptive" : getModel(conversation?.selectedModels[0] ?? "")?.name ?? workspaceCopy.model}</span><span aria-hidden="true">⌄</span></button>}
-        locationIdentity={owner} files={revisionDraft.files} onFilesChange={revisionDraft.setFiles} onRemoveFile={revisionDraft.removeFile} onFileUploaded={revisionDraft.addFile} copy={copy} language={language} transport={transport} draft={draft} setDraft={setDraft} disabled={loading || uncertain} offline={offline} streaming={streaming} conversation={conversation} onConfigureTools={configureTools} onSend={(text, files) => send(text, files).then(result => result === false ? false : undefined)} onStop={() => abort.current?.abort()} voiceConversation={disabled => <VoiceConversation transport={transport} language={language} conversationId={conversation?.id ?? null} scopeKey={`${owner}:${signedIn}:${product}`} disabled={disabled} selectionLabel={conversation?.selectionMode === "auto" || (!conversation && draftAutoOffered) ? "Smart Adaptive" : conversation?.selectedModels[0] ?? "Tomverse"} searchEnabled={conversation ? conversation.webSearchMode === "always" : true} onSessionEnded={() => setVoiceRevision(value => value + 1)} onRequest={async text => { const receipt = await send(text, [], true); if (!receipt) throw Error("VOICE_ANSWER_FAILED"); return receipt; }} />} />
+        locationIdentity={owner} files={revisionDraft.files} onFilesChange={revisionDraft.setFiles} onRemoveFile={revisionDraft.removeFile} onFileUploaded={revisionDraft.addFile} copy={copy} language={language} transport={transport} draft={draft} setDraft={setDraft} disabled={loading || uncertain} offline={offline} streaming={streaming} conversation={conversation} onConfigureTools={configureTools} onSend={(text, files) => send(text, files, false, researchPreview.selected).then(result => result === false ? false : undefined)} onStop={() => abort.current?.abort()} voiceConversation={disabled => <VoiceConversation transport={transport} language={language} conversationId={conversation?.id ?? null} scopeKey={`${owner}:${signedIn}:${product}`} disabled={disabled} selectionLabel={conversation?.selectionMode === "auto" || (!conversation && draftAutoOffered) ? "Smart Adaptive" : conversation?.selectedModels[0] ?? "Tomverse"} searchEnabled={conversation ? conversation.webSearchMode === "always" : true} onSessionEnded={() => setVoiceRevision(value => value + 1)} onRequest={async text => { const receipt = await send(text, [], true); if (!receipt) throw Error("VOICE_ANSWER_FAILED"); return receipt; }} />} />
     </>}
     {iosEntry && signedIn && <IosWorkspacePanel key={owner} entry={iosEntry} language={language} transport={transport} imageEnabled={iosImageEnabled} onClose={() => setIosEntry(null)} onStartAssistant={startIosAssistant} onContinue={async id => { if (await open(id)) { setProduct("chat"); setIosEntry(null); } else throw Error("CONVERSATION_OPEN_FAILED"); }} onSeed={seedIosWorkspace} onSettings={() => { setIosEntry(null); openSettings(); }} />}
     {modelPicker && <ModelSheet transport={transport} conversation={conversation} language={language} onClose={() => setModelPicker(false)} onApply={configureModel} />}

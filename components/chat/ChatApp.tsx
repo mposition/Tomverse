@@ -66,6 +66,8 @@ import {
   TRACE_PROVENANCE,
   type MessageErrorReportContext,
 } from "@/lib/errorReportContract";
+import { researchRunMessage } from "@/lib/researchPreviewRunClient";
+import type { ResearchPreviewRunDto } from "@/lib/researchPreviewRunTypes";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { fitChatRequestTranscript } from "@/lib/chatRequestLimits";
 import type { ChatContentState } from "@/lib/chatContentState";
@@ -279,6 +281,7 @@ type ChatAppProps = {
      */
     modelIds: string[];
     attachments: ChatAttachment[];
+    researchDurable?: boolean;
     researchMode?: "preview";
     deepResearchDepth?: "quick" | "standard" | "deep";
     /**
@@ -1075,6 +1078,20 @@ function ChatAppComponent({
               data.messagePage = pageData.messagePage;
               nextCursor = pageData.messagePage?.nextCursor;
             }
+            if (transcriptScope === "conversation" && !isGuestMode) {
+              try {
+              const runsResponse = await fetch(`/api/chat/research-preview/runs?conversationId=${encodeURIComponent(initialConversationId)}`, { cache: "no-store" });
+              const runsValue = await runsResponse.json().catch(() => null);
+              if (runsResponse.ok && Array.isArray(runsValue?.runs)) {
+                for (const run of runsValue.runs as ResearchPreviewRunDto[]) {
+                  if (run.conversationId !== initialConversationId || typeof run.id !== "string" || typeof run.assistantMessageId !== "string") continue;
+                  const index = data.messages.findIndex((message: Message) => message.id === run.assistantMessageId);
+                  if (index >= 0) data.messages[index] = { ...data.messages[index], researchRunId: run.id };
+                  else data.messages.push(researchRunMessage(run));
+                }
+              }
+              } catch { /* Optional run discovery never hides the stored transcript or starts work. */ }
+            }
             if (!isCurrentLoad()) return;
             // This key sent something while the history request was in
             // flight, so the response describes the conversation as it was
@@ -1518,6 +1535,7 @@ function ChatAppComponent({
     routerLocationTurn?: RouterLocationTurn,
     sourcePassages?: string,
     researchMode?: "preview",
+    researchDurable = false,
   ) => {
     // The key this run owns for its whole life. `targetChatId` is the
     // conversation the send was made in, and every write below names this key
@@ -1916,6 +1934,25 @@ function ChatAppComponent({
 
     let hasRouterLocationContinuation = false;
     try {
+      if (researchMode === "preview" && researchDurable && !isGuestMode) {
+        try {
+        onDispatchStarted?.();
+        const response = await fetch("/api/chat/research-preview/runs", {
+          method: "POST", headers: { "Content-Type": "application/json", "Accept-Language": lang },
+          body: JSON.stringify({ conversationId: targetChatId, sourceUserMessageId, assistantMessageId, modelId, locale: lang }),
+          signal: controller.signal,
+        });
+        const value = await response.json().catch(() => null) as { run?: ResearchPreviewRunDto } | null;
+        const run = value?.run;
+        if (!response.ok || !run || run.conversationId !== targetChatId || run.assistantMessageId !== assistantMessageId) throw new Error("RESEARCH_RUN_OUTCOME_UNCONFIRMED");
+        writeChatRuntimeMessages(runKey, current => current.map(message => message.id === assistantMessageId ? researchRunMessage(run) : message));
+        } catch {
+          // An interrupted create may already have queued a run. Only saved
+          // status discovery can confirm it; never claim that a worker stopped.
+          setAssistantMessage(assistantMessageId, t("chat.researchRunReadError"), "error", { errorCode: "RESEARCH_RUN_OUTCOME_UNCONFIRMED" });
+        }
+        return;
+      }
       const sendChatRequest = async (turnstileToken?: string, recoverWithSavedLocation = false) => {
         // Human permission and guest verification happen before provider wait
         // time starts. The same source turn is continued after either prompt.
@@ -3146,6 +3183,7 @@ function ChatAppComponent({
           promptPayload.routerLocationTurn,
           promptPayload.sourcePassages,
           promptPayload.researchMode,
+          promptPayload.researchDurable,
         ).then(() => {
           if (!providerStarted) reportDisposition("terminal");
         });
@@ -3316,6 +3354,7 @@ function ChatAppComponent({
         // A continuation is not an empty conversation: the imported half is
         // its earlier turns, and they render inside this list.
         !hasImportedTranscript ? null : <ChatMessageList
+        onResearchMessage={(message) => writeChatRuntimeMessages(runtimeKey, current => current.map(existing => existing.id === message.id ? { ...existing, ...message } : existing))}
         transcriptFooter={voiceHistoryRevision !== undefined && initialConversationId && !isGuestMode ? <VoiceConversationHistory conversationId={initialConversationId} revision={voiceHistoryRevision} /> : undefined}
         messages={
           // The imported half first, always: it is what this conversation

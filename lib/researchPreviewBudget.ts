@@ -9,6 +9,7 @@ import { APP_MANAGED_SEARCH_LIMITS } from "./webSearchBackends";
 import { reserveTurnSearchCost } from "./webSearchNativeCostReservation";
 import { researchPreviewReportSchema } from "./researchPreviewReport";
 import { z } from "zod";
+import { RESEARCH_PAGE_MAX_MODEL_CHARACTERS, RESEARCH_PAGE_MAX_READS } from "./researchPreviewPageEvidence";
 import {
   RESEARCH_PREVIEW_MAX_STEPS,
   RESEARCH_PREVIEW_MAX_TOTAL_OUTPUT_TOKENS,
@@ -40,6 +41,8 @@ const reportToolSchemaJson = JSON.stringify(
 );
 export const RESEARCH_PREVIEW_REPORT_TOOL_INPUT_TOKENS =
   Buffer.byteLength(reportToolSchemaJson, "utf8");
+export const RESEARCH_PREVIEW_PAGE_INPUT_TOKENS =
+  RESEARCH_PAGE_MAX_READS * RESEARCH_PAGE_MAX_MODEL_CHARACTERS * 6 + 4_000;
 
 type SearchReservation = Extract<
   ReturnType<typeof reserveTurnSearchCost>,
@@ -52,6 +55,7 @@ export function createResearchPreviewBudget(input: {
   input: TokenEstimateBreakdown;
   webSearchSurchargeCredits: number;
   searchReservation: SearchReservation;
+  pageReadingEnabled?: boolean;
 }): ChatBudget {
   return createChatBudget(input.accessKind, input.model, input.input, {
     webSearchSurchargeCredits: input.webSearchSurchargeCredits,
@@ -61,7 +65,8 @@ export function createResearchPreviewBudget(input: {
     toolInputAboveAuthoredLimit: true,
     additionalToolInputTokens:
       RESEARCH_PREVIEW_EVIDENCE_INPUT_TOKENS +
-      RESEARCH_PREVIEW_REPORT_TOOL_INPUT_TOKENS,
+      RESEARCH_PREVIEW_REPORT_TOOL_INPUT_TOKENS +
+      (input.pageReadingEnabled ? RESEARCH_PREVIEW_PAGE_INPUT_TOKENS : 0),
     totalOutputTokenCap: RESEARCH_PREVIEW_MAX_TOTAL_OUTPUT_TOKENS,
   });
 }

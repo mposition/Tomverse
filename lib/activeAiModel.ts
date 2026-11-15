@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createAnthropic } from "@ai-sdk/anthropic";
+import { createCohere } from "@ai-sdk/cohere";
 import { createGoogle } from "@ai-sdk/google";
 import { createMistral } from "@ai-sdk/mistral";
 import { createOpenAI } from "@ai-sdk/openai";
@@ -19,6 +20,7 @@ import {
 } from "@/lib/modelRegistryShared";
 import { deepseekUsageFetch } from "@/lib/deepseekUsageAdapter";
 import { perplexityUsageFetch } from "@/lib/perplexityUsageCapture";
+import { createCohereResearchFetch } from "@/lib/cohereResearchFetch";
 
 const runtimeConfiguration = (model: AiModel) => {
   const defaults = PROVIDER_API_CONFIGURATION[model.provider];
@@ -79,12 +81,20 @@ export const getActiveAiModel = (
   model: AiModel,
   openRouterRequest?: OpenRouterRequest
 ) => {
+  if (model.provider === "cohere" && process.env.COHERE_CHAT_ENABLED === "false") {
+    throw new Error("COHERE_CHAT_DISABLED");
+  }
+  if (model.provider === "cohere" && model.apiModel !== "command-a-plus-05-2026") {
+    throw new Error("COHERE_CHAT_MODEL_UNSUPPORTED");
+  }
   const configuration = runtimeConfiguration(model);
   switch (model.provider) {
     case "openai":
       return createOpenAI(configuration)(model.apiModel);
     case "anthropic":
       return createAnthropic(configuration)(model.apiModel);
+    case "cohere":
+      return createCohere({ ...configuration, fetch: createCohereResearchFetch() })(model.apiModel);
     case "google":
       return createGoogle(configuration)(model.apiModel);
     case "groq":

@@ -709,6 +709,27 @@ export const MODEL_PRICING: readonly ModelPricingProfile[] = [
         effectiveDate: "2026-08-01",
     },
     {
+        // Cohere documents Command A+ as free for both trial and production
+        // keys until the hosted API rate limit. This profile is intentionally
+        // exact to command-a-plus-05-2026 through api.cohere.com/v2; it does
+        // not price private/Vault deployments. Verified from:
+        // https://docs.cohere.com/docs/command-a-plus
+        modelId: "command-a-plus",
+        provider: "cohere",
+        apiModelId: "command-a-plus-05-2026",
+        ...DIRECT_STANDARD,
+        tiers: flatTier(0, 0),
+        reasoningTokenBilling: "billed_as_output",
+        maxOutputTokens: 64_000,
+        providerMaxOutputTokens: 64_000,
+        reservationOutputTokens: 4_096,
+        reservationOutputBasis: "conservative_default",
+        cachedInputPricingVerified: false,
+        priceSource: "cohere_command_a_plus_hosted_api_free_until_rate_limit",
+        pricingVersion: "cohere-command-a-plus-hosted-free-2026-11-15",
+        effectiveDate: "2026-11-15",
+    },
+    {
         modelId: "gemini-3-7-flash",
         provider: "google",
         apiModelId: "gemini-3.7-flash",

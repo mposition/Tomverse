@@ -5,12 +5,15 @@ import { sanitizeWebSearchCitations, type WebSearchCitation } from "./webSearchC
 import type { AppManagedSearchBatchResult, AppManagedSearchToolResult } from "./appManagedWebSearchTool";
 import { languageFromTag } from "./language";
 import { researchPreviewCopy } from "@/locales/researchPreview";
+import { curateResearchPageEvidence, researchPageEvidenceSchema, type ResearchPageEvidence } from "./researchPreviewPageEvidence";
+import type { ResearchPageReadResult } from "./researchPreviewPageRead";
 
 const sourceIdsSchema = z.array(z.string().regex(/^R(?:[1-9]|1\d|2[0-5])$/)).max(15);
 const statementSchema = z.object({
   text: z.string().trim().min(1).max(1200),
   sourceIds: sourceIdsSchema,
   kind: z.enum(["fact", "inference", "uncertain"]),
+  evidenceLevel: z.enum(["search_snippets", "page_text"]).optional(),
 }).strict();
 
 export const researchPreviewReportSchema = z.object({
@@ -31,6 +34,7 @@ export type ResearchPreviewReport = z.infer<typeof researchPreviewReportSchema>;
 export type ResearchEvidenceSource = {
   sourceId: string; url: string; title?: string; snippet?: string;
   publishedAt?: string; retrievedAt: string;
+  pageRead?: ResearchPageEvidence;
 };
 export type ResearchSearchToolResult = Omit<AppManagedSearchToolResult, "results"> & {
   results?: Array<NonNullable<AppManagedSearchToolResult["results"]>[number] & { sourceId: string }>;
@@ -39,8 +43,24 @@ export type ResearchSearchBatchResult = Omit<AppManagedSearchBatchResult, "searc
   searches: ResearchSearchToolResult[];
 };
 
-export function createResearchEvidenceRegistry() {
+export const researchEvidenceSourceSchema = z.object({
+  sourceId: z.string().regex(/^R(?:[1-9]|1\d|2[0-5])$/),
+  url: z.string().min(1).max(2048), title: z.string().max(200).optional(),
+  snippet: z.string().max(400).optional(), publishedAt: z.string().datetime({ offset: true }).optional(),
+  retrievedAt: z.string().datetime({ offset: true }), pageRead: researchPageEvidenceSchema.optional(),
+}).strict();
+
+export function createResearchEvidenceRegistry(initialSources: readonly ResearchEvidenceSource[] = []) {
   const byUrl = new Map<string, ResearchEvidenceSource>();
+  if (initialSources.length > 25) throw new Error("Invalid Research evidence checkpoint");
+  for (const [index, candidate] of initialSources.entries()) {
+    const parsed = researchEvidenceSourceSchema.safeParse(candidate);
+    if (!parsed.success || parsed.data.sourceId !== `R${index + 1}` ||
+        safeResultUrl(parsed.data.url) !== parsed.data.url || /[<>\s\\]/u.test(parsed.data.url) || byUrl.has(parsed.data.url)) {
+      throw new Error("Invalid Research evidence checkpoint");
+    }
+    byUrl.set(parsed.data.url, parsed.data);
+  }
   const add = (result: AppManagedSearchToolResult, retrievedAt: string): ResearchSearchToolResult => {
     if (result.status !== "ok" || !result.results) {
       return { ...result, results: undefined };
@@ -80,7 +100,16 @@ export function createResearchEvidenceRegistry() {
         : add(result, retrievedAt);
     },
     sourceIds: () => [...byUrl.values()].map((source) => source.sourceId),
-    snapshot: () => [...byUrl.values()].map((source) => ({ ...source })),
+    snapshot: () => [...byUrl.values()].map((source) => ({ ...source,
+      ...(source.pageRead ? { pageRead: { ...source.pageRead } } : {}) })),
+    recordPageRead(sourceId: string, result: ResearchPageReadResult) {
+      const source = [...byUrl.values()].find((entry) => entry.sourceId === sourceId);
+      const pageRead = curateResearchPageEvidence(result);
+      if (!source || result.sourceId !== sourceId || result.url !== source.url || !pageRead) {
+        throw new Error("Invalid Research page evidence binding");
+      }
+      source.pageRead = pageRead;
+    },
   };
 }
 
@@ -100,12 +129,22 @@ export type RenderedResearchPreviewReport = {
 
 export function validateAndRenderResearchReport(input: {
   report: unknown; registry: ResearchEvidenceRegistry; allowedSourceIds: readonly string[]; locale?: string;
+  allowedEvidenceSources?: readonly ResearchEvidenceSource[];
 }): RenderedResearchPreviewReport {
   const parsed = researchPreviewReportSchema.safeParse(input.report);
   if (!parsed.success) return { ok: false, reason: "invalid_report" };
   const report = parsed.data;
   const copy = researchPreviewCopy[languageFromTag(input.locale) ?? "en"];
-  const sources = new Map(input.registry.snapshot().map((source) => [source.sourceId, source]));
+  const currentSources = input.registry.snapshot();
+  const allowedSources = input.allowedEvidenceSources ?? currentSources;
+  if (allowedSources.length > 25 || new Set(allowedSources.map((source) => source.sourceId)).size !== allowedSources.length ||
+      allowedSources.some((source) => {
+        const actual = currentSources.find((entry) => entry.sourceId === source.sourceId);
+        return !researchEvidenceSourceSchema.safeParse(source).success || !actual ||
+          source.url !== actual.url || source.title !== actual.title || source.snippet !== actual.snippet ||
+          source.publishedAt !== actual.publishedAt || source.retrievedAt !== actual.retrievedAt;
+      })) return { ok: false, reason: "unknown_source" };
+  const sources = new Map(allowedSources.map((source) => [source.sourceId, source]));
   const allowed = new Set(input.allowedSourceIds);
   const citedIds = [...new Set([
     ...report.findings.flatMap((finding) => finding.statements.flatMap((statement) => statement.sourceIds)),
@@ -113,6 +152,11 @@ export function validateAndRenderResearchReport(input: {
   ])];
   if (citedIds.some((id) => !allowed.has(id) || !sources.has(id))) return { ok: false, reason: "unknown_source" };
   if (citedIds.length > 15) return { ok: false, reason: "too_many_sources" };
+  if (report.findings.some((finding) => finding.statements.some((statement) =>
+    statement.evidenceLevel === "page_text" && (!statement.sourceIds.length ||
+      statement.sourceIds.some((id) => sources.get(id)?.pageRead?.status !== "read"))))) {
+    return { ok: false, reason: "invalid_report" };
+  }
   if (report.findings.some((finding) => finding.statements.some((statement) =>
       (statement.kind === "fact" || statement.kind === "inference") && !statement.sourceIds.length)) ||
       report.contradictions.some((contradiction) => !contradiction.sourceIds.length) ||
@@ -138,7 +182,11 @@ export function validateAndRenderResearchReport(input: {
   if (report.contradictions.length) {
     for (const contradiction of report.contradictions) lines.push(`- ${researchPlainText(contradiction.text)} ${references(contradiction.sourceIds)}`);
   } else lines.push(copy.researchReportNoContradictions);
-  lines.push("", `### ${copy.researchReportLimitations}`, "", `- ${copy.researchReportSnippetLimitation}`);
+  const pagesRead = citedSources.some((source) => source.pageRead?.status === "read");
+  lines.push("", `### ${copy.researchReportLimitations}`, "", `- ${pagesRead
+    ? copy.researchReportPageLimitation : copy.researchReportSnippetLimitation}`);
+  if (citedSources.some((source) => source.pageRead?.truncated)) lines.push(`- ${copy.researchReportPageTruncated}`);
+  if (citedSources.some((source) => source.pageRead?.status === "unavailable")) lines.push(`- ${copy.researchReportPageUnavailable}`);
   lines.push(...report.limitations.map((limitation) => `- ${researchPlainText(limitation)}`));
   if (report.nextQuestions.length) lines.push("", `### ${copy.researchReportNextQuestions}`, "", ...report.nextQuestions.map((question) => `- ${researchPlainText(question)}`));
   const citationStream = createGroundedCitationStream(citations.map((citation) => citation.url));

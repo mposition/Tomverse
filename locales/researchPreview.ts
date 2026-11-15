@@ -1,4 +1,6 @@
+import { researchPreviewP1Copy } from "./researchPreviewP1";
 const en = {
+  ...researchPreviewP1Copy.en,
   researchPreviewTitle: "Research Preview",
   researchPreviewDescription: "Research this question once using public web search excerpts.",
   researchPreviewScope: "Only this self-contained public question is used. Previous chats, Memory, profile knowledge and files are excluded. Search queries are sent to the web search provider; results are excerpts, not full pages. The next message returns to normal Chat.",
@@ -34,6 +36,7 @@ export const researchPreviewCopy = {
   en,
   ko: {
     ...en,
+    ...researchPreviewP1Copy.ko,
     researchPreviewDescription: "이번 질문을 공개 웹 검색 발췌로 한 번 조사합니다.",
     researchPreviewScope: "현재의 자기완결적인 공개 질문만 사용합니다. 이전 대화, 메모리, 프로필 지식과 파일은 제외됩니다. 검색어는 웹 검색 제공업체에 전달되며, 결과는 페이지 전문이 아닌 발췌입니다. 다음 메시지는 일반 채팅으로 돌아갑니다.",
     researchPreviewQuestion: "앞선 맥락 없이 이해할 수 있는 공개 조사 질문을 작성해 주세요.",
@@ -59,6 +62,7 @@ export const researchPreviewCopy = {
   },
   zh: {
     ...en,
+    ...researchPreviewP1Copy.zh,
     researchPreviewDescription: "使用公开网页搜索摘要，仅研究本次问题。",
     researchPreviewScope: "仅使用当前可独立理解的公开问题，不包含历史对话、记忆、个人资料知识或文件。搜索词会发送给网页搜索服务商；结果是摘录，而非页面全文。下一条消息恢复普通聊天。",
     researchPreviewQuestion: "请填写无需前文即可理解的公开研究问题。",
@@ -84,6 +88,7 @@ export const researchPreviewCopy = {
   },
   "zh-Hant": {
     ...en,
+    ...researchPreviewP1Copy["zh-Hant"],
     researchPreviewDescription: "使用公開網頁搜尋摘要，僅研究本次問題。",
     researchPreviewScope: "僅使用目前可獨立理解的公開問題，不包含歷史對話、記憶、個人資料知識或檔案。搜尋詞會傳送給網頁搜尋服務商；結果是摘錄，而非頁面全文。下一則訊息恢復一般聊天。",
     researchPreviewQuestion: "請填寫不需前文即可理解的公開研究問題。",
@@ -109,6 +114,7 @@ export const researchPreviewCopy = {
   },
   fr: {
     ...en,
+    ...researchPreviewP1Copy.fr,
     researchPreviewDescription: "Rechercher une seule fois cette question à partir d’extraits du Web public.",
     researchPreviewScope: "Seule cette question publique et autonome est utilisée. Les anciennes conversations, la mémoire, les connaissances du profil et les fichiers sont exclus. Les requêtes sont envoyées au fournisseur de recherche ; les résultats sont des extraits, pas des pages entières. Le prochain message revient au Chat normal.",
     researchPreviewQuestion: "Rédigez une question de recherche publique compréhensible sans contexte antérieur.",
@@ -134,6 +140,7 @@ export const researchPreviewCopy = {
   },
   de: {
     ...en,
+    ...researchPreviewP1Copy.de,
     researchPreviewDescription: "Diese Frage einmal anhand öffentlicher Websuchauszüge recherchieren.",
     researchPreviewScope: "Nur diese eigenständige öffentliche Frage wird verwendet. Frühere Chats, Erinnerungen, Profilwissen und Dateien bleiben ausgeschlossen. Suchanfragen gehen an den Suchanbieter; Ergebnisse sind Auszüge, keine vollständigen Seiten. Die nächste Nachricht verwendet wieder den normalen Chat.",
     researchPreviewQuestion: "Formulieren Sie eine öffentliche Recherchefrage, die ohne vorherigen Kontext verständlich ist.",
@@ -159,6 +166,7 @@ export const researchPreviewCopy = {
   },
   es: {
     ...en,
+    ...researchPreviewP1Copy.es,
     researchPreviewDescription: "Investigar esta pregunta una vez con extractos de búsquedas en la Web pública.",
     researchPreviewScope: "Solo se utiliza esta pregunta pública y autónoma. Se excluyen chats anteriores, memoria, conocimientos del perfil y archivos. Las consultas se envían al proveedor de búsqueda; los resultados son extractos, no páginas completas. El próximo mensaje vuelve al Chat normal.",
     researchPreviewQuestion: "Escribe una pregunta de investigación pública que se entienda sin contexto anterior.",
@@ -184,6 +192,7 @@ export const researchPreviewCopy = {
   },
   pt: {
     ...en,
+    ...researchPreviewP1Copy.pt,
     researchPreviewDescription: "Pesquisar esta pergunta uma vez usando trechos de buscas na Web pública.",
     researchPreviewScope: "Somente esta pergunta pública e independente é usada. Conversas anteriores, memória, conhecimento do perfil e arquivos são excluídos. As consultas são enviadas ao provedor de busca; os resultados são trechos, não páginas completas. A próxima mensagem volta ao Chat normal.",
     researchPreviewQuestion: "Escreva uma pergunta de pesquisa pública que seja compreensível sem contexto anterior.",

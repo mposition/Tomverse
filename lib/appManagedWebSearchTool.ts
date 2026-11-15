@@ -45,6 +45,7 @@ import {
 import {
   createAppManagedSearchSession,
   type AppManagedSearchSession,
+  type AppManagedSearchSnapshot,
 } from "@/lib/appManagedWebSearchCore";
 import { utcDateString } from "@/lib/chatCurrentDatePrompt";
 import {
@@ -241,6 +242,7 @@ export type AppManagedWebSearchToolConfig = {
   serializeOriginalDescriptions?: (result: AppManagedSearchToolResult | AppManagedSearchBatchResult) => string | undefined;
   /** The counter and collected sources. Read after the turn settles. */
   session: AppManagedSearchSession;
+  successfulCacheSnapshot?: () => Promise<Array<{ key: string; result: AppManagedSearchToolResult }>>;
 };
 
 /**
@@ -254,6 +256,9 @@ export const buildAppManagedWebSearchTool = (input: {
   backend: WebSearchBackend;
   /** The ceiling from the capability the reservation was sized on. */
   maxQueries: number;
+  initialSnapshot?: AppManagedSearchSnapshot;
+  /** Successful, completed tool results only; pending calls are never replayed. */
+  initialSuccessfulCache?: readonly { key: string; result: AppManagedSearchToolResult }[];
   /** Aborts an in-flight backend request when the turn ends. */
   signal?: AbortSignal;
   /**
@@ -285,10 +290,15 @@ export const buildAppManagedWebSearchTool = (input: {
   const session = createAppManagedSearchSession({
     backend: input.backend,
     maxQueries: input.maxQueries,
+    initialSnapshot: input.initialSnapshot,
   });
   // Attempt-local single flight: identical concurrent calls share one backend
   // request and one settlement. Only successful results remain reusable.
   const requests = new Map<string, Promise<AppManagedSearchToolResult>>();
+  for (const entry of input.initialSuccessfulCache ?? []) {
+    if (entry.result.status !== "ok" || requests.size >= input.maxQueries) throw new Error("Invalid Research query cache");
+    requests.set(entry.key, Promise.resolve(entry.result));
+  }
   const originalResults = input.extraSnippets === true
     ? new WeakMap<WebSearchBackendResult[], WebSearchBackendResult[]>() : undefined;
   let toolCallIndex = 0;
@@ -446,7 +456,12 @@ export const buildAppManagedWebSearchTool = (input: {
     const projection = result.status === "batch" ? { ...result, searches: result.searches.map(restore) } : restore(result);
     return changed ? JSON.stringify(projection) : undefined;
   } : undefined;
-  return { session, search, ...(serializeOriginalDescriptions ? { serializeOriginalDescriptions } : {}), tools: {
+  return { session, search,
+    successfulCacheSnapshot: async () => {
+      const entries = await Promise.all([...requests].map(async ([key, pending]) => ({ key, result: await pending })));
+      return entries.filter((entry) => entry.result.status === "ok");
+    },
+    ...(serializeOriginalDescriptions ? { serializeOriginalDescriptions } : {}), tools: {
     [APP_MANAGED_WEB_SEARCH_TOOL_NAME]: tool({
       description: SEARCH_TOOL_DESCRIPTION,
       inputSchema: searchToolInputSchema,

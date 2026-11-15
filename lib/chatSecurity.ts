@@ -4059,6 +4059,133 @@ export const acquireChatAccess = async (
     };
 };
 
+/**
+ * Re-enters only the concurrency boundary for a durable run whose financial
+ * reservation already exists. It deliberately does not consume another
+ * request quota, credit hold or provider/search hold: a resumed Research
+ * Preview generation is part of the original capped turn, not a new turn.
+ */
+export const acquireReservedChatAccess = async (
+    access: ChatAccess,
+    input: { reservationId: string; modelId: string }
+): Promise<{ leaseId: string; setCookie: string | undefined }> => {
+    try {
+        await assertOperationalFeatureEnabled("aiChatEnabled");
+    } catch (error) {
+        if (error instanceof OperationalFeatureDisabledError) {
+            throw new ChatAccessError(
+                503,
+                "AI_CHAT_DISABLED_BY_ADMIN",
+                "AI chat is temporarily paused for operational maintenance."
+            );
+        }
+        throw error;
+    }
+    if (access.kind !== "user" || !access.userId) {
+        throw new ChatAccessError(
+            401,
+            "AUTHENTICATION_REQUIRED",
+            "Authentication is required."
+        );
+    }
+    await assertUserOperationalAccess(access.userId);
+
+    const leaseId = randomUUID();
+    const now = new Date();
+    const plan = resolveChatConcurrencyPlan(access);
+    await prisma.$transaction(async (tx) => {
+        // The same lock order as acquireChatAccess: credit account, subject,
+        // concurrency scopes, then rows.
+        await lockCreditAccount(tx, access.userId!);
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${access.subjectKey}))`;
+        await lockConcurrencyScopes(tx, plan);
+        await sweepExpiredLeasesForScopes(tx, {
+            subjectKey: plan.subject.key,
+            ipKey: plan.ip?.key ?? null,
+        });
+        const reservation = await tx.chatCreditReservation.findUnique({
+            where: { id: input.reservationId },
+            select: {
+                userId: true,
+                subjectKey: true,
+                modelId: true,
+                source: true,
+                status: true,
+                expiresAt: true,
+            },
+        });
+        if (
+            !reservation ||
+            reservation.userId !== access.userId ||
+            reservation.subjectKey !== access.subjectKey ||
+            reservation.modelId !== input.modelId ||
+            reservation.source !== "chat" ||
+            reservation.status !== "reserved" ||
+            reservation.expiresAt <= now
+        ) {
+            throw new ChatAccessError(
+                409,
+                "CHAT_RESERVATION_NOT_OPEN",
+                "The Research reservation can no longer be resumed."
+            );
+        }
+        await assertConcurrencyCapacity(tx, plan, 1);
+        await insertLeases(tx, [
+            {
+                id: leaseId,
+                subjectKey: plan.subject.key,
+                ipKey: plan.ip?.key ?? null,
+                modelId: input.modelId,
+                admissionId: null,
+                claimedAt: now,
+                expiresAt: new Date(
+                    now.getTime() + resolveLeaseTtlSeconds() * 1_000
+                ),
+            },
+        ]);
+    });
+    return { leaseId, setCookie: access.setCookie };
+};
+
+/** Restores the frozen pricing/budget receipt from its canonical durable row. */
+export const readOpenChatUsageReservation = async (
+    reservationId: string,
+    userId: string
+): Promise<ChatUsageReservation> => {
+    const row = await prisma.chatCreditReservation.findUnique({
+        where: { id: reservationId },
+        select: {
+            userId: true,
+            source: true,
+            status: true,
+            expiresAt: true,
+            reservationPayload: true,
+        },
+    });
+    if (
+        !row ||
+        row.userId !== userId ||
+        row.source !== "chat" ||
+        row.status !== "reserved" ||
+        row.expiresAt <= new Date()
+    ) {
+        throw new ChatAccessError(
+            409,
+            "CHAT_RESERVATION_NOT_OPEN",
+            "The Research reservation can no longer be resumed."
+        );
+    }
+    const reservation = deserializeReservation(row.reservationPayload);
+    if (
+        reservation.reservationId !== reservationId ||
+        reservation.userId !== userId ||
+        reservation.source !== "chat"
+    ) {
+        throw new Error("Durable chat credit reservation identity mismatch.");
+    }
+    return reservation;
+};
+
 export const settleChatUsage = async (
     reservation: ChatUsageReservation,
     callerTurnUsage: {

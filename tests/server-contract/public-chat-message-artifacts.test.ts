@@ -52,6 +52,7 @@ const row = (artifacts: Array<Record<string, unknown>>) => ({
   status: "incomplete",
   modelId: "claude-haiku-4-5",
   pendingJobId: null,
+  researchRunId: null,
   searchMetadata: null,
   createdAt: "2026-09-17T00:00:00.000Z",
   memoryUsedCount: null,

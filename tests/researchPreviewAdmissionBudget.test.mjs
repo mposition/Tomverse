@@ -12,6 +12,7 @@ import {
   createResearchPreviewBudget,
   RESEARCH_PREVIEW_EVIDENCE_INPUT_TOKENS,
   RESEARCH_PREVIEW_REPORT_TOOL_INPUT_TOKENS,
+  RESEARCH_PREVIEW_PAGE_INPUT_TOKENS,
 } from "../lib/researchPreviewBudget.ts";
 import { researchPreviewInputEstimate } from "../lib/researchPreviewPrompt.ts";
 import { getWebSearchCapability } from "../lib/webSearchCapability.ts";
@@ -125,4 +126,17 @@ test("one budget reserves three prompt passes, prior output, schema and worst-ca
     budget.contextInputTokens * 3 + budget.maxOutputTokens * 2
   );
   assert.ok(RESEARCH_PREVIEW_EVIDENCE_INPUT_TOKENS >= 202_000);
+});
+
+test("page reading is default-off and its bounded text is reserved in every input pass", () => {
+  const reservation = reserveTurnSearchCost({ model, capability: getWebSearchCapability(model), nativeSearchEnabled: false, appManagedSearchEnabled: true });
+  assert.equal(reservation.ok, true);
+  const common = { accessKind: "user", model, input: researchPreviewInputEstimate({ question: "Compare public evidence.", locale: "en", currentDate: "2026-11-15" }), webSearchSurchargeCredits: 0, searchReservation: reservation };
+  const excerpts = createResearchPreviewBudget(common);
+  const pages = createResearchPreviewBudget({ ...common, pageReadingEnabled: true });
+  assert.equal(pages.contextInputTokens - excerpts.contextInputTokens, RESEARCH_PREVIEW_PAGE_INPUT_TOKENS);
+  assert.equal(pages.inputTokens - excerpts.inputTokens, RESEARCH_PREVIEW_PAGE_INPUT_TOKENS * 3);
+  assert.equal(pages.maxOutputTokens, excerpts.maxOutputTokens);
+  assert.deepEqual(pages.searchBackend, excerpts.searchBackend);
+  assert.equal(pages.usageCredits, excerpts.usageCredits);
 });

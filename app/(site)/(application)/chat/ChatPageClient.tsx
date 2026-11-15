@@ -717,6 +717,7 @@ function ChatShellSkeleton({ label }: { label: string }) {
  * and persistence for itself.
  */
 type GlobalSubmitOptions = {
+  researchDurable?: boolean;
   researchMode?: "preview";
   submittedAtMonotonicMs?: number;
   /** The image-intent call already answered for this exact draft. */
@@ -1846,6 +1847,7 @@ export function ChatPageClient({
      */
     modelIds: string[];
     attachments: ChatAttachment[];
+    researchDurable?: boolean;
     researchMode?: "preview";
     deepResearchDepth?: "quick" | "standard" | "deep";
     /**
@@ -5869,7 +5871,7 @@ export function ChatPageClient({
   ]);
 
   const researchPreview = useResearchPreview({
-    identityKey, conversationId: currentChatId, modelId: selectedModels[0], question: inputValue.trim(), locale: lang,
+    identityKey, conversationId: currentChatId, modelId: selectedModels[0], question: inputValue.trim(), locale: lang, assistantProfileId: currentChatId ? undefined : pendingProfileId,
     revision: JSON.stringify([assistantProfile, assistantProfileRemovedAt, accountUsage?.plan]),
     enabled: mountedSurface === "chat" && !isGuestMode && selectionMode === "manual" &&
       selectedModels.length === 1 && activeModelCount === 1 && !isImageDraftActive,
@@ -7547,7 +7549,7 @@ export function ChatPageClient({
         ...(options?.webSearchOverride
           ? { webSearchMode: options.webSearchOverride }
           : {}),
-        ...(options?.researchMode ? { researchMode: options.researchMode } : {}),
+        ...(options?.researchMode ? { researchMode: options.researchMode, researchDurable: options.researchDurable === true } : {}),
         ...(options?.deepResearchDepth
           ? { deepResearchDepth: options.deepResearchDepth }
           : {}),
@@ -8946,7 +8948,7 @@ export function ChatPageClient({
       setSendEcho(mine);
     }
     try {
-      await handleGlobalSubmit(researchPreview.selected ? { researchMode: "preview", imageIntentChecked: true } : undefined);
+      await handleGlobalSubmit(researchPreview.selected ? { researchMode: "preview", researchDurable: researchPreview.features?.durableRuns === true, imageIntentChecked: true } : undefined);
     } finally {
       if (mine && sendEchoRef.current === mine) {
         sendEchoRef.current = null;

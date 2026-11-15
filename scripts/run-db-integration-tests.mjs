@@ -1493,6 +1493,13 @@ run(
   "Running Research Preview route and cumulative settlement scenarios"
 );
 
+run(
+  ["--conditions=react-server", "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
+    "--test-concurrency=1", "tests/integration/research-preview-durable-run.db.test.ts"],
+  "Running durable Research Preview service, checkpoint and dispatch CAS scenarios"
+);
+
 if ([...focusedSuites].some((suite) => !selectedFocusedSuites.has(suite))) {
   fail("a requested DB_INTEGRATION_SUITES path is not registered in this lane.");
 }

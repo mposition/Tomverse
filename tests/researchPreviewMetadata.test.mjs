@@ -29,7 +29,7 @@ test("versioned metadata preserves only bounded cited evidence across JSON reloa
 test("metadata rejects oversized excerpts, invalid versions, dangerous links and wrong numbering", () => {
   const base = metadata();
   for (const value of [
-    { ...base, version: 2 },
+    { ...base, version: 3 },
     { ...base, sources: [{ ...base.sources[0], excerpt: "x".repeat(401) }] },
     { ...base, sources: [{ ...base.sources[0], url: "javascript:alert(1)" }] },
     { ...base, sources: [{ ...base.sources[0], referenceNumber: 9 }] },

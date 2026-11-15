@@ -189,6 +189,7 @@ export type ProviderHealthDashboard = {
 export const PROVIDER_DISPLAY_NAMES: Record<AiProvider, string> = {
   openai: "OpenAI",
   anthropic: "Anthropic",
+  cohere: "Cohere",
   google: "Google Gemini",
   groq: "Groq",
   xai: "xAI",

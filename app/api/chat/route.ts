@@ -181,6 +181,8 @@ import {
     researchPreviewMessages,
 } from "@/lib/researchPreviewExecution";
 import { buildResearchPreviewMetadata } from "@/lib/researchPreviewMetadata";
+import { researchPreviewFeatures } from "@/lib/researchPreviewFeatures";
+import { getResearchPreviewAiModel } from "@/lib/researchPreviewModel";
 import { hasSearchPath, resolveAttemptSearchPath } from "@/lib/webSearchPath";
 import { getRouterRuntimeSignals } from "@/lib/routerRuntimeSignals";
 import { normalizeWebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
@@ -1470,6 +1472,10 @@ async function handleChatPost(
             researchMode,
         } = validateChatPayload(body);
         const isResearchPreview = researchMode === "preview";
+        const researchFeatures = researchPreviewFeatures();
+        if (isResearchPreview && req.headers.has("authorization") && !researchFeatures.nativeStart) {
+            throw new ChatAccessError(503, "RESEARCH_PREVIEW_NATIVE_UNAVAILABLE", "Research Preview is not enabled for this client.");
+        }
         const researchPreviewQuestion = isResearchPreview
             ? requestMessages[0]!.content.trim()
             : null;
@@ -3276,7 +3282,7 @@ async function handleChatPost(
 
         let activeModel;
         try {
-            activeModel = getActiveAiModel(modelConfig);
+            activeModel = isResearchPreview ? getResearchPreviewAiModel(modelConfig) : getActiveAiModel(modelConfig);
         } catch (error) {
             const code = catalogueHostRefusalCode(error);
             if (!code) throw error;
@@ -4697,6 +4703,7 @@ async function handleChatPost(
                     content: researchPreviewInstructions({
                         locale: researchPreviewLanguage,
                         currentDate: researchPreviewCurrentDate,
+                        pageReadingEnabled: researchFeatures.pageReading,
                     }),
                 },
                 ...researchPreviewMessages(researchPreviewQuestion!)
@@ -4786,6 +4793,7 @@ async function handleChatPost(
                       question: researchPreviewQuestion!,
                       locale: researchPreviewLanguage,
                       currentDate: researchPreviewCurrentDate,
+                      pageReadingEnabled: researchFeatures.pageReading,
                   }),
                   webSearchSurchargeCredits: getWebSearchSurchargeCredits(
                       "always",
@@ -4793,6 +4801,7 @@ async function handleChatPost(
                       searchBackendReadiness
                   ),
                   searchReservation: nativeSearchReservation,
+                  pageReadingEnabled: researchFeatures.pageReading,
               })
             : createChatBudget(
                   access.kind,
@@ -5223,9 +5232,11 @@ async function handleChatPost(
             isResearchPreview && webSearchCapability.searchBackend
                 ? createResearchPreviewExecution({
                       backend: webSearchCapability.searchBackend,
+                      provider: modelConfig.provider,
                       totalOutputTokens: budget.maxOutputTokens,
                       locale: researchPreviewLanguage,
                       signal: researchPreviewRunSignal,
+                      pageReadingEnabled: researchFeatures.pageReading,
                       onSearchOutcome: recordAppManagedSearchOutcome,
                   })
                 : null;

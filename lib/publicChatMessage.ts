@@ -25,6 +25,7 @@ export const PUBLIC_CHAT_MESSAGE_SELECT = {
   status: true,
   modelId: true,
   pendingJobId: true,
+  researchRunId: true,
   searchMetadata: true,
   createdAt: true,
   memoryUsedCount: true,
@@ -58,6 +59,7 @@ type PublicChatMessageRow = {
   status: string;
   modelId: string | null;
   pendingJobId: string | null;
+  researchRunId: string | null;
   searchMetadata: unknown;
   createdAt: Date | string;
   memoryUsedCount: number | null;
@@ -95,6 +97,7 @@ export const toPublicChatMessage = (row: PublicChatMessageRow) => ({
   status: row.status,
   modelId: row.modelId,
   pendingJobId: row.pendingJobId,
+  researchRunId: row.researchRunId,
   searchMetadata: projectResearchSearchMetadata(row.searchMetadata),
   createdAt: row.createdAt,
   ...(row.attachments.length

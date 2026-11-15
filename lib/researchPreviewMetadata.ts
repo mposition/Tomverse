@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { curateResearchPageEvidence, researchPageEvidenceSchema, type ResearchPageEvidence } from "./researchPreviewPageEvidence";
 
 export const RESEARCH_PREVIEW_OUTCOMES = [
   "complete", "partial", "insufficient_evidence", "failed", "cancelled",
@@ -26,16 +27,22 @@ const researchSourceSchema = z.object({
 }).strict();
 
 /** Public, bounded fields only. No queries, internal budget, or provider payload. */
-export const researchPreviewMetadataSchema = z.object({
-  version: z.literal(1),
+const researchMetadataBase = {
   mode: z.literal("preview"),
-  evidenceLevel: z.literal("search_snippets"),
   outcome: z.enum(RESEARCH_PREVIEW_OUTCOMES),
   startedAt: isoTimestamp,
   completedAt: isoTimestamp,
   stopReason: z.enum(RESEARCH_PREVIEW_STOP_REASONS),
-  sources: z.array(researchSourceSchema).max(15).optional(),
-}).strict();
+};
+export const researchPreviewMetadataSchema = z.discriminatedUnion("version", [
+  z.object({ ...researchMetadataBase, version: z.literal(1),
+    evidenceLevel: z.literal("search_snippets"), sources: z.array(researchSourceSchema).max(15).optional(),
+  }).strict(),
+  z.object({ ...researchMetadataBase, version: z.literal(2),
+    evidenceLevel: z.enum(["search_snippets", "search_snippets_and_pages"]),
+    sources: z.array(researchSourceSchema.extend({ pageRead: researchPageEvidenceSchema.optional() })).max(15).optional(),
+  }).strict(),
+]);
 
 export type ResearchPreviewMetadata = z.infer<typeof researchPreviewMetadataSchema>;
 
@@ -51,6 +58,8 @@ export function parseResearchPreviewMetadata(value: unknown): ResearchPreviewMet
       ...(entry.title !== undefined ? { title: entry.title } : {}),
       ...(entry.excerpt !== undefined ? { excerpt: entry.excerpt } : {}),
       ...(entry.publishedAt !== undefined ? { publishedAt: entry.publishedAt } : {}),
+      ...(row.version === 2 && entry.pageRead !== undefined
+        ? { pageRead: curateResearchPageEvidence(entry.pageRead) } : {}),
       retrievedAt: entry.retrievedAt,
     };
   }) : undefined;
@@ -64,6 +73,8 @@ export function parseResearchPreviewMetadata(value: unknown): ResearchPreviewMet
   if (entries.some((source, index) => source.referenceNumber !== index + 1) ||
       new Set(entries.map((source) => source.sourceId)).size !== entries.length ||
       new Set(entries.map((source) => source.url)).size !== entries.length) return null;
+  if (parsed.data.version === 2 && (parsed.data.evidenceLevel === "search_snippets_and_pages") !==
+      (parsed.data.sources ?? []).some((source) => source.pageRead?.status === "read")) return null;
   return parsed.data;
 }
 
@@ -75,10 +86,14 @@ export function buildResearchPreviewMetadata(input: {
   citedSources?: readonly {
     sourceId: string; url: string; title?: string; snippet?: string;
     publishedAt?: string; retrievedAt: string;
+    pageRead?: ResearchPageEvidence;
   }[];
 }): ResearchPreviewMetadata {
+  const withPages = input.citedSources?.some((source) => source.pageRead !== undefined) ?? false;
+  const pagesRead = input.citedSources?.some((source) => source.pageRead?.status === "read") ?? false;
   const metadata = {
-    version: 1 as const, mode: "preview" as const, evidenceLevel: "search_snippets" as const,
+    version: withPages ? 2 as const : 1 as const, mode: "preview" as const,
+    evidenceLevel: pagesRead ? "search_snippets_and_pages" as const : "search_snippets" as const,
     outcome: input.outcome, startedAt: input.startedAt, completedAt: input.completedAt,
     stopReason: input.stopReason,
     ...(input.citedSources?.length ? {
@@ -87,6 +102,7 @@ export function buildResearchPreviewMetadata(input: {
         ...(source.title ? { title: source.title } : {}),
         ...(source.snippet ? { excerpt: source.snippet } : {}),
         ...(source.publishedAt ? { publishedAt: source.publishedAt } : {}),
+        ...(source.pageRead ? { pageRead: source.pageRead } : {}),
         retrievedAt: source.retrievedAt,
       })),
     } : {}),

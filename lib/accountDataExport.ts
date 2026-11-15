@@ -320,6 +320,28 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
       take: EXPORT_ROW_CAP,
     }),
 
+  researchPreviewRun: (userId) =>
+    prisma.researchPreviewRun.findMany({
+      where: { userId },
+      select: {
+        id: true,
+        conversationId: true,
+        assistantMessageId: true,
+        modelId: true,
+        status: true,
+        stopReason: true,
+        stepCount: true,
+        searchCount: true,
+        readCount: true,
+        startedAt: true,
+        completedAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+      orderBy: { createdAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
+
   promptRefinerChatScope: (userId) =>
     prisma.$queryRaw<unknown[]>`SELECT "surface", "epoch" FROM "PromptRefinerChatScope"
       WHERE "userId" = ${userId} ORDER BY "id" LIMIT ${EXPORT_ROW_CAP}`,

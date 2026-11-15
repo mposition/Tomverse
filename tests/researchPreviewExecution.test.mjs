@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test, { beforeEach, afterEach } from "node:test";
 import { generateText, streamText } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
-import { createResearchPreviewExecution, RESEARCH_PREVIEW_REPORT_TOOL_NAME } from "../lib/researchPreviewExecution.ts";
+import { createResearchPreviewExecution, RESEARCH_PREVIEW_REPORT_TOOL_NAME, usedResearchOutputTokens } from "../lib/researchPreviewExecution.ts";
 import { researchPreviewMessages, researchPreviewInstructions } from "../lib/researchPreviewPrompt.ts";
 
 const originalFetch = globalThis.fetch;
@@ -20,6 +20,13 @@ const report = (id = "R1", status = "complete") => ({
 });
 const submit = (value = report(), id) => call(RESEARCH_PREVIEW_REPORT_TOOL_NAME, value, id);
 const generation = (content, output = 100) => ({ content, usage: usage(output), finishReason: { unified: "tool-calls", raw: undefined }, warnings: [] });
+
+test("Google raw missing usage cannot become a known zero through SDK normalization", () => {
+  for (const raw of [{}, { promptTokenCount: 1 }, { promptTokenCount: 1, candidatesTokenCount: 1, thoughtsTokenCount: -1 }]) {
+    assert.throws(() => usedResearchOutputTokens([{ usage: { inputTokens: 0, outputTokens: 0, raw } }], "google"), error => error.code === "RESEARCH_PREVIEW_USAGE_UNKNOWN");
+  }
+  assert.equal(usedResearchOutputTokens([{ usage: { inputTokens: 4, outputTokens: 5, raw: { promptTokenCount: 3, toolUsePromptTokenCount: 1, candidatesTokenCount: 2, thoughtsTokenCount: 3 } } }], "google"), 5);
+});
 
 beforeEach(() => {
   backendCalls = [];

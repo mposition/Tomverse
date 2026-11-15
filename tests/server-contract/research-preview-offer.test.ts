@@ -31,6 +31,11 @@ mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {
     return owned ? { id: "conversation", password: "protected", kind: "chat", productKey, selectionMode, selectedModels: JSON.stringify([modelId]), assistantProfileVersionId: profileId } : null;
   } },
   assistantProfileVersion: { findFirst: async () => ({ toolPolicy: policy }) },
+  assistantProfile: { findFirst: async ({ where, select }: { where: { userId: string }; select: unknown }) => {
+    assert.equal(where.userId, "owner");
+    assert.deepEqual(select, { currentVersion: { select: { toolPolicy: true } } });
+    return owned ? { currentVersion: { toolPolicy: policy } } : null;
+  } },
 } } });
 mock.module(mod("lib/apiSecurity.ts"), { namedExports: {
   consumeApiRateLimit: async () => {}, apiSecurityResponse: () => null,
@@ -46,7 +51,7 @@ mock.module(mod("lib/researchPreviewBudget.ts"), { namedExports: { createResearc
 
 let POST: (request: Request) => Promise<Response>;
 before(async () => { ({ POST } = await import(mod("app/api/chat/research-preview/offer/route.ts"))); });
-const offer = () => POST(new Request("http://localhost/api/chat/research-preview/offer", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversationId: "conversation", modelId, question: "Compare public documentation" }) }));
+const offer = (body?: Record<string, unknown>) => POST(new Request("http://localhost/api/chat/research-preview/offer", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body ?? { conversationId: "conversation", modelId, question: "Compare public documentation" }) }));
 
 beforeEach(() => {
   process.env.RESEARCH_PREVIEW_ENABLED = "true";
@@ -105,4 +110,29 @@ test("guests and models outside the pinned shortlist are never offered", async (
   process.env.RESEARCH_PREVIEW_MODEL_IDS = modelId;
   assert.equal((await (await offer()).json()).offered, false);
   assert.equal(budgetCalls, 0);
+});
+
+
+test("a provisional manual draft is offered without creating or loading a conversation", async () => {
+  const result = await (await offer({ selectionMode: "manual", modelId, question: "Compare public documentation" })).json();
+  assert.equal(result.offered, true); assert.equal(result.estimatedCredits, 24);
+  assert.deepEqual(result.features, { pageReading: false, durableRuns: false });
+  assert.equal(reads, 0); assert.equal(budgetCalls, 1);
+});
+
+test("provisional drafts require explicit manual mode and owner-scoped current profile restrictions", async () => {
+  const body = { selectionMode: "manual", modelId, question: "Compare public documentation", assistantProfileId: "profile" };
+  assert.equal((await (await offer({ ...body, selectionMode: "auto" })).json()).offered, false);
+  assert.equal((await (await offer({ modelId, question: body.question })).json()).offered, false);
+  owned = false;
+  assert.equal((await (await offer(body)).json()).reason, "profile_restricted");
+  owned = true; policy = { webSearch: true, deepResearch: false };
+  assert.equal((await (await offer(body)).json()).reason, "profile_restricted");
+  assert.equal(budgetCalls, 0); assert.equal(reads, 0);
+});
+
+test("a missing saved conversation never falls back to a provisional offer", async () => {
+  owned = false;
+  assert.equal((await (await offer()).json()).offered, false);
+  assert.equal(reads, 1); assert.equal(budgetCalls, 0);
 });

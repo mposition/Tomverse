@@ -187,6 +187,11 @@ export function nativeWorkspaceBearerRoute(path: string, method: string, enabled
 export function nativeParityBearerRoute(path: string, method: string, enabled = false, workspaceEnabled = false): boolean {
   if (!enabled) return false;
   if (nativeWorkspaceBearerRoute(path, method, workspaceEnabled)) return true;
+  if (process.env.RESEARCH_PREVIEW_NATIVE_ENABLED === "true") {
+    if (path === "/api/chat/research-preview/offer" || path === "/api/chat/research-preview/runs") return method === "POST" || (path.endsWith("/runs") && method === "GET");
+    if (/^\/api\/chat\/research-preview\/runs\/[A-Za-z0-9_-]{1,100}$/.test(path)) return method === "GET";
+    if (/^\/api\/chat\/research-preview\/runs\/[A-Za-z0-9_-]{1,100}\/(?:resume|cancel)$/.test(path)) return method === "POST";
+  }
   // Checkout itself restricts bearer requests to complimentary internal passes.
   if (path === "/api/billing/checkout") return method === "POST";
   if (path === "/api/user/usage") return method === "GET";

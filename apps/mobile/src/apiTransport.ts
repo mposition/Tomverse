@@ -1,3 +1,5 @@
+import { researchRunMessage } from "../../../lib/researchPreviewRunClient";
+import type { ResearchPreviewRunDto } from "../../../lib/researchPreviewRunTypes";
 import { createWorkspaceTransport } from "./workspaceTransport";
 import { createApiClient, ApiClientError, requestChatLocationIntent } from "@tomverse/api-client";
 import { CONTINUATION_RECEIPT_HEADER, receiptForAttempt, type ContinuationReceipt } from "../../../lib/continuationReceipt";
@@ -44,7 +46,7 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
   const run = async (path: string, init?: MobileRequestInit): Promise<Response> => {
     try {
       for (const [id, token] of unlockGrants) if (Number(token.split(".")[0]) <= Date.now() / 1000) unlockGrants.delete(id);
-      if (unlockGrants.size && (/^\/api\/(?:conversations|artifacts)(?:\/|\?)/.test(path) || path === "/api/chat")) {
+      if (unlockGrants.size && (/^\/api\/(?:conversations|artifacts)(?:\/|\?)/.test(path) || path.startsWith("/api/chat/research-preview/") || path === "/api/chat")) {
         const grantHeaders = (value?: RequestInit) => {
           const headers = new Headers(value?.headers);
           headers.set("X-Tomverse-Conversation-Unlocks", [...unlockGrants].map(([id, token]) => `${id}=${token}`).join("; "));
@@ -114,6 +116,17 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     }
     if (researchChanged) item = await readConversation(id);
     const messages = [...item.messages];
+    if (capabilityCache?.value.researchPreview?.enabled) {
+      try {
+      const result = await request<{ runs: ResearchPreviewRunDto[] }>(`/api/chat/research-preview/runs?conversationId=${encodeURIComponent(id)}`, { cache: "no-store" });
+      for (const run of result.runs) {
+        if (run.conversationId !== id) continue;
+        const index = messages.findIndex(message => message.id === run.assistantMessageId);
+        if (index >= 0) messages[index] = { ...messages[index], researchRunId: run.id };
+        else messages.push(researchRunMessage(run));
+      }
+      } catch (error) { if ((error as { status?: number }).status === 401) throw error; }
+    }
     for (const attempt of item.responseAttempts ?? []) {
       if (messages.some((message) => message.id === attempt.assistantMessageId)) continue;
       messages.push({ id: attempt.assistantMessageId, role: "assistant", content: attempt.partialContent,
@@ -186,8 +199,8 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       ? { modelIds: decision.modelId ? [decision.modelId] : [], preset: decision.preset, edit: true }
       : null;
   }
-  async function streamModel(persisted: Conversation, sourceId: string, modelId: string, signal: AbortSignal, progress: (text: string) => void, review = false, admission?: { admissionToken: string; contextBundle?: string }, continuation?: ContinuationTurnContext) {
-    const messages = fitChatRequestTranscript(persisted.messages.filter(message =>
+  async function streamModel(persisted: Conversation, sourceId: string, modelId: string, signal: AbortSignal, progress: (text: string) => void, review = false, admission?: { admissionToken: string; contextBundle?: string }, continuation?: ContinuationTurnContext, research?: { locale: string }) {
+    const messages = research ? persisted.messages.filter(message => message.id === sourceId && message.role === "user").map(message => ({ id: message.id, role: "user" as const, content: message.content })) : fitChatRequestTranscript(persisted.messages.filter(message =>
       (message.role === "user" || !review || message.modelId === modelId) &&
       (message.role === "user" || message.status === "normal" || message.status === "incomplete" || !message.status))
       .map(message => toChatRequestMessage({ id: message.id, role: message.role, content: message.content, attachments: message.attachments })));
@@ -206,7 +219,7 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     };
     let watchdog: ReturnType<typeof createChatLivenessWatchdog> | undefined;
     try {
-      const fix = await location.readForTurn(scope, controller.signal, {
+      const fix = research ? null : await location.readForTurn(scope, controller.signal, {
         turnId: sourceId,
         requiresLocation: () => requestChatLocationIntent(String(persisted.messages.find(message => message.id === sourceId && message.role === "user")?.content ?? ""), (path, init) => run(path, () => {
           if (revision !== sessionRevision) throw new DOMException("Session changed", "AbortError");
@@ -218,11 +231,12 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       const response = await run("/api/chat", () => {
         controller.signal.throwIfAborted();
         if (revision !== sessionRevision) throw new DOMException("Session changed", "AbortError");
-        return { ...json("POST", { messages, modelId, webSearchMode: persisted.webSearchMode ?? "off", conversationId: persisted.id,
+        return { ...json("POST", { messages, modelId, webSearchMode: research ? "always" : persisted.webSearchMode ?? "off", conversationId: persisted.id,
+          ...(research ? { researchMode: "preview" } : {}),
           assistantMessageId, sourceUserMessageId: sourceId, ...(admission ?? {}),
           ...(fix && location.canShare(fix, scope) ? { currentLocation: fix } : {}) }),
-          ...(continuation?.sourcePassages !== undefined && !review ? { headers: { "Content-Type": "application/json",
-            [PASSAGE_HEADER]: encodePassages(continuation.sourcePassages) } } : {}), signal: controller.signal };
+          ...(continuation?.sourcePassages !== undefined && !review && !research ? { headers: { "Content-Type": "application/json",
+            [PASSAGE_HEADER]: encodePassages(continuation.sourcePassages) } } : {}), ...(research ? { headers: { "Content-Type": "application/json", "Accept-Language": research.locale } } : {}), signal: controller.signal };
       });
       watchdog.noteHeaders();
       const traceId = response.headers.get("X-Request-ID");
@@ -291,6 +305,29 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       }, async () => { assertScope(); const value = await requireParity(); assertScope(); return value; }, async (url, headers, file) => { assertScope(); await uploadFile(url, headers, file); assertScope(); });
     },
     location,
+    researchPreviewOffer: async (input, signal, locale) => {
+      if (!(await requireParity()).researchPreview?.enabled) return { offered: false, reason: "disabled" };
+      return request("/api/chat/research-preview/offer", { ...json("POST", input), ...(locale ? { headers: { "Content-Type": "application/json", "Accept-Language": locale } } : {}), signal });
+    },
+    researchRuns: {
+      read: async (id, signal) => { if (!(await requireParity()).researchPreview?.enabled) throw Error("NATIVE_RESEARCH_UNAVAILABLE"); return (await request<{ run: ResearchPreviewRunDto }>(`/api/chat/research-preview/runs/${encodeURIComponent(id)}`, { cache: "no-store", signal })).run; },
+      resume: async id => { if (!(await requireParity()).researchPreview?.enabled) throw Error("NATIVE_RESEARCH_UNAVAILABLE"); return (await request<{ run: ResearchPreviewRunDto }>(`/api/chat/research-preview/runs/${encodeURIComponent(id)}/resume`, { method: "POST" })).run; },
+      cancel: async id => { if (!(await requireParity()).researchPreview?.enabled) throw Error("NATIVE_RESEARCH_UNAVAILABLE"); return (await request<{ run: ResearchPreviewRunDto }>(`/api/chat/research-preview/runs/${encodeURIComponent(id)}/cancel`, { method: "POST" })).run; },
+    },
+    sendResearchPreview: async (conversation, text, files, signal, progress, options) => {
+      const refusal = () => Object.assign(Error("RESEARCH_PREVIEW_UNAVAILABLE"), { questionPersisted: false });
+      if (files.length || !text.trim() || text.trim().length > 4000 || conversation.selectionMode !== "manual" || conversation.selectedModels.length !== 1) throw refusal();
+      if (!(await requireParity()).researchPreview?.enabled) throw refusal();
+      const offered = await request<{ offered: boolean; features?: { durableRuns: boolean } }>("/api/chat/research-preview/offer", { ...json("POST", { conversationId: conversation.id, modelId: conversation.selectedModels[0], question: text.trim() }), headers: { "Content-Type": "application/json", "Accept-Language": options.locale }, signal });
+      if (!offered.offered) throw refusal();
+      const { persisted, sourceId } = await persistQuestion(conversation, text.trim(), [], signal);
+      if (persisted.selectionMode !== "manual" || persisted.selectedModels.length !== 1 || persisted.selectedModels[0] !== conversation.selectedModels[0]) throw Error("RESEARCH_PREVIEW_SELECTION_CHANGED");
+      if (options.durable && offered.features?.durableRuns) {
+        await request("/api/chat/research-preview/runs", { ...json("POST", { conversationId: persisted.id, sourceUserMessageId: sourceId, assistantMessageId: crypto.randomUUID(), modelId: persisted.selectedModels[0], locale: options.locale }), signal });
+        return;
+      }
+      await streamModel(persisted, sourceId, persisted.selectedModels[0], signal, progress, false, undefined, undefined, { locale: options.locale });
+    },
     history: {
       projects: async () => { await historySupport(); return (await request<{ projects: import("./chatTransport").HistoryProject[] }>("/api/projects")).projects; },
       saveProject: (id, name) => historyWrite(id ? `/api/projects/${encodeURIComponent(id)}` : "/api/projects", id ? "PATCH" : "POST", { name }),

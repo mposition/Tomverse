@@ -18,11 +18,19 @@ const question = "Compare the public release notes for two products.";
 let session: unknown = null;
 let activeModel: MockLanguageModelV4;
 mock.module("next-auth/next", { namedExports: { getServerSession: async () => session } });
+mock.module(mod("lib/chatRouteSession.ts"), { namedExports: { resolveChatRouteSession: async () => ({ session }) } });
+mock.module(mod("lib/researchPreviewPageRead.ts"), { namedExports: {
+  readResearchPage: async ({ sourceId, sources }: { sourceId: string; sources: Array<{ sourceId: string; url: string }> }) => ({
+    sourceId, url: sources.find(source => source.sourceId === sourceId)!.url, status: "read", readAt: new Date().toISOString(),
+    content: "<html>BOUNDED_ORIGINAL_PAGE_SENTINEL</html>", contentType: "text/html", truncated: true,
+  }),
+} });
 mock.module(mod("lib/activeAiModel.ts"), { namedExports: {
   getActiveAiModel: () => activeModel,
   qwenLookupStep: () => undefined,
   QWEN_GROUNDED_THINKING_BUDGET: 128,
 } });
+mock.module(mod("lib/researchPreviewModel.ts"), { namedExports: { getResearchPreviewAiModel: () => activeModel } });
 
 process.env.RESEARCH_PREVIEW_ENABLED = "true";
 process.env.RESEARCH_PREVIEW_MODEL_IDS = modelId;
@@ -102,13 +110,14 @@ const terminal = {
   findings: [{ heading: "Release notes", statements: [{ text: "The public source describes the release.", sourceIds: ["R4"], kind: "fact" }] }],
   contradictions: [], limitations: ["This synthetic fixture uses search excerpts only."], nextQuestions: ["Which release date should be compared next?"],
 };
-function scriptedModel(unknownUsage = false) {
+function scriptedModel(unknownUsage = false, readPage = false) {
   return new MockLanguageModelV4({ provider: "google", modelId: "gemini-3.1-pro-preview", doStream: async () => {
     const index = activeModel.doStreamCalls.length - 1;
     assert.ok(index < 3, "no repair or fallback generation is permitted");
     const part: LanguageModelV4StreamPart = { type: "tool-call", toolCallId: `fixture-${index}`,
-      toolName: index < 2 ? "web_search" : "submit_research_report",
-      input: JSON.stringify(index < 2 ? { query: index === 0 ? "first public product" : "second public product" } : terminal) };
+      toolName: readPage && index === 1 ? "read_research_sources" : index < 2 ? "web_search" : "submit_research_report",
+      input: JSON.stringify(readPage && index === 1 ? { sourceIds: ["R1"] } : index < 2 ? { query: index === 0 ? "first public product" : "second public product" } : readPage
+        ? { ...terminal, findings: terminal.findings.map(finding => ({ ...finding, statements: finding.statements.map(statement => ({ ...statement, sourceIds: ["R1"], evidenceLevel: "page_text" })) })) } : terminal) };
     return { stream: new ReadableStream<LanguageModelV4StreamPart>({ start(controller) {
       controller.enqueue(part);
       controller.enqueue({ type: "finish", finishReason: { unified: "tool-calls", raw: "fixture" }, usage: {
@@ -202,4 +211,46 @@ test("unknown model usage stops after one dispatched step and never persists an 
   assert.notEqual(providerAttempt.usageSource, "provider_usage_metadata", "unknown usage must remain an estimate, not a measured zero");
   assert.deepEqual(stoppedReasons, ["usage_unknown"], "the underlying unknown-usage cause must survive the text-only transport");
   assert.deepEqual(unexpectedNetwork, []);
+});
+
+test("inline page reading uses the reserved feature and saves only curated page evidence", async () => {
+  const previous = process.env.RESEARCH_PREVIEW_PAGE_READING_ENABLED;
+  process.env.RESEARCH_PREVIEW_PAGE_READING_ENABLED = "true";
+  try {
+    const input = await fixture();
+    activeModel = scriptedModel(false, true);
+    const response = await POST(request(input));
+    assert.equal(response.status, 200);
+    await response.text();
+    assert.equal(activeModel.doStreamCalls.length, 3);
+    assert.doesNotMatch(JSON.stringify(activeModel.doStreamCalls[1].prompt), /BOUNDED_ORIGINAL_PAGE_SENTINEL/);
+    assert.match(JSON.stringify(activeModel.doStreamCalls[2].prompt), /BOUNDED_ORIGINAL_PAGE_SENTINEL/);
+    const message = await prisma.message.findUniqueOrThrow({ where: { id: input.assistantId } });
+    const metadata = message.searchMetadata as { research: { version: number; evidenceLevel: string } };
+    assert.equal(metadata.research.version, 2);
+    assert.equal(metadata.research.evidenceLevel, "search_snippets_and_pages");
+    assert.doesNotMatch(JSON.stringify(message), /BOUNDED_ORIGINAL_PAGE_SENTINEL/);
+    assert.deepEqual(unexpectedNetwork, []);
+  } finally {
+    if (previous === undefined) delete process.env.RESEARCH_PREVIEW_PAGE_READING_ENABLED;
+    else process.env.RESEARCH_PREVIEW_PAGE_READING_ENABLED = previous;
+  }
+});
+
+test("the already enrolled main Chat endpoint cannot bypass the Native Research flag", async () => {
+  const previous = process.env.RESEARCH_PREVIEW_NATIVE_ENABLED;
+  delete process.env.RESEARCH_PREVIEW_NATIVE_ENABLED;
+  try {
+    const input = await fixture();
+    activeModel = scriptedModel();
+    const incoming = request(input);
+    incoming.headers.set("Authorization", "Bearer synthetic-authenticated-owner");
+    const response = await POST(incoming);
+    assert.equal(response.status, 503);
+    assert.equal((await response.json()).code, "RESEARCH_PREVIEW_NATIVE_UNAVAILABLE");
+    assert.equal(activeModel.doStreamCalls.length, 0);
+    assert.equal(await prisma.chatCreditReservation.count({ where: { userId: input.user.id } }), 0);
+  } finally {
+    if (previous !== undefined) process.env.RESEARCH_PREVIEW_NATIVE_ENABLED = previous;
+  }
 });

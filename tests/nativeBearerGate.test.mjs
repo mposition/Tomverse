@@ -7,6 +7,7 @@ import {
   applyMobileIdentityHeaders,
   nativeBearerVerdict,
   nativeArtifactRevisionBearerRoute,
+  nativeParityBearerRoute,
   stripInternalAuthHeaders,
 } from "../lib/nativeBearerGate.ts";
 import { N1B_BEARER_ROUTES } from "../lib/mobileAuthContract.ts";
@@ -207,4 +208,20 @@ test("the verifier is not consulted for a route nobody registered", () => {
     },
   });
   assert.equal(calls, 0);
+});
+
+
+test("Research Preview native enrollment is default-off and names exact methods only", () => {
+  const previous = process.env.RESEARCH_PREVIEW_NATIVE_ENABLED;
+  const paths = [["/api/chat/research-preview/offer", "POST"], ["/api/chat/research-preview/runs", "POST"], ["/api/chat/research-preview/runs", "GET"], ["/api/chat/research-preview/runs/run_1", "GET"], ["/api/chat/research-preview/runs/run_1/resume", "POST"], ["/api/chat/research-preview/runs/run_1/cancel", "POST"]];
+  try {
+    delete process.env.RESEARCH_PREVIEW_NATIVE_ENABLED;
+    for (const [path, method] of paths) assert.equal(nativeParityBearerRoute(path, method, true), false);
+    process.env.RESEARCH_PREVIEW_NATIVE_ENABLED = "true";
+    for (const [path, method] of paths) {
+      assert.equal(nativeParityBearerRoute(path, method, false), false);
+      assert.equal(nativeParityBearerRoute(path, method, true), true);
+    }
+    for (const [path, method] of [["/api/chat/research-preview/offer", "GET"], ["/api/chat/research-preview/runs/run_1", "POST"], ["/api/chat/research-preview/runs/run_1/resume", "GET"], ["/api/chat/research-preview/runs/run_1/admin", "POST"], ["/api/chat/research-preview/runs/run_1/cancel/extra", "POST"]]) assert.equal(nativeParityBearerRoute(path, method, true), false);
+  } finally { if (previous === undefined) delete process.env.RESEARCH_PREVIEW_NATIVE_ENABLED; else process.env.RESEARCH_PREVIEW_NATIVE_ENABLED = previous; }
 });
