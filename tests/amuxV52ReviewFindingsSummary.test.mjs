@@ -112,6 +112,12 @@ test("findings travel whole: no cap on how many or how long, and only past 1 MB 
   const big = { version: 1, reviewers: [{ vendor: "openai", verdict: "reject", reason: null, note: null, omitted: 0,
     findings: Array.from({ length: 3_000 }, (_, index) => ({ severity: index === 0 ? "major" : "nit",
       summary: `finding ${index} ${"z".repeat(900)}`, file: null, line: null })) }] };
+  // A slice never crosses into a more severe finding: 40 majors and one nit lose the nit only.
+  const mixed = fitAmuxV52FindingsDoc({ version: 1, reviewers: [{ vendor: "openai", verdict: "reject", reason: null, note: null, omitted: 0,
+    findings: [...Array.from({ length: 40 }, (_, index) => ({ severity: "major", summary: `m${index} ${"q".repeat(30_000)}`, file: null, line: null })),
+      { severity: "nit", summary: "n".repeat(10), file: null, line: null }] }] });
+  assert.equal(mixed.reviewers[0].findings.filter((finding) => finding.severity === "nit").length, 0);
+  assert.ok(mixed.reviewers[0].findings.filter((finding) => finding.severity === "major").length >= 30);
   const fitted = fitAmuxV52FindingsDoc(big);
   assert.ok(Buffer.byteLength(JSON.stringify(fitted)) <= 1_000_000);
   assert.equal(fitted.reviewers[0].findings[0].severity, "major");

@@ -15,7 +15,9 @@
   accept로 짐작하지 않습니다. blocker·major 지적이 있으면 reviewer가 accept라고 해도
   reject입니다.
 - reviewer는 diff를 prompt에서 받지 않고 자기 checkout에서 `git diff <base> <head>`로
-  통째로 읽습니다. 그래서 diff 크기, 파일 목록 개수, scope 길이에 한도가 없습니다.
+  통째로 읽습니다. 그래서 diff 크기와 파일 목록 개수에 서버가 두는 한도가 없고, scope도
+  서버가 자르지 않습니다. scope는 SSH 명령 인자 하나로 오므로 전송 한계(RPC token 120,000자,
+  scope 약 60,000바이트)만 남습니다. AMUX는 20,000자 안에서 보냅니다.
   지침 파일(AGENTS.md 등) 변경만 checkout이 base 판이라 prompt에 통째로 보여 줍니다.
 - **timeout은 끝이 아닙니다.** 시간을 넘긴 reviewer는 죽이고, 그 slot을 이미 시간을
   넘긴 vendor와 이 job의 다른 slot이 쓰는 vendor를 뺀 채 대기열에 되돌립니다. 시도할

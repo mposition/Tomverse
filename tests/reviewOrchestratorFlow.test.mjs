@@ -381,6 +381,7 @@ test("the reviewer reads the whole diff from its checkout, sees the whole scope 
   try {
     f.config.providers.find((p) => p.id === "claude").passEnv = ["FAKE_REVIEWER_PROMPT_OUT"];
     f.commit("a.txt", "six\n");
+    // The Windows command line the fixture spawns allows about 32,000 characters; the RPC token bound itself is tested in reviewOrchestratorCore.
     const scope = `scope-marker-${"x".repeat(20_000)}-scope-end`;
     const { jobId } = JSON.parse(f.client("submit", "--author", "codex", "--repo", "demo", "--scope", scope).stdout);
     const orchestrator = new Orchestrator(f.config);

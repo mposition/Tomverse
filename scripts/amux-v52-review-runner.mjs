@@ -20,7 +20,7 @@ function validInput(input) {
     input.reviewRef === `refs/amux-v52-review/${input.attemptId}` &&
     ["claude", "codex", "cursor", "copilot", "antigravity"].includes(input.author) &&
     VENDOR.test(input.authorVendor) && typeof input.scope === "string" &&
-    input.scope.length > 0 && input.scope.length <= 200_000 &&
+    input.scope.length > 0 && input.scope.length <= 20_000 &&
     typeof input.touchesContract === "boolean" && validAvoid(input);
 }
 
@@ -338,7 +338,13 @@ export function rejectionFindings(status, notes = {}) {
         SEVERITY_ORDER.indexOf(a.findings.at(-1).severity) ||
         b.findings.length - a.findings.length)[0];
     if (worst) {
-      const drop = Math.max(1, Math.floor(worst.findings.length / 20));
+      // A slice never crosses into a more severe finding: only the tail of the
+      // least severe level is dropped, a twentieth of it at a time.
+      const level = worst.findings.at(-1).severity;
+      let tail = 0;
+      while (tail < worst.findings.length &&
+          worst.findings[worst.findings.length - 1 - tail].severity === level) tail += 1;
+      const drop = Math.max(1, Math.floor(tail / 20));
       worst.findings.splice(worst.findings.length - drop, drop);
       worst.omitted += drop;
       continue;

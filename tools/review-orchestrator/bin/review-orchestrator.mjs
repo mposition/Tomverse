@@ -36,7 +36,9 @@ const print = (value) => process.stdout.write(`${JSON.stringify(value, null, 2)}
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export function decodeRpc(token) {
-  if (typeof token !== "string" || !/^[A-Za-z0-9_-]{1,65536}$/.test(token)) {
+  // The token rides one SSH command argument (Linux allows 131,072 bytes per argument), so
+  // this is that bound, not a policy one: a 60,000-byte scope note is about 80,000 characters.
+  if (typeof token !== "string" || !/^[A-Za-z0-9_-]{1,120000}$/.test(token)) {
     throw new UsageError("rpc_invalid");
   }
   let request;

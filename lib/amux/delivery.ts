@@ -388,7 +388,7 @@ export async function pullAmuxWorkDelivery(input: {
   // reviewer itself can say which of its findings repeat them (v52ReviewFindingsCore.ts).
   const earlierForReview = formatAmuxV52ReviewEntries(reviewOpened.flatMap((row) =>
     row.verdict === "reject" && row.opened?.doc ?
-      [{ attemptNumber: row.attemptNumber, doc: row.opened.doc }] : []), 12_000);
+      [{ attemptNumber: row.attemptNumber, doc: row.opened.doc }] : []), 10_000);
   const reviewAvoidVendors = amuxV52ReviewAvoidVendorsEnabled() ?
     amuxV52VendorsToAvoid(reviewOpened) : [];
   const deliveryContent = async (tx: Prisma.TransactionClient,

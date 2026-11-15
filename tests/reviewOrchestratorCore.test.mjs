@@ -321,7 +321,10 @@ test("rpc round-trips and the SSH command yields only its token", () => {
   const longScope = "\u0001".repeat(6_000);
   assert.deepEqual(decodeRpc(encodeRpc({ command: "submit", scope: longScope })),
     { command: "submit", scope: longScope });
-  assert.throws(() => decodeRpc("A".repeat(65_537)), /rpc_invalid/);
+  // A scope note of 60,000 bytes (the v52 launcher's bound) is about 80,000 token characters.
+  const widest = "x".repeat(60_000);
+  assert.deepEqual(decodeRpc(encodeRpc({ command: "submit", scope: widest })), { command: "submit", scope: widest });
+  assert.throws(() => decodeRpc("A".repeat(120_001)), /rpc_invalid/);
   assert.equal(tokenFromSshCommand(`review-orchestrator rpc ${token}`), token);
   assert.throws(() => tokenFromSshCommand("rm -rf /"), /rpc_missing/);
   assert.throws(() => decodeRpc(encodeRpc({ command: "daemon" })), /rpc_command_invalid/);

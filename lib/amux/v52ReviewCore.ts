@@ -2,8 +2,11 @@
 export const AMUX_V52_REVIEW_VERDICTS = ["accept", "reject", "unknown"] as const;
 export type AmuxV52ReviewVerdict = (typeof AMUX_V52_REVIEW_VERDICTS)[number];
 
-// No working cap on the scope the review server is given (owner decision 2026-11-15).
-export const AMUX_V52_REVIEW_SCOPE_MAX_CHARS = 200_000;
+// The scope travels inside one SSH command argument to the review server (131,072 bytes
+// per argument on Linux, base64url-expanded by a third), so its bound is the transport's,
+// not a policy one: 20,000 characters are at most 60,000 bytes (owner decision 2026-11-15
+// lifted the old 8,192; the review server's own cut is gone).
+export const AMUX_V52_REVIEW_SCOPE_MAX_CHARS = 20_000;
 
 export function formatAmuxV52ReviewScope(title: string,
   completionCriteria: string[]): string {

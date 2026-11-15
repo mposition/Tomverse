@@ -18,12 +18,13 @@ test("review scope preserves the largest valid Task title and completion criteri
     `${index}:` + "C".repeat(496));
   const scope = formatAmuxV52ReviewScope(title, criteria);
   assert.ok(scope.length > 4_000);
-  assert.ok(scope.length <= 200_000);
+  assert.ok(scope.length <= 20_000);
   assert.match(scope, /Title: T{500}/);
   assert.ok(scope.endsWith(`- ${criteria.at(-1)}`));
-  // Owner decision 2026-11-15: the 8,192-character cap is gone; only a runaway scope is refused.
+  // Owner decision 2026-11-15: the 8,192-character cap is lifted to the transport's bound
+  // (the scope rides one SSH command argument): 20,000 characters.
   assert.doesNotThrow(() => formatAmuxV52ReviewScope("T", ["C".repeat(8_193)]));
-  assert.throws(() => formatAmuxV52ReviewScope("T", ["C".repeat(200_001)]),
+  assert.throws(() => formatAmuxV52ReviewScope("T", ["C".repeat(20_001)]),
     /exceeds server limit/);
 });
 

@@ -196,8 +196,13 @@ export function fitAmuxV52FindingsDoc(doc: AmuxV52FindingsDoc): AmuxV52FindingsD
       .sort((a, b) => rank(b.findings.at(-1)!.severity) - rank(a.findings.at(-1)!.severity) ||
         b.findings.length - a.findings.length)[0];
     if (worst) {
-      // A long tail goes in slices, so a very large review does not loop once per finding.
-      const drop = Math.max(1, Math.floor(worst.findings.length / 20));
+      // A long tail goes in slices, so a very large review does not loop once per finding;
+      // a slice stays inside the least severe level and never reaches a more severe finding.
+      const level = worst.findings.at(-1)!.severity;
+      let tail = 0;
+      while (tail < worst.findings.length &&
+          worst.findings[worst.findings.length - 1 - tail]!.severity === level) tail += 1;
+      const drop = Math.max(1, Math.floor(tail / 20));
       worst.findings.splice(worst.findings.length - drop, drop);
       worst.omitted += drop;
       continue;
