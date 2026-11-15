@@ -4,18 +4,21 @@
  * DM에게 자동으로 하도록 승인합니다."). A review pull request the Decision
  * Maker approved from the owner queue (lib/amux/dmOwnerSettlementService.ts,
  * kind `t2_pr`) is marked ready by the app, its CI runs, and the QA-release
- * merge lane merges it into develop -- never main, never a deploy. Only a
- * pull request whose every changed path is on the allow list
- * (QA_RELEASE_DM_MERGE_ALLOW_PATTERNS, qaReleaseDmMergeAllowed) takes this
- * path; one path outside it leaves the pull request to a person.
+ * merge lane merges it into develop -- never main, never a deploy. Which
+ * changes take this path is the merge scope's (owner decision 2026-11-15,
+ * QA_RELEASE_DM_MERGE_SCOPE_ENV): by default every product path on no block
+ * list, with the approved patch's changed lines free of the alarms below;
+ * with the kill switch, only the allow list of 2026-11-13. One path or line
+ * outside leaves the pull request to a person.
  *
  * Pure: the switch, which paths a patch changes, whether CI admission's line
  * leaves room, and whether a pull request read fresh is still the change the
  * Decision Maker approved. Default off; off, nothing here is consulted.
  */
 
-import { ciRunKey } from "../ciAdmissionCore.ts";
-import { qaReleaseDmApprovedHumanPaths } from "../qaReleaseMergeLaneExclusionCore.ts";
+import { DECISION_VALUE_ALARMS } from "../agentPushPolicy.ts";
+import { CI_ADMISSION_HOLD_LABEL, ciRunKey } from "../ciAdmissionCore.ts";
+import { qaReleaseDmApprovedHumanPaths, type QaReleaseDmMergeScope } from "../qaReleaseMergeLaneExclusionCore.ts";
 
 /** Default off. On, the app marks Decision Maker approved review pull requests ready and the lane may merge them into develop. */
 export const AMUX_DM_T2_MERGE_ENV = "TOMVERSE_AMUX_DM_T2_MERGE";
@@ -49,14 +52,89 @@ export type AmuxDmT2MergeGate =
   | { pass: false; reason: "outside_dm_merge_allowlist" | "paths_unreadable"; paths: string[] };
 
 /**
- * Whether a change may take the automatic path: every one of its paths is on
- * the allow list, and its paths could be read at all. Anything else is left to
- * a person.
+ * Whether a change may take the automatic path: every one of its paths is one
+ * the merge scope lets through (qaReleaseDmMergeAllowed), and its paths could
+ * be read at all. Anything else is left to a person. Without a scope, the
+ * allow list, the narrower rule.
  */
-export function amuxDmT2MergeGate(paths: readonly string[] | null): AmuxDmT2MergeGate {
+export function amuxDmT2MergeGate(paths: readonly string[] | null,
+  scope: QaReleaseDmMergeScope = "allowlist"): AmuxDmT2MergeGate {
   if (paths === null || paths.length === 0) return { pass: false, reason: "paths_unreadable", paths: [] };
-  const human = qaReleaseDmApprovedHumanPaths(paths);
+  const human = qaReleaseDmApprovedHumanPaths(paths, [], scope);
   return human.length === 0 ? { pass: true } : { pass: false, reason: "outside_dm_merge_allowlist", paths: human.slice(0, 20) };
+}
+
+/**
+ * What a path cannot say (review r-20261113-134019-5d8f82: a list of what a
+ * revert cannot undo always misses one, such as a spending cap inside an
+ * ordinary file). In the block list scope a changed line, or the function a
+ * hunk sits in as Git names it after `@@`, that matches one of these leaves
+ * the change to a person: the values AGENTS.md reserves for a person
+ * (lib/agentPushPolicy.ts), the words of money, environment and stored
+ * switches (a default-off switch turned on is a paid call enabled), deletion
+ * and raw SQL, authentication and secrets, and mail. Cheap and loose by
+ * design: a false alarm only means a person merges.
+ */
+export const AMUX_DM_T2_MERGE_CONTENT_ALARMS: readonly RegExp[] = [
+  ...DECISION_VALUE_ALARMS,
+  /credit|billing|stripe|pric(?:e|ing)|budget|spend|cost|ledger|quota|entitlement|reservation|refund|discount|promotion|payment|invoice|checkout|subscription/i,
+  /\bprocess\.env\b|\bTOMVERSE_[A-Z0-9_]+|\benv\s*\[|\b[A-Z][A-Z0-9_]*_ENV\b|\bappSetting\b|\bAppSetting\b/,
+  /\b(?:delete\w*|purge\w*|erase\w*|wipe\w*|truncate)\b|\.delete(?:Many)?\s*\(|\$executeRaw|\$queryRawUnsafe|\bdrop\s+(?:table|column|schema|index|trigger|function)\b/i,
+  /\b(?:auth\w*|session\w*|secret\w*|token|password\w*|cookie\w*|csrf\w*|permission\w*|api_?key\w*|bearer|credential\w*|reauth\w*|require(?:Admin|User|Session|Auth)\w*)\b/i,
+  /\b(?:send\w*(?:Email|Mail)\w*|mail\w*|resend|smtp|webhook\w*|notify\w*)\b/i,
+  /\bdangerouslySetInnerHTML\b/,
+  /^Subproject commit [0-9a-f]+$/,
+];
+
+/** A file header line that says the change is not reviewable text: binary, or a mode other than a plain file. */
+const NOT_PLAIN_TEXT = /^(?:GIT binary patch|Binary files .* differ)$|^(?:old|new|deleted|new file|deleted file) mode (?!100644$)\d+$|^index [0-9a-f]+\.\.[0-9a-f]+ (?!100644$)\d+$/;
+
+/**
+ * The files of a unified diff that the block list scope leaves to a person
+ * for what they say rather than where they are: a changed line or hunk
+ * context that sounds an alarm (AMUX_DM_T2_MERGE_CONTENT_ALARMS), or a header
+ * that is not plain text (binary, executable bit, symlink, submodule).
+ */
+export function amuxDmT2MergeContentAlarmPaths(patch: string): string[] {
+  const flagged = new Set<string>();
+  let path: string | null = null;
+  let inHunk = false;
+  for (const raw of patch.split("\n")) {
+    const line = raw.replace(/\r$/, "");
+    const header = /^diff --git a\/(.+?) b\/(.+)$/.exec(line);
+    if (header) {
+      path = header[2]!;
+      inHunk = false;
+      continue;
+    }
+    if (path === null || flagged.has(path)) continue;
+    let text: string | null = null;
+    if (line.startsWith("@@")) {
+      inHunk = true;
+      text = line.replace(/^@@[^@]*@@/, "");
+    } else if (!inHunk) {
+      if (NOT_PLAIN_TEXT.test(line)) flagged.add(path);
+      continue;
+    } else if (line.startsWith("+") || line.startsWith("-")) {
+      text = line.slice(1);
+    }
+    if (text !== null && AMUX_DM_T2_MERGE_CONTENT_ALARMS.some((alarm) => alarm.test(text))) flagged.add(path);
+  }
+  return [...flagged];
+}
+
+/**
+ * The approved patch judged whole: its paths in that scope, and in the block
+ * list scope what its lines say too (amuxDmT2MergeContentAlarmPaths). What the
+ * owner-queue settlement checks before it records an approval; the ready step,
+ * the merge lane's list and its consume check it again on the stored patch.
+ */
+export function amuxDmT2MergePatchGate(patch: string | null,
+  scope: QaReleaseDmMergeScope = "allowlist"): AmuxDmT2MergeGate {
+  const gate = amuxDmT2MergeGate(amuxDmT2MergePatchPaths(patch), scope);
+  if (!gate.pass || scope !== "blocklist" || patch === null) return gate;
+  const alarmed = amuxDmT2MergeContentAlarmPaths(patch);
+  return alarmed.length === 0 ? gate : { pass: false, reason: "outside_dm_merge_allowlist", paths: alarmed.slice(0, 20) };
 }
 
 /** Line statuses of a draft that still waits for runners: the line goes first. */
@@ -106,6 +184,8 @@ export type AmuxDmT2MergeApproved = {
 /** The pull request as CI admission's App reads it now; `fork` when its head is not this repository's. */
 export type AmuxDmT2MergePullNow = {
   open: boolean; draft: boolean; base: string; head: string; headSha: string; fork: boolean;
+  /** Its labels as read: a person's ci:hold (CI_ADMISSION_HOLD_LABEL) is never readied past. */
+  labels?: readonly string[];
 };
 
 /** The pull request's change as the engineering agent's read-only token reads it now. */
@@ -117,21 +197,28 @@ export type AmuxDmT2MergeChangeNow = {
 };
 
 export type AmuxDmT2MergeSkipReason = "pull_closed" | "fork_pr" | "base_not_develop" | "branch_moved" | "head_moved" |
-  "diff_unreadable" | "diff_changed" | "paths_unreadable" | "outside_dm_merge_allowlist";
+  "diff_unreadable" | "diff_changed" | "paths_unreadable" | "outside_dm_merge_allowlist" | "ci_hold";
 
 /**
  * Whether a pull request's change, read fresh from GitHub, is still the one
  * the Decision Maker approved: open, into develop, on the approved branch and
  * head, its diff byte for byte the approved one (a merge base that moved with
- * develop changes it), and every path on the allow list. Anything unread or
+ * develop changes it), and every path one the merge scope lets through. In
+ * the block list scope the approved patch, as stored, must pass too, lines
+ * and all (amuxDmT2MergePatchGate); none stored does not. Anything unread or
  * different does not hold. What the app checks before it marks a pull request
  * ready and every time it tells the merge lane of one.
  */
 export function amuxDmT2MergeChangeVerdict(input: {
   approved: AmuxDmT2MergeApproved;
   change: AmuxDmT2MergeChangeNow;
+  /** Without one, the allow list. */
+  scope?: QaReleaseDmMergeScope;
+  /** The patch the publisher applied, as the engineering agent stored it; read in the block list scope only. */
+  patch?: string | null;
 }): { holds: true } | { holds: false; reason: AmuxDmT2MergeSkipReason; paths?: string[] } {
   const { approved, change } = input;
+  const scope = input.scope ?? "allowlist";
   if (!SHA.test(approved.approvedHeadSha) || !DIGEST.test(approved.approvedDiffDigest) ||
       !AMUX_DM_T2_MERGE_HEAD.test(approved.headRef)) return { holds: false, reason: "head_moved" };
   if (change.state !== "open") return { holds: false, reason: "pull_closed" };
@@ -142,8 +229,11 @@ export function amuxDmT2MergeChangeVerdict(input: {
   if (change.headSha !== approved.approvedHeadSha) return { holds: false, reason: "head_moved" };
   if (change.diffDigest === null) return { holds: false, reason: "diff_unreadable" };
   if (change.diffDigest !== approved.approvedDiffDigest) return { holds: false, reason: "diff_changed" };
-  const gate = amuxDmT2MergeGate(change.changedFiles);
-  return gate.pass ? { holds: true } : { holds: false, reason: gate.reason, paths: gate.paths };
+  const gate = amuxDmT2MergeGate(change.changedFiles, scope);
+  if (!gate.pass) return { holds: false, reason: gate.reason, paths: gate.paths };
+  if (scope !== "blocklist") return { holds: true };
+  const patch = amuxDmT2MergePatchGate(input.patch ?? null, scope);
+  return patch.pass ? { holds: true } : { holds: false, reason: patch.reason, paths: patch.paths };
 }
 
 export type AmuxDmT2MergeReadyVerdict =
@@ -162,6 +252,8 @@ export function amuxDmT2MergeReadyVerdict(input: {
   approved: AmuxDmT2MergeApproved;
   pull: AmuxDmT2MergePullNow | null;
   change: AmuxDmT2MergeChangeNow;
+  scope?: QaReleaseDmMergeScope;
+  patch?: string | null;
 }): AmuxDmT2MergeReadyVerdict {
   const { approved, pull, change } = input;
   if (!SHA.test(approved.approvedHeadSha) || !DIGEST.test(approved.approvedDiffDigest) ||
@@ -172,7 +264,9 @@ export function amuxDmT2MergeReadyVerdict(input: {
   if (pull.head !== approved.headRef) return { verdict: "skip", reason: "branch_moved" };
   if (pull.headSha !== approved.approvedHeadSha) return { verdict: "skip", reason: "head_moved" };
   if (!pull.draft) return { verdict: "already_ready" };
-  const held = amuxDmT2MergeChangeVerdict({ approved, change });
+  // A person's hold stands: ci:hold is lifted only by a person (AGENTS.md), and a ready would start CI past it.
+  if ((pull.labels ?? []).includes(CI_ADMISSION_HOLD_LABEL)) return { verdict: "skip", reason: "ci_hold" };
+  const held = amuxDmT2MergeChangeVerdict({ approved, change, scope: input.scope, patch: input.patch });
   return held.holds ? { verdict: "ready" } :
     { verdict: "skip", reason: held.reason, ...(held.paths ? { paths: held.paths } : {}) };
 }

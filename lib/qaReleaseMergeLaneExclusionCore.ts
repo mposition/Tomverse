@@ -7,7 +7,7 @@
  * candidate. Every input comes from the caller -- this module reads no
  * network, file or clock -- and every uncertainty excludes.
  */
-import { classifyPath, compileManifestPattern, isCanonicalRepoPath } from "./agentAuthorityFiles.ts";
+import { CONTROL_PLANE_NAME_TOKENS, classifyPath, compileManifestPattern, isCanonicalRepoPath } from "./agentAuthorityFiles.ts";
 import { isPolicyTestName } from "./agentPushPolicy.ts";
 
 /**
@@ -78,15 +78,34 @@ export const QA_RELEASE_DEPENDABOT_PATHS: readonly string[] = [
 ];
 
 /**
- * The only paths a Decision Maker approved pull request may change and still
- * be merged without a person (review r-20261113-134019-5d8f82: an allow list,
- * not a block list -- a list of what a revert cannot undo always misses one,
- * such as a deletion route's re-authentication, a spending cap or a discount
- * provider). Every changed path, both sides of a rename, must be inside it;
- * one outside leaves the whole pull request to a person. Tests, documents
- * other than policy, UI contracts and agent instructions, locale strings,
- * components, and the page, layout, loading and error files of app routes.
- * Code under lib/, every API route and everything else is a person's.
+ * How far a Decision Maker approved pull request may reach (owner decision
+ * 2026-11-15: "내부 개발용 Flow입니다. 제한을 줄 이유가 없습니다. 로컬 CLI처럼
+ * 편리한 Flow였으면 합니다."). `blocklist`, the default: every product path
+ * on no block list may merge. `allowlist`, the kill switch: only the allow
+ * list of 2026-11-13, exactly as it was. Unset, empty or exactly `blocklist`
+ * is the default; any other value -- `allowlist`, or a typo -- is the allow
+ * list, so the switch only ever fails toward the narrower rule. The app reads
+ * it (lib/amux/dmT2MergeService.ts) and tells the merge lane only of what its
+ * scope lets through; the lane judges those again in the block list scope
+ * (lib/qaReleaseMergeLaneServiceCore.ts QA_RELEASE_LANE_DM_MERGE_SCOPE), so
+ * setting it on the app service alone reverts the whole path.
+ */
+export const QA_RELEASE_DM_MERGE_SCOPE_ENV = "TOMVERSE_AMUX_DM_MERGE_SCOPE";
+export type QaReleaseDmMergeScope = "blocklist" | "allowlist";
+export const qaReleaseDmMergeScope = (env: Readonly<Record<string, string | undefined>>): QaReleaseDmMergeScope => {
+  const value = env[QA_RELEASE_DM_MERGE_SCOPE_ENV];
+  return value === undefined || value === "" || value === "blocklist" ? "blocklist" : "allowlist";
+};
+
+/**
+ * The allow list scope (the kill switch): the only paths a Decision Maker
+ * approved pull request may change and still be merged without a person
+ * (review r-20261113-134019-5d8f82). Every changed path, both sides of a
+ * rename, must be inside it; one outside leaves the whole pull request to a
+ * person. Tests, documents other than policy, UI contracts and agent
+ * instructions, locale strings, components, and the page, layout, loading
+ * and error files of app routes. Code under lib/, every API route and
+ * everything else is a person's.
  */
 export const QA_RELEASE_DM_MERGE_ALLOW_PATTERNS: readonly string[] = [
   "tests/**",
@@ -108,7 +127,7 @@ export const QA_RELEASE_DM_MERGE_ALLOW_EXCEPT_PATTERNS: readonly string[] = [
 ];
 
 /**
- * Laid over the allow list, without regard to case: the gate paths above and
+ * Laid over either scope, without regard to case: the gate paths above and
  * what a revert cannot undo (migrations and the schema; prices, credits and
  * the contract role's other areas; authentication and secrets; the audit
  * chain; deletion and retention). A path on it is a person's even inside the
@@ -135,6 +154,88 @@ export const QA_RELEASE_DM_MERGE_BLOCK_PATTERNS: readonly string[] = [
   "lib/retention*",
   "lib/**/*Retention*",
   "lib/**/*Deletion*",
+];
+
+/**
+ * The block list scope's further paths, without regard to case: raw SQL and
+ * key material anywhere; package manifests, lock files and build
+ * configuration in any directory (what runs, and which module an import
+ * resolves to); unauthenticated public reads and shares, object storage, and
+ * the account routes (deletion, export).
+ */
+export const QA_RELEASE_DM_MERGE_BLOCKLIST_SCOPE_PATTERNS: readonly string[] = [
+  "**/*.sql",
+  "**/.env*",
+  "**/*.pem",
+  "**/*.key",
+  "**/*.p12",
+  "**/*.pfx",
+  "**/package.json",
+  "**/package-lock.json",
+  "**/pnpm-lock.yaml",
+  "**/yarn.lock",
+  "**/.npmrc",
+  "**/tsconfig*.json",
+  "**/*.config.*",
+  "app/api/public/**",
+  "lib/public*",
+  "lib/r2.ts",
+  "app/api/code/**",
+  "app/api/user/account/**",
+];
+
+/**
+ * The block list scope's name fragments: one anywhere in a path, without
+ * regard to case, leaves the pull request to a person. A revert cannot undo
+ * what these areas do (AGENTS.md's list of what needs a person), so a list of
+ * file names would always miss one -- a fragment takes every file of the area,
+ * present and future, and more than it must (`auth` also takes `author`),
+ * which only means a person merges. Above it: product paths only
+ * (lib/agentAuthorityFiles.ts), so the execution environment (`scripts/**`,
+ * `bin/**`, `config/**`, `docker/**`, `tools/**`, root files and
+ * dot-directories), policy and agent instructions, the admin console and the
+ * whole AMUX control plane stay a person's in either scope.
+ */
+export const QA_RELEASE_DM_MERGE_BLOCK_NAME_TOKENS: readonly string[] = [
+  // Real money leaving: prices, credits, billing, spending caps and ceilings, cost ledgers, plans and what
+  // they entitle, which models run by default, the paid providers and their calls, and guests (whose
+  // calls Tomverse pays for).
+  "pric", "credit", "billing", "stripe", "payment", "checkout", "subscription", "promotion", "coupon",
+  "discount", "refund", "invoice", "payout", "purchase", "budget", "spend", "cost", "ledger", "guardrail",
+  "quota", "ceiling", "entitlement", "ratelimit", "reservation", "settlement", "usage", "currency",
+  "goodwill", "grant", "wallet", "foundingtester", "planchange", "plandefault", "planadjust", "codemanaged",
+  "modelcatalog", "modelregistry", "modelselection", "models", "activeaimodel", "initialmodel",
+  "pinnedmodel", "defaultmodel", "retire", "productkey", "conversationproduct", "appdefault", "appsetting",
+  "tunable", "admission", "limitdecision", "requestlimit", "concurrency", "guest", "provider", "openai",
+  "anthropic", "gemini", "google", "perplexity",
+  "mistral", "cohere", "qwen", "xai", "deepseek", "elevenlabs", "higgsfield", "heygen", "falimage",
+  // Anything leaving Tomverse: mail, notifications, publication, marketing, webhooks, shares, analytics,
+  // the app stores.
+  "mail", "unsubscribe", "newsletter", "broadcast", "notif", "webpush", "publish", "marketing", "social",
+  "zernio", "webhook", "slack", "discord", "telegram", "twilio", "share", "sharing", "ga4", "analytic",
+  "posthog", "sentry", "mobilestore",
+  // Deleting user data, and where it is stored.
+  "delet", "purge", "erase", "erasure", "retention", "gdpr", "wipe", "anonymi", "tombstone", "prune",
+  "cleanup", "expir", "maintenance", "scheduledjob", "storage",
+  // Credentials and security boundaries, consent and legal text.
+  "auth", "secret", "token", "session", "password", "passkey", "webauthn", "credential", "csrf", "crypto",
+  "encrypt", "signature", "hmac", "jwt", "cookie", "bearer", "revocation", "refreshrotation", "permission",
+  "security", "sanitiz", "ssrf", "csp", "cors", "egress", "originprotection", "requestorigin", "clientip",
+  "captcha", "turnstile", "abuse", "trust", "moderat", "jurisdiction", "region", "country", "china",
+  "aurelationship", "allowlist", "denylist", "blocklist", "consent", "privacy", "legal", "terms", "safety",
+  "redirect", "middleware", "verif", "keyring", "login", "signin", "signup", "account", "identity",
+  "conversationlock", "lockservice", "lockgrant", "/lock", "mcp", "admin", "impersonat", "well-known", "testmode",
+  "e2e", "fixture",
+  // The audit chain.
+  "audit",
+  // Production merges, releases and deployments, and what CI admission and the merge lane decide.
+  "deploy", "release", "railway", "github", "ciadmission", "cirepair", "qarelease", "mergetrain",
+  "mergelane", "autofix", "canary", "rollout", "qualitygate",
+  // Giving an agent a new permission: approvals, activations, switches, and the agents themselves.
+  "approv", "activation", "killswitch", "featureflag", "featureswitch", "supporttriage", "scout", "sreops",
+  "crossreview", ...CONTROL_PLANE_NAME_TOKENS,
+  // The database: migrations, backfills, the client and its connection.
+  "prisma", "migrat", "backfill", "postgres", "connectionconfig",
 ];
 
 export type QaReleaseChangedFile = {
@@ -173,6 +274,12 @@ export type QaReleaseExclusionInput = {
    */
   dmApproved?: boolean;
   /**
+   * Which rule judges a Decision Maker approved pull request's paths: the
+   * caller reads it from its environment (qaReleaseDmMergeScope). Absent is
+   * the allow list, the narrower rule.
+   */
+  dmMergeScope?: QaReleaseDmMergeScope;
+  /**
    * The GitHub read vouches that this is Dependabot's own pull request
    * (QA_RELEASE_DEPENDABOT_HEAD). Absent or false: the `dependabot` prefix
    * leaves it to a person, as ever.
@@ -190,7 +297,7 @@ export type QaReleaseExclusionReason =
   | "agent_own_path"
   | "protected_table_migration"
   | "excluded_branch"
-  /** A Decision Maker approved pull request that changes a path outside its merge allow list. */
+  /** A Decision Maker approved pull request that changes a path its merge scope leaves to a person. */
   | "dm_outside_allowlist"
   /** A Dependabot pull request that changes a path other than an npm manifest or lock file. */
   | "dependabot_outside_manifests";
@@ -206,22 +313,41 @@ const DM_ALLOW_EXCEPT_MATCHERS = QA_RELEASE_DM_MERGE_ALLOW_EXCEPT_PATTERNS
 const DEPENDABOT_MATCHERS = QA_RELEASE_DEPENDABOT_PATHS.map(compileManifestPattern);
 const DM_BLOCK_MATCHERS = [...QA_RELEASE_MERGE_LANE_GATE_PATTERNS, ...QA_RELEASE_DM_MERGE_BLOCK_PATTERNS]
   .map((pattern) => new RegExp(compileManifestPattern(pattern).source, "i"));
+const DM_BLOCKLIST_SCOPE_MATCHERS = QA_RELEASE_DM_MERGE_BLOCKLIST_SCOPE_PATTERNS
+  .map((pattern) => new RegExp(compileManifestPattern(pattern).source, "i"));
+
+/** A block list scope name fragment anywhere in the path, without regard to case. */
+export function qaReleaseDmMergeBlockedName(path: string): boolean {
+  const lower = path.toLowerCase();
+  return QA_RELEASE_DM_MERGE_BLOCK_NAME_TOKENS.some((token) => lower.includes(token));
+}
 
 /**
  * Whether one changed path may be part of a pull request the Decision Maker
- * merges: a canonical path inside the allow list and outside its exceptions,
- * a product path in the engineering agent's authority manifest (its
- * control-plane tests, documents and components stay a person's), not a
- * policy test (by name, lib/agentPushPolicy.ts, or named by the policy
- * documents when the caller read them), and on no block list.
+ * merges: a canonical product path in the engineering agent's authority
+ * manifest (its control plane -- the AMUX, the agents, admin, scripts and the
+ * rest of the execution environment, policy and instructions -- stays a
+ * person's), not a policy test (by name, lib/agentPushPolicy.ts, or named by
+ * the policy documents when the caller read them), and on no block list.
+ * The allow list scope also wants it inside the allow list and outside its
+ * exceptions, exactly as before. The block list scope keeps what the allow
+ * list let through and adds every other product path -- code under lib/, API
+ * routes, the rest of app/, packages, types -- whose name carries no block
+ * fragment; raw SQL and key material are a person's anywhere.
  */
-export function qaReleaseDmMergeAllowed(path: unknown, policyTestPaths: readonly string[] = []): boolean {
+export function qaReleaseDmMergeAllowed(path: unknown, policyTestPaths: readonly string[] = [],
+  scope: QaReleaseDmMergeScope = "allowlist"): boolean {
   if (!isReadablePath(path)) return false;
-  if (!DM_ALLOW_MATCHERS.some((matcher) => matcher.test(path))) return false;
-  if (DM_ALLOW_EXCEPT_MATCHERS.some((matcher) => matcher.test(path))) return false;
+  const blocklist = scope === "blocklist";
+  const inAllowList = DM_ALLOW_MATCHERS.some((matcher) => matcher.test(path)) &&
+    !DM_ALLOW_EXCEPT_MATCHERS.some((matcher) => matcher.test(path));
+  if (!blocklist && !inAllowList) return false;
   if (classifyPath(path) !== "product") return false;
   if (isPolicyTestName(path) || policyTestPaths.includes(path)) return false;
-  return !DM_BLOCK_MATCHERS.some((matcher) => matcher.test(path));
+  if (DM_BLOCK_MATCHERS.some((matcher) => matcher.test(path))) return false;
+  if (!blocklist) return true;
+  if (DM_BLOCKLIST_SCOPE_MATCHERS.some((matcher) => matcher.test(path))) return false;
+  return inAllowList || !qaReleaseDmMergeBlockedName(path);
 }
 
 /**
@@ -243,12 +369,18 @@ function branchExcluded(headBranch: string, dmApproved: boolean, dependabot: boo
 
 /**
  * The paths of a Decision Maker approved pull request that leave it to a
- * person (qaReleaseDmMergeAllowed): outside the allow list, on a block list,
- * a policy test, or one that cannot be judged. Empty when none does.
+ * person (qaReleaseDmMergeAllowed in that scope): control plane, on a block
+ * list, a policy test, outside the allow list in that scope, or one that
+ * cannot be judged. Empty when none does.
  */
-export function qaReleaseDmApprovedHumanPaths(paths: readonly unknown[], policyTestPaths: readonly string[] = []): string[] {
-  return paths.flatMap((path) => qaReleaseDmMergeAllowed(path, policyTestPaths) ? [] : [String(path).slice(0, 200)]);
+export function qaReleaseDmApprovedHumanPaths(paths: readonly unknown[], policyTestPaths: readonly string[] = [],
+  scope: QaReleaseDmMergeScope = "allowlist"): string[] {
+  return paths.flatMap((path) => qaReleaseDmMergeAllowed(path, policyTestPaths, scope) ? [] : [String(path).slice(0, 200)]);
 }
+
+/** The scope a judgement runs in: the block list only when the caller says so. */
+const scopeOf = (input: Pick<QaReleaseExclusionInput, "dmMergeScope">): QaReleaseDmMergeScope =>
+  input.dmMergeScope === "blocklist" ? "blocklist" : "allowlist";
 
 export function judgeQaReleaseMergeLaneExclusion(input: QaReleaseExclusionInput): QaReleaseExclusion {
   const reasons = new Set<QaReleaseExclusionReason>();
@@ -273,7 +405,7 @@ export function judgeQaReleaseMergeLaneExclusion(input: QaReleaseExclusionInput)
     return { excluded: true, reasons: [...reasons].sort() };
   }
 
-  const judgeFile = fileJudge(input.policyTestPaths, input.agentOwnPatterns, dmApproved, dependabot);
+  const judgeFile = fileJudge(input.policyTestPaths, input.agentOwnPatterns, dmApproved, dependabot, scopeOf(input));
   for (const file of changedFiles) for (const reason of judgeFile(file)) reasons.add(reason);
 
   return reasons.size === 0 ? { excluded: false } : { excluded: true, reasons: [...reasons].sort() };
@@ -285,7 +417,8 @@ function dependabotVouched(input: Pick<QaReleaseExclusionInput, "dependabot" | "
 }
 
 /** The per-file half of the judgement: what one changed file excludes for. */
-function fileJudge(policyTestPaths: readonly string[], agentOwnPatterns: readonly string[], dmApproved = false, dependabot = false) {
+function fileJudge(policyTestPaths: readonly string[], agentOwnPatterns: readonly string[], dmApproved = false, dependabot = false,
+  dmMergeScope: QaReleaseDmMergeScope = "allowlist") {
   const policyTests = new Set(policyTestPaths);
   const ownMatchers = agentOwnPatterns.map(compileManifestPattern);
   return (file: QaReleaseChangedFile): Set<QaReleaseExclusionReason> => {
@@ -304,7 +437,7 @@ function fileJudge(policyTestPaths: readonly string[], agentOwnPatterns: readonl
       }
       if (policyTests.has(path)) reasons.add("policy_test");
       if (ownMatchers.some((matcher) => matcher.test(path))) reasons.add("agent_own_path");
-      if (dmApproved && !qaReleaseDmMergeAllowed(path, policyTestPaths)) reasons.add("dm_outside_allowlist");
+      if (dmApproved && !qaReleaseDmMergeAllowed(path, policyTestPaths, dmMergeScope)) reasons.add("dm_outside_allowlist");
     }
     if (isReadablePath(file.path) && QA_RELEASE_MIGRATION_SQL_PATH.test(file.path)) {
       if (typeof file.migrationSql !== "string" || QA_RELEASE_PROTECTED_TABLE_PATTERN.test(file.migrationSql)) {
@@ -325,7 +458,8 @@ export function qaReleaseMergeLaneExcludingFiles(
   limit = 20,
 ): { path: string; reasons: QaReleaseExclusionReason[] }[] {
   if (!Array.isArray(input.changedFiles) || !Array.isArray(input.policyTestPaths) || !Array.isArray(input.agentOwnPatterns)) return [];
-  const judgeFile = fileJudge(input.policyTestPaths, input.agentOwnPatterns, input.dmApproved === true, dependabotVouched(input));
+  const judgeFile = fileJudge(input.policyTestPaths, input.agentOwnPatterns, input.dmApproved === true, dependabotVouched(input),
+    scopeOf(input));
   const out: { path: string; reasons: QaReleaseExclusionReason[] }[] = [];
   for (const file of input.changedFiles) {
     const reasons = judgeFile(file);

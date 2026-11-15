@@ -187,8 +187,11 @@ v22 `implement` Task의 패치가 T2로 판정되어도 아래를 모두 만족�
 
 이 PR이 draft인 동안에는 어떤 workflow도 돌지 않는다. 모든 `pull_request` workflow는 draft를 건너뛰고,
 `push` workflow는 `main`·`develop`·`to-develop` branch에서만 돈다. 토큰은 workflow 파일을 바꿀 수 없으므로
-이 조건을 PR이 스스로 풀지 못한다. ready 전환은 사람만 한다. CI admission은 `agent/engineering/` branch를
-줄에 넣지 않고, 병합 레인과 PR CI 자동 수정도 이 branch를 다루지 않는다. 검토 항목은 cause key
+이 조건을 PR이 스스로 풀지 못한다. ready 전환은 사람이 하거나, DM이 운영자 확인 대기에서 승인한 PR에 한해 앱이 한다(운영자 결정
+2026-11-13·2026-11-15, §9-10의 두 번째 근거; `TOMVERSE_AMUX_DM_T2_MERGE=enabled`일 때만, 승인한 head·diff 그대로이고 병합 범위
+`TOMVERSE_AMUX_DM_MERGE_SCOPE` 안일 때만). 그 PR은 CI가 통과하면 병합 레인이 `develop`에 병합한다. 사람이 이어 받는 단계는 없고,
+`main`은 사람의 몫이다. CI admission은 `agent/engineering/` branch를 줄에 넣지 않고, PR CI 자동 수정도 이 branch를 다루지 않으며,
+병합 레인은 앱이 넘긴 DM 승인 PR만 다룬다. 검토 항목은 cause key
 `publish_review:<runId>`로 구별한다. DB가 cause key를 바꾸지 못하게 하므로, 재대기나 조회를 거쳐도 일반 PR이
 되지 않는다. 앱은 claim 요청 헤더 `x-engineering-publisher-features`에 `review_draft`를 적은 게시 서비스에만
 검토 항목의 쓰기 claim을 준다. 그래서 이 기능 이전에 배포된 게시 서비스는 이 항목을 ready PR로 열 수 없다.
@@ -598,10 +601,14 @@ snapshot과 같아야 한다) → 사람이 병합하고 본 앱이 병합을 �
       아직 보고하지 않은 attempt가 열려 있거나 diff를 읽지 못하면 그 회차에는 판정하지 않는다.
 
     fork에서 온 PR은 이 경로를 타지 않는다(head 저장소가 base 저장소와 다르면 ready·레인 목록·레인 병합 모두에서 제외).
-    이 경로는 **변경 파일이 모두 허용 목록 안에 있는 PR만** 탄다(`QA_RELEASE_DM_MERGE_ALLOW_PATTERNS`와
-    `qaReleaseDmMergeAllowed`: 테스트, 정책·UI 계약·에이전트 지시가 아닌 문서, locale, 컴포넌트, app의 page·layout·loading·error
-    파일; 이 manifest의 control-plane 경로, 정책 테스트, 레인 게이트 파일, 가격·크레딧·migration·삭제·인증·감사 체인 경로는
-    그 안에 있어도 제외). 하나라도 밖이면 DM 승인을 기록하지 않고 사람에게 넘긴다. 앱이 레인에 승인을 넘길 때마다 현재 PR
+    이 경로는 **변경이 모두 병합 범위 안에 있는 PR만** 탄다(운영자 결정 2026-11-15, `qaReleaseDmMergeAllowed`와
+    `amuxDmT2MergePatchGate`, 범위의 전체 목록은 `docs/policy/qa-release-agent.md` 8절 3항). 기본은 차단 목록이다: 이 manifest의
+    product 경로 가운데 정책 테스트가 아니고 레인 게이트 파일·되돌릴 수 없는 경로 목록·차단 이름 조각에 걸리지 않는 경로는
+    `lib/**`·`app/api/**`도 받고, 저장된 patch의 바뀐 줄에 사람에게 예약된 값·돈·환경 변수와 스위치·삭제·raw SQL·인증·비밀·메일의
+    단어나 binary·실행 비트가 없어야 한다. control-plane 경로(§4-4의 에이전트 자신과 AMUX 전부)는 어느 범위에서도 사람에게
+    남는다. 앱의 `TOMVERSE_AMUX_DM_MERGE_SCOPE`에 `blocklist`가 아닌 값을 두면 2026-11-13의 허용 목록(테스트, 정책·UI 계약·에이전트
+    지시가 아닌 문서, locale, 컴포넌트, app의 page·layout·loading·error 파일)으로 돌아간다. 하나라도 밖이면 DM 승인을 기록하지 않고
+    사람에게 넘긴다. 앱이 레인에 승인을 넘길 때마다 현재 PR
     diff와 파일 목록을 다시 읽어 같을 때만 넘기고, 레인은 승인된 head를 고정해 병합한다. 위 조건에
     하나라도 맞지 않는 병합은 종전대로 비승인이고 정지 대상이다. `main` 병합과 배포는 사람의
     몫이다. 게시 App과 에이전트에는 여전히 병합 권한이 없다 — 병합하는 것은 병합 레인 App이다.

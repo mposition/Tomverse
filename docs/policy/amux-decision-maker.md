@@ -83,11 +83,20 @@ approvedBy: mposition · approvedAt: 2026-10-17 · 정책 버전: 2
    `TOMVERSE_AMUX_DM_OWNER_SETTLEMENT=enabled`(기본 꺼짐)를 켜는 것은 운영자 몫이다. 가격·크레딧·migration·삭제·인증·감사
    체인 경로와 병합 레인 게이트 파일, main 병합과 배포는 사람에게 남는다. S2(`TOMVERSE_AMUX_DM_T2_MERGE=enabled`, 기본
    꺼짐): 기록된 `approve`를 쓸 때마다 binding이 열려 있고 head·diff digest가 승인 때와 같고 base가 develop이고 Task가
-   review인지 다시 읽는다. 자동 병합은 **변경 파일이 모두 허용 목록 안에 있을 때만** 한다(`QA_RELEASE_DM_MERGE_ALLOW_PATTERNS`:
-   `tests/**`, `docs/**`, `locales/**`, `components/**`, `app/**`의 `page.tsx`·`layout.tsx`·`loading.tsx`·`error.tsx`; 그
-   가운데 `docs/policy/**`·`docs/ui-contracts/**`·`docs/agents/**`·`app/api/**`, 엔지니어링 에이전트 권한 manifest의
-   control-plane 경로, 정책 테스트, 레인 게이트 파일과 되돌릴 수 없는 경로는 제외). 하나라도 밖이면 사람에게 남는다. 스위치가
-   켜져 있으면 승인을 기록하는 순간 patch의 경로를 판정해, 허용 목록 밖의 경로가 있거나 경로를 읽지 못하면 승인 대신
+   review인지 다시 읽는다. 자동 병합은 **변경이 모두 병합 범위 안에 있을 때만** 한다(운영자 결정 2026-11-15, "내부 개발용
+   Flow입니다. 제한을 줄 이유가 없습니다. 로컬 CLI처럼 편리한 Flow였으면 합니다."; 전체 목록은 `docs/policy/qa-release-agent.md`
+   8절 3항). 기본은 **차단 목록**이다: 엔지니어링 에이전트 권한 manifest의 product 경로이고 정책 테스트가 아니며 레인 게이트 파일,
+   되돌릴 수 없는 경로(`QA_RELEASE_DM_MERGE_BLOCK_PATTERNS`·`QA_RELEASE_DM_MERGE_BLOCKLIST_SCOPE_PATTERNS`), 차단 이름 조각
+   (`QA_RELEASE_DM_MERGE_BLOCK_NAME_TOKENS`: 실제 비용, 외부 발송, 사용자 데이터 삭제, 자격증명과 보안 경계, 감사 체인, 병합과
+   배포, 에이전트 권한, DB)에 걸리지 않으면 `lib/**`·`app/api/**`도 병합한다. 저장된 patch의 바뀐 줄과 hunk 문맥도 읽어 사람에게
+   예약된 값, 돈·환경 변수·저장된 스위치·삭제·raw SQL·인증·비밀·메일의 단어, binary·실행 비트가 있으면 사람에게 남긴다
+   (`AMUX_DM_T2_MERGE_CONTENT_ALARMS`). control-plane 경로(AMUX와 에이전트 자신, admin, 실행 환경, 정책과 지시)는 어느 범위에서도
+   사람에게 남는다. 앱 서비스의 `TOMVERSE_AMUX_DM_MERGE_SCOPE`에 `blocklist`가 아닌 값(예: `allowlist`)을 두면 kill switch로
+   2026-11-13의 **허용 목록**(`QA_RELEASE_DM_MERGE_ALLOW_PATTERNS`: `tests/**`, `docs/**`, `locales/**`, `components/**`,
+   `app/**`의 `page.tsx`·`layout.tsx`·`loading.tsx`·`error.tsx`; 그 가운데 `docs/policy/**`·`docs/ui-contracts/**`·
+   `docs/agents/**`·`app/api/**`, control-plane 경로, 정책 테스트, 레인 게이트 파일과 되돌릴 수 없는 경로는 제외)으로 돌아간다.
+   하나라도 밖이면 사람에게 남는다. 스위치가
+   켜져 있으면 승인을 기록하는 순간 patch를 판정해, 범위 밖의 경로나 줄이 있거나 경로를 읽지 못하면 승인 대신
    handoff(`outside_dm_merge_allowlist`·`paths_unreadable`)를 남긴다. 앱은 CI 입장 round가
    한 번 돌 때마다 승인된 검토 초안 하나를 GitHub에서 다시 읽어(CI 입장 App으로 단계·head, 엔지니어링 읽기 토큰으로 diff와
    파일 목록) 대기열의 draft가 runner를 기다리지 않고 그 CI가 통째로 들어갈 때만, 해시 체인 감사를 먼저 남기고 ready로
@@ -96,9 +105,10 @@ approvedBy: mposition · approvedAt: 2026-10-17 · 정책 버전: 2
    지금 여유가 있을 때만 하고, 앞선 DM ready의 CI가 GitHub에 아직 보이지 않으면(ready 감사 기록 뒤 10분까지) 다음 ready를
    하지 않는다. **넘침은 PR 한 건으로 묶인다.**
    **fork PR은 제외한다**: CI 입장 App과 엔지니어링 읽기 토큰이 보여 주는 head 저장소가 base 저장소와 다르면 ready로 바꾸지
-   않고 레인 목록에도 싣지 않는다. 앱은 레인의 상태
+   않고 레인 목록에도 싣지 않는다. 사람이 `ci:hold`를 붙인 PR도 ready로 바꾸지 않는다(목록에서든 쓰기 직전의 다시 읽기에서든,
+   CI 입장 줄과 같은 규칙). 앱은 레인의 상태
    읽기마다 가장 오래 확인하지 않은 승인 **한 건**만 골라 방문을 기록하고, 그 PR의 현재 diff와 파일 목록을 GitHub에서 다시 읽어
-   digest가 `approvedDiffDigest`와 같고 파일이 모두 허용 목록 안일 때만 싣는다(읽지 못하거나 다르면 싣지 않고, 그 승인은 차례를
+   digest가 `approvedDiffDigest`와 같고 파일과 저장된 patch가 모두 병합 범위 안일 때만 싣는다(읽지 못하거나 다르면 싣지 않고, 그 승인은 차례를
    쓴 것으로 본다). 레인은 승인된 head를 `sha`로 고정해 병합한다. 병합 레인은 앱이 넘긴 목록의 PR만
    `agent` 브랜치 제외의 예외로 받고(`docs/policy/qa-release-agent.md` 8절 3항), observer는 그 레인의 병합을 두 번째 승인
    근거(`dm_approval`, `docs/policy/engineering-agent.md` §9-10)로 판정한다. **대상은 develop뿐이고 main은 제외다.** S3(구현 완료):
