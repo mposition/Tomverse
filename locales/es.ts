@@ -1,9 +1,11 @@
+import { reviewActionsCopy } from "./reviewActions";
 import { reviewHandoffCopy } from "./reviewHandoff";
 import { workspaceWelcomeCopy } from "./workspaceWelcome";
 import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 import { en } from "./en";
 
 export const es = {
+    reviewActions: reviewActionsCopy.es,
     reviewHandoff: reviewHandoffCopy.es,
     journey: {
         receiptSent: "Fuente incluida en este intento: {selected} seleccionados + {recent} recientes ({unique} mensajes únicos)",

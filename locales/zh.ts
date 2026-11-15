@@ -1,3 +1,4 @@
+import { reviewActionsCopy } from "./reviewActions";
 import { reviewHandoffCopy } from "./reviewHandoff";
 import { workspaceWelcomeCopy } from "./workspaceWelcome";
 import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
@@ -21,6 +22,7 @@ import { en } from "./en";
  * in review rather than a key quietly going missing.
  */
 export const zh = {
+    reviewActions: reviewActionsCopy.zh,
     reviewHandoff: reviewHandoffCopy.zh,
     journey: {
         receiptSent: "本次尝试的输入包含原文：已选 {selected} 个 + 最近 {recent} 个（去重后 {unique} 条消息）",

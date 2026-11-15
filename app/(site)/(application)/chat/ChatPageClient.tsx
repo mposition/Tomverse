@@ -2,6 +2,7 @@
 
 import { ReviewChatHandoffProvider, ReviewChatAction } from "@/components/chat/ReviewChatHandoff";
 import { AvailableCreditsProvider } from "@/components/credits/UsageMeter";
+import { ReviewAnalysisActions } from "@/components/chat/ReviewAnalysisActions";
 import { ReviewChatDraftReceiver } from "@/components/chat/ReviewChatDraftReceiver";
 import { REVIEW_CHAT_PARAM, type ReviewChatSource } from "@/lib/reviewToChat";
 
@@ -11439,7 +11440,6 @@ export function ChatPageClient({
             </button>
           </div>
           <div className="grid min-h-0 flex-1 touch-pan-y gap-4 overflow-y-auto overscroll-contain p-4 [scrollbar-gutter:stable] sm:p-5">
-            <ReviewChatAction source={compareSummarySource} ready={!isCompareSummaryLoading && !isGuestMode && compareSummarySource?.scope === reviewChatSourceScope} />
             <section data-testid="quick-summary-consensus" className="rounded-xl border border-blue-200 bg-blue-50/70 p-4 dark:border-blue-900/70 dark:bg-blue-950/30">
               <h3 className="text-sm font-bold text-blue-950 dark:text-blue-100">
                 {t("chat.quickSummaryCommonConclusions")}
@@ -11612,6 +11612,8 @@ export function ChatPageClient({
               </section>
             )}
           </div>
+          <ReviewAnalysisActions source={compareSummarySource} ready={!isCompareSummaryLoading && !isGuestMode && compareSummarySource?.scope === reviewChatSourceScope}
+            scope={reviewChatSourceScope} onClose={() => setCompareSummary(null)} />
         </section>
       </div>
     )}
