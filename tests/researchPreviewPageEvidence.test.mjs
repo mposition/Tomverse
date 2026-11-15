@@ -71,7 +71,7 @@ test("v2 public metadata and exports contain curated page status and only cited 
     content: "RAW_PAGE_CHECKPOINT_ONLY", finalUrl: "https://private.example.com", headers: { authorization: "secret" } } }] };
   const exported = researchPreviewExportFields({ research: injected });
   assert.deepEqual(exported.research, result);
-  assert.doesNotMatch(JSON.stringify(exported), /RAW_PAGE_CHECKPOINT_ONLY|private.example.com|authorization/);
+  assert.doesNotMatch(JSON.stringify(exported), /RAW_PAGE_CHECKPOINT_ONLY|private\.example\.com|authorization/);
   assert.deepEqual(parseResearchPreviewMetadata(JSON.parse(JSON.stringify(result))), result);
 });
 
