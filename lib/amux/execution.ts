@@ -1658,8 +1658,10 @@ export async function settleAmuxV22TaskExecution(input: {
       // consent: v22_publication_skipped) leaves the patch private. The Task
       // still settles and goes to a person's review with no publication
       // product; refusing here stopped the worker bridge on every accepted
-      // patch (2026-11-06). A run that exists but no longer matches is still
-      // a conflict.
+      // patch (2026-11-06). The stored patch is a kept result, published once
+      // publication can open (lib/amux/v22KeptResultPublication.ts, owner
+      // decision 2026-11-15). A run that exists but no longer matches is
+      // still a conflict.
       if (run && patch && !ownerQuestion && effectivePathDecision === "pass" &&
           (!reviewRequired || reviewDisposition?.status === "review")) {
         const assignment = await tx.amuxV22WorkerAssignment.findUnique({

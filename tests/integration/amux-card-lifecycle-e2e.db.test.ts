@@ -169,7 +169,7 @@ test("a review recorded before the merge completes the card on that review", asy
   });
 });
 
-test("a merge by anyone else with no review still stops the agent and leaves the card for a person", async () => {
+test("a merge by anyone else with no review holds that card for a person, and only that card", async () => {
   await lifecycle(async (tx) => {
     const card = await publishedCard(tx);
     const outcome = await observe(card, () => mergedPull({ mergedByApprover: false }));
@@ -180,19 +180,130 @@ test("a merge by anyone else with no review still stops the agent and leaves the
     // the store admits, so this write failed and the whole round with it.
     assert.equal(await openMismatches(tx, card), 1);
     assert.equal(((await bindingRow(tx, card)).mergeObservation as { merged: boolean }).merged, true);
+    // Owner decision 2026-11-15: it is that card's decision; the agent goes on.
+    const { readEngineeringAgentHaltState, currentEngineeringAgentHalt, engineeringAgentHalted } =
+      await import("@/lib/engineeringAgentStore");
+    const state = await readEngineeringAgentHaltState(tx);
+    assert.equal(engineeringAgentHalted(state), false);
+    assert.equal(currentEngineeringAgentHalt(state), "none");
   });
-  // An approver's merge of a change the app did not verify is not that
-  // approval either: another head whose pull request diff is not the verified
-  // one, or whose diff could not be read.
+});
+
+test("the CI auto-fix merged develop into the agent's pull request, then the owner merged it: done, nothing stops", async () => {
+  // #3942 and #3944 (2026-11-14): `auto-fix(conflict): merge develop into #N`
+  // moved the head and the diff after verification, the owner merged on
+  // GitHub, and the agent stopped for nine hours. The owner's merge approves
+  // the diff it merged, and the audit entry names it.
+  const MOVED = "a".repeat(40);
   for (const diffDigest of ["e".repeat(64), null]) {
     await lifecycle(async (tx) => {
       const card = await publishedCard(tx);
       const outcome = await observe(card, () =>
-        mergedPull({ mergedByApprover: true, headSha: "a".repeat(40), diffDigest }));
+        mergedPull({ mergedByApprover: true, headSha: MOVED, diffDigest }));
+      assert.equal(outcome?.outcome, "completed");
+      assert.equal((await cardRow(tx, card)).status, "done");
+      assert.equal(await openMismatches(tx, card), 0);
+      const observed = await tx.adminAuditLog.findMany({
+        where: { targetType: "engineering_agent_binding", targetId: card.bindingId } });
+      const merge = observed.map((entry) => entry.metadata as Record<string, unknown> | null)
+        .find((metadata) => metadata?.kind === "merge");
+      assert.equal(merge?.approvedByMerge, true);
+      assert.equal(merge?.mergedHeadSha, MOVED);
+      assert.equal(merge?.mergedDiffDigest, diffDigest);
+      assert.equal(merge?.mergedHeadVerified, false);
+    });
+  }
+  // ENGINEERING_AGENT_LEGACY_HALTS: the rule before it.
+  process.env.ENGINEERING_AGENT_LEGACY_HALTS = "enabled";
+  try {
+    await lifecycle(async (tx) => {
+      const card = await publishedCard(tx);
+      const outcome = await observe(card, () =>
+        mergedPull({ mergedByApprover: true, headSha: MOVED, diffDigest: "e".repeat(64) }));
       assert.equal(outcome?.outcome, "merged_without_approval");
       assert.equal((await cardRow(tx, card)).status, "review");
     });
+  } finally {
+    delete process.env.ENGINEERING_AGENT_LEGACY_HALTS;
   }
+});
+
+/**
+ * A card whose reviewed result was stored while its publication could not
+ * open (`v22_publication_skipped`): settled in review with a patch, and no
+ * engineering run for that attempt.
+ */
+async function keptCard(tx: LifecycleTx) {
+  const seed = await seedAmuxV4PortfolioRecoveryPrerequisites(queryAdapter(tx),
+    { taskRole: "implement", settlementReason: "review_server_accepted" }) as {
+    taskId: string; priorAttemptId: string; ideaId: string };
+  const escalationId = randomUUID();
+  await tx.$executeRaw`INSERT INTO "AmuxHumanEscalation"
+    ("id", "taskId", "specialty", "reason", "status", "openedBy", "openedTaskRevision", "updatedAt")
+    VALUES (${escalationId}, ${seed.taskId}, 'code-review', 'human_review_required', 'open',
+      'system:amux-v22-settlement', 4, CURRENT_TIMESTAMP)`;
+  await tx.$executeRaw`INSERT INTO "AmuxV22TaskResult"
+    ("attemptId", "taskId", "ideaId", "ciphertext", "keyId", "keyVersion",
+     "digest", "digestKeyId", "sourceSha256", "byteLength", "createdAt")
+    VALUES (${seed.priorAttemptId}, ${seed.taskId}, ${seed.ideaId}, convert_to('synthetic-only', 'UTF8'),
+      'synthetic', 1, ${"d".repeat(64)}, 'synthetic', ${"d".repeat(64)}, 14, CURRENT_TIMESTAMP)`;
+  await tx.$executeRaw`INSERT INTO "AmuxV22TaskPatch"
+    ("attemptId", "taskId", "ideaId", "ciphertext", "keyId", "keyVersion",
+     "digest", "digestKeyId", "patchSha256", "baseSha", "byteLength", "createdAt")
+    VALUES (${seed.priorAttemptId}, ${seed.taskId}, ${seed.ideaId}, convert_to('synthetic-patch', 'UTF8'),
+      'synthetic', 1, ${"e".repeat(64)}, 'synthetic', ${"e".repeat(64)}, ${BASE}, 15, CURRENT_TIMESTAMP)`;
+  await fixtureCommitted(tx);
+  return { taskId: seed.taskId, attemptId: seed.priorAttemptId, escalationId };
+}
+
+test("a reviewed result whose publication never opened is kept for publication, and nothing runs it again", async () => {
+  // AMUX-IMGOUT-003 (2026-11-14): the agent was halted, so two results that
+  // passed review stayed private; the Decision Maker's owner settlement then
+  // chose "run again" each time, until all five attempts were spent.
+  const { readAmuxV22KeptResultCandidates } = await import("@/lib/amux/v22KeptResultRead");
+  const { scanAmuxDmOwnerSettlementCandidates } = await import("@/lib/amux/dmOwnerSettlementRead");
+  await lifecycle(async (tx) => {
+    const card = await keptCard(tx);
+    const kept = await readAmuxV22KeptResultCandidates(tx, 10, card.taskId);
+    assert.deepEqual(kept.map((row) => [row.taskId, row.attemptId, row.taskStatus, row.baseSha]),
+      [[card.taskId, card.attemptId, "review", BASE]], "the publication round will take it");
+    // The Decision Maker, whose answers include a retry, is never asked about
+    // it; with the kill switch it is filed as before.
+    assert.deepEqual(await scanAmuxDmOwnerSettlementCandidates(tx, 10, [card.escalationId]), []);
+    process.env.ENGINEERING_AGENT_LEGACY_HALTS = "enabled";
+    try {
+      assert.deepEqual((await scanAmuxDmOwnerSettlementCandidates(tx, 10, [card.escalationId]))
+        .map((row) => row.taskId), [card.taskId]);
+    } finally {
+      delete process.env.ENGINEERING_AGENT_LEGACY_HALTS;
+    }
+
+    // Its budget spent on later failures, it is still the card's result to publish.
+    await withoutTriggers(tx, async () => {
+      await tx.$executeRaw`UPDATE "AmuxWorkItem" SET "status" = 'blocked' WHERE "id" = ${card.taskId}`;
+    });
+    const blocked = await readAmuxV22KeptResultCandidates(tx, 10, card.taskId);
+    assert.deepEqual(blocked.map((row) => row.taskStatus), ["blocked"]);
+
+    // Once a publication run exists for that attempt, it is no longer kept.
+    await withoutTriggers(tx, async () => {
+      await tx.$executeRaw`INSERT INTO "EngineeringAgentRun"
+        ("id", "amuxAttemptId", "cardId", "cardKind", "baseSha", "status", "outcome", "halt", "modeAtStart",
+         "startedAt", "endedAt", "leaseExpiresAt")
+        VALUES (${String(830_000_000 + Math.floor(Math.random() * 90_000_000))}, ${card.attemptId},
+          ${card.taskId}, 'task', ${BASE}, 'finished', 't2_draft', 'none', 't1',
+          CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`;
+    });
+    assert.deepEqual(await readAmuxV22KeptResultCandidates(tx, 10, card.taskId), []);
+  });
+  // A person who sent the result back rejected it: it is not kept.
+  await lifecycle(async (tx) => {
+    const card = await keptCard(tx);
+    await tx.$executeRaw`UPDATE "AmuxHumanEscalation" SET "status" = 'resolved', "resolutionOutcome" = 'retry',
+      "resolution" = 'Run it again.', "resolvedById" = 'lifecycle-person', "resolvedAt" = CURRENT_TIMESTAMP
+      WHERE "id" = ${card.escalationId}`;
+    assert.deepEqual(await readAmuxV22KeptResultCandidates(tx, 10, card.taskId), []);
+  });
 });
 
 test("an approver's merge of a branch brought up to date still counts: same diff, later head", async () => {

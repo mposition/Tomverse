@@ -95,3 +95,24 @@ test("an approver's own merge of the verified head into develop is the approval"
   // Nothing merged is still open, whoever would merge it.
   assert.equal(decideEngineeringAgentMergedPr({ ...own, merged: false }), "open");
 });
+
+test("owner decision 2026-11-15: an approver's develop merge approves the diff it merged, a moved head included", () => {
+  const moved = { merged: true, approvalRecordedBeforeMerge: false, mergedByApprover: true, baseRef: "develop",
+    headVerified: false, approverMergeApprovesMergedDiff: true };
+  // The CI auto-fix merged develop into #3942 and #3944; the owner then merged them.
+  assert.equal(decideEngineeringAgentMergedPr(moved), "done");
+  // Still only a person on the list, and only into develop.
+  assert.equal(decideEngineeringAgentMergedPr({ ...moved, mergedByApprover: false }), "merged_without_approval");
+  assert.equal(decideEngineeringAgentMergedPr({ ...moved, baseRef: "main" }), "merged_without_approval");
+  // A review recorded before the merge stands for the verified change, or for the approver's own merge,
+  assert.equal(decideEngineeringAgentMergedPr({ ...moved, approvalRecordedBeforeMerge: true }), "done");
+  assert.equal(decideEngineeringAgentMergedPr({ ...moved, mergedByApprover: false, approvalRecordedBeforeMerge: true,
+    headVerified: true }), "done");
+  // but not for someone else's merge of a head that moved after it.
+  assert.equal(decideEngineeringAgentMergedPr({ ...moved, mergedByApprover: false, approvalRecordedBeforeMerge: true }),
+    "merged_without_approval");
+  // ENGINEERING_AGENT_LEGACY_HALTS: the rule before it.
+  const legacy = { ...moved, approverMergeApprovesMergedDiff: false };
+  assert.equal(decideEngineeringAgentMergedPr(legacy), "merged_without_approval");
+  assert.equal(decideEngineeringAgentMergedPr({ ...legacy, mergedByApprover: false, approvalRecordedBeforeMerge: true }), "done");
+});

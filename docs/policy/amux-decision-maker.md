@@ -199,7 +199,14 @@ DM은 **제안을 쓰는 worker이지 승인자가 아니다.** (되돌릴 수 �
     human escalation이 있으며 실행 중인 것이 없는 Task다. 결과 검토(§0a-2)가 열려 있거나 그 실행에서 DM이 `block`한 Task,
     v22 worker 질문(8)이 기다리는 Task, 그 아이디어에 계획 거부(9)나 남은 카드 닫기 질문(10)이 열린 Task는 제외한다. 엔지니어링
     쪽 작업이 남은 Task(진행 중인 publish·정리 항목, 열린 T2 초안·결정·불일치)와 publisher가 draft로 연 검토 PR이 아닌 열린 PR이
-    있는 Task(merge observer 경로)도 제외한다. escalation 하나에 `AmuxDmOwnerSettlement` 행 하나이고(행 id는 escalation에서
+    있는 Task(merge observer 경로)도 제외한다. **검토를 통과한 성공 결과가 게시를 기다리는 Task(게시 대기, kept result:
+    가장 최근에 성공해 `review`로 간 시도의 patch가 남아 있고 그 시도의 게시 run이 없는 것)도 제외한다(운영자 결정
+    2026-11-15).** 그런 결과에 필요한 일은 다시 실행이 아니라 게시이고, 이 카드의 선택지에는 `retry`가 있다. 게시는 엔지니어링
+    관측 round가 맡는다(`docs/policy/engineering-agent.md` §11). 2026-11-14 AMUX-IMGOUT-003은 정지 중 검토를 통과한 결과 두 번이
+    비공개로 남은 뒤 DM이 매번 "다시 실행"을 골라 시도 5회를 모두 썼다. 사람은 운영자 확인 대기 화면에서 그대로 정리할 수 있고,
+    사람의 retry·block은 그 결과의 거절로 존중된다. `ENGINEERING_AGENT_LEGACY_HALTS=enabled`이면 종전대로 올린다.
+    retry는 실패하거나 거절된 결과에만 남는다: patch 없이 끝난 실행의 결과 검토(§0a-2)는 DM이 검토자이므로 retry가 그 거절이다.
+    escalation 하나에 `AmuxDmOwnerSettlement` 행 하나이고(행 id는 escalation에서
     유도한 version 8 UUID), tick마다 새 행 3건, 카드 3장까지다. 카드는 8과 같은 형식이며 세션 이름은 `amux-owner-settlement`,
     provider는 `claude`다. 고정 영어 문장과 증거(표시 번호와 제목, 역할과 grade, 멈춘 사유의 고정 문장, 승인된 완료 조건,
     실행 결과, 검토 서버 거절 횟수, 같은 부모의 형제 카드와 이 카드에 의존하는지)로 만든다. 검토 서버 거절의 findings는 앱에

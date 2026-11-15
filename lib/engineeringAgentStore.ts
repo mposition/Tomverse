@@ -86,13 +86,15 @@ import {
   ENGINEERING_AGENT_PR_RESUME_CLAIMED_REASON,
   ENGINEERING_AGENT_REGISTRATION_SETTING_KEY,
   UNKNOWN_OUTCOME_DECISION_CAUSE_PREFIX,
-  ENGINEERING_AGENT_MISMATCH_CARD_SCOPED_ENV,
+  ENGINEERING_AGENT_LEGACY_HALTS_ENV,
+  engineeringAgentLegacyHalts,
   engineeringAgentMismatchCardScoped,
+  parseObservedHaltSubject,
+  type ObservedHaltSubject,
   ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_AFTER_MS,
   ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_ENV,
   ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_MAX_DECISIONS,
   engineeringAgentUnknownAutoLookupEnabled,
-  QUEUE_TTL_DAYS,
   WRITE_ITEM_KINDS,
   decideArmedGate,
   decideOwnerQueues,
@@ -248,6 +250,7 @@ export const ENGINEERING_AGENT_AUDIT_ACTIONS = Object.freeze({
   monitorsConfirmed: "engineering_agent.monitors_confirmed",
   serviceFinished: "engineering_agent.service_finished",
   haltObserved: "engineering_agent.halt_observed",
+  haltCleared: "engineering_agent.halt_cleared",
 } as const);
 
 const humanActorId = (session: Session): string =>
@@ -324,10 +327,19 @@ export type EngineeringAgentHaltState = {
    */
   unacknowledgedHalt: HaltValue | null;
   circuitLatched: boolean;
-  /** Mismatches and orphaned runs hold only their card (AMUXFLOW/B2). */
+  /**
+   * Mismatches and orphaned runs hold only their card (AMUXFLOW/B2; the
+   * default since owner decision 2026-11-15, off with ENGINEERING_AGENT_LEGACY_HALTS).
+   */
   cardScoped?: boolean;
-  /** Open mismatches bound to no run: no card to hold, so they still halt. */
+  /**
+   * Open mismatches bound to no card: no run, and no published item of a run
+   * (a `review_pr:` mismatch names its publish item, whose run is a card's).
+   * There is no card to hold, so they still halt.
+   */
   unscopedStateMismatches?: number;
+  /** The observed unbound reading that still holds, with what it named; null when none does. */
+  observedHalt?: { halt: ObservableHalt; subject: ObservedHaltSubject | null } | null;
 };
 
 // A halt the database holds that this build does not know is still a halt.
@@ -359,10 +371,18 @@ const lockEngineeringAgentHalt = async (tx: EngineeringAgentTransaction) => {
 export async function readEngineeringAgentHaltState(
   db: PrismaClient | Prisma.TransactionClient,
 ): Promise<EngineeringAgentHaltState> {
-  // One read for both: every open mismatch, and those bound to no run (AMUXFLOW/B2).
+  // One read for both: every open mismatch, and those bound to no card
+  // (AMUXFLOW/B2). A `review_pr:` mismatch has no run of its own but names the
+  // publish item it is about, and that item's run is its card's.
+  // The publish item is looked up by its id (the primary key), never by
+  // building every item's cause key: this runs under AMUX's statement timeout.
   const [mismatchCounts] = await db.$queryRaw<Array<{ total: bigint; unscoped: bigint }>>`
-    SELECT COUNT(*) AS "total", COUNT(*) FILTER (WHERE "runId" IS NULL) AS "unscoped"
-    FROM "EngineeringAgentWorkItem" WHERE "kind" = 'state_mismatch' AND "state" = 'open'`;
+    SELECT COUNT(*) AS "total", COUNT(*) FILTER (WHERE m."runId" IS NULL AND NOT (
+        starts_with(m."causeKey", ${REVIEW_PR_MISMATCH_PREFIX}) AND EXISTS (
+          SELECT 1 FROM "EngineeringAgentWorkItem" p
+          WHERE p."id" = substr(m."causeKey", ${REVIEW_PR_MISMATCH_PREFIX.length + 1})
+            AND p."runId" IS NOT NULL))) AS "unscoped"
+    FROM "EngineeringAgentWorkItem" m WHERE m."kind" = 'state_mismatch' AND m."state" = 'open'`;
   const openStateMismatches = Number(mismatchCounts?.total ?? 0);
   const orphaned = await db.engineeringAgentRun.count({
     where: { status: "active", attempt: { endedAt: { not: null } } },
@@ -388,11 +408,14 @@ export async function readEngineeringAgentHaltState(
     select: { value: true },
   });
   const observed = parseObservedHalt(observedSetting?.value);
-  const observedHalt =
-    observed !== null && (acknowledgedAt === null || observed.at.getTime() > acknowledgedAt.getTime())
-      ? observed.halt
-      : null;
-  const cardScoped = engineeringAgentMismatchCardScoped(process.env[ENGINEERING_AGENT_MISMATCH_CARD_SCOPED_ENV]);
+  // A reading a later clean one explained no longer holds (owner decision
+  // 2026-11-15). A clearance is a recorded fact: turning the kill switch on
+  // afterwards stops further clearances, it does not bring one back.
+  const legacy = engineeringAgentLegacyHalts(process.env[ENGINEERING_AGENT_LEGACY_HALTS_ENV]);
+  const observedHolds = observed !== null && observed.clearedAt === null &&
+    (acknowledgedAt === null || observed.at.getTime() > acknowledgedAt.getTime());
+  const observedHalt = observedHolds ? observed!.halt : null;
+  const cardScoped = engineeringAgentMismatchCardScoped(process.env[ENGINEERING_AGENT_LEGACY_HALTS_ENV]);
   const unscopedStateMismatches = Number(mismatchCounts?.unscoped ?? 0);
   return {
     cardScoped,
@@ -401,17 +424,29 @@ export async function readEngineeringAgentHaltState(
     orphanedRuns: orphaned,
     unacknowledgedHalt:
       fromRuns === null ? observedHalt : observedHalt === null ? fromRuns : higherHalt(fromRuns, observedHalt),
-    circuitLatched: isCircuitLatched({ runs, acknowledgedAt }),
+    // The circuit halts only with the kill switch (owner decision 2026-11-15,
+    // ENGINEERING_AGENT_GLOBAL_HALTS): every halt it counted is now a security
+    // boundary that clears on its own terms or one card's hold, and a card
+    // that keeps failing is held by its own attempt budget.
+    circuitLatched: legacy && isCircuitLatched({ runs, acknowledgedAt }),
+    observedHalt: observedHolds ? { halt: observed!.halt, subject: observed!.subject } : null,
   };
 }
 
-const parseObservedHalt = (value: string | undefined): { halt: HaltValue; at: Date } | null => {
+/** The `review_pr:` mismatch's cause key prefix: it names the publish item it is about. */
+const REVIEW_PR_MISMATCH_PREFIX = "review_pr:";
+
+type ObservedHaltValue = { halt: ObservableHalt; at: Date; subject: ObservedHaltSubject | null; clearedAt: Date | null };
+
+const parseObservedHalt = (value: string | undefined): ObservedHaltValue | null => {
   if (value === undefined) return null;
   try {
-    const parsed = JSON.parse(value) as { halt?: unknown; at?: unknown };
+    const parsed = JSON.parse(value) as { halt?: unknown; at?: unknown; subject?: unknown; clearedAt?: unknown };
     const at = typeof parsed.at === "string" ? parseSettingInstant(parsed.at) : null;
     if (at === null || !(OBSERVABLE_HALTS as readonly unknown[]).includes(parsed.halt)) return null;
-    return { halt: parsed.halt as HaltValue, at };
+    // A clearance this build cannot read is no clearance: the halt still holds.
+    const clearedAt = typeof parsed.clearedAt === "string" ? parseSettingInstant(parsed.clearedAt) : null;
+    return { halt: parsed.halt as ObservableHalt, at, subject: parseObservedHaltSubject(parsed.subject), clearedAt };
   } catch {
     return null;
   }
@@ -445,8 +480,16 @@ export async function readEngineeringAgentKnownPublishes(
 ): Promise<{
   bindings: Array<{ runId: string; prNumber: number; headSha: string; verifiedHeadSha: string }>;
   consumed: Array<{ runId: string; commitDigest: string }>;
+  /**
+   * Owner decision 2026-11-15: with the kill switch off the runner takes a
+   * bound run's branch or pull request at a moved head for that card's own
+   * (a person's or the CI auto-fix's push), and reports a clean reading when
+   * an observed halt still holds, so the app can clear it.
+   */
+  legacyHalts: boolean;
+  observedHalt: ObservableHalt | null;
 }> {
-  const [capabilities, bindings] = await Promise.all([
+  const [capabilities, bindings, settings] = await Promise.all([
     db.engineeringAgentCapability.findMany({
       where: { consumedAt: { not: null } },
       orderBy: [{ consumedAt: "asc" }, { id: "asc" }],
@@ -457,12 +500,24 @@ export async function readEngineeringAgentKnownPublishes(
       orderBy: [{ prNumber: "asc" }, { id: "asc" }],
       select: { runId: true, prNumber: true, headSha: true, verifiedHeadSha: true },
     }),
+    db.appSetting.findMany({
+      where: { key: { in: [ENGINEERING_AGENT_OBSERVED_HALT_SETTING_KEY, ENGINEERING_AGENT_HALT_ACKNOWLEDGED_SETTING_KEY] } },
+      select: { key: true, value: true },
+    }),
   ]);
+  const legacyHalts = engineeringAgentLegacyHalts(process.env[ENGINEERING_AGENT_LEGACY_HALTS_ENV]);
+  const observed = parseObservedHalt(settings.find((row) => row.key === ENGINEERING_AGENT_OBSERVED_HALT_SETTING_KEY)?.value);
+  const acknowledgedAt = parseSettingInstant(
+    settings.find((row) => row.key === ENGINEERING_AGENT_HALT_ACKNOWLEDGED_SETTING_KEY)?.value);
+  const holds = observed !== null && observed.clearedAt === null &&
+    (acknowledgedAt === null || observed.at.getTime() > acknowledgedAt.getTime());
   return {
     bindings,
     consumed: capabilities
       .filter((row) => row.workItem.runId !== null)
       .map((row) => ({ runId: row.workItem.runId as string, commitDigest: row.commitDigest })),
+    legacyHalts,
+    observedHalt: holds ? observed!.halt : null,
   };
 }
 
@@ -509,10 +564,23 @@ async function engineeringAgentCardHeld(
   const cardId = input.cardId ?? (input.runId ? (await tx.engineeringAgentRun.findUnique({
     where: { id: input.runId }, select: { cardId: true } }))?.cardId : undefined);
   if (!cardId) return false;
-  return (await tx.engineeringAgentRun.count({ where: { cardId, OR: [
-    { workItems: { some: { kind: "state_mismatch", state: "open" } } },
-    { status: "active", attempt: { endedAt: { not: null } } },
-  ] } })) > 0;
+  // One statement, as the count it replaced (execution start budgets one): an
+  // open mismatch on a run of the card, a run still active after its attempt
+  // ended, or a `review_pr:` mismatch -- which has no run of its own -- about
+  // a publish item of one of the card's runs (owner decision 2026-11-15).
+  const [held] = await tx.$queryRaw<Array<{ held: boolean }>>`
+    SELECT EXISTS (
+      SELECT 1 FROM "EngineeringAgentRun" r
+      WHERE r."cardId" = ${cardId} AND (
+        EXISTS (SELECT 1 FROM "EngineeringAgentWorkItem" m
+          WHERE m."runId" = r."id" AND m."kind" = 'state_mismatch' AND m."state" = 'open')
+        OR (r."status" = 'active' AND EXISTS (SELECT 1 FROM "AmuxExecutionAttempt" a
+          WHERE a."id" = r."amuxAttemptId" AND a."endedAt" IS NOT NULL))
+        OR EXISTS (SELECT 1 FROM "EngineeringAgentWorkItem" p
+          JOIN "EngineeringAgentWorkItem" m ON m."causeKey" = ${REVIEW_PR_MISMATCH_PREFIX} || p."id"
+          WHERE p."runId" = r."id" AND m."runId" IS NULL AND m."kind" = 'state_mismatch' AND m."state" = 'open'))
+    ) AS "held"`;
+  return held?.held === true;
 }
 
 /** Whether anything halts claims, runs and pushes (§12). */
@@ -547,12 +615,12 @@ export async function requireEngineeringAgentRunAdmission(tx: EngineeringAgentTr
 /* ------------------------------------------------------------------------- */
 
 /**
- * Whether the owner queues have room for another run, counted as the run
- * trigger counts them (migration `engineering_agent_state`): an active run
- * may still become a pull request or a decision, and a publish item not yet
- * settled may still become a binding. The trigger stays the authority at the
- * run's INSERT; this reading lets the worker stop offering itself for cards
- * before AMUX assigns one it would have to refuse (§2.1).
+ * The owner queues as the run trigger counted them before owner decision
+ * 2026-11-15 removed the caps: an active run may still become a pull request
+ * or a decision, and a publish item not yet settled may still become a
+ * binding. Uncapped, a run is always admitted here; with
+ * ENGINEERING_AGENT_LEGACY_HALTS this reading is the cap, held by the app
+ * alone, since the guards no longer count (§2.1).
  */
 export async function readEngineeringAgentOwnerQueues(
   db: PrismaClient | Prisma.TransactionClient,
@@ -572,10 +640,11 @@ export async function readEngineeringAgentOwnerQueues(
   `;
   const row = rows[0];
   const activeRuns = Number(row.activeRuns);
+  // Counted, never capped (owner decision 2026-11-15); the kill switch brings the caps back.
   return decideOwnerQueues({
     openPrBindings: Number(row.openPrs) + activeRuns,
     pendingDecisions: Number(row.pendingDecisions) + activeRuns,
-  });
+  }, engineeringAgentLegacyHalts(process.env[ENGINEERING_AGENT_LEGACY_HALTS_ENV]));
 }
 
 /* ------------------------------------------------------------------------- */
@@ -1113,7 +1182,7 @@ export async function claimNextEngineeringAgentPublishWork(
   // item's only for a publisher that also opens drafts.
   const resumeAllowed = publishAllowed && input.resumePullRequests === true;
   const now = await databaseNow(tx);
-  const cardScoped = engineeringAgentMismatchCardScoped(process.env[ENGINEERING_AGENT_MISMATCH_CARD_SCOPED_ENV]);
+  const cardScoped = engineeringAgentMismatchCardScoped(process.env[ENGINEERING_AGENT_LEGACY_HALTS_ENV]);
   // A lookup only reads: with the switch on, a decision that has waited its
   // time no longer holds it, up to a bound on the decisions one item opens.
   const autoLookup = engineeringAgentUnknownAutoLookupEnabled(
@@ -1167,7 +1236,12 @@ export async function claimNextEngineeringAgentPublishWork(
               EXISTS (SELECT 1 FROM "EngineeringAgentWorkItem" m
                 WHERE m."kind" = 'state_mismatch' AND m."state" = 'open' AND m."runId" = sib."id")
               OR (sib."status" = 'active' AND EXISTS (SELECT 1 FROM "AmuxExecutionAttempt" x
-                WHERE x."id" = sib."amuxAttemptId" AND x."endedAt" IS NOT NULL)))))
+                WHERE x."id" = sib."amuxAttemptId" AND x."endedAt" IS NOT NULL))
+              -- A review_pr: mismatch holds the card of the publish item it names (owner decision 2026-11-15).
+              OR EXISTS (SELECT 1 FROM "EngineeringAgentWorkItem" pp
+                JOIN "EngineeringAgentWorkItem" mm ON mm."causeKey" = ${REVIEW_PR_MISMATCH_PREFIX} || pp."id"
+                WHERE pp."runId" = sib."id" AND mm."runId" IS NULL
+                  AND mm."kind" = 'state_mismatch' AND mm."state" = 'open'))))
           AND (${v22PublicationEnabled} OR NOT EXISTS (
             SELECT 1 FROM "EngineeringAgentRun" r
             JOIN "AmuxWorkItem" card ON card."id" = r."cardId"
@@ -1348,32 +1422,11 @@ export async function markEngineeringAgentWorkItemLeaseExpired(
   });
 }
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-/**
- * The queue's expiry (§12): an unclaimed publish item after the PR queue's
- * period, an undecided draft or decision after the decision queue's. A draft
- * that has a decision never merely expires (the trigger's rule).
- */
-export async function expireEngineeringAgentWorkItem(
-  tx: EngineeringAgentTransaction,
-  input: { workItemId: string },
-): Promise<void> {
-  const item = await lockWorkItem(tx, input.workItemId);
-  await requireSwitch(tx, "maintenanceAllowed");
-  const now = await databaseNow(tx);
-  const ttlDays =
-    item.kind === "publish" && item.state === "queued"
-      ? QUEUE_TTL_DAYS.pr
-      : (item.kind === "t2_draft" || item.kind === "decision") && item.state === "open"
-        ? QUEUE_TTL_DAYS.decision
-        : refuse("work_item_does_not_expire");
-  if (now.getTime() - item.createdAt.getTime() < ttlDays * DAY_MS) refuse("work_item_not_due");
-  await tx.engineeringAgentWorkItem.update({ where: { id: item.id }, data: { state: "expired" } });
-  await systemAudit(tx, "engineering-agent-retention", ENGINEERING_AGENT_AUDIT_ACTIONS.workItemExpired, "engineering_agent_work_item", item.id, {
-    kind: item.kind,
-  });
-}
+// The queue has no expiry (owner decision 2026-11-15): an unclaimed publish
+// item, an undecided draft or a decision waits until it is settled, however
+// long that takes, and a result is never closed for its age. The age shows in
+// the console beside each item (createdAt). The expiry writer that closed
+// them after 14 and 7 days had no caller and is gone.
 
 /**
  * A v22 publish item whose capability lapsed unclaimed and whose candidate,
@@ -1955,8 +2008,6 @@ export async function resolveEngineeringAgentStateMismatch(
     lookupVerifiedNoWrite: consumed === 0,
     mergeObserved: mergedBinding !== null,
     boundReviewPrRecorded: boundBinding !== null,
-    // One item per cause (its key is unique), so a cause cannot recur here.
-    recurrences: 0,
   });
   if (!verdict.allowed) return refuse(verdict.reason);
 
@@ -2191,12 +2242,15 @@ export async function recordEngineeringAgentServiceFinish(
  */
 export async function recordEngineeringAgentObservedHalt(
   tx: EngineeringAgentTransaction,
-  input: { halt: ObservableHalt },
+  input: { halt: ObservableHalt; subject?: ObservedHaltSubject | null },
 ): Promise<{ observedAt: Date }> {
   if (!(OBSERVABLE_HALTS as readonly string[]).includes(input.halt)) refuse("halt_not_observable");
+  // What the reading was about, so the halt names its pull request or branch
+  // (owner decision 2026-11-15). Identifiers only; one this build cannot read is dropped.
+  const subject = input.subject === undefined || input.subject === null ? null : parseObservedHaltSubject(input.subject);
   await lockEngineeringAgentHalt(tx);
   const observedAt = await databaseNow(tx);
-  const value = JSON.stringify({ halt: input.halt, at: observedAt.toISOString() });
+  const value = JSON.stringify({ halt: input.halt, at: observedAt.toISOString(), ...(subject ? { subject } : {}) });
   await tx.appSetting.upsert({
     where: { key: ENGINEERING_AGENT_OBSERVED_HALT_SETTING_KEY },
     update: { value },
@@ -2208,9 +2262,53 @@ export async function recordEngineeringAgentObservedHalt(
     ENGINEERING_AGENT_AUDIT_ACTIONS.haltObserved,
     "app_setting",
     ENGINEERING_AGENT_OBSERVED_HALT_SETTING_KEY,
-    { halt: input.halt },
+    { halt: input.halt, ...observedHaltSubjectAudit(subject) },
   );
   return { observedAt };
+}
+
+/** The audit entry's metadata is flat: a subject goes in as its one identifier. */
+const observedHaltSubjectAudit = (subject: ObservedHaltSubject | null): Record<string, string | number> =>
+  subject === null ? {} : "prNumber" in subject ? { subjectPrNumber: subject.prNumber } : { subjectRef: subject.ref };
+
+/**
+ * The runner's later reading found nothing unbound (owner decision
+ * 2026-11-15): what the observed halt was about is gone or now accounted for
+ * -- the pull request merged or closed, the branch deleted, or the app bound
+ * it. The halt stops holding from this instant; the reading it was and this
+ * clearance both stay on the audit chain. Nothing is written when no observed
+ * halt holds, and with ENGINEERING_AGENT_LEGACY_HALTS only a person's
+ * acknowledgement clears one. A reading, never refused by a switch.
+ */
+export async function clearEngineeringAgentObservedHalt(
+  tx: EngineeringAgentTransaction,
+): Promise<{ cleared: boolean }> {
+  if (engineeringAgentLegacyHalts(process.env[ENGINEERING_AGENT_LEGACY_HALTS_ENV])) return { cleared: false };
+  await lockEngineeringAgentHalt(tx);
+  const [setting, acknowledgement] = await Promise.all([
+    tx.appSetting.findUnique({ where: { key: ENGINEERING_AGENT_OBSERVED_HALT_SETTING_KEY }, select: { value: true } }),
+    tx.appSetting.findUnique({ where: { key: ENGINEERING_AGENT_HALT_ACKNOWLEDGED_SETTING_KEY }, select: { value: true } }),
+  ]);
+  const observed = parseObservedHalt(setting?.value);
+  const acknowledgedAt = parseSettingInstant(acknowledgement?.value);
+  if (observed === null || observed.clearedAt !== null ||
+      (acknowledgedAt !== null && observed.at.getTime() <= acknowledgedAt.getTime())) return { cleared: false };
+  const clearedAt = await databaseNow(tx);
+  await tx.appSetting.update({
+    where: { key: ENGINEERING_AGENT_OBSERVED_HALT_SETTING_KEY },
+    data: { value: JSON.stringify({ halt: observed.halt, at: observed.at.toISOString(),
+      ...(observed.subject ? { subject: observed.subject } : {}), clearedAt: clearedAt.toISOString() }) },
+  });
+  await systemAudit(
+    tx,
+    "engineering-agent-runner",
+    ENGINEERING_AGENT_AUDIT_ACTIONS.haltCleared,
+    "app_setting",
+    ENGINEERING_AGENT_OBSERVED_HALT_SETTING_KEY,
+    { halt: observed.halt, observedAt: observed.at.toISOString(), reason: "later_reading_clean",
+      ...observedHaltSubjectAudit(observed.subject) },
+  );
+  return { cleared: true };
 }
 
 /* ------------------------------------------------------------------------- */
@@ -2449,6 +2547,13 @@ type BindingObservationInput =
        * Kept in the audit entry, as approvedByMerge.
        */
       approvedByDm?: true;
+      /**
+       * The head and pull request diff the merge took, as the observer read
+       * them, and whether they are the verified ones (owner decision
+       * 2026-11-15): an approver's merge approves what it merged, so the
+       * audit entry names it, a moved head included. Kept in the audit entry.
+       */
+      mergedChange?: { headSha: string; diffDigest: string | null; headVerified: boolean };
     };
 
 export async function recordEngineeringAgentBindingObservation(
@@ -2470,6 +2575,12 @@ const bindingObservationAudit = (input: BindingObservationInput) => ({
   merged: input.kind === "merge" ? input.observation.merged : null,
   ...("approvedByMerge" in input && input.approvedByMerge ? { approvedByMerge: true } : {}),
   ...("approvedByDm" in input && input.approvedByDm ? { approvedByDm: true } : {}),
+  ...("mergedChange" in input && input.mergedChange && SHA1.test(input.mergedChange.headSha) &&
+    (input.mergedChange.diffDigest === null || SHA256.test(input.mergedChange.diffDigest)) ? {
+    mergedHeadSha: input.mergedChange.headSha,
+    mergedDiffDigest: input.mergedChange.diffDigest,
+    mergedHeadVerified: input.mergedChange.headVerified === true,
+  } : {}),
 });
 
 /**

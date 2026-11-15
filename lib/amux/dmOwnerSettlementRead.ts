@@ -2,8 +2,10 @@ import "server-only";
 
 import type { Prisma } from "@prisma/client";
 
-import { ENGINEERING_AGENT_V22_REVIEW_CAUSE_PREFIX } from "@/lib/engineeringAgentCore";
+import { ENGINEERING_AGENT_LEGACY_HALTS_ENV, ENGINEERING_AGENT_V22_REVIEW_CAUSE_PREFIX,
+  engineeringAgentLegacyHalts } from "@/lib/engineeringAgentCore";
 import { AMUX_OWNER_QUEUE_DM_REQUESTED_ACTION, AMUX_OWNER_QUEUE_DM_RESENT_ACTION } from "./ownerQueueDmRequestCore.ts";
+import { amuxV22KeptResultExistsSql } from "./v22KeptResultRead.ts";
 
 /**
  * The reads of the owner queue settlement (lib/amux/dmOwnerSettlementService.ts)
@@ -37,6 +39,13 @@ export type AmuxDmOwnerSettlementCandidate = {
 export async function scanAmuxDmOwnerSettlementCandidates(tx: Prisma.TransactionClient, limit: number,
   escalationIds: string[] | null = null) {
   const reviewPrefix = ENGINEERING_AGENT_V22_REVIEW_CAUSE_PREFIX;
+  // Owner decision 2026-11-15: a Task holding a kept result -- a reviewed
+  // patch whose publication never opened -- needs publishing, not running
+  // again, so it is never put to the Decision Maker, whose answers include a
+  // retry (v22KeptResultCore.ts). The publication round takes it; a person
+  // still settles it from the owner queue. With ENGINEERING_AGENT_LEGACY_HALTS
+  // it is filed as before.
+  const keepsNoResult = engineeringAgentLegacyHalts(process.env[ENGINEERING_AGENT_LEGACY_HALTS_ENV]);
   return tx.$queryRaw<AmuxDmOwnerSettlementCandidate[]>`
     SELECT w."id" AS "taskId", e."id" AS "escalationId", w."status" AS "taskStatus",
       a."id" AS "attemptId", b."id" AS "bindingId"
@@ -83,6 +92,7 @@ export async function scanAmuxDmOwnerSettlementCandidates(tx: Prisma.Transaction
       AND (b."id" IS NOT NULL OR NOT EXISTS (SELECT 1 FROM "EngineeringAgentBinding" ob
         JOIN "EngineeringAgentRun" r ON r."id" = ob."runId"
         WHERE r."cardId" = w."id" AND ob."state" = 'open'))
+      AND (${keepsNoResult} OR NOT ${amuxV22KeptResultExistsSql})
     ORDER BY e."createdAt", e."id"
     LIMIT ${limit}`;
 }

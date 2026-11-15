@@ -1,0 +1,116 @@
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import test from "node:test";
+
+// Owner decision 2026-11-15: one card's events hold that card only, a
+// successful result is never thrown away, and nothing runs a reviewed result
+// again for want of a pull request. One kill switch, ENGINEERING_AGENT_LEGACY_HALTS.
+
+const read = (path) => readFileSync(path, "utf8");
+
+test("card-scoped halts are the default; the kill switch is the one way back", async () => {
+  const core = await import("../lib/engineeringAgentCore.ts");
+  assert.equal(core.ENGINEERING_AGENT_LEGACY_HALTS_ENV, "ENGINEERING_AGENT_LEGACY_HALTS");
+  assert.equal(core.engineeringAgentLegacyHalts(undefined), false);
+  assert.equal(core.engineeringAgentLegacyHalts(" enabled "), true);
+  assert.equal(core.engineeringAgentLegacyHalts("true"), false, "exactly `enabled`");
+  assert.equal(core.engineeringAgentMismatchCardScoped(undefined), true);
+  assert.equal(core.engineeringAgentMismatchCardScoped("enabled"), false);
+  // A review_pr: mismatch (no run of its own) holds the card of the publish item it names, everywhere a card is held.
+  const store = read("lib/engineeringAgentStore.ts");
+  assert.equal(store.split('JOIN "EngineeringAgentWorkItem" m ON m."causeKey" = ${REVIEW_PR_MISMATCH_PREFIX} || p."id"').length, 2,
+    "the card-held test");
+  assert.equal(store.split('JOIN "EngineeringAgentWorkItem" mm ON mm."causeKey" = ${REVIEW_PR_MISMATCH_PREFIX} || pp."id"').length, 2,
+    "the publish claim's pick");
+  assert.match(store, /WHERE p\."id" = substr\(m\."causeKey", \$\{REVIEW_PR_MISMATCH_PREFIX\.length \+ 1\}\)/,
+    "the unscoped count looks the item up by its key");
+  // The old opt-in switch is gone: nothing reads it.
+  assert.equal("ENGINEERING_AGENT_MISMATCH_CARD_SCOPED_ENV" in core, false);
+  for (const path of ["lib/engineeringAgentStore.ts", "lib/engineeringAgentCore.ts"])
+    assert.doesNotMatch(read(path), /ENGINEERING_AGENT_MISMATCH_CARD_SCOPED\b/, path);
+});
+
+test("the global halts are named, and each is a security boundary or has no card to hold", async () => {
+  const { ENGINEERING_AGENT_GLOBAL_HALTS, HALT_VALUES } = await import("../lib/engineeringAgentCore.ts");
+  assert.deepEqual(Object.keys(ENGINEERING_AGENT_GLOBAL_HALTS).sort(),
+    HALT_VALUES.filter((h) => h !== "none" && h !== "circuit_open").sort(), "the circuit halts only with the kill switch");
+  assert.match(ENGINEERING_AGENT_GLOBAL_HALTS.state_mismatch, /no card/);
+  assert.match(ENGINEERING_AGENT_GLOBAL_HALTS.unbound_app_pr, /clears once a later reading explains it/);
+  const store = read("lib/engineeringAgentStore.ts");
+  assert.match(store, /circuitLatched: legacy && isCircuitLatched\(\{ runs, acknowledgedAt \}\)/);
+});
+
+test("an observed halt names its pull request or branch, and nothing else", async () => {
+  const { parseObservedHaltSubject } = await import("../lib/engineeringAgentCore.ts");
+  assert.deepEqual(parseObservedHaltSubject({ prNumber: 3942 }), { prNumber: 3942 });
+  assert.deepEqual(parseObservedHaltSubject({ ref: "refs/heads/agent/engineering/123" }),
+    { ref: "refs/heads/agent/engineering/123" });
+  for (const bad of [null, [], { prNumber: 0 }, { prNumber: 1.5 }, { prNumber: 1, ref: "refs/heads/x" },
+    { ref: "heads/x" }, { ref: "refs/heads/a/../b" }, { ref: "refs/heads/a b" }, { other: 1 }])
+    assert.equal(parseObservedHaltSubject(bad), null, JSON.stringify(bad));
+});
+
+test("a card's review is its newest accepted result; a later failure does not hide it", async () => {
+  const { amuxV22ReviewAttempt } = await import("../lib/amux/v22KeptResultCore.ts");
+  const at = new Date("2026-11-15T00:00:00Z");
+  const ok = (id) => ({ id, endedAt: at, outcome: "succeeded", toStatus: "review" });
+  const failed = (id) => ({ id, endedAt: at, outcome: "failed", toStatus: "todo" });
+  // AMUX-IMGOUT-003: attempts 2 and 3 passed review, 4 and 5 failed.
+  const imgout = [failed("a5"), failed("a4"), ok("a3"), ok("a2"), failed("a1")];
+  assert.equal(amuxV22ReviewAttempt(imgout)?.id, "a3");
+  assert.equal(amuxV22ReviewAttempt(imgout, true), null, "legacy: only the newest counts");
+  assert.equal(amuxV22ReviewAttempt([ok("a2"), failed("a1")])?.id, "a2");
+  assert.equal(amuxV22ReviewAttempt([ok("a2")], true)?.id, "a2");
+  // A result rejected back to todo holds no review; anything still open holds every review.
+  assert.equal(amuxV22ReviewAttempt([{ ...ok("a3"), toStatus: "todo" }, ok("a2")])?.id, "a2");
+  assert.equal(amuxV22ReviewAttempt([{ ...ok("a3"), endedAt: null }, ok("a2")]), null);
+  assert.equal(amuxV22ReviewAttempt([]), null);
+});
+
+test("a kept result is published once publication could open, the way settlement would have", async () => {
+  const { decideAmuxV22KeptResult } = await import("../lib/amux/v22KeptResultCore.ts");
+  const open = { publicationEnabled: true, legacy: false, orchestratorHalted: false, publishAllowed: true,
+    mode: "t1", consent: true, taskStatus: "review" };
+  assert.deepEqual(decideAmuxV22KeptResult(open), { publish: true, moveToReview: false, tierPending: true });
+  assert.deepEqual(decideAmuxV22KeptResult({ ...open, taskStatus: "blocked" }),
+    { publish: true, moveToReview: true, tierPending: true }, "a card whose budget ran out goes back to review");
+  for (const [change, reason] of [
+    [{ publicationEnabled: false }, "disabled"], [{ legacy: true }, "disabled"],
+    [{ orchestratorHalted: true }, "orchestrator_halted"], [{ taskStatus: "todo" }, "task_moved"],
+    [{ publishAllowed: false }, "publish_switch_off"], [{ mode: "off" }, "mode_off"],
+    [{ consent: false }, "public_pr_consent_unverified"]])
+    assert.deepEqual(decideAmuxV22KeptResult({ ...open, ...change }), { publish: false, reason }, JSON.stringify(change));
+});
+
+test("the Decision Maker is never asked to run a kept result again, and the reads only read", () => {
+  const scan = read("lib/amux/dmOwnerSettlementRead.ts");
+  assert.match(scan, /AND \(\$\{keepsNoResult\} OR NOT \$\{amuxV22KeptResultExistsSql\}\)/);
+  const kept = read("lib/amux/v22KeptResultRead.ts");
+  const sql = [...kept.matchAll(/(?:Prisma\.sql|\$queryRaw<[\s\S]*?>)`([\s\S]*?)`/g)].map((m) => m[1]).join("\n");
+  assert.match(sql, /NOT EXISTS \(SELECT 1 FROM "EngineeringAgentRun" kr WHERE kr\."amuxAttemptId" = ka\."id"\)/);
+  assert.match(sql, /kp\."bodyPurgedAt" IS NULL/);
+  assert.match(sql, /ke\."resolutionOutcome" IN \('retry', 'block'\)/, "a person's rejection is honoured");
+  assert.doesNotMatch(sql.toLowerCase(), /\b(insert|update|delete|merge|upsert|truncate|alter|drop)\b/,
+    "the engineering reads only read (scripts/check-protected-table-writers-core.mjs)");
+});
+
+test("the runner's round carries the kept results after the bindings are released", () => {
+  const route = read("app/api/internal/engineering-agent/observe/pull-requests/route.ts");
+  const released = route.indexOf("await releaseEngineeringAgentBindings();");
+  const kept = route.indexOf("await publishAmuxV22KeptResults();");
+  assert.ok(released > 0 && kept > released);
+  const halt = read("app/api/internal/engineering-agent/observe/halt/route.ts");
+  assert.match(halt, /z\.object\(\{ halt: z\.literal\("none"\) \}\)\.strict\(\)/);
+  assert.match(halt, /clearEngineeringAgentObservedHalt\(tx\)/);
+});
+
+test("the kept result publication writes in one transaction, through the stores, and runs nothing", () => {
+  const child = spawnSync(process.execPath, [
+    "--experimental-test-module-mocks", "--conditions=react-server", "--no-warnings=ExperimentalWarning",
+    "--import", "tsx",
+    resolve("tests/support/amuxV22KeptResultPublicationHarness.mjs"),
+  ], { cwd: resolve(import.meta.dirname, ".."), encoding: "utf8" });
+  assert.equal(child.status, 0, child.stderr || child.stdout);
+});

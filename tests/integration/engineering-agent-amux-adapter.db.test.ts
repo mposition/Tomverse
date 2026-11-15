@@ -935,14 +935,24 @@ test("an active run whose attempt ended halts runs before anyone reports it", as
   await reclaimExpiredAmuxExecutions({ now: new Date(Date.now() + 10 * 60_000), limit: 200 });
   const ended = await prisma.amuxExecutionAttempt.findUniqueOrThrow({ where: { id: started.attemptId } });
   assert.ok(ended.endedAt, "recovery ended the attempt");
-  const other = await readyWorkerWithCard();
-  await assert.rejects(
-    startWithRun(other, nextRunId()),
-    (error: unknown) => error instanceof EngineeringAgentStoreRefusedError && error.code === "halted",
-  );
-  assert.equal(await runEngineeringAgentTransaction(prisma, (tx) => openEngineeringAgentRunMismatches(tx)), 1);
-  const mismatch = await prisma.engineeringAgentWorkItem.findUniqueOrThrow({ where: { causeKey: `run_attempt:${runId}` } });
-  assert.equal(currentEngineeringAgentHalt(await readEngineeringAgentHaltState(prisma)), "state_mismatch");
+  // Owner decision 2026-11-15: the orphaned run holds its own card only, so
+  // the agent as a whole reports no halt for it.
+  assert.equal(currentEngineeringAgentHalt(await readEngineeringAgentHaltState(prisma)), "none");
+  // ENGINEERING_AGENT_LEGACY_HALTS: it halts every run, as before.
+  process.env.ENGINEERING_AGENT_LEGACY_HALTS = "enabled";
+  let mismatch!: { id: string };
+  try {
+    const other = await readyWorkerWithCard();
+    await assert.rejects(
+      startWithRun(other, nextRunId()),
+      (error: unknown) => error instanceof EngineeringAgentStoreRefusedError && error.code === "halted",
+    );
+    assert.equal(await runEngineeringAgentTransaction(prisma, (tx) => openEngineeringAgentRunMismatches(tx)), 1);
+    mismatch = await prisma.engineeringAgentWorkItem.findUniqueOrThrow({ where: { causeKey: `run_attempt:${runId}` } });
+    assert.equal(currentEngineeringAgentHalt(await readEngineeringAgentHaltState(prisma)), "state_mismatch");
+  } finally {
+    delete process.env.ENGINEERING_AGENT_LEGACY_HALTS;
+  }
 
   // A person's action: AMUX's rows locked first, both sides read again.
   const person = {

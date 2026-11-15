@@ -380,12 +380,12 @@ export function AdminEngineeringAgentPanel({ initial }: { initial: EngineeringAg
           <p className="text-sm text-zinc-300">
             {fill(m.prQueue, {
               occupied: initial.settings.pullRequests.occupied,
-              limit: initial.settings.pullRequests.limit,
+              limit: initial.settings.pullRequests.limit === null ? "" : `/${initial.settings.pullRequests.limit}`,
             })}
             <br />
             {fill(m.decisionQueue, {
               occupied: initial.settings.decisions.occupied,
-              limit: initial.settings.decisions.limit,
+              limit: initial.settings.decisions.limit === null ? "" : `/${initial.settings.decisions.limit}`,
             })}
           </p>
           <p className="text-sm text-zinc-400">{m.queueNote}</p>
