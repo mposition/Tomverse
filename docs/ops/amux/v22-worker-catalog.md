@@ -94,8 +94,10 @@ left it runs `claude auth status`, then if that did not refresh it a one-line
 reads only `expiresAt`/`refreshTokenExpiresAt` and never prints a token. A
 cleared login logs `login_required` and fails the unit; that one still needs
 the operator's `claude auth login` as the operator user. Install as that user
-(no sudo): copy the script to `~/.local/lib/tomverse-amux-v22/`, the units to
-`~/.config/systemd/user/`, the env file to `~/.config/tomverse-amux-v22/`, then
+(no sudo): copy `scripts/amux-v22-claude-login-keepalive.mjs` under the same
+name to `~/.local/lib/tomverse-amux-v22/`, the `.service` and `.timer` to
+`~/.config/systemd/user/`, and the `.env.example` as
+`~/.config/tomverse-amux-v22/claude-login-keepalive.env` (mode 0600), then
 `systemctl --user daemon-reload && systemctl --user enable --now
 amux-v22-claude-login-keepalive.timer`; read it with
 `journalctl --user -u amux-v22-claude-login-keepalive.service`.
