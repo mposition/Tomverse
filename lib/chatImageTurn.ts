@@ -76,7 +76,7 @@ export async function startChatImageTurn(
         select: {
             kind: true,
             productKey: true,
-            password: true,
+            password: true, passwordVersion: true,
             continuationBridge: { select: { id: true } },
         },
     });
@@ -100,7 +100,7 @@ export async function startChatImageTurn(
         throw new ChatAccessError(403, "CHAT_IMAGE_TURN_DISABLED", "Images in chat are not enabled.");
     }
     if (conversation.password &&
-        (!input.request || !hasConversationUnlockGrant(input.request, input.userId, input.conversationId, conversation.password))) {
+        (!input.request || !hasConversationUnlockGrant(input.request, input.userId, input.conversationId, conversation.password == null ? null : conversation.passwordVersion))) {
         throw new ChatAccessError(403, "CONVERSATION_LOCKED", "Unlock this conversation before generating images.");
     }
 

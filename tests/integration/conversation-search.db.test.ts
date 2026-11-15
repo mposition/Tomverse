@@ -128,7 +128,7 @@ const bridge = (userId: string, conversationId: string, externalConversationId: 
         },
     });
 
-type Grant = { type: "conversation" | "external_conversation"; userId: string; id: string; password: string };
+type Grant = { type: "conversation" | "external_conversation"; userId: string; id: string; password: string; passwordVersion?: number };
 
 const requestWith = (grants: Grant[] = []) =>
     new Request("https://tomverse.test/api/conversations/search", {
@@ -136,7 +136,7 @@ const requestWith = (grants: Grant[] = []) =>
             ? {
                   cookie: grants
                       .map((grant) =>
-                          createResourceUnlockCookie(grant.type, grant.userId, grant.id, grant.password).split(";")[0]
+                          createResourceUnlockCookie(grant.type, grant.userId, grant.id, grant.passwordVersion ?? 0).split(";")[0]
                       )
                       .join("; "),
               }

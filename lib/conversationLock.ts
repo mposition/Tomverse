@@ -200,8 +200,8 @@ const unlockCookieName = (
         : `${UNLOCK_COOKIE_PREFIX}${resourceType}_${resourceId}`;
 
 /**
- * The HMAC key for one resource type. Native uses the secret itself, which is
- * what keeps existing cookies valid; every other type uses a key derived from
+ * The HMAC key for one resource type. Native uses the session secret;
+ * every other type uses a key derived from
  * it under a type-specific label, so a grant cannot be replayed across types
  * however the ids line up.
  */
@@ -212,18 +212,15 @@ const grantKey = (resourceType: LockResourceType): string | Buffer =>
               .update(`lock-resource.${resourceType}.v1`)
               .digest();
 
-const passwordFingerprint = (storedPassword: string) =>
-    createHash("sha256").update(storedPassword).digest("base64url");
-
 const signUnlockGrant = (
     resourceType: LockResourceType,
     userId: string,
     resourceId: string,
     expiresAt: number,
-    fingerprint: string
+    passwordVersion: number
 ) =>
     createHmac("sha256", grantKey(resourceType))
-        .update(`${userId}:${resourceId}:${expiresAt}:${fingerprint}`)
+        .update(`lock-grant.v2:${userId}:${resourceId}:${expiresAt}:${passwordVersion}`)
         .digest("base64url");
 
 const readCookie = (request: Request, name: string) => {
@@ -242,32 +239,32 @@ export const createResourceUnlockCookie = (
     resourceType: LockResourceType,
     userId: string,
     resourceId: string,
-    storedPassword: string
+    passwordVersion: number
 ) => {
+    if (!Number.isSafeInteger(passwordVersion) || passwordVersion < 0) throw new Error("Invalid lock version.");
     const expiresAt = Math.floor(Date.now() / 1000) + UNLOCK_GRANT_TTL_SECONDS;
-    const fingerprint = passwordFingerprint(storedPassword);
     const signature = signUnlockGrant(
         resourceType,
         userId,
         resourceId,
         expiresAt,
-        fingerprint
+        passwordVersion
     );
     const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
-    return `${unlockCookieName(resourceType, resourceId)}=${expiresAt}.${fingerprint}.${signature}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${UNLOCK_GRANT_TTL_SECONDS}; Priority=High${secure}`;
+    return `${unlockCookieName(resourceType, resourceId)}=${expiresAt}.${passwordVersion}.${signature}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${UNLOCK_GRANT_TTL_SECONDS}; Priority=High${secure}`;
 };
 
-/** The native shape, unchanged, for the eighteen call sites that use it. */
+/** Existing fingerprint-based grants expire at rollout; owners unlock once again. */
 export const createConversationUnlockCookie = (
     userId: string,
     conversationId: string,
-    storedPassword: string
+    passwordVersion: number
 ) =>
     createResourceUnlockCookie(
         NATIVE_RESOURCE,
         userId,
         conversationId,
-        storedPassword
+        passwordVersion
     );
 
 export const clearResourceUnlockCookie = (
@@ -293,11 +290,9 @@ export const resourceUnlockGrantExpiry = (
     request: Request,
     userId: string,
     resourceId: string,
-    storedPassword: string | null
+    passwordVersion: number | null
 ): number | null =>
-    storedPassword
-        ? validUnlockGrantExpiry(resourceType, request, userId, resourceId, storedPassword)
-        : null;
+    passwordVersion === null ? null : validUnlockGrantExpiry(resourceType, request, userId, resourceId, passwordVersion);
 
 /**
  * Access to a resource and, when it rests on a grant, when that grant lapses --
@@ -309,10 +304,10 @@ export const resourceUnlockAccess = (
     request: Request,
     userId: string,
     resourceId: string,
-    storedPassword: string | null
+    passwordVersion: number | null
 ): { granted: boolean; expiresAt: number | null } => {
-    if (!storedPassword) return { granted: true, expiresAt: null };
-    const expiresAt = validUnlockGrantExpiry(resourceType, request, userId, resourceId, storedPassword);
+    if (passwordVersion === null) return { granted: true, expiresAt: null };
+    const expiresAt = validUnlockGrantExpiry(resourceType, request, userId, resourceId, passwordVersion);
     return { granted: expiresAt !== null, expiresAt };
 };
 
@@ -321,10 +316,10 @@ export const hasResourceUnlockGrant = (
     request: Request,
     userId: string,
     resourceId: string,
-    storedPassword: string | null
+    passwordVersion: number | null
 ) => {
-    if (!storedPassword) return true;
-    return validUnlockGrantExpiry(resourceType, request, userId, resourceId, storedPassword) !== null;
+    if (passwordVersion === null) return true;
+    return validUnlockGrantExpiry(resourceType, request, userId, resourceId, passwordVersion) !== null;
 };
 
 /** The grant's expiry in epoch seconds when it is valid now, otherwise null. */
@@ -333,8 +328,9 @@ const validUnlockGrantExpiry = (
     request: Request,
     userId: string,
     resourceId: string,
-    storedPassword: string
+    passwordVersion: number
 ): number | null => {
+    if (!Number.isSafeInteger(passwordVersion) || passwordVersion < 0) return null;
     const conversationId = resourceId;
     // Native fetch omits cookies. Its owner-bound grants stay in app memory;
     // a bearer request never borrows an ambient browser unlock cookie.
@@ -346,13 +342,13 @@ const validUnlockGrantExpiry = (
         : readCookie(request, unlockCookieName(resourceType, resourceId));
     if (!token) return null;
 
-    const [expiresValue, fingerprint, signature, ...extra] = token.split(".");
+    const [expiresValue, versionValue, signature, ...extra] = token.split(".");
     const expiresAt = Number(expiresValue);
     if (
         extra.length > 0 ||
         !Number.isSafeInteger(expiresAt) ||
         expiresAt <= Math.floor(Date.now() / 1000) ||
-        fingerprint !== passwordFingerprint(storedPassword)
+        versionValue !== String(passwordVersion)
     ) {
         return null;
     }
@@ -362,7 +358,7 @@ const validUnlockGrantExpiry = (
         userId,
         conversationId,
         expiresAt,
-        fingerprint
+        passwordVersion
     );
     const actualBuffer = Buffer.from(signature || "");
     const expectedBuffer = Buffer.from(expected);
@@ -377,14 +373,14 @@ export const hasConversationUnlockGrant = (
     request: Request,
     userId: string,
     conversationId: string,
-    storedPassword: string | null
+    passwordVersion: number | null
 ) =>
     hasResourceUnlockGrant(
         NATIVE_RESOURCE,
         request,
         userId,
         conversationId,
-        storedPassword
+        passwordVersion
     );
 
 export const conversationLockedResponse = () =>

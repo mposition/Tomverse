@@ -34,7 +34,7 @@ const sourceSelect = {
   id: true, conversationId: true, objectKey: true, format: true, filename: true,
   mediaType: true, byteSize: true, status: true,
   canonicalSpec: true, lineageId: true,
-  conversation: { select: { userId: true, password: true } },
+  conversation: { select: { userId: true, password: true, passwordVersion: true } },
 } as const;
 type Input = z.infer<typeof generatedArtifactCopySchema> & {
   userId: string;
@@ -53,7 +53,7 @@ async function readSource(db: Db, input: Input) {
   });
   if (!source || source.conversation.userId !== input.userId || source.status !== "ready" ||
     !source.objectKey?.startsWith(`message-artifacts/${input.userId}/${input.conversationId}/`)) throw unavailable();
-  if (!hasConversationUnlockGrant(input.request, input.userId, input.conversationId, source.conversation.password)) {
+  if (!hasConversationUnlockGrant(input.request, input.userId, input.conversationId, source.conversation.password == null ? null : source.conversation.passwordVersion)) {
     throw new GeneratedArtifactRevisionError("CONVERSATION_LOCKED", 423);
   }
   return source;

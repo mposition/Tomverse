@@ -25,9 +25,9 @@ const schema = z.discriminatedUnion("action", [
 const json = (code: string, status: number, extra: Record<string, unknown> = {}) => Response.json({ code, ...extra }, { status, headers: { "Cache-Control": "private, no-store" } });
 
 async function ownedConversation(request: Request, userId: string, conversationId: string) {
-  const row = await prisma.conversation.findFirst({ where: { id: conversationId, userId }, select: { id: true, productKey: true, password: true } });
+  const row = await prisma.conversation.findFirst({ where: { id: conversationId, userId }, select: { id: true, productKey: true, password: true, passwordVersion: true } });
   if (!row || row.productKey !== "chat") throw new ApiSecurityError(403, "VOICE_CONVERSATION_FORBIDDEN", "This conversation is not available for voice.");
-  if (!hasConversationUnlockGrant(request, userId, row.id, row.password)) throw new ApiSecurityError(423, "CONVERSATION_LOCKED", "Unlock this conversation first.");
+  if (!hasConversationUnlockGrant(request, userId, row.id, row.password == null ? null : row.passwordVersion)) throw new ApiSecurityError(423, "CONVERSATION_LOCKED", "Unlock this conversation first.");
   return row;
 }
 

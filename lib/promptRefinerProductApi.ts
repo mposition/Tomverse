@@ -38,10 +38,10 @@ async function conversationAccessible(request: Request, userId: string,
     where: {
       id: conversationId, userId, kind: "chat", productKey: "chat",
     },
-    select: { password: true },
+    select: { password: true, passwordVersion: true },
   });
   return Boolean(row && hasConversationUnlockGrant(request, userId,
-    conversationId, row.password));
+    conversationId, row.password == null ? null : row.passwordVersion));
 }
 
 export async function handlePromptRefinerProductScope(request: Request,

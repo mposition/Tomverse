@@ -45,7 +45,7 @@ export async function POST(
     });
     const conversation = await prisma.conversation.findUnique({
       where: { id: conversationId },
-      select: { userId: true, password: true, kind: true, productKey: true },
+      select: { userId: true, password: true, passwordVersion: true, kind: true, productKey: true },
     });
     // Missing and foreign ids deliberately share one response. The receipt is
     // a recovery read, not a conversation-existence oracle.
@@ -59,7 +59,7 @@ export async function POST(
       req,
       session.user.id,
       conversationId,
-      conversation.password
+      conversation.password == null ? null : conversation.passwordVersion
     )) {
       const response = conversationLockedResponse();
       response.headers.set("Cache-Control", "private, no-store");

@@ -165,7 +165,7 @@ export async function GET(
 
     const existingConv = await prisma.conversation.findUnique({
         where: { id: params.conversationId },
-        select: { userId: true, password: true }
+        select: { userId: true, password: true, passwordVersion: true }
     });
 
     if (!existingConv || existingConv.userId !== userId) {
@@ -177,7 +177,7 @@ export async function GET(
             req,
             userId,
             conversationId,
-            existingConv.password
+            existingConv.password == null ? null : existingConv.passwordVersion
         )
     ) {
         return privateNoStore(conversationLockedResponse());
@@ -225,7 +225,7 @@ export async function GET(
         shareExpiresAt: true,
         createdAt: true,
         updatedAt: true,
-        password: true,
+        password: true, passwordVersion: true,
         assistantProfileVersionId: true,
         assistantProfileRemovedAt: true,
         // Existence only (docs/policy/external-conversation-continuation.md
@@ -355,7 +355,7 @@ export async function GET(
           conversation.assistantProfileRemovedAt?.toISOString() ?? null,
         shareToken: undefined,
         shareSnapshot: undefined,
-        password: undefined
+        password: undefined, passwordVersion: undefined
     }));
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
@@ -401,7 +401,7 @@ export async function PATCH(
             select: {
                 userId: true,
                 selectedModels: true,
-                password: true,
+                password: true, passwordVersion: true,
                 memoryMode: true,
                 // The stored product is the authority for a PATCH: the request
                 // body cannot carry one, and §3 does not offer a PATCH that
@@ -459,7 +459,7 @@ export async function PATCH(
               req,
               userId,
               conversationId,
-              existingConv.password
+              existingConv.password == null ? null : existingConv.passwordVersion
           )
       ) {
           return conversationLockedResponse();
@@ -759,7 +759,7 @@ export async function PATCH(
           updatedConversation.assistantProfileRemovedAt?.toISOString() ?? null,
         shareToken: undefined,
         shareSnapshot: undefined,
-        password: undefined
+        password: undefined, passwordVersion: undefined
     });
     if (password !== undefined) {
       response.headers.append(
@@ -805,7 +805,7 @@ export async function DELETE(req: Request, { params }: Params) {
 
       const existingConv = await prisma.conversation.findUnique({
           where: { id: conversationId },
-          select: { userId: true, password: true }
+          select: { userId: true, password: true, passwordVersion: true }
       });
 
       if (!existingConv) {
@@ -826,7 +826,7 @@ export async function DELETE(req: Request, { params }: Params) {
         req,
         userId,
         conversationId,
-        existingConv.password
+        existingConv.password == null ? null : existingConv.passwordVersion
       )
     ) {
       logSecurityAuditEvent("conversation.delete", {

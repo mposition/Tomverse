@@ -50,7 +50,7 @@ export async function POST(
 
         const conversation = await prisma.conversation.findUnique({
             where: { id: conversationId },
-            select: { id: true, userId: true, password: true },
+            select: { id: true, userId: true, password: true, passwordVersion: true },
         });
 
         if (!conversation || conversation.userId !== userId) {
@@ -96,17 +96,19 @@ export async function POST(
             );
         }
 
-        let effectivePassword = conversation.password;
+        let effectiveVersion = conversation.passwordVersion;
         if (verification.needsUpgrade) {
             const upgradedPassword = await hashConversationPassword(password);
-            await prisma.conversation.updateMany({
+            const upgraded = await prisma.conversation.updateMany({
                 where: {
                     id: conversationId,
                     password: conversation.password,
+                    passwordVersion: conversation.passwordVersion,
                 },
                 data: { password: upgradedPassword },
             });
-            effectivePassword = upgradedPassword;
+            if (upgraded.count !== 1) return NextResponse.json({ success: false, error: "Lock changed. Try again." }, { status: 409 });
+            effectiveVersion += 1;
         }
         await clearLockVerificationAttempts(attempt);
         logSecurityAuditEvent("conversation.lock.verify", {
@@ -118,7 +120,7 @@ export async function POST(
         const cookie = createConversationUnlockCookie(
                 userId,
                 conversationId,
-                effectivePassword
+                effectiveVersion
             );
         const native = req.headers.has("authorization");
         const response = NextResponse.json({ success: true,
