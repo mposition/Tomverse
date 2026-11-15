@@ -207,9 +207,13 @@ What a worker gets:
 What the sidecar keeps in its state directory (mode 0600, beside the journal,
 never in it): `<attempt>.transcript.jsonl` (the CLI's whole stdout; Claude
 runs `--output-format stream-json --verbose`) and `<attempt>.preserved.patch`
-(the change a stopped or failed run, or a read role, left). Both are removed
-30 days after they were written, when a later run starts. The app does not
-store transcripts yet.
+(the diff of the change a stopped or failed run, or a read role, left). Both
+are removed 30 days after they were written, when a later run starts. The
+change itself is also a commit under `refs/amux-v22-preserved/<attempt>` in
+the worker clone (an earlier run's leftovers under `leftover-<attempt>`,
+taken before the base sync); recover one with
+`git -C <worktree> diff HEAD refs/amux-v22-preserved/<name>`. Those refs are
+not pruned yet. The app does not store transcripts yet.
 
 Operator stop of a live run: send `{"op":"stop","attemptId":"<id>"}` on the
 worker's sidecar socket as the bridge account, or `systemctl stop` the sidecar
