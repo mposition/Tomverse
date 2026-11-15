@@ -8887,6 +8887,20 @@ export function ChatPageClient({
   useLayoutEffect(() => {
     handleGlobalSubmitRef.current = handleGlobalSubmit;
   });
+  // A failed Chat reply's Retry: the same question through the ordinary send
+  // path, leaving the composer draft alone (see `overrideText`). A question
+  // with files is restored instead, since an override send carries none.
+  const retryChatPrompt = useCallback((prompt: {
+    text: string;
+    attachments: ChatAttachment[];
+    targetChatId: string;
+  }) => {
+    if (mountedSurface !== "chat" || !identityKey ||
+        identityKey !== identityNamespaceKey(identityNamespaceRef.current) ||
+        prompt.targetChatId !== currentChatIdRef.current ||
+        prompt.attachments.length > 0 || !prompt.text.trim()) return;
+    void handleGlobalSubmitRef.current({ overrideText: prompt.text });
+  }, [identityKey, mountedSurface]);
   /*
     The composer's send. Everything before the payload -- the image-intent and
     Review routing calls, creating the conversation, saving the question --
@@ -10553,6 +10567,7 @@ export function ChatPageClient({
           onCompareInReview={compareChatInReview}
           transcriptScope={mountedSurface === "chat" ? "conversation" : "model"}
           onRestorePrompt={restoreChatPrompt}
+          onRetryPrompt={retryChatPrompt}
           conversations={blendedConversations}
           currentChatId={shellConversationId}
           selectedModels={visibleReviewModels}
@@ -10746,6 +10761,7 @@ export function ChatPageClient({
           onCompareInReview={compareChatInReview}
           transcriptScope={mountedSurface === "chat" ? "conversation" : "model"}
           onRestorePrompt={restoreChatPrompt}
+          onRetryPrompt={retryChatPrompt}
           conversations={blendedConversations}
           currentChatId={shellConversationId}
           selectedModels={visibleReviewModels}

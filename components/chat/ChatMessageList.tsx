@@ -77,6 +77,13 @@ type ChatMessageListProps = {
   /** Chat restores this message's question to the composer; never dispatches. */
   onRestoreQuestion?: (messageId: string) => void;
   /**
+   * Chat: send this failed reply's question again as it was. Offered only for
+   * a question without files; restoring stays the way to edit it first.
+   */
+  onRetryQuestion?: (messageId: string) => void;
+  /** Chat: open the model picker from a failed reply. */
+  onChooseAnotherModel?: MouseEventHandler<HTMLButtonElement>;
+  /**
    * Chat: open this answer's question as a new Review draft
    * (lib/chatReviewHandoff.ts). Never sends, never changes this conversation.
    */
@@ -469,6 +476,8 @@ export function ChatMessageList({
   messages,
   onRetryLast,
   onRestoreQuestion,
+  onRetryQuestion,
+  onChooseAnotherModel,
   onCompareInReview,
   onRetryWithoutAttachments,
   onContinueWithoutUnavailableAttachments,
@@ -957,6 +966,10 @@ export function ChatMessageList({
             // the question back in the composer: retrying is that, done for you.
             const canRestoreQuestion = recoveryEnabled && !isSending &&
               recoveryPrompts.has(msg.id) && msg.id !== concurrencyRetryMessageId;
+            // A resend carries no files, so a question with files is only restored.
+            const canRetryQuestion = canRestoreQuestion && Boolean(onRetryQuestion) &&
+              !isUser && msg.status === "error" &&
+              (recoveryPrompts.get(msg.id)?.attachments.length ?? 0) === 0;
 
             // UI-ERR-001. A failed turn is a state of one answer, not of the
             // conversation: three failed panels used to paint the whole
@@ -1782,11 +1795,23 @@ export function ChatMessageList({
                             triggerTestId="report-error-button"
                           />
                           )}
-                          {(errorCategory === "generic" || errorCategory === "attachment") && (
-                            <span className="flex items-center text-xs font-semibold text-zinc-600 dark:text-zinc-400">
-                              {t("chat.tryAnotherModelHint")}
-                            </span>
-                          )}
+                          {(errorCategory === "generic" || errorCategory === "attachment") &&
+                            (onChooseAnotherModel ? (
+                              <button
+                                type="button"
+                                data-testid="chat-error-choose-model"
+                                onClick={onChooseAnotherModel}
+                                disabled={isSending || isSendPreparing}
+                                className={secondaryButtonClass}
+                              >
+                                <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+                                {t("chat.chooseAnotherModel")}
+                              </button>
+                            ) : (
+                              <span className="flex items-center text-xs font-semibold text-zinc-600 dark:text-zinc-400">
+                                {t("chat.tryAnotherModelHint")}
+                              </span>
+                            ))}
                           {errorCategory === "concurrency" && msg.id === concurrencyRetryMessageId && (
                             <span
                               data-testid="concurrency-retry-hint"
@@ -1884,18 +1909,37 @@ export function ChatMessageList({
                   )}
                   {canRestoreQuestion && (
                     <div className="mt-3 space-y-2 border-t border-zinc-200 pt-3 dark:border-zinc-700">
-                      <button
-                        type="button"
-                        data-testid="restore-chat-question"
-                        onClick={() => onRestoreQuestion?.(msg.id)}
-                        className="inline-flex items-center gap-2 rounded-full bg-blue-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-blue-500"
-                      >
-                        <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
-                        {t("chat.restoreQuestion")}
-                      </button>
-                      <p className={`text-xs ${isUser ? "text-white" : "text-zinc-600 dark:text-zinc-400"}`}>
-                        {t("chat.restoreQuestionHint")}
-                      </p>
+                      {/* Retry is the main action; restoring is for editing the question first. */}
+                      <div className="flex flex-wrap items-center gap-2">
+                        {canRetryQuestion && (
+                          <button
+                            type="button"
+                            data-testid="retry-chat-question"
+                            onClick={() => onRetryQuestion?.(msg.id)}
+                            disabled={isSendPreparing}
+                            className="inline-flex items-center gap-2 rounded-full bg-blue-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-blue-500"
+                          >
+                            <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+                            {t("chat.retry")}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          data-testid="restore-chat-question"
+                          onClick={() => onRestoreQuestion?.(msg.id)}
+                          className={canRetryQuestion
+                            ? "inline-flex items-center gap-2 rounded-full border border-zinc-300 bg-white px-3 py-1.5 text-xs font-bold text-zinc-700 hover:bg-zinc-100 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700"
+                            : "inline-flex items-center gap-2 rounded-full bg-blue-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-blue-500"}
+                        >
+                          <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+                          {t("chat.restoreQuestion")}
+                        </button>
+                      </div>
+                      {!canRetryQuestion && (
+                        <p className={`text-xs ${isUser ? "text-white" : "text-zinc-600 dark:text-zinc-400"}`}>
+                          {t("chat.restoreQuestionHint")}
+                        </p>
+                      )}
                     </div>
                   )}
                 </div>
