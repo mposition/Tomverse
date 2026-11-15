@@ -554,3 +554,14 @@ composer screenshot goldens; these are not claimed as passes. Actual dev UI
 acceptance above succeeds. The dedicated local test database is stopped after
 verification. General research quality, unsupported plain-text responses and
 production rollout remain outside this single successful UI case.
+
+While the final evidence commit was being pushed, the existing CI auto-fix
+publisher added `969f34ea1` to the same remote branch. That commit is preserved
+by a normal merge, not overwritten. Its only runtime-file change formats the
+offer route's existing owner-scoped query; the other changes repair two source
+assertions for existing tool-overhead and fitted-transcript behavior. Local
+security regression checks pass 193/193 and request-limit tests pass 12/12 with
+the repository's TypeScript loader. This session did not trigger that earlier
+CI execution or its publisher. The deployed runtime behavior remains the
+validated source above; the later commits contain evidence, query formatting
+and those test-assertion repairs.
