@@ -1717,6 +1717,52 @@ export async function openModelPickerCatalogue(page: Page) {
 }
 
 /**
+ * Sets the active model set to exactly `models` through the composer's model
+ * picker -- the control a person uses on the start screen, where the desktop
+ * panels behind the welcome surface are `inert` (UI-EMPTY-001) and their own
+ * `<select>`s cannot be operated.
+ *
+ * The starting selection depends on the URL and fixture, so it is read from
+ * the picker rather than named. toggleModel() refuses to drop the last
+ * remaining model, so a starting model can only be removed once at least one
+ * target is selected: add the first target, drop everything that is not a
+ * target, then add the rest. Panels follow selection order, so `models[0]`
+ * is not necessarily the first panel when other targets were already on.
+ */
+export async function selectModelsViaPicker(page: Page, models: string[]) {
+  // STG-F008: specific models are picked from the full catalogue, which is the
+  // picker's second step.
+  await openModelPickerCatalogue(page);
+  const optionFor = (modelId: string) =>
+    page.locator(`[data-testid="model-option"][data-model-id="${modelId}"]`);
+  const select = async (modelId: string) => {
+    if ((await optionFor(modelId).getAttribute("aria-pressed")) !== "true") {
+      await optionFor(modelId).click();
+    }
+    // Settled before the starting selection is read below.
+    await expect(optionFor(modelId)).toHaveAttribute("aria-pressed", "true");
+  };
+  await select(models[0]);
+  const startedOn = await page
+    .locator('[data-testid="model-option"][aria-pressed="true"]')
+    .evaluateAll((options) => options.map((option) => option.getAttribute("data-model-id")));
+  for (const modelId of startedOn) {
+    if (modelId && !models.includes(modelId)) {
+      await optionFor(modelId).click();
+      await expect(optionFor(modelId)).toHaveAttribute("aria-pressed", "false");
+    }
+  }
+  for (const modelId of models.slice(1)) {
+    await select(modelId);
+  }
+  // Escape only steps back one level in the two-step picker, so close via the
+  // completion control -- the dialog's backdrop blocks the tools menu until it
+  // is actually dismissed.
+  await page.getByTestId("model-picker-done").click();
+  await expect(page.locator("#chat-input-popover")).toBeHidden();
+}
+
+/**
  * Opens a seeded conversation from the new-chat screen, whichever shell is
  * rendering.
  *
