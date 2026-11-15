@@ -19,6 +19,6 @@ export function automaticDailyRetry(entry: {
 
 export function dailyRetryInstruction(attempts: number, reason?: string): string {
   return attempts > 1
-    ? `\nRetry attempt ${attempts}/${DAILY_PRODUCT_AGENT_MAX_ATTEMPTS}; prior pre-publication outcome: ${reason ?? "owner_retry"}. Verify the blocker on current develop first. If already solved, cite the commit and tests; if blocked by scope or missing facts, report the exact blocker. Do not manufacture a change or weaken a test.\n`
+    ? `\nRetry attempt ${attempts}${attempts <= DAILY_PRODUCT_AGENT_MAX_ATTEMPTS ? `/${DAILY_PRODUCT_AGENT_MAX_ATTEMPTS}` : " (owner requested)"}; prior pre-publication outcome: ${reason ?? "owner_retry"}. Verify the blocker on current develop first. If already solved, cite the commit and tests; if blocked by scope or missing facts, report the exact blocker. Do not manufacture a change or weaken a test.\n`
     : "";
 }
