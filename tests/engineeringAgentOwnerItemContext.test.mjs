@@ -112,7 +112,6 @@ test("the read writes nothing and shows Decision Maker bodies only to ops:write"
 import {
   engineeringAgentCardItems,
   engineeringAgentDraftRejudgeable,
-  engineeringAgentPatchAddsFile,
 } from "../lib/engineeringAgentOwnerItemContextCore.ts";
 
 const v22Run = (over = {}) => ({
@@ -128,12 +127,11 @@ test("a draft may be judged again only as a kept v22 patch of a v4 idea card sta
   assert.equal(engineeringAgentDraftRejudgeable(draft(), v22Run()), true);
   assert.equal(engineeringAgentDraftRejudgeable(draft({ patchBody: null }), v22Run()), false);
   assert.equal(engineeringAgentDraftRejudgeable(draft({ reason: "tier_pending" }), v22Run()), false);
-  // A patch that adds a file can never become a sparse candidate (no base
-  // blob), so reading it again would only repeat base_blob_missing.
-  const added = "diff --git a/t.test.ts b/t.test.ts\nnew file mode 100644\nindex 0000000..e69de29\n--- /dev/null\n+++ b/t.test.ts\n@@ -0,0 +1 @@\n+x\n";
-  assert.equal(engineeringAgentDraftRejudgeable(draft({ reason: "base_blob_missing", patchBody: added }), v22Run()), false);
-  assert.equal(engineeringAgentPatchAddsFile(added), true);
-  assert.equal(engineeringAgentPatchAddsFile(draft().patchBody), false);
+  // Operator, 2026-11-15: a patch that adds a regular file now becomes a
+  // sparse candidate too, so a draft an older round left as
+  // base_blob_missing may be judged again.
+  const added = "diff --git a/t.test.ts b/t.test.ts\nnew file mode 100644\nindex 0000000..587be6b\n--- /dev/null\n+++ b/t.test.ts\n@@ -0,0 +1 @@\n+x\n";
+  assert.equal(engineeringAgentDraftRejudgeable(draft({ reason: "base_blob_missing", patchBody: added }), v22Run()), true);
   assert.equal(engineeringAgentDraftRejudgeable(draft({ kind: "state_mismatch" }), v22Run()), false);
   assert.equal(engineeringAgentDraftRejudgeable(draft(), v22Run({ modeAtStart: "t2" })), false);
   assert.equal(engineeringAgentDraftRejudgeable(draft(), v22Run({ amuxAttemptId: null })), false);
