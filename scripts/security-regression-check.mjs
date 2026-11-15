@@ -1690,6 +1690,30 @@ const checks = [
     },
   },
   {
+    name: "A sent-image thumbnail is owner-scoped, raster-only and non-destructive",
+    file: "app/api/attachments/[attachmentId]/preview/route.ts",
+    test: (source) => {
+      const code = source
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^\s*\/\/.*$/gm, "");
+      // The owner's own image back to the owner: ownership is the lookup, only
+      // raster formats are served, the read cannot delete the object and no
+      // signed URL is minted (user-attachment-persistence.md section 5.1).
+      return (
+        code.includes("where: { id: attachmentId, userId }") &&
+        code.includes("hasConversationUnlockGrant(") &&
+        code.includes("isPreviewableAttachmentMediaType(") &&
+        code.includes("attachment.unavailableAt") &&
+        code.includes("readOwnR2ObjectBytes(") &&
+        !code.includes("readR2Object(") &&
+        !code.includes("createR2ReadUrl") &&
+        !code.includes("markMessageAttachmentUnavailable") &&
+        code.includes('"X-Content-Type-Options": "nosniff"') &&
+        code.includes('"Cache-Control": "private, no-store"')
+      );
+    },
+  },
+  {
     name: "Stale image recovery can reclaim a stranded settlement",
     file: "lib/imageGenerationService.ts",
     test: (source) =>

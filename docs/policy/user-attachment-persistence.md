@@ -88,6 +88,7 @@ mediaType, size, kind, objectKey, uploadId, createdAt.
 | 초안에서 제거 | `DELETE /api/chat` `{ uploadId }` | 204, 또는 이미 전송된 파일이면 `{ kept: true }` |
 | 메시지 pre-save | `POST /api/conversations/{id}/messages` `{ messages:[{ id, content, attachmentUploadIds }] }` 또는 순서 있는 `attachmentReferences:[{uploadId}\|{attachmentId}]` | `{ success, created, attachments:[{messageId, id, ordinal, name, mediaType, size, kind}] }` |
 | 대화 조회 | `GET /api/conversations/{id}` | 각 메시지에 `attachments: [{id, attachmentId, ordinal, name, mediaType, size, kind}]`, 누락된 파일에는 `unavailableAt`·`unavailableReason`(§11) — 없으면 **키 자체가 없다** |
+| 이미지 썸네일 | `GET /api/attachments/{attachmentId}/preview` | 본인 소유의 래스터 이미지(png·jpeg·webp·gif) 바이트, `inline` — §5.1 |
 | 채팅 | `POST /api/chat` | 각 첨부는 `{attachmentId}` 또는 `{uploadId}`. 선택적으로 `acknowledgedUnavailableAttachmentIds`(§11.4) |
 
 - **`content`는 비어 있을 수 있다.** pre-save schema는
@@ -109,8 +110,9 @@ mediaType, size, kind, objectKey, uploadId, createdAt.
 
 ## 5. 무엇이 브라우저에 가지 않는가
 
-`objectKey`, 첨부 바이트, data URL, 추출된 본문, 업로드된 아카이브 내부 경로,
-서명 URL은 **어떤 경로로도** 클라이언트에 가지 않는다.
+`objectKey`, data URL, 추출된 본문, 업로드된 아카이브 내부 경로, 서명 URL은
+**어떤 경로로도** 클라이언트에 가지 않는다. 첨부 바이트는 §5.1의 썸네일 route
+하나로만, 소유자 본인에게, 래스터 이미지에 한해 간다.
 
 - 근거는 select이지 필터가 아니다. `PUBLIC_MESSAGE_ATTACHMENT_SELECT`는
   8개 필드(id, ordinal, name, mediaType, size, kind, unavailableAt,
@@ -122,8 +124,28 @@ mediaType, size, kind, objectKey, uploadId, createdAt.
 - **입력 첨부에는 다운로드 route가 없다.** 로컬 파일 업로드 외에 생성 파일을
   다운로드하지 않고 독립 입력 사본으로 준비할 수도 있다(§8.1). 따라서 사용자가
   입력 원본을 이미 갖고 있다고 가정하지 않는다. 기존 생성 파일 다운로드는 유지하며,
-  입력 첨부 전용 다운로드나 공유는 제공하지 않는다.
+  입력 첨부 전용 다운로드나 공유는 제공하지 않는다. §5.1의 썸네일은 이미지 카드를
+  그리기 위한 `inline` 응답이며 문서·아카이브에는 열리지 않는다.
 - 서명 URL은 DB에 저장하지 않는다(애초에 만들지 않는다).
+
+### 5.1 보낸 이미지의 썸네일
+
+보낸 탭은 로컬 미리보기를 쓰지만, 다시 연 대화에는 카드 메타데이터만 있어 모든
+이미지가 아이콘으로 돌아왔다(운영자 요청 2026-11-15). `GET /api/attachments/{attachmentId}/preview`가
+그 이미지를 소유자에게만 돌려준다.
+
+- **조회가 소유권이다.** `findFirst({ where: { id, userId } })`로 찾고 대화 소유자도
+  다시 확인한다. 남의 행, 없는 행, `unavailableAt`이 찍힌 행, 래스터 이미지가 아닌 행은
+  모두 같은 404다. 잠긴 대화는 소유자에게만 `CONVERSATION_LOCKED`.
+- **래스터 이미지만.** png·jpeg·webp·gif(`lib/messageAttachmentPreview.ts`). SVG는
+  스크립트를 실을 수 있어 넣지 않는다.
+- **응답 헤더.** 행의 media type, `nosniff`, `Content-Disposition: inline`,
+  `Cache-Control: private, no-store`, `Content-Security-Policy: default-src 'none'; ... sandbox`.
+  URL에는 opaque id만 있고 key·서명 URL은 만들지 않는다.
+- **비파괴 읽기.** `readOwnR2ObjectBytes`를 쓴다. 읽기 실패는 404일 뿐이고
+  `unavailableAt`을 쓰지 않는다 — 그 판정은 §11대로 채팅 route만 한다. 카드는 썸네일
+  로드가 실패하면 아이콘 카드로 돌아간다.
+- 게스트 첨부는 행이 없으므로 대상이 아니다.
 
 ## 6. 모델이 보는 것 — turn handle
 

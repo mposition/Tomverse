@@ -70,6 +70,10 @@ import {
   localizedProductHref,
   type ChatWorkspaceProduct,
 } from "@/lib/chatProductUiCopy";
+import {
+  isPreviewableAttachmentMediaType,
+  messageAttachmentPreviewUrl,
+} from "@/lib/messageAttachmentPreview";
 
 type ChatMessageListProps = {
   onResearchMessage?: (message: Message) => void;
@@ -242,6 +246,112 @@ const hasImagePreview = (attachment: ChatAttachment) =>
   attachment.mediaType.startsWith("image/") &&
   typeof attachment.data === "string" &&
   (attachment.data.startsWith("data:image/") || attachment.data.startsWith("blob:"));
+
+/**
+ * Where a sent picture's thumbnail comes from.
+ *
+ * The tab that sent it still holds a local preview and uses it. A reloaded
+ * conversation, or one opened again from the sidebar, has only the saved row,
+ * so a raster image is asked for by its opaque id from the owner-only preview
+ * route (docs/policy/user-attachment-persistence.md section 5.1). Anything else
+ * -- a document, a guest file, a file storage lost -- keeps its icon.
+ */
+const sentAttachmentPreviewSource = (attachment: ChatAttachment): string | null => {
+  if (attachment.unavailableAt) return null;
+  if (hasImagePreview(attachment)) return attachment.data ?? null;
+  if (attachment.attachmentId && isPreviewableAttachmentMediaType(attachment.mediaType)) {
+    return messageAttachmentPreviewUrl(attachment.attachmentId);
+  }
+  return null;
+};
+
+/**
+ * One file card in a sent message.
+ *
+ * A file whose bytes object storage no longer holds keeps its card. The name
+ * stays, the type stays, the message stays -- what the person sent is part of
+ * this conversation whether or not the bytes survived, and a card that quietly
+ * vanished would leave them asking about a document neither side can name
+ * (docs/policy/user-attachment-persistence.md §11). What changes is that it
+ * stops pretending: no thumbnail, a stated reason, and an accessible name that
+ * carries the state rather than only the colour.
+ *
+ * A thumbnail that fails to load falls back to the same icon card, so a
+ * storage hiccup costs the picture and nothing else.
+ */
+function SentAttachmentCard({ attachment }: { attachment: ChatAttachment }) {
+  const { t } = useLanguage();
+  const previewSource = sentAttachmentPreviewSource(attachment);
+  const [failedSource, setFailedSource] = useState<string | null>(null);
+  const isUnavailable = Boolean(attachment.unavailableAt);
+  const showImagePreview = Boolean(previewSource) && previewSource !== failedSource;
+  return (
+    <div
+      data-testid={
+        isUnavailable ? "chat-attachment-card-unavailable" : "chat-attachment-card"
+      }
+      data-attachment-unavailable={isUnavailable ? "true" : undefined}
+      className={
+        showImagePreview
+          ? "relative h-20 w-20 overflow-hidden rounded-xl border border-white/20 bg-white/10 shadow-sm"
+          : `flex h-16 min-w-52 max-w-64 items-center gap-3 rounded-xl border py-2 pl-2 pr-3 shadow-sm backdrop-blur ${
+              isUnavailable
+                ? "border-dashed border-amber-200/60 bg-white/5"
+                : "border-white/15 bg-white/10"
+            }`
+      }
+      title={
+        isUnavailable
+          ? `${attachment.name} — ${t("chat.attachmentUnavailableBadge")}`
+          : attachment.name
+      }
+    >
+      {showImagePreview && previewSource ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          data-testid="chat-attachment-thumbnail"
+          src={previewSource}
+          alt={attachment.name}
+          loading="lazy"
+          decoding="async"
+          className="h-full w-full object-cover"
+          onError={() => setFailedSource(previewSource)}
+        />
+      ) : (
+        <>
+          <span
+            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ring-1 ring-white/10 ${
+              isUnavailable ? "bg-white/10 text-amber-100" : "bg-white/15 text-white"
+            }`}
+            aria-hidden="true"
+          >
+            {isUnavailable ? (
+              <FileWarning className="h-5 w-5" />
+            ) : (
+              getAttachmentIcon(attachment)
+            )}
+          </span>
+          <span className="flex min-w-0 flex-col text-left">
+            <span className="truncate text-sm font-semibold text-white">
+              {attachment.name}
+            </span>
+            <span
+              className={
+                isUnavailable
+                  ? "truncate text-[11px] font-semibold text-amber-100"
+                  : "text-[11px] font-semibold text-blue-100/80"
+              }
+            >
+              {isUnavailable
+                ? t("chat.attachmentUnavailableBadge")
+                : getAttachmentLabel(attachment)}
+            </span>
+          </span>
+        </>
+      )}
+    </div>
+  );
+}
 
 const isFileParsingError = (content: string) => {
   const normalized = content.toLowerCase();
@@ -1249,94 +1359,7 @@ export function ChatMessageList({
                   {isUser && msg.attachments && msg.attachments.length > 0 && (
                     <div className={`flex flex-wrap gap-2 ${msg.content ? "mb-3" : ""}`}>
                       {msg.attachments.map((attachment) => (
-                        (() => {
-                          /*
-                            A file whose bytes object storage no longer holds.
-
-                            The card stays. The name stays, the type stays, the
-                            message stays -- what the person sent is part of
-                            this conversation whether or not the bytes survived,
-                            and a card that quietly vanished would leave them
-                            asking about a document neither side can name
-                            (docs/policy/user-attachment-persistence.md §11).
-
-                            What changes is that it stops pretending: no
-                            thumbnail, a stated reason, and an accessible name
-                            that carries the state rather than only the colour.
-                          */
-                          const isUnavailable = Boolean(attachment.unavailableAt);
-                          const showImagePreview =
-                            !isUnavailable && hasImagePreview(attachment);
-                          return (
-                        <div
-                          key={attachment.id}
-                          data-testid={
-                            isUnavailable
-                              ? "chat-attachment-card-unavailable"
-                              : "chat-attachment-card"
-                          }
-                          data-attachment-unavailable={
-                            isUnavailable ? "true" : undefined
-                          }
-                          className={
-                            showImagePreview
-                              ? "relative h-20 w-20 overflow-hidden rounded-xl border border-white/20 bg-white/10 shadow-sm"
-                              : `flex h-16 min-w-52 max-w-64 items-center gap-3 rounded-xl border py-2 pl-2 pr-3 shadow-sm backdrop-blur ${
-                                  isUnavailable
-                                    ? "border-dashed border-amber-200/60 bg-white/5"
-                                    : "border-white/15 bg-white/10"
-                                }`
-                          }
-                          title={
-                            isUnavailable
-                              ? `${attachment.name} — ${t("chat.attachmentUnavailableBadge")}`
-                              : attachment.name
-                          }
-                        >
-                          {showImagePreview ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={attachment.data}
-                              alt={attachment.name}
-                              className="h-full w-full object-cover"
-                            />
-                          ) : (
-                            <>
-                              <span
-                                className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ring-1 ring-white/10 ${
-                                  isUnavailable
-                                    ? "bg-white/10 text-amber-100"
-                                    : "bg-white/15 text-white"
-                                }`}
-                                aria-hidden="true"
-                              >
-                                {isUnavailable ? (
-                                  <FileWarning className="h-5 w-5" />
-                                ) : (
-                                  getAttachmentIcon(attachment)
-                                )}
-                              </span>
-                              <span className="flex min-w-0 flex-col text-left">
-                                <span className="truncate text-sm font-semibold text-white">
-                                  {attachment.name}
-                                </span>
-                                <span
-                                  className={
-                                    isUnavailable
-                                      ? "truncate text-[11px] font-semibold text-amber-100"
-                                      : "text-[11px] font-semibold text-blue-100/80"
-                                  }
-                                >
-                                  {isUnavailable
-                                    ? t("chat.attachmentUnavailableBadge")
-                                    : getAttachmentLabel(attachment)}
-                                </span>
-                              </span>
-                            </>
-                          )}
-                        </div>
-                          );
-                        })()
+                        <SentAttachmentCard key={attachment.id} attachment={attachment} />
                       ))}
                     </div>
                   )}
