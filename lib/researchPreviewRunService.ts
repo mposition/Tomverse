@@ -10,6 +10,7 @@ import {
   heartbeatChatAccess,
   identifyChatCaller,
   readOpenChatUsageReservation,
+  readChatUsageReservationForSettlement,
   releaseChatAccess,
   settleChatUsage,
   type ChatUsageReservation,
@@ -51,6 +52,7 @@ import {
   completeResearchPreviewGeneration,
   createPreparingResearchPreviewRun,
   failPreparingResearchPreviewRun,
+  expireResearchPreviewCheckpoints,
   finishResearchPreviewRunWithoutReport,
   heartbeatResearchPreviewRun,
   listResearchPreviewRunDtos,
@@ -418,7 +420,7 @@ const knownSettlement = (
   searchSurchargeCredits: run.searchSurchargeCredits,
   searchExecuted: checkpoint?.search.executed ?? false,
   searchQueryCount: checkpoint?.search.succeededRequestCount ?? 0,
-  searchBackendRequestCount: checkpoint?.search.succeededRequestCount ?? 0,
+  searchBackendRequestCount: checkpoint?.search.backendRequestCount ?? 0,
   searchQueriesObserved: true,
 });
 
@@ -443,7 +445,7 @@ async function settleStoredResearchPreviewRun(
   const usage = parseResearchPreviewSettlementUsage(run.settlementUsage);
   if (!usage) return;
   try {
-    const reservation = await readOpenChatUsageReservation(
+    const reservation = await readChatUsageReservationForSettlement(
       run.reservationId,
       run.userId
     );
@@ -484,6 +486,7 @@ export async function recoverStaleResearchPreviewRuns(limit = 50) {
     const outcome = await recoverStaleResearchPreviewRun(run.id);
     if (outcome !== "unchanged") recovered += 1;
   }
+  recovered += await expireResearchPreviewCheckpoints(limit);
   await settlePendingResearchPreviewRuns(limit);
   return recovered;
 }

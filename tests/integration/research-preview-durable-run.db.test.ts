@@ -22,6 +22,7 @@ import {
   resumeResearchPreviewRun,
 } from "@/lib/researchPreviewRunStore";
 import { parseResearchPreviewCheckpoint } from "@/lib/researchPreviewStep";
+import { reconcileExpiredChatCreditReservations } from "@/lib/chatSecurity";
 
 const root = resolve(import.meta.dirname, "../..");
 const mod = (file: string) => pathToFileURL(resolve(root, file)).href;
@@ -256,10 +257,10 @@ function completedDurableModel() {
   });
 }
 
-for (const pauseAfterFirst of [false, true]) test(`the real durable service reserves once and completes three steps${pauseAfterFirst ? " across an explicit checkpoint and resume" : " in one claim"}`, async () => {
+async function createServiceFixture(label: string) {
   const user = await prisma.user.create({
     data: {
-      email: `durable-service-${randomUUID()}@example.test`,
+      email: `${label}-${randomUUID()}@example.test`,
       plan: "Pro",
       subscriptionStatus: "active",
       subscriptionCurrentPeriodEnd: new Date(Date.now() + 30 * 86_400_000),
@@ -270,7 +271,7 @@ for (const pauseAfterFirst of [false, true]) test(`the real durable service rese
   const conversation = await prisma.conversation.create({
     data: {
       userId: user.id,
-      title: "durable service",
+      title: label,
       kind: "chat",
       productKey: "chat",
       selectionMode: "manual",
@@ -311,6 +312,56 @@ for (const pauseAfterFirst of [false, true]) test(`the real durable service rese
   assert.equal(held[0]?.status, "reserved");
   reservations.push(held[0]!.id);
 
+  return { user, conversation, source, assistantMessageId, request, service, created, held };
+}
+
+test("cancelling an undispatched queued run settles known zero tokens, search cost and credits", async () => {
+  const { user, service, created, held } = await createServiceFixture("queued-cancel");
+  await service.cancelDurableResearchPreviewRun({ userId: user.id, runId: created.run.id });
+  const reservation = await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id: held[0]!.id } });
+  assert.equal(reservation.status, "refunded");
+  assert.equal(reservation.settledCredits, 0);
+  assert.equal(reservation.settledInputTokens, 0);
+  assert.equal(reservation.settledOutputTokens, 0);
+  assert.equal(reservation.settledCostMicroUsd, BigInt(0));
+  assert.equal(activeModel.doGenerateCalls.length, 0);
+  const attempts = await prisma.chatAttemptUsage.findMany({ where: { reservationId: reservation.id } });
+  assert.ok(attempts.every(attempt => attempt.inputTokens === 0 && attempt.outputTokens === 0 && attempt.costMicroUsd === BigInt(0)));
+});
+
+for (const viaSweep of [false, true]) test(`expired paid checkpoints preserve known usage and clear private data through ${viaSweep ? "generic reservation expiry" : "worker recovery"}`, async () => {
+  const { service, created, held } = await createServiceFixture(`expired-${viaSweep}`);
+  await service.processOneResearchPreviewRun("expiry-worker", { maxStepsPerClaim: 1 });
+  const cutoff = new Date(Date.now() - 1000);
+  await prisma.chatCreditReservation.update({ where: { id: held[0]!.id }, data: { expiresAt: cutoff } });
+  if (viaSweep) {
+    await reconcileExpiredChatCreditReservations();
+    const active = await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id: held[0]!.id } });
+    assert.equal(active.status, "reserved", "a still-valid checkpoint cannot become a generic zero refund");
+  }
+  await prisma.researchPreviewRun.update({ where: { id: created.run.id }, data: { checkpointExpiresAt: cutoff } });
+  if (viaSweep) {
+    await reconcileExpiredChatCreditReservations();
+  } else await service.recoverStaleResearchPreviewRuns();
+  const run = await prisma.researchPreviewRun.findUniqueOrThrow({ where: { id: created.run.id } });
+  assert.equal(run.status, "failed");
+  assert.equal(run.stopReason, "checkpoint_expired");
+  assert.equal(run.checkpoint, null);
+  assert.equal(run.checkpointExpiresAt, null);
+  const reservation = await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id: held[0]!.id } });
+  assert.ok(["settled", "refunded"].includes(reservation.status), "user-credit refund status does not erase provider spend");
+  assert.equal(reservation.settledInputTokens, 200);
+  assert.equal(reservation.settledOutputTokens, 100);
+  assert.equal(activeModel.doGenerateCalls.length, 1);
+  const attempt = await prisma.chatAttemptUsage.findFirstOrThrow({ where: { reservationId: reservation.id } });
+  assert.equal(attempt.usageSource, "provider_usage_metadata");
+  assert.equal(attempt.inputTokens, 200);
+  assert.equal(attempt.outputTokens, 100);
+  assert.ok(attempt.costMicroUsd > BigInt(0));
+});
+
+for (const pauseAfterFirst of [false, true]) test(`the real durable service reserves once and completes three steps${pauseAfterFirst ? " across an explicit checkpoint and resume" : " in one claim"}`, async () => {
+  const { user, conversation, source, assistantMessageId, request, service, created, held } = await createServiceFixture("durable-service");
   if (pauseAfterFirst) {
     await assert.rejects(service.processOneResearchPreviewRun("invalid-worker", { maxStepsPerClaim: 4 }), /step limit/);
     assert.equal(activeModel.doGenerateCalls.length, 0);

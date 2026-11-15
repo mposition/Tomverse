@@ -4148,9 +4148,10 @@ export const acquireReservedChatAccess = async (
 };
 
 /** Restores the frozen pricing/budget receipt from its canonical durable row. */
-export const readOpenChatUsageReservation = async (
+const readReservedChatUsageReservation = async (
     reservationId: string,
-    userId: string
+    userId: string,
+    requireUnexpired: boolean
 ): Promise<ChatUsageReservation> => {
     const row = await prisma.chatCreditReservation.findUnique({
         where: { id: reservationId },
@@ -4167,7 +4168,7 @@ export const readOpenChatUsageReservation = async (
         row.userId !== userId ||
         row.source !== "chat" ||
         row.status !== "reserved" ||
-        row.expiresAt <= new Date()
+        (requireUnexpired && row.expiresAt <= new Date())
     ) {
         throw new ChatAccessError(
             409,
@@ -4185,6 +4186,13 @@ export const readOpenChatUsageReservation = async (
     }
     return reservation;
 };
+
+export const readOpenChatUsageReservation = (reservationId: string, userId: string) =>
+    readReservedChatUsageReservation(reservationId, userId, true);
+
+/** Terminal accounting may consume an expired hold; paid resume still requires an open one. */
+export const readChatUsageReservationForSettlement = (reservationId: string, userId: string) =>
+    readReservedChatUsageReservation(reservationId, userId, false);
 
 export const settleChatUsage = async (
     reservation: ChatUsageReservation,
@@ -5734,9 +5742,10 @@ export const reconcileExpiredChatCreditReservations = async (
             // `startScheduledJob` records a run rather than holding a lock --
             // so the read moves to where nothing can settle around it.
             //
-            // Only deep research reservations pay for the lookup. Nothing else
-            // can have a PerplexityAsyncJob, and the sweep's page is up to a
-            // thousand rows of which almost none are this model.
+            // Research Preview owns its reservation through queued/running
+            // checkpoints. Resolve that ownership under the same lock before
+            // a generic expiry refund can discard paid work.
+            let researchHandoff = false;
             let handoff: Awaited<
                 ReturnType<typeof findDeepResearchHandoff>
             > = null;
@@ -5746,8 +5755,11 @@ export const reconcileExpiredChatCreditReservations = async (
                 {
                     reconciled: true,
                     reason: "reservation_expired",
-                    resolveTurnUsage: isDeepResearchReservation(row.modelId)
-                        ? async (tx) => {
+                    resolveTurnUsage: async (tx) => {
+                              const { researchPreviewSettlementForExpiry } = await import("./researchPreviewRunStore");
+                              const researchUsage = await researchPreviewSettlementForExpiry(tx, reservation.reservationId, now);
+                              if (researchUsage) { researchHandoff = true; return { turnUsage: researchUsage }; }
+                              if (!isDeepResearchReservation(row.modelId)) return null;
                               handoff = await findDeepResearchHandoff(
                                   reservation.reservationId,
                                   tx
@@ -5767,11 +5779,10 @@ export const reconcileExpiredChatCreditReservations = async (
                                           .providerUsageSnapshot as never) ??
                                       null,
                               };
-                          }
-                        : undefined,
+                          },
                 }
             );
-            if (result.applied && handoff) settledFromHandoff += 1;
+            if (result.applied && (handoff || researchHandoff)) settledFromHandoff += 1;
             else if (result.applied && result.status === "refunded") refunded += 1;
             else alreadyFinalized += 1;
         } catch (error) {

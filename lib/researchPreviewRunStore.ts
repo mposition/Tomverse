@@ -737,15 +737,7 @@ export async function requestResearchPreviewCancellation(
       });
       return { run: updated, terminalized: false };
     }
-    const settlementUsage = checkpointJson({
-      ...(parseResearchPreviewSettlementUsage(run.settlementUsage) ?? {}),
-      usageFromProvider: Boolean(
-        parseResearchPreviewSettlementUsage(run.settlementUsage)?.usageFromProvider
-      ),
-      outcome: "cancelled",
-      searchSurchargeCredits: run.searchSurchargeCredits,
-      searchQueriesObserved: true,
-    } satisfies ResearchPreviewSettlementUsage);
+    const settlementUsage = checkpointJson(await stoppedResearchPreviewUsage(tx, run, "cancelled"));
     const updated = await tx.researchPreviewRun.update({
       where: { id: runId },
       data: {
@@ -760,6 +752,58 @@ export async function requestResearchPreviewCancellation(
     });
     return { run: updated, terminalized: true };
   });
+}
+
+async function stoppedResearchPreviewUsage(
+  tx: Prisma.TransactionClient,
+  run: { id: string; settlementUsage: unknown; searchSurchargeCredits: number },
+  outcome: "cancelled" | "failed"
+): Promise<ResearchPreviewSettlementUsage> {
+  const unknown = await tx.researchPreviewGeneration.count({ where: {
+    runId: run.id, status: { in: ["dispatch_started", "outcome_unknown"] },
+  } });
+  const saved = parseResearchPreviewSettlementUsage(run.settlementUsage);
+  if (!unknown && saved) return { ...saved, outcome };
+  const completed = await tx.researchPreviewGeneration.count({ where: { runId: run.id, status: "completed" } });
+  if (unknown || completed > 0) return { usageFromProvider: false, outcome,
+    searchSurchargeCredits: run.searchSurchargeCredits, searchQueriesObserved: false };
+  return { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cacheWriteInputTokens: 0,
+    reasoningTokens: 0, usageFromProvider: true, outcome, searchSurchargeCredits: run.searchSurchargeCredits,
+    searchExecuted: false, searchQueryCount: 0, searchBackendRequestCount: 0, searchQueriesObserved: true };
+}
+
+/** Called under the reservation settlement lock: active work can never become a zero refund. */
+export async function researchPreviewSettlementForExpiry(
+  tx: Prisma.TransactionClient, reservationId: string, now = new Date()
+): Promise<ResearchPreviewSettlementUsage | null> {
+  await tx.$queryRaw`SELECT "id" FROM "ResearchPreviewRun" WHERE "reservationId" = ${reservationId} FOR UPDATE`;
+  const run = await tx.researchPreviewRun.findFirst({ where: { reservationId } });
+  if (!run) return null;
+  if (!["completed", "failed", "cancelled", "attention"].includes(run.status)) {
+    const neverStarted = run.status === "queued" && run.checkpoint === null && run.stepCount === 0;
+    if (!["checkpointed", "queued"].includes(run.status) ||
+        (!neverStarted && (!run.checkpointExpiresAt || run.checkpointExpiresAt > now))) {
+      throw new ResearchPreviewRunError(409, "RESEARCH_RUN_STILL_ACTIVE", "Research owns this reservation until its work is finalized.");
+    }
+    const usage = await stoppedResearchPreviewUsage(tx, run, "failed");
+    await tx.researchPreviewRun.update({ where: { id: run.id }, data: {
+      status: "failed", stopReason: neverStarted ? "timeout" : "checkpoint_expired", checkpoint: Prisma.DbNull,
+      checkpointExpiresAt: null, settlementUsage: checkpointJson(usage),
+      leaseOwner: null, leaseExpiresAt: null, activeDeadlineAt: null, completedAt: now,
+    } });
+    return usage;
+  }
+  return parseResearchPreviewSettlementUsage(run.settlementUsage) ??
+    stoppedResearchPreviewUsage(tx, run, "failed");
+}
+
+export async function expireResearchPreviewCheckpoints(limit = 50) {
+  const now = new Date();
+  const runs = await prisma.researchPreviewRun.findMany({ where: {
+    status: { in: ["checkpointed", "queued"] }, checkpointExpiresAt: { lte: now }, reservationId: { not: null },
+  }, select: { reservationId: true }, take: Math.min(100, Math.max(1, limit)), orderBy: { checkpointExpiresAt: "asc" } });
+  for (const run of runs) await prisma.$transaction(tx => researchPreviewSettlementForExpiry(tx, run.reservationId!, now));
+  return runs.length;
 }
 
 export async function finishResearchPreviewRunWithoutReport(input: {
