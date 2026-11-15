@@ -86,7 +86,7 @@ output limits; this session did not query the production DB to verify them:
 | --- | --- | --- |
 | GPT Astra | 128,000 | Candidate; exact operating API ID, pricing and reasoning configuration not yet captured |
 | Claude Fable 5.2 | 128,000 | Candidate; exact operating API ID, pricing and reasoning configuration not yet captured |
-| Gemini 4 Argon | 32,768 | Original outcome unknown; owner-authorized retry confirms HTTP 400 on step 2; no final report |
+| Gemini 4 Argon | 32,768 | HTTP 400 isolated to nested report maxItems and repaired; three HTTP 200 steps and one successful original-page read; final report rejected by validation |
 
 The product's shared 4,096-token run cap is independent of those model limits.
 There is no measured basis for excluding Astra or Fable on output-limit,
@@ -199,9 +199,87 @@ supported by their current cited pages. The report remains unchanged and
 Rerank returned three source-bound results with the official release overview
 first. This one side experiment establishes API integration, not an improvement
 in report quality. Four separate non-generation token-counting probes accepted
-synthetic request variants; that does not prove generation-schema acceptance or
-explain Argon's HTTP 400. No specific Gemini fix is claimed. There is no live
+synthetic request variants; at that stage they did not prove generation-schema
+acceptance or explain Argon's HTTP 400. No specific Gemini fix was claimed from
+those probes. There is no live
 Astra/Fable result and no cross-provider quality ranking.
+
+### Argon repair: isolated maxItems failure and successful original read
+
+The owner subsequently authorized at most seven additional generations and
+US$1.50, with cumulative ceilings of 15 generations and US$11.50. The four
+diagnostic calls and three-step original-page case used exactly seven calls.
+Their conservative reservation is US$1.384872; retaining all earlier maximum
+reservations gives US$11.309356, inside the new cumulative ceiling. No product
+credits, runtime prices, provider budget settings or production configuration
+were changed.
+
+Controlled requests kept the model, prompt/history, tools and generation
+settings identical and changed only report-array cardinality hints:
+
+| Report schema variant | HTTP result |
+| --- | --- |
+| Original nested maxItems and minItems | 400 INVALID_ARGUMENT |
+| Remove both array limits | 200 |
+| Remove only maxItems, retaining minItems | 200 |
+| Remove only minItems, retaining maxItems | 400 INVALID_ARGUMENT |
+
+This isolates nested `maxItems` in this report tool as the request rejection
+trigger, rather than output capacity, search evidence quality or provider
+latency. Google documents schema-complexity constraints, and the upstream
+[tool-schema issue](https://github.com/googleapis/python-genai/issues/2170)
+reports the same opaque array-bound failure. No specific undocumented numeric
+threshold is inferred for this report.
+
+The fix removes only `maxItems` from `submit_research_report` on the exact
+`gemini-4-argon` Research transport. Minimum array lengths, required fields,
+enums, patterns and string limits are retained. Other tools and Google models
+are unchanged. The original Zod schema still rejects oversized reports before
+execution; the actual SDK regression sends seven findings and confirms a tool
+error and no accepted report. Tool descriptions explicitly retain the report
+count limits and the successful-page-only citation rule for model guidance.
+The later description clarification was checked locally, not with another
+paid generation.
+
+A manifest-bound optional request-input ceiling now permits smaller development
+probes without inventing a smaller provider context window. It can only reduce
+the existing ceiling and reservation. The compact official-source case used
+32,768 reserved input tokens per request and the unchanged aggregate 4,096
+output cap. The preview remains network-free, and execution still requires the
+exact manifest approval. Tests cover the smaller reservation and private page
+content remaining absent from the journal.
+
+The RFC Editor original-page case has manifest digest
+`5dc39332d7c2449efe9288a949b3cd489aec82631d02d40c608c204ec7551a1b`.
+From 11:57:50 to 11:58:20 AEST on 2026-11-15, it recorded:
+
+- Three HTTP 200 model responses, 7,582 input tokens and 1,550 output tokens,
+  with zero reported reasoning tokens and no fallback or hidden retry.
+- Two successful Brave queries, followed by two bounded read attempts.
+- Source R2, `https://www.rfc-editor.org/rfc/rfc1149.html`: `status=read`,
+  `text/html`, 3,407 characters, `truncated=false`. This real page result was
+  delivered to the following model generation.
+- Source R3, `https://www.rfc-editor.org/rfc/rfc1149.txt`: unavailable with
+  `unsupported_content`. This is not counted as a successful read.
+- A separate no-model read-only smoke checked the R2 title and original text.
+  Its content digest matched the investigation checkpoint exactly:
+  `d0d110a83e0b5d6766211170f07f1cbda0ea61b1c895a2f0072049d0c74a7989`.
+  It used the same production reader and retained the DNS/IP pinning, TLS,
+  128 KiB body, 12,000-character, redirect and deadline guards.
+
+The loop completed after three generations, but the terminal report was
+`invalid_report`, with no accepted content or cited-source projection. This
+does **not** demonstrate a successful final report. The HTTP 400 repair and
+successful original-page delivery are established separately; the report
+rejection remains a quality/validation follow-up. The rejected payload was
+not retained, so this record does not assign a specific validation cause.
+No fourth repair call or fabricated report was produced.
+
+Known frozen-rate costs for this round: accepted diagnostic responses
+US$0.026816 and the original-page case including search US$0.071328, subtotal
+US$0.098144. HTTP refusals without usage are not assigned zero. The known-usage
+subtotal across every round is US$0.143727, not a complete provider invoice.
+The original unknown call remains unknown and all earlier journals are intact.
 
 ## Verification
 
@@ -218,6 +296,7 @@ unchanged UI and database suites were not rerun for the tool-choice correction.
 | Research/search/page/evaluation focused tests | 120/120 passed |
 | Post-attempt evaluator diagnostics and existing offline evaluation guards | 15/15 passed |
 | Recovery Research/page/report/evaluation and Cohere focused regressions | 81/81 passed |
+| Argon maximum-hint repair, lower input reservation, private-page journal and focused regressions | 84/84 passed |
 | Cohere adapter, protocol types and existing provider regressions | 71/71 passed |
 | Offer and Native authentication boundary tests | 36/36 passed |
 | Native transport regressions | 15/15 passed |

@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { generateText } from "ai";
+import { z } from "zod";
 import { getModel } from "../lib/models.ts";
 import { getResearchPreviewAiModel, researchPreviewGoogleFetch } from "../lib/researchPreviewModel.ts";
 import { runResearchPreviewStep } from "../lib/researchPreviewStep.ts";
+import { createResearchPreviewExecution } from "../lib/researchPreviewExecution.ts";
+import { researchPreviewReportSchema } from "../lib/researchPreviewReport.ts";
 
 test("Google SDK internal continuation opens no second Research HTTP request", async () => {
   const previousFetch = globalThis.fetch;
@@ -22,6 +25,49 @@ test("Google SDK internal continuation opens no second Research HTTP request", a
     assert.equal(requests, 1);
     await assert.rejects(researchPreviewGoogleFetch("https://generativelanguage.googleapis.com", { body: JSON.stringify({ continuationToken: "no" }) }), /CONTINUATION_REFUSED/);
     assert.equal(requests, 1);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousKey === undefined) delete process.env.GOOGLE_GENERATIVE_AI_API_KEY; else process.env.GOOGLE_GENERATIVE_AI_API_KEY = previousKey;
+  }
+});
+
+test("Argon omits only report array maximum hints while original server bounds still reject oversized reports", async () => {
+  const previousFetch = globalThis.fetch;
+  const previousKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+  const requests = [];
+  process.env.GOOGLE_GENERATIVE_AI_API_KEY = "offline-research-fixture-only";
+  const oversized = { status: "partial", summary: "An oversized report.", findings: Array.from({ length: 7 }, () => ({
+    heading: "Finding", statements: [{ text: "Uncertain.", sourceIds: [], kind: "uncertain" }] })),
+    contradictions: [], limitations: ["Fixture."], nextQuestions: [] };
+  globalThis.fetch = async (_url, init) => {
+    requests.push(JSON.parse(init.body));
+    return Response.json({ candidates: [{ content: { role: "model", parts: [{ functionCall: {
+      name: "submit_research_report", args: oversized }, thoughtSignature: "offline-report-signature" }] }, finishReason: "STOP" }],
+      usageMetadata: { promptTokenCount: 200, candidatesTokenCount: 100 } });
+  };
+  try {
+    const signal = new AbortController().signal;
+    const execution = createResearchPreviewExecution({ backend: "brave", totalOutputTokens: 4096, locale: "en", signal, stepNumberOffset: 2 });
+    const config = { ...getModel("gemini-3-1-pro"), id: "gemini-4-argon", apiModel: "gemini-4-argon" };
+    const result = await generateText({ model: getResearchPreviewAiModel(config), prompt: "Submit a bounded report.",
+      tools: execution.tools, prepareStep: execution.prepareStep, maxOutputTokens: 4096, maxRetries: 0 });
+    assert.equal(requests.length, 1);
+    const schema = requests[0].tools[0].functionDeclarations[0].parametersJsonSchema;
+    assert.equal(JSON.stringify(schema).includes('"maxItems"'), false);
+    assert.equal(schema.properties.findings.items.properties.statements.minItems, 1);
+    assert.equal(schema.additionalProperties, false);
+    assert.equal(schema.properties.summary.maxLength, 1600);
+    assert.deepEqual(schema.required, Object.keys(researchPreviewReportSchema.shape));
+    assert.ok(result.steps[0].content.some(part => part.type === "tool-error"));
+    assert.equal(execution.finalReport(), null);
+    assert.equal(researchPreviewReportSchema.safeParse(oversized).success, false);
+    // Other tools and other Google models retain their own schema bounds.
+    const body = { tools: [{ functionDeclarations: [{ name: "web_search", parametersJsonSchema: z.toJSONSchema(z.array(z.string()).max(5)) }] }] };
+    await researchPreviewGoogleFetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-4-argon:generateContent", { body: JSON.stringify(body) });
+    assert.equal(requests[1].tools[0].functionDeclarations[0].parametersJsonSchema.maxItems, 5);
+    body.tools[0].functionDeclarations[0] = { name: "submit_research_report", parametersJsonSchema: z.toJSONSchema(researchPreviewReportSchema) };
+    await researchPreviewGoogleFetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent", { body: JSON.stringify(body) });
+    assert.equal(requests[2].tools[0].functionDeclarations[0].parametersJsonSchema.properties.findings.maxItems, 6);
   } finally {
     globalThis.fetch = previousFetch;
     if (previousKey === undefined) delete process.env.GOOGLE_GENERATIVE_AI_API_KEY; else process.env.GOOGLE_GENERATIVE_AI_API_KEY = previousKey;

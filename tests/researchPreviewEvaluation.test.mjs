@@ -38,7 +38,7 @@ test("default comparison freezes Argon/Luna on one public brief inside six calls
 
 test("development clones preserve catalogue config and exact hosted Command A+ pricing", () => {
   const before = JSON.stringify(AVAILABLE_MODELS);
-  const baseline = proposal({ modelIds: ["gemini-3-1-pro"], caseIds: RESEARCH_EVALUATION_CASES.map(entry => entry.id) });
+  const baseline = proposal({ modelIds: ["gemini-3-1-pro"], caseIds: RESEARCH_EVALUATION_CASES.slice(0, 2).map(entry => entry.id) });
   assert.equal(baseline.cases.length, 2);
   const command = proposal({ modelIds: ["command-a-plus"], rerank: true });
   assert.deepEqual(command.providers, ["brave", "cohere"]);
@@ -50,6 +50,17 @@ test("development clones preserve catalogue config and exact hosted Command A+ p
   assert.equal(command.rerank.maxCalls, 1); assert.ok(command.rerank.reservedMicroUsd > 0);
   assert.equal(JSON.stringify(AVAILABLE_MODELS), before);
   assert.equal(resolveResearchEvaluationModel("gpt-6-luna").webSearchOverride, "app-managed");
+});
+
+test("a smaller manifest-bound request ceiling reduces reservation and never raises model capacity", () => {
+  const bounded = proposal({ modelIds: ["gemini-4-argon"], caseIds: ["official-compact-original"], requestInputCeilingTokens: 32768 });
+  assert.equal(bounded.requestInputCeilingTokens, 32768);
+  assert.equal(bounded.cases[0].budget.contextInputTokens, 32768);
+  assert.equal(bounded.cases[0].budget.inputTokens, 3 * 32768 + 2 * 4096);
+  assert.equal(bounded.totalReservedMicroUsd, 532904);
+  assert.ok(bounded.totalReservedMicroUsd < proposal({ modelIds: ["gemini-4-argon"] }).totalReservedMicroUsd);
+  assert.equal(proposal({ requestInputCeilingTokens: Number.MAX_SAFE_INTEGER }).cases[0].reservedMicroUsd, proposal().cases[0].reservedMicroUsd);
+  for (const requestInputCeilingTokens of [0, -1, 1.5, Infinity, NaN]) assert.throws(() => proposal({ requestInputCeilingTokens }));
 });
 
 test("closed selections and immutable US$10 ceiling refuse expanded authority", () => {
@@ -112,7 +123,9 @@ function fixture(t, { manifest: manifestInput, scenario = "success" } = {}) {
           if (scenario === "drift") digest = "b".repeat(64);
           const completedSteps = (input.checkpoint?.completedSteps ?? 0) + 1;
           const checkpoint = { completedSteps, usage: { inputTokens: completedSteps * 100, outputTokens: completedSteps * 50, cachedInputTokens: 0, cacheWriteTokens: 0 },
-            search: { backendRequestCount: 1, succeededRequestCount: scenario === "search_unknown" ? 0 : 1 }, pageReads: [],
+            search: { backendRequestCount: 1, succeededRequestCount: scenario === "search_unknown" ? 0 : 1 },
+            pageReads: scenario === "pages" && completedSteps >= 2 ? [{ sourceId: "R1", url: "https://nodejs.org/en/about/previous-releases",
+              status: "read", readAt: "2026-11-15T00:00:00Z", truncated: false, contentType: "text/plain", content: "RAW_PAGE_MUST_STAY_PRIVATE" }] : [],
             sources: [{ sourceId: "R1", url: "https://nodejs.org/en/about/previous-releases", snippet: "Official public runtime release schedule" }], stopReason: "completed" };
           return { checkpoint, finished: completedSteps === 3 && scenario !== "no_terminal", report: { content: "Offline structured report" } };
         },
@@ -189,6 +202,17 @@ test("failed live attempts retain bounded error type and HTTP status without cre
   assert.equal(readFileSync(f.journal, "utf8").includes("SECRET"), false);
   await assert.rejects(runResearchEvaluationCli(f.args, f.seams), /already has an intent/);
   assert.equal(f.counts.calls, 1);
+});
+
+test("the evaluation journal proves page-read outcomes without persisting original page content", async t => {
+  const f = fixture(t, { scenario: "pages" });
+  await runResearchEvaluationCli(f.args, f.seams);
+  const checkpoint = f.events().find(event => event.kind === "checkpoint" && event.completedSteps === 2);
+  assert.equal(checkpoint.pageReads[0].status, "read");
+  assert.equal(checkpoint.pageReads[0].truncated, false);
+  assert.equal(checkpoint.pageReads[0].contentCharacters, "RAW_PAGE_MUST_STAY_PRIVATE".length);
+  assert.equal(checkpoint.pageReads[0].contentDigest, researchEvaluationDigest("RAW_PAGE_MUST_STAY_PRIVATE"));
+  assert.equal(readFileSync(f.journal, "utf8").includes("RAW_PAGE_MUST_STAY_PRIVATE"), false);
 });
 
 test("optional Cohere side experiment is one separate dispatch after six report generations", async t => {

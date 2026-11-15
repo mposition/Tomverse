@@ -7,6 +7,7 @@ import { buildResearchEvaluationManifest, resolveResearchEvaluationModel, resear
   researchEvaluationMeasuredCost, validateResearchEvaluationApproval, rerankResearchEvaluationSnippets,
   RESEARCH_EVALUATION_MAX_MICRO_USD } from "../lib/researchPreviewEvaluation.ts";
 import { writeCollectionDurably, readCollectionText } from "../lib/routerDevelopmentCollectorJournal.ts";
+import { curateResearchPageEvidence } from "../lib/researchPreviewPageEvidence.ts";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const sources = [
@@ -38,7 +39,7 @@ function failureDiagnostic(error) {
   if (["RESEARCH_PROVIDER_CONTINUATION_REFUSED", "RESEARCH_PROVIDER_REQUEST_UNAVAILABLE"].includes(error?.message)) diagnostic.code = error.message;
   return diagnostic;
 }
-const help = "Preview: npm run research:preview:evaluate -- [--models=gemini-4-argon,gpt-6-luna] [--cases=official-runtime-support] [--rerank] [--max-total-microusd=10000000] --expires-at=UTC [--output=NEW_PATH]\nExecute: npm run research:preview:evaluate -- --mode=execute --manifest=PATH --approval=PATH --live\nClosed models: gemini-4-argon, gpt-6-luna, gemini-3-1-pro, command-a-plus. At most two model/brief pairs, six generation calls, one optional Rerank 5 Fast side experiment and US$10. Requires separately approved development provider and Brave credentials; no production credits/budgets. Interrupted/unknown intent is never retried automatically.";
+const help = "Preview: npm run research:preview:evaluate -- [--models=gemini-4-argon,gpt-6-luna] [--cases=official-runtime-support] [--request-input-ceiling=32768] [--rerank] [--max-total-microusd=10000000] --expires-at=UTC [--output=NEW_PATH]\nExecute: npm run research:preview:evaluate -- --mode=execute --manifest=PATH --approval=PATH --live\nClosed models: gemini-4-argon, gpt-6-luna, gemini-3-1-pro, command-a-plus. At most two model/brief pairs, six generation calls, one optional Rerank 5 Fast side experiment and US$10. Requires separately approved development provider and Brave credentials; no production credits/budgets. Interrupted/unknown intent is never retried automatically.";
 
 async function loadProviders() {
   const [{ getResearchPreviewAiModel }, { runResearchPreviewStep }, { readResearchPage }, { resolveProviderApiKey }] = await Promise.all([
@@ -51,7 +52,7 @@ async function loadProviders() {
 export async function runResearchEvaluationCli(args, seams = {}) {
   const options = new Map();
   for (const argument of args) {
-    const match = /^--(mode|manifest|approval|output|cases|models|rerank|max-total-microusd|expires-at|live|help)(?:=(.*))?$/.exec(argument);
+    const match = /^--(mode|manifest|approval|output|cases|models|rerank|request-input-ceiling|max-total-microusd|expires-at|live|help)(?:=(.*))?$/.exec(argument);
     if (!match || options.has(match[1]) || (["live", "help", "rerank"].includes(match[1]) ? match[2] !== undefined : !match[2])) throw new Error("Invalid evaluation arguments");
     options.set(match[1], match[2] ?? true);
   }
@@ -65,17 +66,19 @@ export async function runResearchEvaluationCli(args, seams = {}) {
     const manifest = buildResearchEvaluationManifest({ sourceDigest: digest(), currentDate: new Date(now()).toISOString().slice(0, 10),
       expiresAt: options.get("expires-at"), maxTotalMicroUsd: options.has("max-total-microusd") ? Number(options.get("max-total-microusd")) : RESEARCH_EVALUATION_MAX_MICRO_USD,
       ...(options.has("cases") ? { caseIds: options.get("cases").split(",") } : {}),
-      ...(options.has("models") ? { modelIds: options.get("models").split(",") } : {}), rerank: options.has("rerank") });
+      ...(options.has("models") ? { modelIds: options.get("models").split(",") } : {}), rerank: options.has("rerank"),
+      ...(options.has("request-input-ceiling") ? { requestInputCeilingTokens: Number(options.get("request-input-ceiling")) } : {}) });
     if (options.has("output")) writeCollectionDurably(resolve(options.get("output")), JSON.stringify(manifest, null, 2) + "\n", "wx");
     return { mode, manifest };
   }
   if (mode !== "execute" || !options.has("manifest") || !options.has("approval") || !options.has("live") ||
-      ["cases", "models", "rerank", "max-total-microusd", "expires-at", "output"].some(key => options.has(key))) throw new Error("Execution requires an unchanged manifest, approval and --live");
+      ["cases", "models", "rerank", "request-input-ceiling", "max-total-microusd", "expires-at", "output"].some(key => options.has(key))) throw new Error("Execution requires an unchanged manifest, approval and --live");
   if (production(env)) throw new Error("Research evaluation must run in a local development process");
   const supplied = readJson(options.get("manifest"));
   const manifest = buildResearchEvaluationManifest({ sourceDigest: digest(), currentDate: supplied.currentDate, expiresAt: supplied.expiresAt,
     maxTotalMicroUsd: supplied.maxTotalMicroUsd, caseIds: [...new Set(supplied.cases.map(entry => entry.id))],
-    modelIds: supplied.models.map(entry => entry.id), rerank: supplied.rerank.enabled });
+    modelIds: supplied.models.map(entry => entry.id), rerank: supplied.rerank.enabled,
+    ...(supplied.requestInputCeilingTokens !== undefined ? { requestInputCeilingTokens: supplied.requestInputCeilingTokens } : {}) });
   if (researchEvaluationDigest(manifest) !== researchEvaluationDigest(supplied)) throw new Error("Evaluation source, pricing or manifest changed");
   const approval = validateResearchEvaluationApproval(readJson(options.get("approval")), manifest, now());
   if (Object.keys(env).some(key => /^CHAT_MODEL_.*_(INPUT_USD_PER_MILLION|OUTPUT_USD_PER_MILLION|CACHED_INPUT_PRICE_MULTIPLIER|MAX_OUTPUT_TOKENS|RESERVATION_OUTPUT_TOKENS)$/i.test(key))) throw new Error("Pricing environment overrides are not allowed");
@@ -114,13 +117,17 @@ export async function runResearchEvaluationCli(args, seams = {}) {
         checkpoint = result.checkpoint;
         if (!claimed) throw new Error("Evaluation returned without a durable dispatch intent");
         record({ kind: "checkpoint", runKey: entry.runKey, modelId: entry.modelId, completedSteps: checkpoint.completedSteps,
-          usage: checkpoint.usage, searchCount: checkpoint.search.backendRequestCount, pageReadCount: checkpoint.pageReads.length });
+          usage: checkpoint.usage, searchCount: checkpoint.search.backendRequestCount, pageReadCount: checkpoint.pageReads.length,
+          pageReads: checkpoint.pageReads.map(page => ({ sourceId: page.sourceId, url: page.url, ...curateResearchPageEvidence(page),
+            ...(page.status === "read" ? { contentCharacters: page.content.length, contentDigest: researchEvaluationDigest(page.content) } : {}) })) });
         if (checkpoint.search.backendRequestCount !== checkpoint.search.succeededRequestCount) throw new Error("Evaluation search usage may be unknown");
         if (result.finished) {
           const measuredCostMicroUsd = researchEvaluationMeasuredCost(checkpoint.usage, entry, checkpoint.search.succeededRequestCount);
           if (measuredCostMicroUsd === null || measuredCostMicroUsd > entry.reservedMicroUsd) throw new Error("Evaluation cost is unknown or exceeds its authorization");
           measuredTotalMicroUsd += measuredCostMicroUsd;
           record({ kind: "terminal", runKey: entry.runKey, modelId: entry.modelId, caseId: entry.id, stopReason: checkpoint.stopReason,
+            outcome: result.report?.outcome ?? null, citedSources: (result.report?.citedSources ?? []).map(source => ({
+              sourceId: source.sourceId, url: source.url, ...(source.pageRead ? { pageRead: curateResearchPageEvidence(source.pageRead) } : {}) })),
             content: result.report?.content ?? null, latencyMs: now() - startedAt, usage: checkpoint.usage, measuredCostMicroUsd, qualityVerdict: "manual_review_pending" });
           if (!rerankInput) rerankInput = { query: entry.question, sources: checkpoint.sources, runKey: entry.runKey };
           break;

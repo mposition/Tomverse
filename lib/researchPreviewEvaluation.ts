@@ -24,6 +24,7 @@ const RERANK_INPUT_USD_PER_MILLION = 0.02;
 export const RESEARCH_EVALUATION_CASES = [
   { id: "official-runtime-support", question: "Compare the current supported Node.js releases using official Node.js sources. Distinguish Active LTS, Maintenance LTS and Current, and state the date of the evidence. Identify any uncertainty.", locale: "en" },
   { id: "official-web-accessibility", question: "WCAG 2.2의 키보드 접근성과 포커스 가시성 요구사항을 W3C 공식 자료로 조사하고, 필수 기준과 권고를 구분해 주세요. 확인할 수 없는 내용은 한계로 밝혀 주세요.", locale: "ko" },
+  { id: "official-compact-original", question: "Use the RFC Editor's official RFC 1149 source. Search for it, then read its original text with read_research_sources before reporting. Explain its stated purpose and limitations, distinguish the document's publication date from today's evidence date, and cite the source IDs. Prefer its compact official HTML or plain-text version. Disclose any failed or truncated read.", locale: "en" },
 ] as const;
 
 export const researchEvaluationDigest = (value: unknown): string => {
@@ -52,13 +53,15 @@ export function resolveResearchEvaluationModel(id: string): AiModel {
 export function buildResearchEvaluationManifest(input: {
   sourceDigest: string; currentDate: string; expiresAt: string; maxTotalMicroUsd: number;
   caseIds?: readonly string[]; modelIds?: readonly string[]; rerank?: boolean;
+  requestInputCeilingTokens?: number;
 }) {
   const caseIds = input.caseIds ?? [RESEARCH_EVALUATION_CASES[0].id];
   const modelIds = input.modelIds ?? RESEARCH_EVALUATION_DEFAULT_MODELS;
   if (!/^[a-f0-9]{64}$/.test(input.sourceDigest) || !/^\d{4}-\d{2}-\d{2}$/.test(input.currentDate) ||
       !Number.isSafeInteger(input.maxTotalMicroUsd) || input.maxTotalMicroUsd < 1 || input.maxTotalMicroUsd > RESEARCH_EVALUATION_MAX_MICRO_USD ||
       !Number.isFinite(Date.parse(input.expiresAt)) || caseIds.length < 1 || modelIds.length < 1 ||
-      caseIds.length * modelIds.length > 2 || new Set(caseIds).size !== caseIds.length || new Set(modelIds).size !== modelIds.length) {
+      caseIds.length * modelIds.length > 2 || new Set(caseIds).size !== caseIds.length || new Set(modelIds).size !== modelIds.length ||
+      (input.requestInputCeilingTokens !== undefined && (!Number.isSafeInteger(input.requestInputCeilingTokens) || input.requestInputCeilingTokens < 1))) {
     throw new Error("Evaluation is limited to two model/brief pairs, six model calls and US$10");
   }
   const models = modelIds.map(id => {
@@ -75,7 +78,8 @@ export function buildResearchEvaluationManifest(input: {
     const pipeline = createResearchPreviewBudget({ accessKind: "user", model,
       input: researchPreviewInputEstimate({ ...brief, currentDate: input.currentDate, pageReadingEnabled: true }),
       webSearchSurchargeCredits: 0, searchReservation: reservation, pageReadingEnabled: true });
-    const requestInputCeiling = Math.min(pipeline.contextInputTokens ?? pipeline.inputTokens, profile.contextWindowTokens - pipeline.maxOutputTokens);
+    const requestInputCeiling = Math.min(pipeline.contextInputTokens ?? pipeline.inputTokens, profile.contextWindowTokens - pipeline.maxOutputTokens,
+      input.requestInputCeilingTokens ?? Number.MAX_SAFE_INTEGER);
     if (requestInputCeiling < 1) throw new Error("Evaluation model has no bounded input capacity");
     const budget = { ...pipeline, contextInputTokens: requestInputCeiling,
       inputTokens: Math.min(pipeline.inputTokens, 3 * requestInputCeiling + 2 * pipeline.maxOutputTokens),
@@ -94,6 +98,7 @@ export function buildResearchEvaluationManifest(input: {
     scope: "One side experiment on captured public search snippets; no HTML, new searches, report rewrite or model judge" };
   const providers = [...new Set(["brave", ...models.map(model => model.provider), ...(input.rerank ? ["cohere"] : [])])].sort();
   const body = { version: 2, purpose: "research-preview-development-evaluation", sourceDigest: input.sourceDigest,
+    ...(input.requestInputCeilingTokens !== undefined ? { requestInputCeilingTokens: input.requestInputCeilingTokens } : {}),
     models, currentDate: input.currentDate, expiresAt: input.expiresAt, credentialScope: RESEARCH_EVALUATION_CREDENTIAL_SCOPE, providers,
     cases, rerank, maxTotalMicroUsd: input.maxTotalMicroUsd, hardCeilingMicroUsd: RESEARCH_EVALUATION_MAX_MICRO_USD,
     totalReservedMicroUsd: cases.reduce((sum, entry) => sum + entry.reservedMicroUsd, 0) + rerank.reservedMicroUsd,

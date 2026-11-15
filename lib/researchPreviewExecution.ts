@@ -154,7 +154,9 @@ export function createResearchPreviewExecution(input: {
 
   const reportTool = tool({
     description:
-      "Submit the final Research Preview report. Text fields must be plain text without URLs or Markdown. Cite only sourceId values available before this model step.",
+      "Submit the final Research Preview report. Text fields must be plain text without URLs or Markdown. Cite only sourceId values available before this model step. " +
+      "Use at most 6 findings, 5 statements per finding, 5 contradictions, 6 limitations, 5 next questions and 15 distinct source IDs overall. " +
+      "For page_text statements, every cited source must have a successful read status in a prior step; an unavailable source cannot support a page_text citation.",
     inputSchema: researchPreviewReportSchema,
     execute: async (report) => {
       if (currentStep === 0) return { status: "rejected" as const, reason: "report_not_allowed_on_first_step" };
