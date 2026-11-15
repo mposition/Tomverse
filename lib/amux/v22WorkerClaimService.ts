@@ -22,7 +22,7 @@ import { calculateCurrentApprovedAmuxV4TaskCost } from
   "./v4TaskCostCatalogApprovalService.ts";
 import { checkV4TaskApprovedCeiling, v4TaskCeilingDecision,
   v4TaskReceiptForApprovedRoutes } from "./v4TaskCostCeilingCore.ts";
-import { AMUX_V4_NEW_MODEL_ROUTE_ENV, amuxV4NewModelRouteWithinCeiling } from "./v4TaskNewModelRouteSwitch.ts";
+import { amuxV4NewModelRouteOptions } from "./v4TaskNewModelRouteSwitch.ts";
 import { readAmuxV52TaskReceipt } from "./v52GradeReceipt.ts";
 import { inspectV52TaskCatalogGrades } from "./v4TaskCostCatalogCore.ts";
 import { amuxTaskRoutePrice } from "./v4TaskCostAutoCatalogCore.ts";
@@ -248,7 +248,7 @@ async function claimCandidate(taskId: string, assignmentId: string,
         amuxV22RecoveryAddedRouteConsented(approvedCost, approved.receipt, recovery.routeId);
       if (reconfirmOnly && !addedRouteConsented)
         throw new BoardImportError("task_not_ready", 409);
-      const routeOptions = amuxV4NewModelRouteWithinCeiling(process.env[AMUX_V4_NEW_MODEL_ROUTE_ENV]);
+      const routeOptions = amuxV4NewModelRouteOptions(process.env, !!recovery);
       // Only routes this Task's approval can run on are judged and offered; a
       // recovery binds its own added route (policy v48) and keeps them all.
       const runnable = recovery ? approved.receipt :
