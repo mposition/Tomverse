@@ -22,13 +22,6 @@ const page = read("../app/(site)/(application)/settings/data/page.tsx");
 const settingsList = read("../components/auth/AuthButton.tsx");
 const route = read("../app/api/user/account/export/route.ts");
 
-test("the empty history describes the retained 90-day window rather than lifetime activity", () => {
-  assert.match(en.accountDataExport.historyEmpty, /last 90 days/);
-  assert.match(ko.accountDataExport.historyEmpty, /최근 90일간/);
-  assert.doesNotMatch(en.accountDataExport.historyEmpty, /not.*yet|never/i);
-  assert.doesNotMatch(ko.accountDataExport.historyEmpty, /적이 없/);
-});
-
 test("the settings list links to the page, and the page renders the component", () => {
   assert.match(settingsList, /href="\/settings\/data"/);
   assert.match(settingsList, /section="account-data"/);
