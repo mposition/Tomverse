@@ -111,15 +111,18 @@ test.describe("Tomverse Chat and Review product switcher", () => {
       { id: "normal-answer", role: "assistant", content: "Two weekend options.", modelId: "gpt-5-6-luna" },
     ] });
     const execution: string[] = [];
+    const transferredPrompts: string[] = [];
     page.on("request", request => {
-      const pathname = new URL(request.url()).pathname;
+      const url = new URL(request.url());
+      const pathname = url.pathname;
+      if (pathname === "/review" && url.searchParams.has("prompt")) transferredPrompts.push(url.searchParams.get("prompt")!);
       if (request.method() === "POST" && (pathname.includes("review-handoff") || pathname === "/api/chat" || pathname.endsWith("/messages"))) execution.push(pathname);
     });
     await page.goto("/chat?lang=en&conversation=qa-conversation");
     await page.getByTestId("chat-compare-in-review").click();
-    await expect(page).toHaveURL(/\/review\?prompt=/);
-    expect(new URL(page.url()).searchParams.get("prompt")).toBe(question);
+    await expect(page).toHaveURL(/\/review(?:\?|$)/);
     await expect(page.getByTestId("chat-textarea")).toHaveValue(question);
+    expect(transferredPrompts).toContain(question);
     expect(execution).toEqual([]);
   });
 

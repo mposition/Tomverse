@@ -4,6 +4,8 @@ import { toPublicCatalogModel } from "@/lib/publicModelCatalog";
 
 /** Keep unrelated preparation synthetic; each journey owns its handoff and send routes. */
 export async function mockReviewHandoffBackground(page: Page) {
+  // Specific page/context mocks registered by the journey take precedence.
+  await page.context().route("**/api/**", route => route.abort("blockedbyclient"));
   await page.route("**/api/models/catalog", route => route.fulfill({ json: { models: AVAILABLE_MODELS.map(toPublicCatalogModel) } }));
   await page.route("**/api/build-info", route => route.fulfill({ json: {
     environment: "development", commitSha: null, shortCommitSha: null, builtAt: null,

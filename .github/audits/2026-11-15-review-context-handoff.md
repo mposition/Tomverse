@@ -57,12 +57,14 @@ Research·이미지·voice·Guest/public share는 이번 지원 범위 밖이다
 | Native 단일 모델 참조·세션 재검증 후 transport | 54개 통과, mobile typecheck 통과 |
 | Native UI | 기존·신규 11개와 한도/미지원 오류 안내 2개 통과 |
 | Web 신규 handoff UI | desktop/mobile browser 8개 통과: long draft, CAS, reload/Back, 잠금 거절, consume, anchor generation, 첨부, 일반 Review 격리 |
+| Web 필수 기존 회귀 | desktop/mobile browser 6개 통과: 일반 Chat 비교, 원문 fork, Review→Chat(모바일 초안·첨부 보존 포함) |
 | PostgreSQL migration | 별도 loopback DB에 422개 적용, schema drift 0 |
 | durable transaction DB | 24개 통과 |
 | handoff 생성 DB | 4개 통과 |
 | 기존 continuation/source opt-in export DB | 50개 통과 |
 | manifest/native reference core | 9개 통과 |
 | handoff reference loader | 8개 통과 |
+| 전체 application typecheck | `npm run typecheck -- --incremental true --tsBuildInfoFile .tmp-review-context-final.tsbuildinfo` 통과 (exit 0, Node heap 8 GiB) |
 | 변경 파일 lint·diff check | 통과 |
 | accent token / conversation writer 검사 | 통과 |
 | model pricing / enum constraint 검사 | 통과 |
@@ -75,6 +77,8 @@ Web 기능 검증은 외부 호출을 차단한 별도 로컬 Next development �
 모델 카탈로그 등 배경 API는 기존 E2E fixture 방식으로 명시적으로 mock했다.
 메모리 압박에서 경로가 반복 컴파일되는 것을 막기 위한 개발 서버 설정은 검증에만
 사용하며 제품 변경으로 남기지 않는다.
+광범위 44개 회귀 실행은 자원 압박과 미모킹 배경 API의 초기 컴파일 때문에 중단했다.
+위 필수 기존 6개는 별도의 명시적 fixture로 끝까지 다시 검증했다.
 임시 PostgreSQL은 검증 후 종료했고 사용한 loopback 포트가 해제된 것을 확인했다.
 
 ## 독립 검토
