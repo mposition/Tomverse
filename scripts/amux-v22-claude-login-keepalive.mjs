@@ -143,9 +143,11 @@ async function main() {
         } catch { return null; }
       })),
       runCli: (args) => run(cli, args, { cwd: workDir, timeout: 180_000 }),
+      // A missing stage setting is a failed restage, never a silent "ok".
       runStage: () => (stageScript && workers.length > 0 ?
         run(process.execPath, [stageScript, ...workers.map((w) => `anthropic:${w}`)],
-          { timeout: 60_000 }) : Promise.resolve()),
+          { timeout: 60_000 }) :
+        Promise.reject(new Error("AMUX_V22_STAGE_AUTH_SCRIPT or AMUX_V22_CLAUDE_WORKERS is not set"))),
       log: (line) => console.log(JSON.stringify({ event: "amux_v22_claude_keepalive", ...line })),
     });
   } finally {
