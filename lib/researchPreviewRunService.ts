@@ -636,9 +636,12 @@ export async function processOneResearchPreviewRun(
           ? {
               status: "failed" as const,
               stopReason: next.stopReason ?? "missing_report",
-              errorCode: "RESEARCH_REPORT_MISSING",
+              errorCode: result.reportRejection?.code ?? "RESEARCH_REPORT_MISSING",
             }
           : undefined;
+      if (terminalFailure && result.reportRejection) console.warn(JSON.stringify({
+        event: "research_report_rejected", runId: current.id, diagnostic: result.reportRejection,
+      }));
       await completeResearchPreviewGeneration({
         runId: current.id,
         generationId: generation.id,
