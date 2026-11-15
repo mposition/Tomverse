@@ -451,6 +451,11 @@ run(
     // mismatch cause keys were longer than the store admits.
     "tests/integration/amux-card-lifecycle-e2e.db.test.ts",
     "tests/integration/amux-stalled-card-sweep.db.test.ts",
+    // Owner decision 2026-11-15: a worker's platform failure spends no card
+    // attempt, the next claim prefers another worker, a worker failing again
+    // and again is quarantined until its usage reads again, and why a card
+    // waits and the box's sign-in signals are stored for Admin.
+    "tests/integration/amux-infra-failure-routing.db.test.ts",
     // Owner decision 2026-11-14: an unchanged score's active window is
     // extended by the system refresher, up to its baseline, never past it.
     "tests/integration/amux-portfolio-score-refresh.db.test.ts",

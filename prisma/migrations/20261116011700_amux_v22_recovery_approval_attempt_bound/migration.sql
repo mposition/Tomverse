@@ -1,7 +1,7 @@
 -- Owner direction 2026-11-15: an owner's recovery approval may name a next
 -- attempt above five (infrastructure failures keep their number but do not
 -- count; the app's runaway guard is thirty counted attempts). The bound is now
--- 64, as in the attempt guards (20261115140200, 20261115140300). Every other
+-- 64, as in the attempt guards (20261116011500, 20261116011600). Every other
 -- part of the shape check is unchanged. Existing rows all satisfy it.
 ALTER TABLE "AmuxV22TaskRecoveryApproval"
   DROP CONSTRAINT "AmuxV22RecoveryApproval_shape_check";

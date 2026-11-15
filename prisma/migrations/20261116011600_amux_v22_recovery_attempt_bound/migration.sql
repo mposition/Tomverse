@@ -3,7 +3,7 @@
 -- runaway guard is thirty counted attempts). An owner's recovery retry of
 -- such a card named a next attempt above five, which this guard refused. The
 -- bound is now 64, as for the v22 attempt guard
--- (20261115140200_amux_v22_attempt_number_bound). The exact one-attempt
+-- (20261116011500_amux_v22_attempt_number_bound). The exact one-attempt
 -- authority it checks is unchanged.
 -- baseline-check: replace-function-if-body-sha256 "amux_v22_recovery_attempt_guard" "49f42cf5e00dbfe9c5740f09c83ff4c52d4e51f95325b64f1f92ccc545638b0b" "c50de03d1fca6243581c0b9e1d2a3ad24a07d7cd4b988201028dabbb095fd02f"
 CREATE OR REPLACE FUNCTION amux_v22_recovery_attempt_guard() RETURNS trigger

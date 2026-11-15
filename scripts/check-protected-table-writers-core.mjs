@@ -779,6 +779,13 @@ export const RAW_SQL_ALLOWLIST = [
     reason: "The migration only replaces the patchBody size CHECK constraint (ALTER TABLE ... DROP/ADD CONSTRAINT); it writes no work item row.",
   },
   {
+    path: "prisma/migrations/20261116011700_amux_v22_recovery_approval_attempt_bound/migration.sql",
+    table: "AmuxV22TaskRecoveryApproval",
+    tableMentions: 2,
+    writeVerbs: 3,
+    reason: "The migration only replaces the recovery approval's shape CHECK constraint to admit a next attempt up to 64; its three write verbs are the two ALTER TABLE statements and the DROP CONSTRAINT. It writes no approval row.",
+  },
+  {
     path: "lib/amux/ideaLaneService.ts",
     table: "AdminAuditLog",
     tableMentions: 1,
