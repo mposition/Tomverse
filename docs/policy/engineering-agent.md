@@ -678,7 +678,10 @@ patch 본문을 실행하지 않는다(파싱·적용의 유일한 예외는 아
 `path_conflict`로 거절한다. 거절하는 것은 다시 만들 수 없는 것뿐이다: submodule 변경,
 데이터 없이 쓴 binary(`Binary files … differ`), git 형식이 아닌 본문, 비정규 경로, 그리고
 바뀐 파일 내용에서 secret 패턴이 보이는 patch(binary는 바이트 그대로 검사한다). T2 초안도
-공개 draft PR이 될 수 있으므로 secret은 거절이다. `.gitattributes`가 적용되는 경로, 중첩
+공개 draft PR이 될 수 있으므로 secret은 거절이다. binary 파일은 patch 안에서 압축된 base85
+글자라 본문 검사로는 보이지 않으므로, 저장 전 두 검사(sidecar의 로컬 검사, 앱의 증거 저장 검사)와
+Publisher의 push 전 검사가 모두 그 바이트를 풀어 검사한다(새 파일·교체는 전체 바이트, delta는
+삽입하는 바이트). 풀 수 없는 binary 구간이 있는 patch는 저장하지 않는다. `.gitattributes`가 적용되는 경로, 중첩
 `.gitattributes`, submodule처럼 tree 검증이 지원하지 않는다고 보고하는 변경은 거절하지 않고
 tier gate의 `unsupported_tree_change` finding으로 T2가 된다. binary·symlink·실행 파일·삭제도
 기존 규칙(§4: `not_text`, `symlink`, `executable_bit` 등)대로 tier 판정을 받는다.
