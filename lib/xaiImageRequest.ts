@@ -32,18 +32,39 @@ export const XAI_IMAGES_URL = "https://api.x.ai/v1/images/generations";
  */
 const LAUNCH_TIERS = new Set<ImageResolutionTier>(["1k"]);
 
+/**
+ * Grok Imagine Image 2.x takes a `quality` field and bills each image "at the
+ * quality they are served at" (xAI release notes, August 2026). Omitted, it is
+ * `auto`: `low` for a generation and `medium` for an edit today, and xAI's to
+ * change. So the quality the user was quoted is always stated for these
+ * models, and never for an older model, whose request has no such field.
+ */
+export const xaiModelTakesQuality = (apiModelId: string): boolean =>
+  /^grok-imagine-image-2\./.test(apiModelId);
+
+/** The quality values xAI documents for a 2.x model; `high` has no mapping. */
+export const XAI_IMAGE_QUALITIES = ["low", "medium"] as const;
+
 export const buildXaiImageRequest = (input: {
   apiModelId: string;
   prompt: string;
   size: ImageSize;
+  /** The product's quality. A 2.x model is refused without a documented one. */
+  quality?: string;
 }): Record<string, unknown> | null => {
   const option = optionForLegacyImageSize(input.size);
   if (!LAUNCH_TIERS.has(option.tier) || option.aspectRatio !== "1:1") return null;
   const mapped = xaiRequestForOption(option);
   if (!mapped) return null;
+  const takesQuality = xaiModelTakesQuality(input.apiModelId);
+  // Refused, not defaulted: `auto` would bill a quality nobody was quoted.
+  if (takesQuality && !(XAI_IMAGE_QUALITIES as readonly string[]).includes(input.quality ?? "")) {
+    return null;
+  }
   return {
     model: input.apiModelId,
     prompt: input.prompt,
+    ...(takesQuality ? { quality: input.quality } : {}),
     resolution: mapped.resolution,
     aspect_ratio: mapped.aspectRatio,
     // Base64 rather than the default temporary URL: the original bytes are
@@ -97,6 +118,7 @@ export const buildXaiImageEditRequest = (input: {
   apiModelId: string;
   prompt: string;
   size: ImageSize;
+  quality?: string;
   image: { bytes: Uint8Array; mimeType: string };
 }): Record<string, unknown> | null => {
   const body = buildXaiImageRequest(input);
