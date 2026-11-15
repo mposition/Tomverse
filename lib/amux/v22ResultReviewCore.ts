@@ -90,6 +90,8 @@ export function amuxV22ResultReviewRelayCard(input: {
   workspace?: boolean;
 }) {
   if (input.criteria.length === 0 || !input.findings.trim()) return null;
+  const context = dmCardEvidenceContext([{ name: "FINDINGS.md", heading: "Its run's report", text: input.findings }], input.workspace);
+  if (context === null) return null;
   const question = [
     "A v22 Task finished and waits for review before it can be marked done.",
     `Task: ${input.taskLabel} (${input.role ?? "task"} Task)`,
@@ -105,7 +107,7 @@ export function amuxV22ResultReviewRelayCard(input: {
     provider: AMUX_V22_RESULT_REVIEW_DM_PROVIDER,
     title: `Result review: ${input.taskLabel}`,
     question,
-    context: dmCardEvidenceContext([{ name: "FINDINGS.md", heading: "Its run's report", text: input.findings }], input.workspace),
+    context,
     unblocks: "An approved result finishes the Task so the Tasks after it can start; a retry runs it again; a block leaves it for a person.",
     options: [
       { id: "approve", label: "Approve the result; the Task is done" },

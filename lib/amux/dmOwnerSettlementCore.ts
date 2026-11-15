@@ -224,6 +224,8 @@ export function amuxDmOwnerSettlementCard(input: {
     ...(findings === null ? [] : [{ name: "FINDINGS.md" as const, heading: "Its run's report", text: findings }]),
   ];
   if (input.kind === "stopped") {
+    const context = dmCardEvidenceContext(evidence, input.workspace);
+    if (context === null) return null;
     return {
       question_id: input.settlementId,
       worker: AMUX_DM_OWNER_SETTLEMENT_DM_WORKER,
@@ -231,7 +233,7 @@ export function amuxDmOwnerSettlementCard(input: {
       title: `Owner queue: ${input.taskLabel}`,
       question: [...head, ...rejected, ...siblings, REMAKE_LINE,
         "Should the Task run again, be marked done because its work is in, or be closed?"].join("\n"),
-      context: dmCardEvidenceContext(evidence, input.workspace),
+      context,
       unblocks: "A retry runs the Task again; done lets the Tasks after it start; a close takes the card off the board; a remake files one new idea in place of the cards it closes.",
       options: [
         { id: "retry", label: "Run the Task again" },
@@ -243,6 +245,9 @@ export function amuxDmOwnerSettlementCard(input: {
   const patch = input.pull!.patch!;
   const files = engineeringAgentPatchFiles(patch);
   if (files.length === 0) return null;
+  const context = dmCardEvidenceContext([{ name: "PATCH.diff", heading: "The pull request's patch", text: patch }, ...evidence],
+    input.workspace);
+  if (context === null) return null;
   return {
     question_id: input.settlementId,
     worker: AMUX_DM_OWNER_SETTLEMENT_DM_WORKER,
@@ -252,8 +257,7 @@ export function amuxDmOwnerSettlementCard(input: {
       `Pull request #${input.pull!.number}, files (${files.length}):`,
       ...files.map((file) => `- ${file.path} (+${file.added} -${file.removed})`),
       "Should the pull request be approved, the Task run again, or the card closed?"].join("\n"),
-    context: dmCardEvidenceContext([{ name: "PATCH.diff", heading: "The pull request's patch", text: patch }, ...evidence],
-      input.workspace),
+    context,
     context_paths: patchContextPaths(patch),
     unblocks: "An approval is kept for the merge lane, which acts on it later; a retry runs the Task again; a close takes the card off the board and leaves the pull request.",
     options: [

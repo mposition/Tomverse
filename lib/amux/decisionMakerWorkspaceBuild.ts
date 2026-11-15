@@ -124,8 +124,9 @@ export const dmWorkspaceHttpClient: DmWorkspaceHttp = async (url) => {
 // git, as the broker runs it
 // ---------------------------------------------------------------------------
 
-/** One git command: its arguments after `git`, a working directory and a deadline. */
-export type DmGitRunner = (args: string[], options: { cwd: string; timeoutMs: number }) => Promise<{ ok: boolean; stdout: string }>;
+/** One git command: its arguments after `git`, a working directory, a deadline and a way to stop it. */
+export type DmGitRunner = (args: string[], options: { cwd: string; timeoutMs: number; signal?: AbortSignal }) =>
+  Promise<{ ok: boolean; stdout: string }>;
 
 /** The system's git, by its fixed path. */
 export const DM_GIT_EXECUTABLE = "/usr/bin/git";
@@ -164,7 +165,8 @@ const runGit = (executable: string, env: NodeJS.ProcessEnv, extraFlags: string[]
       execFile(
         executable,
         [...DM_WORKSPACE_GIT_FLAGS, ...extraFlags, ...args],
-        { cwd: options.cwd, env, timeout: options.timeoutMs, killSignal: "SIGKILL", maxBuffer: 1024 * 1024, windowsHide: true },
+        { cwd: options.cwd, env, timeout: options.timeoutMs, killSignal: "SIGKILL", maxBuffer: 1024 * 1024, windowsHide: true,
+          ...(options.signal ? { signal: options.signal } : {}) },
         (error, stdout) => resolve({ ok: error === null, stdout: String(stdout ?? "") }),
       );
     });
@@ -178,6 +180,34 @@ export type DmWorkspaceBuild =
   | { ok: true; patch: "applied" | "not_applied" | "none"; bytes: number }
   | { ok: false; reason: "git_failed"; step: string }
   | { ok: false; reason: "head_mismatch" | "write_failed" | "tree_unsafe" | "too_large" };
+
+/** How often the build measures the request directory while git writes into it. */
+export const DM_WORKSPACE_DISK_CHECK_MS = 1_000;
+
+/** The bytes of the regular files under `root` (links and others count nothing); never throws. */
+export const dmWorkspaceBytes = (root: string): number => {
+  let bytes = 0;
+  const directories = [root];
+  while (directories.length > 0) {
+    const directory = directories.pop()!;
+    let names: string[];
+    try {
+      names = readdirSync(directory);
+    } catch {
+      continue;
+    }
+    for (const name of names) {
+      try {
+        const stats = lstatSync(join(directory, name));
+        if (stats.isDirectory()) directories.push(join(directory, name));
+        else if (stats.isFile()) bytes += stats.size;
+      } catch {
+        // Gone between the listing and the stat: git renames as it writes.
+      }
+    }
+  }
+  return bytes;
+};
 
 /** Everything under `root` handed to the vendor's group read-only; any link refused; sizes summed. */
 const handOver = (root: string, groupId: number | null, owners: boolean): { ok: true; bytes: number } | { ok: false; reason: "tree_unsafe" | "too_large" } => {
@@ -239,11 +269,33 @@ export async function buildDmWorkspace(
   // One budget for every step (DM_WORKSPACE_BUILD_MAX_MS): a step that would
   // run past it is not started, and the one running is cut at it.
   const buildDeadline = Date.now() + DM_WORKSPACE_BUILD_MAX_MS;
+  // The disk cap holds while git writes, not only after: the directory is
+  // measured every second, and the running git is stopped once it passes
+  // DM_WORKSPACE_DISK_MAX_BYTES (it can overshoot by what it writes in that
+  // second; a size-limited filesystem under the request root is the box's
+  // own bound, docs/policy/amux-decision-maker.md §0b).
+  const stop = new AbortController();
+  let overDisk = false;
+  const watchdog = setInterval(() => {
+    if (!overDisk && dmWorkspaceBytes(directory) > DM_WORKSPACE_DISK_MAX_BYTES) {
+      overDisk = true;
+      stop.abort();
+    }
+  }, DM_WORKSPACE_DISK_CHECK_MS);
+  watchdog.unref?.();
   const unbounded = git;
   const bounded: DmGitRunner = async (args, step) => {
     const left = buildDeadline - Date.now();
-    return left <= 0 ? { ok: false, stdout: "" } : unbounded(args, { ...step, timeoutMs: Math.min(step.timeoutMs, left) });
+    if (left <= 0 || overDisk) return { ok: false, stdout: "" };
+    return unbounded(args, { ...step, timeoutMs: Math.min(step.timeoutMs, left), signal: stop.signal });
   };
+  try {
+    const built = await buildWithin(bounded);
+    return overDisk ? { ok: false, reason: "too_large" } : built;
+  } finally {
+    clearInterval(watchdog);
+  }
+  async function buildWithin(bounded: DmGitRunner): Promise<DmWorkspaceBuild> {
   try {
     mkdirSync(evidence, { mode: 0o750 });
     for (const file of workspace.files) writeFileSync(join(evidence, file.name), file.text, { encoding: "utf8", flag: "wx", mode: 0o640 });
@@ -297,4 +349,5 @@ export async function buildDmWorkspace(
   }
   if (!handed.ok) return handed;
   return { ok: true, patch, bytes: handed.bytes };
+  }
 }

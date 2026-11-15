@@ -438,28 +438,23 @@ const INLINE_ROOM_BYTES = DM_CARD_TEXT_MAX_BYTES - 32 * 1024;
 /**
  * A card's context for its evidence: with the workspace on, the pointer to
  * the files; with it off (the kill switch, the card alone), the evidence
- * itself, whole, in the evidence markers the term check may skip -- unless it
- * holds characters a card cannot carry or is larger than the card's one cap
- * leaves room for, and then a sentence says so.
+ * itself, whole, in the evidence markers the term check may skip. Null when
+ * the evidence cannot ride whole -- characters a card cannot carry, or more
+ * than the card's one cap leaves room for: the caller files no card then and
+ * the person decides, since a DM must never judge without the evidence.
  */
 export const dmCardEvidenceContext = (
   evidence: ReadonlyArray<{ name: DmWorkspaceEvidenceName; heading: string; text: string }>,
   workspace: boolean = amuxDmWorkspaceEnabled(),
-): string => {
+): string | null => {
   if (workspace) return dmWorkspaceCardPointer(evidence.map((item) => item.name));
   const blocks: string[] = [];
   let room = INLINE_ROOM_BYTES;
   for (const item of evidence) {
-    if (CARD_CONTROL.test(item.text)) {
-      blocks.push(`${item.heading} holds characters a card cannot carry, so it is not shown.`);
-      continue;
-    }
+    if (CARD_CONTROL.test(item.text)) return null;
     const block = `${DM_EVIDENCE_OPEN}\n${item.heading}:\n${item.text}\n${DM_EVIDENCE_CLOSE}`;
     const bytes = Buffer.byteLength(JSON.stringify(block), "utf8");
-    if (bytes > room) {
-      blocks.push(`${item.heading} is larger than a card can carry, so it is not shown.`);
-      continue;
-    }
+    if (bytes > room) return null;
     room -= bytes;
     blocks.push(block);
   }

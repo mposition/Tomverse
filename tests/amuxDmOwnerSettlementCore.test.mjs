@@ -160,11 +160,11 @@ test("a stopped Task's card is a summary; its report is evidence in the workspac
   assert.ok(long, "long findings never leave the card unfiled");
   assert.equal(long.context, `[evidence]\nIts run's report:\n${longFindings}\n[/evidence]`);
   assert.doesNotMatch(long.context, /cut to fit/);
-  // Only what a card cannot carry at all is not shown, and the card still goes.
+  // Evidence a card cannot carry whole files no card: the person decides (a DM never judges without it).
   const bell = amuxDmOwnerSettlementCard({ ...base, kind: "stopped", findings: "bell\u0007", workspace: false });
-  assert.equal(bell.context, "Its run's report holds characters a card cannot carry, so it is not shown.");
+  assert.equal(bell, null);
   const huge = amuxDmOwnerSettlementCard({ ...base, kind: "stopped", findings: "y".repeat(300_000), workspace: false });
-  assert.equal(huge.context, "Its run's report is larger than a card can carry, so it is not shown.");
+  assert.equal(huge, null);
   // A card with no findings has no evidence block, and says so in the question.
   assert.equal(amuxDmOwnerSettlementCard({ ...base, kind: "stopped", findings: null, workspace: false }).context, "");
   // The cards beside it: eight are named, the rest counted, and a title is never shortened.

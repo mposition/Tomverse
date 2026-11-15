@@ -610,3 +610,18 @@ test("the workspace's git runs with no credential, no config file and https only
       workspace: { state: "none", targetSha: null, files: [] } }, { git: { executable: "git", cloneUrl: "file:///x" } }),
     /fixed on the system host/);
 });
+
+test("the build measures the directory as git writes into it: every regular file's bytes, nothing else", async () => {
+  const { dmWorkspaceBytes, DM_WORKSPACE_DISK_CHECK_MS } = await import("../lib/amux/decisionMakerWorkspaceBuild.ts");
+  const probe = makeTempRoot();
+  try {
+    mkdirSync(join(probe, "a", "b"), { recursive: true });
+    writeFileSync(join(probe, "a", "one"), "x".repeat(1000));
+    writeFileSync(join(probe, "a", "b", "two"), "y".repeat(24));
+    assert.equal(dmWorkspaceBytes(probe), 1024);
+    assert.equal(dmWorkspaceBytes(join(probe, "missing")), 0, "a directory that is gone counts nothing and never throws");
+    assert.ok(DM_WORKSPACE_DISK_CHECK_MS <= 1_000, "checked at least every second while git runs");
+  } finally {
+    rmSync(probe, { recursive: true, force: true });
+  }
+});

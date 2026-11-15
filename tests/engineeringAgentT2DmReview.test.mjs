@@ -85,15 +85,13 @@ test("with the workspace switched off the whole patch rides in the context, neve
   const label = "AMUX-ENG-" + "9".repeat(200);
   assert.equal(engineeringAgentT2DmCard({ workItemId: ID, cardLabel: label, reason: "tier_two", patchBody: many }).title, `Patch review: ${label}`);
 
-  // Only what a card cannot carry at all is not shown, and the card still goes.
+  // Evidence a card cannot carry whole files no card: the person decides (a DM never judges without it).
   const control = engineeringAgentT2DmCard({ workItemId: ID, cardLabel: "C", reason: "tier_two",
     patchBody: filePatch("a.ts", ["+bell\u0007"]), workspace: false });
-  assert.equal(control.context, "The patch holds characters a card cannot carry, so it is not shown.");
-  assert.doesNotMatch(control.context, /bell/);
+  assert.equal(control, null);
   const tooBig = engineeringAgentT2DmCard({ workItemId: ID, cardLabel: "C", reason: "tier_two",
     patchBody: filePatch("a.ts", [`+${"x".repeat(300_000)}`]), workspace: false });
-  assert.equal(tooBig.context, "The patch is larger than a card can carry, so it is not shown.");
-  assert.match(tooBig.question, /- a\.ts \(\+1 -0\)/);
+  assert.equal(tooBig, null);
 
   assert.equal(engineeringAgentT2DmCard({ workItemId: ID, cardLabel: "C", reason: "tier_two", patchBody: null }), null);
   assert.equal(engineeringAgentT2DmCard({ workItemId: ID, cardLabel: "C", reason: "tier_two", patchBody: "no diff" }), null);

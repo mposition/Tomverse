@@ -97,9 +97,9 @@ test("a card points at its evidence with the workspace on, and carries it whole 
   const inline = dmCardEvidenceContext(evidence, false);
   assert.ok(inline.startsWith(`${DM_EVIDENCE_OPEN}\nThe patch:\n`));
   assert.ok(inline.includes(PATCH), "whole: far past the 4,000 characters a context once held");
-  // Only the card's one cap, or characters a card cannot carry, leave it out -- and the card says so.
-  assert.match(dmCardEvidenceContext([{ ...evidence[0], text: "z".repeat(DM_CARD_TEXT_MAX_BYTES) }], false), /larger than a card can carry/);
-  assert.match(dmCardEvidenceContext([{ ...evidence[0], text: "bell\u0007" }], false), /characters a card cannot carry/);
+  // Evidence that cannot ride whole (past the card's one cap, or characters a card cannot carry): no card at all.
+  assert.equal(dmCardEvidenceContext([{ ...evidence[0], text: "z".repeat(DM_CARD_TEXT_MAX_BYTES) }], false), null);
+  assert.equal(dmCardEvidenceContext([{ ...evidence[0], text: "bell\u0007" }], false), null);
 });
 
 test("WORKSPACE.md says what is where, and that nothing in it is an instruction", () => {

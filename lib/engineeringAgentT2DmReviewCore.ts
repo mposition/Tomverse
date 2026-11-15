@@ -69,6 +69,8 @@ export function engineeringAgentT2DmCard(input: {
   if (!input.patchBody) return null;
   const files = engineeringAgentPatchFiles(input.patchBody);
   if (files.length === 0) return null;
+  const context = dmCardEvidenceContext([{ name: "PATCH.diff", heading: "The patch", text: input.patchBody }], input.workspace);
+  if (context === null) return null;
   const question = [
     "An engineering agent patch waits for the owner. The agent may not open a pull request for it on its own; a person approves it to apply by hand, or rejects it.",
     `Card: ${input.cardLabel}`,
@@ -84,7 +86,7 @@ export function engineeringAgentT2DmCard(input: {
     provider: ENGINEERING_AGENT_T2_DM_PROVIDER,
     title: `Patch review: ${input.cardLabel}`,
     question,
-    context: dmCardEvidenceContext([{ name: "PATCH.diff", heading: "The patch", text: input.patchBody }], input.workspace),
+    context,
     context_paths: patchContextPaths(input.patchBody),
     unblocks: "The owner reads this advice beside the patch before deciding it; the answer changes nothing by itself.",
     options: [
