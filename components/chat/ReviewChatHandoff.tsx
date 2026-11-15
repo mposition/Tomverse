@@ -19,10 +19,11 @@ export function useReviewChatCopy(): ReviewChatCopy {
 }
 
 type Offer = { source: ReviewChatSource; selection?: ReviewChatSelection; isCurrent: () => boolean };
-const HandoffContext = createContext<{ open: (offer: Offer) => void; supported: boolean } | null>(null);
+const HandoffContext = createContext<{ open: (offer: Offer) => void; supported: boolean; identity: string | null } | null>(null);
+export const useReviewResultAccess = () => useContext(HandoffContext);
 
-export function ReviewChatAction({ source, selection, ready = true, scope = "" }: {
-  source: ReviewChatSource | null; selection?: ReviewChatSelection; ready?: boolean; scope?: string;
+export function ReviewChatAction({ source, selection, ready = true, scope = "", inline = false }: {
+  source: ReviewChatSource | null; selection?: ReviewChatSelection; ready?: boolean; scope?: string; inline?: boolean;
 }) {
   const context = useContext(HandoffContext);
   const copy = useReviewChatCopy();
@@ -32,13 +33,13 @@ export function ReviewChatAction({ source, selection, ready = true, scope = "" }
   if (!context) return null;
   const eligible = context.supported && ready && source && source.setup.source && source.review.id &&
     (source.kind === "quick" || (!source.review.guest && source.review.persisted !== false));
-  return <div className="my-3">
+  return <div className={inline ? "min-w-0 max-w-full" : "my-3"}>
     <button type="button" disabled={!eligible} data-testid={selection ? "review-chat-issue" : "review-chat-continue"}
       className="min-h-11 rounded-xl border border-zinc-300 px-4 py-2 text-sm font-semibold disabled:opacity-50 dark:border-zinc-600"
       onClick={() => { if (eligible && source) context.open({ source: structuredClone(source), selection, isCurrent: () => current.current === key }); }}>
       {selection ? copy.issue : copy.continue}
     </button>
-    {!eligible && !selection && <p className="mt-1 text-xs text-zinc-500">{context.supported ? copy.failed : copy.unsupported}</p>}
+    {!eligible && !selection && !inline && <p className="mt-1 text-xs text-zinc-500">{context.supported ? copy.failed : copy.unsupported}</p>}
   </div>;
 }
 
@@ -83,7 +84,7 @@ export function ReviewChatHandoffProvider({ identity, supported, sourceScope, na
     } catch { if (!controller.signal.aborted) setError(copy.failed); }
     finally { if (pending.current === controller) { pending.current = null; setBusy(false); } }
   };
-  return <HandoffContext.Provider value={{ supported, open: next => {
+  return <HandoffContext.Provider value={{ supported, identity, open: next => {
     if (!identity?.startsWith("account:") || !supported) return;
     pending.current?.abort(); pending.current = null; setBusy(false);
     setOffer({ ...next, identity, scope: sourceScope, epoch: observeReviewChatIdentity(identity) }); setRequest(""); setError("");
