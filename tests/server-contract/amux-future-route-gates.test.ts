@@ -74,7 +74,6 @@ mock.module(moduleUrl("lib/amux/workerRuntime.ts"), {
 });
 mock.module(moduleUrl("lib/amux/store.ts"), {
   namedExports: {
-    AmuxQueueCapacityError: class extends Error {},
     listOwnedTodos: () => {
       serviceCalls += 1;
       throw new Error("unexpected owned queue read");

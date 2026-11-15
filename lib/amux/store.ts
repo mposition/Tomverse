@@ -53,15 +53,6 @@ export const AMUX_OWNED_QUEUE_MAX_ITEMS = 512;
 export const AMUX_QUEUE_READ_MAX_ROWS = 2_000;
 export const PRISMA_INT_MAX = 2_147_483_647;
 
-export class AmuxQueueCapacityError extends Error {
-  readonly code = "AMUX_QUEUE_CAPACITY_EXCEEDED";
-
-  constructor(readonly queue: "selection" | "owned") {
-    super(`AMUX ${queue} queue exceeds the complete-response item ceiling`);
-    this.name = "AmuxQueueCapacityError";
-  }
-}
-
 const satisfiedDependencyStatuses = (): string[] => ["done"];
 const nonScoringDependentStatuses = (): string[] => [
   "backlog",
