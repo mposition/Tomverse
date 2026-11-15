@@ -152,6 +152,82 @@ test("v22 sparse transport rejects omission-shaped invalid paths and modes", () 
   });
 });
 
+// Operator, 2026-11-15: a v22 patch may add new regular text files.
+test("v22 sparse new files, in new and existing directories, reproduce Git's tree", () => {
+  withRepo(({ put, snapshot }) => {
+    put("lib/a.ts", "old\n");
+    put("tests/keep.test.mjs", "keep\n");
+    const base = snapshot();
+    const derived = resultListingFromModifiedBlobs({ base: base.listing,
+      baseRootTreeId: base.root, files: [
+        { path: "lib/a.ts", mode: "100644", bytes: bytes("new\n") },
+        { path: "tests/added.test.mjs", mode: "100644", bytes: bytes("a\n"),
+          added: true },
+        { path: "lib/deep/er/c.ts", mode: "100644", bytes: bytes("c\n"),
+          added: true },
+        { path: "top.md", mode: "100644", bytes: bytes("keep\n"),
+          added: true },
+      ] });
+    assert.equal(derived.ok, true, derived.reason);
+    put("lib/a.ts", "new\n");
+    put("tests/added.test.mjs", "a\n");
+    put("lib/deep/er/c.ts", "c\n");
+    put("top.md", "keep\n");
+    const actual = snapshot();
+    assert.equal(derived.rootTreeId, actual.root);
+    assert.deepEqual(derived.result.map((entry) => entry.path).sort(),
+      actual.listing.map((entry) => entry.path).sort());
+    // `top.md` copies a base blob, so only the three new blobs are submitted.
+    assert.equal(derived.changedBlobs.size, 3);
+    const verified = verifyResultListing({ base: base.listing,
+      baseTruncated: false, baseRootTreeId: base.root,
+      result: derived.result, claimedResultRootTreeId: derived.rootTreeId,
+      changedBlobs: derived.changedBlobs, baseGitattributes: null });
+    assert.equal(verified.ok, true);
+    assert.deepEqual(verified.changes.map((change) =>
+      [change.path, change.status]), [["lib/a.ts", "modified"],
+      ["lib/deep/er/c.ts", "added"], ["tests/added.test.mjs", "added"],
+      ["top.md", "added"]]);
+  });
+});
+
+test("v22 sparse new files refuse a taken path, a file parent and a case twin", () => {
+  withRepo(({ put, snapshot }) => {
+    put("lib/a.ts", "old\n");
+    put("lib/sub/b.ts", "b\n");
+    const base = snapshot();
+    const input = { base: base.listing, baseRootTreeId: base.root };
+    const added = (path) => ({ path, mode: "100644", bytes: bytes("n\n"),
+      added: true });
+    for (const files of [
+      [added("lib/a.ts")], // an existing file
+      [added("lib/sub")], // an existing directory
+      [added("lib/a.ts/x.ts")], // under an existing file
+      [added("lib/A.ts")], // a case twin of a file
+      [added("Lib/x.ts")], // a case twin of a directory
+      [added("lib/Sub/x.ts")],
+      [added(`lib/n${String.fromCharCode(0x303)}.ts`), // one name, two forms
+        added(`lib/${String.fromCharCode(0xf1)}.ts`)],
+      [added("lib/new.ts"), added("lib/NEW.ts")],
+      [added("lib/new"), added("lib/new/x.ts")], // a new file, then under it
+      [added("lib/new/x.ts"), added("lib/new")],
+    ]) {
+      assert.deepEqual(resultListingFromModifiedBlobs({ ...input, files }),
+        { ok: false, reason: "path_conflict" }, files.map((f) => f.path).join());
+    }
+    // Without `added`, a path the base lacks is still refused.
+    assert.deepEqual(resultListingFromModifiedBlobs({ ...input,
+      files: [{ ...added("lib/new.ts"), added: false }] }),
+    { ok: false, reason: "files_invalid" });
+    // A new file is still bounded and still only `100644`.
+    for (const file of [{ ...added("lib/x.ts"), mode: "100755" },
+      { ...added("lib/x.ts"), bytes: new Uint8Array(200 * 1024 + 1) }]) {
+      assert.deepEqual(resultListingFromModifiedBlobs({ ...input,
+        files: [file] }), { ok: false, reason: "files_invalid" });
+    }
+  });
+});
+
 /** Builds a base and a result in one repository and the verification input for them. */
 const scenario = (build) =>
   withRepo((repo) => {

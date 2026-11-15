@@ -199,20 +199,28 @@ export const checkListing = (entries: readonly TreeEntry[]): ListingCheck => {
 };
 
 /** v22's bounded sparse transport: compute a result listing from app-read
- * GitHub base entries and complete replacement bytes for existing regular
- * files. This function never parses or applies the worker's patch (bytes
- * rebuilt from a stored patch come from engineeringAgentV22PatchApply). The
- * Publisher must still apply that patch independently and match this exact
- * root before push. `maxFiles` defaults to `PUSH_LIMITS.maxFiles`; the tier
- * gate judges the count for T1 either way. */
+ * GitHub base entries, complete replacement bytes for existing regular files,
+ * and the bytes of new regular files the caller names `added`. A new file's
+ * path must be free in the base, every directory above it an existing tree
+ * or new (then made here), and no name it introduces may equal an existing
+ * one but for case or Unicode form, which a case-insensitive checkout would
+ * write to the same place; otherwise `path_conflict`. A path the caller does
+ * not name `added` must be an existing `100644` blob. This function never
+ * parses or applies the worker's patch (bytes rebuilt from a stored patch
+ * come from engineeringAgentV22PatchApply). The Publisher must still apply
+ * that patch independently and match this exact root before push.
+ * `maxFiles` defaults to `PUSH_LIMITS.maxFiles`; the tier gate judges the
+ * count for T1 either way. */
 export const resultListingFromModifiedBlobs = (input: {
   base: readonly TreeEntry[];
   baseRootTreeId: string;
-  files: readonly { path: string; mode: "100644"; bytes: Uint8Array }[];
+  files: readonly { path: string; mode: "100644"; bytes: Uint8Array;
+    added?: boolean }[];
   maxFiles?: number;
 }): { ok: true; result: TreeEntry[]; rootTreeId: string;
   changedBlobs: ReadonlyMap<string, Uint8Array> } |
-  { ok: false; reason: "base_invalid" | "files_invalid" | "result_invalid" } => {
+  { ok: false; reason: "base_invalid" | "files_invalid" | "path_conflict" |
+    "result_invalid" } => {
   const checked = checkListing(input.base);
   if (!checked.ok || checked.rootTreeId !== input.baseRootTreeId)
     return { ok: false, reason: "base_invalid" };
@@ -220,6 +228,8 @@ export const resultListingFromModifiedBlobs = (input: {
       input.files.length > (input.maxFiles ?? PUSH_LIMITS.maxFiles))
     return { ok: false, reason: "files_invalid" };
   const entries = new Map(input.base.map((entry) => [entry.path, { ...entry }]));
+  const fold = (path: string) => path.normalize("NFC").toLowerCase();
+  const folded = new Set(input.base.map((entry) => fold(entry.path)));
   const seen = new Set<string>();
   const baseBlobIds = new Set(input.base.filter((entry) =>
     entry.type === "blob").map((entry) => entry.oid));
@@ -227,15 +237,35 @@ export const resultListingFromModifiedBlobs = (input: {
   for (const file of input.files) {
     const old = entries.get(file.path);
     if (!isCanonicalRepoPath(file.path) || seen.has(file.path) ||
-        file.mode !== "100644" || old?.type !== "blob" ||
-        old.mode !== file.mode || !(file.bytes instanceof Uint8Array) ||
-        file.bytes.byteLength > PUSH_LIMITS.maxFileBytes) {
+        file.mode !== "100644" || !(file.bytes instanceof Uint8Array) ||
+        file.bytes.byteLength > PUSH_LIMITS.maxFileBytes ||
+        (file.added !== true && (old?.type !== "blob" ||
+          old.mode !== file.mode))) {
       return { ok: false, reason: "files_invalid" };
     }
     seen.add(file.path);
     const oid = gitObjectId("blob", file.bytes);
-    if (oid === old.oid) return { ok: false, reason: "files_invalid" };
-    entries.set(file.path, { ...old, oid });
+    if (file.added === true) {
+      const segments = file.path.split("/");
+      for (let depth = 1; depth <= segments.length; depth += 1) {
+        const path = segments.slice(0, depth).join("/");
+        const existing = entries.get(path);
+        const leaf = depth === segments.length;
+        if (existing === undefined ? folded.has(fold(path)) :
+          leaf || existing.type !== "tree")
+          return { ok: false, reason: "path_conflict" };
+        if (existing !== undefined) continue;
+        // A tree's id is computed below, once its children are known.
+        entries.set(path, leaf ?
+          { path, mode: TREE_MODES.blob, type: "blob", oid } :
+          { path, mode: TREE_MODES.tree, type: "tree", oid: "" });
+        folded.add(fold(path));
+      }
+    } else if (old === undefined || oid === old.oid) {
+      return { ok: false, reason: "files_invalid" };
+    } else {
+      entries.set(file.path, { ...old, oid });
+    }
     if (!baseBlobIds.has(oid)) changedBlobs.set(oid, file.bytes);
   }
   const children = new Map<string, TreeEntry[]>();
