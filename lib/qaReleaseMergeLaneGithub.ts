@@ -21,7 +21,12 @@ import { createSign } from "node:crypto";
 import { PULL_DIFF_DIGEST_MAX_BYTES, pullDiffDigest } from "./pullDiffDigestCore.ts";
 
 import type { QaReleaseLanePullRequest } from "./qaReleaseMergeLaneCandidateCore.ts";
-import { type QaReleaseChangedFile, type QaReleaseExclusionInput, QA_RELEASE_MIGRATION_SQL_PATH } from "./qaReleaseMergeLaneExclusionCore.ts";
+import {
+  type QaReleaseChangedFile,
+  type QaReleaseExclusionInput,
+  QA_RELEASE_DEPENDABOT_HEAD,
+  QA_RELEASE_MIGRATION_SQL_PATH,
+} from "./qaReleaseMergeLaneExclusionCore.ts";
 import { isQaReleasePolicyDocument, qaReleaseAgentOwnPatterns, qaReleasePolicyTestPaths } from "./qaReleaseMergeLanePolicyInputsCore.ts";
 import type { QaReleaseMergeCall, QaReleaseMergeLanePorts, QaReleasePullRead } from "./qaReleaseMergeLaneServiceCore.ts";
 
@@ -55,6 +60,9 @@ const SHA = /^[0-9a-f]{40}$/;
 /** GitHub lists at most 3,000 files for a pull request; a larger one is never complete. */
 const MAX_FILE_PAGES = 30;
 const MAX_PULL_PAGES = 4;
+/** Dependabot's login, and the committer GitHub names on a commit it signs for Dependabot. */
+const DEPENDABOT_LOGIN = "dependabot[bot]";
+const GITHUB_SIGNED_COMMITTER = "web-flow";
 
 const base64url = (value: string | Buffer) => Buffer.from(value).toString("base64url");
 
@@ -319,9 +327,33 @@ export function createQaReleaseGithubPorts(input: {
     // Complete only when every page was read, the count is the one GitHub
     // states, and the head did not move between the list and this read.
     return {
+      rest,
       files,
       complete: complete && typeof expected === "number" && files.length === expected && headSha === pull.headRefOid,
     };
+  };
+
+  // Whether this is Dependabot's own pull request (owner 2026-11-15): its
+  // head prefix, opened by dependabot[bot] from this repository, and every
+  // commit up to the judged head dependabot[bot]'s and signed by GitHub. A
+  // person's commit on the branch is not signed for Dependabot, so it leaves
+  // the pull request to a person. Anything unread is not Dependabot's.
+  const dependabotOwned = async (pull: QaReleaseLanePullRequest, rest: Record<string, unknown>): Promise<boolean> => {
+    if (!QA_RELEASE_DEPENDABOT_HEAD.test(pull.headRefName)) return false;
+    try {
+      if (str(record(rest.user).login) !== DEPENDABOT_LOGIN) return false;
+      const headRepo = str(record(record(rest.head).repo).full_name);
+      if (headRepo === "" || headRepo !== str(record(record(rest.base).repo).full_name)) return false;
+      const commits = await getJson(`${REPO_PATH}/pulls/${pull.number}/commits?per_page=100`);
+      if (!Array.isArray(commits) || commits.length === 0 || commits.length >= 100) return false;
+      const signed = commits.map(record).every((entry) =>
+        str(record(entry.author).login) === DEPENDABOT_LOGIN &&
+        str(record(entry.committer).login) === GITHUB_SIGNED_COMMITTER &&
+        record(record(entry.commit).verification).verified === true);
+      return signed && str(record(commits[commits.length - 1]).sha).toLowerCase() === pull.headRefOid;
+    } catch {
+      return false;
+    }
   };
 
   const compareStatus = async (from: string, to: string) =>
@@ -355,12 +387,14 @@ export function createQaReleaseGithubPorts(input: {
     async exclusionInputs(pull): Promise<QaReleaseExclusionInput> {
       policyInputs ??= readPolicyInputs();
       const [inputs, changed] = await Promise.all([policyInputs, changedFilesOf(pull)]);
+      const dependabot = await dependabotOwned(pull, changed.rest);
       return {
         headBranch: pull.headRefName,
         changedFiles: changed.files,
         changedFilesComplete: changed.complete,
         policyTestPaths: inputs.tests,
         agentOwnPatterns: inputs.own,
+        ...(dependabot ? { dependabot: true } : {}),
       };
     },
 
