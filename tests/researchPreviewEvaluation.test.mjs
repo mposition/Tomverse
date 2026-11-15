@@ -104,6 +104,11 @@ function fixture(t, { manifest: manifestInput, scenario = "success" } = {}) {
         runResearchPreviewStep: async input => {
           await input.onBeforeModelDispatch(); counts.calls++;
           if (scenario === "unknown") throw new Error("Provider usage missing");
+          if (scenario === "provider_refused") throw Object.assign(new Error("SECRET request and provider body"), {
+            name: "AI_NoOutputGeneratedError", cause: Object.assign(new Error("SECRET authorization header"), {
+              name: "AI_APICallError", statusCode: 400, responseBody: "SECRET provider response", requestBodyValues: { apiKey: "SECRET key" },
+            }),
+          });
           if (scenario === "drift") digest = "b".repeat(64);
           const completedSteps = (input.checkpoint?.completedSteps ?? 0) + 1;
           const checkpoint = { completedSteps, usage: { inputTokens: completedSteps * 100, outputTokens: completedSteps * 50, cachedInputTokens: 0, cacheWriteTokens: 0 },
@@ -174,6 +179,16 @@ test("a missing terminal stops at three generations without a fourth or false co
   await assert.rejects(runResearchEvaluationCli(f.args, f.seams), /inspect the durable journal/);
   assert.equal(f.counts.calls, 3); assert.equal(f.events().at(-1).kind, "attention");
   assert.equal(f.events().some(event => event.kind === "evaluation_completed"), false);
+});
+
+test("failed live attempts retain bounded error type and HTTP status without credentials or provider payloads", async t => {
+  const f = fixture(t, { scenario: "provider_refused" });
+  await assert.rejects(runResearchEvaluationCli(f.args, f.seams), /inspect the durable journal/);
+  assert.equal(f.counts.calls, 1);
+  assert.deepEqual(f.events().at(-1).diagnostic, { errorType: "AI_NoOutputGeneratedError", httpStatus: 400 });
+  assert.equal(readFileSync(f.journal, "utf8").includes("SECRET"), false);
+  await assert.rejects(runResearchEvaluationCli(f.args, f.seams), /already has an intent/);
+  assert.equal(f.counts.calls, 1);
 });
 
 test("optional Cohere side experiment is one separate dispatch after six report generations", async t => {

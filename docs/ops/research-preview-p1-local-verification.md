@@ -61,7 +61,7 @@ clients or making requests. Execution separately requires a matching approval,
 single-use journal commits intent before dispatch and prevents automatic retry
 after a crash or unknown outcome. Production processes are refused.
 
-The prepared, unexecuted comparison is Gemini 4 Argon at low thinking and GPT 6
+The prepared functional comparison is Gemini 4 Argon at low thinking and GPT 6
 Luna at low thinking on one identical public brief. It allows six model calls, ten Brave
 attempts, four page reads and one optional Rerank 5 Fast side experiment over
 captured public snippets. The conservative reservation is US$4.701131 including
@@ -69,8 +69,8 @@ rerank, beneath the US$10 ceiling. Argon uses the standard US$4/US$20 rate in
 this development manifest, without relying on temporary introductory pricing.
 Command A+ and the original Pro baseline are closed optional evaluation arms.
 
-No live evaluation has been executed yet. Read-only configuration discovery
-located Google/OpenAI/Brave credentials in the application's dev environment.
+The live attempt and its interruption are recorded below. Read-only configuration
+discovery located Google/OpenAI/Brave credentials in the application's dev environment.
 The owner identified the production Cohere key and authorized using that key
 alone for the local bounded evaluation. Credential values are not copied into
 this worktree or printed, and no production configuration or database is used.
@@ -86,7 +86,7 @@ output limits; this session did not query the production DB to verify them:
 | --- | --- | --- |
 | GPT Astra | 128,000 | Candidate; exact operating API ID, pricing and reasoning configuration not yet captured |
 | Claude Fable 5.2 | 128,000 | Candidate; exact operating API ID, pricing and reasoning configuration not yet captured |
-| Gemini 4 Argon | 32,768 | Development clone prepared; no live result |
+| Gemini 4 Argon | 32,768 | First generation completed; second dispatched outcome unknown; no final report |
 
 The product's shared 4,096-token run cap is independent of those model limits.
 There is no measured basis for excluding Astra or Fable on output-limit,
@@ -106,6 +106,39 @@ completion rate or quality ranking. A 4,096-token product-cap experiment also
 does not measure the models' long-output capability. Adding all candidates
 must not silently increase the approved six-generation execution scope.
 
+### Live attempt: incomplete, no model comparison
+
+After the owner-authorized review retry returned aggregate `accept`, the local
+operator helper executed the exact approved manifest digest
+`1c5a72503dd3f4b62d233e7fe13956a1b85be203e6273163d49e9f68b920eed5`.
+The append-only single-use journal recorded:
+
+| UTC time on 2026-11-15 | Event |
+| --- | --- |
+| 00:57:26.689 | Argon generation 1 dispatch intent |
+| 00:57:33.247 | Completed generation 1 checkpoint: 820 input tokens, 45 output tokens, two successful Brave searches, zero completed page reads |
+| 00:57:33.279 | Argon generation 2 dispatch intent |
+| 00:57:33.811 | Attention: dispatched outcome/usage may be unknown; execution stopped |
+
+No final report was produced. Luna and Rerank were not started, and no automatic
+retry or replacement manifest was executed. The checkpoint's known usage is
+US$0.014180 at the manifest's frozen model/search rates: US$0.004180 model plus
+US$0.010000 search. This is a known-usage subtotal at those rates, not a complete
+provider invoice or a claim that the second intent cost zero. Its outcome and
+usage remain unknown. The original conservative total reservation was
+US$4.701131; the Argon arm reserved US$4.440020.
+
+The original error was intentionally reduced to a generic stop message and was
+not retained, so this record cannot identify the cause retrospectively. A local
+follow-up now journals only an allowlisted error type, a bounded numeric HTTP
+status from the error/cause chain and two fixed internal provider refusal codes.
+It never records arbitrary messages, headers, keys or request/response bodies.
+The original journal is unchanged and remains single-use. The follow-up was
+verified offline; it has not been exercised with a new paid call.
+
+Neither this incomplete attempt nor the mock tests support a provider quality,
+completion-rate, reasoning-efficiency or successful-investigation-cost ranking.
+
 ## Verification
 
 The checks use independent lockfile dependencies, mocked provider transports,
@@ -116,6 +149,7 @@ existing integration runner's test-target checks and migration/drift setup.
 | Check | Result |
 | --- | --- |
 | Research/search/page/evaluation focused tests | 120/120 passed |
+| Post-attempt evaluator diagnostics and existing offline evaluation guards | 15/15 passed |
 | Cohere adapter, protocol types and existing provider regressions | 71/71 passed |
 | Offer and Native authentication boundary tests | 36/36 passed |
 | Native transport regressions | 15/15 passed |
@@ -147,10 +181,13 @@ reported. Non-blocking observations cover cancel-route error mapping, Native
 list-read error visibility, the resume-route lock-code comparison and the
 Google fetch guard's JSON-only assumption.
 
-The job has not been resubmitted: repository instructions require a human to
-decide whether to retry an unknown review. Protected live evaluation remains
-unexecuted. Review parsing, local verification and real model quality are
-separate outcomes.
+The owner explicitly authorized one retry. Job `r-20261115-005304-c7fb03` reviewed
+head `21c862aa5ffaba6cd8cc41ae057847429eef16df` with the same implementation
+boundaries and returned `accept` from both Google and Moonshot reviewers.
+The accepted boundary review is reused for the later bounded diagnostic-only
+change; no live authority, model allowlist, credential boundary or spending
+ceiling was expanded. Review approval, local verification and real model quality
+remain separate outcomes.
 
 ## Git and release state
 

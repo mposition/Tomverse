@@ -24,6 +24,20 @@ const sources = [
 const sourceDigest = () => researchEvaluationDigest(sources.map(path => [path, readFileSync(resolve(root, path), "utf8")]));
 const readJson = path => JSON.parse(readCollectionText(resolve(path), 2 * 1024 * 1024));
 const production = env => env.NODE_ENV === "production" || env.RAILWAY_PROJECT_ID || env.RAILWAY_ENVIRONMENT_ID || env.VERCEL_ENV === "production";
+const diagnosticErrorNames = new Set(["Error", "TypeError", "AbortError", "TimeoutError", "AI_APICallError", "AI_NoOutputGeneratedError", "AI_TypeValidationError", "AI_RetryError", "ResearchPreviewUsageUnknownError", "ResearchPreviewBudgetExhaustedError"]);
+function failureDiagnostic(error) {
+  const errorType = diagnosticErrorNames.has(error?.name) ? error.name : "OtherError";
+  const diagnostic = { errorType };
+  for (let cause = error, depth = 0; cause && typeof cause === "object" && depth < 4; cause = cause.cause, depth++) {
+    if (Number.isInteger(cause.statusCode) && cause.statusCode >= 100 && cause.statusCode <= 599) {
+      diagnostic.httpStatus = cause.statusCode;
+      break;
+    }
+  }
+  // Never retain provider messages, request bodies, headers or response bodies.
+  if (["RESEARCH_PROVIDER_CONTINUATION_REFUSED", "RESEARCH_PROVIDER_REQUEST_UNAVAILABLE"].includes(error?.message)) diagnostic.code = error.message;
+  return diagnostic;
+}
 const help = "Preview: npm run research:preview:evaluate -- [--models=gemini-4-argon,gpt-6-luna] [--cases=official-runtime-support] [--rerank] [--max-total-microusd=10000000] --expires-at=UTC [--output=NEW_PATH]\nExecute: npm run research:preview:evaluate -- --mode=execute --manifest=PATH --approval=PATH --live\nClosed models: gemini-4-argon, gpt-6-luna, gemini-3-1-pro, command-a-plus. At most two model/brief pairs, six generation calls, one optional Rerank 5 Fast side experiment and US$10. Requires separately approved development provider and Brave credentials; no production credits/budgets. Interrupted/unknown intent is never retried automatically.";
 
 async function loadProviders() {
@@ -127,8 +141,8 @@ export async function runResearchEvaluationCli(args, seams = {}) {
     if (measuredTotalMicroUsd > manifest.maxTotalMicroUsd) throw new Error("Evaluation cost exceeds its authorization");
     record({ kind: "evaluation_completed", modelCalls, rerankCalls, measuredTotalMicroUsd });
     return { journal, status: "completed", modelCalls, rerankCalls, measuredTotalMicroUsd, qualityVerdict: "manual_review_pending" };
-  } catch {
-    record({ kind: "attention", reason: "dispatch_or_usage_outcome_may_be_unknown_no_automatic_retry" });
+  } catch (error) {
+    record({ kind: "attention", reason: "dispatch_or_usage_outcome_may_be_unknown_no_automatic_retry", diagnostic: failureDiagnostic(error) });
     throw new Error("Evaluation stopped; inspect the durable journal before any new paid execution");
   }
 }
