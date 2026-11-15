@@ -143,7 +143,7 @@ export async function GET(req: Request) {
               query already treats the conversation's own password.
             */
             externalConversation: {
-              select: { title: true, password: true, passwordVersion: true },
+              select: { title: true, password: true },
             },
             /*
               For the name a row gets when the source cannot give one, and
