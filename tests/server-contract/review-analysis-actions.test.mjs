@@ -42,7 +42,9 @@ mock.module(mod("lib/chatRouteSession.ts"), { namedExports: { resolveChatRouteSe
 mock.module(mod("lib/comparisonReviewTurn.ts"), { namedExports: { latestComparableConversationTurn: async () => state.turn } });
 mock.module(mod("lib/appSettings.ts"), { namedExports: { getOperationalFeatureFlags: async () => ({ publicSharingEnabled: state.sharingEnabled }), isMemoryInjectionEnabled: async () => false } });
 mock.module(mod("lib/conversationLock.ts"), { namedExports: {
-  hasConversationUnlockGrant: (_request, _owner, _id, password) => password === null,
+  // Grants are bound to the stored passwordVersion (null = no password), never to the password itself.
+  hasConversationUnlockGrant: (_request, _owner, _id, passwordVersion) =>
+    passwordVersion === null || (Number.isSafeInteger(passwordVersion) && passwordVersion === state.grantVersion),
   conversationLockedResponse: () => Response.json({ code: "CONVERSATION_LOCKED" }, { status: 423 }),
 } });
 mock.module(mod("lib/billingEntitlements.ts"), { namedExports: {
@@ -70,7 +72,7 @@ beforeEach(() => {
   const source = makeReviewReportFixture();
   const createdAt = new Date("2026-11-15T00:00:00Z");
   state = { source, session: { user: { id: "owner-a" } }, sharingEnabled: true, downloads: true, sharePlan: true,
-    conversation: { id: "qa-conversation", userId: "owner-a", password: null, kind: "chat", title: "Private source", createdAt, shareToken: null, shareEnabled: false, shareRevokedAt: null, chatRecoveryEpoch: 0, continuationBridge: null },
+    conversation: { id: "qa-conversation", userId: "owner-a", password: null, passwordVersion: 0, kind: "chat", title: "Private source", createdAt, shareToken: null, shareEnabled: false, shareRevokedAt: null, chatRecoveryEpoch: 0, continuationBridge: null },
     messages: [{ id: "prompt-1", role: "user", content: source.setup.source.question, modelId: null, createdAt },
       ...source.setup.source.responses.map((response, index) => ({ id: response.messageId, role: "assistant", content: response.content, modelId: source.review.responseMap[index].modelId, createdAt }))],
     stored: { id: "review-1", userId: "owner-a", conversationId: "qa-conversation", inputHash: "hash", promptMessageId: "prompt-1", assistantMessageIds: ["answer-a", "answer-b"], reviewerModelId: source.review.reviewerModelId, result: source.review.result, isStale: false },
@@ -110,6 +112,17 @@ test("late deletion, locking and continuation changes withhold already-rendered 
     const response = await exportReport(await requestFor("analysis/export", { format: "txt" }), context);
     assert.ok(response.status >= 400); assert.match(response.headers.get("content-type"), /json/);
   }
+});
+test("a locked conversation exports only with a grant for its current password version", async () => {
+  state.conversation.password = "hashed-lock"; state.conversation.passwordVersion = 3;
+  state.grantVersion = 3;
+  assert.equal((await exportReport(await requestFor("analysis/export", { format: "txt" }), context)).status, 200);
+  state.grantVersion = 2;
+  assert.equal((await exportReport(await requestFor("analysis/export", { format: "txt" }), context)).status, 423);
+  // A password change while the file renders advances the version and withholds the bytes.
+  state.grantVersion = 3; state.ownerReads = 0;
+  state.afterRead = () => ({ ...state.conversation, passwordVersion: 4 });
+  assert.equal((await exportReport(await requestFor("analysis/export", { format: "txt" }), context)).status, 423);
 });
 test("regeneration during rendering withholds the old report rather than downloading stale bytes", async () => {
   state.afterRead = () => {
