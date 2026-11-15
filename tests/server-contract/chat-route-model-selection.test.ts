@@ -3,6 +3,7 @@ import test, { mock } from "node:test";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
+import { createHash } from "node:crypto";
 import { PromptRefinerChatExecutionError } from "@/lib/promptRefinerChatExecutionCore";
 
 // Server-side contract for MODEL_NOT_SELECTED on POST /api/chat.
@@ -35,6 +36,11 @@ process.env.NEXTAUTH_SECRET ||= "server-contract-test-secret";
 process.env.NEXTAUTH_URL ||= "http://127.0.0.1:3100";
 
 const SESSION_USER_ID = "qa-user-1";
+const SESSION_EMAIL = "qa@tomverse.app";
+const ACCOUNT_PREFIX = `attachments/${createHash("sha256")
+  .update(SESSION_EMAIL)
+  .digest("hex")
+  .slice(0, 20)}/`;
 const CONVERSATION_ID = "qa-conversation-5dc1d2ee";
 const STORED_SELECTED_MODELS = ["gpt-5-4-mini"];
 const UNSELECTED_MODEL_ID = "claude-haiku-4-5";
@@ -101,7 +107,40 @@ async function loadRouteWithSpies(): Promise<{
       refinerAdmissionEvents.push("consume");
       if (!explicitRefinerAuthority || consumedRefinerDecisions !== 0) throw new PromptRefinerChatExecutionError();
       consumedRefinerDecisions += 1;
-      return preview;
+      // The real store reads the view back inside its consume transaction, so
+      // the route receives new message objects, never the preview's own.
+      return structuredClone(preview);
+    },
+  } });
+  // A turn's own file that storage reports gone, to observe which turn the
+  // route believes it belongs to.
+  const realStorage = original("lib/messageAttachmentStorage.ts");
+  mock.module(mod("lib/messageAttachmentStorage.ts"), { namedExports: {
+    ...realStorage,
+    resolveMessageAttachmentReferences: async (input: { references: Array<{ attachmentId?: string }> }) =>
+      input.references.map((reference) => ({
+        attachmentId: reference.attachmentId!,
+        uploadId: null,
+        name: `${reference.attachmentId}.png`,
+        mediaType: "image/png",
+        size: 29,
+        kind: "file",
+        objectKey: `${ACCOUNT_PREFIX}${reference.attachmentId}.png`,
+        unavailableAt: null,
+        unavailableReason: null,
+      })),
+    markMessageAttachmentUnavailable: async () => true,
+  } });
+  const realR2 = original("lib/r2.ts");
+  mock.module(mod("lib/r2.ts"), { namedExports: {
+    ...realR2,
+    readR2Object: async () => {
+      const storageErrors = original("lib/storageObjectErrors.ts") as {
+        toStorageError: (operation: string, error: unknown) => Error;
+      };
+      throw storageErrors.toStorageError("head", Object.assign(new Error("NotFound"), {
+        name: "NotFound", $metadata: { httpStatusCode: 404 },
+      }));
     },
   } });
   mock.module(mod("lib/chatDurableRecoveryAccess.ts"), { namedExports: {
@@ -238,10 +277,11 @@ const chatRequest = (modelId: string) =>
     }),
   });
 
-const refinerRequest = () =>
+const refinerRequest = (attachments?: unknown[]) =>
   new Request("http://127.0.0.1:3100/api/chat", {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages: [{ id: "22222222-2222-4222-8222-222222222222", role: "user", content: "authored source" }],
+    body: JSON.stringify({ messages: [{ id: "22222222-2222-4222-8222-222222222222", role: "user", content: "authored source",
+      ...(attachments ? { attachments } : {}) }],
       modelId: STORED_SELECTED_MODELS[0], conversationId: CONVERSATION_ID,
       assistantMessageId: "11111111-1111-4111-8111-111111111111", sourceUserMessageId: "22222222-2222-4222-8222-222222222222",
       promptRefinerDecision: { suggestionId: "33333333-3333-4333-8333-333333333333",
@@ -385,6 +425,32 @@ test("an admitted valid Refiner decision consumes once and a stale replay remain
       "scope", "admission", "preview", "consume",
       "scope", "admission", "preview",
     ]);
+  } finally { explicitRefinerAuthority = false; }
+});
+
+// Traces 0daea561 and d937b61b, 2026-11-15: on a turn carrying a Refiner
+// decision the route compared each message with a `latestMessage` taken before
+// the consumed view replaced the transcript, so the turn's own files were never
+// recognised as this turn's -- convert_files saw no readable attachment and an
+// "images into one PDF" request failed every time. A file that storage lost is
+// the observable half of the same decision: it must still be this turn's file.
+test("a Refiner turn's own file is still the current turn's after the decision is consumed", async () => {
+  const { POST, spies } = await loadRouteWithSpies();
+  explicitRefinerAuthority = true; consumedRefinerDecisions = 0;
+  refinerAdmissions = 0; refinerAdmissionEvents = [];
+  try {
+    const response = await POST(refinerRequest([{
+      id: "photo1", attachmentId: "photo1", name: "photo1.png",
+      mediaType: "image/png", size: 29, kind: "file",
+    }]));
+    assert.equal(response.status, 410);
+    const payload = (await response.json()) as { code?: string; details?: Record<string, unknown> };
+    assert.equal(payload.code, "ATTACHMENT_UNAVAILABLE");
+    assert.deepEqual(payload.details?.unavailableAttachmentIds, ["photo1"]);
+    assert.equal(payload.details?.attachmentScope, "current_turn");
+    assert.equal(consumedRefinerDecisions, 1, "the decision was consumed before the files were read");
+    assert.equal(spies.creditReservations, 0);
+    assert.equal(spies.streamTextCalls, 0);
   } finally { explicitRefinerAuthority = false; }
 });
 
