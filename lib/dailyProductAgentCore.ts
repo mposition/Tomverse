@@ -42,6 +42,8 @@ const claim = z.object({
   at: z.string().datetime(),
   leaseUntil: z.string().datetime(),
   source: z.enum(DAILY_PRODUCT_SOURCES),
+  attempts: z.number().int().min(1).max(1_000_000).optional(),
+  finishedAt: z.string().datetime().optional(),
 }).strict();
 
 const prUrl = z.string().regex(/^https:\/\/github\.com\/mposition\/Tomverse\/pull\/[1-9][0-9]{0,8}$/);

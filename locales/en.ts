@@ -1776,11 +1776,11 @@ export const en = {
     accountDataExport: {
         dataTabTitle: "Your account data",
         dataTabDescription:
-            "Download everything Tomverse holds for your account -- conversations, memories, imports, payments and usage -- as a single file.",
+            "Download your exportable account data -- conversations, memories, imports, payments and usage -- as a single file. Operator records and other non-user data are excluded.",
         dataTabOpen: "Download your data",
         pageTitle: "Download your account data",
         pageDescription:
-            "One file with everything Tomverse holds for your account. It names what it contains and what it leaves out, and says why.",
+            "One file with your exportable account data: conversations, memories, imports, payments and usage. Operator records and other non-user data are excluded. The file lists included and excluded categories and explains why.",
         securityNote:
             "Downloading requires a recent sign-in. The link you get back works once and stops working after five minutes, so a link that ends up somewhere else is already spent.",
         prepareDownload: "Prepare a download",
@@ -1795,7 +1795,7 @@ export const en = {
         historyDescription:
             "Every request, download and refusal on this account, kept for ninety days. A refusal means a download link for your account was presented and turned away.",
         historyLoading: "Loading...",
-        historyEmpty: "You have not downloaded your account data yet.",
+        historyEmpty: "No account data download activity in the last 90 days.",
         refusedExpired: "The system refused this download because the link expired. Prepare a new link.",
         refusedUsed: "The system refused a repeat download using an already-used, single-use link.",
         refusedAccountMismatch: "The system refused this download because the requesting account did not own the link.",
@@ -2338,10 +2338,10 @@ export const en = {
         providerTransferTitle: "What is sent to the chat provider",
         providerTransfer1: "What is transferred: your question, the earlier conversation needed to answer it, and files you attach. If account memory or an assistant is on, the reference material described in those sections is included. Tomverse does not attach your account identifier, email address, or client IP address to this request. If Current location is on, your approximate device location is also included for that turn, including when a fallback provider answers.",
         providerTransfer2: "When and how: when generating the response, in an encrypted HTTPS API request.",
-        providerTransfer3: "Who receives it: the provider of the model that generates the answer. Choosing a model chooses that recipient. If you compare several models, each chosen model's provider receives the turn.",
+        providerTransfer3: "Who receives it: when you choose a specific model, its provider receives the turn. If you compare several models, each chosen model's provider receives it. When automatic fallback is enabled, Auto may send a text-only turn to another eligible model's provider if the initial attempt fails or stalls. Both providers may receive the question, needed conversation context and enabled memory, assistant or location context. Fallback is excluded for turns with attachments, tools, web search or deep research.",
         providerTransfer4: "Purpose: to generate that response. Tomverse does not send the turn to the provider for any other purpose.",
         providerTransfer5: "How to refuse: do not choose that model.",
-        providerTransfer6: "If you refuse: you do not receive that model's answer. Choosing another model sends the turn only to that model's provider. The rest of Tomverse stays available.",
+        providerTransfer6: "If you refuse: you do not receive that model's answer. To avoid automatic transfer to a fallback provider, choose a specific model instead of Auto; Tomverse will not automatically replace that chosen model with another provider's model. The rest of Tomverse stays available.",
         providerTransfer7: "Web search: on a turn where Tomverse itself runs the search, the search text is sent to Brave Search over encrypted HTTPS. That request does not include your account identifier, email address, or client IP address. Turning web search off stops that transfer. When the model provider runs the search, that text is part of the provider request described above. If Current location is on, search text may include your approximate coordinates or a nearby place derived from them.",
         voiceInputTitle: "Voice input",
         voiceInput: "If you use the microphone in the message box, the recording is sent to a speech-to-text provider — OpenAI today — for the sole purpose of converting it into text, and it is transferred to OpenAI OpCo, LLC, a company established in the United States. The provider's global API is used, so the infrastructure that does the processing is not limited to the United States: the recording may be processed wherever OpenAI and its sub-processors operate. Tomverse does not store the audio: it is held in memory for the length of that one request and is never written to a database, to file storage, to a log or to error tracking, and a recording you cancel is never sent anywhere at all. The text that comes back is placed in the message box for you to read, edit or delete before you send anything; until you send it, it is a draft on your device and Tomverse stores nothing. Once you send it, it is an ordinary message and the rest of this policy applies to it. Voice input is available whether or not you are signed in. When you are not, the request is attributed to the same anonymous identifier your other guest activity uses, and nothing about the recording is stored either way.",

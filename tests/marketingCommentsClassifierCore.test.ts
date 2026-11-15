@@ -344,10 +344,10 @@ test("the service is declared hourly in staging and production only, with the wo
   assert.match(worker, /purpose: "comment_triage"/);
 });
 
-test("the worker loads under plain node with stripped types, and off it asks nothing of anyone", () => {
+test("the worker loads with native types or tsx, and off it asks nothing of anyone", () => {
   const worker = fileURLToPath(new URL("../scripts/marketing-comments-monitor-worker.mjs", import.meta.url));
   const run = (env: Record<string, string>) =>
-    spawnSync(process.execPath, ["--experimental-strip-types", "--no-warnings", worker], {
+    spawnSync(process.execPath, [...(process.features.typescript ? ["--experimental-strip-types"] : ["--import=tsx"]), "--no-warnings", worker], {
       env: { ...env, PATH: process.env.PATH ?? "", SystemRoot: process.env.SystemRoot ?? "", NODE_ENV: "test" },
       encoding: "utf8",
     });
@@ -358,7 +358,7 @@ test("the worker loads under plain node with stripped types, and off it asks not
   // on passes the gate. Started by hand, with no run id or deadline from the
   // service, the worker then stops before any request: it prints no event, asks
   // the app nothing and exits 1. Every module it imports has loaded by the time
-  // it gets that far, the notice constant's module included, under stripped types.
+  // it gets that far, including the notice constant's module.
   const on = run({ [MARKETING_COMMENTS_MONITOR_ENV]: "true" });
   assert.equal(on.status, 1);
   assert.equal(on.stdout, "");

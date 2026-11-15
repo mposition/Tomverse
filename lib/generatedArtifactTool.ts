@@ -311,7 +311,11 @@ const HANDLERS: Record<AuthoredArtifactKind, KindHandler> = {
       "attach it to your reply. Use this for reports, letters, summaries, " +
       "proposals and any prose document the user wants as a file. You supply " +
       "the content as a flow of blocks (headings, paragraphs, lists, tables, " +
-      "quotes, code); the application writes the file. For PDF amount or numeric " +
+      "quotes, code); the application writes the file. Match every heading and " +
+      "table caption to the full time span and scope of the content below it. " +
+      "For example, a schedule with first-day, first-week and first-month rows " +
+      "needs a first-month heading, not a first-week heading; if the user asks " +
+      "for only the first week, keep the rows within that week. For PDF amount or numeric " +
       "table columns, set pdfNumberColumns to their zero-based indices and supply " +
       "numeric cells as numbers for grouped, right-aligned display. Keep identifiers " +
       "and exact authored strings as strings. For PDF tables, set " +

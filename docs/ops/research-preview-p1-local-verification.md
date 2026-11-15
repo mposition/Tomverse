@@ -632,3 +632,19 @@ stylesheet from their respective global CSS entry points. The final complete
 client lane passes 1,022/1,022 with no skips. Native production bundling passes,
 and its emitted CSS includes the Research card styles. Changed-file lint and
 whitespace checks pass.
+
+### PR #3977 develop conflict repair
+
+Merged develop `c1aae3cac` into the feature branch. The only conflict was the
+observed privacy-content digest: develop added the English/Korean automatic
+fallback disclosure, while this PR added the Cohere disclosure table. Both
+sets of content are retained and the combined verifier recomputes
+`b1e897e3b94c044847919b627354ace36f1046b73af934f815b7611a21973020`.
+The approved publication-digest list is byte-for-byte unchanged.
+
+Publication, privacy, fallback, locale, account-data, comparison-copy and Native
+Research regressions pass 41 cases with two existing date-dependent sitemap
+skips. Privacy-table render regressions pass 2/2. The locale-translation check
+passes six locales with 2,397 keys each; scoped ESLint and whitespace checks
+pass. This conflict repair adds no new paid run, publication approval, PR
+merge or deployment. Draft and `ci:hold` remain in place.
