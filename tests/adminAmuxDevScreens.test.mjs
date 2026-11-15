@@ -46,7 +46,7 @@ test("an idea row only links to the idea: the approval panels and their blocking
 
 test("the card list counts the whole board and reads the state of the page's own cards", () => {
   const page = read("app/(site)/(application)/admin/amux-backlog/page.tsx");
-  assert.ok(page.includes("backlogList === null ? null : await listAmuxCardsForAdmin(backlogList.rows.map((row) => row.id))"),
+  assert.ok(page.includes("backlogList === null ? null : await listAmuxCardsForAdmin({ ids: backlogList.rows.map((row) => row.id) })"),
     "no summary read before the list itself was readable; the page's cards are named");
   assert.ok(page.includes("summary={cardSummary}"));
   const panel = read("components/admin/AmuxBacklogListPanel.tsx");
@@ -57,7 +57,7 @@ test("the card list counts the whole board and reads the state of the page's own
   assert.equal(panel.includes("c.bounded("), false);
   const list = read("lib/amux/adminCardList.ts");
   assert.match(list, /groupBy\(\{ by: \["status"\], where: \{ archivedAt: null \}/);
-  assert.doesNotMatch(list, /take:/, "no read takes only the newest cards");
+  assert.ok(list.includes("...(named ? {} : { take: select.limit })"), "named cards are read without a take");
   // A bad search keeps its form (it can be fixed or cleared), and a phone card still reaches the card.
   assert.ok(panel.indexOf("{searchForm}") < panel.indexOf("m.invalidSearch"), "the search form is shown with the invalid-search message");
   assert.ok(/cardTitle=\{\(row\) => \(\s*<Link/.test(panel), "the phone card's title links to the card");

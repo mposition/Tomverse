@@ -17,7 +17,9 @@ test("the AMUX card list is an owner-only section that is not advertised to othe
   // the old address redirects there.
   const page = await read("app/(site)/(application)/admin/amux-execution/page.tsx");
   assert.match(page, /getAdminRole\(session\) !== "owner"\) notFound\(\)/);
-  assert.match(page, /listAmuxCardsForExecutionList\(\)/);
+  assert.ok(page.includes("listAmuxCardsForExecutionList(amuxAdminCardListRequestedLimit(query.cardLimit))"),
+    "one page, or as many as show more asked for (owner decision 2026-11-15: no display cap)");
+  assert.ok(page.includes(`initialView={query.cardView === "list" ? "list" : "board"}`), "show more reopens the List view");
   assert.equal(ADMIN_LEGACY_ROUTES["/admin/amux-cards"], "/admin/amux-execution?tab=cards");
   const meta = resolveAdminPageMeta("/admin/amux-execution");
   assert.equal(meta.isKnown, true);
@@ -38,7 +40,7 @@ test("the card list reads identifiers and state only", async () => {
     assert.equal(select.includes(forbidden), false, forbidden);
   }
   assert.match(select, /executionBriefDigest: true/);
-  assert.match(loader, /take: AMUX_ADMIN_CARD_LIST_LIMIT/);
+  assert.ok(loader.includes("...(named ? {} : { take: select.limit })"), "the newest cards up to the asked limit; named cards whole");
   assert.doesNotMatch(loader, /\.(update|updateMany|create|createMany|upsert|delete|deleteMany)\(/);
   // One set query per page for the latest attempt and one for the counts.
   assert.doesNotMatch(loader, /executionAttempts: \{/);
@@ -67,7 +69,7 @@ test("the list view states how many rows it shows out of how many and opens a ro
 
 test("the list view's loader adds a title and a worker to the owner list and writes nothing", async () => {
   const loader = await read("lib/amux/adminExecutionCardList.ts");
-  assert.match(loader, /listAmuxCardsForAdmin\(\)/);
+  assert.ok(loader.includes("listAmuxCardsForAdmin({ limit })"), "the newest cards, as many as the List view asked for");
   // The title is read the way the board reads it: digest-verified, or null.
   assert.match(loader, /readAmuxCardTitle/);
   assert.match(loader, /v22AcceptedAssignment: \{ select: \{ workerName: true \} \}/);

@@ -360,6 +360,9 @@ test("AMUX Prisma-call ceiling refuses N+1 before issuing its SQL", async () => 
   );
 });
 
+/** A duration as PostgreSQL shows it back from current_setting. */
+const pgDuration = (ms: number) => (ms % 1000 === 0 ? `${ms / 1000}s` : `${ms}ms`);
+
 test("AMUX LOCAL timeout settings do not leak to another connection use", async () => {
   await withAmuxDbBoundary(
     {
@@ -375,7 +378,8 @@ test("AMUX LOCAL timeout settings do not leak to another connection use", async 
           current_setting('idle_in_transaction_session_timeout') AS idle
       `;
       assert.equal(values[0]?.statement, "200ms");
-      assert.equal(values[0]?.idle, `${AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS}ms`);
+      // PostgreSQL shows a whole number of seconds in seconds (1000ms reads back as 1s).
+      assert.equal(values[0]?.idle, pgDuration(AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS));
     },
   );
   const values = await prisma.$queryRaw<
@@ -385,7 +389,7 @@ test("AMUX LOCAL timeout settings do not leak to another connection use", async 
       current_setting('idle_in_transaction_session_timeout') AS idle
   `;
   assert.notEqual(values[0]?.statement, "200ms");
-  assert.notEqual(values[0]?.idle, `${AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS}ms`);
+  assert.notEqual(values[0]?.idle, pgDuration(AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS));
 });
 
 const signals = (
@@ -4920,7 +4924,7 @@ test("the admin card list reads attempt counts and the latest attempt in set que
       data: { drag: 0 },
     });
 
-    const list = await listAmuxCardsForAdmin([taskId]);
+    const list = await listAmuxCardsForAdmin({ ids: [taskId] });
     const row = list.rows.find((candidate) => candidate.id === taskId);
     assert.ok(row, "the card the page names is read");
     assert.ok((list.statusCounts.todo ?? 0) >= 1, "the board's counts include it");

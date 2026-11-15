@@ -5,6 +5,7 @@ import {
   AMUX_SESSION_REVIEW_DETAILS, classifyAmuxSessionReviewAnswer, readAmuxSessionReviewReply,
 } from "../lib/amux/ideaSessionReviewCore.ts";
 import { DM_CARD_TEXT_MAX_BYTES } from "../lib/amux/decisionMakerCore.ts";
+import { AMUX_INTAKE_SAFETY_MAX_BYTES } from "../lib/amux/intakeLimitsCore.ts";
 import { amuxSessionReviewFirstPageDetail } from "../lib/amux/ideaSessionReviewDetailCore.ts";
 import { amuxV19SessionPromptForClaim } from "../lib/amux/ideaSessionAnalysisPromptCore.ts";
 
@@ -95,7 +96,10 @@ test("a refused first page names the plan writer's own failed check, never answe
   assert.deepEqual(detailOf(firstPage({ extra: true })),
     { detail: "chunk_schema_rejected", at: { rule: "key_extra", field: "chunk" } });
   assert.deepEqual(detailOf(firstPage({ coveredScope: "" })), { detail: "chunk_metadata_incomplete" });
-  assert.deepEqual(detailOf("x".repeat(65_537)), { detail: "chunk_too_large" });
+  // The former 64 KiB answer is no limit (owner direction 2026-11-15): only the
+  // 4 MiB safety ceiling is too large.
+  assert.deepEqual(detailOf("x".repeat(65_537)), { detail: "chunk_schema_rejected", at: { rule: "json_unparsable" } });
+  assert.deepEqual(detailOf("x".repeat(AMUX_INTAKE_SAFETY_MAX_BYTES + 1)), { detail: "chunk_too_large" });
   for (const raw of [firstPage(), "not json", firstPage({ units: [] })]) {
     assert.ok(AMUX_SESSION_REVIEW_DETAILS.includes(detailOf(raw).detail));
   }

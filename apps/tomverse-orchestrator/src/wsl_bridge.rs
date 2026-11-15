@@ -2195,7 +2195,14 @@ async fn v22_sidecar_call(
     // JSON escaping can at most double the prompt (the sidecar's same bound).
     let request_limit = if local_cli_flow {
         2 * crate::tomverse_api::v22_delivery_prompt_max_bytes() + 64 * 1024 } else { 64 * 1024 };
-    let response_limit = if local_cli_flow { 2 * backstop + 1024 * 1024 } else { 327680 };
+    // A local CLI flow answer carries the report (up to the backstop, at most
+    // doubled by JSON escaping) beside the patch envelope; the earlier flow's
+    // answer is the patch envelope (`V22_PATCH_ENVELOPE_MAX_BYTES`).
+    let response_limit = if local_cli_flow {
+        2 * backstop + crate::tomverse_api::V22_PATCH_ENVELOPE_MAX_BYTES
+    } else {
+        crate::tomverse_api::V22_PATCH_ENVELOPE_MAX_BYTES
+    };
     if request.len() > request_limit {
         bail!("v22 sidecar request exceeds limit");
     }
@@ -2204,8 +2211,7 @@ async fn v22_sidecar_call(
         stream.write_all(&request).await?;
         stream.shutdown().await?;
         let mut response = Vec::new();
-        let limit = if local_cli_flow { response_limit } else {
-            crate::tomverse_api::V22_PATCH_ENVELOPE_MAX_BYTES };
+        let limit = response_limit;
         stream.take(limit as u64 + 1).read_to_end(&mut response).await?;
         if response.len() > limit {
             bail!("v22 sidecar response exceeds limit");

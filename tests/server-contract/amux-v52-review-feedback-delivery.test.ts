@@ -186,7 +186,7 @@ async function pull() {
 async function reviewFile(prompt: string) {
   const { amuxV22ExtractContextFiles, AMUX_V22_CONTEXT_FILES } = await localCli();
   return amuxV22ExtractContextFiles(prompt).files
-    .find((file) => file.name === AMUX_V22_CONTEXT_FILES.reviewFindings)?.text ?? null;
+    .find((file: { name: string; text: string }) => file.name === AMUX_V22_CONTEXT_FILES.reviewFindings)?.text ?? null;
 }
 
 const reset = () => { history = []; sealedBodies = new Map(); avoidSwitch = undefined; flowSwitch = undefined; };

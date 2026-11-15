@@ -53,8 +53,9 @@ test("a v22 question's workspace holds what the worker found, whole, as CONTEXT.
   const { openDecisionMakerWorkspaceEvidence } = await service;
   const { AMUX_V22_OWNER_QUESTION_MARKER } = await import(mod("lib/amux/v22OwnerQuestionCore.ts"));
   const found = "The retry path loses the error. ".repeat(20_000).trim();
-  const { taskId: _task, sourceSnapshot: _snapshot, bodyCiphertext: _body, bodyKeyId: _bk, bodyKeyVersion: _bv,
-    bodyDigest: _bd, bodyDigestKeyId: _bdk, ...result } = sealed;
+  const result = { attemptId: sealed.attemptId, resultIdeaId: sealed.resultIdeaId, ciphertext: sealed.ciphertext,
+    keyId: sealed.keyId, keyVersion: sealed.keyVersion, digest: sealed.digest, digestKeyId: sealed.digestKeyId,
+    sourceSha256: sealed.sourceSha256, bodyPurgedAt: sealed.bodyPurgedAt };
   resultText = `Work so far.\n${AMUX_V22_OWNER_QUESTION_MARKER} ${JSON.stringify({ question: "Which path?",
     unblocks: "the fix", options: [{ id: "a", label: "A" }], context: found })}`;
   try {

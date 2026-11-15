@@ -123,7 +123,7 @@ export default async function AdminAmuxBacklogPage({
   // The whole board's counts, and the kind, priority and state of the page's
   // own cards, only once the paged list itself was readable. A failed read is
   // drawn as unavailable, never as zero.
-  const cardSummary = backlogList === null ? null : await listAmuxCardsForAdmin(backlogList.rows.map((row) => row.id)).then((read) => ({
+  const cardSummary = backlogList === null ? null : await listAmuxCardsForAdmin({ ids: backlogList.rows.map((row) => row.id) }).then((read) => ({
     total: read.total,
     statusCounts: read.statusCounts,
     cards: read.rows.map(({ id, status, kind, priority }) => ({ id, status, kind, priority })),

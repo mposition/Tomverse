@@ -237,9 +237,11 @@ function IdeaLaneCard({ card }: { card: AmuxIdeaLaneBoardCard }) {
   </li>;
 }
 
-export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = false,
+export function AmuxExecutionWorkspace({ initialTaskId = null, initialView = "board", canMoveCards = false,
   canReviewCards = false, decisionMaker, laneIdeas, workerChannels, cardList, ownerQueue }: {
   initialTaskId?: string | null; canMoveCards?: boolean;
+  /** The view the board opens in: the List view after its "show more" (`?cardView=list`). */
+  initialView?: "board" | "list" | "hierarchy";
   /** The "Waiting on me" queue's count and groups, read by the page; null: not read. */
   ownerQueue?: AmuxBoardOwnerQueue | null;
   /**
@@ -265,7 +267,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
    * The List view's rows, read by the page (lib/amux/adminExecutionCardList.ts).
    * Absent: the view is not offered; null: the read failed, which the view says.
    */
-  cardList?: { rows: AmuxExecutionListRow[]; total: number; limit: number } | null;
+  cardList?: { rows: AmuxExecutionListRow[]; total: number; limit: number; nextLimit?: number | null } | null;
 }) {
   const m = useAdminMessages(adminAmuxExecutionMessages);
   const d = useAdminMessages(adminAmuxDecisionMakerAttentionMessages);
@@ -275,7 +277,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
   // The clock the card ages are counted against: read when the board was read, not on every render.
   const [nowMs, setNowMs] = useState<number | null>(null);
   const dmTotal = decisionMaker?.total ?? 0;
-  const [view, setView] = useState<"board" | "list" | "hierarchy">("board");
+  const [view, setView] = useState<"board" | "list" | "hierarchy">(initialView);
   // A lane the board pages on its own (the attention lane's rest, the past-work list) stops after a failed read instead of retrying in a loop.
   const [autoStopped, setAutoStopped] = useState<Partial<Record<AmuxExecutionLane, true>>>({});
   const [board, setBoard] = useState<BoardSnapshot | null>(null);
@@ -906,7 +908,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
     </>}
     {view === "list" && cardList !== undefined && (cardList === null ?
       <AdminReadFailed title={views.list.unavailableTitle} detail={views.list.unavailableDetail} /> :
-      <AmuxCardListPanel rows={cardList.rows} total={cardList.total} limit={cardList.limit} nowMs={nowMs}
+      <AmuxCardListPanel rows={cardList.rows} total={cardList.total} limit={cardList.limit} nextLimit={cardList.nextLimit} nowMs={nowMs}
         workerChannels={workerChannels}
         onOpen={(taskId, opener) => { returnFocusRef.current = opener; void openCard(taskId); }} />)}
     {view === "hierarchy" && <section className="rounded-lg border p-4 border-zinc-700">

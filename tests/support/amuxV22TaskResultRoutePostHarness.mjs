@@ -42,6 +42,8 @@ mock.module(mod("lib/amux/v22TaskResultStore.ts"), {
     readAmuxV22TaskPatchEvidence: async () => null,
     v22TaskResultIdeaId: (snapshot) => snapshot?.ideaId ?? null,
     v22TaskResultSha256: sha256,
+    // The route bounds the report by the store's flow-aware cap (#4004).
+    amuxV22ResultMaxBytes: () => 32 * 1024 * 1024,
   },
 });
 mock.module(mod("lib/prisma.ts"), {
