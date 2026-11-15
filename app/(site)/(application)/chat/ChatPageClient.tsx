@@ -1758,6 +1758,13 @@ export function ChatPageClient({
   );
   const [showGuestSignInPrompt, setShowGuestSignInPrompt] = useState(false);
   /**
+   * The starter card whose lock opened the guest sign-in prompt, as its
+   * `labelKey`. Set only by a locked starter click and cleared when the prompt
+   * closes, so the prompt can name the outcome the person chose and say that
+   * sign-in is the requirement, instead of the generic catalogue pitch.
+   */
+  const [guestSignInStarterLabelKey, setGuestSignInStarterLabelKey] = useState<string | null>(null);
+  /**
    * A send that has been started but not yet handed to the panels, and the
    * conversation it started from. Read only by the shells' content-state
    * derivation; it changes nothing about credits, preflight, admission,
@@ -10181,8 +10188,11 @@ export function ChatPageClient({
     reason: the requirement was stated on the card, so the click is the user
     acting on a fact they already had rather than discovering one.
   */
-  const handleStarterLocked = (reason: StarterLockReason) => {
+  const handleStarterLocked = (reason: StarterLockReason, entry: ChatStarterEntry) => {
     if (reason === "sign_in_required") {
+      // The prompt names the card's outcome and the requirement, so the person
+      // sees why this click led to sign-in rather than a generic pitch.
+      setGuestSignInStarterLabelKey(entry.labelKey);
       setShowGuestSignInPrompt(true);
       return;
     }
@@ -10775,7 +10785,7 @@ export function ChatPageClient({
           onStudioStarter={id => {
             const card = starterCards.find(item => item.entry.id === id);
             if (!card) return;
-            if (card.availability.state === "locked") handleStarterLocked(card.availability.reason);
+            if (card.availability.state === "locked") handleStarterLocked(card.availability.reason, card.entry);
             else if (reviewWorkspace.mode === "easy" && card.entry.seed.productKey === "studio") {
               // Easy routes once per selected provider, so the sentence goes
               // out as an image request to every provider that can draw.
@@ -11052,8 +11062,17 @@ export function ChatPageClient({
           <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-500/10 text-blue-600 dark:text-blue-300">
             <Sparkles className="h-5 w-5" aria-hidden="true" />
           </span>
-          <h2 id="guest-compare-signin-title" className="mt-4 text-xl font-black">{trialCopy.title}</h2>
-          <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">{trialCopy.body}</p>
+          <h2 id="guest-compare-signin-title" className="mt-4 text-xl font-black">
+            {guestSignInStarterLabelKey ? t("chatStarter.lockedSignInTitle") : trialCopy.title}
+          </h2>
+          <p
+            className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300"
+            data-testid={guestSignInStarterLabelKey ? "guest-signin-starter-reason" : undefined}
+          >
+            {guestSignInStarterLabelKey
+              ? t("chatStarter.lockedSignInReason").replaceAll("{starter}", t(guestSignInStarterLabelKey))
+              : trialCopy.body}
+          </p>
           <div className="mt-5 grid gap-2 sm:grid-cols-2">
             <a
               href={guestCompareSignInHref}
@@ -11078,7 +11097,10 @@ export function ChatPageClient({
             </a>
             <button
               type="button"
-              onClick={() => setShowGuestSignInPrompt(false)}
+              onClick={() => {
+                setShowGuestSignInPrompt(false);
+                setGuestSignInStarterLabelKey(null);
+              }}
               className="min-h-11 rounded-xl border border-zinc-200 px-4 py-2 text-sm font-bold text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
             >
               {trialCopy.cancel}
