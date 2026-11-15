@@ -23,7 +23,11 @@ import {
   type AmuxAttachment,
 } from "@/lib/amux/dbBoundary";
 import {
+  AMUX_REPEATED_FAILURE_REASON,
+  AMUX_REPEATED_FAILURE_RUNS,
   amuxApprovedCeilingOverrun,
+  amuxRepeatedResultFailure,
+  amuxResultFailureSignature,
   decideAmuxAttemptBudget,
   settlementDestinationForBudget,
 } from "@/lib/amux/executionBudgetCore";
@@ -108,6 +112,11 @@ import { amuxV22ReadOnlyApiUsageProjection,
 import { amuxV22WorkerSafeStopFenced } from "@/lib/amux/v22LegacySafeStopFence";
 import { amuxV22OwnerQuestionSettlementPlan } from "@/lib/amux/v22OwnerQuestionCore";
 import { amuxWorkerRuntimeUsesReadOnlyApi } from "@/lib/amux/workerRuntime";
+import { AMUX_INFRA_ATTEMPTS_EXHAUSTED_REASON, amuxInfraFailureReason,
+  amuxInfraFailureRoutingEnabled, amuxV22InfraFailureKind,
+  type AmuxSidecarFailureReport } from "@/lib/amux/infraFailureCore";
+import { countAmuxInfraAttemptsBefore, readAmuxAttemptBudgetFacts,
+  readAmuxRecentResultSignatures } from "@/lib/amux/infraFailureStore";
 import { AMUX_V22_CLI_USAGE_UNREPORTED_REASON,
   AMUX_V22_LEASE_EXPIRED_RETRY_REASON, amuxExecutionLeaseMs,
   amuxV22CliUsageRecordOnly, amuxV22ReadBackProceedEnabled } from
@@ -447,11 +456,11 @@ export async function startAmuxV22TaskExecution(input: {
         candidate.provider === assignment.provider &&
         candidate.modelId === assignment.modelId &&
         candidate.routePolicyDigest === assignment.routePolicyDigest);
-      const prior = await tx.amuxExecutionAttempt.aggregate({
-        where: { taskId: input.taskId },
-        _count: { _all: true }, _max: { attemptNumber: true },
-        _sum: { reservedCostMicrousd: true },
-      });
+      // One statement: the rows, the greatest number, the reserved total and
+      // the infrastructure failures, which do not use the card's attempts
+      // (owner decision 2026-11-15, lib/amux/infraFailureCore.ts).
+      const prior = await readAmuxAttemptBudgetFacts(tx, input.taskId);
+      const priorReserved = prior.reservedMicrousd;
       const recovery = assignment.recoveryApprovalId ? await readAmuxV22RecoveryAuthority(tx,
         input.taskId, assignment.taskRevision, assignment.recoveryApprovalId, now) : null;
       if (assignment.recoveryApprovalId && !recovery) return { started: false as const,
@@ -471,10 +480,13 @@ export async function startAmuxV22TaskExecution(input: {
         return { started: false as const,
           reason: "recovery_approval_unbound" as const };
       }
-      const budget = recoveryAttemptBudget({
-        historicalAttempts: prior._count._all,
-        greatestAttemptNumber: prior._max.attemptNumber,
-      });
+      // A paid (risk-accepted) retry keeps its own exact count.
+      const budget = recovery?.riskAcceptanceId ? recoveryAttemptBudget({
+        historicalAttempts: prior.historicalRows,
+        greatestAttemptNumber: prior.greatestAttemptNumber,
+      }) : decideAmuxAttemptBudget({ historical_rows: prior.historicalRows,
+        greatest_attempt_number: prior.greatestAttemptNumber,
+        infra_rows: prior.infraRows, infra_window_rows: prior.infraWindowRows });
       if (!budget.allowed) return { started: false as const,
         reason: "attempt_budget_exhausted" as const };
       // v47: the retry receipt is recomputed as of its launch check.
@@ -483,12 +495,12 @@ export async function startAmuxV22TaskExecution(input: {
           { asOf: recovery.costAsOf }) : cost;
       const recoveryCost = recovery?.riskAcceptanceId && route ?
         amuxV22ReadOnlyRetryRouteCost({
-          priorReservedMicroUsd: prior._sum.reservedCostMicrousd ?? BigInt(0),
+          priorReservedMicroUsd: priorReserved,
           catalogApprovalId: recoveryReceipt.approvalId, receipt: recoveryReceipt.receipt,
           routeId: route.routeId, workerName: route.workerName,
           provider: route.provider, modelId: route.modelId }) :
         recovery ? amuxV22RecoveryCost({
-          priorReservedMicroUsd: prior._sum.reservedCostMicrousd ?? BigInt(0),
+          priorReservedMicroUsd: priorReserved,
           catalogApprovalId: cost.approvalId, receipt: cost.receipt }) : null;
       const apiFrame = recovery?.readOnlyExecutorKind ===
         AMUX_V22_READ_ONLY_API_EXECUTOR_KIND ?
@@ -520,8 +532,8 @@ export async function startAmuxV22TaskExecution(input: {
              recovery.briefDigest !== card.v4BriefDigest)) ||
           !(recovery ? amuxV22RecoveryStartAllowed({ approval: recovery,
             taskId: input.taskId, assignmentRevision: assignment.taskRevision,
-            historicalAttempts: prior._count._all, nextAttemptNumber: budget.next_attempt_number,
-            priorReservedMicroUsd: prior._sum.reservedCostMicrousd ?? BigInt(0),
+            historicalAttempts: prior.historicalRows, nextAttemptNumber: budget.next_attempt_number,
+            priorReservedMicroUsd: priorReserved,
             assignedMicroUsd: assignment.perAttemptMicroUsd,
             catalogApprovalId: cost.approvalId,
             costDigest: recoveryCost!.costDigest,
@@ -564,7 +576,7 @@ export async function startAmuxV22TaskExecution(input: {
       // Recorded, never refused (owner decision 2026-11-14): the same
       // calculation the claim recorded for this assignment.
       const ceilingOverrun = amuxApprovedCeilingOverrun({ approvedReceipt: approved,
-        priorReservedMicroUsd: prior._sum.reservedCostMicrousd ?? BigInt(0),
+        priorReservedMicroUsd: priorReserved,
         nextAttemptMicroUsd: assignment.perAttemptMicroUsd });
       if (ceilingOverrun) console.warn(JSON.stringify({ subsystem: "amux",
         event: "v22_approved_ceiling_overrun", phase: "execution_start",
@@ -1428,6 +1440,9 @@ export async function settleAmuxV22TaskExecution(input: {
     launcherConfigDigest?: string;
     apiExecutionFrameDigest?: string;
     apiExecutionReceipt?: unknown };
+  /** What the sidecar said about a run with no verified result (a bridge
+   * from 2026-11-15 on sends it with an unverified settlement). */
+  failure?: AmuxSidecarFailureReport;
 }) {
   const patch = input.outcome === "succeeded" ?
     await loadEngineeringAgentV22SettlementPatch(input.attemptId) : null;
@@ -1437,9 +1452,12 @@ export async function settleAmuxV22TaskExecution(input: {
   // + 6: an applied investigate conclusion writes its own system audit (4)
   // and a result put to Decision Maker review its row (1), with one spare.
   // + 1: the local CLI flow's in-place escalation reads its review record.
+  // + 2: the Task's earlier infrastructure failures, and its latest result
+  // failures for the repeat check (owner decision 2026-11-15).
   const settleBoundary = { ...AMUX_DB_BOUNDARIES.executionSettle,
-    prismaCallCeiling: AMUX_DB_BOUNDARIES.executionSettle.prismaCallCeiling + 44 + 6 + 1 };
+    prismaCallCeiling: AMUX_DB_BOUNDARIES.executionSettle.prismaCallCeiling + 44 + 6 + 1 + 2 };
   const localCliFlow = amuxV22LocalCliFlowEnabled();
+  const infraRouting = amuxInfraFailureRoutingEnabled();
   const conclusionMode = amuxV22ConclusionMode(process.env[AMUX_V22_CONCLUSION_ENV]);
   const resultReviewDm = amuxV22ResultReviewDmEnabled();
   const publicationEligible = v22PublishPreflightEligible({
@@ -1674,6 +1692,20 @@ export async function settleAmuxV22TaskExecution(input: {
         outcome: input.outcome, readPatch: patch, storedPatch }))
         return { settled: false as const,
           reason: "publication_state_changed" as const };
+      // Owner decision 2026-11-15 (lib/amux/infraFailureCore.ts): a run that
+      // never did the card's work -- no result, an exit right after start, a
+      // refused sign-in, the sidecar -- goes back to todo for another worker
+      // without using an attempt. Its usage stays unknown in the ledger. The
+      // Task's earlier infrastructure failures never count either.
+      const infraKind = amuxV22InfraFailureKind({ enabled: infraRouting,
+        outcome: input.outcome, budgetBound: !!settlementRecovery?.riskAcceptanceId,
+        apiReceipt: !!apiExecutionReceipt, receiptsComplete,
+        knownCliFailure: knownCliFailure !== null,
+        resultStored: storedResult !== null, patchStored: storedPatch !== null,
+        usageEventCount: storedEvents.length, failure: input.failure ?? null });
+      const infraBefore = infraRouting ?
+        await countAmuxInfraAttemptsBefore(tx, task.id, attempt.id, true) :
+        { total: 0, window: 0 };
       let escalationReceipt: Awaited<ReturnType<
         typeof calculateCurrentApprovedAmuxV4TaskCost>>["receipt"] | null = null;
       let originalReceiptDigest: string | null = null;
@@ -1774,20 +1806,44 @@ export async function settleAmuxV22TaskExecution(input: {
         effectivePathDecision === "pass" && executionRole === "investigate" &&
         patch === null && storedPatch === null && task.sourceSystem === "admin-idea-v4" ?
         amuxV22ConclusionSettlement(storedResult?.conclusionVerdict ?? null) : null;
+      const requestedStatus = questionPlan ? questionPlan.toStatus :
+        effectivePathDecision === "escalate" ? "todo" :
+        reviewDisposition ? reviewDisposition.status :
+        conclusionPlan ? conclusionPlan.toStatus :
+        input.outcome === "succeeded" ? "review" :
+        input.outcome === "failed" ? "todo" :
+        infraKind || cliUsageRecordOnly ? "todo" : "blocked";
+      const unverifiedReason = infraKind ? amuxInfraFailureReason(infraKind) :
+        cliUsageRecordOnly ? AMUX_V22_CLI_USAGE_UNREPORTED_REASON :
+        knownCliFailure ?? "usage_outcome_unknown";
+      // Owner direction 2026-11-15: no fixed count stops a card. A retry of
+      // the worker's own failed result stops only when it is the same
+      // failure as the runs before it, and then goes to a person and the
+      // Decision Maker with that reason (executionBudgetCore.ts). A grade
+      // escalation starts the card over and is not a repeat.
+      const resultRetry = infraRouting && requestedStatus === "todo" && !infraKind &&
+        effectivePathDecision !== "escalate" && !questionPlan;
+      const repeatedFailure = resultRetry && amuxRepeatedResultFailure([
+        amuxResultFailureSignature(input.outcome, reviewDisposition?.reason ??
+          (receiptsComplete ? "reported_result" : unverifiedReason)),
+        ...await readAmuxRecentResultSignatures(tx, task.id, attempt.id,
+          AMUX_REPEATED_FAILURE_RUNS - 1)]);
       const budget = settlementDestinationForBudget({
-        requested_status: questionPlan ? questionPlan.toStatus :
-          effectivePathDecision === "escalate" ? "todo" :
-          reviewDisposition ? reviewDisposition.status :
-          conclusionPlan ? conclusionPlan.toStatus :
-          input.outcome === "succeeded" ? "review" :
-          input.outcome === "failed" ? "todo" :
-          cliUsageRecordOnly ? "todo" : "blocked",
+        requested_status: requestedStatus,
         attempt_number: attempt.attemptNumber,
+        infra_attempts_before: infraBefore.total,
+        infra_window_before: infraBefore.window,
+        infra_failure: infraKind !== null,
+        repeated_failure: repeatedFailure,
         ...(attempt.taskId === AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID &&
           settlementAssignment?.recoveryApprovalId ? {
           max_attempts: AMUX_V22_READ_ONLY_RETRY_TASK_ATTEMPT_LIMIT,
         } : {}),
       });
+      const exhaustedReason = budget.exhausted_limit === "infra_attempts" ?
+        AMUX_INFRA_ATTEMPTS_EXHAUSTED_REASON :
+        budget.exhausted_limit === "repeated_failure" ? AMUX_REPEATED_FAILURE_REASON :
+        budget.exhausted_limit === "attempts" ? "attempt_budget_exhausted" : null;
       const next = effectivePathDecision === "blocked" ? "blocked" :
         budget.to_status;
       const gradeEscalated = effectivePathDecision === "escalate" &&
@@ -1805,11 +1861,10 @@ export async function settleAmuxV22TaskExecution(input: {
         effectivePathDecision === "blocked" ?
           (escalating ? escalationBlockReason :
             "changed_paths_unavailable") :
-        budget.exhausted_limit ?? reviewDisposition?.reason ??
+        exhaustedReason ?? reviewDisposition?.reason ??
           (receiptsComplete ?
             (input.outcome === "blocked" ? "reported_result" : "execution_blocked") :
-            cliUsageRecordOnly ? AMUX_V22_CLI_USAGE_UNREPORTED_REASON :
-            knownCliFailure ?? "usage_outcome_unknown");
+            unverifiedReason);
       if ((gradeEscalated || gradeRaisedInPlace) && escalationReceipt) {
         await writeSystemAuditLog({ tx, systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
           action: AMUX_GRADE_ESCALATED_ACTION,
@@ -1842,12 +1897,14 @@ export async function settleAmuxV22TaskExecution(input: {
       await tx.amuxExecutionAttempt.update({ where: { id: attempt.id },
         data: { endedAt: now, leaseExpiresAt: null, heartbeatAt: now,
           outcome: input.outcome, toStatus: next, endedBy: input.worker,
+          // An infrastructure failure keeps its own reason even when it is
+          // the one that reaches the bound (the escalation names the bound),
+          // so the budget and the worker quarantine still count it.
           reason: gradeEscalated ? "contract_path_touched" :
+            infraKind ? amuxInfraFailureReason(infraKind) :
             next === "blocked" ? blockedReason :
-            budget.exhausted_limit ?? reviewDisposition?.reason ??
-                (receiptsComplete ? "reported_result" :
-                  cliUsageRecordOnly ? AMUX_V22_CLI_USAGE_UNREPORTED_REASON :
-                  knownCliFailure ?? "usage_outcome_unknown") },
+            exhaustedReason ?? reviewDisposition?.reason ??
+                (receiptsComplete ? "reported_result" : unverifiedReason) },
       });
       await tx.amuxWorkerRuntime.updateMany({ where: {
         workerName: input.worker, instanceId: input.instanceId,
@@ -1905,6 +1962,7 @@ export async function settleAmuxV22TaskExecution(input: {
         metadata: { attemptId: attempt.id, outcome: input.outcome,
           toStatus: next, invocationIds: expectedIds,
           receiptsComplete, cliFailureReason: knownCliFailure,
+          infraFailure: infraKind, sidecarFailure: input.failure?.code ?? null,
           reservedCostMicrousd:
             attempt.reservedCostMicrousd.toString(),
           apiExecutionReceiptDigest: apiExecutionReceipt?.digest ?? null,
@@ -1949,8 +2007,9 @@ export async function quarantineExpiredAmuxV22TaskExecutions(limit = 50) {
   for (const candidate of candidates) {
     const changed = await withAmuxDbBoundary(
       { ...AMUX_DB_BOUNDARIES.executionRecoveryWrite,
+        // + 1: the Task's earlier infrastructure failures (2026-11-15).
         prismaCallCeiling:
-          AMUX_DB_BOUNDARIES.executionRecoveryWrite.prismaCallCeiling + 12 },
+          AMUX_DB_BOUNDARIES.executionRecoveryWrite.prismaCallCeiling + 12 + 1 },
       async (tx, context) => {
         const now = context.dbNow;
         const runtime = await lockRuntime(tx, candidate.worker);
@@ -1968,13 +2027,23 @@ export async function quarantineExpiredAmuxV22TaskExecutions(limit = 50) {
         // its attempt budget (owner decision 2026-11-14,
         // v22ReadBackProceedCore.ts); a late settle of it is refused and the
         // bridge reads that back. A budget-bound (paid) run stays quarantined.
-        const assignment = amuxV22ReadBackProceedEnabled() ?
+        // Since 2026-11-15 the expiry is an infrastructure failure that uses
+        // no attempt (lib/amux/infraFailureCore.ts).
+        const infraRetry = amuxInfraFailureRoutingEnabled();
+        const assignment = amuxV22ReadBackProceedEnabled() || infraRetry ?
           await tx.amuxV22WorkerAssignment.findUnique({
             where: { id: attempt.v22AssignmentId },
             select: { recoveryApproval: { select: { riskAcceptanceId: true } } } }) : null;
-        const retry = !!assignment && !assignment.recoveryApproval?.riskAcceptanceId &&
-          settlementDestinationForBudget({ requested_status: "todo",
-            attempt_number: attempt.attemptNumber }).to_status === "todo";
+        const cliRoute = !!assignment && !assignment.recoveryApproval?.riskAcceptanceId;
+        const infraBefore = cliRoute && infraRetry ?
+          await countAmuxInfraAttemptsBefore(tx, task.id, attempt.id, true) :
+          { total: 0, window: 0 };
+        const destination = cliRoute ? settlementDestinationForBudget({
+          requested_status: "todo", attempt_number: attempt.attemptNumber,
+          infra_attempts_before: infraBefore.total, infra_window_before: infraBefore.window,
+          infra_failure: infraRetry }) : null;
+        const retry = destination?.to_status === "todo";
+        const infraExhausted = destination?.exhausted_limit === "infra_attempts";
         const toStatus = retry ? "todo" : "blocked";
         await tx.amuxWorkItem.update({ where: { id: task.id }, data: {
           status: toStatus, owner: null, claimedAt: null,
@@ -1984,7 +2053,10 @@ export async function quarantineExpiredAmuxV22TaskExecutions(limit = 50) {
           data: { endedAt: now, leaseExpiresAt: null,
             outcome: "expired", toStatus,
             endedBy: "system:amux-v22-execution-reaper",
-            reason: retry ? AMUX_V22_LEASE_EXPIRED_RETRY_REASON : "outcome_unknown" },
+            // The bound reached is named by the escalation below; the attempt
+            // keeps its infrastructure reason so it is still counted.
+            reason: retry || infraExhausted ? (infraRetry ? amuxInfraFailureReason("lease_expired") :
+              AMUX_V22_LEASE_EXPIRED_RETRY_REASON) : "outcome_unknown" },
         });
         // An owner question this run recorded is not parked by an unknown
         // outcome; it is closed so it never holds the Task's question slot.
@@ -1998,7 +2070,8 @@ export async function quarantineExpiredAmuxV22TaskExecutions(limit = 50) {
             generation: attempt.workerGeneration, status: "busy",
           }, data: { status: "error", dispatchReady: false } });
         if (!retry) await openAmuxHumanEscalation(tx, { taskId: task.id,
-          specialty: "execution-recovery", reason: "execution_lease_expired",
+          specialty: "execution-recovery", reason: infraExhausted ?
+            AMUX_INFRA_ATTEMPTS_EXHAUSTED_REASON : "execution_lease_expired",
           openedBy: "system:amux-v22-execution-reaper" });
         await cancelPendingAmuxWorkDelivery(tx, attempt.id, now);
         await writeSystemAuditLog({ tx, systemActor: AMUX_SYSTEM_AUDIT_ACTOR,

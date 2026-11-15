@@ -29,7 +29,9 @@ const approved = { approvalId: "catalog-one", catalogDigest: receipt.catalogDige
     modelId: "gpt-6-1-sol", uncachedInputMicroUsdPerMillion: 1_000_000,
     cacheReadMicroUsdPerMillion: 100_000, cacheWriteMicroUsdPerMillion: 200_000,
     outputMicroUsdPerMillion: 2_000_000 }] }, receipt };
-const attempts: Record<string, number> = { [spentTask]: 5, [freshTask]: 0 };
+// Owner direction 2026-11-15: no fixed five; a Task is spent only at the
+// runaway guard of thirty (infrastructure failures left out).
+const attempts: Record<string, number> = { [spentTask]: 30, [freshTask]: 0 };
 const assigned: string[] = [];
 const auditMetadata: Array<Record<string, unknown>> = [];
 
@@ -51,6 +53,12 @@ const tx = {
     if (sql.includes("ORDER BY CASE WHEN lane")) return [{ id: spentTask }, { id: freshTask }];
     if (sql.includes("FROM \"AmuxWorkItem\" WHERE \"id\"") &&
         sql.includes("FOR UPDATE")) return [{ id: values[0] }];
+    // readAmuxAttemptBudgetFacts: one statement for the budget.
+    if (sql.includes('COUNT(*)::int AS "rows"')) {
+      const used = attempts[String(values.at(-1))] ?? 0;
+      return [{ rows: used, greatest: used || null, infra: 0,
+        reserved: BigInt(used) * BigInt("3400000") }];
+    }
     if (sql.includes("FROM \"AmuxExecutionAttempt\" a")) return [];
     if (sql.includes("FROM \"AmuxWorkerRuntime\"") && sql.includes("FOR UPDATE"))
       return [runtime(String(values[0]))];
@@ -79,7 +87,7 @@ const tx = {
   amuxIdeaUnitDecision: { findUnique: async () => ({
     confirmationSnapshot: { card: { task: { costReceipt: receipt } } },
   }) },
-  amuxExecutionAttempt: { aggregate: async ({ where }: Where) => {
+  amuxExecutionAttempt: { findMany: async () => [], aggregate: async ({ where }: Where) => {
     const used = attempts[String(where.taskId)] ?? 0;
     return { _count: { _all: used }, _max: { attemptNumber: used || null },
       _sum: { reservedCostMicrousd: BigInt(used) * BigInt("3400000") } };
@@ -149,7 +157,7 @@ test("a Task with its attempts spent is skipped and the next Task is assigned", 
     // With only the spent Task left, the tick assigns nothing rather than a
     // reservation execution start would refuse.
     assigned.length = 0;
-    attempts[freshTask] = 5;
+    attempts[freshTask] = 30;
     const none = await (await service).tickV22WorkerClaim();
     assert.deepEqual(none, { claimed: false, reason: "no_ready_candidate" });
     assert.deepEqual(assigned, []);
@@ -158,10 +166,10 @@ test("a Task with its attempts spent is skipped and the next Task is assigned", 
     assert.equal(Object.hasOwn(auditMetadata[0], "ceilingOverrun"), false,
       "the first attempt reaches the approved ceiling exactly");
 
-    // One attempt left still assigns (the fifth attempt is allowed). Its
+    // One attempt left still assigns (the thirtieth attempt is allowed). Its
     // reservation passes the receipt's approved ceiling: recorded on the
     // assignment and logged, never refused (owner decision 2026-11-14).
-    attempts[freshTask] = 4;
+    attempts[freshTask] = 29;
     const warn = mock.method(console, "warn", () => undefined);
     let last;
     try {
@@ -169,7 +177,7 @@ test("a Task with its attempts spent is skipped and the next Task is assigned", 
     } finally { warn.mock.restore(); }
     assert.equal(last.claimed && last.taskId, freshTask);
     const overrun = { ceilingMicroUsd: "3400000",
-      priorReservedMicroUsd: "13600000", projectedMicroUsd: "17000000" };
+      priorReservedMicroUsd: "98600000", projectedMicroUsd: "102000000" };
     assert.deepEqual(auditMetadata.at(-1)?.ceilingOverrun, overrun);
     const logged = warn.mock.calls.map((call) => JSON.parse(String(call.arguments[0])))
       .filter((line) => line.event === "v22_approved_ceiling_overrun");

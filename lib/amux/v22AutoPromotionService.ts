@@ -8,7 +8,7 @@ import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { prisma } from "@/lib/prisma";
 import { BoardImportError } from "./boardImportCore.ts";
-import type { AmuxOrchestratorReceiptRecorder } from "./dbBoundary.ts";
+import { type AmuxOrchestratorReceiptRecorder, amuxRouteHasBudgetForMs } from "./dbBoundary.ts";
 import { findOpenAmuxOrchestratorHalt } from "./orchestratorHaltStore.ts";
 import { AMUX_INCIDENT_SETTING_KEY, parseAmuxIncidentSetting } from
   "./incidentCore.ts";
@@ -36,6 +36,9 @@ import { AMUX_V22_AUTO_PROMOTION_CODE_LATCH,
   amuxV22GraduationPermitted } from "./v22AutoPromotionCore.ts";
 import { writeV22AutoPromotionAudit } from "./v22AutoPromotionAudit.ts";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
+import { type AmuxCardWaitEntry, recordAmuxCardWaitReasons } from "./cardWaitReasonStore.ts";
+import { amuxInfraFailureRoutingEnabled } from "./infraFailureCore.ts";
+import { AUTO_TICK_TRANSACTION_MAX_MS } from "./autoPromotionCore.ts";
 import { amuxV22PromotionBlockedNotice,
   type AmuxV22PromotionNotReady } from "./v22PromotionBlockedCore.ts";
 
@@ -97,7 +100,9 @@ type OwnerMoveAuditBinding = {
   requestId: string;
   humanIntentAuditId: string;
 };
-const MAX_CANDIDATES_PER_TICK = 8;
+/** Candidates one tick reads (owner direction 2026-11-15: widened from 8).
+ * The tick stops early when its route budget no longer fits another one. */
+const MAX_CANDIDATES_PER_TICK = 100;
 const V22_AUDIT_ACTION = "amux.v22.auto_promotion.consumed";
 const V22_OWNER_MOVE_DESTINATION = "amux_unassigned_todo";
 
@@ -341,8 +346,11 @@ async function latestCandidates(tx: Prisma.TransactionClient, now: Date):
       AND w."owner" IS NULL AND w."claimedAt" IS NULL
       AND (${amuxV22PromotionFlowEnabled()} OR
         (n."activeStaleAt" > ${now} AND n."baselineStaleAt" > ${now}))
+      -- An unknown whose read-back found no receipt at all never committed
+      -- (owner direction 2026-11-15): that card is a candidate again.
       AND NOT EXISTS (SELECT 1 FROM "AmuxV22PromotionUnknown" u
-        WHERE u."workItemId" = w."id")
+        WHERE u."workItemId" = w."id"
+          AND (u."receiptFound" OR NOT ${amuxInfraFailureRoutingEnabled()}))
       -- A Task waiting on an unfinished dependency can never pass readiness
       -- (dependency_incomplete). Left in, eight such Tasks with higher scores
       -- filled every tick's window and a ready Task below them was never read.
@@ -657,6 +665,15 @@ async function readBackLostPromotion(receiptId: string, taskId: string,
         return { promoted: true as const, receiptId, taskId,
           recoveredByReadback: true as const };
       }
+      // Owner direction 2026-11-15: under the queue lock this read-back is
+      // final, so no receipt at all means the promotion never committed. It
+      // is a known "not promoted", tried again next tick, never an unknown
+      // that parks the card and counts toward halting every promotion. A
+      // receipt that exists but does not match stays unknown, and so does an
+      // owner's move (expectedRevision), whose request is never run again.
+      if (receipt === null && expectedRevision === null && amuxInfraFailureRoutingEnabled())
+        return { promoted: false as const, reason: "readback_not_committed",
+          receiptId, taskId };
       const auditId = await writeV22AutoPromotionAudit(tx, {
         action: "amux.v22.auto_promotion.outcome_unknown",
         targetType: "AmuxV22PromotionUnknown", targetId: receiptId,
@@ -806,6 +823,48 @@ export async function requestV22ExecutionMove(input: OwnerMoveCommand) {
   }
 }
 
+/**
+ * Clears an open promotion halt that only unknown outcomes opened, once every
+ * unknown in its window was read back as never committed (owner direction
+ * 2026-11-15: "다시 읽어 확인되면 자동 해제"). A halt for a critical violation,
+ * or one with an unknown whose receipt was found, or one of the older
+ * recommendation path's unknowns, stays for the owner. One system audit.
+ */
+async function clearReadBackPromotionHalt() {
+  if (!amuxInfraFailureRoutingEnabled()) return;
+  try {
+    await withAutoTransaction(null, TICK_TRANSACTION_LIMITS, async (tx, now) => {
+      const halt = await tx.amuxRecommendationAutoHalt.findFirst({
+        where: { clearedAt: null, reason: "outcome_unknown_burst" },
+        orderBy: { openedAt: "desc" }, select: { id: true, openedAt: true } });
+      if (!halt) return;
+      const since = new Date(halt.openedAt.getTime() - AUTO_UNKNOWN_BURST_MS);
+      const [found, oldUnknowns, oldConsumptions] = await Promise.all([
+        tx.amuxV22PromotionUnknown.count({ where: { receiptFound: true,
+          recordedAt: { gte: since, lte: halt.openedAt } } }),
+        tx.amuxRecommendationAutoUnknown.count({ where: {
+          recordedAt: { gte: since, lte: halt.openedAt } } }),
+        tx.amuxRecommendationAutoConsumption.count({ where: {
+          outcomeUnknownAt: { gte: since, lte: halt.openedAt } } }),
+      ]);
+      if (found + oldUnknowns + oldConsumptions > 0) return;
+      await takeAuditChainLock(tx);
+      const cleared = await tx.amuxRecommendationAutoHalt.updateMany({
+        where: { id: halt.id, clearedAt: null }, data: { clearedAt: now } });
+      if (cleared.count !== 1) return;
+      await writeV22AutoPromotionAudit(tx, {
+        action: "amux.auto_promotion.resumed_by_readback",
+        targetType: "AmuxRecommendationAutoHalt", targetId: halt.id,
+        summary: "Cleared an AMUX promotion halt whose unknown outcomes were read back as never committed.",
+        metadata: { policyVersion: AMUX_V22_AUTO_PROMOTION_POLICY_VERSION },
+      });
+    });
+  } catch (error) {
+    console.warn(JSON.stringify({ subsystem: "amux", event: "amux_v22_promotion_halt_clear_failed",
+      code: error instanceof BoardImportError ? error.code : "unexpected" }));
+  }
+}
+
 /** One tick moves at most one card. A cryptographically invalid high-score
  * candidate is skipped for this tick; no lower card borrows its approval. */
 export async function tickV22AutoPromotion() {
@@ -813,6 +872,7 @@ export async function tickV22AutoPromotion() {
     process.env[AMUX_V22_AUTO_PROMOTION_ENV])) {
     return { promoted: false as const, reason: "apply_disabled" };
   }
+  await clearReadBackPromotionHalt();
   const candidates = await prisma.$transaction(async (tx) => {
     const rows = await tx.$queryRaw<Array<{ now: Date }>>`
       SELECT clock_timestamp() AS now`;
@@ -822,12 +882,20 @@ export async function tickV22AutoPromotion() {
     reason: "no_candidate" };
   let unavailable = 0;
   const notReady: AmuxV22PromotionNotReady[] = [];
+  const waits: AmuxCardWaitEntry[] = [];
   for (const candidate of candidates) {
+    // The rest wait for the next tick once another transaction no longer fits.
+    if (!amuxRouteHasBudgetForMs(2 * AUTO_TICK_TRANSACTION_MAX_MS)) break;
     let context: Awaited<ReturnType<typeof loadAmuxV4TaskReadyContext>>;
     try { context = await loadAmuxV4TaskReadyContext(candidate.taskId); }
     catch { unavailable += 1; continue; }
     const receiptId = randomUUID();
-    try { return await commitCandidate({ candidate, receiptId, context }); }
+    try {
+      const promoted = await commitCandidate({ candidate, receiptId, context });
+      // The cards passed over before this one still say why they wait.
+      await recordAmuxCardWaitReasons(waits);
+      return promoted;
+    }
     catch (error) {
       if (!(error instanceof BoardImportError)) throw error;
       if (error.code === "outcome_unknown") {
@@ -848,14 +916,20 @@ export async function tickV22AutoPromotion() {
       if (error instanceof AmuxV22TaskNotReadyError) {
         notReady.push({ taskId: candidate.taskId, displayKey: null, reasons: error.reasons });
       }
+      // Why the card stays in backlog, for its Admin card (owner decision
+      // 2026-11-15, lib/amux/cardWaitReasonStore.ts).
+      waits.push({ taskId: candidate.taskId, stage: "promotion", code: error.code,
+        detail: error instanceof AmuxV22TaskNotReadyError ? { reasons: [...(error.reasons ?? [])] } : {} });
       if (["task_not_ready", "score_changed", "score_unbound",
         "lifecycle_present", "not_backlog", "conflict"].includes(error.code)) {
         continue;
       }
+      await recordAmuxCardWaitReasons(waits);
       return { promoted: false as const, reason: error.code };
     }
   }
   // Only once nothing could move: a promoting tick stops at its first card.
+  await recordAmuxCardWaitReasons(waits);
   await reportPromotionBlocked(notReady);
   return { promoted: false as const,
     reason: unavailable > 0 ? "candidate_unavailable" : "no_ready_candidate" };

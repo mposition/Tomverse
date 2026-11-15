@@ -7,6 +7,9 @@ import type {
   AmuxWorkerRegistryAdminView,
   AmuxWorkerRoleCeiling,
 } from "./workerRegistryCore.ts";
+import { type AmuxWorkerHealthNotice, type AmuxWorkerHealthView, amuxWorkerHealthHold,
+  amuxWorkerHealthNotice } from
+  "./workerHealthCore.ts";
 
 /**
  * AMUX › Operations settings › Workers: the one list an operator reads.
@@ -37,6 +40,9 @@ export const AMUX_WORKER_STATUS_KINDS = [
   "assignable_ready",
   "assignable_busy",
   "assignable_starting",
+  "infra_quarantined",
+  "usage_unobserved",
+  "usage_exhausted",
   "connection_lost",
   "bridge_error",
   "bridge_stopped",
@@ -80,6 +86,10 @@ export type AmuxWorkerOverviewRow = {
   /** The capability row the editor starts from; null when none is recorded. */
   capability: AmuxWorkerCapabilityAdminRow | null;
   actions: AmuxWorkerOverviewAction[];
+  /** The claim's view of the worker (2026-11-15); null when it was not read. */
+  health: AmuxWorkerHealthView | null;
+  /** A warning beside a worker that can still take work. */
+  healthNotice: AmuxWorkerHealthNotice | null;
 };
 
 export type AmuxWorkerProviderCount = { providerClass: AmuxWorkerProviderClass; count: number };
@@ -154,6 +164,9 @@ const STATUS_GROUP: Readonly<Record<AmuxWorkerStatusKind, AmuxWorkerOverviewGrou
   assignable_ready: "assignable",
   assignable_busy: "assignable",
   assignable_starting: "assignable",
+  infra_quarantined: "attention",
+  usage_unobserved: "attention",
+  usage_exhausted: "attention",
   connection_lost: "attention",
   bridge_error: "attention",
   bridge_stopped: "attention",
@@ -197,6 +210,14 @@ export function buildAmuxWorkerOverview(input: {
   capabilities: AmuxWorkerCapabilityAdminView | null;
   live: AgentOfficeAmuxState | null;
   nowMs: number;
+  /**
+   * Each worker's quarantine, usage reading and box signals
+   * (lib/amux/workerHealthCore.ts). A worker the claim would not assign is
+   * never shown as able to take work (owner decision 2026-11-15).
+   */
+  health?: Readonly<Record<string, AmuxWorkerHealthView>> | null;
+  /** TOMVERSE_AMUX_V22_NON_CLAUDE_QUOTA_GATE, so another provider's exhausted reading holds it too. */
+  nonClaudeQuotaGate?: boolean;
 }): AmuxWorkerOverview | null {
   const { registry, capabilities, live, nowMs } = input;
   if (registry === null || !registry.registryReadable) return null;
@@ -211,11 +232,18 @@ export function buildAmuxWorkerOverview(input: {
     const capability = capabilityByName.get(row.workerName) ?? null;
     const recorded = capability?.current?.capability ?? null;
     const capabilityRecorded = capabilities === null || recorded !== null;
-    const status: AmuxWorkerStatusKind =
+    const health = input.health?.[row.workerName] ?? null;
+    const base: AmuxWorkerStatusKind =
       row.desiredState === "retired" ? "retired"
       : row.desiredState === "requested" ? "waiting_activation"
       : row.desiredState === "paused" ? "paused"
       : activeStatus(liveState, row.reasons, capabilityRecorded);
+    // A worker that would take work by its bridge, but that the claim leaves
+    // out, says why instead (a busy one is still working).
+    const hold = base === "assignable_ready" || base === "assignable_starting" ?
+      amuxWorkerHealthHold(health, { provider: row.providerClass,
+        nonClaudeQuotaGate: input.nonClaudeQuotaGate === true }) : null;
+    const status: AmuxWorkerStatusKind = hold ?? base;
     const group = STATUS_GROUP[status];
     const heartbeat = reading?.heartbeatAt ? Date.parse(reading.heartbeatAt) : NaN;
     return {
@@ -236,6 +264,8 @@ export function buildAmuxWorkerOverview(input: {
       routingTags: [...(recorded?.routingTags ?? [])],
       capability,
       actions: [...ACTIONS[row.desiredState]],
+      health,
+      healthNotice: row.desiredState === "active" ? amuxWorkerHealthNotice(health) : null,
     };
   });
 

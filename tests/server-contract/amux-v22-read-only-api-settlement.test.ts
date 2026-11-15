@@ -71,7 +71,26 @@ function makeWorld(outcome: Outcome) {
     questionAnswerClears: 0,
     questionCancels: 0,
     escalations: [] as Array<Record<string, unknown>>,
+    infraAttemptsBefore: 0,
+    infraWindowBefore: null as number | null,
+    recentRuns: [] as Array<{ outcome: string | null; reason: string | null }>,
   };
+}
+
+async function withEnv<T>(name: string, value: string | undefined, run: () => Promise<T>) {
+  const prior = process.env[name];
+  if (value === undefined) delete process.env[name]; else process.env[name] = value;
+  try { return await run(); } finally {
+    if (prior === undefined) delete process.env[name]; else process.env[name] = prior;
+  }
+}
+/** lib/amux/infraFailureCore.ts; on unless `disabled`. */
+function withInfraRouting<T>(value: string | undefined, run: () => Promise<T>) {
+  return withEnv("TOMVERSE_AMUX_INFRA_FAILURE_ROUTING", value, run);
+}
+/** lib/amux/v22ReadBackProceedCore.ts; on unless `disabled`. */
+function withReadBackProceed<T>(value: string | undefined, run: () => Promise<T>) {
+  return withEnv("TOMVERSE_AMUX_V22_READ_BACK_PROCEED", value, run);
 }
 
 const boundary = new Proxy({}, {
@@ -158,6 +177,11 @@ mock.module(mod("lib/amux/v4TaskCostCatalogCore.ts"), { namedExports: {
 const tx = {
   $queryRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
     const sql = strings.join("?");
+    // The Task's earlier infrastructure failures, all and since a person's
+    // last retry (lib/amux/infraFailureStore.ts, 2026-11-15).
+    if (sql.includes('COUNT(*)::int AS "total"')) return [{
+      total: world.infraAttemptsBefore,
+      infraWindow: world.infraWindowBefore ?? world.infraAttemptsBefore }];
     if (sql.includes('FROM "AmuxWorkerRuntime"')) return [{
       workerName: worker, instanceId, generation: 1, status: "busy",
       dispatchReady: false, protocolCapabilities: ["read_only_api_retry_v1"],
@@ -267,6 +291,8 @@ const tx = {
       world.attemptUpdates += 1;
       world.attemptUpdateData = input.data;
     },
+    // The Task's earlier ended runs (lib/amux/infraFailureStore.ts, 2026-11-15).
+    findMany: async () => world.recentRuns,
   },
   amuxWorkerRuntime: {
     updateMany: async () => { world.runtimeUpdates += 1; return { count: 1 }; },
@@ -364,18 +390,24 @@ for (const outcome of ["succeeded", "failed"] as const) {
         outcome === "failed" ? "blocked" : "review");
       assert.equal(world.attemptUpdateData?.toStatus,
         outcome === "failed" ? "blocked" : "review");
+      // The paid retry's own bound of two; stored under the escalation's
+      // code since 2026-11-15 (it was the budget core's `attempts`).
       assert.equal(world.attemptUpdateData?.reason,
-        outcome === "failed" ? "attempts" : "reported_result");
+        outcome === "failed" ? "attempt_budget_exhausted" : "reported_result");
     });
 }
 
-test("other Tasks keep the global five-attempt settlement budget", async () => {
-  const cases = [[4, "todo", null], [4, "todo", "approval-other"],
-    [5, "blocked", null]] as const;
-  for (const [attemptNumber, expectedStatus, approvalId] of cases) {
+test("other Tasks keep the global settlement budget: thirty, or five with the switch disabled", async () => {
+  // Owner direction 2026-11-15: no fixed five; the runaway guard of thirty
+  // (executionBudgetCore.ts) is the global bound unless the switch is off.
+  const cases = [[4, "todo", null, undefined], [4, "todo", "approval-other", undefined],
+    [5, "todo", null, undefined], [29, "todo", null, undefined],
+    [30, "blocked", null, undefined], [5, "blocked", null, "disabled"]] as const;
+  for (const [attemptNumber, expectedStatus, approvalId, routing] of cases)
+    await withInfraRouting(routing, async () => {
     world = makeWorld("failed");
     world.taskId = "00000000-0000-4000-8000-000000000099";
-    world.attemptId = `00000000-0000-4000-8000-00000000000${attemptNumber}`;
+    world.attemptId = `00000000-0000-4000-8000-${String(attemptNumber).padStart(12, "0")}`;
     world.attemptNumber = attemptNumber;
     world.recoveryApprovalId = approvalId;
     world.recovery = approvalId ? { riskAcceptanceId: null } : null;
@@ -398,8 +430,8 @@ test("other Tasks keep the global five-attempt settlement budget", async () => {
     assert.equal(world.taskUpdateData?.status, expectedStatus);
     assert.equal(world.attemptUpdateData?.toStatus, expectedStatus);
     assert.equal(world.attemptUpdateData?.reason,
-      attemptNumber === 5 ? "attempts" : "reported_result");
-  }
+      expectedStatus === "blocked" ? "attempt_budget_exhausted" : "reported_result");
+  });
 });
 
 test("legacy settlement does not acquire the v52 assignment-audit gate", async () => {
@@ -767,7 +799,8 @@ test("v52 review unknown asks for the review again by running the Task again; th
 test("v52 contract touch on the final attempt blocks for human recovery", async () => {
   world = makeWorld("failed");
   world.taskId = "00000000-0000-4000-8000-000000000099";
-  world.attemptNumber = 5;
+  // The final attempt is the runaway guard since 2026-11-15.
+  world.attemptNumber = 30;
   world.recoveryApprovalId = null;
   world.gradeGuard = true;
   world.taskRole = "implement";
@@ -808,16 +841,23 @@ test("v52 missing inventory blocks even a successful execution", async () => {
 });
 
 test("v52 worker-blocked outcome keeps its cause without an inventory", async () => {
-  world = makeWorld("failed");
-  world.gradeGuard = true;
-  world.taskGrade = "routine";
-  const result = await (await execution).settleAmuxV22TaskExecution({
-    attemptId: world.attemptId, worker, instanceId, generation: 1,
-    taskRevision: 5, outcome: "blocked", invocationIds: [],
-  });
-  assert.equal(result.settled, true);
-  assert.equal(world.taskUpdateData?.status, "blocked");
-  assert.notEqual(world.attemptUpdateData?.reason, "changed_paths_unavailable");
+  // A run with no result is a platform failure since 2026-11-15 and goes back
+  // to todo; with the switch disabled it is blocked as before. Either way the
+  // missing inventory is not its cause.
+  for (const [routing, status] of [[undefined, "todo"], ["disabled", "blocked"]] as const) {
+    await withInfraRouting(routing, async () => {
+      world = makeWorld("failed");
+      world.gradeGuard = true;
+      world.taskGrade = "routine";
+      const result = await (await execution).settleAmuxV22TaskExecution({
+        attemptId: world.attemptId, worker, instanceId, generation: 1,
+        taskRevision: 5, outcome: "blocked", invocationIds: [],
+      });
+      assert.equal(result.settled, true);
+      assert.equal(world.taskUpdateData?.status, status);
+      assert.notEqual(world.attemptUpdateData?.reason, "changed_paths_unavailable");
+    });
+  }
 });
 
 test("worker-blocked outcome preserves owner retry eligibility with and without v52", async () => {
@@ -902,23 +942,89 @@ test("a Claude turn-limit failure is a known failure the owner may retry", async
   }
 });
 
-test("a failure with no named cause, or no receipt at all, stays unknown", async () => {
-  for (const events of [[claudeFailedEvent("unknown")],
-    [claudeFailedEvent(null)], []]) {
-    world = makeWorld("failed");
-    world.storedEvents = events;
-    const result = events.length ? await settleLikeBridge() :
+const unnamedFailures = () => [[claudeFailedEvent("unknown")],
+  [claudeFailedEvent(null)], []];
+
+test("an unnamed CLI failure is the run's own; a run with no receipt is the platform's", () =>
+  withInfraRouting(undefined, async () => {
+    for (const events of unnamedFailures()) {
+      world = makeWorld("failed");
+      // An ordinary subscription card, not the paid read-only retry with its
+      // own bound of two.
+      world.taskId = "00000000-0000-4000-8000-000000000099";
+      world.recoveryApprovalId = null;
+      world.storedEvents = events;
+      // With TOMVERSE_AMUX_V22_READ_BACK_PROCEED on (the default since
+      // 2026-11-15) a subscription CLI's partial receipt is recorded, not a
+      // gate: the failed run settles at once and counts as an attempt.
       // A deadline, signal or lost sidecar leaves no receipt; the bridge
-      // settles it blocked straight away.
-      await (await execution).settleAmuxV22TaskExecution({
+      // settles it blocked, and that run did none of the card's work
+      // (lib/amux/infraFailureCore.ts): back to todo, no attempt used.
+      const result = await (await execution).settleAmuxV22TaskExecution({
         attemptId, worker, instanceId, generation: 1, taskRevision: 5,
-        outcome: "blocked", invocationIds: [] });
+        outcome: events.length ? "failed" : "blocked",
+        invocationIds: events.length ? [attemptId] : [] });
+      assert.equal(result.settled, true);
+      assert.equal(world.taskUpdateData?.status, "todo");
+      assert.equal(world.attemptUpdateData?.reason,
+        events.length ? "cli_usage_unreported" : "infra_no_result");
+      assert.equal(world.escalations.length, 0);
+    }
+  }));
+
+test("with both switches disabled the same failure stays unknown", () =>
+  withInfraRouting("disabled", () => withReadBackProceed("disabled", async () => {
+    for (const events of unnamedFailures()) {
+      world = makeWorld("failed");
+      world.storedEvents = events;
+      const result = events.length ? await settleLikeBridge() :
+        await (await execution).settleAmuxV22TaskExecution({
+          attemptId, worker, instanceId, generation: 1, taskRevision: 5,
+          outcome: "blocked", invocationIds: [] });
+      assert.equal(result.settled, true);
+      assert.equal(world.taskUpdateData?.status, "blocked");
+      assert.equal(world.attemptUpdateData?.reason, "usage_outcome_unknown");
+      assert.equal(await ownerMayRetry(), false);
+    }
+  })));
+
+test("the twelfth platform failure blocks the card but is still counted as one", () =>
+  withInfraRouting(undefined, async () => {
+    // Review r-20261115-120153-60193b: the bound is named by the escalation;
+    // the attempt keeps its own reason so the budget and the worker's
+    // quarantine still count it.
+    world = makeWorld("failed");
+    world.taskId = "00000000-0000-4000-8000-000000000099";
+    world.recoveryApprovalId = null;
+    world.infraAttemptsBefore = 11;
+    world.attemptNumber = 12;
+    const result = await (await execution).settleAmuxV22TaskExecution({
+      attemptId, worker, instanceId, generation: 1, taskRevision: 5,
+      outcome: "blocked", invocationIds: [] });
     assert.equal(result.settled, true);
     assert.equal(world.taskUpdateData?.status, "blocked");
-    assert.equal(world.attemptUpdateData?.reason, "usage_outcome_unknown");
-    assert.equal(await ownerMayRetry(), false);
-  }
-});
+    assert.equal(world.attemptUpdateData?.reason, "infra_no_result");
+    assert.equal(world.escalations.at(-1)?.reason, "infra_attempts_exhausted");
+  }));
+
+test("after a person's retry the platform failures before it do not count toward the bound", () =>
+  withInfraRouting(undefined, async () => {
+    // Eleven failures before the person sent the card back, two since: the
+    // card goes on (the bound counts those since the retry).
+    world = makeWorld("failed");
+    world.taskId = "00000000-0000-4000-8000-000000000099";
+    world.recoveryApprovalId = null;
+    world.infraAttemptsBefore = 13;
+    world.infraWindowBefore = 2;
+    world.attemptNumber = 15;
+    const result = await (await execution).settleAmuxV22TaskExecution({
+      attemptId, worker, instanceId, generation: 1, taskRevision: 5,
+      outcome: "blocked", invocationIds: [] });
+    assert.equal(result.settled, true);
+    assert.equal(world.taskUpdateData?.status, "todo");
+    assert.equal(world.attemptUpdateData?.reason, "infra_no_result");
+    assert.equal(world.escalations.length, 0);
+  }));
 
 test("v52 ordinary paths preserve the normal successful destination", async () => {
   world = makeWorld("succeeded");

@@ -13,7 +13,6 @@ import {
   AMUX_CATALOG_WORKER_NAME_PATTERN,
   AMUX_WORKER_CATALOG_EXEMPT,
   AMUX_WORKER_DESIRED_STATES,
-  AMUX_WORKER_LATCH_CONSECUTIVE_FAILURES,
   AMUX_WORKER_PROVIDER_CLASSES,
   AMUX_WORKER_PROVIDER_CLASS_TABLE,
   AMUX_WORKER_REGISTRY_AUDIT_ACTIONS,
@@ -74,10 +73,10 @@ test("the class table is section 2's: two verified classes, three unverified at 
   assert.ok(Object.isFrozen(AMUX_WORKER_PROVIDER_CLASS_TABLE.cursor));
 });
 
-test("activation gate 2's values are the ones the operator approved", () => {
+test("activation gate 2's table bounds stay; its counted latch is the worker quarantine now", () => {
+  // Owner direction 2026-11-15: the counted latch is lib/amux/workerCircuitCore.ts.
   assert.equal(AMUX_WORKER_TRIAL_CARD_COUNT, 3);
   assert.equal(AMUX_WORKER_TRIAL_COST_CAP_MICRO_USD, 5_000_000);
-  assert.equal(AMUX_WORKER_LATCH_CONSECUTIVE_FAILURES, 3);
 });
 
 test("the name grammar is 1-40 lower-case letters, digits and hyphens, and says nothing of the CLI", () => {

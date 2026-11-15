@@ -1228,6 +1228,27 @@ impl TomverseApi {
 
     /// One write, then exact lookup on a lost response. Never repost a quota
     /// observation or treat an unknown outcome as a completed report.
+    /// Forwards a worker's box health signals (owner decision 2026-11-15).
+    /// A diagnostic write the app upserts by worker and source, so a repeat
+    /// is harmless; `Ok(false)` is a known refusal, `Err` no answer.
+    pub async fn worker_health_record(&self, worker: &str, signals: &[Value]) -> Result<bool> {
+        let response = self.client
+            .post(format!("{}/api/internal/amux/v22/worker-health", self.base_url))
+            .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT).bearer_auth(&self.secret)
+            .json(&serde_json::json!({ "worker": worker, "signals": signals }))
+            .send().await?;
+        let status = response.status();
+        let answer = read_raw_answer(response, 4096).await?;
+        if status == StatusCode::OK {
+            let body: Value = serde_json::from_slice(&answer.body)?;
+            return Ok(body.get("recorded").and_then(Value::as_u64).is_some());
+        }
+        if [StatusCode::BAD_REQUEST, StatusCode::UNAUTHORIZED, StatusCode::CONFLICT].contains(&status) {
+            return Ok(false);
+        }
+        bail!("health signal write answered {status}")
+    }
+
     pub async fn worker_quota_record_once(&self, observation: &AmuxWorkerQuota) -> Result<bool> {
         let payload = serde_json::to_value(observation)?;
         let response = self.client
@@ -1884,10 +1905,22 @@ mod tests {
             invocation_ids: &[],
             read_only_retry: None,
             changed_paths: None,
+            failure: None,
         }).unwrap();
         assert_eq!(body["outcome"], "blocked");
         assert_eq!(body["invocation_ids"], serde_json::json!([]));
         assert!(body.get("to_status").is_none());
+        assert!(body.get("failure").is_none());
+        // 2026-11-15: an unverified settlement names what the sidecar said.
+        let failure = V22FailureReport { code: "invalid_result".into(), cli_started: Some(true),
+            exit_code: Some(1), elapsed_ms: Some(4200) };
+        let body = serde_json::to_value(V22ExecutionSettleRequest {
+            attempt_id: "attempt", worker: "worker", instance_id: "instance",
+            generation: 1, task_revision: 3, outcome: "blocked", invocation_ids: &[],
+            read_only_retry: None, changed_paths: None, failure: Some(&failure),
+        }).unwrap();
+        assert_eq!(body["failure"], serde_json::json!({"code": "invalid_result",
+            "cli_started": true, "exit_code": 1, "elapsed_ms": 4200}));
         let response: ExecutionSettleResponse = serde_json::from_value(
             serde_json::json!({"settled":true,"taskRevision":4})
         ).unwrap();
@@ -1902,7 +1935,7 @@ mod tests {
                 attempt_id: "attempt", worker: "worker", instance_id: "instance",
                 generation: 1, task_revision: 3, outcome: "succeeded",
                 invocation_ids: &["attempt"], read_only_retry: None,
-                changed_paths: inventory,
+                changed_paths: inventory, failure: None,
             }).unwrap();
             match inventory {
                 Some(names) => assert_eq!(body["changed_paths"], serde_json::json!(names)),
@@ -1922,7 +1955,7 @@ mod tests {
             attempt_id: "attempt", worker: "worker", instance_id: "instance",
             generation: 1, task_revision: 3, outcome: "succeeded",
             invocation_ids: &["attempt"], read_only_retry: Some(&echo),
-            changed_paths: None,
+            changed_paths: None, failure: None,
         }).unwrap();
         assert_eq!(body["read_only_retry"], serde_json::json!({
             "version": 1,
@@ -1955,7 +1988,7 @@ mod tests {
             attempt_id: "attempt", worker: "worker", instance_id: "instance",
             generation: 1, task_revision: 3, outcome: "succeeded",
             invocation_ids: &["attempt"], read_only_retry: Some(&echo),
-            changed_paths: None,
+            changed_paths: None, failure: None,
         }).unwrap();
         assert_eq!(body["read_only_retry"]["executor_kind"],
             "read_only_api_retry_v1");
@@ -3386,6 +3419,49 @@ pub struct V22ReadOnlyRetryProfile {
     pub role: String,
 }
 
+/// What the sidecar said about a run that produced no verified result: its
+/// failure code (lib/amux/v22OneShotSidecar.mjs) and, for an unreadable
+/// result, the CLI's exit code and run time. The app classifies it as an
+/// infrastructure failure that uses no card attempt, or as the card's own
+/// (owner decision 2026-11-15, lib/amux/infraFailureCore.ts). Codes only.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct V22FailureReport {
+    pub code: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cli_started: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub elapsed_ms: Option<i64>,
+}
+
+impl V22FailureReport {
+    /// A code the app accepts: lowercase letters, digits and `_`, 1 to 64.
+    pub fn valid_code(code: &str) -> bool {
+        !code.is_empty() && code.len() <= 64 &&
+            code.bytes().all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+    }
+
+    /// The report a sidecar answer carries; None when it names no valid code.
+    pub fn from_sidecar(value: &Value) -> Option<Self> {
+        let code = value.get("failure").and_then(|v| v.as_str())?;
+        if !Self::valid_code(code) { return None; }
+        Some(Self {
+            code: code.to_owned(),
+            cli_started: value.get("cliStarted").and_then(|v| v.as_bool()),
+            exit_code: value.get("exitCode").and_then(|v| v.as_i64())
+                .filter(|code| (-1_000..=1_000).contains(code)),
+            elapsed_ms: value.get("elapsedMs").and_then(|v| v.as_i64())
+                .filter(|ms| (0..=86_400_000).contains(ms)),
+        })
+    }
+
+    /// A bridge-side cause with no sidecar answer behind it.
+    pub fn bridge(code: &str) -> Self {
+        Self { code: code.to_owned(), cli_started: None, exit_code: None, elapsed_ms: None }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct V22ReadOnlyRetryEcho {
@@ -3625,6 +3701,8 @@ struct V22ExecutionSettleRequest<'a> {
     read_only_retry: Option<&'a V22ReadOnlyRetryEcho>,
     #[serde(skip_serializing_if = "Option::is_none")]
     changed_paths: Option<&'a [String]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    failure: Option<&'a V22FailureReport>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -4223,6 +4301,7 @@ impl TomverseApi {
         invocation_ids: &[&str],
         read_only_retry: Option<&V22ReadOnlyRetryEcho>,
         changed_paths: Option<&[String]>,
+        failure: Option<&V22FailureReport>,
     ) -> Result<ExecutionSettleResponse> {
         if delivery.assignment_id.is_none() {
             bail!("v22 settlement requires an assignment-bound delivery");
@@ -4241,6 +4320,8 @@ impl TomverseApi {
                 invocation_ids,
                 read_only_retry,
                 changed_paths,
+                // Only an unverified settlement names a failure.
+                failure: if outcome == "blocked" { failure } else { None },
             })
             .send().await?;
         let (status, body): (_, ExecutionSettleResponse) = read_bounded_json(
@@ -4274,7 +4355,7 @@ impl TomverseApi {
             bail!("verified v22 settlement requires a terminal CLI result");
         }
         self.v22_execution_settle_with_receipt(delivery, instance_id, generation,
-            outcome, &[&delivery.attempt_id], read_only_retry, None).await
+            outcome, &[&delivery.attempt_id], read_only_retry, None, None).await
     }
 
     pub async fn v22_execution_settle_v52(
@@ -4290,7 +4371,7 @@ impl TomverseApi {
             bail!("v52 settlement requires a terminal CLI result");
         }
         self.v22_execution_settle_with_receipt(delivery, instance_id, generation,
-            outcome, &[&delivery.attempt_id], read_only_retry, changed_paths).await
+            outcome, &[&delivery.attempt_id], read_only_retry, changed_paths, None).await
     }
 
     pub async fn v52_review_readback(&self, attempt_id: &str) -> Result<V52ReviewReadback> {
@@ -4349,8 +4430,23 @@ impl TomverseApi {
         generation: i64,
         read_only_retry: Option<&V22ReadOnlyRetryEcho>,
     ) -> Result<ExecutionSettleResponse> {
+        self.v22_execution_settle_unverified_with_failure(delivery, instance_id,
+            generation, read_only_retry, None).await
+    }
+
+    /// The same unverified settlement, naming what the sidecar said about the
+    /// run (owner decision 2026-11-15): the app tells an infrastructure
+    /// failure, which uses no card attempt, from the card's own.
+    pub async fn v22_execution_settle_unverified_with_failure(
+        &self,
+        delivery: &PulledDelivery,
+        instance_id: &str,
+        generation: i64,
+        read_only_retry: Option<&V22ReadOnlyRetryEcho>,
+        failure: Option<&V22FailureReport>,
+    ) -> Result<ExecutionSettleResponse> {
         self.v22_execution_settle_with_receipt(delivery, instance_id, generation,
-            "blocked", &[], read_only_retry, None).await
+            "blocked", &[], read_only_retry, None, failure).await
     }
 
     /// Policy version 15: the system consumer of pre-approved automatic

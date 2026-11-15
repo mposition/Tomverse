@@ -22,6 +22,9 @@ import {
 } from "./adminExecutionViewCore.ts";
 import type { AmuxV52AttemptReviewView } from "./v52ReviewFindingsCore.ts";
 import { openAmuxV52ReviewFindingsRow } from "./v52ReviewFindingsStore.ts";
+import { amuxCardWaitFromState, amuxCardWaitVisible } from "./cardWaitReasonCore.ts";
+import { readAmuxCardWaitReasons } from "./cardWaitReasonStore.ts";
+import { amuxInfraFailureKindOfReason, amuxInfraFailureRoutingEnabled } from "./infraFailureCore.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -77,7 +80,7 @@ async function cardSummaries(rows: CardRow[]) {
   const ids = rows.map((row) => row.id);
   const storyIds = rows.filter((row) => row.cardType === "story").map((row) => row.id);
   const [titles, scores, dependencies, lanes, progress, openEscalations,
-    waitingQuestions] = await Promise.all([
+    waitingQuestions, storedWaits, openDependencyRows] = await Promise.all([
     Promise.all(rows.map(readAmuxCardTitle)),
     ids.length ? prisma.$queryRaw<Array<{ taskId: string;
       taskRevision: number; scoreTotal: number; activeStaleAt: Date }>>`
@@ -114,7 +117,29 @@ async function cardSummaries(rows: CardRow[]) {
       orderBy: [{ taskId: "asc" }, { sequence: "desc" }], distinct: ["taskId"],
       select: { taskId: true, state: true },
     }) : [],
+    // Why a card waits (owner decision 2026-11-15): what the last promotion or
+    // claim pass stored for it. A failed read shows no reason, never a guess.
+    readAmuxCardWaitReasons(ids).catch(() => new Map()),
+    ids.length ? prisma.amuxWorkDependency.findMany({
+      where: { taskId: { in: ids }, dependency: { OR: [{ status: { not: "done" } },
+        { v4TerminalAt: null }] } }, select: { taskId: true } }) : [],
   ]);
+  const openDependencies = new Map<string, number>();
+  for (const row of openDependencyRows)
+    openDependencies.set(row.taskId, (openDependencies.get(row.taskId) ?? 0) + 1);
+  const nowMs = Date.now();
+  const waitReasonOf = (row: CardRow, scoreFresh: boolean) => {
+    const stored = storedWaits.get(row.id);
+    if (stored && amuxCardWaitVisible({ stage: stored.stage,
+      lastSeenAtMs: stored.lastSeenAt.getTime(), cardStatus: row.status,
+      assigned: row.v22AssignmentId !== null, nowMs }))
+      return { stage: stored.stage, code: stored.code, detail: stored.detail,
+        since: stored.firstSeenAt.toISOString(), seenAt: stored.lastSeenAt.toISOString() };
+    const derived = amuxCardWaitFromState({ sourceSystem: row.sourceSystem,
+      cardType: row.cardType, status: row.status, assigned: row.v22AssignmentId !== null,
+      scoreFresh, openDependencies: openDependencies.get(row.id) ?? 0 });
+    return derived ? { ...derived, detail: {}, since: null, seenAt: null } : null;
+  };
   const ownerQuestion = new Map(waitingQuestions.map((row) =>
     [row.taskId, row.state === "open" ? "open" as const : "answered" as const]));
   const attentionReason = new Map(openEscalations.map((row) =>
@@ -157,6 +182,9 @@ async function cardSummaries(rows: CardRow[]) {
     briefPresent: Boolean(row.executionBriefDigest || row.v4BriefDigest),
     attentionReason: attentionReason.get(row.id) ?? null,
     ownerQuestion: ownerQuestion.get(row.id) ?? null,
+    /** Why the card is not running: a code with structured detail, or null. */
+    waitReason: waitReasonOf(row, latestScore.get(row.id)?.taskRevision === row.revision &&
+      latestScore.get(row.id)!.activeStaleAt.getTime() > nowMs),
     /** In the archive drawer; the archive lane also holds finished cards that were never archived. */
     archived: row.archivedAt !== null,
     updatedAt: row.updatedAt.toISOString(),
@@ -571,9 +599,15 @@ export async function readAmuxExecutionTaskDetail(taskId: string) {
         } satisfies AmuxV52AttemptReviewView;
       })() : null,
       usageUnknown: usageUnknown(attempt),
+      // An infrastructure failure uses no attempt and holds no worker; its
+      // usage stays unknown, released without a person (2026-11-15).
+      infraFailure: amuxInfraFailureKindOfReason(attempt.reason),
       usageAcceptance: (() => {
         const row = acceptanceByAttempt.get(attempt.id);
-        return row ? { source: row.source, acceptedAt: row.acceptedAt.toISOString() } : null;
+        if (row) return { source: row.source, acceptedAt: row.acceptedAt.toISOString() };
+        return amuxInfraFailureRoutingEnabled() &&
+          amuxInfraFailureKindOfReason(attempt.reason) && attempt.endedAt ?
+          { source: "infra_failure", acceptedAt: attempt.endedAt.toISOString() } : null;
       })(),
       reason: normalizeAmuxUntrustedReason(attempt.reason),
       startedAt: attempt.startedAt.toISOString(),

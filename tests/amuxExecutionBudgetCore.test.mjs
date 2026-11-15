@@ -8,7 +8,9 @@ import {
   settlementDestinationForBudget,
 } from "../lib/amux/executionBudgetCore.ts";
 
-test("new attempts are monotonic and stop at the bounded retry limit", () => {
+// Owner direction 2026-11-15: no fixed count of five; the bound below is the
+// runaway guard (tests/amuxInfraFailureCore.test.mjs has the repeat rule).
+test("new attempts are monotonic and stop only at the runaway guard", () => {
   assert.deepEqual(
     decideAmuxAttemptBudget({
       historical_rows: 2,
@@ -20,15 +22,16 @@ test("new attempts are monotonic and stop at the bounded retry limit", () => {
       max_attempts: AMUX_MAX_EXECUTION_ATTEMPTS,
     },
   );
+  assert.equal(decideAmuxAttemptBudget({ historical_rows: 5, greatest_attempt_number: null }).allowed, true);
   assert.deepEqual(
     decideAmuxAttemptBudget({
-      historical_rows: 5,
+      historical_rows: AMUX_MAX_EXECUTION_ATTEMPTS,
       greatest_attempt_number: null,
     }),
     {
       allowed: false,
       exhausted_limit: "attempts",
-      attempts_used: 5,
+      attempts_used: AMUX_MAX_EXECUTION_ATTEMPTS,
       max_attempts: AMUX_MAX_EXECUTION_ATTEMPTS,
     },
   );
@@ -38,25 +41,25 @@ test("the last failed attempt blocks instead of requeueing forever", () => {
   assert.deepEqual(
     settlementDestinationForBudget({
       requested_status: "todo",
-      attempt_number: 5,
+      attempt_number: AMUX_MAX_EXECUTION_ATTEMPTS,
     }),
     {
       to_status: "blocked",
       exhausted_limit: "attempts",
-      max_attempts: 5,
+      max_attempts: AMUX_MAX_EXECUTION_ATTEMPTS,
     },
   );
   assert.equal(
     settlementDestinationForBudget({
       requested_status: "todo",
-      attempt_number: 4,
+      attempt_number: 5,
     }).to_status,
     "todo",
   );
   assert.equal(
     settlementDestinationForBudget({
       requested_status: "review",
-      attempt_number: 5,
+      attempt_number: AMUX_MAX_EXECUTION_ATTEMPTS,
     }).to_status,
     "review",
   );

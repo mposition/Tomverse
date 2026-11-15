@@ -45,7 +45,7 @@ use crate::tomverse_api::{
     DatabaseBusy, ExecutionStartResponse,
     NothingCommittedAnswer, OwnedTodoTask,
     PulledDelivery, SelectionRead, SelectionReadTransientStatus, UnacceptedStatus,
-    V22ReadOnlyRetryEcho, V22ReadOnlyRetryProfile, WorkerBridgeKind, WorkerBridgeScope,
+    V22FailureReport, V22ReadOnlyRetryEcho, V22ReadOnlyRetryProfile, WorkerBridgeKind, WorkerBridgeScope,
     WorkerSessionList, V52ReviewEvidence,
     BOARD_CAPACITY_EXCEEDED, DATABASE_BUSY,
 };
@@ -463,6 +463,38 @@ impl WorkerScope {
 /// status is the notice.
 pub const BRIDGE_HALT_EXIT_CODE: i32 = 3;
 
+/// Exit status of a runner that halted only on causes it can read back for
+/// itself (owner direction 2026-11-15: "내부 개발용 Flow입니다. 제한을 줄 이유가
+/// 없습니다."). systemd restarts it (`Restart=on-failure`, exit 3 alone is in
+/// `RestartPreventExitStatus`); the new process registers again and every
+/// attempt it left open is read back by the app: a lease that expires is an
+/// infrastructure failure that goes to another worker without using an
+/// attempt (lib/amux/infraFailureCore.ts). EX_TEMPFAIL.
+pub const BRIDGE_RESTART_EXIT_CODE: i32 = 75;
+
+/// Halt causes that stay with a person: a paid API call whose write or
+/// access outcome is unknown. Every other cause restarts while
+/// TOMVERSE_AMUX_BRIDGE_READ_BACK_PROCEED is on (the default).
+pub const BRIDGE_PERSON_HALT_CAUSES: &[&str] = &[
+    "read_only_api_outcome_unknown",
+    "api_model_access_outcome_unknown",
+    "api_model_access_write_unknown",
+    "api_model_access_authorization_unavailable",
+    "api_model_access_report_refused",
+];
+
+static PERSON_HALT_NOTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The exit status a halted runner leaves.
+pub fn bridge_halt_exit_code_for(read_back_proceed: bool, person_halt: bool) -> i32 {
+    if read_back_proceed && !person_halt { BRIDGE_RESTART_EXIT_CODE } else { BRIDGE_HALT_EXIT_CODE }
+}
+
+fn bridge_halt_exit_code() -> i32 {
+    bridge_halt_exit_code_for(bridge_read_back_proceed(),
+        PERSON_HALT_NOTED.load(std::sync::atomic::Ordering::SeqCst))
+}
+
 const CONTROL_PLANE_MARKERS: &[&str] = &[
     "TOMVERSE_AMUX_SYNC_SECRET",
     "TOMVERSE_AMUX_ENABLED",
@@ -664,9 +696,27 @@ fn read_only_api_result_must_remain_open(
                 V22SidecarState::Succeeded | V22SidecarState::Failed)))
 }
 
+/// The failure an unverified v22 settlement names: the sidecar's own code,
+/// a usage receipt the sidecar never produced for a finished run, or a
+/// sidecar this bridge could not read for fifteen minutes.
+pub fn v22_unverified_failure(result: Option<&V22SidecarResult>) -> V22FailureReport {
+    match result {
+        Some(result) => match (&result.failure, result.state) {
+            (Some(failure), _) => failure.clone(),
+            (None, V22SidecarState::Succeeded | V22SidecarState::Failed) =>
+                V22FailureReport::bridge("usage_receipt_missing"),
+            (None, V22SidecarState::OutcomeUnknown) => V22FailureReport::bridge("sidecar_outcome_unknown"),
+            (None, _) => V22FailureReport::bridge("sidecar_lost"),
+        },
+        None => V22FailureReport::bridge("sidecar_unreachable"),
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct V22SidecarResult {
     pub state: V22SidecarState,
+    /// The sidecar's failure report, when it named one.
+    pub failure: Option<V22FailureReport>,
     pub read_only_retry: Option<V22ReadOnlyRetryEcho>,
     pub api_execution_receipt: Option<serde_json::Value>,
     pub usage_receipt: Option<serde_json::Value>,
@@ -731,7 +781,7 @@ pub trait LocalAmux {
 
     async fn readback_v22_result(&mut self, attempt_id: &str) -> Result<V22SidecarResult> {
         Ok(V22SidecarResult { state: self.readback_v22(attempt_id).await?,
-            read_only_retry: None,
+            failure: None, read_only_retry: None,
             api_execution_receipt: None,
             usage_receipt: None, usage_receipt_digest: None,
             result_text: None, result_sha256: None,
@@ -1068,8 +1118,11 @@ pub const BRIDGE_READ_BACK_PROCEED_ENV: &str = "TOMVERSE_AMUX_BRIDGE_READ_BACK_P
 /// own lost answer.
 const PRE_SETTLE_WRITE_UNKNOWN: &str = "v22 result or usage write outcome unknown before settle";
 
+/// On unless exactly `disabled` (owner direction 2026-11-15: an internal
+/// development flow reads back and goes on by itself; only a paid call's
+/// unknown write stays with a person).
 pub fn bridge_read_back_proceed_enabled(value: Option<&str>) -> bool {
-    value.map(str::trim) == Some("enabled")
+    value.map(str::trim) != Some("disabled")
 }
 
 fn bridge_read_back_proceed() -> bool {
@@ -1177,6 +1230,9 @@ fn quota_write_unknown_warning(name: &str, error: &anyhow::Error) -> String {
 fn note_halt(halt_cause: &mut Option<String>, cause: impl Into<String>) {
     let cause = cause.into();
     eprintln!("{}", halt_noted_line(&cause));
+    if BRIDGE_PERSON_HALT_CAUSES.contains(&cause.as_str()) {
+        PERSON_HALT_NOTED.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
     if halt_cause.is_none() {
         *halt_cause = Some(cause);
     }
@@ -2089,6 +2145,120 @@ async fn v22_sidecar_quota(_socket_path: &str, _worker: &str) -> Result<Option<c
     Ok(None)
 }
 
+/// The box health signals a sidecar answers for its worker (owner decision
+/// 2026-11-15): source, signal, observation and expiry times, codes only.
+/// Anything else in the answer is refused, so nothing a worker wrote is
+/// forwarded. An old sidecar refuses the operation; that is "no signals".
+pub fn parse_v22_health_response(value: serde_json::Value, request_id: &str, worker: &str)
+    -> Result<Vec<serde_json::Value>> {
+    let object = value.as_object().context("invalid health envelope")?;
+    if object.len() != 4 || value.get("kind").and_then(|v| v.as_str()) != Some("health") ||
+        value.get("requestId").and_then(|v| v.as_str()) != Some(request_id) ||
+        value.get("worker").and_then(|v| v.as_str()) != Some(worker) {
+        bail!("invalid health envelope");
+    }
+    let signals = value.get("signals").and_then(|v| v.as_array()).context("missing health signals")?;
+    if signals.len() > 8 { bail!("too many health signals"); }
+    fn time(value: Option<&serde_json::Value>) -> Option<&str> {
+        value.and_then(|v| v.as_str())
+            .filter(|text| chrono::DateTime::parse_from_rfc3339(text).is_ok())
+    }
+    signals.iter().map(|signal| {
+        let fields = signal.as_object().context("invalid health signal")?;
+        let source = fields.get("source").and_then(|v| v.as_str())
+            .filter(|s| matches!(*s, "login_keepalive" | "auth_stage" | "sidecar"))
+            .context("invalid health source")?;
+        let code = fields.get("signal").and_then(|v| v.as_str())
+            .filter(|s| V22FailureReport::valid_code(s)).context("invalid health code")?;
+        let observed = time(fields.get("observedAt")).context("invalid health time")?;
+        let expires = fields.get("expiresAt");
+        if fields.keys().any(|key| !matches!(key.as_str(), "source" | "signal" | "observedAt" | "expiresAt")) ||
+            (expires.is_some() && time(expires).is_none()) {
+            bail!("invalid health signal");
+        }
+        let mut out = serde_json::json!({"source": source, "signal": code, "observed_at": observed});
+        if let Some(expires) = time(expires) { out["expires_at"] = serde_json::Value::from(expires); }
+        Ok(out)
+    }).collect()
+}
+
+#[cfg(unix)]
+async fn v22_sidecar_health(socket_path: &str, worker: &str) -> Result<Vec<serde_json::Value>> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::UnixStream;
+    if !std::path::Path::new(socket_path).is_absolute() || !valid_session_name(worker) {
+        bail!("invalid health endpoint");
+    }
+    let request_id = Uuid::new_v4().to_string();
+    let payload = serde_json::json!({"op":"health","requestId":request_id,"worker":worker});
+    let operation = async {
+        let mut request = serde_json::to_vec(&payload)?; request.push(b'\n');
+        let mut stream = UnixStream::connect(socket_path).await?;
+        stream.write_all(&request).await?; stream.shutdown().await?;
+        let mut response = Vec::new();
+        stream.take(8193).read_to_end(&mut response).await?;
+        if response.len() > 8192 { bail!("health response exceeds limit"); }
+        parse_v22_health_response(serde_json::from_slice(&response)?, &request_id, worker)
+    };
+    tokio::time::timeout(Duration::from_secs(5), operation).await.context("health probe timeout")?
+}
+
+#[cfg(not(unix))]
+async fn v22_sidecar_health(_socket_path: &str, _worker: &str) -> Result<Vec<serde_json::Value>> {
+    Ok(Vec::new())
+}
+
+#[cfg(test)]
+mod health_tests {
+    use super::*;
+
+    #[test]
+    fn health_forwards_only_coded_signals_for_its_own_request_and_worker() {
+        let body = serde_json::json!({"kind":"health","requestId":"r","worker":"claude-impl",
+            "signals":[{"source":"login_keepalive","signal":"relogin_soon",
+                "observedAt":"2026-11-15T07:00:00.000Z","expiresAt":"2026-11-16T04:05:50.000Z"}]});
+        let signals = parse_v22_health_response(body.clone(), "r", "claude-impl").unwrap();
+        assert_eq!(signals, vec![serde_json::json!({"source":"login_keepalive",
+            "signal":"relogin_soon","observed_at":"2026-11-15T07:00:00.000Z",
+            "expires_at":"2026-11-16T04:05:50.000Z"})]);
+        assert!(parse_v22_health_response(body.clone(), "other", "claude-impl").is_err());
+        assert!(parse_v22_health_response(body.clone(), "r", "claude-chore").is_err());
+        let mut extra = body.clone();
+        extra["signals"][0]["token"] = serde_json::json!("secret");
+        assert!(parse_v22_health_response(extra, "r", "claude-impl").is_err());
+        let mut text = body.clone();
+        text["signals"][0]["signal"] = serde_json::json!("Login Required!");
+        assert!(parse_v22_health_response(text, "r", "claude-impl").is_err());
+        let mut source = body;
+        source["signals"][0]["source"] = serde_json::json!("worker");
+        assert!(parse_v22_health_response(source, "r", "claude-impl").is_err());
+    }
+
+    #[test]
+    fn an_unverified_settlement_names_what_the_sidecar_said() {
+        let unknown = serde_json::json!({"kind":"outcome_unknown","attemptId":"a",
+            "cliStarted":true,"failure":"invalid_result","exitCode":1,"elapsedMs":4200});
+        let report = V22FailureReport::from_sidecar(&unknown).unwrap();
+        assert_eq!(report, V22FailureReport { code: "invalid_result".into(),
+            cli_started: Some(true), exit_code: Some(1), elapsed_ms: Some(4200) });
+        assert!(V22FailureReport::from_sidecar(&serde_json::json!({"failure":"Bad Code"})).is_none());
+        let result = |state, failure| V22SidecarResult { state, failure,
+            read_only_retry: None, api_execution_receipt: None, usage_receipt: None,
+            usage_receipt_digest: None, result_text: None, result_sha256: None,
+            patch_body: None, patch_base_sha: None, patch_digest: None,
+            publish_files: None, publish_files_digest: None, changed_paths: None,
+            review_commit_sha: None, review_base_sha: None,
+            review_touches_contract: None, review_ref: None };
+        assert_eq!(v22_unverified_failure(Some(&result(V22SidecarState::OutcomeUnknown,
+            Some(report.clone())))), report);
+        assert_eq!(v22_unverified_failure(Some(&result(V22SidecarState::Succeeded, None))).code,
+            "usage_receipt_missing");
+        assert_eq!(v22_unverified_failure(Some(&result(V22SidecarState::NotFound, None))).code,
+            "sidecar_lost");
+        assert_eq!(v22_unverified_failure(None).code, "sidecar_unreachable");
+    }
+}
+
 #[cfg(unix)]
 async fn v22_sidecar_api_model_access(socket_path: &str,
     request: &AmuxV22ApiModelAccessRequest) -> Result<AmuxV22ApiModelAccessResult> {
@@ -2360,7 +2530,11 @@ async fn v22_sidecar_call(
                 !sha.bytes().all(|byte| byte.is_ascii_hexdigit())) {
             bail!("invalid v22 sidecar patch envelope");
         }
-        Ok(V22SidecarResult { state, read_only_retry,
+        // A terminal without a verified result names its failure; the app
+        // reads it to keep an infrastructure failure off the card's attempts.
+        let failure = matches!(state, V22SidecarState::Failed | V22SidecarState::OutcomeUnknown)
+            .then(|| V22FailureReport::from_sidecar(&value)).flatten();
+        Ok(V22SidecarResult { state, failure, read_only_retry,
             api_execution_receipt, usage_receipt: receipt,
             usage_receipt_digest: digest.map(str::to_owned),
             result_text: result_text.map(str::to_owned),
@@ -3391,6 +3565,19 @@ async fn run_bridge(mut scope: WorkerScope) -> i32 {
                         },
                         _ => eprintln!("amux v22 quota source unavailable for {name}"),
                     }
+                    // The box's sign-in signals for this worker (owner
+                    // decision 2026-11-15), forwarded at the same cadence. A
+                    // diagnostic write: its answer never halts the bridge.
+                    match v22_sidecar_health(socket, &name).await {
+                        Ok(signals) if !signals.is_empty() =>
+                            match api.worker_health_record(&name, &signals).await {
+                                Ok(true) => {}
+                                Ok(false) => eprintln!("amux v22 health signals refused for {name}"),
+                                Err(error) => eprintln!("amux wsl bridge warn: health signals for {name} not recorded ({}); sent again next probe, not halted",
+                                    bridge_error_class(&error)),
+                            },
+                        _ => {}
+                    }
                 }
             }
         }
@@ -3905,9 +4092,13 @@ async fn run_bridge(mut scope: WorkerScope) -> i32 {
                             } else if api_retry {
                                 Err(anyhow::anyhow!("read-only API receipt unverified"))
                             } else {
-                                api.v22_execution_settle_unverified(&entry.delivery,
+                                // Say what the sidecar said (owner decision
+                                // 2026-11-15): the app keeps an infrastructure
+                                // failure off the card's attempts.
+                                let failure = v22_unverified_failure(v22_result.as_ref());
+                                api.v22_execution_settle_unverified_with_failure(&entry.delivery,
                                     &session.instance_id, session.generation,
-                                    settlement_retry_echo).await
+                                    settlement_retry_echo, Some(&failure)).await
                             }
                         } else {
                             api.execution_settle_with_review_pr(
@@ -3981,7 +4172,9 @@ async fn run_bridge(mut scope: WorkerScope) -> i32 {
             halt_reported = true;
         }
         if should_exit_halted_bridge(halted, pending.len() + undelivered_started.len()) {
-            return BRIDGE_HALT_EXIT_CODE;
+            // Exit 3 waits for a person only on a paid call's unknown
+            // outcome; any other halt restarts and reads back (2026-11-15).
+            return bridge_halt_exit_code();
         }
 
         tokio::select! {
@@ -4480,10 +4673,25 @@ mod tests {
     }
 
     #[test]
-    fn read_back_proceed_is_off_unless_enabled() {
-        assert!(!bridge_read_back_proceed_enabled(None));
-        assert!(!bridge_read_back_proceed_enabled(Some("true")));
+    fn read_back_proceed_is_on_unless_disabled() {
+        // Owner direction 2026-11-15: on by default; `disabled` restores the halt.
+        assert!(bridge_read_back_proceed_enabled(None));
+        assert!(bridge_read_back_proceed_enabled(Some("true")));
         assert!(bridge_read_back_proceed_enabled(Some(" enabled ")));
+        assert!(!bridge_read_back_proceed_enabled(Some(" disabled ")));
+    }
+
+    #[test]
+    fn only_a_paid_calls_unknown_outcome_waits_for_a_person() {
+        assert_eq!(bridge_halt_exit_code_for(true, false), BRIDGE_RESTART_EXIT_CODE);
+        assert_eq!(bridge_halt_exit_code_for(true, true), BRIDGE_HALT_EXIT_CODE);
+        assert_eq!(bridge_halt_exit_code_for(false, false), BRIDGE_HALT_EXIT_CODE);
+        assert!(BRIDGE_RESTART_EXIT_CODE != BRIDGE_HALT_EXIT_CODE &&
+            BRIDGE_RESTART_EXIT_CODE != 0 && BRIDGE_RESTART_EXIT_CODE != 1);
+        for cause in ["dispatch_outcome_unknown", "settle_outcome_unknown", "pending_session_missing"] {
+            assert!(!BRIDGE_PERSON_HALT_CAUSES.contains(&cause), "{cause} restarts");
+        }
+        assert!(BRIDGE_PERSON_HALT_CAUSES.contains(&"read_only_api_outcome_unknown"));
     }
 
     #[test]
@@ -4552,7 +4760,7 @@ mod tests {
             base_sha: None,
         };
         let mut result = V22SidecarResult {
-            state: V22SidecarState::Succeeded, read_only_retry: None,
+            state: V22SidecarState::Succeeded, failure: None, read_only_retry: None,
             api_execution_receipt: None, usage_receipt: None,
             usage_receipt_digest: None, result_text: None,
             result_sha256: Some("a".repeat(64)), patch_body: None,
@@ -4595,6 +4803,7 @@ AMUX_OWNER_QUESTION: {\"question\":\"Which?\",\"unblocks\":\"u\",\"options\":[{\
     fn confirmed_patch_retries_by_exact_readback_without_volatile_bytes() {
         let mut result = V22SidecarResult {
             state: V22SidecarState::Succeeded,
+            failure: None,
             read_only_retry: None,
             api_execution_receipt: None,
             usage_receipt: None, usage_receipt_digest: None,
@@ -5641,7 +5850,7 @@ AMUX_OWNER_QUESTION: {\"question\":\"Which?\",\"unblocks\":\"u\",\"options\":[{\
         let source = include_str!("wsl_bridge.rs");
         let run = &source[source.find("pub async fn run_worker_from_env").unwrap()..];
         let run = &run[..run.find("fn local_client").unwrap()];
-        assert!(run.contains("return BRIDGE_HALT_EXIT_CODE;"));
+        assert!(run.contains("return bridge_halt_exit_code();"));
         assert!(!run.contains("worker_register(&name"), "a lost lease never re-registers");
         let lost = &run[run.find("Some(\"runtime_lease_lost\")").unwrap()..];
         let lost = &lost[..lost.find("_ => {").unwrap()];
@@ -5836,7 +6045,7 @@ AMUX_OWNER_QUESTION: {\"question\":\"Which?\",\"unblocks\":\"u\",\"options\":[{\
         delivery.assignment_id = Some("11111111-1111-4111-8111-111111111111".into());
         let entry = PendingExecution { delivery, sent_at: 0, card: None };
         let result = V22SidecarResult { state: V22SidecarState::Succeeded,
-            read_only_retry: None, api_execution_receipt: None,
+            failure: None, read_only_retry: None, api_execution_receipt: None,
             usage_receipt: None, usage_receipt_digest: None,
             result_text: Some(text.into()), result_sha256: Some(digest),
             patch_body: None, patch_base_sha: None, patch_digest: None,
@@ -5871,7 +6080,7 @@ AMUX_OWNER_QUESTION: {\"question\":\"Which?\",\"unblocks\":\"u\",\"options\":[{\
         delivery.assignment_id = Some("11111111-1111-4111-8111-111111111111".into());
         let entry = PendingExecution { delivery, sent_at: 0, card: None };
         let result = V22SidecarResult { state: V22SidecarState::Succeeded,
-            read_only_retry: None, api_execution_receipt: None,
+            failure: None, read_only_retry: None, api_execution_receipt: None,
             usage_receipt: None, usage_receipt_digest: None,
             result_text: Some("different text".into()),
             result_sha256: Some("a".repeat(64)),

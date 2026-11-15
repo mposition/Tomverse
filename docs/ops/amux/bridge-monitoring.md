@@ -225,6 +225,14 @@ amux wsl bridge halted: no new assignments; cause=<원인>; restart only after c
 
 ## 5. 자동 재시작 (승인된 원인만)
 
+**2026-11-15부터(운영자 지시 "내부 개발용 Flow입니다. 제한을 줄 이유가 없습니다").** bridge는 유료 API 호출의
+결과 불명(`read_only_api_outcome_unknown`, `api_model_access_*`)일 때만 종료 코드 3으로 사람을 기다린다. 그 밖의
+halt(`dispatch_outcome_unknown`, `settle_outcome_unknown`, `pending_session_missing` 등)는 종료 코드 75로 끝나고
+systemd(`Restart=on-failure`, `RestartSec=60`)가 다시 시작한다. 새 프로세스는 다시 등록하고, 남은 attempt는
+lease가 끝나면 앱이 플랫폼 실패로 다른 워커에게 보낸다(카드 시도를 쓰지 않는다). bridge에
+`TOMVERSE_AMUX_BRIDGE_READ_BACK_PROCEED=disabled`를 두면 모든 halt가 예전처럼 종료 코드 3이다. 아래 자동 재시작
+timer는 종료 코드 3으로 남은 halt에만 계속 쓰인다.
+
 코드: `scripts/amux-bridge-autorestart/`. 테스트: `tests/amuxBridgeAutorestart.test.mjs`.
 
 **승인:** 운영자, 2026-10-14. 2026-10-13 하루 동안 bridge가 열 번 넘게 halt했고, 대부분 아무것도 저장되지 않은

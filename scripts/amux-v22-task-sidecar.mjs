@@ -4,6 +4,7 @@ import { createAmuxV22SidecarServer, createAmuxV22SidecarHandler,
   AMUX_V22_SIDECAR_ENV, runAmuxV22OneShot, probeAmuxV22ClaudeQuota } from
   "../lib/amux/v22OneShotSidecar.mjs";
 import { probeAmuxV22ChannelQuota } from "../lib/amux/v22ChannelQuota.mjs";
+import { readAmuxV22WorkerHealth } from "../lib/amux/v22WorkerHealthFile.mjs";
 import { inspectAmuxV22RecoveryUnit } from "../lib/amux/v22RecoveryHost.mjs";
 import { captureAmuxV22PatchBaseline } from "../lib/amux/v22PatchCapture.mjs";
 import { amuxV22SidecarLaunchConfigFromEnvironment } from
@@ -42,6 +43,9 @@ const handler = createAmuxV22SidecarHandler({ worker: config.worker, stateDir, p
     // app does with a non-Claude reading is TOMVERSE_AMUX_V22_NON_CLAUDE_QUOTA_GATE.
     quota: () => provider === "anthropic" ? probeAmuxV22ClaudeQuota(config) :
       probeAmuxV22ChannelQuota(provider, { ...config, quotaGroup }),
+    // What the sign-in stage and the login keepalive wrote next to this
+    // worker's sign-in copy (owner decision 2026-11-15).
+    health: () => readAmuxV22WorkerHealth(config.claudeConfigDir),
     // The handler adds the local CLI flow's transcript and preserved-patch
     // paths and the operator's stop signal (v22LocalCliFlowCore.ts).
     run: (request, extra) => runAmuxV22OneShot(request, config, extra) });
