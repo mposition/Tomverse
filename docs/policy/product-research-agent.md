@@ -361,6 +361,11 @@ Chromium sandbox가 떴는지(`on`), 재시도로 sandbox 없이 떴는지(`off`
     채팅 화면은 초안을 복원한 상태로 열리고 전송 한 턴만 씁니다.
   - 모델이 정한 턴은 앱의 `POST …/scout/scenario`가 Scout 모델에 텍스트 호출 한 번(하루 호출 상한에서 차감)으로 요청 문장·첨부·기대 결과를
     받아 walker에 돌려줍니다. 검사는 문장 길이와 첨부가 `SCOUT_FIXTURES`에 있는지 하나입니다(`admitScenario`).
+  - **같은 대화에서 첨부 두 번**(`generated.attachment-follow-up`, 2026-11-15 사용자가 찾은 결함 대응: 이미지 두 장을 PDF로 만든 뒤 같은 대화에
+    새 이미지 두 장으로 같은 요청을 하자 "이미지를 불러오지 못했다"는 답과 실패한 파일 카드가 나옴). 앱 변수
+    `PRODUCT_RESEARCH_SCOUT_ATTACHMENT_FOLLOW_UP_TASK_ENABLED`로 기본 꺼짐, 허가 1개.
+    아래 동선 walker가 고정 단계(첨부 두 장으로 PDF 요청 → 전송 → `attach` 두 번 → 같은 요청 → 전송)를 따르고, 두 턴의 파일 카드 상태와 답을
+    판정에 넘깁니다. 유료 턴은 2번입니다.
 - **Chat 이미지와 후속 수정**(`generated.image-follow-up`, 2026-11-15 G4 데모 녹화에서 Scout가 놓친 두 결함 대응, 앱 변수
   `PRODUCT_RESEARCH_SCOUT_IMAGE_FOLLOW_UP_TASK_ENABLED`로 기본 꺼짐). 한 대화에서 이미지를 요청하고, 그림이 오면 같은 대화에 그 그림을 바꾸는
   요청을 보냅니다. 새 대화 한 턴으로는 닿지 않는 기존 대화의 Auto 준비 경로와 이전 이미지를 지나고, 답 카드의 캡션도 봅니다. 허가 1개로 이미지가
@@ -370,9 +375,11 @@ Chromium sandbox가 떴는지(`on`), 재시도로 sandbox 없이 떴는지(`off`
   `PRODUCT_RESEARCH_SCOUT_JOURNEY_TASK_ENABLED`로 기본 꺼짐). 화면 한 장으로는 안 보이고 단계 사이에서만 드러나는 결함(이동 후 사라진 초안·첨부,
   할 일을 마친 뒤에도 열려 있는 drawer, 앞 턴을 잊은 후속 답, 내부 id 노출)을 찾습니다. 앱의 `POST …/scout/journey`가 Scout 모델에 텍스트 호출
   한 번(하루 호출 상한에서 차감, 판정용 1회를 남김)으로 하루 한 동선을 받습니다. 동작은 `open`(로그인 화면 목록의 주소만)·`click`(이름 붙인 조작부
-  `menu`·`new-chat`·`conversation:N` 또는 보이는 글자)·`type`·`send`(동선당 2회)·`back`·`press`(Escape·Enter·Tab)이고 최대 8단계, 시작 초안에
-  예시 파일을 넣을 수 있습니다. 검사는 `admitJourney` 하나입니다. walker는 새 대화에서 시작해 단계마다 주소·입력창 내용·첨부 수·열린 dialog 수·
-  답·캡션을 적고 화면을 4칸 한 장으로 묶어 판정에 넘깁니다. 쓰기는 전송 사이에는 Chat 초안 저장(PUT·DELETE)만, 전송 중에는 그 턴의 경로만
+  `menu`·`new-chat`·`conversation:N` 또는 보이는 글자)·`type`·`attach`(예시 파일, 동선당 3회)·`send`(동선당 2회)·`back`·
+  `press`(Escape·Enter·Tab)이고 최대 8단계, 시작 초안에도 예시 파일을 넣을 수 있습니다. `attach`는 시작 초안과 같은 방식으로 지금 대화의 초안에
+  파일을 저장하고 화면을 다시 불러옵니다(browser는 업로드하지 않음). 결함 계열은 `JOURNEY_FAMILIES`에 적고, 날짜마다 권하는 계열이 돌아가서
+  모델이 한 계열만 고르더라도 모든 계열이 차례로 다뤄집니다. 검사는 `admitJourney` 하나입니다. walker는 새 대화에서 시작해 단계마다 주소·입력창 내용·첨부 수·열린 dialog 수·
+  답·캡션·답마다 파일 카드 상태(준비됨·만드는 중·실패)를 적고 화면을 4칸 한 장으로 묶어 판정에 넘깁니다. 쓰기는 전송 사이에는 Chat 초안 저장(PUT·DELETE)만, 전송 중에는 그 턴의 경로만
   (`scoutJourneyWrites`) 허용하므로 삭제·이름 변경·공유·설정 변경은 나가지 않고 모델에게 알립니다. 허가 1개로 유료 턴이 최대 2번(이미지일 수 있음)
   생기므로 켜는 일과 하루 횟수는 owner가 정합니다.
 - **비용**: owner가 Admin에서 정한 하루 횟수(UTC 하루, 기본 0, 최대 20)만큼 walker가 허가를 받습니다. 허가는 쓰기 전에 원장에 한 줄씩 남고

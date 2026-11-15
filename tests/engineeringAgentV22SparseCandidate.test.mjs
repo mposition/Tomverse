@@ -37,6 +37,19 @@ test("v22 sparse candidate refuses missing base bytes and unsafe evidence", () =
   { ok: false, reason: "files_invalid" });
 });
 
+test("v22 sparse candidate builds a new file only when the caller names it added", () => {
+  const added = { path: "lib/new.ts", mode: "100644",
+    bytesBase64: Buffer.from("export const n = 1;\n").toString("base64") };
+  assert.deepEqual(verifyEngineeringAgentV22SparseCandidate({ ...input,
+    files: [added] }), { ok: false, reason: "files_invalid" });
+  const result = verifyEngineeringAgentV22SparseCandidate({ ...input,
+    files: [file, added], addedPaths: new Set([added.path]) });
+  assert.equal(result.ok, true, result.reason);
+  assert.deepEqual(result.changes.map((entry) => [entry.path, entry.status,
+    entry.oldMode, entry.newMode]), [["file.ts", "modified", "100644",
+    "100644"], ["lib/new.ts", "added", null, "100644"]]);
+});
+
 test("pinned GitHub loader reads only named old blobs and wipes their bytes", async () => {
   const fetched = Buffer.from(before);
   const reads = [];

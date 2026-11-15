@@ -1,9 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
 import {
   mockAuthenticatedApi,
-  openModelPickerCatalogue,
   openRecentConversation,
   prepareGuestPage,
+  selectModelsViaPicker,
   sendChatMessage,
 } from "./support/app-fixtures";
 
@@ -143,40 +143,9 @@ const seedFreshAccount = async (page: Page) => {
 // answers with its stored default (gpt-5-6-luna); `/chat?lang=en` reads
 // `/api/user/settings?lang=en`, which that route does not match, so the E2E
 // server answers with APP_DEFAULTS.defaultModelId. The two were the same model
-// until the default moved to gpt-6-luna on 2026-10-12, which is why the helper
-// below reads the starting selection from the picker instead of naming it.
-// toggleModel() refuses to drop the last remaining model, so a starting model
-// can only be removed once at least one target is selected -- add the first
-// target, drop everything that is not a target, then add the rest.
-const selectModelsViaPicker = async (page: Page, models: string[]) => {
-  // STG-F008: specific models are picked from the full catalogue, which is the
-  // picker's second step.
-  await openModelPickerCatalogue(page);
-  const optionFor = (modelId: string) =>
-    page.locator(`[data-testid="model-option"][data-model-id="${modelId}"]`);
-  const select = async (modelId: string) => {
-    if ((await optionFor(modelId).getAttribute("aria-pressed")) !== "true") {
-      await optionFor(modelId).click();
-    }
-    // Settled before the starting selection is read below.
-    await expect(optionFor(modelId)).toHaveAttribute("aria-pressed", "true");
-  };
-  await select(models[0]);
-  const startedOn = await page
-    .locator('[data-testid="model-option"][aria-pressed="true"]')
-    .evaluateAll((options) => options.map((option) => option.getAttribute("data-model-id")));
-  for (const modelId of startedOn) {
-    if (modelId && !models.includes(modelId)) await optionFor(modelId).click();
-  }
-  for (const modelId of models.slice(1)) {
-    await select(modelId);
-  }
-  // Escape only steps back one level in the two-step picker, so close via the
-  // completion control -- the dialog's backdrop blocks the tools menu until it
-  // is actually dismissed.
-  await page.getByTestId("model-picker-done").click();
-  await expect(page.locator("#chat-input-popover")).toBeHidden();
-};
+// until the default moved to gpt-6-luna on 2026-10-12, which is why
+// selectModelsViaPicker (support/app-fixtures.ts) reads the starting selection
+// from the picker instead of naming it.
 
 const assistantBadge = (page: Page, modelId: string) =>
   page
@@ -717,6 +686,20 @@ test.describe("native web search (webSearchMode: always)", () => {
   // tests noticing. The assertion in all three is the same: what the UI shows,
   // what preflight reserves, and what every /api/chat body carries agree.
 
+  // prepareTwoModelChat's gpt-5-5 + claude-sonnet-5, with gpt-5-5 swapped for
+  // gemini-2-5-flash: still two panels, one of them on a different model.
+  const swapOneModelViaPicker = async (page: Page) => {
+    await selectModelsViaPicker(page, ["gemini-2-5-flash", "claude-sonnet-5"]);
+    const panels = page.getByTestId("desktop-model-panel");
+    await expect(panels).toHaveCount(2);
+    await expect(
+      panels.and(page.locator('[data-model-id="gemini-2-5-flash"]'))
+    ).toHaveCount(1);
+    await expect(
+      panels.and(page.locator('[data-model-id="gpt-5-5"]'))
+    ).toHaveCount(0);
+  };
+
   const expectModeEverywhere = async (
     page: Page,
     preflightModes: (string | undefined)[],
@@ -742,16 +725,12 @@ test.describe("native web search (webSearchMode: always)", () => {
     const { preflightModes, chatModes } = await readModesOnSubmit(page);
 
     await setWebSearchModeAlways(page);
-    // The model change happens after the mode choice and before the submit.
-    // Swapping a panel's own model is the narrowest way to trigger it: it
-    // rebuilds the submit handler without touching the mode.
-    await page
-      .locator('[data-testid="desktop-model-panel"] select')
-      .first()
-      .selectOption("gemini-2-5-flash");
-    await expect(
-      page.locator('[data-testid="desktop-model-panel"] select').first()
-    ).toHaveValue("gemini-2-5-flash");
+    // The model change happens after the mode choice and before the submit,
+    // and rebuilds the submit handler without touching the mode. It goes
+    // through the composer's picker: on this empty conversation the panels
+    // sit `inert` behind the welcome surface (UI-EMPTY-001), so the picker is
+    // the control a person can use to swap a model here.
+    await swapOneModelViaPicker(page);
 
     await page.getByTestId("chat-textarea").fill("Latest figure after a model swap");
     await page.getByTestId("chat-textarea").press("Enter");
@@ -767,13 +746,7 @@ test.describe("native web search (webSearchMode: always)", () => {
 
     await setWebSearchModeAlways(page);
     await setWebSearchModeOff(page);
-    await page
-      .locator('[data-testid="desktop-model-panel"] select')
-      .first()
-      .selectOption("gemini-2-5-flash");
-    await expect(
-      page.locator('[data-testid="desktop-model-panel"] select').first()
-    ).toHaveValue("gemini-2-5-flash");
+    await swapOneModelViaPicker(page);
 
     await page.getByTestId("chat-textarea").fill("Answer from what you know");
     await page.getByTestId("chat-textarea").press("Enter");

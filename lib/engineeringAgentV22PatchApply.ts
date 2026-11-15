@@ -4,24 +4,32 @@ import { gitObjectId } from "@/lib/engineeringAgentTreeVerify";
 /**
  * A stored v22 patch with no file list (the sidecar keeps file bytes only for
  * at most five files and 48 KiB) is rebuilt here against the pinned base
- * blobs. Only the exact shape `git diff --binary --no-renames` writes for a
- * modified text file is read. Its `index` line names the old and new blob ids
- * (abbreviated for text): the pinned base blob must be the old one, and a
- * rebuilt file counts only when its blob id is the new one the diff named.
- * The publisher still applies the patch with git and matches the tree before
- * any push. Anything else -- a new,
- * deleted or renamed file, a mode change, a binary patch, a quoted path, a
- * hunk that does not sit exactly where it says -- is refused, never fuzzed.
+ * blobs. Only the exact shapes `git diff --binary --no-renames` writes for a
+ * modified text file and for a new regular text file are read. A modified
+ * file's `index` line names the old and new blob ids (abbreviated for text):
+ * the pinned base blob must be the old one, and a rebuilt file counts only
+ * when its blob id is the new one the diff named. A new file
+ * (`new file mode 100644`, `--- /dev/null`) is one hunk that adds every line
+ * from nothing, and its bytes must hash to the blob id its `index` line
+ * names; whether its path is free in the base is the caller's check. The
+ * publisher still applies the patch with git and matches the tree before any
+ * push. Anything else -- a deleted or renamed file, a mode change, a new
+ * executable, symlink or empty file, a binary patch, a quoted path, a hunk
+ * that does not sit exactly where it says -- is refused, never fuzzed.
  */
 export type V22DiffLine = { op: " " | "-" | "+"; text: string; eol: boolean };
 export type V22DiffHunk = { oldStart: number; oldCount: number;
   newStart: number; newCount: number; lines: V22DiffLine[] };
-/** `oldOid` and `newOid` are the diff's blob ids, possibly abbreviated. */
-export type V22DiffFile = { path: string; oldOid: string; newOid: string;
-  hunks: V22DiffHunk[] };
+/** `oldOid` and `newOid` are the diff's blob ids, possibly abbreviated; a new
+ * file has no old blob. */
+export type V22DiffFile = { path: string; newOid: string;
+  hunks: V22DiffHunk[] } &
+  ({ added: false; oldOid: string } | { added: true; oldOid: null });
 
 const DIFF = /^diff --git a\/(\S+) b\/(\S+)$/;
 const INDEX = /^index ([0-9a-f]{7,40})\.\.([0-9a-f]{7,40}) 100644$/;
+const NEW_FILE = "new file mode 100644";
+const NEW_INDEX = /^index (0{7,40})\.\.([0-9a-f]{7,40})$/;
 const HUNK = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(?: .*)?$/;
 const NO_EOL = "\\ No newline at end of file";
 const ZERO = /^0+$/;
@@ -40,10 +48,13 @@ export function parseV22GitDiff(text: string):
     if (!head || !path || head[2] !== path || !isCanonicalRepoPath(path) ||
         seen.has(path)) return { ok: false };
     seen.add(path);
-    const index = INDEX.exec(lines[i++] ?? "");
-    if (!index || ZERO.test(index[1]) || ZERO.test(index[2]) ||
-        index[1] === index[2] ||
-        lines[i++] !== `--- a/${path}` || lines[i++] !== `+++ b/${path}`)
+    const added = lines[i] === NEW_FILE;
+    if (added) i++;
+    const index = (added ? NEW_INDEX : INDEX).exec(lines[i++] ?? "");
+    if (!index || ZERO.test(index[2]) ||
+        (!added && (ZERO.test(index[1]) || index[1] === index[2])) ||
+        lines[i++] !== (added ? "--- /dev/null" : `--- a/${path}`) ||
+        lines[i++] !== `+++ b/${path}`)
       return { ok: false };
     const hunks: V22DiffHunk[] = [];
     while (i < lines.length && lines[i].startsWith("@@ ")) {
@@ -71,7 +82,15 @@ export function parseV22GitDiff(text: string):
       hunks.push(hunk);
     }
     if (hunks.length === 0) return { ok: false };
-    files.push({ path, oldOid: index[1], newOid: index[2], hunks });
+    if (added) {
+      // Every line comes from nothing: one hunk, `@@ -0,0 +1[,n] @@`.
+      if (hunks.length !== 1 || hunks[0].oldStart !== 0 ||
+          hunks[0].oldCount !== 0 || hunks[0].newStart !== 1)
+        return { ok: false };
+      files.push({ path, added, oldOid: null, newOid: index[2], hunks });
+    } else {
+      files.push({ path, added, oldOid: index[1], newOid: index[2], hunks });
+    }
   }
   return { ok: true, files };
 }
@@ -79,13 +98,19 @@ export function parseV22GitDiff(text: string):
 const utf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 
 /** The rebuilt bytes, or null when the diff does not apply to `base` exactly
- * or does not yield the blob the diff names. */
-export function applyV22FileDiff(base: Uint8Array, file: V22DiffFile):
+ * or does not yield the blob the diff names. A new file applies to no base
+ * (`null`); a modified one only to its old blob. */
+export function applyV22FileDiff(base: Uint8Array | null, file: V22DiffFile):
   Uint8Array | null {
-  if (!gitObjectId("blob", base).startsWith(file.oldOid)) return null;
-  let source: string;
-  try { source = utf8.decode(base); } catch { return null; }
-  if (source.includes("\0")) return null;
+  let source = "";
+  if (file.added) {
+    if (base !== null) return null;
+  } else {
+    if (base === null || !gitObjectId("blob", base).startsWith(file.oldOid))
+      return null;
+    try { source = utf8.decode(base); } catch { return null; }
+    if (source.includes("\0")) return null;
+  }
   // Each token keeps its own line ending, so a last line with none stays so.
   const tokens = source.match(/[^\n]*\n|[^\n]+$/g) ?? [];
   const out: string[] = [];

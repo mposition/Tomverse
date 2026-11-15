@@ -1,0 +1,18 @@
+[Unit]
+Description=Tomverse AMUX v22 operator Claude login keepalive
+After=network-online.target
+Wants=network-online.target
+ConditionFileNotEmpty=%h/.local/lib/tomverse-amux-v22/amux-v22-claude-login-keepalive.mjs
+
+[Service]
+Type=oneshot
+# AMUX_V22_STAGE_AUTH_SCRIPT and AMUX_V22_CLAUDE_WORKERS: see the .env.example.
+EnvironmentFile=%h/.config/tomverse-amux-v22/claude-login-keepalive.env
+ExecStart=/usr/bin/node %h/.local/lib/tomverse-amux-v22/amux-v22-claude-login-keepalive.mjs
+WorkingDirectory=%h
+TimeoutStartSec=300
+UMask=0077
+NoNewPrivileges=true
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=amux-v22-claude-login-keepalive
