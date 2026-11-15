@@ -66,11 +66,12 @@ export const dmDeliveryMessageId = (requestId: string): string => {
 };
 
 /**
- * A message's cap in UTF-8 bytes. The longest answer is a body of 8 KiB (§10:
- * the DM's answer or the operator's); the header and the sentence add a few
- * hundred bytes. The local route holds the same cap.
+ * A message's cap in UTF-8 bytes. The longest answer is a body of 256 KiB
+ * (§10: the DM's answer or the operator's, since 2026-11-15); the header and
+ * the sentence add a few hundred bytes, so a confirmed answer is always
+ * deliverable. The local route holds the same cap.
  */
-export const DM_DELIVERY_MESSAGE_MAX_BYTES = 16 * 1024;
+export const DM_DELIVERY_MESSAGE_MAX_BYTES = 272 * 1024;
 
 /** A card id as the ledger holds it (`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`). */
 const CARD_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;

@@ -24,6 +24,7 @@ export function decideEngineeringAgentV22Tier(input: {
   installedVersions: Readonly<Record<keyof typeof CONVENTION_VERSIONS,
     string | null>>;
   policyDocuments: readonly string[];
+  unsupported?: TierInput["unsupported"];
 }): TierVerdict {
   const blind = analyseCredentialReachability({
     workflows: input.workflows,
@@ -54,5 +55,6 @@ export function decideEngineeringAgentV22Tier(input: {
     slice: slice.status === "analysed" ? {
       status: "analysed", slicePaths: slice.slicePaths,
     } : { status: "failed" },
+    unsupported: input.unsupported,
   });
 }

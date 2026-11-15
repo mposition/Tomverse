@@ -17,8 +17,8 @@ import {
 } from "@/lib/amux/decisionMakerJudgmentCore";
 
 const JUDGMENT_PATH = "/api/admin/amux/decision-maker/judgments";
-/** §10: a person's edited answer is at most 8 KiB of UTF-8. */
-export const DM_OPERATOR_ANSWER_MAX_BYTES = 8 * 1024;
+/** §10: a person's edited answer, as the body store holds it (lib/amux/decisionMakerBodyCore.ts; 256 KiB of UTF-8). */
+export const DM_OPERATOR_ANSWER_MAX_BYTES = 256 * 1024;
 
 type Messages = (typeof adminAmuxDecisionMakerJudgmentMessages)["en"];
 

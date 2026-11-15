@@ -772,6 +772,13 @@ export const RAW_SQL_ALLOWLIST = [
     reason: "The additive migration creates EngineeringAgentDmReview with a restrictive foreign key to the work item (ALTER TABLE ... ON DELETE/UPDATE RESTRICT); it writes no work item row.",
   },
   {
+    path: "prisma/migrations/20261115140000_v22_patch_size_bound/migration.sql",
+    table: "EngineeringAgentWorkItem",
+    tableMentions: 1,
+    writeVerbs: 4,
+    reason: "The migration only replaces the patchBody size CHECK constraint (ALTER TABLE ... DROP/ADD CONSTRAINT); it writes no work item row.",
+  },
+  {
     path: "lib/amux/ideaLaneService.ts",
     table: "AdminAuditLog",
     tableMentions: 1,
@@ -3241,6 +3248,54 @@ export const RAW_SQL_ALLOWLIST = [
       "Adds the delivery event's notSentReason with its two CHECKs, replaces the kind CHECK and the one-outcome partial unique index with the third outcome delivery_not_sent (sections 2-7 and 9), and replaces the delivery guard, which allows it once after the decision. Nothing here inserts, updates or deletes a delivery event.",
   },
   {
+    path: "prisma/migrations/20261115140000_amux_dm_card_text_cap/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 5,
+    writeVerbs: 6,
+    reason:
+      "The 2026-11-15 cap migration (docs/policy/amux-decision-maker.md §0b, §10): it replaces the body table's text size CHECK with one cap per field and the body guard with its previous body (20261018120000_amux_decision_maker_delivery_gaps) but for the request total. Its AdminAuditLog mentions are the unchanged guard body's reads of the audit row a body's insert or purge is bound to. It never writes AdminAuditLog; its write verbs are the DDL (the replaced CHECK), the guard's TG_OP comparisons and words of comments inside the function body.",
+  },
+  {
+    path: "prisma/migrations/20261115140000_amux_dm_card_text_cap/migration.sql",
+    table: "AmuxDecisionMakerRequest",
+    tableMentions: 5,
+    writeVerbs: 6,
+    reason:
+      "The 2026-11-15 cap migration (docs/policy/amux-decision-maker.md §0b, §10): it replaces the body table's text size CHECK with one cap per field and the body guard with its previous body (20261018120000_amux_decision_maker_delivery_gaps) but for the request total. The unchanged guard body reads the request row and names the request as an audit's target type. Nothing here writes a request.",
+  },
+  {
+    path: "prisma/migrations/20261115140000_amux_dm_card_text_cap/migration.sql",
+    table: "AmuxDecisionMakerRequestEvent",
+    tableMentions: 3,
+    writeVerbs: 6,
+    reason:
+      "The 2026-11-15 cap migration (docs/policy/amux-decision-maker.md §0b, §10): it replaces the body table's text size CHECK with one cap per field and the body guard with its previous body (20261018120000_amux_decision_maker_delivery_gaps) but for the request total. The unchanged guard body reads a request's closing event. Nothing here inserts, updates or deletes an event.",
+  },
+  {
+    path: "prisma/migrations/20261115140000_amux_dm_card_text_cap/migration.sql",
+    table: "AmuxDecisionMakerBody",
+    tableMentions: 2,
+    writeVerbs: 6,
+    reason:
+      "The 2026-11-15 cap migration (docs/policy/amux-decision-maker.md §0b, §10): it replaces the body table's text size CHECK with one cap per field and the body guard with its previous body (20261018120000_amux_decision_maker_delivery_gaps) but for the request total. The replaced CHECK and the guard's own table. Nothing here inserts, updates or deletes a body; only caps grow, so every stored row passes the new CHECK.",
+  },
+  {
+    path: "prisma/migrations/20261115140000_amux_dm_card_text_cap/migration.sql",
+    table: "AmuxDecisionMakerRetentionEvent",
+    tableMentions: 1,
+    writeVerbs: 6,
+    reason:
+      "The 2026-11-15 cap migration (docs/policy/amux-decision-maker.md §0b, §10): it replaces the body table's text size CHECK with one cap per field and the body guard with its previous body (20261018120000_amux_decision_maker_delivery_gaps) but for the request total. The unchanged guard body reads a request's retention events for its purge rule. Nothing here writes a retention event.",
+  },
+  {
+    path: "prisma/migrations/20261115140000_amux_dm_card_text_cap/migration.sql",
+    table: "AmuxDecisionMakerDigestKeyEvent",
+    tableMentions: 1,
+    writeVerbs: 6,
+    reason:
+      "The 2026-11-15 cap migration (docs/policy/amux-decision-maker.md §0b, §10): it replaces the body table's text size CHECK with one cap per field and the body guard with its previous body (20261018120000_amux_decision_maker_delivery_gaps) but for the request total. The unchanged guard body reads the key period's events. Nothing here writes a key event.",
+  },
+  {
     path: "prisma/migrations/20261003010000_qa_release_operator_control/migration.sql",
     table: "QaReleaseOperatorControl",
     tableMentions: 11,
@@ -4098,6 +4153,12 @@ export const RUNTIME_SQL_ALLOWLIST = [
     count: 36,
     reason:
       "Thirty-six statements in the six replaced guards (stage S2-2b4), all EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, because every function pins search_path to pg_catalog, pg_temp, and each the same as in the body it replaces: the event guard's six (20261017200000), the body guard's ten, the retention guard's four, the key guard's five, the judgment guard's six and the delivery guard's five (20261008130100). Only the closing kinds, a direct answer's close's audit action and the delivery guard's third outcome change in them. The schema is the trigger's own, quoted with %I; every value is bound with USING. They read and never write.",
+  },
+  {
+    path: "prisma/migrations/20261115140000_amux_dm_card_text_cap/migration.sql",
+    count: 10,
+    reason:
+      "The body guard's ten statements, the same as in the body it replaces (20261018120000_amux_decision_maker_delivery_gaps), all EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, because the function pins search_path to pg_catalog, pg_temp. Only the request total's number changes. The schema is the trigger's own, quoted with %I; every value is bound with USING. They read and never write.",
   },
   {
     path: "prisma/migrations/20261008090100_amux_decision_maker_request_ledger/migration.sql",

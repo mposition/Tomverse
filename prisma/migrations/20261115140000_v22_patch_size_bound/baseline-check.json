@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "migrationSqlSha256": "1f483b008ea03aa9c19061288d84e9f2fabad1844ae4675a5729aa4221c93548",
+  "replacedChecks": [
+    {
+      "table": "AmuxV22TaskPatch",
+      "constraint": "AmuxV22TaskPatch_digest_check",
+      "previousDefinitionSha256": "896fe5eb61800b7f292e23977c295bd05ffe7988945bc98fc5c2bd27a2dab830"
+    },
+    {
+      "table": "EngineeringAgentWorkItem",
+      "constraint": "EngineeringAgentWorkItem_patchBody_check",
+      "previousDefinitionSha256": "0df5a5351e88e322a41611420fe4310ee90c85ed3850573a1daf6930d7c4b498"
+    }
+  ]
+}

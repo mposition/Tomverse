@@ -51,6 +51,7 @@ async function readTier(candidate: Extract<Candidate, { ok: true }>):
   const { exclusionDigest, ...sources } = evidence;
   return { tier: decideEngineeringAgentV22Tier({
     changes: candidate.changes, ...sources,
+    unsupported: candidate.unsupported,
   }), imageProofDigest: exclusionDigest };
 }
 
@@ -112,11 +113,11 @@ export async function loadEngineeringAgentV22StoredCandidate(attemptId: string,
   const patch = await ports.readPatch(attemptId, first.taskId);
   if (!patch || patch.baseSha !== first.baseSha)
     return { ok: false, reason: "patch_unavailable" };
-  // Evidence over the sidecar's file limits carries the patch text only; the
-  // loader then rebuilds the changed files from the pinned base blobs.
+  // The loader rebuilds every changed file from the patch text and the
+  // pinned base blobs; file bytes an older sidecar stored beside the text
+  // are not read.
   ports.onStage("candidate_rebuild");
-  const candidate = await ports.loadCandidate(patch.files ?
-    { baseSha: first.baseSha, files: patch.files } :
+  const candidate = await ports.loadCandidate(
     { baseSha: first.baseSha, patchText: patch.text });
   if (!candidate.ok) return { ok: false, reason: candidate.reason };
   ports.onStage("base_evidence");

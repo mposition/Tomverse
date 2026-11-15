@@ -16,6 +16,7 @@ import {
   DecisionMakerDigestKeyError,
   loadDecisionMakerDigestKeyRing,
 } from "@/lib/amux/decisionMakerDigestKeys";
+import { DM_CARD_TEXT_MAX_BYTES } from "@/lib/amux/decisionMakerCore";
 import { DecisionMakerRequestWriteError } from "@/lib/amux/decisionMakerRequestStore";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 import {
@@ -47,8 +48,12 @@ import {
 
 const AMUX_DM_ROUTING_ENV = "TOMVERSE_AMUX_DM_ROUTING";
 
-/** The card text is capped at 16 KiB (§5); the body carries it once, with the binding. */
-const MAX_BODY_BYTES = 64 * 1_024;
+/**
+ * The card text has one cap (§5, `DM_CARD_TEXT_MAX_BYTES`); the body carries it
+ * once, with the binding. A card over the cap still reaches the routing, which
+ * sends it to the operator (`input_limit_exceeded`), so the body may hold it.
+ */
+const MAX_BODY_BYTES = 2 * DM_CARD_TEXT_MAX_BYTES;
 
 const requestSchema = z
   .object({

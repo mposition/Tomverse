@@ -380,6 +380,10 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   "20261115140200_amux_v22_attempt_number_bound",
   "20261115140300_amux_v22_recovery_attempt_bound",
   "20261115140400_amux_v22_recovery_approval_attempt_bound",
+  // Owner decision 2026-11-15: the Decision Maker body store's caps grow, a CHECK
+  // and one number of the body guard; no commit-deadline marker, classifier or
+  // deferred trigger changes.
+  "20261115140000_amux_dm_card_text_cap",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {

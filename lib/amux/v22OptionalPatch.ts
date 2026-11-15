@@ -3,17 +3,23 @@ import { z } from "zod";
 
 import { encodeV22PatchEvidence, v22PublishFilesSha256 } from
   "@/lib/amux/v22PatchEvidence";
+import { AMUX_V22_PATCH_MAX_BYTES } from "@/lib/amux/v22PatchLimit";
 
 const patchSchema = z.object({
-  text: z.string().min(1).max(65_536),
+  // UTF-16 length bounds UTF-8 bytes from below; the evidence encoder checks
+  // the bytes against the same bound.
+  text: z.string().min(1).max(AMUX_V22_PATCH_MAX_BYTES),
   sha256: z.string().regex(/^[0-9a-f]{64}$/),
   baseSha: z.string().regex(/^[0-9a-f]{40}$/),
   filesDigest: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+  // A sidecar before 2026-11-15 sends file bytes beside the text; the
+  // candidate rebuilds from the text alone, and the evidence encoder bounds
+  // them with the text.
   files: z.array(z.object({
-    path: z.string().min(1).max(400),
+    path: z.string().min(1).max(4096),
     mode: z.literal("100644"),
-    bytesBase64: z.string().min(4).max(65_536),
-  }).strict()).min(1).max(5).optional(),
+    bytesBase64: z.string().min(4).max(Math.ceil(AMUX_V22_PATCH_MAX_BYTES / 3) * 4),
+  }).strict()).min(1).optional(),
 }).strict();
 
 export type V22OptionalPatch = z.infer<typeof patchSchema>;
