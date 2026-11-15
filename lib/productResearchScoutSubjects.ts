@@ -33,7 +33,7 @@ export function scoutSubjectInfo(subject: string): ScoutSubjectInfo {
     // Relative, so the link opens the page on the environment the viewer is on.
     return { kind: "page", page: name, lang: page.lang, path: page.path, href: page.path };
   }
-  const generated = /^generated\.(pdf|docx|xlsx|pptx|image|attachment-pdf|explore)$/.exec(subject);
+  const generated = /^generated\.(pdf|docx|xlsx|pptx|image|attachment-pdf|image-follow-up|explore)$/.exec(subject);
   if (generated) return { kind: "file", format: `generated-${generated[1]}` };
   const file = /^(pdf|docx|xlsx|pptx)\.[a-z]+$/.exec(subject);
   if (file) return { kind: "file", format: file[1] };

@@ -8,8 +8,9 @@
 // PDF, the text of generated Office files, and the catalogue mismatches the
 // 0-step report finds. When the app has a test account (§14) it also sees the
 // signed-in screens and makes real files and an image, within the cap an owner
-// set; with the app's own switches on, also a turn with attached example files
-// and a turn whose request the app's scenario model wrote. Each subject goes to the app's scout route on its own; the app calls the
+// set; with the app's own switches on, also a turn with attached example files,
+// an image in Chat followed by a change to it, and a turn whose request the app's
+// scenario model wrote. Each subject goes to the app's scout route on its own; the app calls the
 // model and stores the suggestions. Last, it asks the app's issues route to
 // triage the newest issue-backlog observation, which the app reads itself (the
 // route is 404 unless the app's PRODUCT_RESEARCH_SCOUT_ISSUE_TRIAGE_ENABLED is set).
@@ -28,6 +29,7 @@ import { installCdpRules, launch, resolverRules, ruledContext, sandboxHost } fro
 import {
   SCOUT_EXPLORE_GENERATION,
   SCOUT_GENERATIONS,
+  SCOUT_IMAGE_FOLLOW_UP_GENERATION,
   SCOUT_LOCALES,
   SCOUT_PAGES,
   SCOUT_SANDBOX_FALLBACK_ENV,
@@ -43,7 +45,7 @@ import {
   scoutPageLanguageMatches,
   signedInAccess,
 } from "../../lib/productResearchScoutBrowserPolicy.mjs";
-import { SCOUT_PAGE_TIMEOUT_MS, generateFile, generateImage, officePackage, pdfFirstPage, screenshot } from "../../lib/productResearchScoutGeneration.mjs";
+import { SCOUT_PAGE_TIMEOUT_MS, generateFile, generateImage, generateImageFollowUp, officePackage, pdfFirstPage, screenshot } from "../../lib/productResearchScoutGeneration.mjs";
 import { walkMemoryProbes, walkMemoryComparison } from "../../lib/productResearchScoutMemoryWalk.mjs";
 import { scoutSendOutcome } from "../../lib/productResearchScoutCore.ts";
 
@@ -324,7 +326,9 @@ async function walkSignedIn(browser, rules) {
     const place = { walk, cookie: access.cookie };
     const subject = id === "generated.image"
       ? await generateImage(browser, generation, place)
-      : await generateFile(browser, rules, generation, place);
+      : id === SCOUT_IMAGE_FOLLOW_UP_GENERATION
+        ? await generateImageFollowUp(browser, rules, generation, place)
+        : await generateFile(browser, rules, generation, place);
     if (subject) {
       outcomes.generated += 1;
       await deliver(subject);
