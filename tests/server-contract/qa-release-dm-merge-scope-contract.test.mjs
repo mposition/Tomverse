@@ -79,30 +79,49 @@ const approval = (patchBody, over = {}) => ({
 });
 const changeOf = (files, over = {}) => async () => ({ state: "open", baseRef: "develop", headRef: REF, headSha: HEAD,
   diffDigest: DIFF, changedFiles: files, crossRepository: false, ...over });
-const reset = (patchBody, over = {}) => { approvals = [approval(patchBody, over)]; audits = []; visits = []; };
+const reset = (patchBody, over = {}) => { approvals = [approval(patchBody, over)]; audits = []; visits = []; fileReads = []; };
+// The whole text at the approved head of each file the block list scope reads; a neutral body unless a test says otherwise.
+let fileReads = [];
+const filesOf = (texts = {}) => async (headSha, paths) => {
+  fileReads.push({ headSha, paths: [...paths] });
+  if (texts === "throw") throw new Error("http_error");
+  return new Map(paths.map((path) => [path, path in texts ? texts[path] : "export const limit = 12;\n"]));
+};
 
 test("the merge lane hears of a reviewed lib/ and app/api/ change by default, and not with the kill switch on", async () => {
+  const lane = (env, files, over = {}) => readAmuxDmT2MergeLanePulls(env, { change: changeOf(files), files: filesOf(over) });
   reset(CODE_PATCH);
-  assert.deepEqual(await readAmuxDmT2MergeLanePulls(ON, { change: changeOf(CODE) }), [{ number: 42, headSha: HEAD, headRef: REF }]);
+  assert.deepEqual(await lane(ON, CODE), [{ number: 42, headSha: HEAD, headRef: REF }]);
+  assert.deepEqual(fileReads, [{ headSha: HEAD, paths: CODE }], "each file read whole at the approved head");
   reset(CODE_PATCH);
-  assert.deepEqual(await readAmuxDmT2MergeLanePulls(KILL, { change: changeOf(CODE) }), [], "kill switch: the allow list");
-  // What the allow list took, the kill switch still takes.
+  assert.deepEqual(await lane(KILL, CODE), [], "kill switch: the allow list");
+  assert.deepEqual(fileReads, [], "and nothing read");
+  // What the allow list took, the kill switch still takes, on its path alone.
   reset(patchOf("components/X.tsx"));
-  assert.deepEqual((await readAmuxDmT2MergeLanePulls(KILL, { change: changeOf(["components/X.tsx"]) })).length, 1);
-  // A block list path in the change, or an alarm in the stored patch's lines: not listed, and its turn is used.
+  assert.deepEqual((await lane(KILL, ["components/X.tsx"])).length, 1);
+  reset(patchOf("components/X.tsx"));
+  assert.deepEqual((await lane(ON, ["components/X.tsx"])).length, 1);
+  assert.deepEqual(fileReads, []);
+  // A block list path in the change, an alarm in the stored patch's lines, or one anywhere in a file: not listed.
   reset(CODE_PATCH);
-  assert.deepEqual(await readAmuxDmT2MergeLanePulls(ON, { change: changeOf([...CODE, "lib/creditLedger.ts"]) }), []);
+  assert.deepEqual(await lane(ON, [...CODE, "lib/creditLedger.ts"]), []);
   assert.deepEqual(visits, ["s-1"], "visited, so it never hides the approvals behind it");
   reset(patchOf("lib/conversationSearch.ts", 'const on = process.env.NEW_PAID_CALL !== "off";'));
-  assert.deepEqual(await readAmuxDmT2MergeLanePulls(ON, { change: changeOf(["lib/conversationSearch.ts"]) }), []);
+  assert.deepEqual(await lane(ON, ["lib/conversationSearch.ts"]), []);
+  reset(CODE_PATCH);
+  assert.deepEqual(await lane(ON, CODE, { "lib/conversationSearch.ts": "function noteGrant(access) { return true; }" }), []);
+  reset(CODE_PATCH);
+  assert.deepEqual(await lane(ON, CODE, { "app/api/conversations/search/route.ts": null }), [], "gone at the head");
+  reset(CODE_PATCH);
+  assert.deepEqual(await lane(ON, CODE, "throw"), [], "a read that fails");
   reset(null);
-  assert.deepEqual(await readAmuxDmT2MergeLanePulls(ON, { change: changeOf(CODE) }), [], "no stored patch to judge");
+  assert.deepEqual(await lane(ON, CODE), [], "no stored patch to judge");
   // Never main.
   reset(CODE_PATCH);
-  assert.deepEqual(await readAmuxDmT2MergeLanePulls(ON, { change: changeOf(CODE, { baseRef: "main" }) }), []);
+  assert.deepEqual(await readAmuxDmT2MergeLanePulls(ON, { change: changeOf(CODE, { baseRef: "main" }), files: filesOf() }), []);
   // The develop merge switch off: nothing at all, whatever the scope.
   reset(CODE_PATCH);
-  assert.deepEqual(await readAmuxDmT2MergeLanePulls({}, { change: changeOf(CODE) }), []);
+  assert.deepEqual(await lane({}, CODE), []);
 });
 
 test("the lane's consume holds a reviewed code change by default, and the allow list with the kill switch on", async () => {
@@ -125,12 +144,13 @@ test("the lane's consume holds a reviewed code change by default, and the allow 
 
 test("a reviewed code change is marked ready by the app without a person, audited first; never with the kill switch on", async () => {
   const draft = { number: 42, head: REF, headSha: HEAD, base: "develop", draft: true, fork: false, labels: [] };
-  const ready = async (env, files = CODE, pullOver = {}, freshOver = {}) => {
+  const ready = async (env, files = CODE, pullOver = {}, freshOver = {}, texts = {}) => {
     const written = [];
     const ports = {
       pull: async () => ({ pull: { ...draft, nodeId: "PR_x", title: "x", ...pullOver, ...freshOver }, open: true }),
       change: changeOf(files),
       markReady: async (pull) => { written.push(pull.number); },
+      files: filesOf(texts),
     };
     const outcome = await runAmuxDmT2MergeReadyStep({ drafts: [{ ...draft, ...pullOver }], room: true, running: new Set(),
       ports, env, nowMs: Date.parse("2026-11-15T00:00:00Z") });
@@ -148,6 +168,9 @@ test("a reviewed code change is marked ready by the app without a person, audite
   const valued = await ready(ON, ["lib/conversationSearch.ts"]);
   assert.deepEqual([valued.outcome.outcome, valued.written], ["skipped", []], "a value AGENTS.md reserves for a person");
   reset(CODE_PATCH);
+  const guarded = await ready(ON, CODE, {}, {}, { "lib/conversationSearch.ts": "if (!canViewConversation(user)) throw x;" });
+  assert.deepEqual([guarded.outcome.outcome, guarded.written], ["skipped", []], "a file that holds an access check");
+  reset(CODE_PATCH);
   const intoMain = await ready(ON, CODE, { base: "main" });
   assert.deepEqual(intoMain.written, [], "never main");
   // A person's ci:hold stands, whether it was on the listed draft or appeared on the fresh read.
@@ -157,4 +180,36 @@ test("a reviewed code change is marked ready by the app without a person, audite
   reset(CODE_PATCH);
   const heldLate = await ready(ON, CODE, {}, { labels: ["ci:hold"] });
   assert.deepEqual([heldLate.outcome.outcome, heldLate.outcome.reason, heldLate.written, audits], ["skipped", "ci_hold", [], []]);
+});
+
+test("the whole-file read takes each file at the approved commit, and anything but text it can read is a person's", async () => {
+  const { readAmuxDmT2MergeFilesAt, AMUX_DM_T2_MERGE_FILE_MAX_BYTES } = await import(mod("lib/amux/dmT2MergeFileRead.ts"));
+  const seen = [];
+  const answers = {
+    "lib/a.ts": () => new Response("export const a = 1;\n", { status: 200 }),
+    "lib/gone.ts": () => new Response("", { status: 404 }),
+    "lib/bin.ts": () => new Response(new Uint8Array([0xff, 0xfe, 0x00]), { status: 200 }),
+    "lib/big.ts": () => new Response("x".repeat(AMUX_DM_T2_MERGE_FILE_MAX_BYTES + 1), { status: 200 }),
+    "app/api/[id]/route.ts": () => new Response("export {};\n", { status: 200 }),
+    "lib/err.ts": () => new Response("", { status: 500 }),
+  };
+  const prefix = "https://api.github.com/repos/mposition/Tomverse/contents/";
+  const fetchImpl = async (url, init) => {
+    seen.push({ url: String(url), accept: init.headers.Accept, auth: init.headers.Authorization });
+    const path = decodeURIComponent(String(url).slice(prefix.length).replace(/\?.*$/, ""));
+    return answers[path]();
+  };
+  const env = { ENGINEERING_AGENT_GITHUB_READ_TOKEN: "t" };
+  const read = await readAmuxDmT2MergeFilesAt(HEAD, ["lib/a.ts", "lib/gone.ts", "lib/bin.ts", "lib/big.ts", "app/api/[id]/route.ts"],
+    { env, fetchImpl });
+  assert.deepEqual([...read], [["lib/a.ts", "export const a = 1;\n"], ["lib/gone.ts", null], ["lib/bin.ts", null], ["lib/big.ts", null],
+    ["app/api/[id]/route.ts", "export {};\n"]]);
+  assert.ok(seen.every((entry) => entry.url.startsWith(prefix) && entry.url.endsWith(`?ref=${HEAD}`) &&
+    entry.accept === "application/vnd.github.raw" && entry.auth === "Bearer t"), "one commit id, raw text, the read token");
+  assert.ok(seen.some((entry) => entry.url.includes("/contents/app/api/%5Bid%5D/route.ts")), "each segment encoded");
+  await assert.rejects(readAmuxDmT2MergeFilesAt(HEAD, ["lib/err.ts"], { env, fetchImpl }), /http_error/);
+  await assert.rejects(readAmuxDmT2MergeFilesAt(HEAD, ["lib/a.ts"], { env: {}, fetchImpl }), /token_missing/);
+  await assert.rejects(readAmuxDmT2MergeFilesAt("develop", ["lib/a.ts"], { env, fetchImpl }), /invalid_input/);
+  await assert.rejects(readAmuxDmT2MergeFilesAt(HEAD, Array.from({ length: 21 }, (_, i) => `lib/${i}.ts`), { env, fetchImpl }),
+    /invalid_input/, "more files than the bound: nothing read");
 });

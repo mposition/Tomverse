@@ -260,6 +260,9 @@ test("what a path cannot say: the approved patch's changed lines and hunk contex
     " if (!canEditProject(viewer, project)) {", " where: { id, ownerId: viewer.id },", " const session = await auth();"]) {
     assert.equal(amuxDmT2MergePatchGate(hunk("", ["-const limit = 10;", "+const limit = 12;", guard]), BLOCK).pass, false, guard);
   }
+  // Review r-20261115-112803-cbb35d: an access check made a no-op.
+  assert.equal(amuxDmT2MergePatchGate(hunk(" function noteGrant(access) {", ["-  return access.granted;", "+  return true;"]), BLOCK).pass, false);
+  assert.equal(amuxDmT2MergePatchGate(hunk("", ["-  return a.granted;", "+  return true;"]), BLOCK).pass, false);
   // A file the allow list took is judged by its path alone, as before, on both sides of a rename.
   assert.deepEqual(amuxDmT2MergePatchGate(patchOf("components/settings/SessionList.tsx", "a", "const session = useSession();"), BLOCK),
     { pass: true });
@@ -295,8 +298,26 @@ test("the app's fresh read holds only while the approved patch still passes, and
   const change = (over = {}) => ({ state: "open", baseRef: "develop", headRef: REF, headSha: HEAD, diffDigest: DIFF,
     crossRepository: false, changedFiles: ["lib/conversationSearch.ts", "app/api/conversations/search/route.ts"], ...over });
   const patch = patchOf("lib/conversationSearch.ts") + patchOf("app/api/conversations/search/route.ts");
-  const verdict = (over = {}) => amuxDmT2MergeChangeVerdict({ approved, change: change(), scope: BLOCK, patch, ...over });
+  const files = new Map([["lib/conversationSearch.ts", "export const limit = 12;\n"],
+    ["app/api/conversations/search/route.ts", "export async function GET() { return Response.json([]); }\n"]]);
+  const verdict = (over = {}) => amuxDmT2MergeChangeVerdict({ approved, change: change(), scope: BLOCK, patch, files, ...over });
   assert.deepEqual(verdict(), { holds: true });
+  // Review r-20261115-112803-cbb35d: the whole file at the approved head is read; one that speaks of access anywhere is a person's.
+  assert.deepEqual(verdict({ files: new Map([...files, ["lib/conversationSearch.ts",
+    "function noteGrant(access) {\n  return true;\n}\nexport const limit = 12;\n"]]) }),
+    { holds: false, reason: "outside_dm_merge_allowlist", paths: ["lib/conversationSearch.ts"] });
+  for (const text of ["const row = await tx.memory.findFirst({ where: { id, userId } });", "if (!session) return null;",
+    "const cents = 0;", "process.env.FLAG", "await sendReceiptEmail(x);", "await tx.x.deleteMany({});"]) {
+    assert.equal(verdict({ files: new Map([...files, ["lib/conversationSearch.ts", text]]) }).holds, false, text);
+  }
+  // A file not read, gone at the head, or no files at all: a person's.
+  assert.deepEqual(verdict({ files: undefined }), { holds: false, reason: "paths_unreadable",
+    paths: ["lib/conversationSearch.ts", "app/api/conversations/search/route.ts"] });
+  assert.deepEqual(verdict({ files: new Map([...files, ["lib/conversationSearch.ts", null]]) }),
+    { holds: false, reason: "paths_unreadable", paths: ["lib/conversationSearch.ts"] });
+  // Files the allow list took need no read.
+  assert.deepEqual(amuxDmT2MergeChangeVerdict({ approved, change: change({ changedFiles: ["components/X.tsx"] }), scope: BLOCK,
+    patch: patchOf("components/X.tsx") }), { holds: true });
   assert.deepEqual(verdict({ scope: ALLOW }), { holds: false, reason: "outside_dm_merge_allowlist",
     paths: ["lib/conversationSearch.ts", "app/api/conversations/search/route.ts"] }, "kill switch");
   assert.deepEqual(verdict({ patch: null }), { holds: false, reason: "paths_unreadable", paths: [] });
@@ -308,7 +329,7 @@ test("the app's fresh read holds only while the approved patch still passes, and
   // Never main, whatever the scope.
   assert.deepEqual(verdict({ change: change({ baseRef: "main" }) }), { holds: false, reason: "base_not_develop" });
   const pull = (over = {}) => ({ open: true, draft: true, base: "develop", head: REF, headSha: HEAD, fork: false, ...over });
-  const ready = (p, over = {}) => amuxDmT2MergeReadyVerdict({ approved, pull: p, change: change(), scope: BLOCK, patch, ...over });
+  const ready = (p, over = {}) => amuxDmT2MergeReadyVerdict({ approved, pull: p, change: change(), scope: BLOCK, patch, files, ...over });
   assert.deepEqual(ready(pull()), { verdict: "ready" });
   assert.deepEqual(ready(pull({ base: "main" })), { verdict: "skip", reason: "base_not_develop" });
   assert.deepEqual(ready(pull({ labels: ["ci:hold"] })), { verdict: "skip", reason: "ci_hold" }, "a person's hold stands");

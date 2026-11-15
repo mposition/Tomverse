@@ -81,6 +81,7 @@ export function amuxDmT2MergeGate(paths: readonly string[] | null,
 export const AMUX_DM_T2_MERGE_CONTENT_ALARMS: readonly RegExp[] = [
   ...DECISION_VALUE_ALARMS,
   /credit|billing|stripe|pric(?:e|ing)|budget|spend|cost|ledger|quota|entitlement|reservation|refund|discount|promotion|payment|invoice|checkout|subscription/i,
+  /[a-z]Cents\b|\bcents\b|\b(?:AUD|USD)\b/,
   /\bprocess\.env\b|\bTOMVERSE_[A-Z0-9_]+|\benv\s*\[|\b[A-Z][A-Z0-9_]*_ENV\b|\bappSetting\b|\bAppSetting\b/,
   /\b(?:delete\w*|purge\w*|erase\w*|wipe\w*|truncate)\b|\.delete(?:Many)?\s*\(|\$executeRaw|\$queryRawUnsafe|\bdrop\s+(?:table|column|schema|index|trigger|function)\b/i,
   /\b(?:auth\w*|session\w*|secret\w*|token|password\w*|cookie\w*|csrf\w*|permission\w*|api_?key\w*|bearer|credential\w*|reauth\w*|require(?:Admin|User|Session|Auth)\w*)\b/i,
@@ -101,7 +102,51 @@ export const AMUX_DM_T2_MERGE_CONTENT_ALARMS: readonly RegExp[] = [
 export const AMUX_DM_T2_MERGE_HUNK_ALARMS: readonly RegExp[] = [
   /ApiSecurityError|\bforbidden\b|\bunauthori[sz]ed\b|\bnotFound\s*\(|\bstatus:\s*40[134]\b|\brequire(?:User|Admin|Session|Auth|Owner|Member|Access)\w*|\bassert\w*(?:Owner|Access|Permission|Member)\w*|\bgetServerSession\b|\bauth\s*\(\s*\)|owned|ownership|\bcan(?:Read|Write|Edit|Access|View|Delete|Manage)\w*/i,
   /\w*(?:userid|ownerid|tenantid|accountid|organizationid|orgid|createdbyid|authorid|memberid)\b|\b(?:user|owner|session|viewer|actor|member)\.id\b|\bsession\.user\b|\bis(?:Admin|Owner|Member)\b/i,
+  // Access itself: a grant, a lock, a guard (review r-20261115-112803-cbb35d: `return access.granted` -> `return true`).
+  /access|grant|unlock|\block\w*|guard|\bdeny|denied|restrict|\bprivate\b|verif/i,
 ];
+
+/**
+ * Read over the whole text of every changed file outside the allow list, at
+ * the approved head (review r-20261115-112803-cbb35d: an access check made a
+ * no-op with no alarm on its lines or beside them). A file that says
+ * anything any alarm above listens for -- money, the environment and stored
+ * switches, deletion and raw SQL, authentication, secrets, mail, ownership,
+ * access -- anywhere in it takes part in what a person decides, and stays a
+ * person's. What the block list scope newly merges is code that says none of
+ * it; the gate cannot see a file that never names such a thing but is
+ * called by one that does (lib/amux/dmT2MergeCore.ts header).
+ */
+export const AMUX_DM_T2_MERGE_FILE_ALARMS: readonly RegExp[] = [
+  ...AMUX_DM_T2_MERGE_CONTENT_ALARMS.filter((alarm) => !alarm.source.startsWith("^")),
+  ...AMUX_DM_T2_MERGE_HUNK_ALARMS,
+];
+
+/**
+ * The changed paths whose whole text the block list scope must read: every
+ * path outside the allow list of 2026-11-13. None in the allow list scope.
+ */
+export function amuxDmT2MergeFilesToRead(paths: readonly string[] | null, scope: QaReleaseDmMergeScope = "allowlist"): string[] {
+  if (scope !== "blocklist" || paths === null) return [];
+  return [...new Set(paths.filter((path) => !qaReleaseDmMergeInAllowList(path)))];
+}
+
+/**
+ * The whole-file check: every path amuxDmT2MergeFilesToRead names was read
+ * (null -- gone, not text, too large -- or unread is a person's) and its
+ * text sounds no AMUX_DM_T2_MERGE_FILE_ALARMS alarm. Passes in the allow list
+ * scope, which judges paths alone.
+ */
+export function amuxDmT2MergeFileGate(paths: readonly string[] | null, files: ReadonlyMap<string, string | null> | null | undefined,
+  scope: QaReleaseDmMergeScope = "allowlist"): AmuxDmT2MergeGate {
+  if (scope !== "blocklist") return { pass: true };
+  if (paths === null || paths.length === 0) return { pass: false, reason: "paths_unreadable", paths: [] };
+  const needed = amuxDmT2MergeFilesToRead(paths, scope);
+  const unread = needed.filter((path) => typeof files?.get(path) !== "string");
+  if (unread.length > 0) return { pass: false, reason: "paths_unreadable", paths: unread.slice(0, 20) };
+  const alarmed = needed.filter((path) => AMUX_DM_T2_MERGE_FILE_ALARMS.some((alarm) => alarm.test(files!.get(path)!)));
+  return alarmed.length === 0 ? { pass: true } : { pass: false, reason: "outside_dm_merge_allowlist", paths: alarmed.slice(0, 20) };
+}
 
 /** A file header line that says the change is not reviewable text: binary, or a mode other than a plain file. */
 const NOT_PLAIN_TEXT = /^(?:GIT binary patch|Binary files .* differ)$|^(?:old|new|deleted|new file|deleted file) mode (?!100644$)\d+$|^index [0-9a-f]+\.\.[0-9a-f]+ (?!100644$)\d+$/;
@@ -245,6 +290,8 @@ export function amuxDmT2MergeChangeVerdict(input: {
   scope?: QaReleaseDmMergeScope;
   /** The patch the publisher applied, as the engineering agent stored it; read in the block list scope only. */
   patch?: string | null;
+  /** The whole text at the approved head of every path amuxDmT2MergeFilesToRead names; block list scope only. */
+  files?: ReadonlyMap<string, string | null> | null;
 }): { holds: true } | { holds: false; reason: AmuxDmT2MergeSkipReason; paths?: string[] } {
   const { approved, change } = input;
   const scope = input.scope ?? "allowlist";
@@ -262,7 +309,9 @@ export function amuxDmT2MergeChangeVerdict(input: {
   if (!gate.pass) return { holds: false, reason: gate.reason, paths: gate.paths };
   if (scope !== "blocklist") return { holds: true };
   const patch = amuxDmT2MergePatchGate(input.patch ?? null, scope);
-  return patch.pass ? { holds: true } : { holds: false, reason: patch.reason, paths: patch.paths };
+  if (!patch.pass) return { holds: false, reason: patch.reason, paths: patch.paths };
+  const files = amuxDmT2MergeFileGate(change.changedFiles, input.files, scope);
+  return files.pass ? { holds: true } : { holds: false, reason: files.reason, paths: files.paths };
 }
 
 export type AmuxDmT2MergeReadyVerdict =
@@ -283,6 +332,7 @@ export function amuxDmT2MergeReadyVerdict(input: {
   change: AmuxDmT2MergeChangeNow;
   scope?: QaReleaseDmMergeScope;
   patch?: string | null;
+  files?: ReadonlyMap<string, string | null> | null;
 }): AmuxDmT2MergeReadyVerdict {
   const { approved, pull, change } = input;
   if (!SHA.test(approved.approvedHeadSha) || !DIGEST.test(approved.approvedDiffDigest) ||
@@ -295,7 +345,7 @@ export function amuxDmT2MergeReadyVerdict(input: {
   if (!pull.draft) return { verdict: "already_ready" };
   // A person's hold stands: ci:hold is lifted only by a person (AGENTS.md), and a ready would start CI past it.
   if ((pull.labels ?? []).includes(CI_ADMISSION_HOLD_LABEL)) return { verdict: "skip", reason: "ci_hold" };
-  const held = amuxDmT2MergeChangeVerdict({ approved, change, scope: input.scope, patch: input.patch });
+  const held = amuxDmT2MergeChangeVerdict({ approved, change, scope: input.scope, patch: input.patch, files: input.files });
   return held.holds ? { verdict: "ready" } :
     { verdict: "skip", reason: held.reason, ...(held.paths ? { paths: held.paths } : {}) };
 }

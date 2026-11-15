@@ -231,7 +231,11 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
        단어)이 든 허용 목록 밖 경로입니다. 레인은 patch 본문을 보지 못하므로, 앱이 승인을 기록할 때와 ready·레인 목록·소비마다
        저장된 patch의 바뀐 줄과 hunk 문맥에 사람에게 예약된 값(`creditWeight`·`maxOutputTokens`·`reservationOutputTokens` 등),
        돈·환경 변수·저장된 스위치·삭제·raw SQL·인증·비밀·메일의 단어, binary·실행 비트·symlink·submodule이 있는지 봅니다
-       (`AMUX_DM_T2_MERGE_CONTENT_ALARMS`). 하나라도 있으면 사람에게 남깁니다. 레인은 앱이 넘긴 PR을 늘 차단 목록 범위로 다시
+       (`AMUX_DM_T2_MERGE_CONTENT_ALARMS`; 있으면 사람에게 남깁니다). hunk의 바뀌지 않은 문맥 줄과 함수 이름에 인가·소유권·접근 검사가 있어도 사람에게
+       남깁니다(`AMUX_DM_T2_MERGE_HUNK_ALARMS`). 그리고 ready와 레인 목록에서는 허용 목록 밖의 바뀐 파일 **전체**를 승인된 head에서
+       엔지니어링 읽기 토큰으로 읽어(`lib/amux/dmT2MergeFileRead.ts`), 파일 어디에든 위 경보가 하나라도 울리거나 읽지 못하면
+       사람에게 남깁니다(`amuxDmT2MergeFileGate`). 그래서 이 범위가 새로 병합하는 코드는 돈·환경 변수·삭제·인증·비밀·메일·소유권·
+       접근을 전혀 말하지 않는 파일뿐입니다. 레인은 앱이 넘긴 PR을 늘 차단 목록 범위로 다시
        판정합니다(`QA_RELEASE_LANE_DM_MERGE_SCOPE`).
      - **허용 목록(kill switch, 다른 모든 값).** 2026-11-13의 규칙 그대로입니다(`QA_RELEASE_DM_MERGE_ALLOW_PATTERNS`: `tests/**`,
        `docs/**`, `locales/**`, `components/**`, `app/**`의 `page.tsx`·`layout.tsx`·`loading.tsx`·`error.tsx`. 그 가운데

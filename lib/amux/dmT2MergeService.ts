@@ -8,7 +8,7 @@ import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import { readDecisionMakerSwitchesOrThrow } from "@/lib/amux/decisionMakerSwitchStore";
 import {
   AMUX_DM_T2_MERGE_HEAD, AMUX_DM_T2_MERGE_READY_SETTLE_MS, amuxDmT2MergeChangeVerdict, amuxDmT2MergeEnabled,
-  amuxDmT2MergePatchGate, amuxDmT2MergeReadyInFlight, amuxDmT2MergeReadyVerdict,
+  amuxDmT2MergeFilesToRead, amuxDmT2MergePatchGate, amuxDmT2MergeReadyInFlight, amuxDmT2MergeReadyVerdict,
   type AmuxDmT2MergeChangeNow,
 } from "@/lib/amux/dmT2MergeCore";
 import {
@@ -40,6 +40,21 @@ import { qaReleaseDmMergeScope } from "@/lib/qaReleaseMergeLaneExclusionCore";
 
 export const AMUX_DM_T2_MERGE_READY_ACTION = "amux.dm_t2_merge.ready_requested";
 type Env = Readonly<Record<string, string | undefined>>;
+
+/** The whole text of some files at one commit (lib/amux/dmT2MergeFileRead.ts), loaded only when a change needs it. */
+type AmuxDmT2MergeFilesRead = (headSha: string, paths: readonly string[]) => Promise<ReadonlyMap<string, string | null>>;
+const readFilesAtHead: AmuxDmT2MergeFilesRead = async (headSha, paths) =>
+  (await import("@/lib/amux/dmT2MergeFileRead")).readAmuxDmT2MergeFilesAt(headSha, paths);
+
+/**
+ * The files the block list scope reads whole for a change (amuxDmT2MergeFilesToRead), at the approved
+ * head: undefined when it needs none, null when the read failed -- which the verdict leaves to a person.
+ */
+async function filesForChange(change: AmuxDmT2MergeChangeNow, headSha: string, env: Env, read: AmuxDmT2MergeFilesRead) {
+  const needed = amuxDmT2MergeFilesToRead(change.changedFiles, qaReleaseDmMergeScope(env));
+  if (needed.length === 0) return undefined;
+  return read(headSha, needed).catch(() => null);
+}
 
 /**
  * Records that one approval was looked at, one statement. Both readers take
@@ -122,6 +137,7 @@ export async function amuxDmT2MergeConsumeAllowed(tx: Prisma.TransactionClient, 
  */
 export async function readAmuxDmT2MergeLanePulls(env: Env = process.env, deps: {
   change?: (prNumber: number) => Promise<AmuxDmT2MergeChangeNow>;
+  files?: AmuxDmT2MergeFilesRead;
 } = {}) {
   if (!amuxDmT2MergeEnabled(env)) return [];
   const row = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.dmT2MergeLaneRead, async (tx) => {
@@ -133,9 +149,10 @@ export async function readAmuxDmT2MergeLanePulls(env: Env = process.env, deps: {
   const change = deps.change ?? ((prNumber: number) => readEngineeringAgentPullChange(prNumber));
   const now = await change(row.prNumber).catch(() => null);
   if (now === null) return [];
+  const files = await filesForChange(now, row.approvedHeadSha, env, deps.files ?? readFilesAtHead);
   const held = amuxDmT2MergeChangeVerdict({ change: now, approved: { prNumber: row.prNumber,
     headRef: row.headRef, approvedHeadSha: row.approvedHeadSha, approvedDiffDigest: row.approvedDiffDigest },
-    scope: qaReleaseDmMergeScope(env), patch: row.patchBody });
+    scope: qaReleaseDmMergeScope(env), patch: row.patchBody, files });
   return held.holds ? [{ number: row.prNumber, headSha: row.approvedHeadSha, headRef: row.headRef }] : [];
 }
 
@@ -163,6 +180,8 @@ export type AmuxDmT2MergeReadyPorts = {
   change: (prNumber: number) => Promise<AmuxDmT2MergeChangeNow>;
   /** CI admission's App's write: draft to ready. */
   markReady: (pull: CiAdmissionPull) => Promise<void>;
+  /** The whole text of files at the approved head, for the block list scope; the engineering read token's by default. */
+  files?: AmuxDmT2MergeFilesRead;
 };
 
 export const amuxDmT2MergeReadyPorts = (github: Pick<CiAdmissionGithub, "pull" | "markReady">): AmuxDmT2MergeReadyPorts => ({
@@ -249,6 +268,7 @@ export async function runAmuxDmT2MergeReadyStep(input: {
   } catch (error) {
     return { outcome: "skipped", ...at, reason: `unreadable:${failureCode(error)}` };
   }
+  const files = await filesForChange(change, row.approvedHeadSha, env, input.ports.files ?? readFilesAtHead);
   const verdict = amuxDmT2MergeReadyVerdict({
     approved: { prNumber: row.prNumber, headRef: row.headRef, approvedHeadSha: row.approvedHeadSha,
       approvedDiffDigest: row.approvedDiffDigest },
@@ -257,6 +277,7 @@ export async function runAmuxDmT2MergeReadyStep(input: {
     change,
     scope: qaReleaseDmMergeScope(env),
     patch: row.patchBody,
+    files,
   });
   if (verdict.verdict === "already_ready") return { outcome: "already_ready", ...at };
   if (verdict.verdict === "skip") return { outcome: "skipped", ...at, reason: verdict.reason };
