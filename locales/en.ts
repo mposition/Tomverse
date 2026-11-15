@@ -1793,7 +1793,7 @@ export const en = {
         historyDescription:
             "Every request, download and refusal on this account, kept for ninety days. A refusal means a download link for your account was presented and turned away.",
         historyLoading: "Loading...",
-        historyEmpty: "You have not downloaded your account data yet.",
+        historyEmpty: "No account data download activity in the last 90 days.",
         refusedExpired: "The system refused this download because the link expired. Prepare a new link.",
         refusedUsed: "The system refused a repeat download using an already-used, single-use link.",
         refusedAccountMismatch: "The system refused this download because the requesting account did not own the link.",
