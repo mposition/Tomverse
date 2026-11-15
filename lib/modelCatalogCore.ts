@@ -26,7 +26,7 @@ import {
   type ImageModelProfile,
 } from "@/lib/imageModelRegistry";
 import { confirmedImageBillingTermsSchema } from "@/lib/imageBillingMeasurementCore";
-import { IMAGE_ROUTING_NOTE_MAX_CHARS, RUNTIME_IMAGE_PROVIDERS } from "@/lib/runtimeImageProviders";
+import { IMAGE_ROUTING_NOTE_MAX_CHARS, IMAGE_USE_CASES, RUNTIME_IMAGE_PROVIDERS } from "@/lib/runtimeImageProviders";
 
 export const MODEL_CATALOG_CATEGORIES = ["chat", "image", "coding", "video"] as const;
 export type ModelCatalogCategory = (typeof MODEL_CATALOG_CATEGORIES)[number];
@@ -155,6 +155,7 @@ export const imageProfileOverrideSchema = z
     shortName: z.string().trim().min(1).max(40),
     disabledNote: z.string().trim().min(1).max(500),
     routingNote: imageRoutingNoteSchema,
+    useCase: z.enum(IMAGE_USE_CASES),
   })
   .partial()
   .strict();
@@ -183,6 +184,7 @@ export const imageFullProfileSchema = z
     thinkingLevel: z.enum(["low", "medium", "high"]).optional(),
     disabledNote: z.string().trim().min(1).max(500).optional(),
     routingNote: imageRoutingNoteSchema.optional(),
+    useCase: z.enum(IMAGE_USE_CASES).optional(),
   })
   .strict();
 export type ImageFullProfile = z.infer<typeof imageFullProfileSchema>;

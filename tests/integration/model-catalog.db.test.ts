@@ -650,6 +650,16 @@ test("an image model is renamed in place, code or runtime, priced or not", async
   assert.deepEqual(kept?.profile, { ...profile, name: "Runtime Last", routingNote: note });
   assert.equal(catalogPatchBodySchema.safeParse({ category: "image", modelId, routingNote: "two\nlines" }).success, false);
   assert.equal(catalogPatchBodySchema.safeParse({ category: "image", modelId, routingNote: "x".repeat(401) }).success, false);
+
+  // The line users see under the model's name is written the same way.
+  await updateCatalogEntry({ category: "image", modelId, patch: { useCase: "text" }, session });
+  const described = await prisma.modelCatalogEntry.findUnique({ where: { category_modelId: { category: "image", modelId } } });
+  assert.deepEqual(described?.profile, { ...profile, name: "Runtime Last", routingNote: note, useCase: "text" });
+  assert.equal((await refreshImageModelCatalog({ force: true })).find((model) => model.id === modelId)?.useCase, "text");
+  await updateCatalogEntry({ category: "image", modelId, patch: { useCase: null }, session });
+  const undescribed = await prisma.modelCatalogEntry.findUnique({ where: { category_modelId: { category: "image", modelId } } });
+  assert.deepEqual(undescribed?.profile, { ...profile, name: "Runtime Last", routingNote: note });
+  assert.equal(catalogPatchBodySchema.safeParse({ category: "image", modelId, useCase: "cheap" }).success, false);
 });
 
 test("a priced runtime image model whose stored profile no longer parses cannot be given a new one", async () => {

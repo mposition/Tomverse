@@ -31,7 +31,7 @@ import {
   measurementApplies,
 } from "@/lib/adminModelCatalogFlow";
 import type { AdminTone } from "@/lib/adminUiCore";
-import { IMAGE_ROUTING_NOTE_MAX_CHARS } from "@/lib/runtimeImageProviders";
+import { IMAGE_ROUTING_NOTE_MAX_CHARS, IMAGE_USE_CASES } from "@/lib/runtimeImageProviders";
 
 // The image catalogue's screens. Presentational only: the panel
 // (AdminModelCatalogPanel) owns the requests and passes the handlers in.
@@ -446,6 +446,7 @@ export function ImageModelDetail({
   onHold,
   onRename,
   onRoutingNote,
+  onUseCase,
   onMeasure,
 }: {
   m: CatalogMessages;
@@ -465,7 +466,10 @@ export function ImageModelDetail({
   onRename: (name: string) => Promise<boolean>;
   /** Saves the router note (null clears it); resolves true once saved. */
   onRoutingNote?: (note: string | null) => Promise<boolean>;
+  /** Saves what users are told the model is for (null clears it). */
+  onUseCase?: (useCase: string | null) => Promise<boolean>;
 }) {
+  const [useCaseBusy, setUseCaseBusy] = useState(false);
   const stage = imageStage(item);
   const [note, setNote] = useState(item.routingNote ?? "");
   const [noteBusy, setNoteBusy] = useState(false);
@@ -598,6 +602,30 @@ export function ImageModelDetail({
               </span>
             </div>
           </form>
+          {onUseCase ? (
+            <label className="mt-4 flex flex-col gap-1 text-xs font-bold text-zinc-300">
+              {m.useCaseLabel}
+              <select
+                value={item.useCase ?? ""}
+                disabled={useCaseBusy}
+                data-testid="model-catalog-use-case"
+                onChange={async (event) => {
+                  setUseCaseBusy(true);
+                  await onUseCase(event.target.value || null);
+                  setUseCaseBusy(false);
+                }}
+                className="min-h-10 rounded-xl border border-zinc-700 bg-zinc-950 px-3 text-sm font-normal text-zinc-100 focus:border-blue-400 focus:outline-none"
+              >
+                <option value="">{m.useCaseNone}</option>
+                {IMAGE_USE_CASES.map((useCase) => (
+                  <option key={useCase} value={useCase}>
+                    {m.useCaseOption[useCase]}
+                  </option>
+                ))}
+              </select>
+              <span className="font-normal text-zinc-500">{m.useCaseHelp}</span>
+            </label>
+          ) : null}
         </AdminTile>
       ) : null}
 

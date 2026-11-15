@@ -39,6 +39,7 @@ import {
   STORED_CATALOG_CATEGORIES,
   type StoredCatalogCategory,
 } from "@/lib/modelCatalogCore";
+import { IMAGE_USE_CASES, type ImageUseCase } from "@/lib/runtimeImageProviders";
 import { prisma } from "@/lib/prisma";
 
 export class CatalogRefusal extends Error {
@@ -69,6 +70,8 @@ export const catalogEntryPatchSchema = z
      * part of the request either, so a priced model takes it.
      */
     routingNote: imageRoutingNoteSchema.nullable().optional(),
+    /** What the model is for, shown to users under its name. Written like the name; null removes it. */
+    useCase: z.enum(IMAGE_USE_CASES).nullable().optional(),
   })
   .strict();
 export type CatalogEntryPatch = z.infer<typeof catalogEntryPatchSchema>;
@@ -100,15 +103,17 @@ const validateProfile = (category: StoredCatalogCategory, modelId: string, profi
 const relabelledImageProfile = (
   modelId: string,
   stored: unknown,
-  labels: { name?: string; routingNote?: string | null }
+  labels: { name?: string; routingNote?: string | null; useCase?: ImageUseCase | null }
 ) => {
-  const apply = <T extends { name?: string; routingNote?: string }>(profile: T) => {
-    const { routingNote: storedNote, ...rest } = profile;
+  const apply = <T extends { name?: string; routingNote?: string; useCase?: ImageUseCase }>(profile: T) => {
+    const { routingNote: storedNote, useCase: storedUseCase, ...rest } = profile;
     const routingNote = labels.routingNote === undefined ? storedNote : labels.routingNote;
+    const useCase = labels.useCase === undefined ? storedUseCase : labels.useCase;
     return {
       ...rest,
       ...(labels.name === undefined ? {} : { name: labels.name }),
       ...(routingNote === null || routingNote === undefined ? {} : { routingNote }),
+      ...(useCase === null || useCase === undefined ? {} : { useCase }),
     };
   };
   if (IMAGE_MODEL_REGISTRY.some((model) => model.id === modelId)) {
@@ -166,7 +171,7 @@ export const updateCatalogEntry = async (input: {
 }) => {
   const { category, modelId, patch, session } = input;
   if (!MODEL_ID_PATTERN.test(modelId)) throw new CatalogRefusal("invalid_model_id", [], 400);
-  const relabels = patch.name !== undefined || patch.routingNote !== undefined;
+  const relabels = patch.name !== undefined || patch.routingNote !== undefined || patch.useCase !== undefined;
   if (relabels && (category !== "image" || "profile" in patch)) {
     throw new CatalogRefusal("invalid_patch", [category !== "image" ? "name_is_image_only" : "name_with_profile"], 400);
   }
@@ -185,7 +190,7 @@ export const updateCatalogEntry = async (input: {
     });
     // A rename or a new router note keeps every other field of the stored profile.
     const profile = relabels
-      ? relabelledImageProfile(modelId, before?.profile, { name: patch.name, routingNote: patch.routingNote })
+      ? relabelledImageProfile(modelId, before?.profile, { name: patch.name, routingNote: patch.routingNote, useCase: patch.useCase })
       : profileInput;
     const next = {
       enabled: patch.enabled === undefined ? (before?.enabled ?? null) : patch.enabled,

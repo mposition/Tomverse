@@ -662,6 +662,13 @@ export function AdminModelCatalogPanel() {
                   showToast({ tone: "ok", title: m.toastRenamed(name) });
                   return true;
                 }}
+                onUseCase={async (useCase) => {
+                  const result = await send("PATCH", { category: "image", modelId: openItem.id, useCase });
+                  if (!result.ok) return false;
+                  await load();
+                  showToast({ tone: "ok", title: m.toastUseCaseSaved });
+                  return true;
+                }}
                 onRoutingNote={async (routingNote) => {
                   const result = await send("PATCH", { category: "image", modelId: openItem.id, routingNote });
                   if (!result.ok) return false;

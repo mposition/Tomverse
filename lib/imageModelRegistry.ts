@@ -12,6 +12,7 @@
 
 import { falEndpointProfile, type FalThinkingTerms } from "@/lib/falImageRequest";
 import type { GoogleThinkingLevel } from "@/lib/googleImageRequest";
+import type { ImageUseCase } from "@/lib/runtimeImageProviders";
 import {
   IMAGE_COST_PER_CREDIT_CEILING_MICRO_USD,
   IMAGE_PROMPT_BUDGET_MICRO_USD,
@@ -180,6 +181,8 @@ export type ImageModelProfile = {
    * model by name alone. Never a cost or a capability gate.
    */
   routingNote?: string;
+  /** What the model is for, shown to users under its name; absent shows no line. */
+  useCase?: ImageUseCase;
   /**
    * The billing terms an operator confirmed for this provider model from a
    * measurement in the admin console (policy section 12.1), attached when the
@@ -334,6 +337,7 @@ const GOOGLE_GEMINI_31_FLASH_IMAGE: ImageModelProfile = {
   latencyClass: "fast",
   routingNote:
     "Best for: general images, posters and diagrams with short text; weaker at: small or long text, left/right placement, consistency across characters.",
+  useCase: "general",
   provenance: ["synthid"],
   outputMimeTypes: ["image/png", "image/jpeg"],
   // The only value its API accepts for response_format.mime_type,
@@ -414,6 +418,7 @@ const XAI_GROK_IMAGINE_IMAGE_QUALITY: ImageModelProfile = {
   latencyClass: "balanced",
   routingNote:
     "Best for: general-purpose images; weaker at: long text blocks and non-English text.",
+  useCase: "general",
   // Verified absent, not merely unread: the 2026-08-04 verification found no
   // watermark, C2PA or metadata guarantee anywhere in xAI's documentation.
   // Claiming provenance a file does not carry would be worse than claiming
@@ -456,6 +461,7 @@ const GOOGLE_GEMINI_31_FLASH_LITE_IMAGE: ImageModelProfile = {
   latencyClass: "fast",
   routingNote:
     "Best for: the fastest drafts (a few seconds), simple scenes with short legible text, high-volume generation; weaker at: portrait realism and hands, small or long text, editing.",
+  useCase: "fast",
   // Verified 2026-08-04: this model carries C2PA in addition to SynthID, which
   // the other two do not.
   provenance: ["synthid", "c2pa"],
