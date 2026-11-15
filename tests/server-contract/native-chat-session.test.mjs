@@ -168,3 +168,23 @@ test("parity additions stay unavailable until both flags are enabled; account ac
   assert.equal(cookies, before);
   delete process.env.TOMVERSE_NATIVE_CHAT_ENABLED; delete process.env.TOMVERSE_NATIVE_PARITY_ENABLED;
 });
+
+
+test("Research Preview bearer routes retain activation, origin, revocation and account checks without cookie fallback", async () => {
+  const names = ["TOMVERSE_NATIVE_CHAT_ENABLED", "TOMVERSE_NATIVE_PARITY_ENABLED", "RESEARCH_PREVIEW_NATIVE_ENABLED"];
+  const beforeFlags = names.map(name => process.env[name]); const beforeCookies = cookies;
+  const request = req({ authorization: "Bearer valid-owner", origin: "capacitor://localhost", cookie: "another-owner" }, "/api/chat/research-preview/offer");
+  try {
+    names.forEach(name => { process.env[name] = "true"; });
+    assert.equal((await resolveChatRouteSession(request)).session.user.id, "bearer-owner");
+    for (const name of names) {
+      delete process.env[name]; assert.ok((await resolveChatRouteSession(request)).response); process.env[name] = "true";
+    }
+    for (tokenState of ["expired", "family_revoked", "device_revoked", "sessions_revoked"]) assert.equal((await resolveChatRouteSession(request)).response.status, 401);
+    tokenState = "valid"; account = "suspended";
+    assert.equal((await resolveChatRouteSession(request)).response.status, 401);
+    account = "active";
+    assert.equal((await resolveChatRouteSession(req({ authorization: "Bearer valid-owner", origin: "https://attacker.invalid" }, "/api/chat/research-preview/runs/run_1" , "GET"))).response.status, 401);
+    assert.equal(cookies, beforeCookies);
+  } finally { tokenState = "valid"; account = "active"; names.forEach((name, i) => { if (beforeFlags[i] === undefined) delete process.env[name]; else process.env[name] = beforeFlags[i]; }); }
+});

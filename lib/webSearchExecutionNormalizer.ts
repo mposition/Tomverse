@@ -9,6 +9,7 @@ import type { WebSearchBackendReadiness } from "@/lib/webSearchBackends";
 import type { AppManagedSearchSnapshot } from "@/lib/appManagedWebSearchCore";
 import { getNativeSearchCostMicroUsdPerQuery } from "@/lib/modelPricing";
 import { getSearchBackendCostMicroUsdPerRequest } from "@/lib/webSearchBackendPricing";
+import type { ResearchPreviewMetadata } from "@/lib/researchPreviewMetadata";
 
 /** Which of the three routes produced (or would have produced) this turn's search. */
 export type WebSearchExecutionKind =
@@ -17,6 +18,8 @@ export type WebSearchExecutionKind =
   | "app_managed";
 
 export type WebSearchExecution = {
+  /** Bounded public Research result; ordinary search turns omit it. */
+  research?: ResearchPreviewMetadata;
   requested: boolean;
   supported: boolean;
   executed: boolean;

@@ -1,4 +1,5 @@
 import { reviewHandoffCopy } from "./reviewHandoff";
+import { researchPreviewCopy } from "./researchPreview";
 import { workspaceWelcomeCopy } from "./workspaceWelcome";
 import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 import { en } from "./en";
@@ -201,6 +202,7 @@ export const ko = {
         projectDeleteFailed: "프로젝트를 삭제하지 못했습니다.",
     },
    chat: {
+        ...researchPreviewCopy["ko"],
         sendPreparationChanged: "답변 준비 중 대화 또는 모델이 변경되었습니다. 질문을 확인한 뒤 다시 전송해 주세요.",
         savedQuestionNotSent: "질문은 저장되었지만 답변 요청은 전송되지 않았습니다. 다시 시도하기 전에 이 대화를 새로고침해 상태를 확인해 주세요.",
         conversationOpenFailed: "이 대화를 열지 못했습니다. 현재 대화는 그대로 유지됩니다.",
@@ -2391,6 +2393,7 @@ export const ko = {
         changes: "서비스 또는 법적 요구사항이 변경되면 이 방침을 업데이트하고 개정된 시행일을 표시할 수 있습니다.",
         providerTableTitle: "공급자별 채팅 내용의 이전",
         providerTableIntro: "이 표는 채팅 내용을 받는 법인, 저장 위치와 처리 위치, 모델 학습에 쓰는지, 내용을 얼마나 보관하는지, 판매나 광고가 금지되는지를 적습니다. 계약이 장소나 기간을 정하지 않으면 표에도 그렇게 적습니다.",
+        providerUnverifiedNotice: "이 공급자의 계정별 처리 위치, 모델 학습 설정과 보관 조건은 확인되지 않았습니다. 다른 공급자의 설정을 근거로 이 정보를 추정해서는 안 됩니다.",
         providerTableScrollHint: "이 표는 좁은 화면보다 넓습니다. 가로로 스크롤하면 나머지 열을 읽을 수 있습니다.",
         colProvider: "공급자",
         colRecipient: "수신자",

@@ -101,6 +101,18 @@ if (group) {
   console.log(`[db-integration] Lane ${group}. Suites outside it run elsewhere.`);
 }
 
+// Local focused runs keep the same database safety checks and schema setup.
+// Only suites named by an existing run() below can be selected.
+const focusedSuites = new Set((process.env.DB_INTEGRATION_SUITES || "")
+  .split(",").map((suite) => suite.trim()).filter(Boolean));
+for (const suite of focusedSuites) {
+  if (!/^tests\/integration\/[A-Za-z0-9_-]+\.db\.test\.(?:ts|mjs)$/.test(suite)) {
+    fail("DB_INTEGRATION_SUITES must contain comma-separated integration suite paths.");
+  }
+}
+const selectedFocusedSuites = new Set();
+if (focusedSuites.size) console.log(`[db-integration] Focused suites: ${[...focusedSuites].join(", ")}.`);
+
 /**
  * Runs a step, dropping the suites that belong to another lane.
  *
@@ -114,13 +126,14 @@ if (group) {
 const run = (args, label, environmentOverrides = {}) => {
   const suites = args.filter((arg) => arg.startsWith("tests/"));
   let selected = args;
-  if (group && suites.length > 0) {
+  if ((group || focusedSuites.size) && suites.length > 0) {
     const mine = suites.filter((suite) =>
-      group === POSTGRES16_COMPAT_GROUP
+      (!focusedSuites.size || focusedSuites.has(suite)) && (!group || (group === POSTGRES16_COMPAT_GROUP
         ? POSTGRES16_COMPAT_SUITES.includes(suite)
-        : dbIntegrationGroupOf(suite) === group
+        : dbIntegrationGroupOf(suite) === group))
     );
     if (mine.length === 0) return;
+    for (const suite of mine) selectedFocusedSuites.add(suite);
     selected = args.filter((arg) => !arg.startsWith("tests/") || mine.includes(arg));
   }
   console.log(`\n[db-integration] ${label}`);
@@ -1045,6 +1058,7 @@ run(
     // deletion, and that a download ticket is spent exactly once under
     // concurrency.
     "tests/integration/account-data-export.db.test.ts",
+    "tests/integration/research-preview-persistence.db.test.ts",
     "tests/integration/account-data-export-ticket.db.test.ts",
     "tests/integration/account-anonymisation.db.test.ts",
     // docs/policy/marketing-automation.md §10.1: the event-name check admits
@@ -1447,3 +1461,23 @@ run(
   ],
   "Running the model catalogue environment copy scenarios"
 );
+
+// Research Preview uses the real route/SDK/reservations with an offline model
+// and fake search backend; its transport mocks stay in this isolated process.
+run(
+  ["--conditions=react-server", "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
+    "--test-concurrency=1", "tests/integration/research-preview-route.db.test.ts"],
+  "Running Research Preview route and cumulative settlement scenarios"
+);
+
+run(
+  ["--conditions=react-server", "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
+    "--test-concurrency=1", "tests/integration/research-preview-durable-run.db.test.ts"],
+  "Running durable Research Preview service, checkpoint and dispatch CAS scenarios"
+);
+
+if ([...focusedSuites].some((suite) => !selectedFocusedSuites.has(suite))) {
+  fail("a requested DB_INTEGRATION_SUITES path is not registered in this lane.");
+}

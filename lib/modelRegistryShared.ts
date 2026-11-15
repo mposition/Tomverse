@@ -9,6 +9,7 @@ import {
 export const AI_PROVIDERS = [
   "openai",
   "anthropic",
+  "cohere",
   "google",
   "groq",
   "xai",
@@ -37,6 +38,13 @@ export const PROVIDER_API_CONFIGURATION: Record<
   anthropic: {
     baseUrl: "https://api.anthropic.com",
     apiKeyEnvName: "ANTHROPIC_API_KEY",
+    protocol: "native",
+  },
+  cohere: {
+    // Command A+ pricing is verified only for Cohere's public hosted v2 API.
+    // Private/Vault deployments are a different routing and pricing contract.
+    baseUrl: "https://api.cohere.com/v2",
+    apiKeyEnvName: "COHERE_API_KEY",
     protocol: "native",
   },
   google: {
@@ -150,6 +158,7 @@ export const PROVIDER_API_KEY_ENV_NAMES: Record<AiProvider, readonly string[]> =
   {
     openai: ["OPENAI_API_KEY"],
     anthropic: ["ANTHROPIC_API_KEY"],
+    cohere: ["COHERE_API_KEY"],
     // Google's own documentation, SDK samples and this repository's
     // measurement script each use a different one of these three.
     google: [
@@ -182,10 +191,14 @@ export const PROVIDER_API_KEY_ENV_NAMES: Record<AiProvider, readonly string[]> =
 export const resolveProviderApiKey = (
   provider: AiProvider,
   environment: Record<string, string | undefined> = process.env
-) =>
-  PROVIDER_API_KEY_ENV_NAMES[provider]
+) => {
+  if (provider === "cohere" && environment.COHERE_CHAT_ENABLED === "false") {
+    return undefined;
+  }
+  return PROVIDER_API_KEY_ENV_NAMES[provider]
     .map((name) => environment[name]?.trim())
     .find((value) => Boolean(value));
+};
 
 export const isProviderApiKeyConfigured = (
   provider: AiProvider,

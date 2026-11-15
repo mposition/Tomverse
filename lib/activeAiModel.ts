@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createAnthropic } from "@ai-sdk/anthropic";
+import { createCohere } from "@ai-sdk/cohere";
 import { createGoogle } from "@ai-sdk/google";
 import { createMistral } from "@ai-sdk/mistral";
 import { createOpenAI } from "@ai-sdk/openai";
@@ -79,12 +80,20 @@ export const getActiveAiModel = (
   model: AiModel,
   openRouterRequest?: OpenRouterRequest
 ) => {
+  if (model.provider === "cohere" && process.env.COHERE_CHAT_ENABLED === "false") {
+    throw new Error("COHERE_CHAT_DISABLED");
+  }
+  if (model.provider === "cohere" && model.apiModel !== "command-a-plus-05-2026") {
+    throw new Error("COHERE_CHAT_MODEL_UNSUPPORTED");
+  }
   const configuration = runtimeConfiguration(model);
   switch (model.provider) {
     case "openai":
       return createOpenAI(configuration)(model.apiModel);
     case "anthropic":
       return createAnthropic(configuration)(model.apiModel);
+    case "cohere":
+      return createCohere({ ...configuration, fetch: createCohereResearchFetch() })(model.apiModel);
     case "google":
       return createGoogle(configuration)(model.apiModel);
     case "groq":
@@ -145,3 +154,21 @@ export const getActiveAiModel = (
     }
   }
 };
+
+/** Cohere's SDK does not yet expose strict_tools. Keep it scoped to Research's report phase. */
+export function createCohereResearchFetch(fetchImpl: typeof fetch = fetch): typeof fetch {
+  return (url, init) => {
+    if (typeof init?.body !== "string") return fetchImpl(url, init);
+    let body: unknown;
+    try { body = JSON.parse(init.body); } catch { return fetchImpl(url, init); }
+    if (!body || typeof body !== "object" || Array.isArray(body)) return fetchImpl(url, init);
+    const request = body as Record<string, unknown>;
+    const reportPhase = Array.isArray(request.tools) && request.tools.some((tool) =>
+      tool?.type === "function" && tool.function?.name === "submit_research_report");
+    if (!reportPhase) return fetchImpl(url, init);
+    if (request.response_format !== undefined) {
+      throw new Error("COHERE_RESEARCH_RESPONSE_FORMAT_WITH_TOOLS");
+    }
+    return fetchImpl(url, { ...init, body: JSON.stringify({ ...request, strict_tools: true }) });
+  };
+}

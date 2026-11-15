@@ -1,4 +1,5 @@
 import { reviewHandoffCopy } from "./reviewHandoff";
+import { researchPreviewCopy } from "./researchPreview";
 import { englishLocationBody } from "./privacyLocation";
 import { workspaceWelcomeCopy } from "./workspaceWelcome";
 import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
@@ -199,6 +200,7 @@ export const en = {
         projectDeleteFailed: "Project could not be deleted.",
     },
    chat: {
+        ...researchPreviewCopy["en"],
         sendPreparationChanged: "The conversation or model changed while preparing the answer. Check your question and send again.",
         savedQuestionNotSent: "Your question was saved, but no answer request was sent. Reload this conversation to check it before trying again.",
         conversationOpenFailed: "This conversation could not be opened. Your current conversation has not changed.",
@@ -2407,6 +2409,7 @@ export const en = {
         changes: "We may update this policy when the service or legal requirements change and will display the revised effective date.",
         providerTableTitle: "Where each provider receives chat content",
         providerTableIntro: "This table names the company that receives chat content, where that content is stored and processed, whether it is used to train models, how long the content is kept, and whether sale or advertising is prohibited. When a contract does not name a place or a period, the table says so.",
+        providerUnverifiedNotice: "We have not verified the account-specific processing locations, model-training settings or retention terms for this provider. These details must not be assumed from the settings of other providers.",
         providerTableScrollHint: "This table is wider than a narrow screen: scroll it sideways to read the remaining columns.",
         colProvider: "Provider",
         colRecipient: "Recipient",

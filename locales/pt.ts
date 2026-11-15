@@ -1,4 +1,5 @@
 import { reviewHandoffCopy } from "./reviewHandoff";
+import { researchPreviewCopy } from "./researchPreview";
 import { workspaceWelcomeCopy } from "./workspaceWelcome";
 import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 import { en } from "./en";
@@ -201,6 +202,7 @@ export const pt = {
     },
     chat: {
        ...en.chat,
+        ...researchPreviewCopy["pt"],
         aiReviewComparedQuestion: "Pergunta comparada",
         aiReviewFindings: "Constatações da revisão",
         aiReviewViewSource: "Ver na resposta original",
@@ -2391,6 +2393,7 @@ export const pt = {
         changes: "Podemos atualizar esta política quando o serviço ou requisitos legais mudarem e exibiremos a data revisada.",
         providerTableTitle: "Para onde cada fornecedor recebe o conteúdo do chat",
         providerTableIntro: "Esta tabela nomeia a empresa que recebe o conteúdo do chat, onde ele é armazenado e processado, se é usado para treinar modelos, por quanto tempo é guardado, e se a venda ou a publicidade é proibida. Quando um contrato não nomeia um lugar nem um prazo, a tabela diz isso.",
+        providerUnverifiedNotice: "Não verificamos os locais de processamento, as configurações de treinamento nem os termos de retenção deste fornecedor para esta conta. Esses detalhes não devem ser deduzidos das configurações de outros fornecedores.",
         providerTableScrollHint: "Esta tabela é mais larga do que uma tela estreita: role na horizontal para ler as colunas restantes.",
         colProvider: "Fornecedor",
         colRecipient: "Destinatário",

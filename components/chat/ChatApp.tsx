@@ -66,6 +66,8 @@ import {
   TRACE_PROVENANCE,
   type MessageErrorReportContext,
 } from "@/lib/errorReportContract";
+import { researchRunMessage } from "@/lib/researchPreviewRunClient";
+import type { ResearchPreviewRunDto } from "@/lib/researchPreviewRunTypes";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { fitChatRequestTranscript } from "@/lib/chatRequestLimits";
 import type { ChatContentState } from "@/lib/chatContentState";
@@ -279,6 +281,8 @@ type ChatAppProps = {
      */
     modelIds: string[];
     attachments: ChatAttachment[];
+    researchDurable?: boolean;
+    researchMode?: "preview";
     deepResearchDepth?: "quick" | "standard" | "deep";
     /**
      * Web search for this send only, when the send was made by the web-search
@@ -1074,6 +1078,20 @@ function ChatAppComponent({
               data.messagePage = pageData.messagePage;
               nextCursor = pageData.messagePage?.nextCursor;
             }
+            if (transcriptScope === "conversation" && !isGuestMode) {
+              try {
+              const runsResponse = await fetch(`/api/chat/research-preview/runs?conversationId=${encodeURIComponent(initialConversationId)}`, { cache: "no-store" });
+              const runsValue = await runsResponse.json().catch(() => null);
+              if (runsResponse.ok && Array.isArray(runsValue?.runs)) {
+                for (const run of runsValue.runs as ResearchPreviewRunDto[]) {
+                  if (run.conversationId !== initialConversationId || typeof run.id !== "string" || typeof run.assistantMessageId !== "string") continue;
+                  const index = data.messages.findIndex((message: Message) => message.id === run.assistantMessageId);
+                  if (index >= 0) data.messages[index] = { ...data.messages[index], researchRunId: run.id };
+                  else data.messages.push(researchRunMessage(run));
+                }
+              }
+              } catch { /* Optional run discovery never hides the stored transcript or starts work. */ }
+            }
             if (!isCurrentLoad()) return;
             // This key sent something while the history request was in
             // flight, so the response describes the conversation as it was
@@ -1520,6 +1538,8 @@ function ChatAppComponent({
     preparedLocationIntent?: ChatPanelLocationIntent,
     routerLocationTurn?: RouterLocationTurn,
     sourcePassages?: string,
+    researchMode?: "preview",
+    researchDurable = false,
   ) => {
     // The key this run owns for its whole life. `targetChatId` is the
     // conversation the send was made in, and every write below names this key
@@ -1591,10 +1611,10 @@ function ChatAppComponent({
       send is identical to what it was before the override existed.
     */
     const effectiveWebSearchMode: WebSearchMode | undefined =
-      webSearchModeOverride ?? webSearchMode;
-    const mcpConnectionId = currentProduct === "chat" ? selectedMcpConnection(initialConversationId) : undefined;
+      researchMode ? "always" : webSearchModeOverride ?? webSearchMode;
+    const mcpConnectionId = !researchMode && currentProduct === "chat" ? selectedMcpConnection(initialConversationId) : undefined;
     const previous = getChatRuntimeLastPrompt(runKey);
-    const turnPassages = sourcePassages ?? (previous?.sourceUserMessageId === sourceUserMessageId ? previous.sourcePassages : undefined);
+    const turnPassages = researchMode ? undefined : sourcePassages ?? (previous?.sourceUserMessageId === sourceUserMessageId ? previous.sourcePassages : undefined);
     setChatRuntimeLastPrompt(runKey, {
       ...(turnPassages ? {sourcePassages: turnPassages} : {}),
       text,
@@ -1778,7 +1798,7 @@ function ChatAppComponent({
     // The bundle actually presented, which a stale-recovery retry replaces.
     // `contextBundle` is what this send was prepared with; after one refusal
     // for drift the request is re-prepared and this becomes the new one.
-    let activeContextBundle = contextBundle ?? null;
+    let activeContextBundle = researchMode ? null : contextBundle ?? null;
     let contextBundleRetries = 0;
     let contextBundleCollisionRetries = 0;
     let memoryUsedCount = 0;
@@ -1918,11 +1938,30 @@ function ChatAppComponent({
 
     let hasRouterLocationContinuation = false;
     try {
+      if (researchMode === "preview" && researchDurable && !isGuestMode) {
+        try {
+        onDispatchStarted?.();
+        const response = await fetch("/api/chat/research-preview/runs", {
+          method: "POST", headers: { "Content-Type": "application/json", "Accept-Language": lang },
+          body: JSON.stringify({ conversationId: targetChatId, sourceUserMessageId, assistantMessageId, modelId, locale: lang }),
+          signal: controller.signal,
+        });
+        const value = await response.json().catch(() => null) as { run?: ResearchPreviewRunDto } | null;
+        const run = value?.run;
+        if (!response.ok || !run || run.conversationId !== targetChatId || run.assistantMessageId !== assistantMessageId) throw new Error("RESEARCH_RUN_OUTCOME_UNCONFIRMED");
+        writeChatRuntimeMessages(runKey, current => current.map(message => message.id === assistantMessageId ? researchRunMessage(run) : message));
+        } catch {
+          // An interrupted create may already have queued a run. Only saved
+          // status discovery can confirm it; never claim that a worker stopped.
+          setAssistantMessage(assistantMessageId, t("chat.researchRunReadError"), "error", { errorCode: "RESEARCH_RUN_OUTCOME_UNCONFIRMED" });
+        }
+        return;
+      }
       const sendChatRequest = async (turnstileToken?: string, recoverWithSavedLocation = false) => {
         // Human permission and guest verification happen before provider wait
         // time starts. The same source turn is continued after either prompt.
         liveness.stop();
-        const fuseLocation = !turnPassages && !recoverWithSavedLocation && routerLocationTurn && !preparedLocationIntent && !mcpConnectionId && !admissionToken &&
+        const fuseLocation = !researchMode && !turnPassages && !recoverWithSavedLocation && routerLocationTurn && !preparedLocationIntent && !mcpConnectionId && !admissionToken &&
           !deepResearchDepth && !reviewProvider && !isGuestMode && chatLocationIntentEnabled &&
           chatLocationSession.canPrepareIntent(panelIdentityKey);
         const checkLocationTurn = () => {
@@ -1950,7 +1989,7 @@ function ChatAppComponent({
         };
         const locationFields = (fix: Awaited<ReturnType<typeof readLocation>>) =>
           fix && chatLocationSession.canShare(fix, panelIdentityKey) ? { currentLocation: fix } : {};
-        const turnLocation = fuseLocation ? null : await readLocation();
+        const turnLocation = researchMode || fuseLocation ? null : await readLocation();
         checkLocationTurn();
         liveness = createChatLivenessWatchdog({ onExpire: onLivenessExpiry });
         onDispatchStarted?.();
@@ -1966,7 +2005,7 @@ function ChatAppComponent({
           // The newest part that fits the request limits: a conversation
           // has no length limit, and one sent whole could not be continued
           // past them (lib/chatRequestLimits.ts).
-          messages: fitChatRequestTranscript(
+          messages: researchMode ? [{ ...toChatRequestMessage(userMessage), id: sourceUserMessageId }] : fitChatRequestTranscript(
             requestTranscriptForScope(
               messages,
               userMessage,
@@ -1993,6 +2032,7 @@ function ChatAppComponent({
                 sourceUserMessageId,
               }
             : {}),
+          ...(researchMode ? { researchMode } : {}),
           ...(deepResearchDepth ? { deepResearchDepth } : {}),
           ...(mcpConnectionId ? { mcpConnectionId } : {}),
           ...(admissionToken ? { admissionToken } : {}),
@@ -2009,7 +2049,7 @@ function ChatAppComponent({
             : {}),
         };
         const post = (path: string, fields: Record<string, unknown>) => fetch(path, {
-          method: "POST", headers: { "Content-Type": "application/json", ...(turnPassages ? {[PASSAGE_HEADER]:turnPassages} : {}) },
+          method: "POST", headers: { "Content-Type": "application/json", ...(researchMode ? { "Accept-Language": lang } : {}), ...(turnPassages ? {[PASSAGE_HEADER]:turnPassages} : {}) },
           body: JSON.stringify({ ...requestBody, ...fields }),
           signal: controller.signal,
         });
@@ -2132,7 +2172,7 @@ function ChatAppComponent({
             sendAfterGrant: () => sendChatRequest(),
           });
         } else if (
-          !hasRouterLocationContinuation && promptRefinerAllowsAutomaticChatRecovery(promptRefinerDecision) &&
+          !researchMode && !hasRouterLocationContinuation && promptRefinerAllowsAutomaticChatRecovery(promptRefinerDecision) &&
           code === "CHAT_CONTEXT_BUNDLE_STALE" &&
           refusalReason !== "already_consumed"
         ) {
@@ -2183,7 +2223,7 @@ function ChatAppComponent({
           // this panel's to spend.
           response = await sendChatRequest(undefined, recoverWithSavedLocation);
         } else if (
-          !hasRouterLocationContinuation && promptRefinerAllowsAutomaticChatRecovery(promptRefinerDecision) &&
+          !researchMode && !hasRouterLocationContinuation && promptRefinerAllowsAutomaticChatRecovery(promptRefinerDecision) &&
           code === "CHAT_CONTEXT_BUNDLE_STALE" &&
           refusalReason === "already_consumed" &&
           !isGuestMode &&
@@ -3146,6 +3186,8 @@ function ChatAppComponent({
           promptPayload.preparedLocationIntent,
           promptPayload.routerLocationTurn,
           promptPayload.sourcePassages,
+          promptPayload.researchMode,
+          promptPayload.researchDurable,
         ).then(() => {
           if (!providerStarted) reportDisposition("terminal");
         });
@@ -3317,6 +3359,7 @@ function ChatAppComponent({
         // A continuation is not an empty conversation: the imported half is
         // its earlier turns, and they render inside this list.
         !hasImportedTranscript ? null : <ChatMessageList
+        onResearchMessage={(message) => writeChatRuntimeMessages(runtimeKey, current => current.map(existing => existing.id === message.id ? { ...existing, ...message } : existing))}
         transcriptFooter={voiceHistoryRevision !== undefined && initialConversationId && !isGuestMode ? <VoiceConversationHistory conversationId={initialConversationId} revision={voiceHistoryRevision} /> : undefined}
         messages={
           // The imported half first, always: it is what this conversation

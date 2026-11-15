@@ -54,19 +54,18 @@ test("48-case bridge retains all catalogue rows, 96 calls and 2/94/0 durable res
   assert.equal(report.mockCollection.repeatedCompletedCalls, 0);
   assert.equal(report.mockCollection.finalTerminalRecords, 96);
   assert.equal(report.score.summary.catalogueRows, 48 * AVAILABLE_MODELS.length);
-  assert.equal(report.score.summary.catalogueRows, 2160);
   assert.equal(report.score.summary.submitted, 96);
   assert.deepEqual({ passed: report.score.summary.passed, incorrect: report.score.summary.incorrect,
     blank: report.score.summary.blank, invalidJson: report.score.summary.invalidJson, failed: report.score.summary.failed },
   { passed: 92, incorrect: 1, blank: 1, invalidJson: 1, failed: 1 });
   assert.equal(report.score.summary.correctnessRate, null);
-  assert.equal(report.selectionCoverage.overall.planned + report.selectionCoverage.overall.refused, 2160);
-  assert.equal(report.selectionCoverage.overall.planned, 864);
+  assert.equal(report.selectionCoverage.overall.planned + report.selectionCoverage.overall.refused, corpus.cases.length * AVAILABLE_MODELS.length);
+  assert.equal(report.selectionCoverage.overall.planned, plan.rows.filter((row) => row.benchmarkEligibility.eligible).length);
   assert.equal(report.selectionCoverage.overall.refused, 1296);
   assert.equal(report.selectionCoverage.overall.selected + report.selectionCoverage.overall.unselectedEligible, report.selectionCoverage.overall.planned);
 });
 
-test("eight cells, twelve families and whole-family 24/24 partitions retain selection denominators", () => {
+test("cells, families and partitions retain population denominators when a new provider has no mock observations", () => {
   assert.equal(report.selectionCoverage.byCell.length, 8);
   assert.ok(report.selectionCoverage.byCell.every((cell) => cell.catalogueRows === 6 * AVAILABLE_MODELS.length && cell.selected === 12 && cell.observed === 12));
   assert.deepEqual(report.selectionCoverage.byPartition.map((part) => part.catalogueRows), [24 * AVAILABLE_MODELS.length, 24 * AVAILABLE_MODELS.length]);
@@ -74,7 +73,7 @@ test("eight cells, twelve families and whole-family 24/24 partitions retain sele
   assert.equal(report.selectionCoverage.byFamily.length, 12);
   assert.ok(report.selectionCoverage.byFamily.every((family) => family.selected === 8));
   assert.equal(report.selectionCoverage.byModel.length, AVAILABLE_MODELS.length);
-  assert.equal(report.selectionCoverage.byModel.reduce((sum, model) => sum + model.catalogueRows, 0), 2160);
+  assert.equal(report.selectionCoverage.byModel.reduce((sum, model) => sum + model.catalogueRows, 0), corpus.cases.length * AVAILABLE_MODELS.length);
   assert.equal(report.selectionCoverage.byModel.reduce((sum, model) => sum + model.selected, 0), 96);
   assert.equal(report.selectionCoverage.byModel.filter((model) => model.selected === 48).length, 2);
   assert.ok(report.selectionCoverage.byModel.every((model) => model.selectedNotObserved === 0));
@@ -88,32 +87,39 @@ test("eight cells, twelve families and whole-family 24/24 partitions retain sele
     ...report.replay.byPartition.map((part) => [part, 24]),
     ...report.replay.byFamily.map((family) => [family, 4])]) {
     for (const choice of [group.baseline, group.candidate]) {
-      assert.equal(choice.availableCases, population);
-      assert.equal(choice.unavailableCases, 0);
-      assert.equal(choice.coverage, 1);
+      assert.equal(choice.availableCases + choice.unavailableCases, population);
+      assert.equal(choice.coverage, choice.availableCases / population);
     }
-    assert.equal(group.paired.commonObservedCases, population);
-    assert.equal(group.paired.unavailablePairCases, 0);
-    assert.equal(group.paired.observedSubset.denominator, population);
-    assert.equal(group.paired.wholePopulationCorrectOutcomeShareDelta, 0);
+    assert.ok(group.paired.commonObservedCases <= Math.min(group.baseline.availableCases, group.candidate.availableCases));
+    assert.equal(group.paired.unavailablePairCases, population - group.paired.commonObservedCases);
+    assert.equal(group.paired.observedSubset.denominator, group.paired.commonObservedCases);
+    assert.equal(group.paired.wholePopulationCorrectOutcomeShareDelta, group.paired.commonObservedCases === population ? 0 : null);
   }
   const { baseline, candidate, paired, rows } = report.replay.benchmarkDomain;
-  assert.equal(baseline.wholePopulationCorrectOutcomeShare, 46 / 48);
-  assert.equal(candidate.wholePopulationCorrectOutcomeShare, 46 / 48);
-  assert.equal(paired.baselineCorrect, 46);
-  assert.equal(paired.candidateCorrect, 46);
-  assert.equal(paired.bothAnsweredCases, 47);
-  assert.equal(paired.acquisitionFailureCases, 1);
+  assert.equal(baseline.availableCases, 8);
+  assert.equal(candidate.availableCases, 29);
+  assert.equal(baseline.wholePopulationCorrectOutcomeShare, null);
+  assert.equal(candidate.wholePopulationCorrectOutcomeShare, null);
+  assert.equal(paired.baselineCorrect, 7);
+  assert.equal(paired.candidateCorrect, 7);
+  assert.equal(paired.bothAnsweredCases, 8);
+  assert.equal(paired.acquisitionFailureCases, 0);
   assert.equal(paired.correctedCases, 0);
   assert.equal(paired.regressedCases, 0);
   assert.equal(paired.changedSelectionCases, 21);
-  assert.equal(paired.changedSelectionObservedCases, 21);
-  assert.equal(paired.sameSelectionObservedCases, 27);
+  assert.equal(paired.changedSelectionObservedCases, 0);
+  assert.equal(paired.sameSelectionObservedCases, 8);
   assert.equal(rows.length, 48);
   assert.equal(rows.filter((row) => row.baseline.modelId !== row.candidate.modelId).length, 21);
   const selectedRows = new Set(manifest.collection.selectedRowIds);
-  assert.ok(rows.every((row) => [row.baseline, row.candidate].every((choice) =>
-    choice.available && choice.unavailableReason === null && selectedRows.has(choice.rowId))));
+  for (const row of rows) for (const choice of [row.baseline, row.candidate]) {
+    assert.equal(choice.available, selectedRows.has(choice.rowId));
+    if (choice.available) assert.equal(choice.unavailableReason, null);
+    else {
+      assert.equal(choice.modelId, "command-a-plus");
+      assert.ok(choice.unavailableReason);
+    }
+  }
   // Use the report's actual fixture policy, without its report-only digest field.
   const { schemaVersion, purpose, policyId, preferences, fallback } = report.replay.candidate;
   const fixturePolicy = { schemaVersion, purpose, policyId, preferences, fallback };

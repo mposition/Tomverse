@@ -1,4 +1,5 @@
 import { reviewHandoffCopy } from "./reviewHandoff";
+import { researchPreviewCopy } from "./researchPreview";
 import { workspaceWelcomeCopy } from "./workspaceWelcome";
 import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 import { en } from "./en";
@@ -213,6 +214,7 @@ export const zhHant = {
     },
     chat: {
        ...en.chat,
+        ...researchPreviewCopy["zh-Hant"],
         aiReviewComparedQuestion: "比較的問題",
         aiReviewFindings: "審查發現",
         aiReviewViewSource: "在原始回答中查看",

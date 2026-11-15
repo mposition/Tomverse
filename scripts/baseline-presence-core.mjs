@@ -178,7 +178,8 @@ const splitSqlAt = (sql, delimiter) => {
 /**
  * The entire grammar a CHECK sidecar may prove: optional BEGIN/COMMIT and one
  * or more ALTER TABLE statements made solely of adjacent DROP + ADD CHECK
- * pairs under the same table/name. Anything else is deliberately invalid.
+ * pairs under the same table/name, including pairs split across adjacent
+ * statements. Anything else is deliberately invalid.
  */
 export const replacedCheckTargetsIn = (sql) => {
   if (typeof sql !== "string") return { kind: "none" };
@@ -187,30 +188,38 @@ export const replacedCheckTargetsIn = (sql) => {
   if (!statements) return { kind: "invalid" };
   const checks = [];
   const seen = new Set();
+  let pendingDrop;
   for (const statement of statements.filter(Boolean)) {
-    if (/^(?:BEGIN|COMMIT)$/i.test(statement)) continue;
+    if (/^(?:BEGIN|COMMIT)$/i.test(statement)) {
+      if (pendingDrop) return { kind: "invalid" };
+      continue;
+    }
     const alter = /^ALTER\s+TABLE\s+(?:"public"\.)?"([A-Za-z_][A-Za-z0-9_]{0,62})"\s+([\s\S]+)$/i.exec(statement);
     if (!alter) return { kind: "invalid" };
     const actions = splitSqlAt(alter[2], ",");
-    if (!actions || actions.length === 0 || actions.length % 2 !== 0) {
+    if (!actions || actions.length === 0) {
       return { kind: "invalid" };
     }
-    for (let index = 0; index < actions.length; index += 2) {
-      const dropped = /^DROP\s+CONSTRAINT\s+"([A-Za-z_][A-Za-z0-9_]{0,62})"$/i.exec(
-        actions[index],
-      );
+    for (const action of actions) {
+      if (!pendingDrop) {
+        const dropped = /^DROP\s+CONSTRAINT\s+"([A-Za-z_][A-Za-z0-9_]{0,62})"$/i.exec(action);
+        if (!dropped) return { kind: "invalid" };
+        pendingDrop = { table: alter[1], constraint: dropped[1] };
+        continue;
+      }
       const added = /^ADD\s+CONSTRAINT\s+"([A-Za-z_][A-Za-z0-9_]{0,62})"\s+CHECK\s*\([\s\S]*\)$/i.exec(
-        actions[index + 1],
+        action,
       );
-      if (!dropped || !added || dropped[1] !== added[1]) return { kind: "invalid" };
-      const table = alter[1];
-      const constraint = dropped[1];
+      if (!added || pendingDrop.table !== alter[1] || pendingDrop.constraint !== added[1]) return { kind: "invalid" };
+      const { table, constraint } = pendingDrop;
       const identity = `${table}\0${constraint}`;
       if (seen.has(identity)) return { kind: "invalid" };
       seen.add(identity);
       checks.push({ table, constraint });
+      pendingDrop = undefined;
     }
   }
+  if (pendingDrop) return { kind: "invalid" };
   return checks.length === 0 ? { kind: "none" } : { kind: "check-replacement", checks };
 };
 
