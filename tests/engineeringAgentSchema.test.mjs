@@ -47,8 +47,8 @@ const migration = (name) =>
   readFileSync(new URL(`../prisma/migrations/${name}/migration.sql`, import.meta.url), "utf8").replace(/\r\n/g, "\n");
 const ownerQueueRunSql = migration("20261109200000_engineering_agent_owner_queue_run_guard");
 const ownerQueueWorkItemSql = migration("20261109200100_engineering_agent_owner_queue_work_item_guard");
-const uncappedRunSql = migration("20261115200000_engineering_agent_run_guard_uncapped");
-const uncappedWorkItemSql = migration("20261115200100_engineering_agent_work_item_guard_uncapped");
+const uncappedRunSql = migration("20261116010200_engineering_agent_run_guard_uncapped");
+const uncappedWorkItemSql = migration("20261116010300_engineering_agent_work_item_guard_uncapped");
 const outcomeSql = readFileSync(
   new URL("../prisma/migrations/20261007010000_engineering_agent_private_result/migration.sql", import.meta.url),
   "utf8",

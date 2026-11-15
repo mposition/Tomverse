@@ -1032,7 +1032,7 @@ export const RAW_SQL_ALLOWLIST = [
     ["AmuxIdeaOperatingScopeSetting", 1, "reads the newest operating scope"],
     ["AdminAuditLog", 3, "reads the claim-bound evidence and the same-transaction result audit"],
   ].map(([table, tableMentions, what]) => ({
-    path: "prisma/migrations/20261115230100_amux_v19_session_result_open_deadline/migration.sql",
+    path: "prisma/migrations/20261116010900_amux_v19_session_result_open_deadline/migration.sql",
     table, tableMentions, writeVerbs: 2,
     reason: `Owner direction 2026-11-15: the migration replaces the session-result insert guard with the same signature and trigger, without its fixed seven-day clause. The guard only ${what}; it writes no row of this table.`,
   })),
@@ -1042,7 +1042,7 @@ export const RAW_SQL_ALLOWLIST = [
     ["AmuxIdeaReadManifestKeyIntent", 3, "checks the intent row the trigger is guarding"],
     ["AdminAuditLog", 3, "reads the same-transaction intent, retirement-claim and deletion audit rows"],
   ].map(([table, tableMentions, what]) => ({
-    path: "prisma/migrations/20261115230200_amux_v19_read_manifest_intent_open_deadline/migration.sql",
+    path: "prisma/migrations/20261116011000_amux_v19_read_manifest_intent_open_deadline/migration.sql",
     table, tableMentions, writeVerbs: 2,
     reason: `Owner direction 2026-11-15: the migration replaces the key-intent guard with the same signature and trigger, without its fixed seven-day insert clause and with an ended-analysis condition on the orphan retirement claim. The guard only ${what}; it writes no row of this table.`,
   })),
@@ -1324,7 +1324,7 @@ export const RAW_SQL_ALLOWLIST = [
       "Owner decision 2026-11-14: the score guard replacement reads the referenced audit to admit the system score refresher's same-transaction entry beside the existing confirmations. CREATE OR REPLACE affects only the guard function; it never writes AdminAuditLog.",
   },
   {
-    path: "prisma/migrations/20261115210100_amux_portfolio_score_rolling_baseline_guard/migration.sql",
+    path: "prisma/migrations/20261116010600_amux_portfolio_score_rolling_baseline_guard/migration.sql",
     table: "AdminAuditLog",
     tableMentions: 1,
     writeVerbs: 1,
@@ -2751,7 +2751,7 @@ export const RAW_SQL_ALLOWLIST = [
       "This migration only replaces the work item guard's body (owner decision 2026-11-09): a promoted v22 draft's publish item is counted against the pull request cap of 8, with no first T1 window. It writes no row and creates no table or trigger; its write verbs are the guard's TG_OP comparisons and the words in its comments, and the exact SQL counts remain pinned. Its EngineeringAgentCapability mentions are the unchanged consumed-capability reads.",
   },
   {
-    path: "prisma/migrations/20261115200000_engineering_agent_run_guard_uncapped/migration.sql",
+    path: "prisma/migrations/20261116010200_engineering_agent_run_guard_uncapped/migration.sql",
     table: "EngineeringAgentRun",
     tableMentions: 13,
     writeVerbs: 2,
@@ -2759,7 +2759,7 @@ export const RAW_SQL_ALLOWLIST = [
       "This migration only replaces the run guard's body (owner decision 2026-11-15): the owner queue count and its refusal are removed, so the queues are counted by the app and never capped. It writes no row and creates no table or trigger; its write verbs are the guard's TG_OP comparisons, and the exact SQL counts remain pinned. Its EngineeringAgentRun mentions are the guarded table itself and its messages.",
   },
   {
-    path: "prisma/migrations/20261115200100_engineering_agent_work_item_guard_uncapped/migration.sql",
+    path: "prisma/migrations/20261116010300_engineering_agent_work_item_guard_uncapped/migration.sql",
     table: "EngineeringAgentRun",
     tableMentions: 1,
     writeVerbs: 6,
@@ -2767,7 +2767,7 @@ export const RAW_SQL_ALLOWLIST = [
       "This migration only replaces the work item guard's body (owner decision 2026-11-15): a promoted v22 draft's publish item is no longer refused at a pull request cap. It writes no row and creates no table or trigger; its write verbs are the guard's TG_OP comparisons and the words in its comments, and the exact SQL counts remain pinned. Its EngineeringAgentRun mention reads the producing run, locked.",
   },
   {
-    path: "prisma/migrations/20261115200100_engineering_agent_work_item_guard_uncapped/migration.sql",
+    path: "prisma/migrations/20261116010300_engineering_agent_work_item_guard_uncapped/migration.sql",
     table: "EngineeringAgentWorkItem",
     tableMentions: 25,
     writeVerbs: 6,
@@ -2775,7 +2775,7 @@ export const RAW_SQL_ALLOWLIST = [
       "This migration only replaces the work item guard's body (owner decision 2026-11-15): a promoted v22 draft's publish item is no longer refused at a pull request cap. It writes no row and creates no table or trigger; its write verbs are the guard's TG_OP comparisons and the words in its comments, and the exact SQL counts remain pinned. Its EngineeringAgentWorkItem mentions are the guarded table itself: the promoted draft and the run's products are read from it.",
   },
   {
-    path: "prisma/migrations/20261115200100_engineering_agent_work_item_guard_uncapped/migration.sql",
+    path: "prisma/migrations/20261116010300_engineering_agent_work_item_guard_uncapped/migration.sql",
     table: "EngineeringAgentApproval",
     tableMentions: 1,
     writeVerbs: 6,
@@ -2783,7 +2783,7 @@ export const RAW_SQL_ALLOWLIST = [
       "This migration only replaces the work item guard's body (owner decision 2026-11-15): a promoted v22 draft's publish item is no longer refused at a pull request cap. It writes no row and creates no table or trigger; its write verbs are the guard's TG_OP comparisons and the words in its comments, and the exact SQL counts remain pinned. Its EngineeringAgentApproval mention is the unchanged T2 decision read.",
   },
   {
-    path: "prisma/migrations/20261115200100_engineering_agent_work_item_guard_uncapped/migration.sql",
+    path: "prisma/migrations/20261116010300_engineering_agent_work_item_guard_uncapped/migration.sql",
     table: "EngineeringAgentCapability",
     tableMentions: 2,
     writeVerbs: 6,
@@ -4268,13 +4268,13 @@ export const RUNTIME_SQL_ALLOWLIST = [
       "The replaced run guard keeps the original's three reads: the attempt and its card, the mode and freeze settings, and the owner queue counts (open pull requests, open decisions, active runs; the first T1 run is no longer read). All are EXECUTE over a TG_TABLE_SCHEMA-qualified constant name quoted with %I, because the function pins search_path to pg_catalog, pg_temp; every value is bound with USING. They read and never write.",
   },
   {
-    path: "prisma/migrations/20261115200000_engineering_agent_run_guard_uncapped/migration.sql",
+    path: "prisma/migrations/20261116010200_engineering_agent_run_guard_uncapped/migration.sql",
     count: 2,
     reason:
       "The uncapped run guard keeps two of the previous version's reads: the attempt and its card, and the mode and freeze settings; the owner queue count is gone. Both are EXECUTE over a TG_TABLE_SCHEMA-qualified constant name quoted with %I, because the function pins search_path to pg_catalog, pg_temp; every value is bound with USING. They read and never write.",
   },
   {
-    path: "prisma/migrations/20261115200100_engineering_agent_work_item_guard_uncapped/migration.sql",
+    path: "prisma/migrations/20261116010300_engineering_agent_work_item_guard_uncapped/migration.sql",
     count: 6,
     reason:
       "The uncapped work item guard keeps the previous version's reads but the pull request queue count. All are EXECUTE over a TG_TABLE_SCHEMA-qualified constant name quoted with %I, because the function pins search_path to pg_catalog, pg_temp; every value is bound with USING. They read and never write.",

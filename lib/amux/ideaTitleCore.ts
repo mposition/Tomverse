@@ -7,7 +7,7 @@
  * while the body does: the raw purge clears both
  * (lib/amux/ideaRawRetentionService.ts, CHECK AmuxIdeaSubmission_title_check).
  * Nothing indexes the column, so it has no length limit of its own
- * (prisma/migrations/20261115220000_amux_idea_title_no_length_cap).
+ * (prisma/migrations/20261116010700_amux_idea_title_no_length_cap).
  *
  * The backfill in prisma/migrations/20261104130000_amux_idea_title repeated the
  * former 80-character rule in SQL for Scout suggestions already sent.

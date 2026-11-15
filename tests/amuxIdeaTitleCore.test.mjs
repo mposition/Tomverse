@@ -83,7 +83,7 @@ test("the migration backfills only sent Scout ideas whose body still exists, wit
 });
 
 test("the 2026-11-15 migration drops only the length cap and keeps the purge rule", () => {
-  const dir = "../prisma/migrations/20261115220000_amux_idea_title_no_length_cap/";
+  const dir = "../prisma/migrations/20261116010700_amux_idea_title_no_length_cap/";
   const sql = readFileSync(new URL(`${dir}migration.sql`, import.meta.url), "utf8");
   const statements = sql.split(/\r?\n/).filter((line) => !line.startsWith("--")).join("\n");
   assert.match(statements, /DROP CONSTRAINT "AmuxIdeaSubmission_title_check",\s*ADD CONSTRAINT "AmuxIdeaSubmission_title_check" CHECK/);
