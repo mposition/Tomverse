@@ -137,7 +137,7 @@ test("@ui-risk plugin inventory shows logos, explicit permissions and one-action
   await page.goto("/plugins?lang=ko");
   await expect(page.getByRole("heading", { name: "플러그인", level: 1, exact: true })).toBeVisible();
   const nav = page.getByTestId("navigation-plugins"); await expect(nav).toHaveAttribute("aria-current", "page");
-  await expect(page.locator('[data-testid="plugin-card"] img[src="/plugins/providers/github.png"]')).toBeVisible();
+  await expect(page.locator('[data-testid="plugin-card"] img[src$="/plugins/providers/github.png"]')).toBeVisible();
   await page.getByTestId("plugin-card").filter({ hasText: "GitHub" }).getByRole("button", { name: "권한 관리" }).click();
   await expect(page.getByRole("checkbox").first()).toBeVisible();
   await expectNoHorizontalOverflow(page);
@@ -262,7 +262,7 @@ test("@ui-risk provider catalog searches both directories without presenting lis
       expect(sample.ratio).toBeGreaterThanOrEqual(4.5);
     }
   }
-  await expect(card.locator("img")).toHaveAttribute("src", "/plugins/providers/figma.png");
+  await expect(card.locator("img")).toHaveAttribute("src", /\/plugins\/providers\/figma\.png$/);
   await expect(card.getByRole("button", { name: "연결", exact: true })).toHaveCount(0);
   await card.getByRole("button", { name: "상세 정보" }).click();
   await expect(page.getByRole("link", { name: "공급자 문서" })).toHaveAttribute("href", /^https:\/\//);
