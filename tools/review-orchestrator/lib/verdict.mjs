@@ -21,7 +21,10 @@ const SEVERITY_SYNONYMS = new Map([
   ["info", "nit"], ["suggestion", "nit"], ["style", "nit"],
 ]);
 
-const FENCE = /```[ \t]*(?:json|JSON)?[ \t]*\r?\n([\s\S]*?)\r?\n?[ \t]*```/g;
+const FENCE = /```[ \t]*([A-Za-z0-9_-]*)[ \t]*\r?\n([\s\S]*?)\r?\n?[ \t]*```/g;
+// Unfenced objects are looked for around the last few mentions of "verdict" only,
+// so a long answer full of braces cannot make the scan slow.
+const MAX_UNFENCED_MENTIONS = 20;
 
 const unknown = (reason) => ({ verdict: "unknown", reason, findings: [] });
 
@@ -48,41 +51,63 @@ function normaliseFinding(raw) {
   return finding;
 }
 
-/** Every JSON object in the text that mentions a verdict, last first: a block, fenced or not. */
-function candidateObjects(text) {
-  const found = [];
-  for (const match of text.matchAll(FENCE)) {
-    try {
-      const parsed = JSON.parse(match[1]);
-      if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) found.push(parsed);
-    } catch { /* not a block of ours */ }
-  }
-  if (found.length > 0) return found.reverse();
-  // No usable fenced block: look for a balanced {...} that has a verdict.
-  for (let start = text.lastIndexOf("{"); start >= 0; start = text.lastIndexOf("{", start - 1)) {
-    let depth = 0;
-    let inString = false;
-    for (let i = start; i < text.length; i += 1) {
-      const char = text[i];
-      if (inString) {
-        if (char === "\\") i += 1;
-        else if (char === '"') inString = false;
-      } else if (char === '"') inString = true;
-      else if (char === "{") depth += 1;
-      else if (char === "}") {
-        depth -= 1;
-        if (depth === 0) {
-          try {
-            const parsed = JSON.parse(text.slice(start, i + 1));
-            if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) &&
-                "verdict" in parsed) return [parsed];
-          } catch { /* keep looking further back */ }
-          break;
-        }
-      }
+const asObject = (value) => (value !== null && typeof value === "object" && !Array.isArray(value) ? value : null);
+
+/** The balanced {...} around `at`, or null: starts at the nearest `{` before it. */
+function objectAround(text, at) {
+  const start = text.lastIndexOf("{", at);
+  if (start < 0) return null;
+  let depth = 0;
+  let inString = false;
+  for (let i = start; i < text.length; i += 1) {
+    const char = text[i];
+    if (inString) {
+      if (char === "\\") i += 1;
+      else if (char === '"') inString = false;
+    } else if (char === '"') inString = true;
+    else if (char === "{") depth += 1;
+    else if (char === "}") {
+      depth -= 1;
+      if (depth === 0) return { start, end: i + 1 };
     }
   }
-  return [];
+  return null;
+}
+
+/**
+ * The places the reviewer wrote a verdict, in order: fenced blocks that parse
+ * as an object (or are marked json, or mention a verdict, and do not parse),
+ * and unfenced objects around a "verdict" key. A candidate that does not parse
+ * is kept as one with `parsed: null`: the LAST candidate decides, so a broken
+ * final block is not replaced by an earlier accept.
+ */
+function candidates(text) {
+  const found = [];
+  const spans = [];
+  for (const match of text.matchAll(FENCE)) {
+    spans.push([match.index, match.index + match[0].length]);
+    let parsed = null;
+    try { parsed = asObject(JSON.parse(match[2])); } catch { /* not valid JSON */ }
+    if (parsed || match[1].toLowerCase() === "json" || match[2].includes('"verdict"')) {
+      found.push({ start: match.index, parsed });
+    }
+  }
+  const inFence = (position) => spans.some(([from, to]) => position >= from && position < to);
+  const mentions = [];
+  for (let at = text.indexOf('"verdict"'); at >= 0; at = text.indexOf('"verdict"', at + 1)) {
+    if (!inFence(at)) mentions.push(at);
+  }
+  let covered = -1;
+  for (const at of mentions.slice(-MAX_UNFENCED_MENTIONS)) {
+    if (at < covered) continue;
+    const span = objectAround(text, at);
+    if (!span || span.end <= at) continue;
+    covered = span.end;
+    let parsed = null;
+    try { parsed = asObject(JSON.parse(text.slice(span.start, span.end))); } catch { /* not valid JSON */ }
+    found.push({ start: span.start, parsed });
+  }
+  return found.sort((x, y) => x.start - y.start);
 }
 
 function verdictOf(value) {
@@ -95,11 +120,13 @@ function verdictOf(value) {
 
 export function parseReviewerOutput(text) {
   if (typeof text !== "string" || text.length === 0) return unknown("empty_output");
-  const objects = candidateObjects(text);
-  if (objects.length === 0) return unknown("no_verdict_block");
-  // The last object that carries a verdict or findings is the answer, even when
-  // its verdict is unreadable or says unknown: an earlier accept is not revived.
-  const parsed = objects.find((item) => "verdict" in item || Array.isArray(item.findings)) ?? objects[0];
+  const found = candidates(text);
+  if (found.length === 0) return unknown("no_verdict_block");
+  // The last place a verdict was written is the answer, even when it cannot be
+  // read or says unknown: an earlier accept is not revived.
+  const last = found.at(-1);
+  if (last.parsed === null) return unknown("verdict_not_json");
+  const parsed = last.parsed;
   const findings = (Array.isArray(parsed.findings) ? parsed.findings : [])
     .flatMap((raw) => { const finding = normaliseFinding(raw); return finding ? [finding] : []; });
   // A blocker or major finding rejects whatever the reviewer concluded.

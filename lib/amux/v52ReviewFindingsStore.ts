@@ -60,6 +60,10 @@ export async function prepareAmuxV52ReviewFindings(input: { attemptId: string;
   if (input.verdict !== "reject") return null;
   const parsed = parseAmuxV52FindingsTransport(input.findingsSummary);
   if (!parsed) return null;
+  // A record that exists already (a repeated submission) seals no new body, so no key is made for it.
+  const existing = await prisma.amuxV52ReviewRecord.findUnique({
+    where: { attemptId: input.attemptId }, select: { attemptId: true } });
+  if (existing) return null;
   const doc = fitAmuxV52FindingsDoc(parsed);
   const attempt = await prisma.amuxExecutionAttempt.findUnique({
     where: { id: input.attemptId },

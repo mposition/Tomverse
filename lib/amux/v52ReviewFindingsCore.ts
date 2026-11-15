@@ -424,7 +424,8 @@ export function amuxV52FindingsRepeat(current: AmuxV52FindingsDoc, previous: Amu
   const before = blocking(previous);
   return blocking(current).some((now) => before.some((then) => then.vendor === now.vendor && (
     (now.finding.file !== null && now.finding.file === then.finding.file &&
-      (now.finding.line === then.finding.line || overlap(now.tokens, then.tokens) >= 0.5)) ||
+      ((now.finding.line !== null && now.finding.line === then.finding.line) ||
+        overlap(now.tokens, then.tokens) >= 0.5)) ||
     overlap(now.tokens, then.tokens) >= 0.6)));
 }
 

@@ -76,7 +76,7 @@ export async function POST(request: Request) {
     return amuxJsonNoStore({ error: "Invalid content type." }, 415);
   return withAmuxRouteBudget(async () => {
     try {
-      const body = await readLimitedJson(request, 6 * 1_024 * 1_024, requestSchema);
+      const body = await readLimitedJson(request, 16 * 1_024 * 1_024, requestSchema);
       // A reject's findings are sealed under the attempt's own key, made here
       // before the record's transaction; without them the verdict is recorded.
       const findings = await prepareAmuxV52ReviewFindings({

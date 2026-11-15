@@ -232,6 +232,18 @@ test("verdict parsing never guesses a verdict, reads what it can, and blocking f
   const finalUnknown = parseReviewerOutput(`${block({ verdict: "accept", findings: [] })}\n${block({ verdict: "unknown", reason: "cannot tell" })}`);
   assert.equal(finalUnknown.verdict, "unknown");
   assert.equal(parseReviewerOutput(`${block({ verdict: "accept", findings: [] })}\n${block({ verdict: "maybe", findings: [] })}`).verdict, "unknown");
+  // The last place a verdict was written decides, whatever shape it has.
+  const accept = block({ verdict: "accept", findings: [] });
+  const fence = "```";
+  assert.equal(parseReviewerOutput(`${accept}\n${fence}json\n{"verdict": "reject", broken\n${fence}`).verdict, "unknown");
+  assert.equal(parseReviewerOutput(`${accept}\n{"verdict":"reject","findings":[{"severity":"major","summary":"late"}]}`).verdict, "reject");
+  // A code block after the verdict is not mistaken for a verdict.
+  assert.equal(parseReviewerOutput(`${accept}\n${fence}ts\nconst a = {;\n${fence}`).verdict, "accept");
+  // A long answer of braces cannot stall the parser.
+  const started = Date.now();
+  assert.equal(parseReviewerOutput("{".repeat(2_000_000)).verdict, "unknown");
+  assert.equal(parseReviewerOutput('{"verdict" '.repeat(200_000)).verdict, "unknown");
+  assert.ok(Date.now() - started < 5_000);
   const overridden = parseReviewerOutput(block({ verdict: "accept", findings: [{ severity: "major", summary: "bad" }] }));
   assert.equal(overridden.verdict, "reject");
   // The last block wins: a quoted example earlier in the answer is not the verdict.

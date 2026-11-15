@@ -701,7 +701,8 @@ test("a rejected run shows each finding with its reviewer, severity, file and li
       { severity: "major" as const, summary: "The retry path loses the original error.",
         file: "lib/chat/stream.ts", line: 42 }] },
     { vendor: "openai", verdict: "reject" as const, reason: "blocking_finding_overrides_accept",
-      note: "The change drops the retry cap.", findings: [], omitted: 0 }] };
+      note: "The change drops the retry cap.", findings: [], omitted: 0 },
+    { vendor: "google", verdict: "unknown" as const, reason: "timeout", note: null, findings: [], omitted: 0 }] };
   const html = renderToStaticMarkup(<AmuxReviewRejectionReason attemptNumber={2}
     review={{ verdict: "reject", jobId: OLD_JOB, reviewerVendors: ["moonshot", "openai"],
       findingsSummary: null, findings: doc, findingsState: "available" }} />);
@@ -712,6 +713,7 @@ test("a rejected run shows each finding with its reviewer, severity, file and li
   assert.match(html, /data-severity="major"[^>]*>[\s\S]*?major[\s\S]*?moonshot[\s\S]*?lib\/chat\/stream\.ts:42[\s\S]*?The retry path/);
   assert.match(html, /openai rejected without listing a finding \(blocking_finding_overrides_accept\)\./);
   assert.match(html, /The change drops the retry cap\./);
+  assert.match(html, /google gave no usable verdict \(timeout\)\./, "a reviewer with no verdict is not said to have rejected");
   assert.match(html, /3 more findings were not kept\./);
   assert.match(html, /shown as data/);
   assert.doesNotMatch(html, /npm run -s review/, "the CLI hint only appears when there is no content");

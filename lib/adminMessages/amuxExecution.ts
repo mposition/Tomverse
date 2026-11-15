@@ -99,8 +99,8 @@ export const adminAmuxExecutionMessages = defineAdminMessages({
       noSummary: (jobId: string) => `The reasons were not kept with this rejection (an older record, or the review sent none). The full reasons are on the review server, job ${jobId}.`,
       noSummaryCommand: "Read them on the PC or the AMUX box:",
       noJob: "This rejection has no review job id, so its reasons cannot be read.",
-      noFinding: (vendor: string | null, reason: string | null) =>
-        `${vendor ?? "A reviewer"} rejected without listing a finding${reason ? ` (${reason})` : ""}.`,
+      noFinding: (vendor: string | null, reason: string | null, rejected: boolean) =>
+        `${vendor ?? "A reviewer"} ${rejected ? "rejected without listing a finding" : "gave no usable verdict"}${reason ? ` (${reason})` : ""}.`,
       omitted: (count: number) => `${count} more finding${count === 1 ? " was" : "s were"} not kept.`,
       purged: "These findings passed their retention period and were deleted.",
       unreadable: "The findings are kept but could not be opened just now. Reload to try again.",
@@ -275,8 +275,8 @@ export const adminAmuxExecutionMessages = defineAdminMessages({
       noSummary: (jobId: string) => `이 거절에는 사유가 함께 남지 않았어요(이전 기록이거나 검토가 사유를 보내지 않았어요). 사유 원문은 검토 서버 job ${jobId}에 있어요.`,
       noSummaryCommand: "PC나 AMUX 박스에서 이렇게 읽을 수 있어요:",
       noJob: "이 거절에는 검토 job id가 없어 사유를 읽을 수 없어요.",
-      noFinding: (vendor: string | null, reason: string | null) =>
-        `${vendor ?? "검토자"}가 지적을 적지 않고 거절했어요${reason ? `(${reason})` : ""}.`,
+      noFinding: (vendor: string | null, reason: string | null, rejected: boolean) =>
+        `${vendor ?? "검토자"}가 ${rejected ? "지적을 적지 않고 거절했어요" : "쓸 수 있는 판정을 내지 못했어요"}${reason ? `(${reason})` : ""}.`,
       omitted: (count: number) => `지적 ${count}건은 전송 한도 때문에 남기지 못했어요.`,
       purged: "이 지적은 보존 기간이 지나 삭제됐어요.",
       unreadable: "지적은 보관돼 있지만 지금은 열 수 없어요. 새로고침해서 다시 시도하세요.",

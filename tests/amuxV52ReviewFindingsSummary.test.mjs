@@ -127,6 +127,9 @@ test("a review repeats the previous one only for the same reviewer's similar blo
     "same file and the same worry in other words");
   assert.equal(amuxV52FindingsRepeat(doc("moonshot", ["blocker", "Different words entirely about quota", "lib/image/out.ts", 17]), before), true,
     "same file and line");
+  assert.equal(amuxV52FindingsRepeat(doc("moonshot", ["major", "Completely different worry about quota", "lib/image/out.ts", null]),
+    doc("moonshot", ["major", "Something unrelated: retries loop forever", "lib/image/out.ts", null])), false,
+  "no line numbers on either side is not a line match");
   assert.equal(amuxV52FindingsRepeat(doc("moonshot", ["major", "The output is written after the redirect, so the file is empty."]), before), true,
     "the same sentence without a file");
   assert.equal(amuxV52FindingsRepeat(doc("openai", ["major", "The output is written after the redirect, so the file is empty.", "lib/image/out.ts", 17]), before), false,

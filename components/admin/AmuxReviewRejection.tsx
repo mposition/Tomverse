@@ -69,7 +69,8 @@ export function AmuxReviewRejectionReason({ review, attemptNumber, showAttempt =
             .map((reviewer, index) => (
               <div key={index} className="mt-1 text-zinc-200" data-testid="amux-review-rejection-no-finding">
                 <p className="text-xs text-zinc-400">
-                  {m.noFinding(reviewer.vendor ? amuxVisibleInspectionText(reviewer.vendor) : null, reviewer.reason)}
+                  {m.noFinding(reviewer.vendor ? amuxVisibleInspectionText(reviewer.vendor) : null, reviewer.reason,
+                    reviewer.verdict === "reject")}
                 </p>
                 {reviewer.note ? (
                   <ul className="mt-0.5 space-y-0.5 break-words [overflow-wrap:anywhere]">
