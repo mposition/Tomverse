@@ -418,8 +418,8 @@ existing Argon registry row. A read-only transaction on production inspected
 only its exact Argon row; no production write was made. The dev plan copies
 that profile's existing prices, credits and 32,768 output limit, with dev-only
 low reasoning and app-managed search. Its frozen maximum reservation for one
-three-generation case is US$4.440248; earlier full reservations plus this case
-are US$16.282508, within the proposed cumulative US$16.50 ceiling. This is
+three-generation case is US$4.440548; earlier full reservations plus this case
+are US$16.282808, within the approved cumulative US$16.50 ceiling. This is
 preparation, not evidence of an executed UI case or a successful deployment.
 
 The current integration review `r-20261115-030651-f58ad2` rejected two
@@ -456,3 +456,101 @@ the checkpoint TTL, so a resumable checkpoint cannot outlive its hold. One
 poisoned settlement is deferred without blocking later runs. Fifteen real-DB
 cases now cover these paths, including missing/valid/revoked unlock grants,
 late cancellation, stale cancellation recovery and settlement error isolation.
+
+### Accepted review and dev deployment
+
+The repair review `r-20261115-033845-44f6a6` accepted commit
+`cd47a2a563a2973a70af63068c5ce299f524806f`. Its non-blocking follow-ups concern
+large batches of poisoned settlements and additional concurrent-lock/route
+regressions. The later clean develop merge changes none of those reviewed
+boundaries. The deployed source is `ba6dccec5467629ac99712dae303b3961a73bac9`,
+including develop `f54fd4d4a7ac7deba960584ecc25a25d23e16412`.
+
+PR [#3977](https://github.com/mposition/Tomverse/pull/3977) targets develop and
+retains `ci:hold`. An external actor marked it ready and removed the hold; the
+hold was restored under the owner's standing instruction. No CI was started or
+retried by this session. No PR merge or production deployment was performed.
+
+The owner-authorized dev web deployment
+`a7a79b88-13e8-4535-8e1d-727959cc4521` reached `SUCCESS`, including migrations
+and `/api/health`. This is a clean local source upload; Railway's build-info
+reports that deployment ID and success but its commit SHA is null. The source
+commit attribution comes from the uploaded clean worktree, not build-info.
+The web service retains its existing develop source configuration.
+
+Dev alone now enables Research, page reading and durable execution with
+`RESEARCH_PREVIEW_MODEL_IDS=gemini-4-argon`. The production model catalog was
+read-only; the exact Argon profile was copied into dev with the existing audit
+chain, preserving 32,768 output tokens, credit weight 12 and US$4/20 per million
+input/output tokens. Its dev overrides use low reasoning and app-managed search.
+The independent Research caps remain 4,096 aggregate output tokens, three
+generations, five Brave attempts and two page reads. No production settings
+were changed; Native's runtime feature gate remains opt-in.
+
+The dev-only Research Preview Worker has no public domain and references the
+existing dev web credentials rather than storing copied values. Its source is
+pinned to the deployed feature commit above. The controlled test deployment
+`7b29e2d7-7e78-4773-b0bd-998c4a797db7` reached `SUCCESS` with one step per
+claim. After the successful test, deployment
+`4202ba0f-7b9f-4afd-b1a1-225df6608fab` reached `SUCCESS` with the default
+`npm run worker:research-preview` command (up to three completed steps per
+claim). This pin should be reconciled to develop when the approved change is
+eventually merged; this session does not authorize that merge.
+
+### Actual Argon UI save, reload and resume acceptance
+
+After the owner completed Cloudflare Access and application login, the actual
+dev Chat UI submitted the approved `official-compact-original` RFC 1149 case
+once with Gemini 4 Argon. The user explicitly approved using Argon in place of
+Pro under the same three-call/US$4.50 case cap. No second case or retry ran.
+
+Conversation: `cmwhazb3x000502o282fkhfrv`; run:
+`cmwhazc01000702o221nkr9bw`; reservation:
+`d248e315-1642-4a68-999d-ecaf1cb2f8b2`.
+
+| Observed state | Generations | Brave attempts | Page reads | Reservations |
+| --- | --- | --- | --- | --- |
+| First saved checkpoint | 1 | 2 | 0 | 1 |
+| Browser reload, before explicit resume | 1 | 2 | 0 | 1 |
+| Second saved checkpoint after UI resume | 2 | 2 | 2 | 1 |
+| Completed after second UI resume | 3 | 2 | 2 | 1 |
+| Completed after browser reload | 3 | 2 | 2 | 1 |
+
+The second checkpoint contains the official HTML source R2, read without
+truncation: 3,407 characters, SHA-256
+`d0d110a83e0b5d6766211170f07f1cbda0ea61b1c895a2f0072049d0c74a7989`.
+The plain-text R3 read returned `unsupported_content`. The final report
+explicitly discloses that failed read, cites the successful original HTML,
+distinguishes 1 April 1990 publication from 15 November 2026 retrieval, and
+was accepted as `complete` / `report_submitted` with no rejection code.
+The 6,163-character stored report survived reload byte-for-byte. Both terminal
+reads confirm that the private checkpoint and its expiry are cleared.
+
+Provider-reported totals are 7,886 input and 1,500 output tokens, including
+zero reported reasoning tokens. The reservation settled at US$0.061544 for
+Google and 20 user credits. Brave is a separate provider budget: two attempts
+at the frozen US$0.005 rate add US$0.010000, giving known case cost US$0.071544.
+The full case reservation is US$4.440548 (model US$4.415548 plus search
+US$0.025000). Retaining every earlier reservation gives US$16.282808 and
+21 cumulative generation intents, within the owner's US$16.50/21-call cap.
+These are application accounting values, not a reconciled provider invoice.
+The historical unknown Google call remains conservatively reserved.
+
+Scoped read-only DB snapshots and screenshots are retained in the handoff
+evidence directory as `dev-ui-first-state.json`,
+`dev-ui-checkpoint1-after-reload.json`, `dev-ui-checkpoint2.json`,
+`dev-ui-final-state-probe.json`, `dev-ui-completed-after-reload.json`,
+`dev-ui-completed-financial-proof.json`, and `dev-ui-completed-proof.jpg`.
+The public stored report is exported unchanged as `dev-ui-argon-report.md`.
+The browser keeps the completed report open and restores the user's original
+new-chat draft and Smart Auto setting without submitting that draft.
+
+Final integration checks include 108 focused tests, 34 boundary/continuation
+tests, 15 durable real-DB cases, 23 existing Perplexity DB cases, three existing
+search-settlement DB cases, 43 accounting unit tests, whole-repository
+TypeScript, scoped ESLint, production builds and six Native browser cases.
+The web suite has 92 passes, 94 skips and two failures caused by missing Windows
+composer screenshot goldens; these are not claimed as passes. Actual dev UI
+acceptance above succeeds. The dedicated local test database is stopped after
+verification. General research quality, unsupported plain-text responses and
+production rollout remain outside this single successful UI case.
