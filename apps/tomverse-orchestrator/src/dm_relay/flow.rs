@@ -666,24 +666,33 @@ where
     B: DmBroker + ?Sized,
 {
     // 4a. The workspace (owner decision 2026-11-15): what the app says the
-    // request's workspace holds -- a read, so a lost or refused answer is just
-    // no workspace -- then the broker's check of it and its payload lines.
-    // `workspace: null` (the app's kill switch) and anything the relay cannot
-    // read are the card alone. The broker's wait ends at the result deadline
-    // or after DM_WORKSPACE_WAIT, whichever comes first, so a broker that
-    // does not answer never holds the card past its window.
+    // request's workspace holds, then the broker's check of it and its
+    // payload lines. The card no longer carries its evidence, so a DM must
+    // never judge without it: an app answer the relay cannot read, evidence
+    // the app or the broker left out, or a broker that does not answer
+    // discards the request -- the card stays with the operator (§2-1). Only
+    // the app's own `workspace: null` (its kill switch, under which the cards
+    // carry their evidence inline) sends the card alone. The broker's wait
+    // ends at the result deadline or after DM_WORKSPACE_WAIT, whichever comes
+    // first, so a broker that does not answer never holds the card past its
+    // window.
     let answered = app
         .post(AppRoute::Workspace, json!({"request_id": request_id}))
         .await;
     let evidence = match read_app_answer(&answered, AppRoute::Workspace.envelope()) {
-        AppAnswer::Done(value) => read_app_workspace(&value),
-        _ => None,
+        AppAnswer::Done(value) if value.get("workspace") == Some(&Value::Null) => None,
+        AppAnswer::Done(value) => match read_app_workspace(&value) {
+            Some(evidence) if evidence.complete => Some(evidence),
+            Some(_) => return discard(app, request_id, "workspace_evidence_refused").await,
+            None => return discard(app, request_id, "workspace_unreadable").await,
+        },
+        _ => return discard(app, request_id, "workspace_unreadable").await,
     };
     let workspace = match &evidence {
         None => None,
         Some(evidence) => {
             let until = deadline.min(Instant::now() + DM_WORKSPACE_WAIT);
-            match tokio::time::timeout_at(
+            let answer = match tokio::time::timeout_at(
                 until,
                 broker.exchange(workspace_request_line(request_id, evidence)),
             )
@@ -693,6 +702,16 @@ where
                     read_workspace_answer(&answer, request_id, evidence)
                 }
                 Ok(BrokerExchange::NotContacted | BrokerExchange::Lost) | Err(_) => None,
+            };
+            match answer {
+                // Every file the app sent, or none of this goes.
+                Some(workspace) if workspace.manifest.len()
+                    == evidence.files.len() + usize::from(workspace.target_sha.is_some()) =>
+                {
+                    Some(workspace)
+                }
+                Some(_) => return discard(app, request_id, "workspace_evidence_refused").await,
+                None => return discard(app, request_id, "workspace_unavailable").await,
             }
         }
     };
@@ -963,6 +982,17 @@ pub(crate) mod tests {
             app
         }
 
+        /// One more scripted answer.
+        pub(crate) fn and(self, route: AppRoute, answer: HttpAnswer) -> Self {
+            self.answers
+                .lock()
+                .unwrap()
+                .entry(route.path())
+                .or_default()
+                .push_back(answer);
+            self
+        }
+
         /// The routes of the question and delivery flows that write. The v22
         /// question sync runs every tick too (`v22_question`), and every
         /// request reads its workspace before the intent (the workspace tests
@@ -998,12 +1028,20 @@ pub(crate) mod tests {
     impl DmApp for FakeApp {
         async fn post(&self, route: AppRoute, body: Value) -> HttpAnswer {
             self.calls.lock().unwrap().push((route, body));
-            self.answers
+            let queued = self
+                .answers
                 .lock()
                 .unwrap()
                 .get_mut(route.path())
-                .and_then(VecDeque::pop_front)
-                .unwrap_or(HttpAnswer::Lost)
+                .and_then(VecDeque::pop_front);
+            // A workspace nobody scripted is the app's kill switch: the card alone.
+            queued.unwrap_or_else(|| match route {
+                AppRoute::Workspace => HttpAnswer::Answered {
+                    status: 200,
+                    body: br#"{"found":true,"workspace":null}"#.to_vec(),
+                },
+                _ => HttpAnswer::Lost,
+            })
         }
     }
 
@@ -1331,17 +1369,21 @@ pub(crate) mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn a_silent_workspace_is_waited_on_for_its_bound_then_the_card_goes_alone() {
-        let app = app_with_workspace();
+    async fn a_silent_workspace_is_waited_on_for_its_bound_then_the_card_stays_with_the_operator() {
+        let mut app = app_with_workspace();
+        app = app.and(AppRoute::AssignmentDiscard, recorded());
         let local = FakeLocal::marking();
         let broker = SilentWorkspaceBroker(FakeBroker::answering(|_| {
             broker_says(proposal(), "process_ended", json!({"status": "verified"}))
         }));
         let started = Instant::now();
         let run = relay_candidate(&app, &local, &broker, &candidate()).await;
-        assert_eq!(run, RelayRun::end(RelayEnd::Settled("result_recorded")));
+        // The card no longer carries its evidence: without the workspace no DM judges it.
+        assert_eq!(run, RelayRun::end(RelayEnd::Settled("workspace_unavailable")));
         assert!(started.elapsed() >= DM_WORKSPACE_WAIT && started.elapsed() < DM_WORKSPACE_WAIT * 2);
-        assert_eq!(app.body(AppRoute::Transmissions)["transmission"]["snapshotState"], json!("none"));
+        assert!(!app.routes().contains(&AppRoute::Transmissions));
+        assert!(app.routes().contains(&AppRoute::AssignmentDiscard));
+        assert_eq!(local.routes(), vec![LocalRoute::SetPending, LocalRoute::ReleasePending]);
     }
 
     #[tokio::test(start_paused = true)]
@@ -1363,20 +1405,33 @@ pub(crate) mod tests {
         let started = Instant::now();
         let run = relay_candidate(&app, &local, &broker, &candidate()).await;
         // The window (5 s) ends first: no intent, the request discarded, the marker released.
-        assert_eq!(run.end, RelayEnd::Settled("deadline_passed"));
+        assert_eq!(run.end, RelayEnd::Settled("workspace_unavailable"));
         assert!(started.elapsed() < Duration::from_secs(10));
         assert!(!app.routes().contains(&AppRoute::Transmissions));
         assert_eq!(local.routes(), vec![LocalRoute::SetPending, LocalRoute::ReleasePending]);
     }
 
     #[tokio::test]
-    async fn no_workspace_from_the_app_or_the_broker_sends_the_card_alone() {
-        for answer in [
-            BrokerExchange::NotContacted,
-            BrokerExchange::Lost,
-            BrokerExchange::Answered(b"{}".to_vec()),
+    async fn a_workspace_the_broker_cannot_give_whole_keeps_the_card_with_the_operator() {
+        let refused_file = BrokerExchange::Answered(
+            serde_json::to_vec(&json!({
+                "v": 1, "type": "workspace", "requestId": REQUEST_ID, "state": "develop",
+                "targetSha": WORKSPACE_SHA, "lines": base64::engine::general_purpose::STANDARD.encode(format!(
+                    "{}\n",
+                    json!({"workspace": {"repository": "github.com/mposition/Tomverse", "commit": WORKSPACE_SHA,
+                        "state": "develop", "patch": false, "files": 0}}))),
+                "files": [], "reason": null, "excluded": {"secret_content": 1},
+            }))
+            .unwrap(),
+        );
+        for (answer, end) in [
+            (BrokerExchange::NotContacted, "workspace_unavailable"),
+            (BrokerExchange::Lost, "workspace_unavailable"),
+            (BrokerExchange::Answered(b"{}".to_vec()), "workspace_unavailable"),
+            // The broker left the patch out (its secret scan): the DM would judge without it.
+            (refused_file, "workspace_evidence_refused"),
         ] {
-            let app = app_with_workspace();
+            let app = app_with_workspace().and(AppRoute::AssignmentDiscard, recorded());
             let local = FakeLocal::marking();
             let workspace_answer = std::sync::Mutex::new(Some(answer));
             let broker = FakeBroker::answering(move |line| {
@@ -1387,13 +1442,32 @@ pub(crate) mod tests {
                 }
             });
             let run = relay_candidate(&app, &local, &broker, &candidate()).await;
-            assert_eq!(run, RelayRun::end(RelayEnd::Settled("result_recorded")));
-            let transmission = app.body(AppRoute::Transmissions)["transmission"].clone();
-            assert_eq!(transmission["snapshotState"], json!("none"));
-            assert_eq!(transmission["snapshotManifestDigest"], Value::Null);
+            assert_eq!(run, RelayRun::end(RelayEnd::Settled(end)));
+            assert!(!app.routes().contains(&AppRoute::Transmissions), "{end}");
+            assert_eq!(broker.lines.lock().unwrap().len(), 1, "no launch");
         }
-        // The app's kill switch (`workspace: null`) and a lost app answer: no
-        // broker workspace request at all, and a launch with no workspace.
+        // An app answer the relay cannot read, or evidence the app left out: no broker at all.
+        for (workspace, end) in [
+            (HttpAnswer::Lost, "workspace_unreadable"),
+            (HttpAnswer::Answered { status: 200, body: br#"{"found":true,"workspace":{"target_sha":null,"files":[],"excluded":{"secret_content":1}}}"#.to_vec() },
+                "workspace_evidence_refused"),
+        ] {
+            let app = FakeApp::with(vec![
+                (AppRoute::Requests, routed("dm_proposal")),
+                (AppRoute::Assignments, assigned(Duration::from_secs(1800))),
+                (AppRoute::Workspace, workspace),
+                (AppRoute::AssignmentDiscard, recorded()),
+            ]);
+            let local = FakeLocal::marking();
+            let broker = FakeBroker::answering(|_| BrokerExchange::Lost);
+            let run = relay_candidate(&app, &local, &broker, &candidate()).await;
+            assert_eq!(run, RelayRun::end(RelayEnd::Settled(end)));
+            assert!(broker.lines.lock().unwrap().is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn only_the_apps_kill_switch_sends_the_card_alone() {
         for workspace in [
             Some(HttpAnswer::Answered { status: 200, body: br#"{"found":true,"workspace":null}"#.to_vec() }),
             None,

@@ -71,8 +71,15 @@ export const DM_WORKSPACE_HISTORY_DEPTH = 100;
 export const DM_WORKSPACE_EVIDENCE_MAX_BYTES = 16 * 1024 * 1024;
 /** The request directory on the box's disk after the checkout: two requests may run at once (one per instance). */
 export const DM_WORKSPACE_DISK_MAX_BYTES = 4 * 1024 * 1024 * 1024;
-/** One `git fetch` of the commit and its history, within the request's 30-minute result window. */
-export const DM_WORKSPACE_FETCH_TIMEOUT_MS = 10 * 60 * 1000;
+/**
+ * The whole workspace build at launch (every git step, the fetch included),
+ * before the launcher is asked. It comes out of the request's result window
+ * (30 minutes from the assignment, the database's), so it is short; the
+ * broker's answer deadline grows by it (DM_BROKER_RESPONSE_DEADLINE_MS).
+ */
+export const DM_WORKSPACE_BUILD_MAX_MS = 5 * 60 * 1000;
+/** One `git fetch` of the commit and its history: all of the build's time if it needs it. */
+export const DM_WORKSPACE_FETCH_TIMEOUT_MS = DM_WORKSPACE_BUILD_MAX_MS;
 /** Every other git step (init, checkout, worktree, apply). */
 export const DM_WORKSPACE_GIT_STEP_TIMEOUT_MS = 2 * 60 * 1000;
 /** One public commit lookup. */

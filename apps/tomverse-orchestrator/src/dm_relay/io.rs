@@ -36,9 +36,10 @@ pub const DM_RELAY_LOCAL_TOKEN_HEADER: &str = "x-amux-dm-relay-token";
 pub const DM_BROKER_SOCKET_PATH: &str = "/run/amux-dm-broker/broker.sock";
 
 /// `DM_BROKER_RESPONSE_DEADLINE_MS`: the hard timeout (30 minutes), the
-/// launcher unit's two minutes, and a minute each for the broker and the
-/// bridge. A broker silent past it is a lost answer.
-pub const DM_BROKER_RESPONSE_DEADLINE: Duration = Duration::from_millis(34 * 60 * 1000);
+/// launcher unit's two minutes, the workspace build before the launcher (five
+/// minutes, `DM_WORKSPACE_BUILD_MAX_MS`), and a minute each for the broker and
+/// the bridge. A broker silent past it is a lost answer.
+pub const DM_BROKER_RESPONSE_DEADLINE: Duration = Duration::from_millis(39 * 60 * 1000);
 
 /// Connecting to a local socket is immediate; a broker that does not accept
 /// within this has received nothing.
@@ -792,6 +793,8 @@ mod tests {
                     json!({"found": true, "status": "not_recorded",
                     "result_kind": null, "event_id": null, "reason": null}),
                 ),
+                // The workspace switched off, unless a test says so: the card alone.
+                "workspace" => Reply::Json(200, json!({"found": true, "workspace": null})),
                 // Stage S2-2b4: no decision is left without an outcome, unless a test says so.
                 "deliveries/unsettled" => Reply::Json(
                     200,

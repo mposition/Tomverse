@@ -57,6 +57,9 @@ pub const DM_WORKSPACE_WAIT: std::time::Duration = std::time::Duration::from_sec
 pub struct WorkspaceEvidence {
     pub target_sha: Option<String>,
     pub files: Vec<Value>,
+    /// The app left nothing out (`excluded` is empty): what it sent is the
+    /// card's whole evidence.
+    pub complete: bool,
 }
 
 fn is_sha(value: &str) -> bool {
@@ -99,6 +102,7 @@ pub fn read_app_workspace(value: &Value) -> Option<WorkspaceEvidence> {
     Some(WorkspaceEvidence {
         target_sha,
         files: files.clone(),
+        complete: workspace["excluded"].as_object()?.is_empty(),
     })
 }
 
@@ -261,6 +265,7 @@ mod tests {
         WorkspaceEvidence {
             target_sha: None,
             files: vec![json!({"name": "PATCH.diff", "content": "ZGlmZg=="})],
+            complete: true,
         }
     }
 

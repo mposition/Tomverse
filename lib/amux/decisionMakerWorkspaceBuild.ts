@@ -8,6 +8,7 @@ import { dmHostPath, type DmLauncherHost } from "./decisionMakerLauncherFs.ts";
 import type { DmInstanceScope } from "./decisionMakerSwitchCore.ts";
 import {
   DM_WORKSPACE_API_ORIGIN,
+  DM_WORKSPACE_BUILD_MAX_MS,
   DM_WORKSPACE_CLONE_URL,
   DM_WORKSPACE_DISK_MAX_BYTES,
   DM_WORKSPACE_FETCH_TIMEOUT_MS,
@@ -235,6 +236,14 @@ export async function buildDmWorkspace(
           "protocol.file.allow=always",
         ]);
   const cloneUrl = options.git?.cloneUrl ?? DM_WORKSPACE_CLONE_URL;
+  // One budget for every step (DM_WORKSPACE_BUILD_MAX_MS): a step that would
+  // run past it is not started, and the one running is cut at it.
+  const buildDeadline = Date.now() + DM_WORKSPACE_BUILD_MAX_MS;
+  const unbounded = git;
+  const bounded: DmGitRunner = async (args, step) => {
+    const left = buildDeadline - Date.now();
+    return left <= 0 ? { ok: false, stdout: "" } : unbounded(args, { ...step, timeoutMs: Math.min(step.timeoutMs, left) });
+  };
   try {
     mkdirSync(evidence, { mode: 0o750 });
     for (const file of workspace.files) writeFileSync(join(evidence, file.name), file.text, { encoding: "utf8", flag: "wx", mode: 0o640 });
@@ -245,30 +254,30 @@ export async function buildDmWorkspace(
   if (workspace.targetSha !== null) {
     const sha = workspace.targetSha;
     const step = { cwd: directory, timeoutMs: DM_WORKSPACE_GIT_STEP_TIMEOUT_MS };
-    if (!(await git(["init", "-q", repo], step)).ok) return { ok: false, reason: "git_failed", step: "init" };
+    if (!(await bounded(["init", "-q", repo], step)).ok) return { ok: false, reason: "git_failed", step: "init" };
     const inRepo = { cwd: repo, timeoutMs: DM_WORKSPACE_GIT_STEP_TIMEOUT_MS };
     // Kept in the repository's own config, so the worktree below and the DM's
     // own git reads see the same: links as plain files, and a stat check on
     // mtime and size only, since the hand-over below changes every mode (and
     // so every ctime) and the DM can write no refreshed index.
     for (const [key, value] of [["core.symlinks", "false"], ["core.trustctime", "false"], ["core.checkStat", "minimal"]]) {
-      if (!(await git(["config", key!, value!], inRepo)).ok) return { ok: false, reason: "git_failed", step: "config" };
+      if (!(await bounded(["config", key!, value!], inRepo)).ok) return { ok: false, reason: "git_failed", step: "config" };
     }
-    const fetched = await git(
+    const fetched = await bounded(
       ["fetch", "-q", "--no-tags", "--no-recurse-submodules", `--depth=${DM_WORKSPACE_HISTORY_DEPTH}`, cloneUrl, sha],
       { cwd: repo, timeoutMs: DM_WORKSPACE_FETCH_TIMEOUT_MS },
     );
     if (!fetched.ok) return { ok: false, reason: "git_failed", step: "fetch" };
-    if (!(await git(["checkout", "-q", "--detach", sha], inRepo)).ok) return { ok: false, reason: "git_failed", step: "checkout" };
-    const head = await git(["rev-parse", "HEAD"], inRepo);
+    if (!(await bounded(["checkout", "-q", "--detach", sha], inRepo)).ok) return { ok: false, reason: "git_failed", step: "checkout" };
+    const head = await bounded(["rev-parse", "HEAD"], inRepo);
     if (!head.ok || head.stdout.trim() !== sha) return { ok: false, reason: "head_mismatch" };
     if (patch === "not_applied") {
-      const added = await git(["worktree", "add", "-q", "--detach", patched, sha], inRepo);
+      const added = await bounded(["worktree", "add", "-q", "--detach", patched, sha], inRepo);
       if (!added.ok) return { ok: false, reason: "git_failed", step: "worktree" };
       // `git apply` is all or nothing: a patch that does not apply leaves the tree as it was.
-      const applied = await git(["apply", "--whitespace=nowarn", join(evidence, DM_WORKSPACE_PATCH_NAME)], { cwd: patched, timeoutMs: DM_WORKSPACE_GIT_STEP_TIMEOUT_MS });
+      const applied = await bounded(["apply", "--whitespace=nowarn", join(evidence, DM_WORKSPACE_PATCH_NAME)], { cwd: patched, timeoutMs: DM_WORKSPACE_GIT_STEP_TIMEOUT_MS });
       if (applied.ok) patch = "applied";
-      else if (!(await git(["worktree", "remove", "--force", patched], inRepo)).ok) return { ok: false, reason: "git_failed", step: "worktree_remove" };
+      else if (!(await bounded(["worktree", "remove", "--force", patched], inRepo)).ok) return { ok: false, reason: "git_failed", step: "worktree_remove" };
     }
   }
   try {

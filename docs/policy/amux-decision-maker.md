@@ -141,6 +141,12 @@ approvedBy: mposition · approvedAt: 2026-10-17 · 정책 버전: 2
    스키마, 허용 선택지, 앱의 재검증)은 바꾸지 않는다. 작업 공간의 근거 파일에도 §5의 비밀 경로 목록과 secret 검사를 앱과 broker가
    각각 적용한다. 요청 디렉터리는 모든 종료 경로에서 지운다. 전송 의도(§10)의 payload digest와 manifest digest가 작업 공간의
    commit과 근거 파일 바이트를 모두 묶는다.
+6. **근거 없이 판단하지 않는다.** 카드에 근거가 더 실리지 않으므로, bridge가 앱의 작업 공간 답을 읽지 못하거나, 앱이나 broker가
+   근거 파일을 하나라도 뺐거나(secret 검사 등), broker가 답하지 않으면 요청을 폐기하고 카드는 운영자에게 남는다. 카드만 보내는
+   경우는 앱의 kill switch(`workspace: null`)뿐이며, DM 지시문은 작업 공간 파일을 가리키는 카드를 그 파일 없이 받으면 이관하라고
+   한다. launch에서 작업 공간을 만들지 못하면 아무것도 보내지 않는다(`workspace_unavailable`). 작업 공간 build는 전체 5분 안에
+   끝나야 하고(`DM_WORKSPACE_BUILD_MAX_MS`), bridge의 broker 응답 기한이 그만큼 늘었다(39분). build 시간은 결과 창(배정 + 30분)에서
+   빠지므로, 아주 긴 DM 실행의 결과는 늦은 결과로 거절될 수 있다(안전한 쪽으로, 카드는 운영자에게 남는다).
 
 ## 1. 목적과 경계
 

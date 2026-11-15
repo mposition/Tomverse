@@ -13,6 +13,7 @@ import { isDmRequestId } from "./decisionMakerRequestCore.ts";
 import type { DmInstanceScope } from "./decisionMakerSwitchCore.ts";
 import { DM_CARD_TEXT_MAX_BYTES } from "./decisionMakerCore.ts";
 import {
+  DM_WORKSPACE_BUILD_MAX_MS,
   DM_WORKSPACE_EVIDENCE_MAX_BYTES,
   dmEncodeLaunchWorkspace,
   dmParseLaunchWorkspace,
@@ -105,8 +106,12 @@ export const DM_LINE_WRITE_TIMEOUT_MS = 10_000;
 export const DM_LAUNCHER_UNIT_RUNTIME_MAX_MS = DM_LAUNCH_HARD_TIMEOUT_MS + 2 * 60 * 1000;
 /** The broker waits one minute past the unit's limit: by then the unit is gone, so a late answer cannot follow. */
 export const DM_LAUNCHER_RESPONSE_TIMEOUT_MS = DM_LAUNCHER_UNIT_RUNTIME_MAX_MS + 60 * 1000;
-/** What the bridge must wait at least for the broker's answer before it treats the outcome as unknown. */
-export const DM_BROKER_RESPONSE_DEADLINE_MS = DM_LAUNCHER_RESPONSE_TIMEOUT_MS + 60 * 1000;
+/**
+ * What the bridge must wait at least for the broker's answer before it
+ * treats the outcome as unknown: the launcher's, the workspace build before
+ * it, and a minute.
+ */
+export const DM_BROKER_RESPONSE_DEADLINE_MS = DM_LAUNCHER_RESPONSE_TIMEOUT_MS + DM_WORKSPACE_BUILD_MAX_MS + 60 * 1000;
 
 // ---------------------------------------------------------------------------
 // Closed vocabularies
