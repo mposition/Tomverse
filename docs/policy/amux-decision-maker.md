@@ -86,7 +86,7 @@ approvedBy: mposition · approvedAt: 2026-10-17 · 정책 버전: 2
    꺼짐): 기록된 `approve`를 쓸 때마다 binding이 열려 있고 head·diff digest가 승인 때와 같고 base가 develop이고 Task가
    review인지 다시 읽는다. 자동 병합은 **변경이 모두 병합 범위 안에 있을 때만** 한다(운영자 결정 2026-11-15, "내부 개발용
    Flow입니다. 제한을 줄 이유가 없습니다. 로컬 CLI처럼 편리한 Flow였으면 합니다."; 전체 목록은 `docs/policy/qa-release-agent.md`
-   8절 3항). 기본은 **차단 목록**이다: 엔지니어링 에이전트 권한 manifest의 product 경로이고 정책 테스트가 아니며 레인 게이트 파일,
+   8절 3항). 앱 서비스의 `TOMVERSE_AMUX_DM_MERGE_SCOPE`가 정확히 `blocklist`일 때는 **차단 목록**이다(기본 꺼짐, 운영자 결정 2026-11-16): 엔지니어링 에이전트 권한 manifest의 product 경로이고 정책 테스트가 아니며 레인 게이트 파일,
    되돌릴 수 없는 경로(`QA_RELEASE_DM_MERGE_BLOCK_PATTERNS`·`QA_RELEASE_DM_MERGE_BLOCKLIST_SCOPE_PATTERNS`), 차단 이름 조각
    (`QA_RELEASE_DM_MERGE_BLOCK_NAME_TOKENS`: 실제 비용, 외부 발송, 사용자 데이터 삭제, 자격증명과 보안 경계, 감사 체인, 병합과
    배포, 에이전트 권한, DB)에 걸리지 않으면 `lib/**`·`app/api/**`도 병합한다. 저장된 patch의 바뀐 줄과 hunk 문맥도 읽어 사람에게
@@ -95,10 +95,10 @@ approvedBy: mposition · approvedAt: 2026-10-17 · 정책 버전: 2
    (`AMUX_DM_T2_MERGE_CONTENT_ALARMS`), hunk 문맥 줄에 인가·소유권·접근 검사가 있어도 남긴다(`AMUX_DM_T2_MERGE_HUNK_ALARMS`).
    ready와 레인 목록에서는 허용 목록 밖의 바뀐 파일 전체를 승인된 head에서 읽어, 어디에든 경보가 울리거나 Node 내장 모듈·허용
    목록 밖 패키지·사람 몫 모듈을 import하거나 읽지 못하면 남긴다(`amuxDmT2MergeFileGate`, `amuxDmT2MergeImportAlarms`). control-plane 경로(AMUX와 에이전트 자신, admin, 실행 환경, 정책과 지시)는 어느 범위에서도
-   사람에게 남는다. 앱 서비스의 `TOMVERSE_AMUX_DM_MERGE_SCOPE`에 `blocklist`가 아닌 값(예: `allowlist`)을 두면 kill switch로
+   사람에게 남는다. 그 밖의 모든 값(값이 없거나 빈 값 포함, **기본**)에서는
    2026-11-13의 **허용 목록**(`QA_RELEASE_DM_MERGE_ALLOW_PATTERNS`: `tests/**`, `docs/**`, `locales/**`, `components/**`,
    `app/**`의 `page.tsx`·`layout.tsx`·`loading.tsx`·`error.tsx`; 그 가운데 `docs/policy/**`·`docs/ui-contracts/**`·
-   `docs/agents/**`·`app/api/**`, control-plane 경로, 정책 테스트, 레인 게이트 파일과 되돌릴 수 없는 경로는 제외)으로 돌아간다.
+   `docs/agents/**`·`app/api/**`, control-plane 경로, 정책 테스트, 레인 게이트 파일과 되돌릴 수 없는 경로는 제외)을 쓴다.
    하나라도 밖이면 사람에게 남는다. 스위치가
    켜져 있으면 승인을 기록하는 순간 patch를 판정해, 범위 밖의 경로나 줄이 있거나 경로를 읽지 못하면 승인 대신
    handoff(`outside_dm_merge_allowlist`·`paths_unreadable`)를 남긴다. 앱은 CI 입장 round가

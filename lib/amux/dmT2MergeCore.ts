@@ -6,10 +6,10 @@
  * kind `t2_pr`) is marked ready by the app, its CI runs, and the QA-release
  * merge lane merges it into develop -- never main, never a deploy. Which
  * changes take this path is the merge scope's (owner decision 2026-11-15,
- * QA_RELEASE_DM_MERGE_SCOPE_ENV): by default every product path on no block
- * list, with the approved patch's changed lines free of the alarms below;
- * with the kill switch, only the allow list of 2026-11-13. One path or line
- * outside leaves the pull request to a person.
+ * QA_RELEASE_DM_MERGE_SCOPE_ENV): by default only the allow list of
+ * 2026-11-13; with the scope set to `blocklist`, every product path on no
+ * block list, with the approved patch's changed lines free of the alarms
+ * below. One path or line outside leaves the pull request to a person.
  *
  * Pure: the switch, which paths a patch changes, whether CI admission's line
  * leaves room, and whether a pull request read fresh is still the change the

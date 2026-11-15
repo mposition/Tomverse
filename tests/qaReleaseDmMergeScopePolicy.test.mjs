@@ -32,13 +32,13 @@ const ALLOW = "allowlist";
 const patchOf = (path, removed = "a", added = "b", context = "") =>
   [`diff --git a/${path} b/${path}`, `--- a/${path}`, `+++ b/${path}`, `@@ -1 +1 @@${context}`, `-${removed}`, `+${added}`, ""].join("\n");
 
-test("the scope is the block list unless the switch says otherwise, and any other value is the allow list", () => {
+test("the scope is the allow list unless the switch says exactly blocklist", () => {
   assert.equal(QA_RELEASE_DM_MERGE_SCOPE_ENV, "TOMVERSE_AMUX_DM_MERGE_SCOPE");
-  assert.equal(qaReleaseDmMergeScope({}), BLOCK, "on by default (owner decision 2026-11-15)");
-  assert.equal(qaReleaseDmMergeScope({ [QA_RELEASE_DM_MERGE_SCOPE_ENV]: "" }), BLOCK);
+  assert.equal(qaReleaseDmMergeScope({}), ALLOW, "off by default (owner decision 2026-11-16)");
+  assert.equal(qaReleaseDmMergeScope({ [QA_RELEASE_DM_MERGE_SCOPE_ENV]: "" }), ALLOW);
   assert.equal(qaReleaseDmMergeScope({ [QA_RELEASE_DM_MERGE_SCOPE_ENV]: "blocklist" }), BLOCK);
   for (const value of ["allowlist", "off", "disabled", "false", "0", "Blocklist", " blocklist", "blocklist ", "block"]) {
-    assert.equal(qaReleaseDmMergeScope({ [QA_RELEASE_DM_MERGE_SCOPE_ENV]: value }), ALLOW, `kill switch: ${JSON.stringify(value)}`);
+    assert.equal(qaReleaseDmMergeScope({ [QA_RELEASE_DM_MERGE_SCOPE_ENV]: value }), ALLOW, `not the block list: ${JSON.stringify(value)}`);
   }
   // The pure judgements take the narrower rule when nobody says which.
   assert.equal(qaReleaseDmMergeAllowed("lib/conversationSearch.ts"), false);

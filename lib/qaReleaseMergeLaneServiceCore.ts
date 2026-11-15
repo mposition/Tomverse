@@ -84,8 +84,8 @@ export type QaReleaseDmApprovedPull = { number: number; headSha: string; headRef
 
 /**
  * The scope the lane judges a reported Decision Maker approval in (owner
- * decision 2026-11-15): always the block list. The app reads the kill switch
- * (TOMVERSE_AMUX_DM_MERGE_SCOPE on the app service) and reports only the
+ * decision 2026-11-15): always the block list. The app reads the scope switch
+ * (TOMVERSE_AMUX_DM_MERGE_SCOPE on the app service, default the allow list) and reports only the
  * pull requests its own scope lets through -- with the stored patch's lines,
  * which the lane cannot see -- so the app's reading is the one that narrows,
  * and the lane needs no variable of its own (its start check admits none).

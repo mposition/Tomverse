@@ -615,13 +615,13 @@ snapshot과 같아야 한다) → 사람이 병합하고 본 앱이 병합을 �
 
     fork에서 온 PR은 이 경로를 타지 않는다(head 저장소가 base 저장소와 다르면 ready·레인 목록·레인 병합 모두에서 제외).
     이 경로는 **변경이 모두 병합 범위 안에 있는 PR만** 탄다(운영자 결정 2026-11-15, `qaReleaseDmMergeAllowed`와
-    `amuxDmT2MergePatchGate`, 범위의 전체 목록은 `docs/policy/qa-release-agent.md` 8절 3항). 기본은 차단 목록이다: 이 manifest의
+    `amuxDmT2MergePatchGate`, 범위의 전체 목록은 `docs/policy/qa-release-agent.md` 8절 3항). 앱의 `TOMVERSE_AMUX_DM_MERGE_SCOPE`가 정확히 `blocklist`이면 차단 목록이다(기본 꺼짐, 운영자 결정 2026-11-16): 이 manifest의
     product 경로 가운데 정책 테스트가 아니고 레인 게이트 파일·되돌릴 수 없는 경로 목록·차단 이름 조각에 걸리지 않는 경로는
     `lib/**`·`app/api/**`도 받고, 저장된 patch의 바뀐 줄에 사람에게 예약된 값·돈·환경 변수와 스위치·삭제·raw SQL·인증·비밀·메일의
     단어, 외부 전송·프로세스 실행·DB 질의·파일 쓰기, binary·실행 비트가 없어야 하며, hunk 문맥에 인가·소유권·접근 검사가 없고, 허용 목록 밖의 바뀐 파일 전체(승인된 head에서
     읽음)에도 그런 단어가 없고 Node 내장 모듈·허용 목록 밖 패키지·사람 몫 모듈을 import하지 않아야 한다. control-plane 경로(§4-4의 에이전트 자신과 AMUX 전부)는 어느 범위에서도 사람에게
-    남는다. 앱의 `TOMVERSE_AMUX_DM_MERGE_SCOPE`에 `blocklist`가 아닌 값을 두면 2026-11-13의 허용 목록(테스트, 정책·UI 계약·에이전트
-    지시가 아닌 문서, locale, 컴포넌트, app의 page·layout·loading·error 파일)으로 돌아간다. 하나라도 밖이면 DM 승인을 기록하지 않고
+    남는다. 그 밖의 값(값이 없을 때 포함, 기본)에서는 2026-11-13의 허용 목록(테스트, 정책·UI 계약·에이전트
+    지시가 아닌 문서, locale, 컴포넌트, app의 page·layout·loading·error 파일)을 쓴다. 하나라도 밖이면 DM 승인을 기록하지 않고
     사람에게 넘긴다. 앱이 레인에 승인을 넘길 때마다 현재 PR
     diff와 파일 목록을 다시 읽어 같을 때만 넘기고, 레인은 승인된 head를 고정해 병합한다. 위 조건에
     하나라도 맞지 않는 병합은 비승인이고 그 카드의 결정 항목이 된다(에이전트는 멈추지 않는다).

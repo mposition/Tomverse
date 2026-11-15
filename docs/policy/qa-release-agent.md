@@ -18,7 +18,7 @@ allowlistGenesisCommit: 8e3dbf64452ab75e3c6f080c8f5f531c02ace387
 | 7 (버전 유지) | 2026-10-19 mposition | 운영자 결정(AGENTS.md Frontier 절, 버전 증가 없음): develop의 배포 환경은 2026-10-13부터 Railway `dev`이므로 8절이 dev를 가리킴, S-M2에 필요한 S-M1 기간 7일 → 3일, 8절 3항의 복구 runbook은 `docs/ops/qa-release-merge-lane-dev-recovery.md`, 머리말의 개정 규칙을 AGENTS.md에 맞춤 |
 | 7 (버전 유지) | 2026-10-20 mposition | 운영자 결정(AGENTS.md Frontier 절, 버전 증가 없음): 릴리스 열차(1절 5항, 8절 12항) — `main:next` 라벨, AEST 출발 시각, `release/train-*` push와 main PR 생성, 기본 꺼진 `QA_RELEASE_TRAIN_ENABLED` |
 | 7 (버전 유지) | 2026-11-03 mposition | 운영자 결정(AGENTS.md Frontier 절, 버전 증가 없음): CI 자동 수정은 예외 없이 모든 열린 PR을 고침 — workflow·action 파일도, PR당 시도 상한도 없음(8절 3항). 레인의 제외 목록은 그대로 |
-| 7 (버전 유지) | 2026-11-15 mposition | 운영자 결정(AGENTS.md Frontier 절, 버전 증가 없음): DM 승인 PR의 병합 범위를 허용 목록에서 차단 목록으로(8절 3항 예외 하나) — 앱의 `TOMVERSE_AMUX_DM_MERGE_SCOPE`가 kill switch로 2026-11-13의 허용 목록에 돌림. 레인의 다른 제외와 main 제외는 그대로 |
+| 7 (버전 유지) | 2026-11-15 mposition | 운영자 결정(AGENTS.md Frontier 절, 버전 증가 없음): DM 승인 PR의 병합 범위에 차단 목록을 추가(8절 3항 예외 하나) — 앱의 `TOMVERSE_AMUX_DM_MERGE_SCOPE`가 정확히 `blocklist`일 때만 켜지고, 기본은 2026-11-13의 허용 목록(운영자 결정 2026-11-16: 기본 꺼짐으로 배포). 레인의 다른 제외와 main 제외는 그대로 |
 
 **규범은 이 파일의 `develop` 현재 내용 하나입니다.** 이전 버전의 본문은 그 버전을 병합한 PR(버전 1 #1946, 버전 2 #1950,
 버전 3 #1986, 버전 4 #2042, 버전 5 #2093, 버전 6 #2102)의 git 기록에 있으며, 효력이 없습니다. 이 버전의 승인 기록이 `develop`에 병합되는 순간 이 파일 전체가
@@ -218,7 +218,7 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
      파일, 정책 테스트, 부록 A, 보호 테이블 migration, 목록 미완)와 2항의 CI 판정을 그대로 받습니다. 그리고 **변경 파일이 모두
      병합 범위 안에 있어야 합니다**(운영자 결정 2026-11-15, "내부 개발용 Flow입니다. 제한을 줄 이유가 없습니다. 로컬 CLI처럼
      편리한 Flow였으면 합니다."). 범위는 앱 서비스의 `TOMVERSE_AMUX_DM_MERGE_SCOPE`가 정합니다(`lib/qaReleaseMergeLaneExclusionCore.ts`):
-     - **차단 목록(기본, 값이 없거나 빈 값이거나 정확히 `blocklist`).** 엔지니어링 에이전트 권한 manifest의 product 경로이고
+     - **차단 목록(정확히 `blocklist`일 때만. 기본 꺼짐, 운영자 결정 2026-11-16).** 엔지니어링 에이전트 권한 manifest의 product 경로이고
        정책 테스트가 아니며 아래 어느 목록에도 걸리지 않으면 `lib/**`·`app/api/**`·`app/**`의 다른 파일·`packages/**`·`types/**`도
        병합합니다. 허용 목록이 받던 경로는 그대로 받습니다. 사람에게 남는 것: control-plane 전부(AMUX `lib/amux/**`·`app/api/internal/**`·
        `crates/**`·`apps/**`, 에이전트 자신 `lib/agent*`·`lib/engineeringAgent*`, `app/api/admin/**`·`components/admin/**`,
@@ -241,7 +241,7 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
        쓴 import는 그 자체로 사람에게 남깁니다. 그래서 이 범위가 새로 병합하는 코드는 돈·환경 변수·삭제·인증·비밀·메일·소유권·
        접근을 전혀 말하지 않고, 네트워크·다른 프로세스·DB·파일 시스템에 스스로 닿지 않는 파일뿐입니다. 레인은 앱이 넘긴 PR을 늘 차단 목록 범위로 다시
        판정합니다(`QA_RELEASE_LANE_DM_MERGE_SCOPE`).
-     - **허용 목록(kill switch, 다른 모든 값).** 2026-11-13의 규칙 그대로입니다(`QA_RELEASE_DM_MERGE_ALLOW_PATTERNS`: `tests/**`,
+     - **허용 목록(기본: 값이 없거나 빈 값이거나 다른 모든 값).** 2026-11-13의 규칙 그대로입니다(`QA_RELEASE_DM_MERGE_ALLOW_PATTERNS`: `tests/**`,
        `docs/**`, `locales/**`, `components/**`, `app/**`의 `page.tsx`·`layout.tsx`·`loading.tsx`·`error.tsx`. 그 가운데
        `docs/policy/**`·`docs/ui-contracts/**`·`docs/agents/**`·`app/api/**`, control-plane 경로, 정책 테스트, 게이트 파일과
        `QA_RELEASE_DM_MERGE_BLOCK_PATTERNS`는 제외). 앱만 읽으면 됩니다: 앱의 승인 기록·ready·레인 목록·소비가 모두 이 범위로

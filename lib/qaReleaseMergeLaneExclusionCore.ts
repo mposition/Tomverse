@@ -80,21 +80,24 @@ export const QA_RELEASE_DEPENDABOT_PATHS: readonly string[] = [
 /**
  * How far a Decision Maker approved pull request may reach (owner decision
  * 2026-11-15: "내부 개발용 Flow입니다. 제한을 줄 이유가 없습니다. 로컬 CLI처럼
- * 편리한 Flow였으면 합니다."). `blocklist`, the default: every product path
- * on no block list may merge. `allowlist`, the kill switch: only the allow
- * list of 2026-11-13, exactly as it was. Unset, empty or exactly `blocklist`
- * is the default; any other value -- `allowlist`, or a typo -- is the allow
- * list, so the switch only ever fails toward the narrower rule. The app reads
- * it (lib/amux/dmT2MergeService.ts) and tells the merge lane only of what its
- * scope lets through; the lane judges those again in the block list scope
+ * 편리한 Flow였으면 합니다."). `allowlist`, the default: only the allow
+ * list of 2026-11-13, exactly as it was. `blocklist`: every product path on
+ * no block list may merge. The block list ships off (owner decision
+ * 2026-11-16): production already runs TOMVERSE_AMUX_DM_T2_MERGE=enabled, so
+ * a default-on scope would widen unattended merges the moment it deployed.
+ * Only exactly `blocklist` turns it on; unset, empty or any other value --
+ * `allowlist`, or a typo -- is the allow list, so the switch only ever fails
+ * toward the narrower rule. The app reads it (lib/amux/dmT2MergeService.ts)
+ * and tells the merge lane only of what its scope lets through; the lane
+ * judges those again in the block list scope
  * (lib/qaReleaseMergeLaneServiceCore.ts QA_RELEASE_LANE_DM_MERGE_SCOPE), so
- * setting it on the app service alone reverts the whole path.
+ * the app service's variable alone decides the whole path.
  */
 export const QA_RELEASE_DM_MERGE_SCOPE_ENV = "TOMVERSE_AMUX_DM_MERGE_SCOPE";
 export type QaReleaseDmMergeScope = "blocklist" | "allowlist";
 export const qaReleaseDmMergeScope = (env: Readonly<Record<string, string | undefined>>): QaReleaseDmMergeScope => {
   const value = env[QA_RELEASE_DM_MERGE_SCOPE_ENV];
-  return value === undefined || value === "" || value === "blocklist" ? "blocklist" : "allowlist";
+  return value === "blocklist" ? "blocklist" : "allowlist";
 };
 
 /**

@@ -5,10 +5,11 @@ import { pathToFileURL } from "node:url";
 
 // The Decision Maker's develop merge through the app's three uses of an
 // approval -- the ready step, the merge lane's list and the lane's consume --
-// in each merge scope (owner decisions 2026-11-13 and 2026-11-15): by default
-// a reviewed lib/ and app/api/ change goes from approval through ready to the
-// lane without a person; TOMVERSE_AMUX_DM_MERGE_SCOPE=allowlist on the app
-// puts every use back on the allow list of 2026-11-13; main never.
+// in each merge scope (owner decisions 2026-11-13, 2026-11-15 and
+// 2026-11-16): with TOMVERSE_AMUX_DM_MERGE_SCOPE=blocklist on the app a
+// reviewed lib/ and app/api/ change goes from approval through ready to the
+// lane without a person; unset (the default) or any other value keeps every
+// use on the allow list of 2026-11-13; main never.
 
 const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path) => pathToFileURL(resolve(root, path)).href;
@@ -16,8 +17,9 @@ const mod = (path) => pathToFileURL(resolve(root, path)).href;
 const HEAD = "c".repeat(40);
 const DIFF = "d".repeat(64);
 const REF = "agent/engineering/700000042";
-const ON = { TOMVERSE_AMUX_DM_T2_MERGE: "enabled" };
-const KILL = { ...ON, TOMVERSE_AMUX_DM_MERGE_SCOPE: "allowlist" };
+const UNSET = { TOMVERSE_AMUX_DM_T2_MERGE: "enabled" };
+const ON = { ...UNSET, TOMVERSE_AMUX_DM_MERGE_SCOPE: "blocklist" };
+const KILL = { ...UNSET, TOMVERSE_AMUX_DM_MERGE_SCOPE: "allowlist" };
 
 const patchOf = (path, added = "const limit = 12;") =>
   [`diff --git a/${path} b/${path}`, `--- a/${path}`, `+++ b/${path}`, "@@ -1 +1 @@", "-const limit = 10;", `+${added}`, ""].join("\n");
@@ -88,7 +90,7 @@ const filesOf = (texts = {}) => async (headSha, paths) => {
   return new Map(paths.map((path) => [path, path in texts ? texts[path] : "export const limit = 12;\n"]));
 };
 
-test("the merge lane hears of a reviewed lib/ and app/api/ change by default, and not with the kill switch on", async () => {
+test("the merge lane hears of a reviewed lib/ and app/api/ change only in the block list scope, which is off by default", async () => {
   const lane = (env, files, over = {}) => readAmuxDmT2MergeLanePulls(env, { change: changeOf(files), files: filesOf(over) });
   reset(CODE_PATCH);
   assert.deepEqual(await lane(ON, CODE), [{ number: 42, headSha: HEAD, headRef: REF }]);
@@ -96,6 +98,11 @@ test("the merge lane hears of a reviewed lib/ and app/api/ change by default, an
   reset(CODE_PATCH);
   assert.deepEqual(await lane(KILL, CODE), [], "kill switch: the allow list");
   assert.deepEqual(fileReads, [], "and nothing read");
+  reset(CODE_PATCH);
+  assert.deepEqual(await lane(UNSET, CODE), [], "unset: the allow list, the default");
+  assert.deepEqual(fileReads, [], "and nothing read");
+  reset(patchOf("components/X.tsx"));
+  assert.deepEqual((await lane(UNSET, ["components/X.tsx"])).length, 1, "unset: what the allow list took, as before");
   // What the allow list took, the kill switch still takes, on its path alone.
   reset(patchOf("components/X.tsx"));
   assert.deepEqual((await lane(KILL, ["components/X.tsx"])).length, 1);
@@ -124,12 +131,13 @@ test("the merge lane hears of a reviewed lib/ and app/api/ change by default, an
   assert.deepEqual(await lane({}, CODE), []);
 });
 
-test("the lane's consume holds a reviewed code change by default, and the allow list with the kill switch on", async () => {
+test("the lane's consume holds a reviewed code change only in the block list scope, and the allow list otherwise", async () => {
   const consume = (env, over = {}) => amuxDmT2MergeConsumeAllowed(fakeTx, { prNumber: 42, headSha: HEAD, base: "develop",
     diffDigest: DIFF, env, ...over });
   reset(CODE_PATCH);
   assert.equal(await consume(ON), "allowed");
   assert.equal(await consume(KILL), "dm_approval_not_holding", "kill switch: the lane's own path check is the block list's");
+  assert.equal(await consume(UNSET), "dm_approval_not_holding", "unset: the allow list, the default");
   assert.equal(await consume(ON, { base: "main" }), "dm_approval_not_holding", "never main");
   assert.equal(await consume(ON, { diffDigest: "e".repeat(64) }), "dm_diff_changed");
   assert.equal(await consume(ON, { headSha: "a".repeat(40) }), "dm_approval_not_holding");
@@ -164,6 +172,10 @@ test("a reviewed code change is marked ready by the app without a person, audite
   reset(CODE_PATCH);
   const killed = await ready(KILL);
   assert.deepEqual([killed.outcome.outcome, killed.outcome.reason, killed.written, audits], ["skipped", "outside_dm_merge_allowlist", [], []]);
+  reset(CODE_PATCH);
+  const unset = await ready(UNSET);
+  assert.deepEqual([unset.outcome.outcome, unset.outcome.reason, unset.written, audits], ["skipped", "outside_dm_merge_allowlist", [], []],
+    "unset: the allow list, the default");
   reset(patchOf("lib/conversationSearch.ts", "creditWeight: 3,"));
   const valued = await ready(ON, ["lib/conversationSearch.ts"]);
   assert.deepEqual([valued.outcome.outcome, valued.written], ["skipped", []], "a value AGENTS.md reserves for a person");
