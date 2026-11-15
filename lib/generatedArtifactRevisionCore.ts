@@ -1,9 +1,9 @@
 import { resolveChatAttachmentFormat } from "@/lib/chatAttachmentFormats";
 import { artifactFormat } from "@/lib/generatedArtifactFormats";
 
-/** Enabled by default; an explicit false disables the connection, not downloads. */
-export const generatedArtifactRevisionEnabled = () =>
-  (process.env.GENERATED_ARTIFACT_REVISION_ENABLED ?? "true") === "true";
+// Defined beside the Native gate so proxy.ts can read the switch without
+// pulling the format tables into the Prompt Refiner's pinned runtime closure.
+export { generatedArtifactRevisionEnabled } from "@/lib/nativeBearerGate";
 
 /** A view of the existing write/read tables, never a second format registry. */
 export function generatedArtifactRevisionFormat(input: {

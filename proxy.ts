@@ -48,9 +48,9 @@ import {
 import { verifyMobileAccessTokenString } from "@/lib/mobileAccessToken";
 import { MOBILE_AUTH_ERROR_CODES, N1B_BEARER_ROUTES } from "@/lib/mobileAuthContract";
 import { isNativeAppOrigin } from "@/lib/nativeAppCors";
-import { generatedArtifactRevisionEnabled } from "@/lib/generatedArtifactRevisionCore";
 import {
   applyMobileIdentityHeaders,
+  generatedArtifactRevisionEnabled,
   nativeBearerVerdict,
   nativeChatBearerRoute,
   nativeParityBearerRoute,
