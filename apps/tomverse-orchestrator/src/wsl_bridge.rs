@@ -2204,8 +2204,10 @@ async fn v22_sidecar_call(
         stream.write_all(&request).await?;
         stream.shutdown().await?;
         let mut response = Vec::new();
-        stream.take(response_limit as u64 + 1).read_to_end(&mut response).await?;
-        if response.len() > response_limit {
+        let limit = if local_cli_flow { response_limit } else {
+            crate::tomverse_api::V22_PATCH_ENVELOPE_MAX_BYTES };
+        stream.take(limit as u64 + 1).read_to_end(&mut response).await?;
+        if response.len() > limit {
             bail!("v22 sidecar response exceeds limit");
         }
         let value: serde_json::Value = serde_json::from_slice(&response)?;
@@ -2334,7 +2336,7 @@ async fn v22_sidecar_call(
             bail!("invalid v22 sidecar result envelope");
         }
         if patch_body.is_some_and(|body| body.is_empty() ||
-            body.len() > 65_536 || body.contains('\0') ||
+            body.len() > crate::tomverse_api::V22_PATCH_MAX_BYTES || body.contains('\0') ||
             !body.starts_with("diff --git ")) ||
             patch_base_sha.is_some_and(|sha| sha.len() != 40 ||
                 !sha.bytes().all(|byte| byte.is_ascii_hexdigit())) ||

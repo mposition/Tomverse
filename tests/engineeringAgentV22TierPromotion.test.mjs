@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { ENGINEERING_AGENT_V22_TIER_EVIDENCE_ATTEMPTS,
+import { ENGINEERING_AGENT_V22_TIER_EVIDENCE_BACKOFF_MAX_MS,
+  ENGINEERING_AGENT_V22_TIER_EVIDENCE_BACKOFF_MS,
   promoteEngineeringAgentV22Draft } from
   "../lib/engineeringAgentV22TierPromotion.ts";
 
@@ -215,50 +216,51 @@ class GitHubReadError extends Error {
   constructor(code) { super(`secret patch text ${code}`); this.name = "EngineeringAgentGitHubReadError"; this.code = code; }
 }
 
-test("an evidence read that throws leaves the draft pending, then keeps it after its rounds", async () => {
+// Owner decision 2026-11-15: a throw is never a verdict, however often it
+// comes; until then a third one kept the draft private.
+test("an evidence read that throws leaves the draft pending and reads it again after its backoff", async () => {
   const failures = new Map();
   let reads = 0;
-  const round = () => promoteEngineeringAgentV22Draft(ports({ failures,
+  let clock = 1_000_000;
+  const throwing = () => ports({ failures, now: () => clock,
     loadStored: async (item, still, onStage) => {
-      reads++;
-      onStage("patch_read");
-      onStage("candidate_rebuild");
-      throw new GitHubReadError("transport_error");
-    } }));
-  for (let attempt = 1; attempt < ENGINEERING_AGENT_V22_TIER_EVIDENCE_ATTEMPTS; attempt++) {
-    const value = ports({ failures, loadStored: async (item, still, onStage) => {
       reads++;
       onStage("candidate_rebuild");
       throw new GitHubReadError("transport_error");
     } });
+  for (let attempt = 1; attempt <= 12; attempt++) {
+    const value = throwing();
+    const result = await promoteEngineeringAgentV22Draft(value);
     // The failure's class, code and step reach the log line; its message never does.
-    assert.deepEqual(await promoteEngineeringAgentV22Draft(value), {
+    assert.deepEqual(result, {
       outcome: "retry", reason: "tier_evidence_unavailable",
       workItemId: pending.workItemId, attempt, stage: "candidate_rebuild",
       error: "EngineeringAgentGitHubReadError", code: "transport_error" });
-    assert.equal(value.resolved.length, 0);
-    assert.equal(failures.get(pending.workItemId), attempt);
+    assert.doesNotMatch(JSON.stringify(result), /secret patch text/);
+    assert.equal(value.resolved.length, 0, "never kept private");
+    const wait = Math.min(ENGINEERING_AGENT_V22_TIER_EVIDENCE_BACKOFF_MS * 2 ** (attempt - 1),
+      ENGINEERING_AGENT_V22_TIER_EVIDENCE_BACKOFF_MAX_MS);
+    assert.deepEqual(failures.get(pending.workItemId), { attempt, retryAt: clock + wait });
+    // Before its time the draft is not read again.
+    clock += wait - 1;
+    assert.deepEqual(await promoteEngineeringAgentV22Draft(throwing()),
+      { outcome: "backoff", workItemId: pending.workItemId, attempt });
+    clock += 1;
   }
-  const last = await round();
-  assert.deepEqual(last, { outcome: "kept", reason: "tier_evidence_unavailable",
-    workItemId: pending.workItemId,
-    attempt: ENGINEERING_AGENT_V22_TIER_EVIDENCE_ATTEMPTS,
-    stage: "candidate_rebuild", error: "EngineeringAgentGitHubReadError",
-    code: "transport_error" });
-  assert.doesNotMatch(JSON.stringify(last), /secret patch text/);
-  assert.equal(reads, ENGINEERING_AGENT_V22_TIER_EVIDENCE_ATTEMPTS);
-  assert.equal(failures.size, 0);
+  assert.equal(reads, 12);
 });
 
 test("a read that succeeds after a throw is judged as usual and forgets the failure", async () => {
   const failures = new Map();
-  const thrown = ports({ failures, loadStored: async () => {
+  let clock = 1_000_000;
+  const thrown = ports({ failures, now: () => clock, loadStored: async () => {
     throw Object.assign(new Error("Can't reach database server"), { code: "P1001" }); } });
   const first = await promoteEngineeringAgentV22Draft(thrown);
   assert.equal(first.outcome, "retry");
   assert.equal(first.stage, "authorization");
   assert.equal(first.code, "P1001");
-  const recovered = ports({ failures });
+  clock += ENGINEERING_AGENT_V22_TIER_EVIDENCE_BACKOFF_MS;
+  const recovered = ports({ failures, now: () => clock });
   assert.deepEqual(await promoteEngineeringAgentV22Draft(recovered),
     { outcome: "promoted" });
   assert.equal(failures.size, 0);
@@ -268,15 +270,27 @@ test("a read that succeeds after a throw is judged as usual and forgets the fail
   assert.equal(odd.code, null);
 });
 
-test("a draft whose read threw goes behind the others for the next round", async () => {
-  const failures = new Map([["draft-0", 1]]);
+test("a draft waiting out its backoff goes behind the others; one past it does not", async () => {
+  const clock = 1_000_000;
+  const failures = new Map([["draft-0", { attempt: 1, retryAt: clock + 1 }],
+    ["draft-9", { attempt: 4, retryAt: clock }]]);
   let behind = null;
-  const value = ports({ failures, readPending: async (set) => {
+  const value = ports({ failures, now: () => clock, readPending: async (set) => {
     behind = [...set];
     return pending;
   } });
   assert.deepEqual(await promoteEngineeringAgentV22Draft(value), { outcome: "promoted" });
   assert.deepEqual(behind, ["draft-0"]);
-  // The other draft's success leaves the failing one's count as it was.
-  assert.equal(failures.get("draft-0"), 1);
+  // The other draft's success leaves the failing ones as they were.
+  assert.deepEqual(failures.get("draft-0"), { attempt: 1, retryAt: clock + 1 });
+  assert.deepEqual(failures.get("draft-9"), { attempt: 4, retryAt: clock });
+});
+
+test("each round first sends back the drafts an earlier deploy kept, and a failure there stops nothing", async () => {
+  let swept = 0;
+  const value = ports({ rejudgeAfterDeploy: async () => { swept++; return 2; } });
+  assert.deepEqual(await promoteEngineeringAgentV22Draft(value), { outcome: "promoted" });
+  assert.equal(swept, 1);
+  const failing = ports({ rejudgeAfterDeploy: async () => { throw new Error("P1001"); } });
+  assert.deepEqual(await promoteEngineeringAgentV22Draft(failing), { outcome: "promoted" });
 });

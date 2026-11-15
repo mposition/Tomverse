@@ -1330,10 +1330,10 @@ export async function recordAmuxV52Review(input: {
       // The local CLI flow also reviews a lower grade's kept contract change,
       // which its settlement then judges at frontier in place.
       const recordDecision = decideAmuxV52SettlementPaths(assignment.grade,
-        input.changedPaths, candidate.files);
+        input.changedPaths, candidate.paths);
       if (recordDecision !== "pass" && !(amuxV22LocalCliFlowEnabled() &&
           recordDecision === "escalate" &&
-          amuxV52InPlaceEscalationAllowed(input.changedPaths, candidate.files)))
+          amuxV52InPlaceEscalationAllowed(input.changedPaths, candidate.paths)))
         return { recorded: false as const,
           reason: "review_patch_unverified" as const };
       const patch = await tx.amuxV22TaskPatch.findUnique({
@@ -1474,7 +1474,7 @@ export async function settleAmuxV22TaskExecution(input: {
       const reportedPathDecision = gradeGuard && settlementAssignment &&
         input.outcome !== "blocked" && !ownerQuestion ?
         decideAmuxV52SettlementPaths(settlementAssignment.grade,
-          input.changedPaths, patch?.files ?? null) : "pass";
+          input.changedPaths, patch?.paths ?? null) : "pass";
       // Local CLI flow (owner decision 2026-11-15): a lower grade's contract
       // change whose patch was kept and independently reviewed is judged at
       // frontier in place -- the grade rises with this settlement and the
@@ -1485,7 +1485,7 @@ export async function settleAmuxV22TaskExecution(input: {
       const inPlaceCandidate = localCliFlow && reportedPathDecision === "escalate" &&
         input.outcome === "succeeded" && patch !== null && !!settlementAssignment &&
         amuxV22TaskWritesPatch(settlementAssignment.role) &&
-        amuxV52InPlaceEscalationAllowed(input.changedPaths, patch.files ?? null);
+        amuxV52InPlaceEscalationAllowed(input.changedPaths, patch.paths ?? null);
       const inPlaceEscalation = inPlaceCandidate &&
         await tx.amuxV52ReviewRecord.findUnique({ where: { attemptId: attempt.id },
           select: { attemptId: true } }) !== null;

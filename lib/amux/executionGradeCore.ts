@@ -153,15 +153,17 @@ export const decideAmuxV52ChangedPaths = (grade: unknown,
   return contract && grade !== "frontier" ? "escalate" : "pass";
 };
 
-/** A publish candidate must be covered by the runner's complete path inventory. */
+/** Every path a patch names must be covered by the runner's complete path
+ * inventory (`patchPaths`: what the patch text names, with any file an older
+ * sidecar stored bytes for). */
 export const decideAmuxV52SettlementPaths = (grade: unknown,
-  changedPaths: unknown, publishFiles: readonly { path: string }[] | null):
+  changedPaths: unknown, patchPaths: readonly { path: string }[] | null):
   AmuxV52PathDecision => {
   const reported = decideAmuxV52ChangedPaths(grade, changedPaths);
-  if (reported === "blocked" || !publishFiles?.length) return reported;
-  const names = changedPaths as string[];
-  const missing = publishFiles.map((file) => file.path)
-    .filter((path) => !names.includes(path));
+  if (reported === "blocked" || !patchPaths?.length) return reported;
+  const names = new Set(changedPaths as string[]);
+  const missing = patchPaths.map((file) => file.path)
+    .filter((path) => !names.has(path));
   return missing.length === 0 ? reported : "blocked";
 };
 

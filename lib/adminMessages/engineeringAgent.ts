@@ -66,6 +66,27 @@ export const adminEngineeringAgentMessages = defineAdminMessages({
         "Not judged: the publish switch, the v22 publication latch or the card's public PR consent is off.",
       publication_state_changed: "Not judged: the run, a switch or the consent changed while it was being read.",
       publish_refused: "Promotion was refused: a switch, the consent or the PR queue changed just before it.",
+      patch_unreadable:
+        "Not judged: the patch is not a git diff the app can rebuild (a submodule, a binary file written without its data, or text git did not write).",
+      path_invalid: "Not judged: the patch names a path no repository file may have.",
+      path_conflict:
+        "Not judged: the patch creates a path that already exists, sits under a file, or differs from another path only by letter case or Unicode form.",
+      base_mismatch: "Not judged: the base commit does not have the files the patch changes, as the patch names them.",
+      patch_mismatch: "Not judged: the patch does not apply exactly to the base, or does not yield the files it names.",
+      secret_detected: "Not judged: a changed file contains what looks like a secret, so it is never published.",
+      patch_over_limit: "Not judged: the patch is larger than the 4 MiB the app can receive.",
+      tree_invalid: "Not judged: the resulting tree could not be verified.",
+      base_blob_missing:
+        "An earlier version could not read this patch (for example a new file). The first tier round after a deploy judges it again.",
+      files_invalid: "An earlier version refused this patch's files. The first tier round after a deploy judges it again.",
+      patch_unsupported:
+        "An earlier version could not read this kind of change. The first tier round after a deploy judges it again.",
+      patch_does_not_apply:
+        "An earlier version could not rebuild this patch. The first tier round after a deploy judges it again.",
+      unsupported_tree_change:
+        "An earlier version refused this tree change. The first tier round after a deploy judges it again (it is now T2 at most).",
+      tree_verification_failed:
+        "An earlier version could not verify this patch's tree. The first tier round after a deploy judges it again.",
       review_not_required:
         "The publisher opened a pull request, but the AMUX card does not require human review, so its number could not be recorded on the card. The pull request exists on GitHub.",
       task_not_in_review:
@@ -239,6 +260,25 @@ export const adminEngineeringAgentMessages = defineAdminMessages({
         "판정하지 않음: 게시 스위치, v22 게시 latch, 카드의 공개 PR 동의 중 하나가 꺼져 있습니다.",
       publication_state_changed: "판정하지 않음: 읽는 도중 run·스위치·동의가 바뀌었습니다.",
       publish_refused: "승격 거절: 직전에 스위치·동의·PR 대기열이 바뀌었습니다.",
+      patch_unreadable:
+        "판정하지 않음: 앱이 다시 만들 수 없는 diff입니다(submodule, 데이터 없이 쓴 binary 파일, git이 쓰지 않은 형식).",
+      path_invalid: "판정하지 않음: 저장소 파일이 가질 수 없는 경로가 있습니다.",
+      path_conflict:
+        "판정하지 않음: 이미 있는 경로나 파일 아래에 새 경로를 만들거나, 다른 경로와 대소문자·Unicode 정규형만 다른 경로를 만듭니다.",
+      base_mismatch: "판정하지 않음: base commit에 patch가 바꾸는 파일이 patch가 적은 그대로 없습니다.",
+      patch_mismatch: "판정하지 않음: patch가 base에 정확히 적용되지 않거나, 적은 결과 파일과 다릅니다.",
+      secret_detected: "판정하지 않음: 바뀐 파일에 비밀값으로 보이는 내용이 있어 게시하지 않습니다.",
+      patch_over_limit: "판정하지 않음: patch가 앱이 받을 수 있는 4 MiB보다 큽니다.",
+      tree_invalid: "판정하지 않음: 결과 tree를 검증하지 못했습니다.",
+      base_blob_missing:
+        "이전 버전이 이 patch를 읽지 못했습니다(새 파일 등). 배포 뒤 첫 tier 라운드가 다시 판정합니다.",
+      files_invalid: "이전 버전이 이 patch의 파일을 거절했습니다. 배포 뒤 첫 tier 라운드가 다시 판정합니다.",
+      patch_unsupported: "이전 버전이 읽지 못하는 종류의 변경이었습니다. 배포 뒤 첫 tier 라운드가 다시 판정합니다.",
+      patch_does_not_apply: "이전 버전이 이 patch를 다시 만들지 못했습니다. 배포 뒤 첫 tier 라운드가 다시 판정합니다.",
+      unsupported_tree_change:
+        "이전 버전이 이 tree 변경을 거절했습니다. 배포 뒤 첫 tier 라운드가 다시 판정합니다(이제는 최대 T2).",
+      tree_verification_failed:
+        "이전 버전이 이 patch의 tree를 검증하지 못했습니다. 배포 뒤 첫 tier 라운드가 다시 판정합니다.",
       review_not_required:
         "게시 서비스가 PR을 열었지만 AMUX 카드가 사람 검토 대상(requiresHumanReview)이 아니어서 PR 번호를 카드에 기록하지 못했습니다. PR은 GitHub에 그대로 있습니다.",
       task_not_in_review:
