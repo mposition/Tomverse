@@ -2,7 +2,8 @@
 export const AMUX_V52_REVIEW_VERDICTS = ["accept", "reject", "unknown"] as const;
 export type AmuxV52ReviewVerdict = (typeof AMUX_V52_REVIEW_VERDICTS)[number];
 
-export const AMUX_V52_REVIEW_SCOPE_MAX_CHARS = 8_192;
+// No working cap on the scope the review server is given (owner decision 2026-11-15).
+export const AMUX_V52_REVIEW_SCOPE_MAX_CHARS = 200_000;
 
 export function formatAmuxV52ReviewScope(title: string,
   completionCriteria: string[]): string {
@@ -50,15 +51,36 @@ export const AMUX_V52_REVIEW_REJECTED_TWICE_REASON =
 
 /**
  * Owner decision 2026-11-14 (AMUX process audit bundle 2, AMUXFLOW/B2): a
- * review is an internal signal and merging has its own gate, so every
- * rejection returns the Task to `todo`; the attempt budget
- * (lib/amux/executionBudgetCore.ts) ends the repeats and a spent budget
- * blocks the Task for the owner queue and the Decision Maker. Off unless
- * TOMVERSE_AMUX_V52_REJECT_RETRY_IN_BUDGET=enabled.
+ * review is an internal signal and merging has its own gate, so a rejection
+ * returns the Task to `todo` with the findings attached to the next run; the
+ * attempt budget (lib/amux/executionBudgetCore.ts) bounds the runs and a spent
+ * budget blocks the Task for the owner queue and the Decision Maker.
+ *
+ * Owner decision 2026-11-15 (an internal development flow has no reason for a
+ * fixed limit): this is now on by default; TOMVERSE_AMUX_V52_REJECT_RETRY_IN_BUDGET
+ * set to `disabled` brings back the old rule (a second rejection blocks).
+ * Neither a second rejection nor an `unknown` review blocks a Task by count: an
+ * unknown review runs again (the next run is reviewed anew), and a rejection
+ * goes to a person or the Decision Maker, with the reason, only when the same
+ * reviewer rejects for the same blocking finding again.
  */
 export const AMUX_V52_REJECT_RETRY_IN_BUDGET_ENV = "TOMVERSE_AMUX_V52_REJECT_RETRY_IN_BUDGET";
 export const amuxV52RejectRetryInBudgetEnabled = (
   value: string | undefined = process.env[AMUX_V52_REJECT_RETRY_IN_BUDGET_ENV],
+) => value?.trim() !== "disabled";
+
+/**
+ * Owner decision 2026-11-15: when the same reviewer vendor rejected a Task's
+ * two newest reviews, the next review prefers another vendor. The delivery
+ * names the vendors to avoid in `review_avoid_vendors`, a field only a
+ * bridge built after this change reads (its profile refuses unknown fields),
+ * so it is sent only when TOMVERSE_AMUX_V52_REVIEW_AVOID_VENDORS is exactly
+ * `enabled`, which the operator sets once the bridge and the review launcher
+ * are deployed. Default off.
+ */
+export const AMUX_V52_REVIEW_AVOID_VENDORS_ENV = "TOMVERSE_AMUX_V52_REVIEW_AVOID_VENDORS";
+export const amuxV52ReviewAvoidVendorsEnabled = (
+  value: string | undefined = process.env[AMUX_V52_REVIEW_AVOID_VENDORS_ENV],
 ) => value?.trim() === "enabled";
 
 /** A first rejection returns to the same grade; a second needs a person.
@@ -69,14 +91,25 @@ export const amuxV52RejectRetryInBudgetEnabled = (
 export function decideAmuxV52ReviewDisposition(
   verdict: AmuxV52ReviewVerdict, priorRejections: number,
   rejectRetryInBudget: boolean = amuxV52RejectRetryInBudgetEnabled(),
+  /** The rejection repeats the previous one (same reviewer, same blocking finding). */
+  repeatedFinding: boolean = false,
 ): { status: "review" | "todo" | "blocked"; reason: string } {
   if (!Number.isSafeInteger(priorRejections) || priorRejections < 0)
     return { status: "blocked", reason: "review_history_unavailable" };
   if (verdict === "accept")
     return { status: "review", reason: "review_server_accepted" };
+  // The same finding rejected again: running the Task again would repeat it, so a
+  // person or the Decision Maker decides (the count since an owner retry decides
+  // whether there is an earlier rejection at all).
+  if (verdict === "reject" && repeatedFinding && priorRejections > 0)
+    return { status: "blocked", reason: AMUX_V52_REVIEW_REJECTED_TWICE_REASON };
   if (verdict === "reject" && (priorRejections === 0 || rejectRetryInBudget))
     return { status: "todo", reason: "review_server_rejected" };
   if (verdict === "reject")
     return { status: "blocked", reason: AMUX_V52_REVIEW_REJECTED_TWICE_REASON };
+  // An unknown review is asked for again by running the Task again: the next
+  // run is submitted to the review server anew.
+  if (verdict === "unknown" && rejectRetryInBudget)
+    return { status: "todo", reason: "review_server_unknown" };
   return { status: "blocked", reason: "review_server_unknown" };
 }

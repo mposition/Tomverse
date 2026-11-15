@@ -202,8 +202,9 @@ DM은 **제안을 쓰는 worker이지 승인자가 아니다.** (되돌릴 수 �
     있는 Task(merge observer 경로)도 제외한다. escalation 하나에 `AmuxDmOwnerSettlement` 행 하나이고(행 id는 escalation에서
     유도한 version 8 UUID), tick마다 새 행 3건, 카드 3장까지다. 카드는 8과 같은 형식이며 세션 이름은 `amux-owner-settlement`,
     provider는 `claude`다. 고정 영어 문장과 증거(표시 번호와 제목, 역할과 grade, 멈춘 사유의 고정 문장, 승인된 완료 조건,
-    실행 결과, 검토 서버 거절 횟수, 같은 부모의 형제 카드와 이 카드에 의존하는지)로 만든다. 검토 서버 거절의 findings는 앱에
-    저장되지 않으므로 싣지 않는다. 검토 PR이면 PR 번호, 파일 목록 전체, 들어가는 만큼의 파일 diff(통째로)와 빠진 수를 싣는다.
+    실행 결과, 검토 서버 거절 횟수, 같은 부모의 형제 카드와 이 카드에 의존하는지)로 만든다. 검토 서버 거절의 findings는 카드 `context`의 `[evidence]` 블록에 싣는다(운영자 결정 2026-11-15: 멈춘 Task만,
+    최근 세 번의 reject를 새것부터, 줄 단위로 통째로, 4,000자 안에서 잘리면 "N more lines are not shown here"를
+    적고, 읽을 수 없는 reject는 그 수를 질문에 밝힌다). 검토 PR의 context는 patch이므로 거기에는 싣지 않는다. 검토 PR이면 PR 번호, 파일 목록 전체, 들어가는 만큼의 파일 diff(통째로)와 빠진 수를 싣는다.
     증거를 읽을 수 없거나 카드 한 장(2,000자)에 통째로 들어가지 않으면 DM에 올리지 않고 사람에게 넘긴다(`evidence_unavailable`).
     운영자 결정 2026-11-14: patch는 질문(2,000자)이 아니라 relay가 전달하는 카드 `context`(4,000자, `[evidence]` 블록)에 싣는다.
     정리·T2 초안 카드는 들어가는 파일 diff만 싣고 빠진 수를 밝힌다. v22 결과 검토는 patch가 없는 실행에서만 생기므로

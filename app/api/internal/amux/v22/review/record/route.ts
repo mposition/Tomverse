@@ -8,6 +8,7 @@ import { AMUX_V22_EXECUTION_ROUTE_BUDGET_MS,
   withAmuxRouteBudget } from "@/lib/amux/dbBoundary";
 import { recordAmuxV52Review } from "@/lib/amux/execution";
 import { AMUX_V52_FINDINGS_SUMMARY_INPUT_MAX_CHARS } from "@/lib/amux/v52ReviewFindingsCore";
+import { prepareAmuxV52ReviewFindings } from "@/lib/amux/v52ReviewFindingsStore";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 import { amuxInternalErrorResponse, amuxJsonNoStore,
   isAmuxInputError } from "@/lib/amux/internalRoute";
@@ -29,7 +30,8 @@ const requestSchema = z.object({
   task_revision: z.number().int().min(0).max(AMUX_MAX_EXPECTED_REVISION),
   changed_paths: z.array(z.string().min(1)).min(1).max(4_096),
   evidence: evidenceSchema,
-  // Display-only reasons of a reject, normalised before it is stored.
+  // A reject's findings: the launcher's JSON document, or plain lines from an
+  // older launcher. Normalised and sealed before they are stored.
   findings_summary: z.string().max(AMUX_V52_FINDINGS_SUMMARY_INPUT_MAX_CHARS).optional(),
 }).strict();
 
@@ -74,7 +76,12 @@ export async function POST(request: Request) {
     return amuxJsonNoStore({ error: "Invalid content type." }, 415);
   return withAmuxRouteBudget(async () => {
     try {
-      const body = await readLimitedJson(request, 64 * 1_024, requestSchema);
+      const body = await readLimitedJson(request, 6 * 1_024 * 1_024, requestSchema);
+      // A reject's findings are sealed under the attempt's own key, made here
+      // before the record's transaction; without them the verdict is recorded.
+      const findings = await prepareAmuxV52ReviewFindings({
+        attemptId: body.attempt_id, verdict: body.evidence.verdict,
+        findingsSummary: body.findings_summary }).catch(() => null);
       const result = await recordAmuxV52Review({
         attemptId: body.attempt_id, worker: body.worker,
         instanceId: body.instance_id, generation: body.generation,
@@ -87,7 +94,7 @@ export async function POST(request: Request) {
           authorVendor: body.evidence.author_vendor,
           reviewerVendors: body.evidence.reviewer_vendors,
           touchesContract: body.evidence.touches_contract },
-        findingsSummary: body.findings_summary,
+        findings,
       });
       return amuxJsonNoStore(result, result.recorded ? 200 : 409);
     } catch (error) {

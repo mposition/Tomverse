@@ -2981,16 +2981,37 @@ Task의 `taskRole`, 예상 경로(`expectedPaths`), intake의 등급 제안뿐�
   - base는 클라이언트의 규칙을 따르고 `--base`를 붙이지 않는다.
   - reviewer 배정, 작성자와 다른 공급사, contract 경로 변경의 2인 검토는 검토 서버가 정한다.
 - **기록.** 본 앱 내부 route가 job id, commit SHA, base SHA, 판정, reviewer 공급사를 기록하고, 시스템
-  감사 `amux.review.recorded`를 같은 트랜잭션에 남긴다. 지적 원문은 본 앱에 저장하지 않는다. 다시
-  작업할 때 runner가 검토 서버에서 읽어 다음 시도의 prompt에 데이터로 넣는다.
+  감사 `amux.review.recorded`를 같은 트랜잭션에 남긴다. 판정 행은 내용 없는 binding이며 바뀌지 않는다.
+  - **지적 저장(운영자 결정 2026-11-15).** reject이면 runner가 검토 서버가 이미 돌려준 구조화 지적과
+    reviewer별 이유 코드(지적을 적지 않았으면 그 report의 글)를 JSON 문서로 만들어 기록 요청의
+    `findings_summary`로 보낸다. 앱은 비밀값처럼 보이는 줄을 지우고 링크를 `[link]`로 바꾼 뒤, 판정 행
+    옆에 AMUX의 다른 본문과 같은 **암호화된 content unit**(`AmuxV52ReviewFindings`, 목적 `review_findings`,
+    attempt마다 외부 key)으로 같은 트랜잭션에 저장한다. 지적 개수와 길이에는 한도를 두지 않고(봉인 단위
+    1 MB를 넘을 때만 덜 심각한 지적부터 빼고 `omitted`로 센다), 감사에는 본문이 아니라 digest와 개수만 남는다.
+    보존은 그 attempt의 result와 같다(Task가 끝난 뒤 90일, 지나면 본문을 비우고 key 삭제를 대기열에 올린다).
+    저장은 신호일 뿐 판정을 바꾸지 않으며, key 저장소가 닿지 않으면 판정만 기록한다.
+  - **읽는 곳.** Admin 카드의 실행 이력과 운영자 확인 대기(지적별 심각도·검토자·파일·줄), Decision Maker 카드의
+    context(`docs/policy/amux-decision-maker.md` 11항), 다음 시도의 prompt(아래 reject 항)다. 내용이 없을 때
+    (이전 기록, 보존 기한 경과, key 저장소 불통)만 검토 서버 job id와 CLI 안내를 보인다.
 - **판정별 처리.**
   - `accept`: v49의 게시 경로(Engineering Publisher의 `develop` PR)로 간다. `done`은 v49·v50의 병합
     관측이다.
-  - `reject`: Task는 같은 등급으로 `todo`에 돌아간다. 두 번째 reject 뒤에는 `blocked`가 되고 사람에게
-    간다. 운영자 결정(2026-11-07): 그 시도는 패치와 판정 기록이 있는 끝난 실행이므로 운영자 검토에서
-    재시도할 수 있다(시도 예산 안에서, 그 시도의 reject 기록이 있을 때만). 재시도는 마지막 reject의
-    지적을 prompt에 받고, 재시도 뒤 첫 reject는 다시 같은 등급으로 한 번 돌아간다.
-  - `unknown`, 요청 오류, 서버 오류: 다시 보내지 않는다. Task는 `blocked`가 되고 사람에게 간다.
+  - `reject`: Task는 같은 등급으로 `todo`에 돌아간다. 운영자 결정(2026-11-07): `blocked`가 된 reject 시도는
+    패치와 판정 기록이 있는 끝난 실행이므로 운영자 검토에서 재시도할 수 있다(시도 예산 안에서, 그 시도의
+    reject 기록이 있을 때만).
+  - **운영자 결정 2026-11-15, 고정 횟수로 막지 않는다.** reject는 횟수와 무관하게 같은 등급으로 `todo`에
+    돌아가고(`TOMVERSE_AMUX_V52_REJECT_RETRY_IN_BUDGET`은 기본 켜짐, `disabled`로 옛 규칙), 다음 시도의
+    prompt는 직전 시도들의 지적(최근 세 번의 reject, 새것부터, 들어가는 만큼 통째로, 잘렸으면 잘렸다고
+    표시)을 데이터로 받는다. 저장된 지적을 열 수 없을 때만 box가 검토 서버에서 job id로 읽는다. **같은 reviewer
+    공급사가 이전 reject의 blocker·major와 같은 말(같은 파일과 줄 또는 비슷한 단어)로 다시 거절할
+    때만** Task가 `blocked`(`review_server_rejected_twice`)가 되어 이유와 함께 사람·Decision Maker로 간다.
+    그 판단은 기록할 때 한 번 하고(`AmuxV52ReviewFindings.repeatsPrior`), 소유자가 재시도한 뒤에는 그 이후
+    reject만 센다. 같은 공급사가 두 번 연달아 거절하면 다음 검토는 다른 공급사를 우선한다(`--avoid-vendor`,
+    기본 꺼진 스위치 `TOMVERSE_AMUX_V52_REVIEW_AVOID_VENDORS`, 배정 규칙은 `tools/review-orchestrator/README.md`).
+  - `unknown`(판정을 읽을 수 없음, 요청·서버 오류 포함): Task는 같은 등급으로 `todo`에 돌아가 다시 실행되며 그
+    실행이 검토 서버에 새로 제출된다. 같은 diff를 같은 attempt에서 두 번 제출하지는 않는다. 시도 예산이 끝나면
+    `blocked`가 되어 사람에게 간다. 검토 서버는 reviewer가 시간을 넘기면 다른 공급사로 다시 시도하므로
+    unknown은 드물다.
 - **신호이지 승인이 아니다.** accept는 PR의 사람 required review·병합(v49)이나 v50 자동 병합의
   조건을 대신하지 않으며, 이 버전은 그 조건을 바꾸지 않는다.
 - **자격증명.** 검토 클라이언트의 SSH key는 launcher 계정만 읽는다. worker 계정이 읽을 수 있으면

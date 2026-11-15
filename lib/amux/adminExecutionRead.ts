@@ -21,6 +21,7 @@ import {
   amuxExecutionLaneWhere, type AmuxExecutionLane,
 } from "./adminExecutionViewCore.ts";
 import type { AmuxV52AttemptReviewView } from "./v52ReviewFindingsCore.ts";
+import { openAmuxV52ReviewFindingsRow } from "./v52ReviewFindingsStore.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -398,7 +399,10 @@ export async function readAmuxExecutionTaskDetail(taskId: string) {
           reason: true, reservedCostMicrousd: true,
           settledCostMicrousd: true, costConfirmed: true,
           v52ReviewRecord: { select: { verdict: true, jobId: true,
-            reviewerVendors: true, findingsSummary: true } } } },
+            reviewerVendors: true, findingsSummary: true,
+            findings: { select: { ideaId: true, ciphertext: true, keyId: true,
+              keyVersion: true, digest: true, digestKeyId: true,
+              bodyPurgedAt: true } } } } } },
       humanEscalations: { where: { status: { in: ["open", "acknowledged"] } },
         orderBy: { createdAt: "desc" as const }, take: 10,
         select: { id: true, reason: true, specialty: true,
@@ -462,6 +466,14 @@ export async function readAmuxExecutionTaskDetail(taskId: string) {
       prisma.amuxV22AttemptUsageAcceptance.findMany({ where: { taskId },
         select: { attemptId: true, source: true, acceptedAt: true } }) : [],
   ]);
+  // A rejected review's sealed findings, opened here (outside any transaction):
+  // an unreadable or purged body shows as such, never as an error.
+  const openedFindings = new Map(await Promise.all(card.executionAttempts.flatMap((attempt) => {
+    const record = attempt.v52ReviewRecord;
+    return record?.verdict === "reject" && record.findings ? [
+      openAmuxV52ReviewFindingsRow(attempt.id, record.findings)
+        .then((opened) => [attempt.id, opened] as const)] : [];
+  })));
   // An ended v4 attempt with no complete usage report holds its worker in the
   // v22 usage gate until the owner accepts it (owner decision 2026-11-10).
   const acceptanceByAttempt = new Map(usageAcceptances.map((row) => [row.attemptId, row]));
@@ -548,8 +560,16 @@ export async function readAmuxExecutionTaskDetail(taskId: string) {
     dependencies: card.dependencies.map((edge) => edge.dependency),
     dependents: card.dependents.map((edge) => edge.task),
     attempts: card.executionAttempts.map(({ v52ReviewRecord, ...attempt }) => ({ ...attempt,
-      // The v52 review of this run; a reject carries its reasons for the owner.
-      v52Review: v52ReviewRecord satisfies AmuxV52AttemptReviewView | null,
+      // The v52 review of this run; a reject carries its findings for the owner.
+      v52Review: v52ReviewRecord ? (() => {
+        const opened = openedFindings.get(attempt.id) ?? null;
+        return { verdict: v52ReviewRecord.verdict, jobId: v52ReviewRecord.jobId,
+          reviewerVendors: v52ReviewRecord.reviewerVendors,
+          findingsSummary: v52ReviewRecord.findingsSummary,
+          findings: opened?.doc ?? null,
+          findingsState: opened ? opened.state : "none" as const,
+        } satisfies AmuxV52AttemptReviewView;
+      })() : null,
       usageUnknown: usageUnknown(attempt),
       usageAcceptance: (() => {
         const row = acceptanceByAttempt.get(attempt.id);

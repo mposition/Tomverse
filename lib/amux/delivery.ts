@@ -46,8 +46,12 @@ import { AMUX_V22_READ_ONLY_API_EXECUTOR_KIND,
   "@/lib/amux/v22ReadOnlyApiProtocol.mjs";
 import { amuxWorkerRuntimeHasExactCapability,
   amuxWorkerRuntimeUsesReadOnlyApi } from "@/lib/amux/workerRuntime";
-import { formatAmuxV52ReviewScope } from "@/lib/amux/v52ReviewCore";
-import { amuxV52ReviewFeedbackJobId } from "@/lib/amux/v52ReviewRejections";
+import { amuxV52ReviewAvoidVendorsEnabled, formatAmuxV52ReviewScope } from
+  "@/lib/amux/v52ReviewCore";
+import { AMUX_V52_REVIEW_HISTORY_PRISMA_CALLS, openAmuxV52ReviewHistory,
+  readAmuxV52ReviewHistory } from "@/lib/amux/v52ReviewFindingsStore";
+import { amuxV52VendorsToAvoid, buildAmuxV52PriorReviewSection } from
+  "@/lib/amux/v52ReviewFindingsCore";
 import { AMUX_V22_PROVIDERS, amuxV22ExecutionRole, amuxV22Provider,
   amuxV22TaskWritesPatch } from "@/lib/amux/v22WorkerClaimCore";
 
@@ -289,6 +293,7 @@ export type AmuxPulledDelivery =
           reviewAuthorVendor?: string;
           reviewScope?: string;
           reviewFeedbackJobId?: string;
+          reviewAvoidVendors?: string[];
           readOnlyRetry?: AmuxV22ReadOnlyDeliveryBinding;
         } | null;
         receiptId: string;
@@ -312,10 +317,11 @@ export async function pullAmuxWorkDelivery(input: {
   const v22Enabled = amuxV22TaskExecutionEnabled(
     process.env[AMUX_V22_TASK_EXECUTION_ENV]);
   const conclusionMode = amuxV22ConclusionMode(process.env[AMUX_V22_CONCLUSION_ENV]);
-  const { sealedCandidate, candidateCard, resumeRows, priorRows } = v22Enabled ?
+  const { sealedCandidate, candidateCard, resumeRows, priorRows, reviewHistory } = v22Enabled ?
     await withAmuxDbBoundary({ ...AMUX_DB_BOUNDARIES.deliveryKeyRead,
       prismaCallCeiling: AMUX_DB_BOUNDARIES.deliveryKeyRead.prismaCallCeiling +
-        AMUX_V22_RESUME_ROWS_PRISMA_CALLS + AMUX_V22_PRIOR_CONCLUSION_ROWS_PRISMA_CALLS },
+        AMUX_V22_RESUME_ROWS_PRISMA_CALLS + AMUX_V22_PRIOR_CONCLUSION_ROWS_PRISMA_CALLS +
+        AMUX_V52_REVIEW_HISTORY_PRISMA_CALLS },
     async (tx) => {
       const sealedCandidate = await tx.amuxWorkDelivery.findFirst({
         where: { worker: input.worker, prompt: AMUX_V22_SEALED_DELIVERY_MARKER,
@@ -339,9 +345,13 @@ export async function pullAmuxWorkDelivery(input: {
       // one depends on go into its prompt as reference material.
       const priorRows = sealedCandidate && conclusionMode !== "off" ?
         await readAmuxV22PriorConclusionRows(tx, sealedCandidate.taskId) : null;
-      return { sealedCandidate, candidateCard, resumeRows, priorRows };
+      // Owner decision 2026-11-15: a retried run reads why the review rejected
+      // the Task's earlier runs, the way a local session reads the review.
+      const reviewHistory = sealedCandidate ?
+        await readAmuxV52ReviewHistory(tx, sealedCandidate.taskId) : null;
+      return { sealedCandidate, candidateCard, resumeRows, priorRows, reviewHistory };
     }) : { sealedCandidate: null, candidateCard: null, resumeRows: null,
-      priorRows: null };
+      priorRows: null, reviewHistory: null };
   const snapshot = candidateCard?.sourceSnapshot;
   const ideaId = snapshot && typeof snapshot === "object" &&
     !Array.isArray(snapshot) && typeof snapshot.ideaId === "string" ?
@@ -369,6 +379,12 @@ export async function pullAmuxWorkDelivery(input: {
   // A body purged at 90 days, or one that cannot be opened, leaves its entry out.
   const priorEntries = priorRows ? await openAmuxV22PriorConclusions(priorRows)
     .catch(() => []) : [];
+  // The rejected runs' findings, opened outside the transaction. An entry that
+  // cannot be opened is left out and the box reads the review server instead.
+  const reviewOpened = reviewHistory && needReviewKeys ?
+    await openAmuxV52ReviewHistory(reviewHistory).catch(() => []) : [];
+  const reviewAvoidVendors = amuxV52ReviewAvoidVendorsEnabled() ?
+    amuxV52VendorsToAvoid(reviewOpened) : [];
   const deliveryContent = async (tx: Prisma.TransactionClient,
     delivery: DeliveryLockRow, now: Date,
     protocolCapabilities: readonly string[]) => {
@@ -376,7 +392,7 @@ export async function pullAmuxWorkDelivery(input: {
       if (amuxWorkerRuntimeUsesReadOnlyApi(protocolCapabilities))
         throw new Error("ordinary delivery cannot use a read-only API runtime");
       return { prompt: delivery.prompt, v22Execution: null,
-        priorConclusionDigest: null };
+        priorConclusionDigest: null, reviewFeedbackDigest: null };
     }
     if (!v22Enabled) throw new Error("v22 sealed delivery is disabled");
     if (!briefKeys || sealedCandidate?.attemptId !== delivery.attemptId ||
@@ -572,8 +588,13 @@ export async function pullAmuxWorkDelivery(input: {
               item.length > 500))
           throw new Error("v52 review scope invalid");
         reviewScope = formatAmuxV52ReviewScope(titleText, criteria);
-        reviewFeedbackJobId = await amuxV52ReviewFeedbackJobId(tx,
-          delivery.taskId);
+        const newest = reviewHistory?.[0];
+        // The findings ride in the prompt below. Only when none could be read
+        // (an older record, a purged or unopenable body) does the box read the
+        // review server by job id, as before.
+        if (newest?.verdict === "reject" && newest.jobId &&
+            !reviewOpened.some((row) => row.opened?.doc))
+          reviewFeedbackJobId = newest.jobId;
       }
       // The fixed HTTPS executor of a read-only API retry has no checkout,
       // so only a CLI run is told about its workspace.
@@ -605,6 +626,14 @@ export async function pullAmuxWorkDelivery(input: {
           budgetBytes: AMUX_V22_RESUME_PROMPT_MAX_BYTES - 2 -
             Buffer.byteLength(head + resumeSection + tail, "utf8") }) : null;
       const priorSection = prior ? `${prior.section}\n` : "";
+      // The Task's earlier rejections, newest first, in the room that is left.
+      const rejected = reviewScope ? reviewOpened.flatMap((row) =>
+        row.verdict === "reject" && row.opened?.doc ?
+          [{ attemptNumber: row.attemptNumber, doc: row.opened.doc }] : []) : [];
+      const review = rejected.length > 0 ? buildAmuxV52PriorReviewSection({
+        entries: rejected, budgetBytes: AMUX_V22_RESUME_PROMPT_MAX_BYTES - 2 -
+          Buffer.byteLength(head + resumeSection + priorSection + tail, "utf8") }) : null;
+      const reviewSection = review ? `${review.section}\n` : "";
       // The question this delivery resumes is marked once, by the pull that
       // first carries it; a pull of the same attempt again finds it resumed.
       if (resumeRows?.question.state === "answered") {
@@ -615,8 +644,9 @@ export async function pullAmuxWorkDelivery(input: {
         if (marked.count !== 1) throw new Error("v22 resume question changed");
       }
       return {
-        prompt: head + resumeSection + priorSection + tail,
+        prompt: head + resumeSection + priorSection + reviewSection + tail,
         priorConclusionDigest: prior?.digest ?? null,
+        reviewFeedbackDigest: review?.digest ?? null,
         // The sidecar runs the execution role; the assignment keeps the Task's.
         v22Execution: { modelId: assignment.modelId,
           role: amuxV22ExecutionRole(assignment.role),
@@ -632,7 +662,10 @@ export async function pullAmuxWorkDelivery(input: {
               })(),
               reviewAuthorVendor: assignment.provider,
               reviewScope,
-              ...(reviewFeedbackJobId ? { reviewFeedbackJobId } : {}) } : {}),
+              ...(reviewFeedbackJobId ? { reviewFeedbackJobId } : {}),
+              // Preference only: the review server falls back when no other
+              // vendor is free (tools/review-orchestrator/lib/assign.mjs).
+              ...(reviewAvoidVendors.length > 0 ? { reviewAvoidVendors } : {}) } : {}),
           } : {}),
           ...(readOnlyRetry ? { readOnlyRetry } : {}) },
         recoveryApprovalId,
@@ -817,6 +850,9 @@ export async function pullAmuxWorkDelivery(input: {
           // The digest of the prior-conclusion section this prompt carries.
           ...(content.priorConclusionDigest ?
             { prior_conclusion_digest: content.priorConclusionDigest } : {}),
+          // The same for the earlier review rejections the prompt carries.
+          ...(content.reviewFeedbackDigest ?
+            { review_feedback_digest: content.reviewFeedbackDigest } : {}),
         },
         tx,
       });

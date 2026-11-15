@@ -33,6 +33,28 @@ test("explicit reviewer options accumulate and require a capable server", () => 
   assert.equal(supportsReviewerSelection(null), false);
 });
 
+// Owner decision 2026-11-15: a vendor that rejected a Task's last two reviews is
+// avoided by the next one, as a preference only.
+test("an avoided vendor is set aside only while another vendor could still take the slot", () => {
+  const request = { providers: PROVIDERS, authorVendor: "openai", load: {}, avoidVendors: ["anthropic"] };
+  assert.equal(pickReviewer(request).provider.id, "cursor", "claude is avoided");
+  assert.equal(pickReviewer({ ...request, load: { cursor: { running: 1 } } }).kind, "wait",
+    "a busy other vendor is waited for");
+  assert.equal(pickReviewer({ ...request, blockedProviders: new Set(["cursor"]) }).provider.id, "claude",
+    "no other vendor can take it: the avoided one reviews as before");
+  assert.equal(pickReviewer({ ...request, avoidVendors: ["anthropic", "xai"] }).provider.id, "claude");
+  assert.equal(pickReviewer({ ...request, providers: [PROVIDERS[0]] }).provider.id, "claude",
+    "the only vendor available is still used");
+  assert.equal(pickReviewer({ ...request, requestedProvider: "claude" }).provider.id, "claude",
+    "an operator-pinned provider is never set aside");
+  const plan = planAssignments({ jobs: [{ job: { id: "r-1", authorVendor: "openai", avoidVendors: ["anthropic"] },
+    slots: [{ index: 0, status: "queued" }] }], providers: PROVIDERS, load: {}, now: 1 });
+  assert.equal(plan[0].provider, "cursor");
+  const retried = planAssignments({ jobs: [{ job: { id: "r-2", authorVendor: "openai" },
+    slots: [{ index: 0, status: "queued", excludeVendors: ["xai"] }] }], providers: PROVIDERS, load: {}, now: 1 });
+  assert.equal(retried[0].provider, "claude", "a slot that timed out on a vendor does not return to it");
+});
+
 test("a pinned reviewer ignores load ordering but retains independence, quota and concurrency", () => {
   const request = { providers: PROVIDERS, authorVendor: "openai", load: {}, requestedProvider: "cursor" };
   assert.equal(pickReviewer(request).provider.id, "cursor");
@@ -179,13 +201,32 @@ test("load counts running slots and only the last 24 hours", () => {
   assert.deepEqual(load.claude, { running: 1, recent24h: 2, lastAssignedAt: day * 2 });
 });
 
-test("verdict parsing fails closed and blocking findings override accept", () => {
+test("verdict parsing never guesses a verdict, reads what it can, and blocking findings override accept", () => {
   const block = (value) => `text\n\`\`\`json\n${JSON.stringify(value)}\n\`\`\``;
   assert.equal(parseReviewerOutput("").verdict, "unknown");
   assert.equal(parseReviewerOutput("looks good").reason, "no_verdict_block");
-  assert.equal(parseReviewerOutput("```json\n{nope\n```").reason, "verdict_not_json");
-  assert.equal(parseReviewerOutput(block({ verdict: "approve", findings: [] })).reason, "verdict_value_invalid");
-  assert.equal(parseReviewerOutput(block({ verdict: "accept", findings: [{ severity: "huge", summary: "x" }] })).verdict, "unknown");
+  assert.equal(parseReviewerOutput("```json\n{nope\n```").verdict, "unknown");
+  assert.equal(parseReviewerOutput(block({ verdict: "maybe", findings: [] })).reason, "verdict_value_invalid");
+  assert.equal(parseReviewerOutput(block({ findings: [{ severity: "minor", summary: "no verdict stated" }] })).verdict, "unknown");
+  // Owner decision 2026-11-15: a slip of format does not cost the review.
+  assert.equal(parseReviewerOutput(block({ verdict: "approve", findings: [] })).verdict, "accept");
+  assert.equal(parseReviewerOutput(block({ verdict: "Rejected", findings: [] })).verdict, "reject");
+  const huge = parseReviewerOutput(block({ verdict: "accept", findings: [{ severity: "huge", summary: "x" }] }));
+  assert.deepEqual(huge, { verdict: "accept", findings: [{ severity: "minor", summary: "x" }] }, "an unfamiliar severity keeps its finding");
+  const named = parseReviewerOutput(block({ verdict: "accept", findings: [{ severity: "Critical", summary: "c" }, { severity: "high", summary: "h" }] }));
+  assert.deepEqual([named.verdict, named.findings.map((f) => f.severity)], ["reject", ["blocker", "major"]]);
+  const mixed = parseReviewerOutput(block({ verdict: "reject", findings: [null, 7, { severity: "major", summary: 3 }, "a bare string",
+    { severity: "major", summary: "kept", file: "a.ts", line: "12" }, { summary: "no severity", file: 4, line: -1 }] }));
+  assert.deepEqual(mixed.findings, [{ severity: "minor", summary: "a bare string" },
+    { severity: "major", summary: "kept", file: "a.ts", line: 12 }, { severity: "minor", summary: "no severity" }]);
+  // No cap on how many findings or how long one is.
+  const long = parseReviewerOutput(block({ verdict: "reject", findings: Array.from({ length: 1_000 }, (_, i) => ({
+    severity: "nit", summary: `n${i} ${"y".repeat(10_000)}` })) }));
+  assert.equal(long.findings.length, 1_000);
+  assert.equal(long.findings[0].summary.length > 10_000, true);
+  // A block with no fence is still found; prose braces earlier are not mistaken for it.
+  const bare = parseReviewerOutput(`I checked {the parser}.\n{"verdict":"reject","findings":[{"severity":"major","summary":"bad {x}"}]}`);
+  assert.deepEqual([bare.verdict, bare.findings[0].summary], ["reject", "bad {x}"]);
   assert.deepEqual(parseReviewerOutput(block({ verdict: "accept", findings: [] })), { verdict: "accept", findings: [] });
   const overridden = parseReviewerOutput(block({ verdict: "accept", findings: [{ severity: "major", summary: "bad" }] }));
   assert.equal(overridden.verdict, "reject");

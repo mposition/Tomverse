@@ -34,20 +34,20 @@ export const SCAN_INTERVAL_SECONDS = 60;
  * queues no faster than the hourly cap, so only a long outage expires one;
  * the workflow refuses a head the branch has moved past anyway.
  */
-export const REQUEST_MAX_AGE_MS = 6 * 60 * 60_000;
+export const REQUEST_MAX_AGE_MS = 48 * 60 * 60_000;
 export const REQUEST_MAX_BYTES = 128 * 1024;
-export const MAX_DISPATCHES_PER_HOUR = 6;
+export const MAX_DISPATCHES_PER_HOUR = 60;
 /**
  * Requests one head may send in all: a failed-CI fix and a conflict
  * resolution, each tried once and once more on the operator's request. A
  * request is sent once (its head and creation time), so a new request for a
  * head -- a retry, the other kind -- is sent too, up to this many.
  */
-export const MAX_SENDS_PER_HEAD = 4;
+export const MAX_SENDS_PER_HEAD = 20;
 const SENT_KEY = /^([0-9a-f]{40})(@[0-9]{1,16})?$/;
 /** A request's identity in the sent ledger. */
 export const requestKey = (request) => `${request.headSha}@${request.createdAt}`;
-export const SENT_KEEP_MS = 14 * 86_400_000;
+export const SENT_KEEP_MS = 90 * 86_400_000;
 const TIMEOUT_MS = 30_000;
 // The workflow's own input limits (its target job refuses anything else).
 const PATCH_MAX_CHARS = 60_000;

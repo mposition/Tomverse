@@ -3,7 +3,7 @@
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminAmuxExecutionMessages } from "@/lib/adminMessages/amuxExecution";
 import { amuxVisibleInspectionText } from "@/lib/amux/adminExecutionViewCore";
-import { amuxV52RejectionView } from "@/lib/amux/v52ReviewFindingsCore";
+import { amuxV52RejectionView, amuxV52SortedFindings } from "@/lib/amux/v52ReviewFindingsCore";
 
 export type AmuxRejectedAttempt = {
   id: string;
@@ -47,7 +47,52 @@ export function AmuxReviewRejectionReason({ review, attemptNumber, showAttempt =
         {showAttempt ? `${m.attempt(attemptNumber)} · ` : ""}{m.title}
         {vendors ? <span className="ml-1 font-normal text-zinc-400">({m.reviewers(vendors)})</span> : null}
       </p>
-      {view.kind === "summary" ? (
+      {view.kind === "findings" ? (
+        <>
+          <ul className="mt-1 space-y-1 break-words text-zinc-200 [overflow-wrap:anywhere]"
+            data-testid="amux-review-rejection-findings">
+            {amuxV52SortedFindings(view.doc).map(({ finding, vendor }, index) => (
+              <li key={index} data-severity={finding.severity}>
+                <span className="text-xs font-bold uppercase text-red-200">{finding.severity}</span>
+                {vendor ? <span className="ml-1 text-xs text-zinc-400">{amuxVisibleInspectionText(vendor)}</span> : null}
+                {finding.file ? (
+                  <code className="ml-1 font-mono text-xs text-zinc-300">
+                    {amuxVisibleInspectionText(finding.file)}{finding.line ? `:${finding.line}` : ""}
+                  </code>
+                ) : null}
+                <span className="ml-1 whitespace-pre-wrap">{amuxVisibleInspectionText(finding.summary)}</span>
+              </li>
+            ))}
+          </ul>
+          {/* A reviewer that rejected without listing a finding: its reason and what its report said. */}
+          {view.doc.reviewers.filter((reviewer) => reviewer.verdict !== "accept" && reviewer.findings.length === 0)
+            .map((reviewer, index) => (
+              <div key={index} className="mt-1 text-zinc-200" data-testid="amux-review-rejection-no-finding">
+                <p className="text-xs text-zinc-400">
+                  {m.noFinding(reviewer.vendor ? amuxVisibleInspectionText(reviewer.vendor) : null, reviewer.reason)}
+                </p>
+                {reviewer.note ? (
+                  <ul className="mt-0.5 space-y-0.5 break-words [overflow-wrap:anywhere]">
+                    {reviewer.note.split("\n").map((line, lineIndex) => (
+                      <li key={lineIndex}>{amuxVisibleInspectionText(line)}</li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            ))}
+          {view.doc.reviewers.some((reviewer) => reviewer.omitted > 0) ? (
+            <p className="mt-1 text-xs text-zinc-400" data-testid="amux-review-rejection-omitted">
+              {m.omitted(view.doc.reviewers.reduce((sum, reviewer) => sum + reviewer.omitted, 0))}
+            </p>
+          ) : null}
+          <p className="mt-1 text-xs text-zinc-500">{m.untrusted}</p>
+        </>
+      ) : view.kind === "purged" || view.kind === "unreadable" ? (
+        <div className="mt-1 text-zinc-300" data-testid="amux-review-rejection-unavailable">
+          <p>{view.kind === "purged" ? m.purged : m.unreadable}</p>
+          {view.jobId ? <p className="mt-1 text-xs text-zinc-400">{m.jobHint(view.jobId)}</p> : null}
+        </div>
+      ) : view.kind === "summary" ? (
         <>
           <ul className="mt-1 space-y-0.5 break-words text-zinc-200 [overflow-wrap:anywhere]"
             data-testid="amux-review-rejection-lines">
