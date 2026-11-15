@@ -1,9 +1,25 @@
+import { reviewHandoffCopy } from "./reviewHandoff";
 import { workspaceWelcomeCopy } from "./workspaceWelcome";
 import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 import { en } from "./en";
 
 export const de = {
+    reviewHandoff: reviewHandoffCopy.de,
     journey: {
+        receiptSent: "Quelle in diesem Versuch: {selected} ausgewählt + {recent} aktuell ({unique} eindeutige Nachrichten)",
+        receiptRetrieved: "{count} frühere Treffer enthalten",
+        historyNoMatch: "Keine früheren Treffer gefunden",
+        historyBudget: "Frühere Auszüge durch Kontextbudget begrenzt",
+        receiptNotSent: "Quelle in diesem Versuch nicht gesendet",
+        receiptUnknown: "Quellübertragung für diesen Versuch nicht bestätigt",
+        receiptPartial: "Teilweise Auszüge",
+        receiptOmitted: "Einige Quellnachrichten ausgelassen",
+        receiptReason_locked: "Original gesperrt",
+        receiptReason_source_deleted: "Original nicht verfügbar",
+        receiptReason_empty_selection: "Auswahl leer oder ungültig",
+        receiptReason_flag_off: "Quellkontext deaktiviert",
+        receiptReason_unsupported: "Dieser Ausführungspfad unterstützt keinen Quellkontext",
+
         importTitle: "Chats importieren",
         imported: "Importierte Chats",
         lastMessage: "Letzte Nachricht",
@@ -33,13 +49,13 @@ export const de = {
         organising: "In Ihrem Konto werden Erinnerungen aus importierten Unterhaltungen geordnet.",
         memoryWhere: "Einstellungen und Verarbeitungsstatus prüfen.",
         loadError: "Die gespeicherten Unterhaltungen konnten nicht geladen werden.",
-        chosen: "Ausgewählte Auszüge für Ihre nächste Frage: {count}",
-        auto: "Verfügbare aktuelle Originalnachrichten: {count}",
+        "chosen": "Nächste Textfrage: {count} ausgewählte Auszüge + aktueller Quelltext",
+        "auto": "Nächste Textfrage: automatische aktuelle Auszüge",
         empty: "Kein automatischer Auszug für die nächste Antwort",
         contextHint: "Das Original enthält {count} Nachrichten. Wählen Sie die Stellen aus, die für Ihre nächste Textfrage wichtig sind.",
         emptyHint: "Wählen Sie eine Stelle aus oder fragen Sie ohne Auszug. Der sichtbare Verlauf wird nicht vollständig an das Modell gesendet.",
         pickSource: "Originalstellen auswählen",
-        pickHelp: "Wählen Sie bis zu drei Nachrichten. Bei langen Nachrichten können Sie die Stelle für Ihre nächste Textfrage auswählen. Nach dem Neuladen müssen Sie die Stelle erneut auswählen.",
+        "pickHelp": "Bis zu drei Nachrichten auswählen. Die Auszüge werden zusammen mit aktuellem Quelltext einmal mit der nächsten Textfrage gesendet. Nach dem Neuladen erneut auswählen.",
         older: "Frühere Nachrichten",
         newer: "Spätere Nachrichten",
         you: "Sie",
@@ -535,8 +551,12 @@ export const de = {
         toolsMemoryOn: "In dieser Unterhaltung verwenden",
         toolsMemoryOff: "In dieser Unterhaltung nicht verwenden",
         toolsMemoryInherit: "Der Kontoeinstellung folgen",
-        toolsMemoryInheritOn: "Folgt der Kontoeinstellung (wird verwendet)",
-        toolsMemoryInheritOff: "Folgt der Kontoeinstellung (wird nicht verwendet)",
+        toolsMemoryInheritOn: "Folgt dem Kontostandard (ein)",
+        toolsMemoryInheritOff: "Folgt dem Kontostandard (aus)",
+        toolsMemoryAccountOff: "Kontogedächtnis ist aus. Die gespeicherte Gesprächsauswahl bleibt bestehen.",
+        toolsMemoryAccountAllowed: "Das Konto erlaubt Gedächtnis; Assistenten- und Diensteinstellungen gelten ebenfalls.",
+        toolsMemoryStatusUnknown: "Kontogedächtnis-Einstellungen sind nicht bestätigt.",
+        toolsMemoryProfileOff: "Dieser Assistent nutzt kein Kontogedächtnis.",
         toolsMemoryOnDescription: "Deine Kontoeinstellung muss es trotzdem erlauben",
         toolsMemoryOffDescription: "Nur diese Unterhaltung. Bereits Gemerktes wird nicht gelöscht",
         toolsMemoryInheritOnDescription: "Deine Einstellung ist derzeit, es zu verwenden; diese Unterhaltung folgt einer Änderung",

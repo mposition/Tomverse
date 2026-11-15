@@ -23,8 +23,11 @@ KillMode=control-group
 TimeoutStopSec=10s
 Nice=10
 NoNewPrivileges=yes
-# The run's clone lives under this unit's own /tmp, outside the home directory.
-PrivateTmp=yes
+# No PrivateTmp: in a --user unit it runs the service in a user namespace of
+# systemd's own, and inside it the Codex sandbox's bwrap cannot create one
+# ("No permissions to create a new namespace" under Ubuntu's AppArmor userns
+# restriction, box 2026-11-14). The run's clone goes to a fresh 0700 mkdtemp
+# directory under /tmp, outside the home directory, removed after the run.
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=tomverse-amux-process-audit

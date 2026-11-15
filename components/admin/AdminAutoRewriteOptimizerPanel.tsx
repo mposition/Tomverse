@@ -1,5 +1,6 @@
 "use client";
 
+import { OptimizerEvidenceView, type OptimizerEvidenceSummary } from "@/components/admin/OptimizerEvidenceView";
 import { formatAestDateTime } from "@/lib/adminUiCore";
 import { useCallback, useEffect, useState } from "react";
 import { Loader2, PencilLine } from "lucide-react";
@@ -19,7 +20,7 @@ import { adminAutoRewriteOptimizerMessages } from "@/lib/adminMessages/autoRewri
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminFetch } from "@/lib/adminFetch";
 
-type Summary = {
+type Summary = OptimizerEvidenceSummary & {
   evaluated: number;
   unchanged: number;
   candidateWins: number;
@@ -48,6 +49,7 @@ type Cycle = {
   summary: Summary | null;
   spentMicroUsd: number;
   promotedAt: string | null;
+  promotionEligibility?: { eligible: boolean; refusal: string | null };
   syntheticCases: SyntheticCase[];
 };
 
@@ -67,7 +69,6 @@ type Action =
   | { action: "roll_back" };
 
 const ENDPOINT = "/api/admin/auto-llm-router/rewrite-optimizer";
-const usd = (micro: number) => `US$${(micro / 1_000_000).toFixed(micro < 10_000 ? 4 : 2)}`;
 
 /**
  * Runs, promotes and rolls back rewrite guidance cycles, beside the routing
@@ -278,7 +279,7 @@ export function AdminAutoRewriteOptimizerPanel({ canWrite = true }: { canWrite?:
                 <AdminStatusChip tone={optimizerCycleTone(cycle.status)}>{status(cycle.status)}</AdminStatusChip>
                 {cycle.promotedAt ? <AdminStatusChip tone="info">{m.promoted}</AdminStatusChip> : null}
               </span>
-              {cycle.status === "passed" && !cycle.promotedAt ? (
+              {cycle.status === "passed" && cycle.promotionEligibility?.eligible === true && !cycle.promotedAt ? (
                 <AdminWriteButton
                   {...writeProps}
                   onClick={() => setConfirming({ kind: "promote", cycleId: cycle.id })}
@@ -289,6 +290,8 @@ export function AdminAutoRewriteOptimizerPanel({ canWrite = true }: { canWrite?:
                 </AdminWriteButton>
               ) : null}
             </div>
+            {cycle.status !== "running" && cycle.promotionEligibility?.refusal && !cycle.promotedAt ? <p className="mt-1 text-xs text-amber-300">{reason(cycle.promotionEligibility.refusal)}</p> : null}
+            <OptimizerEvidenceView summary={cycle.summary} spentMicroUsd={cycle.spentMicroUsd} />
             {cycle.failure ? <p className="mt-1 text-xs text-amber-300">{reason(cycle.failure)}</p> : null}
             {cycle.summary ? (
               <p className="mt-1 text-xs text-zinc-400">
@@ -328,7 +331,7 @@ export function AdminAutoRewriteOptimizerPanel({ canWrite = true }: { canWrite?:
               </details>
             ) : null}
             <p className="mt-1 text-xs text-zinc-500">
-              {cycle.optimizerModelId} · {m.spent} {usd(cycle.spentMicroUsd)}
+              {cycle.optimizerModelId}
             </p>
             {cycle.candidateGuidance ? (
               <details className="mt-2">

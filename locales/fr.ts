@@ -1,9 +1,25 @@
+import { reviewHandoffCopy } from "./reviewHandoff";
 import { workspaceWelcomeCopy } from "./workspaceWelcome";
 import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 import { en } from "./en";
 
 export const fr = {
+    reviewHandoff: reviewHandoffCopy.fr,
     journey: {
+        receiptSent: "Source incluse dans cet essai : {selected} choisis + {recent} récents ({unique} messages uniques)",
+        receiptRetrieved: "{count} résultats historiques inclus",
+        historyNoMatch: "Aucun résultat historique trouvé",
+        historyBudget: "Extraits historiques limités par le budget de contexte",
+        receiptNotSent: "Source non envoyée pour cet essai",
+        receiptUnknown: "Transmission de la source non confirmée pour cet essai",
+        receiptPartial: "Extraits partiels",
+        receiptOmitted: "Certains messages source omis",
+        receiptReason_locked: "Original verrouillé",
+        receiptReason_source_deleted: "Original indisponible",
+        receiptReason_empty_selection: "Sélection vide ou invalide",
+        receiptReason_flag_off: "Contexte source désactivé",
+        receiptReason_unsupported: "Cette exécution ne prend pas en charge le contexte source",
+
         importTitle: "Importer des discussions",
         imported: "Discussions importées",
         lastMessage: "Dernier message",
@@ -33,13 +49,13 @@ export const fr = {
         organising: "Les souvenirs des conversations importées sont en cours d’organisation dans votre compte.",
         memoryWhere: "Consulter les paramètres de la mémoire et l’état du traitement.",
         loadError: "Impossible de charger les conversations enregistrées.",
-        chosen: "Extraits sélectionnés pour votre prochaine question : {count}",
-        auto: "Messages récents de l’original disponibles : {count}",
+        "chosen": "Prochaine question texte : {count} extraits choisis + source récente",
+        "auto": "Prochaine question texte : extraits récents automatiques",
         empty: "Aucun extrait automatique pour la prochaine réponse",
         contextHint: "L’original contient {count} messages. Choisissez les passages utiles à votre prochaine question écrite.",
         emptyHint: "Choisissez un passage ou posez votre question sans extrait. Le modèle ne reçoit pas tout l’historique affiché.",
         pickSource: "Choisir des extraits de l’original",
-        pickHelp: "Sélectionnez jusqu’à trois messages. Pour un message long, choisissez le passage à joindre à votre prochaine question. Après avoir rechargé la page, sélectionnez-le à nouveau pour le réutiliser.",
+        "pickHelp": "Choisissez jusqu’à trois messages. Les extraits et la source récente seront envoyés une fois avec la prochaine question texte. Sélectionnez à nouveau après rechargement.",
         older: "Messages précédents",
         newer: "Messages suivants",
         you: "Vous",
@@ -546,8 +562,12 @@ export const fr = {
         toolsMemoryOn: "Utiliser dans cette conversation",
         toolsMemoryOff: "Ne pas utiliser dans cette conversation",
         toolsMemoryInherit: "Suivre le réglage du compte",
-        toolsMemoryInheritOn: "Suit le réglage du compte (utilisée)",
-        toolsMemoryInheritOff: "Suit le réglage du compte (non utilisée)",
+        toolsMemoryInheritOn: "Suit le choix du compte (activé)",
+        toolsMemoryInheritOff: "Suit le choix du compte (désactivé)",
+        toolsMemoryAccountOff: "La mémoire du compte est désactivée. Le choix enregistré est conservé.",
+        toolsMemoryAccountAllowed: "Le compte autorise la mémoire ; les réglages de l’assistant et du service s’appliquent aussi.",
+        toolsMemoryStatusUnknown: "Les réglages de mémoire du compte ne sont pas confirmés.",
+        toolsMemoryProfileOff: "Cet assistant n’utilise pas la mémoire du compte.",
         toolsMemoryOnDescription: "Le réglage de votre compte doit tout de même l'autoriser",
         toolsMemoryOffDescription: "Uniquement cette conversation. Rien de mémorisé n'est supprimé",
         toolsMemoryInheritOnDescription: "Votre réglage est actuellement de l'utiliser, et cette conversation suivra tout changement",

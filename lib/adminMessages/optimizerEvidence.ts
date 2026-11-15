@@ -1,0 +1,38 @@
+import { defineAdminMessages } from "@/lib/adminLocale";
+
+export const optimizerEvidenceMessages = defineAdminMessages({
+  en: {
+    knownCost: "Recorded known optimizer cost",
+    costBasis: "Calculated from reported token usage and configured prices. Full Chat request cost is unmeasured.",
+    incomplete: "Total optimizer cost unconfirmed",
+    legacy: "Holdout and cost coverage unverified",
+    coverage: (known: number, noDispatch: number, unknown: number) => `${known} known · ${noDispatch} verified no-dispatch · ${unknown} unknown`,
+    calls: (started: number, completed: number, skipped: number, failed: number) => `${started} started · ${completed} completed · ${skipped} not started · ${failed} failed`,
+    creditRatio: "Catalog credit ratio (proposal/current)",
+    creditLimit: "The existing gate permits up to a 10% credit increase.",
+    quality: "Answer quality",
+    qualityStatus: { passed: "gate passed", failed: "gate failed", unmeasured: "evaluation incomplete" },
+    basis: "Gate basis",
+    judged: "own answer comparisons",
+    direct: "own answers and same-kind/model-pair proxies",
+    evidence: (own: number, proxyWins: number, proxyLosses: number, disagreements: number) => `${own} own answer comparisons · proxy toward winner ${proxyWins}, loser ${proxyLosses} · ${disagreements} order disagreements`,
+    legacySamples: (count: number) => `${count} stored legacy input samples; missing text remains unavailable`,
+  },
+  ko: {
+    knownCost: "기록된 optimizer 확인 비용",
+    costBasis: "관측 토큰 사용량과 설정 단가로 계산한 값입니다. 전체 Chat 요청 비용은 미측정입니다.",
+    incomplete: "optimizer 전체 비용 미확정",
+    legacy: "holdout·비용 coverage 미검증",
+    coverage: (known: number, noDispatch: number, unknown: number) => `${known}건 비용 확인 · ${noDispatch}건 미호출 확인 · ${unknown}건 비용 불명`,
+    calls: (started: number, completed: number, skipped: number, failed: number) => `${started}건 시작 · ${completed}건 완료 · ${skipped}건 미시작 · ${failed}건 실패`,
+    creditRatio: "카탈로그 credit 비율 (제안/현재)",
+    creditLimit: "기존 게이트는 최대 10% credit 증가를 허용합니다.",
+    quality: "답변 품질",
+    qualityStatus: { passed: "게이트 통과", failed: "게이트 미통과", unmeasured: "평가 미완료" },
+    basis: "게이트 근거",
+    judged: "자체 답변 비교",
+    direct: "자체 답변과 같은 작업 종류·모델 쌍의 proxy",
+    evidence: (own: number, proxyWins: number, proxyLosses: number, disagreements: number) => `자체 답변 비교 ${own}건 · proxy 승자 방향 ${proxyWins}건, 패자 방향 ${proxyLosses}건 · 순서 불일치 ${disagreements}건`,
+    legacySamples: (count: number) => `구형 입력 표본 ${count}건: 저장되지 않은 내용은 복원하지 않음`,
+  },
+});

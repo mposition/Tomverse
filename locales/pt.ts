@@ -1,9 +1,25 @@
+import { reviewHandoffCopy } from "./reviewHandoff";
 import { workspaceWelcomeCopy } from "./workspaceWelcome";
 import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 import { en } from "./en";
 
 export const pt = {
+    reviewHandoff: reviewHandoffCopy.pt,
     journey: {
+        receiptSent: "Fonte incluída nesta tentativa: {selected} selecionados + {recent} recentes ({unique} mensagens únicas)",
+        receiptRetrieved: "{count} correspondências históricas incluídas",
+        historyNoMatch: "Nenhuma correspondência histórica encontrada",
+        historyBudget: "Trechos históricos limitados pelo contexto disponível",
+        receiptNotSent: "Fonte não enviada nesta tentativa",
+        receiptUnknown: "Não foi possível confirmar o envio da fonte nesta tentativa",
+        receiptPartial: "Trechos parciais",
+        receiptOmitted: "Algumas mensagens originais omitidas",
+        receiptReason_locked: "Original bloqueado",
+        receiptReason_source_deleted: "Original indisponível",
+        receiptReason_empty_selection: "Seleção vazia ou inválida",
+        receiptReason_flag_off: "Contexto de origem desativado",
+        receiptReason_unsupported: "Esta execução não aceita contexto de origem",
+
         importTitle: "Importar chats",
         imported: "Chats importados",
         lastMessage: "Última mensagem",
@@ -33,13 +49,13 @@ export const pt = {
         organising: "As memórias das conversas importadas estão sendo organizadas na sua conta.",
         memoryWhere: "Consulte as configurações da memória e o andamento do processamento.",
         loadError: "Não foi possível carregar as conversas salvas.",
-        chosen: "Trechos selecionados para a próxima pergunta: {count}",
-        auto: "Mensagens recentes do original disponíveis: {count}",
+        "chosen": "Próxima pergunta de texto: {count} trechos selecionados + fonte recente",
+        "auto": "Próxima pergunta de texto: trechos recentes automáticos",
         empty: "Nenhum trecho automático para a próxima resposta",
         contextHint: "O original contém {count} mensagens. Escolha os trechos importantes para a próxima pergunta por texto.",
         emptyHint: "Escolha um trecho ou pergunte sem ele. Nem todo o histórico exibido é enviado ao modelo.",
         pickSource: "Escolher trechos do original",
-        pickHelp: "Selecione até três mensagens. Se a mensagem for longa, escolha o trecho que deseja enviar com a próxima pergunta. Para usá-lo após recarregar a página, selecione-o novamente.",
+        "pickHelp": "Selecione até três mensagens. Os trechos e a fonte recente serão enviados uma vez com a próxima pergunta de texto. Selecione novamente após recarregar.",
         older: "Mensagens anteriores",
         newer: "Mensagens posteriores",
         you: "Você",
@@ -546,8 +562,12 @@ export const pt = {
         toolsMemoryOn: "Usar nesta conversa",
         toolsMemoryOff: "Não usar nesta conversa",
         toolsMemoryInherit: "Seguir o padrão da conta",
-        toolsMemoryInheritOn: "Seguindo o padrão da conta (em uso)",
-        toolsMemoryInheritOff: "Seguindo o padrão da conta (sem uso)",
+        toolsMemoryInheritOn: "Segue o padrão da conta (ativado)",
+        toolsMemoryInheritOff: "Segue o padrão da conta (desativado)",
+        toolsMemoryAccountOff: "A memória da conta está desativada. A escolha salva é mantida.",
+        toolsMemoryAccountAllowed: "A conta permite memória; as configurações do assistente e do serviço também se aplicam.",
+        toolsMemoryStatusUnknown: "As configurações de memória da conta não foram confirmadas.",
+        toolsMemoryProfileOff: "Este assistente não usa a memória da conta.",
         toolsMemoryOnDescription: "A configuração da sua conta ainda precisa permitir",
         toolsMemoryOffDescription: "Apenas esta conversa. Nada do que já foi lembrado é apagado",
         toolsMemoryInheritOnDescription: "Seu padrão atual é usar, e esta conversa acompanhará qualquer mudança",

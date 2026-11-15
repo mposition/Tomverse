@@ -35,8 +35,55 @@ import { AMUX_V22_AUTO_PROMOTION_CODE_LATCH,
   amuxV22ScoreCurrent, amuxV22GraduationExceptionEnabled, amuxV22PromotionFlowEnabled,
   amuxV22GraduationPermitted } from "./v22AutoPromotionCore.ts";
 import { writeV22AutoPromotionAudit } from "./v22AutoPromotionAudit.ts";
+import { reportOperationalIncident } from "@/lib/operationalMonitoring";
+import { amuxV22PromotionBlockedNotice,
+  type AmuxV22PromotionNotReady } from "./v22PromotionBlockedCore.ts";
 
 type Candidate = { id: string; taskId: string; scoreTotal: number };
+
+/** A refusal that keeps the readiness reasons, so the tick can say why. */
+class AmuxV22TaskNotReadyError extends BoardImportError {
+  readonly reasons: readonly string[];
+  constructor(reasons: readonly string[]) {
+    super("task_not_ready", 409);
+    this.reasons = reasons;
+  }
+}
+
+/**
+ * Tells the operator which backlog Tasks wait on them, and why (owner
+ * direction 2026-11-14). Best effort: a failed read or report never changes
+ * the tick's answer.
+ */
+async function reportPromotionBlocked(notReady: AmuxV22PromotionNotReady[]) {
+  if (notReady.length === 0) return;
+  try {
+    const keys = await prisma.amuxWorkItem.findMany({
+      where: { id: { in: notReady.map((task) => task.taskId) } },
+      select: { id: true, displayKey: true },
+    });
+    const keyOf = new Map(keys.map((row) => [row.id, row.displayKey]));
+    const named = notReady.map((task) => ({ ...task, displayKey: keyOf.get(task.taskId) ?? null }));
+    const notice = amuxV22PromotionBlockedNotice(named);
+    console.info(JSON.stringify({ event: "amux_v22_promotion_not_ready",
+      notReady: named.length, blockedByOperator: notice?.count ?? 0,
+      reasons: notice?.reasons ?? {} }));
+    if (!notice) return;
+    await reportOperationalIncident({
+      code: "AMUX_V22_PROMOTION_BLOCKED",
+      title: "AMUX backlog Tasks are held by a reason the operator must clear",
+      error: new Error(`${notice.count} Task(s): ${notice.tasks}`),
+      severity: "warning",
+      cooldownMs: 6 * 60 * 60 * 1_000,
+      context: { component: "amux-v22-auto-promotion", count: notice.count,
+        reasons: Object.entries(notice.reasons).map(([reason, n]) => `${reason}=${n}`).join(","),
+        tasks: notice.tasks, admin: "/admin/amux-backlog" },
+    });
+  } catch (error) {
+    console.error(JSON.stringify({ event: "amux_v22_promotion_blocked_report_failed",
+      message: error instanceof Error ? error.message.slice(0, 200) : "unknown" }));
+  }
+}
 type OwnerMoveCommand = {
   session: Session;
   request: Request;
@@ -445,7 +492,7 @@ async function commitCandidate(input: { candidate: Candidate; receiptId: string;
       if (!ready.ready || !ready.sourceApprovalId ||
           !ready.sourceApprovalDigest || !ready.briefDigest ||
           !ready.parentFeatureNodeId) {
-        throw new BoardImportError("task_not_ready", 409);
+        throw new AmuxV22TaskNotReadyError(ready.reasons);
       }
       if (input.ownerMove &&
           ready.taskRevision !== input.ownerMove.expectedRevision) {
@@ -774,6 +821,7 @@ export async function tickV22AutoPromotion() {
   if (!candidates.length) return { promoted: false as const,
     reason: "no_candidate" };
   let unavailable = 0;
+  const notReady: AmuxV22PromotionNotReady[] = [];
   for (const candidate of candidates) {
     let context: Awaited<ReturnType<typeof loadAmuxV4TaskReadyContext>>;
     try { context = await loadAmuxV4TaskReadyContext(candidate.taskId); }
@@ -797,6 +845,9 @@ export async function tickV22AutoPromotion() {
             receiptId, taskId: candidate.taskId };
         }
       }
+      if (error instanceof AmuxV22TaskNotReadyError) {
+        notReady.push({ taskId: candidate.taskId, displayKey: null, reasons: error.reasons });
+      }
       if (["task_not_ready", "score_changed", "score_unbound",
         "lifecycle_present", "not_backlog", "conflict"].includes(error.code)) {
         continue;
@@ -804,6 +855,8 @@ export async function tickV22AutoPromotion() {
       return { promoted: false as const, reason: error.code };
     }
   }
+  // Only once nothing could move: a promoting tick stops at its first card.
+  await reportPromotionBlocked(notReady);
   return { promoted: false as const,
     reason: unavailable > 0 ? "candidate_unavailable" : "no_ready_candidate" };
 }

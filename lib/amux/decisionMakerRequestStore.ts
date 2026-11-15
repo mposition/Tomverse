@@ -727,10 +727,15 @@ export async function recordDecisionMakerRequest(
       r."route", r."instance", r."refusalCodes",
       floor(extract(epoch FROM r."createdAt") * 1000)::bigint AS "createdAtEpochMs",
       floor(extract(epoch FROM r."assignmentDeadlineAt") * 1000)::bigint AS "assignmentDeadlineAtEpochMs",
-      -- AMUXFLOW/B2: a card the app filed itself, proven by the owner
-      -- settlement row that recorded this local card (no extra statement).
-      EXISTS (SELECT 1 FROM "AmuxDmOwnerSettlement" s
-        WHERE s."localCardId" = ${binding.cardId}) AS "appFiledCard"
+      -- AMUXFLOW/B2: a card the app filed itself, proven by the row that
+      -- recorded this local card (no extra statement): an owner settlement,
+      -- and since 2026-11-14 a T2 draft review, whose card now carries the
+      -- draft's patch as evidence. A worker's own question is never one: its
+      -- table is not read here.
+      (EXISTS (SELECT 1 FROM "AmuxDmOwnerSettlement" s
+        WHERE s."localCardId" = ${binding.cardId})
+      OR EXISTS (SELECT 1 FROM "EngineeringAgentDmReview" e
+        WHERE e."localCardId" = ${binding.cardId})) AS "appFiledCard"
     FROM (SELECT 1) AS "probe"
     LEFT JOIN "AmuxDecisionMakerRequest" r
       ON r."cardId" = ${binding.cardId} AND r."questionRevision" = ${binding.questionRevision}

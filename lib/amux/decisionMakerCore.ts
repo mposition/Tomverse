@@ -153,9 +153,55 @@ export const DM_ESCALATION_MAX_BYTES = 1024;
  * words, case-insensitively. A false positive only costs the operator a draft,
  * so the list errs wide. Changing it is a policy version change.
  */
+/**
+ * The only clauses the exception admits, whole from the clause's start (after
+ * the last comma) to the sentence's end: "(목록은) Free·Pro·Max 권한을
+ * 구분합니다" and "(플랜) 권한에 따라 문구가 다릅니다". Anything else after the
+ * describing word -- "구분 없이 지급합니다" -- is not one.
+ */
+const PLAN_DESCRIPTION_CLAUSE = new RegExp(
+  "^\\s*(?:(?:[가-힣A-Za-z]+\\s+){0,2}[가-힣A-Za-z]+(?:은|는)\\s+)?" +
+  "(?:(?:(?:free|pro|max|guest|plus|team)\\s*(?:[·,/]\\s*)?)+(?:플랜\\s*)?|(?:플랜|요금제)\\s*)(?:별\\s*)?권한" +
+  "(?:(?:을|를)\\s*(?:구분|비교)(?:합니다|해요|한다|됩니다)|에\\s*따라\\s*[가-힣]+(?:이|가)\\s*(?:다릅니다|달라집니다))\\s*$",
+  "i",
+);
+/** A request or question, whatever its verb. */
+const REQUEST_FORM = /까요|까\s|할지|될지|해도|하면|하시겠|주세요|해\s*주|합시다|하자|드릴/;
+/** Stems of granting, changing, switching or taking away; wide on purpose ("줄" also hits "줄이다"). */
+const ACCESS_CHANGE_STEM =
+  /주|줘|줄|준|부여|변경|바꾸|바꿔|바꿀|바뀌|수정|설정|추가|삭제|제거|회수|열|올리|올려|올릴|높|낮|상승|승격|격상|허용|받|얻|요청|필요|빼|넓|확대|축소|위임|할당|박탈|해제|풀|없애|활성|비활성|켜|켤|끄|꺼|끌|적용|전환|승인|부활|복구|차단|제한/;
+
+/**
+ * Whether a text's Korean "권한" names access. Every one does, except a
+ * clause that is exactly a plan description (`PLAN_DESCRIPTION_CLAUSE`) in a
+ * sentence that is not a request or question and has no changing verb
+ * ("플랜별 목록은 Free·Pro·Max 권한을 구분합니다."). The exception is narrow on
+ * purpose: five independent review rounds each found an access change that a
+ * looser rule let through.
+ */
+export function koreanAccessTermHit(text: string): boolean {
+  for (let at = text.indexOf("권한"); at !== -1; at = text.indexOf("권한", at + 2)) {
+    const head = text.slice(0, at);
+    const start = Math.max(...[".", "?", "!", "\n", "。"].map((mark) => head.lastIndexOf(mark))) + 1;
+    const rest = text.slice(at + 2);
+    const end = rest.search(/[.?!\n。]/);
+    const after = end === -1 ? rest : rest.slice(0, end);
+    const sentence = text.slice(start, at) + after;
+    const question = end !== -1 && rest[end] === "?";
+    const clauseStart = Math.max(start, head.lastIndexOf(",") + 1);
+    const clause = text.slice(clauseStart, at) + "권한" + after;
+    const planDescription = PLAN_DESCRIPTION_CLAUSE.test(clause) &&
+      !question && !REQUEST_FORM.test(sentence) && !ACCESS_CHANGE_STEM.test(sentence);
+    if (!planDescription) return true;
+  }
+  return false;
+}
+
 export const DM_IRREVERSIBLE_TERMS: ReadonlyArray<{
   category: string;
   korean: readonly string[];
+  /** A Korean hit a substring cannot say (the access entry's "권한" rule). */
+  koreanTest?: (text: string) => boolean;
   english: readonly string[];
 }> = [
   { category: "main_merge", korean: ["main 병합", "main에 병합", "main으로 병합"], english: ["merge to main", "merge into main", "merge main"] },
@@ -165,22 +211,50 @@ export const DM_IRREVERSIBLE_TERMS: ReadonlyArray<{
   { category: "money", korean: ["결제", "환불", "청구"], english: ["payment", "refund", "charge", "invoice"] },
   { category: "outbound", korean: ["게시", "발송", "연락"], english: ["publish", "post to", "send to", "send email", "send an email", "email the", "tweet", "notify", "contact"] },
   { category: "secret", korean: ["비밀번호", "비밀값", "토큰", "API 키"], english: ["secret", "token", "password", "api key", "apikey", "credential"] },
-  { category: "access", korean: ["권한", "접근 설정"], english: ["permission", "permissions", "access control"] },
+  // Every Korean "권한" is still a hit, with one exception (owner decision
+  // 2026-11-14, AMUX-PRICINGCOPY-002): a plan's entitlement -- "권한" right after
+  // a plan name ("Free·Pro·Max 권한을 구분합니다") -- whose sentence has no
+  // verb that grants, changes or takes it away. Two independent reviews showed
+  // that listing the access-change forms instead always misses one.
+  { category: "access", korean: ["접근 설정"], koreanTest: (text) => koreanAccessTermHit(text), english: ["permission", "permissions", "access control"] },
   { category: "gate", korean: ["정책 변경", "정책 개정", "정책을 바꾸", "정책을 고치", "워크플로"], english: ["policy change", "change the policy", "amend the policy", "workflow", "workflows", "branch protection"] },
 ];
 
 const englishTermPatterns = DM_IRREVERSIBLE_TERMS.map((entry) => ({
   category: entry.category,
   korean: entry.korean,
+  koreanTest: entry.koreanTest ?? (() => false),
   english: entry.english.map(
     (term) => new RegExp(`(?<![A-Za-z0-9_])${term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/[ -]/g, "[ -]")}(?![A-Za-z0-9_])`, "i"),
   ),
 }));
 
+/**
+ * The operational incident for a DM run that ended `unavailable` (owner
+ * decision 2026-11-14). That result is a failed process -- a CLI that could not
+ * start, sign in or write its output -- not a judgment, yet the question still
+ * goes to the operator as if the DM had looked at it. On 2026-11-14 the
+ * anthropic instance's first run in six days exited 1 within two seconds, and
+ * every codex worker's question routes to that instance (§7). The incident
+ * names the instance and request only; the reason is in the box's broker
+ * journal (`amux_dm_broker_request`).
+ */
+export const dmRunUnavailableIncident = (instance: unknown, requestId: unknown) => ({
+  code: "AMUX_DM_RUN_UNAVAILABLE",
+  title: "AMUX Decision Maker run failed before judging",
+  error: "The Decision Maker process ended without a result; its question went to the operator. Check the instance's CLI sign-in on the AMUX box.",
+  severity: "warning" as const,
+  context: {
+    instance: typeof instance === "string" ? instance.slice(0, 64) : null,
+    requestId: typeof requestId === "string" ? requestId.slice(0, 64) : null,
+  },
+});
+
 /** The categories of the term list that a text hits, in list order. Never the text. */
 export const irreversibleTermCategories = (text: string): string[] =>
   englishTermPatterns
-    .filter((entry) => entry.korean.some((term) => text.includes(term)) || entry.english.some((pattern) => pattern.test(text)))
+    .filter((entry) => entry.korean.some((term) => text.includes(term)) ||
+      entry.koreanTest(text) || entry.english.some((pattern) => pattern.test(text)))
     .map((entry) => entry.category);
 
 /**

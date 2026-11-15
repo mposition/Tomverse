@@ -1,3 +1,4 @@
+import { reviewHandoffCopy } from "./reviewHandoff";
 import { workspaceWelcomeCopy } from "./workspaceWelcome";
 import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 import { en } from "./en";
@@ -11,7 +12,22 @@ import { en } from "./en";
  * in `lib/localeLaunchPolicy.ts`. A string fixed in `zh` needs fixing here.
  */
 export const zhHant = {
+    reviewHandoff: reviewHandoffCopy.zhHant,
     journey: {
+        receiptSent: "本次嘗試的輸入包含原文：已選 {selected} 個 + 最近 {recent} 個（去重後 {unique} 則訊息）",
+        receiptRetrieved: "包含 {count} 條歷史比對",
+        historyNoMatch: "未找到歷史比對",
+        historyBudget: "歷史摘錄受上下文預算限制",
+        receiptNotSent: "本次嘗試未傳送原文",
+        receiptUnknown: "無法確認本次嘗試的原文傳遞情況",
+        receiptPartial: "部分摘錄",
+        receiptOmitted: "部分原文訊息已省略",
+        receiptReason_locked: "原文已鎖定",
+        receiptReason_source_deleted: "原文無法使用",
+        receiptReason_empty_selection: "選擇為空或無效",
+        receiptReason_flag_off: "原文脈絡功能已關閉",
+        receiptReason_unsupported: "此執行路徑不支援原文脈絡",
+
         importTitle: "匯入對話",
         imported: "已匯入的對話",
         lastMessage: "最後一則訊息",
@@ -41,13 +57,13 @@ export const zhHant = {
         organising: "正在為您的帳戶整理匯入對話中的記憶。",
         memoryWhere: "查看記憶設定與處理狀態。",
         loadError: "無法載入已儲存的對話。",
-        chosen: "已為下一個問題選取 {count} 個片段",
-        auto: "可參考的近期原始訊息：{count} 則",
+        "chosen": "下一次文字提問：已選 {count} 個片段 + 最近原文",
+        "auto": "下一次文字提問：自動擷取最近原文",
         empty: "下一次回答沒有可自動引用的片段",
         contextHint: "原文共有 {count} 則訊息。您可以挑選與下一個文字問題相關的部分。",
         emptyHint: "您可以挑選片段，也可以不選就直接提問。畫面上的紀錄不會全部傳送給模型。",
         pickSource: "選擇原文片段",
-        pickHelp: "最多選擇三則訊息。如果訊息較長，可選擇要隨下一個文字問題傳送的片段。重新載入頁面後想再次使用，請重新選取。",
+        "pickHelp": "最多選擇三則訊息。所選片段與最近原文會隨下一次文字提問傳送一次。重新整理後需再次選擇。",
         older: "較早的訊息",
         newer: "較新的訊息",
         you: "您",
@@ -549,8 +565,12 @@ export const zhHant = {
         toolsMemoryOn: "在此對話中使用",
         toolsMemoryOff: "在此對話中不使用",
         toolsMemoryInherit: "沿用帳戶預設設定",
-        toolsMemoryInheritOn: "沿用帳戶預設設定（使用）",
-        toolsMemoryInheritOff: "沿用帳戶預設設定（不使用）",
+        toolsMemoryInheritOn: "沿用帳戶預設設定（開啟）",
+        toolsMemoryInheritOff: "沿用帳戶預設設定（關閉）",
+        toolsMemoryAccountOff: "帳戶記憶已關閉。已儲存的對話選擇保持不變。",
+        toolsMemoryAccountAllowed: "帳戶允許使用記憶；助理與服務設定也適用。",
+        toolsMemoryStatusUnknown: "尚未確認帳戶記憶設定。",
+        toolsMemoryProfileOff: "此助理不使用帳戶記憶。",
         toolsMemoryOnDescription: "仍需帳戶設定允許才會生效",
         toolsMemoryOffDescription: "僅限此對話，已儲存的記憶不會被刪除",
         toolsMemoryInheritOnDescription: "目前預設為使用，變更帳戶設定後此對話會跟隨",

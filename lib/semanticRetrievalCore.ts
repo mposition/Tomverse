@@ -674,7 +674,8 @@ export const rerankCacheKey = (input: {
 }) =>
     sha256(
         JSON.stringify([
-            "rerank-v1",
+            // Memory's query budget/pool contract changed; knowledge keeps its cache domain.
+            input.feature === "memoryRerank" ? "memory-rerank-v2" : "rerank-v1",
             input.feature,
             input.userId,
             input.model,

@@ -35,11 +35,11 @@ import type { SemanticCallMode, SemanticStepModes } from "@/lib/semanticRetrieva
  * against a prompt and chat sends one, so a block only one of them knows about
  * is a block the user is charged wrongly for.
  *
- * ## The order is §9.1's, and it is one message
+ * ## Instructions and data have separate roles
  *
- * Instructions, then memory, then knowledge, assembled by
- * `buildProfileSystemPrompt` into a single system message. Three messages
- * would leave their order to the provider, and not every provider keeps it.
+ * Profile instructions, app-authored memory rules and knowledge retain their
+ * system block. Memory statements go separately into the user-role prelude,
+ * before native history and the current request, including Deep Research.
  *
  * ## A profile narrows memory; it never widens it
  *
@@ -133,7 +133,7 @@ export async function buildChatTurnContext(input: {
 
     const systemPrompt = buildProfileSystemPrompt({
         instructions: profile.instructionsPrompt,
-        memory: memory.prompt.text,
+        memory: memory.prompt.rules,
         knowledge: profile.knowledgePrompt,
     });
 

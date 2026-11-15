@@ -267,6 +267,20 @@ export const MARKETING_VIDEO_DAYS: Readonly<Record<string, { readonly video: num
 };
 
 /**
+ * Where one language on a platform takes another ratio than the platform's,
+ * keyed `platform:locale`. Korean Instagram: Reels reach far more people
+ * there than images, so three days in four carry a video (owner decision
+ * 2026-11-14); an image still stands in on a day no video fits.
+ */
+export const MARKETING_VIDEO_DAYS_BY_LOCALE: Readonly<Record<string, { readonly video: number; readonly of: number }>> = {
+  "instagram:ko": { video: 3, of: 4 },
+};
+
+/** The video-day ratio for an account on `channel` writing in `locale`. */
+export const marketingVideoDaysFor = (channel: string, locale: string): { readonly video: number; readonly of: number } =>
+  MARKETING_VIDEO_DAYS_BY_LOCALE[`${channel}:${locale}`] ?? MARKETING_VIDEO_DAYS[channel] ?? { video: 0, of: 1 };
+
+/**
  * The kind of media an account's drafts carry on a day, so that the posts a
  * person approves follow the owner's video-to-image ratio over time. `day` is
  * whole UTC days since the epoch; day d is a video day when
@@ -281,7 +295,7 @@ export function marketingA5MediaKindFor(
   day: number,
   accountId?: string,
 ): "image" | "video" | null {
-  const ratio = MARKETING_VIDEO_DAYS[channel] ?? { video: 0, of: 1 };
+  const ratio = marketingVideoDaysFor(channel, locale);
   const planned =
     Math.floor(((day + 1) * ratio.video) / ratio.of) > Math.floor((day * ratio.video) / ratio.of) ? "video" : "image";
   const other = planned === "video" ? "image" : "video";

@@ -23,6 +23,7 @@ import {
     type MemoryInjectionDecision,
 } from "@/lib/memoryInjectionGate";
 import { MEMORY_RETRIEVAL_ALGORITHM_VERSION } from "@/lib/memoryRetrievalScoring";
+import { buildMemoryQueryPlan } from "@/lib/memoryQueryPlan";
 import { retrieveMemoryContext } from "@/lib/memoryRetrievalService";
 import { getMemorySettings } from "@/lib/memoryService";
 import { STYLE_MEMORY_KINDS } from "@/lib/memoryValidatorCore";
@@ -52,7 +53,7 @@ import type { SemanticCallMode } from "@/lib/semanticRetrievalCore";
 export type ChatMemoryContext = {
     /** Why memory is or is not part of this request. */
     decision: MemoryInjectionDecision;
-    /** The block to place in the system message, or null. */
+    /** App rules and separate user-role memory data. */
     prompt: MemoryContextPrompt;
     /**
      * Input tokens the memory block contributes. Priced by preflight, booked
@@ -89,7 +90,8 @@ export type ChatMemoryContext = {
  */
 const EMPTY_PROMPT: MemoryContextPrompt = {
     promptVersion: MEMORY_CONTEXT_PROMPT_VERSION,
-    text: null,
+    rules: null,
+    data: null,
     usedCount: 0,
     factualCount: 0,
     styleCount: 0,
@@ -235,8 +237,10 @@ export async function buildChatMemoryContext(input: {
         memoryVersion,
         styleVersion,
         profileVersion: null,
-        retrievalHash: prompt.text === null ? retrieval.resultHash : pricedMemoryRetrievalHash(
-            retrieval.selected.map(({ memory }) => memory.id), prompt.text),
+        retrievalHash: pricedMemoryRetrievalHash(
+            retrieval.selected.map(({ memory }) => memory.id),
+            JSON.stringify({ rules: prompt.rules, data: prompt.data }),
+            JSON.stringify(buildMemoryQueryPlan(input.query))),
         retrievalVersion: retrieval.algorithmVersion,
         promptVersion: prompt.promptVersion,
         knowledgeHash: "none",
@@ -247,7 +251,8 @@ export async function buildChatMemoryContext(input: {
         prompt,
         // The block is what is sent, so the block is what is counted --
         // including its rules preamble, which is not free.
-        memoryTokens: prompt.text ? estimatePromptTokens(prompt.text) : 0,
+        memoryTokens: (prompt.rules ? estimatePromptTokens(prompt.rules) : 0) +
+            (prompt.data ? estimatePromptTokens(prompt.data) : 0),
         fingerprintInput,
         fingerprint: contextFingerprint(fingerprintInput),
         consideredCount: retrieval.consideredCount,

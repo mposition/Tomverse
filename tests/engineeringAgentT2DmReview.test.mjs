@@ -12,6 +12,8 @@ import {
   ENGINEERING_AGENT_T2_DM_REASON_TEXT,
   engineeringAgentT2DmCard,
   engineeringAgentT2DmReviewEnabled,
+  DM_PATCH_CONTEXT_MAX,
+  patchEvidenceContext,
 } from "../lib/engineeringAgentT2DmReviewCore.ts";
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
@@ -40,23 +42,35 @@ test("the card's fixed words hit no routing term, so it reaches a DM", () => {
   }
 });
 
-test("every file is listed; whole diffs follow while they fit, and the card says what it left out", () => {
+test("every file is listed in the question; whole diffs ride in the context while they fit, and the card says what it left out", () => {
   const small = engineeringAgentT2DmCard({ workItemId: ID, cardLabel: "C", reason: "tier_two",
     patchBody: [filePatch("a.ts", ["-x", "+y"]), filePatch("b.ts", ["+z"])].join("\n") });
   assert.match(small.question, /Files \(2\):\n- a\.ts \(\+1 -1\)\n- b\.ts \(\+1 -0\)/);
-  assert.match(small.question, /Patch:\ndiff --git a\/a\.ts b\/a\.ts[\s\S]*diff --git a\/b\.ts b\/b\.ts/);
-  assert.doesNotMatch(small.question, /not shown/);
+  assert.match(small.context, /^\[evidence\]\nPatch:\ndiff --git a\/a\.ts b\/a\.ts[\s\S]*diff --git a\/b\.ts b\/b\.ts[\s\S]*\[\/evidence\]$/);
+  assert.doesNotMatch(small.context, /not shown/);
+  assert.doesNotMatch(small.question, /diff --git/);
 
   const big = engineeringAgentT2DmCard({ workItemId: ID, cardLabel: "C", reason: "tier_two",
-    patchBody: [filePatch("a.ts", ["+short"]), filePatch("b.ts", Array.from({ length: 200 }, (_, i) => `+line ${i}`))].join("\n") });
+    patchBody: [filePatch("a.ts", ["+short"]), filePatch("b.ts", Array.from({ length: 600 }, (_, i) => `+line ${i}`))].join("\n") });
   assert.ok(big.question.length <= ENGINEERING_AGENT_T2_DM_QUESTION_MAX);
-  assert.match(big.question, /- b\.ts \(\+200 -0\)/, "a file whose diff does not fit is still listed");
-  assert.match(big.question, /\(1 more file diffs are not shown\.\)/);
-  assert.doesNotMatch(big.question, /line 199/);
+  assert.ok(big.context.length <= DM_PATCH_CONTEXT_MAX);
+  assert.match(big.question, /- b\.ts \(\+600 -0\)/, "a file whose diff does not fit is still listed");
+  assert.match(big.context, /\(1 more file diffs are not shown\.\)/);
+  assert.doesNotMatch(big.context, /line 599/);
+  // A diff the old 2,000-character question could not hold now fits whole.
+  const mid = engineeringAgentT2DmCard({ workItemId: ID, cardLabel: "C", reason: "tier_two",
+    patchBody: filePatch("a.ts", Array.from({ length: 150 }, (_, i) => `+line ${i}`)) });
+  assert.match(mid.context, /\+line 149/);
+  assert.doesNotMatch(mid.context, /not shown|does not fit/);
 
   const huge = engineeringAgentT2DmCard({ workItemId: ID, cardLabel: "C", reason: "tier_two",
-    patchBody: filePatch("a.ts", Array.from({ length: 300 }, (_, i) => `+line ${i}`)) });
-  assert.match(huge.question, /The patch does not fit this card; judge it from the file list\./);
+    patchBody: filePatch("a.ts", Array.from({ length: 800 }, (_, i) => `+line ${i}`)) });
+  assert.match(huge.context, /The patch does not fit this card; judge it from the file list\./);
+  assert.equal(patchEvidenceContext(filePatch("a.ts", ["+ok"])).whole, true);
+  const control = patchEvidenceContext(filePatch("a.ts", ["+bell\u0007"]));
+  assert.equal(control.whole, false, "text a card cannot carry is never shown");
+  assert.doesNotMatch(control.context, /bell/);
+  assert.equal(patchEvidenceContext("no diff"), null);
 
   assert.equal(engineeringAgentT2DmCard({ workItemId: ID, cardLabel: "C", reason: "tier_two", patchBody: null }), null);
   assert.equal(engineeringAgentT2DmCard({ workItemId: ID, cardLabel: "C", reason: "tier_two", patchBody: "no diff" }), null);

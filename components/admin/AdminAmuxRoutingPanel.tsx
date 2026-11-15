@@ -109,6 +109,10 @@ export type AmuxReviewDetail = {
   /** The attempt stored a patch no pull request carries; "no change needed"
    * is refused for it. */
   unpublished_patch?: { publication_run_missing: boolean } | null;
+  /** The engineering agent has a pull request open for this run's change
+   * ("pr_open", numbered) or may still open one ("pending"); the card itself
+   * records none. A retry waits for it. */
+  publication_hold?: { state: "pr_open" | "pending"; pr_number: number | null } | null;
   /** Why the server offers no decision at all; null while it offers one. */
   decision_hold?: string | null;
   retry: { used: number; limit: number; remaining: number };

@@ -9,6 +9,8 @@ import {
 } from "@/components/admin/routing/AutoRouterOverview";
 import { optimizerCycleTone } from "@/components/admin/routing/optimizerTone";
 import { adminRoutingScreensMessages } from "@/lib/adminMessages/routingScreens";
+import { OptimizerEvidenceView } from "@/components/admin/OptimizerEvidenceView";
+import { verifiedOptimizerSummary } from "../fixtures/optimizerVerifiedSummary";
 
 const report = (overrides: Partial<ShadowReport> = {}): ShadowReport => ({
   windowDays: 7,
@@ -59,6 +61,33 @@ test("kind shares are portions of what was decided, largest first, without empty
   assert.equal(shares[0].share, 0.4);
   assert.ok(Math.abs(shares.reduce((sum, row) => sum + row.share, 0) - 1) < 1e-9);
   assert.deepEqual(autoRouterKindShares(report({ byTaskKind: [] })), []);
+});
+
+test("optimizer rendering separates known cost, incomplete total, credit ratio and own/proxy evidence", async () => {
+  const summary = await verifiedOptimizerSummary();
+  const html = renderToStaticMarkup(<OptimizerEvidenceView spentMicroUsd={120} summary={{
+    ...summary, candidateCredits: 13.2,
+    costCoverage: { ...summary.costCoverage, complete: false, unknownCalls: 1,
+      calls: [{ kind: "answer", provider: "p", failed: true, state: "unknown", dispatch: "unknown", reason: "exception" }] },
+    quality: { status: "unmeasured" },
+    gate: { basis: "direct" },
+    evidence: { ownAnswerCases: 2, proxyTowardWinner: 3, proxyTowardLoser: 1, orderDisagreements: 1 },
+  }} />);
+  assert.match(html, /Recorded known optimizer cost/);
+  assert.match(html, /0\.000120/);
+  assert.match(html, /Total optimizer cost unconfirmed/);
+  assert.match(html, /Catalog credit ratio/);
+  assert.match(html, /1\.100/);
+  assert.match(html, /evaluation incomplete/);
+  assert.match(html, /2 own answer comparisons/);
+  assert.match(html, /proxy toward winner 3, loser 1/);
+  assert.match(html, /answer\/exception: 1/);
+  assert.doesNotMatch(html, /invoice|saving|gate failed/i);
+  const legacy = renderToStaticMarkup(<OptimizerEvidenceView spentMicroUsd={0} summary={null} />);
+  assert.match(legacy, /Holdout and cost coverage unverified/);
+  assert.match(legacy, /Total optimizer cost unconfirmed/);
+  const complete = renderToStaticMarkup(<OptimizerEvidenceView spentMicroUsd={2} summary={summary} />);
+  assert.doesNotMatch(complete, /Total optimizer cost unconfirmed|Holdout and cost coverage unverified/);
 });
 
 test("the shadow split is agreed, moved and no-candidate, and is null when nothing was recorded", () => {

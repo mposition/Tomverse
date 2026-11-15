@@ -16,6 +16,7 @@ import {
     MEMORY_RETRIEVAL_ALGORITHM_VERSION,
     MEMORY_SEMANTIC_DEFAULTS,
     MEMORY_SEMANTIC_RETRIEVAL_ALGORITHM_VERSION,
+    memoryRerankCandidates,
     memoryTier,
     selectMemoryContext,
 } from "../lib/memoryRetrievalScoring.ts";
@@ -49,9 +50,9 @@ const byId = (selection, id) => selection.selected.find((row) => row.memory.id =
 
 /* ------------------------------------------------------- versions and defaults */
 
-test("the algorithm versions are 2 for lexical and 3 for reranked", () => {
-    assert.equal(MEMORY_RETRIEVAL_ALGORITHM_VERSION, 2);
-    assert.equal(MEMORY_SEMANTIC_RETRIEVAL_ALGORITHM_VERSION, 3);
+test("lexical and reranked selections carry distinct algorithm versions", () => {
+    assert.ok(MEMORY_RETRIEVAL_ALGORITHM_VERSION > 2, "query budgeting invalidates legacy selections without changing indexes");
+    assert.ok(MEMORY_SEMANTIC_RETRIEVAL_ALGORITHM_VERSION > MEMORY_RETRIEVAL_ALGORITHM_VERSION);
 });
 
 test("the semantic defaults are usable numbers", () => {
@@ -69,7 +70,7 @@ test("without externalRelevance the signature carries the lexical version and no
         memory("m3"),
     ];
     const before = select(memories);
-    assert.ok(before.signature.startsWith("v2 "), before.signature);
+    assert.ok(before.signature.startsWith(`v${MEMORY_RETRIEVAL_ALGORITHM_VERSION} `), before.signature);
     assert.deepEqual(idsOf(before), ["m2", "m1"]);
 
     // Passing the key explicitly as undefined is the same as leaving it out.
@@ -78,17 +79,17 @@ test("without externalRelevance the signature carries the lexical version and no
 });
 
 test("an empty selection without a map is just the lexical version", () => {
-    assert.equal(select([memory("m1")]).signature, "v2");
+    assert.equal(select([memory("m1")]).signature, `v${MEMORY_RETRIEVAL_ALGORITHM_VERSION}`);
 });
 
 test("any map, even an empty one, moves the signature to the semantic version", () => {
     const memories = [memory("m1", MATCHING)];
     const empty = select(memories, { externalRelevance: new Map() });
-    assert.ok(empty.signature.startsWith("v3 "), empty.signature);
+    assert.ok(empty.signature.startsWith(`v${MEMORY_SEMANTIC_RETRIEVAL_ALGORITHM_VERSION} `), empty.signature);
 
     const populated = select(memories, { externalRelevance: new Map([["m1", 0.7]]) });
-    assert.ok(populated.signature.startsWith("v3 "), populated.signature);
-    assert.equal(select([], { externalRelevance: new Map() }).signature, "v3");
+    assert.ok(populated.signature.startsWith(`v${MEMORY_SEMANTIC_RETRIEVAL_ALGORITHM_VERSION} `), populated.signature);
+    assert.equal(select([], { externalRelevance: new Map() }).signature, `v${MEMORY_SEMANTIC_RETRIEVAL_ALGORITHM_VERSION}`);
 });
 
 test("an empty map leaves the selection itself as the lexical one", () => {
@@ -104,7 +105,7 @@ test("an empty map leaves the selection itself as the lexical one", () => {
     assert.equal(withEmptyMap.tokens, lexical.tokens);
     assert.deepEqual(withEmptyMap.omitted, lexical.omitted);
     assert.equal(
-        withEmptyMap.signature.replace(/^v3/, "v2"),
+        withEmptyMap.signature.replace(/^v\d+/, `v${MEMORY_RETRIEVAL_ALGORITHM_VERSION}`),
         lexical.signature
     );
 });
@@ -273,5 +274,73 @@ test("pinned memories and core kinds are the core tier", () => {
 test("every other memory is the relevant tier", () => {
     for (const kind of ["preference", "project", "decision", "relationship", "recurring_context"]) {
         assert.equal(memoryTier(memory("m", { kind })), "relevant", kind);
+    }
+});
+
+/* -------------------------------------------------------- the provider pools */
+
+const pool = (prefix, count, overrides = {}) => Array.from({ length: count }, (_, index) =>
+    memory(`${prefix}-${String(index).padStart(3, "0")}`, overrides));
+const candidateIds = (input) => memoryRerankCandidates({ now: NOW, ...input }).map(row => row.id);
+
+test("a full lexical pool leaves half of the 100 candidates for recent extra IDs", () => {
+    const lexical = pool("lexical", 120, MATCHING);
+    const extras = pool("extra", 100, MATCHING);
+    const selected = candidateIds({ lexical, extras });
+    assert.equal(selected.length, 100);
+    assert.equal(selected.filter(id => id.startsWith("lexical")).length, 50);
+    assert.equal(selected.filter(id => id.startsWith("extra")).length, 50);
+    assert.deepEqual(selected, [...lexical.slice(0, 50), ...extras.slice(0, 50)].map(row => row.id));
+    assert.deepEqual(candidateIds({ lexical, extras }), selected, "stable input order is deterministic");
+});
+
+test("unused provider slots go to the other pool", () => {
+    for (const [lexicalCount, extraCount, expectedLexical, expectedExtra] of [
+        [100, 3, 97, 3], [3, 100, 3, 97], [100, 0, 100, 0], [0, 100, 0, 100], [3, 4, 3, 4],
+    ]) {
+        const selected = candidateIds({ lexical: pool("lexical", lexicalCount), extras: pool("extra", extraCount) });
+        assert.equal(selected.filter(id => id.startsWith("lexical")).length, expectedLexical);
+        assert.equal(selected.filter(id => id.startsWith("extra")).length, expectedExtra);
+        assert.ok(selected.length <= MEMORY_SEMANTIC_DEFAULTS.maxRerankCandidates);
+    }
+});
+
+test("extra eligibility is ID-based and does not ban overlapping terms or equal text", () => {
+    const first = memory("same", MATCHING);
+    const sameText = memory("different-id", { ...MATCHING, statement: first.statement });
+    const selected = memoryRerankCandidates({
+        lexical: [first, first], extras: [first, sameText, sameText], now: NOW,
+    });
+    assert.deepEqual(selected.map(row => row.id), ["same", "different-id"]);
+    assert.deepEqual(selected[1].searchTerms, selected[0].searchTerms);
+    assert.equal(selected[1].statement, selected[0].statement, "provider supply does not add a text-duplicate gate");
+});
+
+test("both provider pools exclude core, pinned, style and expired rows", () => {
+    const protectedRows = [
+        ...CORE_MEMORY_KINDS.map(kind => memory(`core-${kind}`, { kind })),
+        ...STYLE_MEMORY_KINDS.map(kind => memory(`style-${kind}`, { kind })),
+        memory("pinned", { pinned: true }),
+        memory("expired", { expiresAt: NOW }),
+    ];
+    for (const key of ["lexical", "extras"]) {
+        assert.deepEqual(candidateIds({ lexical: [], extras: [], [key]: [...protectedRows, memory("ordinary")] }), ["ordinary"]);
+    }
+});
+
+test("lexical rows outside the 100-candidate provider slice still use lexical relevance", () => {
+    const lexical = pool("lexical", 120, MATCHING);
+    const extras = pool("extra", 100, { importance: 10 });
+    const candidates = memoryRerankCandidates({ lexical, extras, now: NOW });
+    const externalRelevance = new Map(candidates.map(row => [row.id, row.id === "extra-000" ? 1 : 0]));
+    const selection = selectMemoryContext({
+        memories: [...lexical, ...extras.filter(row => externalRelevance.has(row.id))],
+        query: QUERY, now: NOW, externalRelevance,
+    });
+    assert.ok(idsOf(selection).includes("extra-000"));
+    assert.ok(idsOf(selection).some(id => id.startsWith("lexical-0") && Number(id.slice(-3)) >= 50));
+    for (const row of selection.selected.filter(row => row.memory.id.startsWith("lexical"))) {
+        assert.equal(externalRelevance.has(row.memory.id), false);
+        assert.equal(row.relevance, 1);
     }
 });

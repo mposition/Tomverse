@@ -114,6 +114,8 @@ type World = {
   cleanupLatchError: Error | null;
   internalErrors: Array<{ operation: string; error: unknown }>;
   logged: string[];
+  /** Operational incidents the result route reported (a DM run that ended unavailable). */
+  incidents: Array<Record<string, unknown>>;
 };
 let world: World;
 const reset = (changes: Partial<World> = {}) => {
@@ -133,6 +135,7 @@ const reset = (changes: Partial<World> = {}) => {
     cleanupLatchError: null,
     internalErrors: [],
     logged: [],
+    incidents: [],
     ...changes,
   };
   if (world.env === undefined) delete process.env.TOMVERSE_AMUX_DM_ROUTING;
@@ -487,6 +490,13 @@ async function loadRoute(route: Route): Promise<{ POST: (request: Request) => Pr
           world.keyRingLoads += 1;
           if (world.keyRingError) throw world.keyRingError;
           return RING;
+        },
+      },
+    });
+    mock.module(mod("lib/operationalMonitoring.ts"), {
+      namedExports: {
+        reportOperationalIncident: async (incident: Record<string, unknown>) => {
+          world.incidents.push(incident);
         },
       },
     });
@@ -900,6 +910,38 @@ test("a validation failure the ledger holds runs §8's latch check in a boundary
   reset({ storeResult: { status: "option_set_mismatch" } });
   assert.equal((await POST(post(route, route.body))).status, 409);
   assert.deepEqual(world.calls.map((call) => call.store), ["submitDecisionMakerOutput"]);
+});
+
+test("a DM run the ledger first records as unavailable is reported once as an operational incident", async () => {
+  const route = ROUTES.find((entry) => entry.name === "result submission")!;
+  const { POST } = await loadRoute(route);
+  const submitted = (result: Record<string, unknown>, resultKind: string) => ({
+    status: "submitted", resultKind, validationFailure: null, resultDigest: DIGEST_C, result, detail: null, storedFields: [],
+  });
+
+  reset({ storeResult: submitted({ status: "accepted", event: EVENT, resultKind: "unavailable" }, "unavailable") });
+  const answer = await POST(post(route, route.body));
+  assert.equal(answer.status, 200);
+  assert.equal((await answer.json()).result_kind, "unavailable");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(world.incidents.length, 1);
+  assert.equal(world.incidents[0]!.code, "AMUX_DM_RUN_UNAVAILABLE");
+  assert.deepEqual(world.incidents[0]!.context, {
+    instance: (route.body as Record<string, unknown>).instance,
+    requestId: (route.body as Record<string, unknown>).request_id,
+  });
+
+  // The same result again, any judgment and a timeout are not reported.
+  for (const storeResult of [
+    submitted({ status: "existing", eventId: EVENT.eventId, resultKind: "unavailable" }, "unavailable"),
+    submitted({ status: "accepted", event: EVENT, resultKind: "escalate" }, "escalate"),
+    submitted({ status: "accepted", event: EVENT, resultKind: "timeout" }, "timeout"),
+  ]) {
+    reset({ storeResult });
+    assert.equal((await POST(post(route, route.body))).status, 200);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(world.incidents, [], storeResult.resultKind);
+  }
 });
 
 test("a cleanup report recorded or found runs §5's latch check in a boundary of its own, and the answer stays the report's", async () => {

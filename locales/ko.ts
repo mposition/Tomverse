@@ -1,3 +1,4 @@
+import { reviewHandoffCopy } from "./reviewHandoff";
 import { workspaceWelcomeCopy } from "./workspaceWelcome";
 import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 import { en } from "./en";
@@ -5,7 +6,21 @@ import { en } from "./en";
 // UX-020. Korean is a primary locale and is complete; this check is what keeps
 // it that way. It was the only complete locale with nothing enforcing it.
 export const ko = {
+    reviewHandoff: reviewHandoffCopy.ko,
     journey: {
+        receiptSent: "이번 시도 입력에 원문 포함: 선택 {selected}개 + 최근 {recent}개 (고유 메시지 {unique}개)",
+        receiptRetrieved: "과거 검색 {count}개 포함",
+        historyNoMatch: "과거 원문에서 일치 항목을 찾지 못함",
+        historyBudget: "맥락 예산으로 과거 발췌 제한",
+        receiptNotSent: "이번 시도에 원문 미전달",
+        receiptUnknown: "이번 시도의 원문 전달 여부 확인 불가",
+        receiptPartial: "일부 구간 발췌",
+        receiptOmitted: "일부 원문 메시지 생략",
+        receiptReason_locked: "원문 잠김",
+        receiptReason_source_deleted: "원문을 사용할 수 없음",
+        receiptReason_empty_selection: "선택이 비었거나 유효하지 않음",
+        receiptReason_flag_off: "원문 맥락 기능 꺼짐",
+        receiptReason_unsupported: "이 실행 경로는 원문 전달을 지원하지 않음",
         importTitle: "대화 가져오기",
         imported: "가져온 대화",
         lastMessage: "마지막 메시지",
@@ -35,13 +50,13 @@ export const ko = {
         "organising": "계정에서 가져온 대화의 기억을 정리하고 있어요.",
         "memoryWhere": "기억 정리 상태는 계정 기억에서 확인할 수 있어요.",
         "loadError": "저장한 대화를 불러오지 못했어요.",
-        "chosen": "다음 질문에 선택한 원문 {count}개를 담아요",
-        "auto": "참고할 수 있는 최근 원문 {count}개",
+        "chosen": "다음 텍스트 질문: 선택 {count}개 + 최근 원문",
+        "auto": "다음 텍스트 질문: 최근 원문 자동 발췌",
         "empty": "다음 답변에 참고할 원문이 없어요",
         "contextHint": "전체 원문은 메시지 {count}개예요. 다음 텍스트 질문에 필요한 부분을 직접 고를 수 있어요.",
         "emptyHint": "필요한 부분을 직접 고르거나 원문 없이 질문할 수 있어요. 화면에 보이는 원문이 모두 전달되지는 않아요.",
         "pickSource": "참고할 원문 선택",
-        "pickHelp": "다음 텍스트 질문에 담을 메시지를 최대 3개 고르세요. 긴 메시지는 필요한 구간을 고를 수 있어요. 새로고침 후 같은 원문으로 다시 질문하려면 한 번 더 선택해 주세요.",
+        "pickHelp": "최대 3개 메시지에서 구간을 고르세요. 선택 구간과 최근 원문을 다음 텍스트 질문 한 번에 함께 전달합니다. 새로고침 후에는 다시 선택하세요.",
         "older": "이전 메시지",
         "newer": "다음 메시지",
         "you": "나",
@@ -546,8 +561,12 @@ export const ko = {
         toolsMemoryOn: "이 대화에서 사용",
         toolsMemoryOff: "이 대화에서 사용 안 함",
         toolsMemoryInherit: "계정 기본값 따르기",
-        toolsMemoryInheritOn: "계정 기본값 따름 (사용)",
-        toolsMemoryInheritOff: "계정 기본값 따름 (사용 안 함)",
+        toolsMemoryInheritOn: "계정 기본값 따름 (켜짐)",
+        toolsMemoryInheritOff: "계정 기본값 따름 (꺼짐)",
+        toolsMemoryAccountOff: "계정 메모리가 꺼져 있습니다. 저장된 대화 선택은 유지됩니다.",
+        toolsMemoryAccountAllowed: "계정에서 메모리를 허용합니다. 어시스턴트·서비스 설정도 적용됩니다.",
+        toolsMemoryStatusUnknown: "계정 메모리 설정을 확인하지 못했습니다.",
+        toolsMemoryProfileOff: "이 어시스턴트는 계정 메모리를 사용하지 않습니다.",
         toolsMemoryOnDescription: "계정 설정이 꺼져 있으면 이 선택도 켜지 못합니다",
         toolsMemoryOffDescription: "이 대화에서만 기억을 쓰지 않습니다. 저장된 기억은 지워지지 않습니다",
         toolsMemoryInheritOnDescription: "지금 계정 기본값은 사용입니다. 계정 설정을 바꾸면 이 대화도 따라갑니다",

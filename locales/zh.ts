@@ -1,3 +1,4 @@
+import { reviewHandoffCopy } from "./reviewHandoff";
 import { workspaceWelcomeCopy } from "./workspaceWelcome";
 import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 import { en } from "./en";
@@ -20,7 +21,22 @@ import { en } from "./en";
  * in review rather than a key quietly going missing.
  */
 export const zh = {
+    reviewHandoff: reviewHandoffCopy.zh,
     journey: {
+        receiptSent: "本次尝试的输入包含原文：已选 {selected} 个 + 最近 {recent} 个（去重后 {unique} 条消息）",
+        receiptRetrieved: "包含 {count} 条历史匹配",
+        historyNoMatch: "未找到历史匹配",
+        historyBudget: "历史摘录受上下文预算限制",
+        receiptNotSent: "本次尝试未发送原文",
+        receiptUnknown: "无法确认本次尝试的原文传递情况",
+        receiptPartial: "部分摘录",
+        receiptOmitted: "部分原文消息已省略",
+        receiptReason_locked: "原文已锁定",
+        receiptReason_source_deleted: "原文不可用",
+        receiptReason_empty_selection: "选择为空或无效",
+        receiptReason_flag_off: "原文上下文功能已关闭",
+        receiptReason_unsupported: "此执行路径不支持原文上下文",
+
         importTitle: "导入对话",
         imported: "已导入的对话",
         lastMessage: "最后一条消息",
@@ -50,13 +66,13 @@ export const zh = {
         organising: "正在为您的账户整理导入对话中的记忆。",
         memoryWhere: "查看记忆设置和处理状态。",
         loadError: "无法加载已保存的对话。",
-        chosen: "为下一个问题选择了 {count} 个片段",
-        auto: "可参考的近期原始消息：{count} 条",
+        "chosen": "下一次文字提问：已选 {count} 个片段 + 最近原文",
+        "auto": "下一次文字提问：自动摘取最近原文",
         empty: "下一次回答没有可自动引用的片段",
         contextHint: "原文共有 {count} 条消息。您可以挑选与下一个文字问题有关的部分。",
         emptyHint: "您可以选择片段，也可以不选直接提问。屏幕上显示的记录不会全部发送给模型。",
         pickSource: "选择原文片段",
-        pickHelp: "最多选择三条消息。如果消息较长，可选择要随下一个文字问题发送的片段。刷新页面后想再次使用该片段，请重新选择。",
+        "pickHelp": "最多选择三条消息。所选片段与最近原文会随下一次文字提问发送一次。刷新后需重新选择。",
         older: "更早的消息",
         newer: "较新的消息",
         you: "您",
@@ -554,8 +570,12 @@ export const zh = {
         toolsMemoryOn: "在此对话中使用",
         toolsMemoryOff: "在此对话中不使用",
         toolsMemoryInherit: "沿用账户默认设置",
-        toolsMemoryInheritOn: "沿用账户默认设置（使用）",
-        toolsMemoryInheritOff: "沿用账户默认设置（不使用）",
+        toolsMemoryInheritOn: "沿用账户默认设置（开启）",
+        toolsMemoryInheritOff: "沿用账户默认设置（关闭）",
+        toolsMemoryAccountOff: "账户记忆已关闭。已保存的对话选择保持不变。",
+        toolsMemoryAccountAllowed: "账户允许使用记忆；助手和服务设置也适用。",
+        toolsMemoryStatusUnknown: "尚未确认账户记忆设置。",
+        toolsMemoryProfileOff: "此助手不使用账户记忆。",
         toolsMemoryOnDescription: "仍需账户设置允许才会生效",
         toolsMemoryOffDescription: "仅限此对话，已保存的记忆不会被删除",
         toolsMemoryInheritOnDescription: "当前默认为使用，更改账户设置后此对话会跟随",

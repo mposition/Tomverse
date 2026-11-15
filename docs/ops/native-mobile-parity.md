@@ -224,3 +224,15 @@ an in-process HTTPS fixture; no production or provider request is dispatched.
 It covers cold restore, a 31-second background return, fresh sign-in proof
 refusal before email-code consumption, and a missing-session sign-in requirement.
 This does not replace physical fingerprint/PIN or iOS Face ID acceptance.
+
+
+## Imported continuation source context
+
+Native already reads imported originals. The source picker now adds server-read coordinates
+(maximum three 500 UTF-16-unit passages), consumed by the next text question only. It uses
+the same selected-plus-recent planner and request/attempt receipt as web Chat; voice and
+Review do not consume that selection. Receipts remain in memory for the current account
+session and are excluded from subsequent prompts, persistence and export. Existing native
+bearer switches, source ownership/unlock checks and continuation flag remain mandatory.
+Desktop Chromium UI tests and API transport mocks do not establish device signing or
+WKWebView behavior. This change does not deploy a native binary.

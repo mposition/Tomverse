@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { BookOpen, ChevronRight, CircleAlert, X } from "lucide-react";
+import { BookOpen, ChevronRight, X } from "lucide-react";
 import {
     MAX_PASSAGES,
     PASSAGE_LENGTH,
@@ -41,28 +41,26 @@ export function ContinuationPassageCard({
     }, [timeline?.conversationId, timeline?.source.status]);
     if (!timeline || timeline.source.status !== "available") return null;
     const { messages, title, messageTotal } = timeline.source;
-    const count = chosen.length || timeline.seed.messageCount;
+    const count = chosen.length;
     return (
         <aside
             data-testid="continuation-context"
             className="mx-auto my-3 w-full max-w-2xl rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-sm dark:border-zinc-700 dark:bg-zinc-900"
         >
             <strong className="flex items-center gap-2">
-                {count ? <BookOpen size={18} /> : <CircleAlert size={18} />}
+                <BookOpen size={18} />
                 {interpolate(
                     t(
                         chosen.length
                             ? "journey.chosen"
-                            : count
-                              ? "journey.auto"
-                              : "journey.empty",
+                            : "journey.auto",
                     ),
                     { count },
                 )}
             </strong>
             <p className="mt-1 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
                 {interpolate(
-                    t(count ? "journey.contextHint" : "journey.emptyHint"),
+                    t("journey.contextHint"),
                     { count: messageTotal },
                 )}
             </p>

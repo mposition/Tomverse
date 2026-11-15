@@ -1,9 +1,25 @@
+import { reviewHandoffCopy } from "./reviewHandoff";
 import { workspaceWelcomeCopy } from "./workspaceWelcome";
 import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 import { en } from "./en";
 
 export const es = {
+    reviewHandoff: reviewHandoffCopy.es,
     journey: {
+        receiptSent: "Fuente incluida en este intento: {selected} seleccionados + {recent} recientes ({unique} mensajes únicos)",
+        receiptRetrieved: "{count} coincidencias históricas incluidas",
+        historyNoMatch: "No se encontraron coincidencias históricas",
+        historyBudget: "Extractos históricos limitados por el contexto disponible",
+        receiptNotSent: "Fuente no enviada en este intento",
+        receiptUnknown: "No se pudo confirmar la entrega de la fuente en este intento",
+        receiptPartial: "Fragmentos parciales",
+        receiptOmitted: "Se omitieron algunos mensajes originales",
+        receiptReason_locked: "Original bloqueado",
+        receiptReason_source_deleted: "Original no disponible",
+        receiptReason_empty_selection: "Selección vacía o no válida",
+        receiptReason_flag_off: "Contexto de origen desactivado",
+        receiptReason_unsupported: "Esta ejecución no admite contexto de origen",
+
         importTitle: "Importar chats",
         imported: "Chats importados",
         lastMessage: "Último mensaje",
@@ -33,13 +49,13 @@ export const es = {
         organising: "Se están organizando los recuerdos de las conversaciones importadas en tu cuenta.",
         memoryWhere: "Revisa la configuración de la memoria y el estado del procesamiento.",
         loadError: "No se pudieron cargar las conversaciones guardadas.",
-        chosen: "Fragmentos seleccionados para tu próxima pregunta: {count}",
-        auto: "Mensajes recientes del original disponibles: {count}",
+        "chosen": "Próxima pregunta de texto: {count} fragmentos seleccionados + fuente reciente",
+        "auto": "Próxima pregunta de texto: fragmentos recientes automáticos",
         empty: "No hay ningún fragmento automático para la próxima respuesta",
         contextHint: "El original contiene {count} mensajes. Elige los fragmentos relevantes para tu próxima pregunta de texto.",
         emptyHint: "Elige un fragmento o pregunta sin él. No se envía al modelo todo el historial visible.",
         pickSource: "Elegir fragmentos del original",
-        pickHelp: "Selecciona hasta tres mensajes. Si un mensaje es largo, elige el fragmento que quieres enviar con tu próxima pregunta. Para volver a usarlo después de recargar la página, selecciónalo de nuevo.",
+        "pickHelp": "Selecciona hasta tres mensajes. Los fragmentos y la fuente reciente se enviarán una vez con la próxima pregunta de texto. Vuelve a seleccionar después de recargar.",
         older: "Mensajes anteriores",
         newer: "Mensajes posteriores",
         you: "Tú",
@@ -546,8 +562,12 @@ export const es = {
         toolsMemoryOn: "Usar en esta conversación",
         toolsMemoryOff: "No usar en esta conversación",
         toolsMemoryInherit: "Seguir el ajuste de la cuenta",
-        toolsMemoryInheritOn: "Sigue el ajuste de la cuenta (en uso)",
-        toolsMemoryInheritOff: "Sigue el ajuste de la cuenta (sin usar)",
+        toolsMemoryInheritOn: "Sigue el valor de la cuenta (activado)",
+        toolsMemoryInheritOff: "Sigue el valor de la cuenta (desactivado)",
+        toolsMemoryAccountOff: "La memoria de la cuenta está desactivada. La elección guardada se mantiene.",
+        toolsMemoryAccountAllowed: "La cuenta permite memoria; también se aplican los ajustes del asistente y del servicio.",
+        toolsMemoryStatusUnknown: "No se han confirmado los ajustes de memoria de la cuenta.",
+        toolsMemoryProfileOff: "Este asistente no usa la memoria de la cuenta.",
         toolsMemoryOnDescription: "El ajuste de tu cuenta todavía tiene que permitirlo",
         toolsMemoryOffDescription: "Solo esta conversación. No se borra nada de lo ya recordado",
         toolsMemoryInheritOnDescription: "Tu ajuste actual es usarla, y esta conversación seguirá cualquier cambio",
