@@ -34,7 +34,7 @@ const sealed = {
 
 test("a T2 draft's workspace is its whole patch on the commit it was made on", async () => {
   const { openDecisionMakerWorkspaceEvidence } = await service;
-  const evidence = await openDecisionMakerWorkspaceEvidence({ kind: "t2_draft", patchBody: PATCH, baseSha: SHA });
+  const evidence = (await openDecisionMakerWorkspaceEvidence({ kind: "t2_draft", patchBody: PATCH, baseSha: SHA }))!;
   assert.equal(evidence.targetSha, SHA);
   assert.deepEqual(evidence.files, [{ name: "PATCH.diff", text: PATCH }]);
   assert.deepEqual(evidence.excluded, {});
@@ -42,28 +42,28 @@ test("a T2 draft's workspace is its whole patch on the commit it was made on", a
 
 test("a settlement's and a result review's workspace hold the criteria and the whole report", async () => {
   const { openDecisionMakerWorkspaceEvidence } = await service;
-  const review = await openDecisionMakerWorkspaceEvidence({ kind: "result_review", ...sealed });
+  const review = (await openDecisionMakerWorkspaceEvidence({ kind: "result_review", ...sealed }))!;
   assert.deepEqual(review.files.map((file: { name: string }) => file.name), ["CRITERIA.md", "FINDINGS.md"]);
   assert.equal(review.files[1].text, "The run's whole report.");
   assert.deepEqual(review.excluded, {});
-  const pr = await openDecisionMakerWorkspaceEvidence({ kind: "settlement", settlementKind: "t2_pr", pullPatch: PATCH, ...sealed });
+  const pr = (await openDecisionMakerWorkspaceEvidence({ kind: "settlement", settlementKind: "t2_pr", pullPatch: PATCH, ...sealed }))!;
   assert.deepEqual(pr.files.map((file: { name: string }) => file.name), ["CRITERIA.md", "FINDINGS.md", "PATCH.diff"]);
   // A stopped Task that never ran has no result row: nothing is missing.
-  const never = await openDecisionMakerWorkspaceEvidence({ kind: "settlement", settlementKind: "stopped", pullPatch: null,
-    ...sealed, resultIdeaId: null });
+  const never = (await openDecisionMakerWorkspaceEvidence({ kind: "settlement", settlementKind: "stopped", pullPatch: null,
+    ...sealed, resultIdeaId: null }))!;
   assert.deepEqual(never.excluded, {});
 });
 
 test("evidence the card points at that cannot be read is left out, by count, so nothing is sent", async () => {
   const { openDecisionMakerWorkspaceEvidence } = await service;
-  assert.deepEqual((await openDecisionMakerWorkspaceEvidence({ kind: "t2_draft", patchBody: null, baseSha: null })).excluded,
+  assert.deepEqual((await openDecisionMakerWorkspaceEvidence({ kind: "t2_draft", patchBody: null, baseSha: null }))!.excluded,
     { unreadable: 1 });
   resultText = null;
   try {
-    assert.deepEqual((await openDecisionMakerWorkspaceEvidence({ kind: "result_review", ...sealed })).excluded, { unreadable: 1 });
+    assert.deepEqual((await openDecisionMakerWorkspaceEvidence({ kind: "result_review", ...sealed }))!.excluded, { unreadable: 1 });
     criteria = null;
     assert.deepEqual((await openDecisionMakerWorkspaceEvidence({ kind: "settlement", settlementKind: "t2_pr", pullPatch: null,
-      ...sealed })).excluded, { unreadable: 3 });
+      ...sealed }))!.excluded, { unreadable: 3 });
   } finally {
     resultText = "The run's whole report.";
     criteria = ["The copy names the plan."];

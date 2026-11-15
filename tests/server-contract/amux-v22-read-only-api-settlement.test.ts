@@ -973,7 +973,7 @@ test("a fourth question opens like the first: there is no question limit", async
   // Owner decision 2026-11-15: the three-question limit is gone. The question row a run's fourth
   // question is recorded as is open, and settlement parks the Task for its answer, no escalation.
   const { amuxV22OwnerQuestionSettlement } = await import(mod("lib/amux/v22OwnerQuestionCore.ts"));
-  assert.deepEqual(amuxV22OwnerQuestionSettlement(4), { questionState: "open", reason: "owner_question" });
+  assert.deepEqual(amuxV22OwnerQuestionSettlement(), { questionState: "open", reason: "owner_question" });
   world = makeWorld("succeeded");
   world.ownerQuestion = { id: "question-four", state: "open" };
   const result = await (await execution).settleAmuxV22TaskExecution(
