@@ -149,8 +149,8 @@ export function ProviderDestinationTable({
                                 </td>
                                 </> : (
                                     <td colSpan={6} className="py-3 pr-3">
-                                        {row.recipientEntity ? <p>{row.recipientEntity}</p> : null}
-                                        <p>{t("privacyPolicy.providerUnverifiedNotice")}</p>
+                                        {row.recipientEntity ? <span className="block">{row.recipientEntity}</span> : null}
+                                        <span className="mt-1 block">{t("privacyPolicy.providerUnverifiedNotice")}</span>
                                     </td>
                                 )}
                             </tr>

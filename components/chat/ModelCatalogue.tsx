@@ -11,7 +11,7 @@ import {
   Star,
   X,
 } from "lucide-react";
-import { UsageMeter } from "@/components/credits/UsageMeter";
+import { UsageMeter, UsageMeterCount } from "@/components/credits/UsageMeter";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { ModelSelectionBadge } from "@/components/chat/ModelSelectionBadge";
 import { useHasCoarsePointer } from "@/components/chat/useHasCoarsePointer";
@@ -528,9 +528,13 @@ export function ModelCatalogue({
                               ))}
                             </span>
                           )}
+                        <UsageMeterCount credits={usageProfile.credits} kind="chat" className="mt-1 block" />
                       </span>
                       <span className="flex shrink-0 flex-col items-end gap-2">
-                        <UsageMeter credits={usageProfile.credits} kind="chat" testId="model-credit-badge" />
+                        {/* The count sits in the text column: beside the bars, its nowrap line
+                            took a third of a 320px row and squeezed the name
+                            and description into a column four words wide. */}
+                        <UsageMeter credits={usageProfile.credits} kind="chat" testId="model-credit-badge" showCount={false} />
                         <ModelSelectionBadge
                           isSelected={isSelected}
                           isLocked={isPlanLocked}
