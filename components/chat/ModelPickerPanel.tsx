@@ -27,6 +27,7 @@ import {
   X,
 } from "lucide-react";
 import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
+import { UsageMeter } from "@/components/credits/UsageMeter";
 import { ImageModelTabPanel } from "@/components/chat/ImageModelTabPanel";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { AutoRoutingToggle } from "@/components/chat/AutoRoutingToggle";
@@ -918,11 +919,6 @@ export function ModelPickerPanel({
                         ? stepCopy.upgradeToUse
                         : null
                   }
-                  creditsLabel={
-                    language === "ko"
-                      ? `기본 ${recommendation.credits}크레딧 차감`
-                      : `Base cost ${formatCountedUnit(recommendation.credits, englishCreditUnit, "en")}`
-                  }
                   limitedLabel={t("modelStatusReasons.limited")}
                   limitDescriptionId={
                     isAtCapacity && !recommendation.isSelected
@@ -1034,7 +1030,6 @@ function RecommendationCard({
   reasonLabel,
   featureLabels,
   lockLabel,
-  creditsLabel,
   limitedLabel,
   limitDescriptionId,
   onSelect,
@@ -1047,7 +1042,6 @@ function RecommendationCard({
   reasonLabel: string;
   featureLabels: Record<"image" | "reasoning" | "search" | "code", string>;
   lockLabel: string | null;
-  creditsLabel: string;
   limitedLabel: string;
   limitDescriptionId?: string;
   onSelect: (model: AiModel, trigger: HTMLButtonElement) => void;
@@ -1111,12 +1105,7 @@ function RecommendationCard({
         )}
       </span>
       <span className="flex shrink-0 flex-col items-end gap-2">
-        <CreditCostBadge
-          credits={recommendation.credits}
-          size="xs"
-          testId="recommended-model-credit-badge"
-          label={creditsLabel}
-        />
+        <UsageMeter credits={recommendation.credits} kind="chat" testId="recommended-model-credit-badge" />
         <ModelSelectionBadge
           isSelected={isVisuallySelected}
           isLocked={recommendation.lock !== "none"}
