@@ -108,7 +108,7 @@ impl DmApp for HttpApp {
                 route.path(),
                 &body,
                 DM_ROUTE_CLIENT_TIMEOUT,
-                DM_ROUTE_ANSWER_MAX_BYTES,
+                route.answer_max_bytes(),
             )
             .await
         {
@@ -952,6 +952,7 @@ mod tests {
             vec![
                 "requests",
                 "assignments",
+                "workspace",
                 "transmissions",
                 "results",
                 "transmissions/outcome"
@@ -1022,7 +1023,7 @@ mod tests {
         );
         // A settled question is not routed again.
         assert_eq!(relay.tick().await, Tick::Idle);
-        assert_eq!(question_paths(&app_seen).len(), 5);
+        assert_eq!(question_paths(&app_seen).len(), 6);
     }
 
     #[tokio::test]
@@ -1037,7 +1038,7 @@ mod tests {
         assert!(lines.lock().unwrap().is_empty());
         assert_eq!(
             question_paths(&app_seen),
-            vec!["requests", "assignments", "transmissions"]
+            vec!["requests", "assignments", "workspace", "transmissions"]
         );
         assert_eq!(
             local_writes(&local_seen),
@@ -1062,6 +1063,7 @@ mod tests {
             vec![
                 "requests",
                 "assignments",
+                "workspace",
                 "transmissions",
                 "results",
                 "results/lookup",
@@ -1095,6 +1097,7 @@ mod tests {
             vec![
                 "requests",
                 "assignments",
+                "workspace",
                 "transmissions",
                 "results",
                 "cleanup/unknown",

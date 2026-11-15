@@ -10,8 +10,14 @@ import {
 } from "./decisionMakerLauncherCore.ts";
 import { DM_LAUNCH_HARD_TIMEOUT_MS } from "./decisionMakerLauncherProcess.ts";
 import { isDmRequestId } from "./decisionMakerRequestCore.ts";
-import { DM_SNAPSHOT_PATHS_MAX, dmSnapshotPayloadLines, type DmSnapshot } from "./decisionMakerSnapshot.ts";
 import type { DmInstanceScope } from "./decisionMakerSwitchCore.ts";
+import { DM_CARD_TEXT_MAX_BYTES } from "./decisionMakerCore.ts";
+import {
+  DM_WORKSPACE_EVIDENCE_MAX_BYTES,
+  dmEncodeLaunchWorkspace,
+  dmParseLaunchWorkspace,
+  type DmLaunchWorkspace,
+} from "./decisionMakerWorkspaceCore.ts";
 
 /**
  * The AMUX Decision Maker broker's local socket protocols, their
@@ -62,14 +68,21 @@ export const DM_LAUNCHER_SOCKET_PATHS: Readonly<Record<DmInstanceScope, string>>
 // ---------------------------------------------------------------------------
 
 /**
- * The stdin payload. §5 caps the card's text at 16 KiB; serialized as JSON a
- * byte takes at most six, so 96 KiB, plus the DM's instructions -- 128 KiB --
- * and the snapshot's lines, at most DM_SNAPSHOT_TOTAL_MAX_BYTES (512 KiB) and
- * their header: 768 KiB. A larger payload is refused before anything is made.
+ * The stdin payload: the DM's fixed instructions, the card as one JSON line
+ * and the workspace's manifest lines. The card is the one part that grows: the
+ * routing holds its text (already JSON) to DM_CARD_TEXT_MAX_BYTES, the single
+ * cap a card has (lib/amux/decisionMakerCore.ts: the vendors' prompt), so the
+ * payload is that and 64 KiB for the rest. A larger payload is refused before
+ * anything is made.
  */
-export const DM_PAYLOAD_MAX_BYTES = 768 * 1024;
-/** A `launch` line: the payload as base64 (4/3) and the fixed fields. */
-export const DM_LAUNCH_LINE_MAX_BYTES = 1280 * 1024;
+export const DM_PAYLOAD_MAX_BYTES = DM_CARD_TEXT_MAX_BYTES + 64 * 1024;
+/**
+ * A `launch` or `workspace` line: the payload and the workspace's evidence as
+ * base64 (4/3 each) and the fixed fields. The evidence never goes to the
+ * launcher; only the broker reads it.
+ */
+export const DM_LAUNCH_LINE_MAX_BYTES =
+  Math.ceil(DM_PAYLOAD_MAX_BYTES / 3) * 4 + Math.ceil(DM_WORKSPACE_EVIDENCE_MAX_BYTES / 3) * 4 + 64 * 1024;
 /**
  * A `result` line: the output (at most `DM_LAUNCH_OUTPUT_MAX_BYTES`, at most
  * six bytes each as a JSON string) and the fixed fields.
@@ -117,6 +130,10 @@ export const DM_BROKER_REFUSALS = [
   "request_root_leftover",
   "vendor_group_unverifiable",
   "request_directory_unusable",
+  /** The launch's workspace is not the one the payload (and so the intent) names. */
+  "workspace_mismatch",
+  /** The workspace could not be built (the fetch, the checkout, the hand-over); nothing was sent. */
+  "workspace_unavailable",
 ] as const;
 export type DmBrokerRefusal = (typeof DM_BROKER_REFUSALS)[number];
 
@@ -202,53 +219,19 @@ export type DmLaunchRequest = {
   payload: Buffer;
   /** The transmissions route's recorded answer (`DmTransmitIntentEvidence`), checked by its own function. */
   transmitIntent: unknown;
+  /**
+   * The workspace the broker builds in the request directory, or null for the
+   * card alone. Only the bridge's line carries it; the broker never forwards
+   * it to the launcher, which reads the workspace from the directory.
+   */
+  workspace: DmLaunchWorkspace | null;
 };
 
 const LAUNCH_KEYS = ["v", "type", "requestId", "instance", "requestKey", "payload", "transmitIntent"] as const;
+const LAUNCH_KEYS_WITH_WORKSPACE = [...LAUNCH_KEYS, "workspace"] as const;
 
-// ---------------------------------------------------------------------------
-// `snapshot`: bridge -> broker (stage S2b)
-// ---------------------------------------------------------------------------
-
-/**
- * Before the transmission intent, the bridge asks the broker for the
- * repository snapshot of a card's paths (§5: the broker fetches it, holding no
- * credential). The broker answers with the snapshot's payload lines and its
- * target; the bridge appends the lines to the payload, computes the manifest
- * digest itself under its request key, and records the intent for the whole
- * payload -- so the launch that follows is checked against every byte.
- */
-const SNAPSHOT_KEYS = ["v", "type", "requestId", "paths"] as const;
-export type DmSnapshotRequest = { requestId: string; paths: string[] };
-
-/** A `snapshot` request line, or null for anything else. */
-export const dmParseSnapshotRequest = (line: string): DmSnapshotRequest | null => {
-  const value = parseJson(line);
-  if (!isPlainObject(value) || !hasExactKeys(value, SNAPSHOT_KEYS)) return null;
-  if (value.v !== DM_BROKER_PROTOCOL_VERSION || value.type !== "snapshot") return null;
-  if (!isDmRequestId(value.requestId) || !Array.isArray(value.paths)) return null;
-  if (value.paths.length > DM_SNAPSHOT_PATHS_MAX) return null;
-  if (!value.paths.every((path) => typeof path === "string" && path.length <= 512)) return null;
-  return { requestId: value.requestId, paths: value.paths as string[] };
-};
-
-/** Whether a request line asks for a snapshot rather than a launch. */
-export const dmIsSnapshotRequestLine = (line: string): boolean => {
-  const value = parseJson(line);
-  return isPlainObject(value) && value.type === "snapshot";
-};
-
-/** The broker's answer: the lines (base64, empty for none), the target, and what was left out. */
-export const dmEncodeSnapshotAnswer = (requestId: string | null, snapshot: DmSnapshot | null) => ({
-  v: DM_BROKER_PROTOCOL_VERSION,
-  type: "snapshot",
-  requestId,
-  state: snapshot === null ? "none" : snapshot.state,
-  targetSha: snapshot !== null && snapshot.state !== "none" ? snapshot.targetSha : null,
-  lines: snapshot === null ? "" : Buffer.from(dmSnapshotPayloadLines(snapshot), "utf8").toString("base64"),
-  reason: snapshot === null ? "request_malformed" : snapshot.state === "none" ? snapshot.reason : null,
-  excluded: snapshot === null ? {} : snapshot.excluded,
-});
+// The `workspace` exchange (bridge -> broker, before the intent) is
+// lib/amux/decisionMakerWorkspaceCore.ts's; it replaced stage S2b's `snapshot`.
 
 export type DmLaunchParse =
   | { ok: true; request: DmLaunchRequest }
@@ -262,11 +245,11 @@ export type DmLaunchParse =
     };
 
 /**
- * One `launch` line, strictly: exactly its seven keys, version 1, the app's
- * request id, a known instance, a 32-byte key as lowercase hex, and a
- * non-empty canonical base64 payload within the cap. The transmission intent
- * is carried as given; the broker and the launcher each check it with
- * `dmTransmitIntentRefusal()`.
+ * One `launch` line, strictly: exactly its seven keys (or eight, with the
+ * bridge's `workspace`), version 1, the app's request id, a known instance, a
+ * 32-byte key as lowercase hex, and a non-empty canonical base64 payload
+ * within the cap. The transmission intent is carried as given; the broker and
+ * the launcher each check it with `dmTransmitIntentRefusal()`.
  */
 export const dmParseLaunchRequest = (line: string): DmLaunchParse => {
   const value = parseJson(line);
@@ -277,7 +260,9 @@ export const dmParseLaunchRequest = (line: string): DmLaunchParse => {
     instance,
     requestKey,
   });
-  if (!isPlainObject(value) || !hasExactKeys(value, LAUNCH_KEYS)) return malformed("request_malformed");
+  if (!isPlainObject(value) || !(hasExactKeys(value, LAUNCH_KEYS) || hasExactKeys(value, LAUNCH_KEYS_WITH_WORKSPACE))) {
+    return malformed("request_malformed");
+  }
   if (value.v !== DM_BROKER_PROTOCOL_VERSION || value.type !== "launch") return malformed("request_malformed");
   const requestId = isDmRequestId(value.requestId) ? value.requestId : null;
   const instance = isDmLauncherInstance(value.instance) ? value.instance : null;
@@ -290,10 +275,19 @@ export const dmParseLaunchRequest = (line: string): DmLaunchParse => {
   if (requestKey === null) return malformed("request_key_invalid", requestId, instance, null);
   const payload = dmDecodeBase64(value.payload, DM_PAYLOAD_MAX_BYTES);
   if (payload === null) return malformed("payload_invalid", requestId, instance, requestKey);
-  return { ok: true, request: { requestId, instance, requestKey, payload, transmitIntent: value.transmitIntent } };
+  const workspace = Object.hasOwn(value, "workspace") ? dmParseLaunchWorkspace(value.workspace) : null;
+  if (workspace === undefined) return malformed("workspace_mismatch", requestId, instance, requestKey);
+  return { ok: true, request: { requestId, instance, requestKey, payload, transmitIntent: value.transmitIntent, workspace } };
 };
 
-export const dmEncodeLaunchRequest = (request: DmLaunchRequest) => ({
+/** The bridge's line to the broker (the bridge writes it in Rust; tests here): the seven keys and the workspace. */
+export const dmEncodeBridgeLaunchRequest = (request: DmLaunchRequest) => ({
+  ...dmEncodeLaunchRequest(request),
+  workspace: dmEncodeLaunchWorkspace(request.workspace),
+});
+
+/** The broker's line to the launcher: the seven keys, never the workspace. */
+export const dmEncodeLaunchRequest = (request: Omit<DmLaunchRequest, "workspace">) => ({
   v: DM_BROKER_PROTOCOL_VERSION,
   type: "launch",
   requestId: request.requestId,

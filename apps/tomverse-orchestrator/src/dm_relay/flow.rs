@@ -47,12 +47,12 @@ use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use tokio::time::Instant;
 
-use super::snapshot::{
-    dm_snapshot_manifest_digest, read_snapshot_answer, snapshot_paths, snapshot_request_line,
-    DM_SNAPSHOT_WAIT,
+use super::workspace::{
+    dm_workspace_manifest_digest, read_app_workspace, read_workspace_answer,
+    workspace_request_line, DM_WORKSPACE_WAIT,
 };
 use super::wire::{
-    dm_card, dm_option_set_digest, dm_payload_digest, dm_payload_with_snapshot, dm_result_digest,
+    dm_card, dm_option_set_digest, dm_payload_digest, dm_payload_with_workspace, dm_result_digest,
     is_option_id, launch_line, lookup_settled, parse_assignment, parse_card_detail,
     parse_needsyou_list, parse_recorded_event, parse_routed, parse_session_providers,
     parse_typed_ask_state, read_app_answer, read_broker_exchange, result_binding, result_output,
@@ -98,6 +98,8 @@ pub enum AppRoute {
     V22QuestionCard,
     /// A v22 question's local card closed.
     V22QuestionClosed,
+    /// What a request's workspace holds (a read, before the intent).
+    Workspace,
 }
 
 impl AppRoute {
@@ -124,6 +126,16 @@ impl AppRoute {
             AppRoute::V22QuestionSync => "/api/internal/amux/decision-maker/v22-questions/sync",
             AppRoute::V22QuestionCard => "/api/internal/amux/decision-maker/v22-questions/card",
             AppRoute::V22QuestionClosed => "/api/internal/amux/decision-maker/v22-questions/closed",
+            AppRoute::Workspace => "/api/internal/amux/decision-maker/workspace",
+        }
+    }
+
+    /// How large an answer the relay reads: the workspace's carries the
+    /// card's whole evidence; every other route answers a few hundred bytes.
+    pub fn answer_max_bytes(self) -> usize {
+        match self {
+            AppRoute::Workspace => super::workspace::DM_WORKSPACE_ANSWER_MAX_BYTES,
+            _ => super::io::DM_ROUTE_ANSWER_MAX_BYTES,
         }
     }
 
@@ -135,6 +147,7 @@ impl AppRoute {
             AppRoute::ResultLookup => "found",
             AppRoute::DeliveriesNext => "found",
             AppRoute::DeliveriesUnsettled => "found",
+            AppRoute::Workspace => "found",
             AppRoute::V22QuestionSync => "synced",
             _ => "recorded",
         }
@@ -652,36 +665,45 @@ where
     L: DmLocal + ?Sized,
     B: DmBroker + ?Sized,
 {
-    // 4a. Stage S2b: the repository snapshot of the card's paths, from the
-    // broker. A card that names no path asks for none; anything the relay
-    // cannot read is no snapshot, and the card goes alone. The wait ends at
-    // the result deadline or after DM_SNAPSHOT_WAIT, whichever comes first
-    // (the broker's own budget is 60 s): a broker that does not answer never
-    // holds the card past its window, and the deadline check below then
-    // discards the request and step 10 releases the marker.
-    let paths = snapshot_paths(&candidate.card);
-    let snapshot = if paths.is_empty() {
-        None
-    } else {
-        let until = deadline.min(Instant::now() + DM_SNAPSHOT_WAIT);
-        match tokio::time::timeout_at(
-            until,
-            broker.exchange(snapshot_request_line(request_id, &paths)),
-        )
-        .await
-        {
-            Ok(BrokerExchange::Answered(answer)) => read_snapshot_answer(&answer, request_id),
-            Ok(BrokerExchange::NotContacted | BrokerExchange::Lost) | Err(_) => None,
+    // 4a. The workspace (owner decision 2026-11-15): what the app says the
+    // request's workspace holds -- a read, so a lost or refused answer is just
+    // no workspace -- then the broker's check of it and its payload lines.
+    // `workspace: null` (the app's kill switch) and anything the relay cannot
+    // read are the card alone. The broker's wait ends at the result deadline
+    // or after DM_WORKSPACE_WAIT, whichever comes first, so a broker that
+    // does not answer never holds the card past its window.
+    let answered = app
+        .post(AppRoute::Workspace, json!({"request_id": request_id}))
+        .await;
+    let evidence = match read_app_answer(&answered, AppRoute::Workspace.envelope()) {
+        AppAnswer::Done(value) => read_app_workspace(&value),
+        _ => None,
+    };
+    let workspace = match &evidence {
+        None => None,
+        Some(evidence) => {
+            let until = deadline.min(Instant::now() + DM_WORKSPACE_WAIT);
+            match tokio::time::timeout_at(
+                until,
+                broker.exchange(workspace_request_line(request_id, evidence)),
+            )
+            .await
+            {
+                Ok(BrokerExchange::Answered(answer)) => {
+                    read_workspace_answer(&answer, request_id, evidence)
+                }
+                Ok(BrokerExchange::NotContacted | BrokerExchange::Lost) | Err(_) => None,
+            }
         }
     };
 
     // 4. The payload: made whole before anything is recorded, and the exact
-    // bytes digested are the bytes sent (§2-4) -- the snapshot's lines too.
-    let payload = dm_payload_with_snapshot(
+    // bytes digested are the bytes sent (§2-4) -- the workspace's lines too.
+    let payload = dm_payload_with_workspace(
         &candidate.card,
-        snapshot
+        workspace
             .as_ref()
-            .map_or(&[][..], |snapshot| snapshot.lines.as_slice()),
+            .map_or(&[][..], |workspace| workspace.lines.as_slice()),
     );
     if payload.len() > DM_PAYLOAD_MAX_BYTES {
         return discard(app, request_id, "payload_too_large").await;
@@ -690,14 +712,20 @@ where
         return discard(app, request_id, "deadline_passed").await;
     }
     let payload_digest = dm_payload_digest(key, &payload);
-    let transmission = match &snapshot {
-        Some(snapshot) => DmTransmissionWire::with_develop_snapshot(
-            snapshot.target_sha.clone(),
-            dm_snapshot_manifest_digest(key, &snapshot.manifest),
+    let transmission = match &workspace {
+        Some(workspace) if workspace.target_sha.is_some() => DmTransmissionWire::with_workspace(
+            workspace.state == "develop",
+            workspace.target_sha.clone().unwrap_or_default(),
+            dm_workspace_manifest_digest(key, workspace),
             payload_digest,
         ),
-        None => DmTransmissionWire::card_only(payload_digest),
+        // Evidence with no checkout: the payload's lines name every file's
+        // blob id, so the payload digest binds them.
+        _ => DmTransmissionWire::card_only(payload_digest),
     };
+    let launch_workspace = workspace
+        .as_ref()
+        .map_or(Value::Null, |workspace| workspace.launch.clone());
 
     // 5. The transmission intent; only its recorded answer starts anything
     // (§10). Unknown: the card may or may not be recorded as sent, and it is
@@ -734,6 +762,7 @@ where
         &payload,
         &intent_event,
         &transmission.input_payload_digest,
+        &launch_workspace,
     );
     let exchange = {
         let answer = broker.exchange(line);
@@ -934,12 +963,14 @@ pub(crate) mod tests {
             app
         }
 
-        /// The routes of the question and delivery flows. The v22 question
-        /// sync runs every tick too (`v22_question`); `all_routes` keeps it.
+        /// The routes of the question and delivery flows that write. The v22
+        /// question sync runs every tick too (`v22_question`), and every
+        /// request reads its workspace before the intent (the workspace tests
+        /// check that read); `all_routes` keeps both.
         pub(crate) fn routes(&self) -> Vec<AppRoute> {
             self.all_routes()
                 .into_iter()
-                .filter(|route| *route != AppRoute::V22QuestionSync)
+                .filter(|route| *route != AppRoute::V22QuestionSync && *route != AppRoute::Workspace)
                 .collect()
         }
 
@@ -1184,57 +1215,80 @@ pub(crate) mod tests {
         }
     }
 
-    /// Stage S2b: a card naming a path asks the broker for the snapshot first.
-    fn snapshot_answer(lines: &[u8]) -> BrokerExchange {
+    /// The workspace: the app's evidence first, then the broker's lines.
+    fn workspace_answer(lines: &[u8]) -> BrokerExchange {
         BrokerExchange::Answered(
             serde_json::to_vec(&json!({
-                "v": 1, "type": "snapshot", "requestId": REQUEST_ID, "state": "develop",
-                "targetSha": SNAPSHOT_SHA, "lines": base64::engine::general_purpose::STANDARD.encode(lines),
-                "reason": null, "excluded": {"secret_path": 1},
+                "v": 1, "type": "workspace", "requestId": REQUEST_ID, "state": "develop",
+                "targetSha": WORKSPACE_SHA, "lines": base64::engine::general_purpose::STANDARD.encode(lines),
+                "files": ["PATCH.diff"], "reason": null, "excluded": {"secret_content": 1},
             }))
             .unwrap(),
         )
     }
 
-    const SNAPSHOT_SHA: &str = "0123456789abcdef0123456789abcdef01234567";
+    const WORKSPACE_SHA: &str = "0123456789abcdef0123456789abcdef01234567";
+    /// A patch far over the 4,000 characters a card's context once held: it goes whole.
+    fn big_patch_base64() -> String {
+        let patch = format!("diff --git a/x b/x\n{}", "+line of the patch\n".repeat(20_000));
+        base64::engine::general_purpose::STANDARD.encode(patch)
+    }
 
-    fn snapshot_lines() -> Vec<u8> {
+    fn workspace_lines() -> Vec<u8> {
         format!(
             "{}\n{}\n",
-            json!({"snapshot": {"repository": "github.com/mposition/Tomverse", "commit": SNAPSHOT_SHA, "files": 1}}),
-            json!({"file": "docs/store.md", "blob": "a".repeat(40), "text": "SQLite is the store."})
+            json!({"workspace": {"repository": "github.com/mposition/Tomverse", "commit": WORKSPACE_SHA,
+                "state": "develop", "patch": true, "files": 1}}),
+            json!({"file": "evidence/PATCH.diff", "blob": "a".repeat(40), "bytes": 380_019})
         )
         .into_bytes()
     }
 
-    fn candidate_with_path() -> Candidate {
-        let mut candidate = candidate();
-        candidate.card.context_paths = vec!["docs/store.md".into(), ".env".into()];
-        candidate
+    fn app_with_workspace() -> FakeApp {
+        FakeApp::with(vec![
+            (AppRoute::Requests, routed("dm_proposal")),
+            (AppRoute::Assignments, assigned(Duration::from_secs(1800))),
+            (
+                AppRoute::Workspace,
+                HttpAnswer::Answered {
+                    status: 200,
+                    body: serde_json::to_vec(&json!({"found": true, "workspace": {"target_sha": null,
+                        "files": [{"name": "PATCH.diff", "content": big_patch_base64()}], "excluded": {}}}))
+                    .unwrap(),
+                },
+            ),
+            (AppRoute::Transmissions, recorded()),
+            (AppRoute::Results, submitted("accepted")),
+            (AppRoute::TransmissionOutcome, recorded()),
+        ])
+    }
+
+    fn is_workspace_line(line: &[u8]) -> bool {
+        serde_json::from_slice::<Value>(&line[..line.len() - 1]).unwrap()["type"] == json!("workspace")
     }
 
     #[tokio::test]
-    async fn a_snapshot_goes_after_the_card_and_the_intent_records_it_for_the_whole_payload() {
-        let app = happy_app();
+    async fn a_workspace_goes_after_the_card_and_the_intent_records_it_for_the_whole_payload() {
+        let app = app_with_workspace();
         let local = FakeLocal::marking();
         let broker = FakeBroker::answering(|line| {
-            if serde_json::from_slice::<Value>(&line[..line.len() - 1]).unwrap()["type"]
-                == json!("snapshot")
-            {
-                snapshot_answer(&snapshot_lines())
+            if is_workspace_line(line) {
+                workspace_answer(&workspace_lines())
             } else {
                 broker_says(proposal(), "process_ended", json!({"status": "verified"}))
             }
         });
-        let run = relay_candidate(&app, &local, &broker, &candidate_with_path()).await;
+        let run = relay_candidate(&app, &local, &broker, &candidate()).await;
         assert_eq!(run, RelayRun::end(RelayEnd::Settled("result_recorded")));
+        assert_eq!(app.body(AppRoute::Workspace), json!({"request_id": REQUEST_ID}));
 
         let lines = broker.lines.lock().unwrap().clone();
-        assert_eq!(lines.len(), 2, "the snapshot request, then the launch");
+        assert_eq!(lines.len(), 2, "the workspace request, then the launch");
         let request: Value = serde_json::from_slice(&lines[0].0[..lines[0].0.len() - 1]).unwrap();
         assert_eq!(
             request,
-            json!({"v": 1, "type": "snapshot", "requestId": REQUEST_ID, "paths": ["docs/store.md", ".env"]})
+            json!({"v": 1, "type": "workspace", "requestId": REQUEST_ID, "targetSha": null,
+                "files": [{"name": "PATCH.diff", "content": big_patch_base64()}]})
         );
 
         let key = RequestKey::from_bytes(KEY);
@@ -1242,26 +1296,34 @@ pub(crate) mod tests {
         let payload = base64::engine::general_purpose::STANDARD
             .decode(launch["payload"].as_str().unwrap())
             .unwrap();
-        // The lines go after the card, byte for byte, and the digest covers them.
-        assert!(payload.ends_with(&snapshot_lines()));
+        // The lines go after the card, byte for byte, and the digest covers
+        // them; the patch is in the launch's workspace, whole, not in the payload.
+        assert!(payload.ends_with(&workspace_lines()));
+        assert!(payload.len() < 64 * 1024);
+        assert_eq!(
+            launch["workspace"],
+            json!({"state": "develop", "targetSha": WORKSPACE_SHA,
+                "files": [{"name": "PATCH.diff", "content": big_patch_base64()}]})
+        );
         assert_eq!(
             app.body(AppRoute::Transmissions)["transmission"],
             json!({
                 "snapshotState": "develop",
-                "snapshotTargetSha": SNAPSHOT_SHA,
-                "snapshotManifestDigest": crate::dm_relay::snapshot::dm_snapshot_manifest_digest(
-                    &key, &[("docs/store.md".to_owned(), "a".repeat(40))]),
+                "snapshotTargetSha": WORKSPACE_SHA,
+                "snapshotManifestDigest": crate::dm_relay::workspace::dm_snapshot_manifest_digest(
+                    &key, &[("repo".to_owned(), WORKSPACE_SHA.to_owned()),
+                        ("evidence/PATCH.diff".to_owned(), "a".repeat(40))]),
                 "inputPayloadDigest": dm_payload_digest(&key, &payload),
             })
         );
     }
 
-    /// A broker whose snapshot answer never comes; a launch is answered.
-    struct SilentSnapshotBroker(FakeBroker);
+    /// A broker whose workspace answer never comes; a launch is answered.
+    struct SilentWorkspaceBroker(FakeBroker);
     #[async_trait]
-    impl DmBroker for SilentSnapshotBroker {
+    impl DmBroker for SilentWorkspaceBroker {
         async fn exchange(&self, line: Vec<u8>) -> BrokerExchange {
-            if serde_json::from_slice::<Value>(&line[..line.len() - 1]).unwrap()["type"] == json!("snapshot") {
+            if is_workspace_line(&line) {
                 std::future::pending::<()>().await;
             }
             self.0.exchange(line).await
@@ -1269,30 +1331,37 @@ pub(crate) mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn a_silent_snapshot_is_waited_on_for_its_bound_then_the_card_goes_alone() {
-        let app = happy_app();
+    async fn a_silent_workspace_is_waited_on_for_its_bound_then_the_card_goes_alone() {
+        let app = app_with_workspace();
         let local = FakeLocal::marking();
-        let broker = SilentSnapshotBroker(FakeBroker::answering(|_| {
+        let broker = SilentWorkspaceBroker(FakeBroker::answering(|_| {
             broker_says(proposal(), "process_ended", json!({"status": "verified"}))
         }));
         let started = Instant::now();
-        let run = relay_candidate(&app, &local, &broker, &candidate_with_path()).await;
+        let run = relay_candidate(&app, &local, &broker, &candidate()).await;
         assert_eq!(run, RelayRun::end(RelayEnd::Settled("result_recorded")));
-        assert!(started.elapsed() >= DM_SNAPSHOT_WAIT && started.elapsed() < DM_SNAPSHOT_WAIT * 2);
+        assert!(started.elapsed() >= DM_WORKSPACE_WAIT && started.elapsed() < DM_WORKSPACE_WAIT * 2);
         assert_eq!(app.body(AppRoute::Transmissions)["transmission"]["snapshotState"], json!("none"));
     }
 
     #[tokio::test(start_paused = true)]
-    async fn a_silent_snapshot_never_holds_the_card_past_its_window() {
+    async fn a_silent_workspace_never_holds_the_card_past_its_window() {
         let app = FakeApp::with(vec![
             (AppRoute::Requests, routed("dm_proposal")),
             (AppRoute::Assignments, assigned(Duration::from_secs(5))),
+            (
+                AppRoute::Workspace,
+                HttpAnswer::Answered {
+                    status: 200,
+                    body: br#"{"found":true,"workspace":{"target_sha":null,"files":[],"excluded":{}}}"#.to_vec(),
+                },
+            ),
             (AppRoute::AssignmentDiscard, recorded()),
         ]);
         let local = FakeLocal::marking();
-        let broker = SilentSnapshotBroker(FakeBroker::answering(|_| BrokerExchange::Lost));
+        let broker = SilentWorkspaceBroker(FakeBroker::answering(|_| BrokerExchange::Lost));
         let started = Instant::now();
-        let run = relay_candidate(&app, &local, &broker, &candidate_with_path()).await;
+        let run = relay_candidate(&app, &local, &broker, &candidate()).await;
         // The window (5 s) ends first: no intent, the request discarded, the marker released.
         assert_eq!(run.end, RelayEnd::Settled("deadline_passed"));
         assert!(started.elapsed() < Duration::from_secs(10));
@@ -1301,34 +1370,55 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn no_snapshot_from_the_broker_sends_the_card_alone() {
+    async fn no_workspace_from_the_app_or_the_broker_sends_the_card_alone() {
         for answer in [
             BrokerExchange::NotContacted,
             BrokerExchange::Lost,
             BrokerExchange::Answered(b"{}".to_vec()),
         ] {
-            let app = happy_app();
+            let app = app_with_workspace();
             let local = FakeLocal::marking();
-            let snapshot_answer = std::sync::Mutex::new(Some(answer));
+            let workspace_answer = std::sync::Mutex::new(Some(answer));
             let broker = FakeBroker::answering(move |line| {
-                if serde_json::from_slice::<Value>(&line[..line.len() - 1]).unwrap()["type"]
-                    == json!("snapshot")
-                {
-                    snapshot_answer.lock().unwrap().take().unwrap()
+                if is_workspace_line(line) {
+                    workspace_answer.lock().unwrap().take().unwrap()
                 } else {
                     broker_says(proposal(), "process_ended", json!({"status": "verified"}))
                 }
             });
-            let run = relay_candidate(&app, &local, &broker, &candidate_with_path()).await;
+            let run = relay_candidate(&app, &local, &broker, &candidate()).await;
             assert_eq!(run, RelayRun::end(RelayEnd::Settled("result_recorded")));
-            assert_eq!(
-                app.body(AppRoute::Transmissions)["transmission"]["snapshotState"],
-                json!("none")
-            );
-            assert_eq!(
-                app.body(AppRoute::Transmissions)["transmission"]["snapshotManifestDigest"],
-                Value::Null
-            );
+            let transmission = app.body(AppRoute::Transmissions)["transmission"].clone();
+            assert_eq!(transmission["snapshotState"], json!("none"));
+            assert_eq!(transmission["snapshotManifestDigest"], Value::Null);
+        }
+        // The app's kill switch (`workspace: null`) and a lost app answer: no
+        // broker workspace request at all, and a launch with no workspace.
+        for workspace in [
+            Some(HttpAnswer::Answered { status: 200, body: br#"{"found":true,"workspace":null}"#.to_vec() }),
+            None,
+        ] {
+            let mut routes = vec![
+                (AppRoute::Requests, routed("dm_proposal")),
+                (AppRoute::Assignments, assigned(Duration::from_secs(1800))),
+                (AppRoute::Transmissions, recorded()),
+                (AppRoute::Results, submitted("accepted")),
+                (AppRoute::TransmissionOutcome, recorded()),
+            ];
+            if let Some(answer) = workspace {
+                routes.push((AppRoute::Workspace, answer));
+            }
+            let app = FakeApp::with(routes);
+            let local = FakeLocal::marking();
+            let broker = FakeBroker::answering(|_| {
+                broker_says(proposal(), "process_ended", json!({"status": "verified"}))
+            });
+            let run = relay_candidate(&app, &local, &broker, &candidate()).await;
+            assert_eq!(run, RelayRun::end(RelayEnd::Settled("result_recorded")));
+            let lines = broker.lines.lock().unwrap().clone();
+            assert_eq!(lines.len(), 1, "the launch only");
+            let launch: Value = serde_json::from_slice(&lines[0].0[..lines[0].0.len() - 1]).unwrap();
+            assert_eq!(launch["workspace"], Value::Null);
         }
     }
 

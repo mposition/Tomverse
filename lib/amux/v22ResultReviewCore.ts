@@ -11,17 +11,23 @@
  * Pure: who is asked about, the card's words, and what an answer says.
  */
 
-/** Default off. Filing a review card starts a Decision Maker turn. */
+import { dmCardEvidenceContext } from "./decisionMakerWorkspaceCore.ts";
+
+/**
+ * Filing a review card starts a Decision Maker turn. Owner decision
+ * 2026-11-15: the switches that make the Decision Maker work default on, and
+ * are kill switches -- on unless exactly `disabled`.
+ */
 export const AMUX_V22_RESULT_REVIEW_DM_ENV = "TOMVERSE_AMUX_V22_RESULT_REVIEW_DM";
-/** Default off. A Decision Maker proposal for a question the app answers
- * itself is applied without the operator's confirmation in Admin. */
+/** A Decision Maker proposal for a question the app answers itself is
+ * applied without the operator's confirmation in Admin. On unless `disabled`. */
 export const AMUX_DM_APPROVER_ENV = "TOMVERSE_AMUX_DM_APPROVER";
 
 export type AmuxResultReviewEnv = Record<string, string | undefined>;
 export const amuxV22ResultReviewDmEnabled = (env: AmuxResultReviewEnv = process.env) =>
-  env[AMUX_V22_RESULT_REVIEW_DM_ENV] === "enabled";
+  env[AMUX_V22_RESULT_REVIEW_DM_ENV]?.trim() !== "disabled";
 export const amuxDmApproverEnabled = (env: AmuxResultReviewEnv = process.env) =>
-  env[AMUX_DM_APPROVER_ENV] === "enabled";
+  env[AMUX_DM_APPROVER_ENV]?.trim() !== "disabled";
 
 export const AMUX_V22_RESULT_REVIEW_KINDS =
   ["needs_owner", "conclusion_invalid", "result_review", "prless_implement"] as const;
@@ -62,17 +68,16 @@ export const AMUX_V22_RESULT_REVIEW_KIND_TEXT: Readonly<Record<AmuxV22ResultRevi
 export const AMUX_V22_RESULT_REVIEW_DM_WORKER = "amux-result-review";
 /** As the card close question: `claude` routes to `decision-maker-openai`. */
 export const AMUX_V22_RESULT_REVIEW_DM_PROVIDER = "claude";
-export const AMUX_V22_RESULT_REVIEW_QUESTION_MAX = 2_000;
-export const AMUX_V22_RESULT_REVIEW_TITLE_MAX = 200;
 
 /**
  * The card the relay files, in the shape of a v22 question's pending entry,
- * or null when the evidence does not fit whole. Written from the Task's
- * number, its role, the fixed sentence of its kind and its approved
- * completion criteria; the run's findings (its conclusion's, else the whole
- * result) follow. Nothing is cut: a review the Decision Maker would judge on
- * part of the evidence is left to the person instead. Words in the criteria
- * or findings may send the card to the operator: that is the routing working.
+ * or null when its evidence is missing. Written from the Task's number, its
+ * role, the fixed sentence of its kind and its approved completion criteria;
+ * the run's findings (its conclusion's, else the whole result) are in the
+ * Decision Maker's workspace, whole (owner decision 2026-11-15), or in the
+ * card's context, whole, with the workspace switched off. Nothing is cut and
+ * nothing is left out to fit a card. Words in the criteria may send the card
+ * to the operator: that is the routing working.
  */
 export function amuxV22ResultReviewRelayCard(input: {
   reviewId: string;
@@ -81,6 +86,8 @@ export function amuxV22ResultReviewRelayCard(input: {
   kind: AmuxV22ResultReviewKind;
   criteria: readonly string[];
   findings: string;
+  /** Whether the Decision Maker has a workspace; the switch decides by default. */
+  workspace?: boolean;
 }) {
   if (input.criteria.length === 0 || !input.findings.trim()) return null;
   const question = [
@@ -89,16 +96,16 @@ export function amuxV22ResultReviewRelayCard(input: {
     `Why it waits: ${AMUX_V22_RESULT_REVIEW_KIND_TEXT[input.kind]}.`,
     "Its completion criteria:",
     ...input.criteria.map((criterion) => `- ${criterion}`),
-    `Its findings: ${input.findings}`,
+    "Its run's report is in the evidence named below.",
     "Should its result be approved as done, the Task run again, or the Task blocked for a person?",
   ].join("\n");
-  if (question.length > AMUX_V22_RESULT_REVIEW_QUESTION_MAX) return null;
   return {
     question_id: input.reviewId,
     worker: AMUX_V22_RESULT_REVIEW_DM_WORKER,
     provider: AMUX_V22_RESULT_REVIEW_DM_PROVIDER,
-    title: `Result review: ${input.taskLabel}`.slice(0, AMUX_V22_RESULT_REVIEW_TITLE_MAX),
+    title: `Result review: ${input.taskLabel}`,
     question,
+    context: dmCardEvidenceContext([{ name: "FINDINGS.md", heading: "Its run's report", text: input.findings }], input.workspace),
     unblocks: "An approved result finishes the Task so the Tasks after it can start; a retry runs it again; a block leaves it for a person.",
     options: [
       { id: "approve", label: "Approve the result; the Task is done" },
