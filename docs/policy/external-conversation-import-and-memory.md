@@ -863,11 +863,18 @@ memory·knowledge·imported content는 untrusted data입니다. 고정 system ru
 주장하지 않음, factual uncertainty 유지, 외부 provider identity 사칭 금지.
 
 구현: memory 블록(3·4번 구획)은 `lib/memoryContextPrompt.ts`가 만들며
-`promptVersion`은 `mem-context-v2`입니다. 앱 작성 `rules`만 system 블록에 두고,
+`promptVersion`은 `mem-context-v3`입니다. 앱 작성 `rules`만 system 블록에 두고,
 factual/style statement와 fence인 `data`는 별도 user-role prelude로 한 번 보냅니다.
 Profile instructions·knowledge의 기존 역할은 유지합니다. Memory data는 continuation와
 독립이며 Deep Research에도 유지됩니다. rules와 data의 실제 비용을 각각 더하고
 두 내용·query plan을 retrieval hash/context bundle에 결속합니다.
+
+프로젝트 항목은 각 항목에 명시된 프로젝트의 사실로 구분합니다. 기존 답변 모델은 현재
+질문과 대화의 최신 명시적 전환·정정을 기준으로 프로젝트를 해석하고 다른 프로젝트의
+업무·역할·마감을 가져와 빈칸을 채우지 않습니다. 비교 요청은 프로젝트별로 구분하고,
+참조가 모호하면 프로젝트를 확인합니다. rerank 점수·항목 순서나 붙여넣은 자료 자체가
+프로젝트를 선택하지 않습니다. 이 규칙은 기존 답변 호출에서 적용하며 검색 후보를
+임의로 하나로 줄이거나 별도 selector 호출을 추가하지 않습니다.
 
 - **statement는 기계적으로 무해화합니다.** 개행·제어문자·zero-width·bidi
   override를 제거해 한 줄로 만들고, fence marker가 statement 안에 있으면

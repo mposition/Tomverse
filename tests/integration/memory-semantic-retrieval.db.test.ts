@@ -1157,6 +1157,36 @@ test("full Memory query preserves Korean middle conditions and the signed histor
     assert.equal(provider.state.calls.length, 1, "same-subset re-preparation also reuses the cached ranking");
 }));
 
+test("separate project facts and scope rules are priced, signed and reproduced when rerank order favors the older project", () => withFullMemoryQuery(async () => {
+    const fixture = await fullQueryFixture();
+    await prisma.message.update({ where: { id: fixture.sources[1].id }, data: {
+        content: "정정: 베가는 제외하고 아틀라스 프로젝트만 다룬다.",
+    } });
+    const vega = "베가 프로젝트 디자인 마감은 12월 15일이다.";
+    await prisma.memoryItem.updateMany({ where: { userId: fixture.userId, statement: "다른 프로젝트 마감은 금요일이다." }, data: {
+        statement: vega, searchTerms: memoryRetrievalTerms(vega),
+    } });
+    provider.state.rerankScore = (_query, document) => document.includes("베가") ? 0.95 : 0.8;
+    const prepared = await fixture.prepare();
+    assert.equal(prepared.semanticSteps.memoryRerank, true);
+    assert.ok(prepared.memory.prompt.data?.includes(vega));
+    assert.ok(prepared.memory.prompt.data?.includes("아틀라스 프로젝트 문서 검수 마감은 다음 화요일이다."));
+    assert.ok(prepared.systemPrompt?.includes("latest explicit project switch or correction"));
+    assert.ok(prepared.systemPrompt?.includes("Never fill a missing detail with another project's facts"));
+    assert.ok(!prepared.systemPrompt?.includes(vega), "project facts remain user data, never app instructions");
+    assert.equal(prepared.memoryTokens, estimatePromptTokens(prepared.memory.prompt.rules!) + estimatePromptTokens(prepared.memory.prompt.data!));
+    const token = fixture.sign(prepared);
+    const previousVersion = fixture.sign({ ...prepared,
+        fingerprintInput: { ...prepared.fingerprintInput, promptVersion: "mem-context-v2" } });
+    await fixture.append();
+    const replay = await fixture.rebuild(token);
+    assert.equal(replay.verification.ok, true);
+    assert.equal(replay.context.memoryTokens, prepared.memoryTokens);
+    assert.deepEqual(replay.context.memory.prompt, prepared.memory.prompt);
+    assert.deepEqual((await fixture.rebuild(previousVersion)).verification, { ok: false, reason: "stale" });
+    assert.equal(provider.state.calls.length, 1);
+}));
+
 test("a full-query contextual success becomes stale after cache loss without another paid dispatch", () => withFullMemoryQuery(async () => {
     const fixture = await fullQueryFixture();
     const context = await fixture.prepare();

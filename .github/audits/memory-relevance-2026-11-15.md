@@ -212,7 +212,7 @@ copied-user-material의 Atlas 회수는 유지했다. 프로젝트 혼입·assis
 | quality 도구 자체 typecheck | 통과 |
 | 변경 서버·평가 코드·DB 테스트의 root 옵션 typecheck (기존 ambient 타입 포함) | 통과 |
 | 변경 파일 scoped lint | 통과 |
-| 후속 통합 head 전체 root typecheck | 미완료: 로컬 메모리 압박. 파일 로딩 진단에서 heap allocation failure가 발생해 전체 실행을 중지했다. Next route typegen은 통과했다. |
+| 당시 후속 통합 head 전체 root typecheck | 미완료: 로컬 메모리 압박. 파일 로딩 진단에서 heap allocation failure가 발생해 전체 실행을 중지했다. Next route typegen은 통과했다. 아래 전체 범위 재검사로 보완했다. |
 
 신규 DB 회귀는 실제 cache·서명·source 조회를 사용하고 provider만 로컬 stand-in으로
 대체한다. 커피 선택, lexical fingerprint 일치, 거절한 history anchor 부재, 현재 질문
@@ -226,3 +226,62 @@ copied-user-material의 Atlas 회수는 유지했다. 프로젝트 혼입·assis
 완료되어 중지 대상이 남지 않았다. 이 세션에서 CI를 시작·재실행하지 않았다.
 
 운영 스위치·예산·고지 gate, 독립 검토 unknown, draft·`ci:hold`, 병합·배포 상태는 유지한다.
+
+## 후속 수정: 프로젝트 범위와 전체 타입 검사
+
+남은 프로젝트 혼입은 기존 답변 호출의 메모리 규칙·데이터 경계에서 보완했다.
+`mem-context-v3`은 현재 질문과 대화의 최신 명시적 프로젝트 전환·정정을 기준으로
+프로젝트를 해석하고, 다른 프로젝트의 역할·업무·날짜·마감으로 빈칸을 채우지 않도록 한다.
+비교 요청은 프로젝트별로 구분하고 참조가 모호하면 확인한다. rerank 점수와 항목 순서,
+붙여넣은 자료 자체를 프로젝트 선택의 근거로 삼지 않는다.
+
+각 project statement는 같은 순서의 독립된 user-role 데이터 항목으로 유지한다.
+앱 작성 규칙에만 위 지침을 넣고 사실은 system 권한으로 올리지 않는다. 기존 답변 모델의
+추론을 사용하며 selector·classifier·새 모델 호출이나 검색 점수 규칙을 추가하지 않았다.
+검색 후보에는 여러 프로젝트가 함께 남을 수 있다. 따라서 이 변경을 후보 혼입률의
+측정된 감소로 해석하지 않는다. 새 답변 모델 실행이나 유료 품질 평가는 하지 않았으므로
+실제 답변 혼입률은 아직 측정하지 않았다.
+
+| 관련 로컬 검사 | 결과 |
+|---|---|
+| prompt·provider payload·bundle·query 평가 회귀 | 75 통과 |
+| Native·send transport 회귀 | 56 통과 |
+| 전용 PostgreSQL bundle·semantic 회귀 | 46 통과 |
+| 메모리 분할 타입 검사 도구의 실제 compiler 회귀 | 5 통과 |
+| 전체 root 타입 범위: 입력 4,846개·Next 경로 검사 726개 | 69/69 묶음 통과, source·설정 변경 없음 |
+| Native workspace 전체 typecheck | 통과 |
+| 변경 파일 scoped lint | 통과 |
+
+SDK 요청은 로컬 fetch로 가로채 OpenAI·Anthropic·Google·Deep Research의 실제 역할·순서와
+메모리 데이터 분리를 확인했다. 프로젝트 전환, 최신 정정, 명시적 비교, 인용 자료 사례의
+현재 질문과 원래 대화 순서가 보존된다. 이 검사는 실제 모델 답변 평가가 아니다.
+DB 회귀는 이전 프로젝트의 rerank 점수가 더 높은 사례에서도 project 사실·규칙을 별도로
+렌더하고 실제 규칙·데이터 토큰을 합산·서명해 전송에서 같은 값으로 재현한다. 이전 prompt
+version의 bundle은 stale이며 provider 재호출은 없다. 전용 로컬 PostgreSQL은 중지했다.
+
+전체 검사는 `typecheck:bounded`를 추가해 설치된 TypeScript와 root `tsconfig.json`의
+동일한 검사 옵션으로 직렬 실행한다. 모든 root 입력과 전역 선언을 유지하고, Next가 만든
+validator는 독립된 최상위 경로 검사 블록 단위로 나눈다. 전역 interface 선언은 필요한
+타입·import와 함께 공유하되 구현 자체도 원래 source로 검사한다. 값의 identity에 의존하는
+전역 선언은 원본 module을 유지한다. 지원하지 않는 validator 형식은 거절한다.
+실행 전후 source 집합·내용·설정이 달라지면 성공으로 표시하지 않는다.
+컴파일러의 incremental 진단 cache는 각 실행의 새 디렉터리 안에서만 사용한다.
+다른 실행의 cache를 가져오거나 strictness·검사 대상 exclude를 바꾸지 않는다.
+
+실행 위치: 로컬 PC / PowerShell / repository root. production credential 불필요.
+저장소 source를 읽고 `.tmp`에 검사 계획·결과만 쓴다. CI나 provider 호출은 없다.
+
+```powershell
+npm run typecheck:bounded
+```
+
+[전체 타입 검증 기록](artifacts/memory-relevance-2026-11-15/full-typecheck.json): 설치된
+TypeScript 6.0.3으로 root 입력 4,846개와 Next 경로 검사 726개를 포함한 69개 묶음을
+모두 통과했다. 최초 27개 통과 후 다음 묶음이 3GB heap 한도에 도달했으며, 원래 입력
+집합·각 파일 내용·설정 해시와 통과 로그를 대조한 뒤 남은 42개를 4GB로 이어서 완료했다.
+실행 후 같은 snapshot임을 다시 확인했다. 새 실행의 기본 heap은 4GB다.
+이는 **전체 검사 범위의 분할·재개 검증 완료**이며, 메모리 부족으로 끝나지 못한
+단일 `tsc` 실행이 성공했다는 뜻은 아니다. strictness 완화나 검사 파일 제외는 없다.
+
+관련 로컬 회귀 총 182개(75 + 56 + 46 + 5), Native workspace typecheck 및 scoped lint도
+통과했다. CI를 시작·재개·재실행하지 않았으며 draft·`ci:hold`를 유지한다.
