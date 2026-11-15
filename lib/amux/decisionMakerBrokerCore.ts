@@ -200,12 +200,13 @@ const parseJson = (line: string): unknown => {
 };
 
 const REQUEST_KEY_PATTERN = /^[0-9a-f]{64}$/;
-const BASE64_PATTERN = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+/** The base64 alphabet and its padding, with no repeated group (a long text would overflow the regex stack); the round trip holds the rest. */
+const BASE64_PATTERN = /^[A-Za-z0-9+/]*={0,2}$/;
 
 /** Canonical base64 only: `Buffer.from(…, "base64")` skips what it cannot read, so the text must round-trip. */
 export const dmDecodeBase64 = (text: unknown, maxBytes: number): Buffer | null => {
   if (typeof text !== "string" || text.length === 0) return null;
-  if (text.length > Math.ceil(maxBytes / 3) * 4 || !BASE64_PATTERN.test(text)) return null;
+  if (text.length % 4 !== 0 || text.length > Math.ceil(maxBytes / 3) * 4 || !BASE64_PATTERN.test(text)) return null;
   const bytes = Buffer.from(text, "base64");
   if (bytes.length === 0 || bytes.length > maxBytes || bytes.toString("base64") !== text) return null;
   return bytes;

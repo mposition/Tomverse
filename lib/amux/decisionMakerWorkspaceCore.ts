@@ -252,11 +252,12 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 const hasExactKeys = (record: Record<string, unknown>, keys: readonly string[]) =>
   Object.keys(record).length === keys.length && keys.every((key) => Object.hasOwn(record, key));
-const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+/** The base64 alphabet and its padding, checked without a repeated group (a 16 MiB text would overflow the regex stack); the round trip below holds the rest. */
+const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
 
 /** Canonical base64 within the evidence cap, or null. */
 const decodeBase64 = (text: unknown): Buffer | null => {
-  if (typeof text !== "string" || text.length > Math.ceil(DM_WORKSPACE_EVIDENCE_MAX_BYTES / 3) * 4 || !BASE64.test(text)) {
+  if (typeof text !== "string" || text.length % 4 !== 0 || text.length > Math.ceil(DM_WORKSPACE_EVIDENCE_MAX_BYTES / 3) * 4 || !BASE64.test(text)) {
     return null;
   }
   const bytes = Buffer.from(text, "base64");
