@@ -691,6 +691,44 @@ test("the card detail's attempt shows a reject's reasons and nothing for other v
   assert.match(none, /data-kind="none"/);
 });
 
+// Owner decision 2026-11-15: a rejected run's findings are read from the card,
+// not from the review server: reviewer, severity, file and line, and the
+// reason of a reviewer that listed none.
+test("a rejected run shows each finding with its reviewer, severity, file and line, and says what is missing", () => {
+  const doc = { version: 1 as const, reviewers: [
+    { vendor: "moonshot", verdict: "reject" as const, reason: null, note: null, omitted: 3, findings: [
+      { severity: "minor" as const, summary: "The test misses the empty trailer.", file: null, line: null },
+      { severity: "major" as const, summary: "The retry path loses the original error.",
+        file: "lib/chat/stream.ts", line: 42 }] },
+    { vendor: "openai", verdict: "reject" as const, reason: "blocking_finding_overrides_accept",
+      note: "The change drops the retry cap.", findings: [], omitted: 0 },
+    { vendor: "google", verdict: "unknown" as const, reason: "timeout", note: null, findings: [], omitted: 0 }] };
+  const html = renderToStaticMarkup(<AmuxReviewRejectionReason attemptNumber={2}
+    review={{ verdict: "reject", jobId: OLD_JOB, reviewerVendors: ["moonshot", "openai"],
+      findingsSummary: null, findings: doc, findingsState: "available" }} />);
+  assert.match(html, /data-kind="findings"/);
+  assert.match(html, /reviewed by moonshot, openai/);
+  // Most severe first, each with its reviewer and place.
+  assert.ok(html.indexOf("The retry path loses the original error.") < html.indexOf("The test misses the empty trailer."));
+  assert.match(html, /data-severity="major"[^>]*>[\s\S]*?major[\s\S]*?moonshot[\s\S]*?lib\/chat\/stream\.ts:42[\s\S]*?The retry path/);
+  assert.match(html, /openai rejected without listing a finding \(blocking_finding_overrides_accept\)\./);
+  assert.match(html, /The change drops the retry cap\./);
+  assert.match(html, /google gave no usable verdict \(timeout\)\./, "a reviewer with no verdict is not said to have rejected");
+  assert.match(html, /3 more findings were not kept\./);
+  assert.match(html, /shown as data/);
+  assert.doesNotMatch(html, /npm run -s review/, "the CLI hint only appears when there is no content");
+  // A body past its retention clock, or one that cannot be opened right now, says so instead.
+  const purged = renderToStaticMarkup(<AmuxReviewRejectionReason attemptNumber={1}
+    review={{ verdict: "reject", jobId: OLD_JOB, reviewerVendors: ["openai"], findingsSummary: null,
+      findings: null, findingsState: "purged" }} />);
+  assert.match(purged, /passed their retention period and were deleted/);
+  const unreadable = renderToStaticMarkup(<AmuxReviewRejectionReason attemptNumber={1}
+    review={{ verdict: "reject", jobId: OLD_JOB, reviewerVendors: ["openai"], findingsSummary: null,
+      findings: null, findingsState: "unavailable" }} />);
+  assert.match(unreadable, /could not be opened just now/);
+  assert.match(unreadable, new RegExp(`job ${OLD_JOB}`));
+});
+
 // Owner decision 2026-11-10: a run whose CLI usage was never fully reported
 // holds its worker; the queue says so and the owner may accept it as unknown,
 // with the cost explicitly not treated as zero.

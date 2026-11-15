@@ -201,7 +201,8 @@ export const AMUX_DB_BOUNDARIES = {
   v52ReviewRecord: {
     operation: "v52_review_record",
     // +1: the audit chain lock before the Task row (lib/adminAudit.ts takeAuditChainLock).
-    prismaCallCeiling: 21,
+    // +2: a reject with findings reads its Task's idea and stores the sealed body.
+    prismaCallCeiling: 23,
     isolation: "mutation",
   },
   executionRecoveryRead: {
@@ -631,10 +632,10 @@ export const AMUX_DB_BOUNDARIES = {
   // the same 12 statements. Sync: setup + the facts of open and claimed
   // settlements + the cancel of those whose Task moved + the candidate scan +
   // the insert + pending + their sibling cards + their pull request evidence +
-  // closing + fence.
+  // their rejected reviews' findings (ranked ids, then rows) + closing + fence.
   decisionMakerOwnerSettlementSync: {
     operation: "decision_maker_owner_settlement_sync",
-    prismaCallCeiling: 10,
+    prismaCallCeiling: 12,
     isolation: "mutation",
   },
   // Hand off (unfilable evidence, or an answer that decides nothing): setup +

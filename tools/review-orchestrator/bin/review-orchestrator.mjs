@@ -36,7 +36,9 @@ const print = (value) => process.stdout.write(`${JSON.stringify(value, null, 2)}
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export function decodeRpc(token) {
-  if (typeof token !== "string" || !/^[A-Za-z0-9_-]{1,65536}$/.test(token)) {
+  // The token rides one SSH command argument (Linux allows 131,072 bytes per argument), so
+  // this is that bound, not a policy one: a 60,000-byte scope note is about 80,000 characters.
+  if (typeof token !== "string" || !/^[A-Za-z0-9_-]{1,120000}$/.test(token)) {
     throw new UsageError("rpc_invalid");
   }
   let request;
@@ -86,7 +88,7 @@ function overview(store, config, quotas = null) {
   const load = computeLoad(jobs, Date.now());
   const queued = jobs.reduce((n, { slots }) => n + slots.filter((s) => s.status === "queued").length, 0);
   return {
-    capabilities: ["reviewer-selection-v1"],
+    capabilities: ["reviewer-selection-v1", "reviewer-avoid-vendors-v1"],
     draining: isDraining(config),
     runningReviews: Object.values(load).reduce((n, entry) => n + entry.running, 0),
     queuedReviews: queued,

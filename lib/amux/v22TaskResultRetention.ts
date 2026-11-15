@@ -41,9 +41,12 @@ async function purgeOne(tx: Prisma.TransactionClient, attemptId: string) {
     WHERE "attemptId" = ${attemptId} FOR UPDATE`;
   await tx.$queryRaw`SELECT "attemptId" FROM "AmuxV22TaskPatch"
     WHERE "attemptId" = ${attemptId} FOR UPDATE`;
-  const [row, patch, task, nowRows] = await Promise.all([
+  await tx.$queryRaw`SELECT "attemptId" FROM "AmuxV52ReviewFindings"
+    WHERE "attemptId" = ${attemptId} FOR UPDATE`;
+  const [row, patch, findings, task, nowRows] = await Promise.all([
     tx.amuxV22TaskResult.findUnique({ where: { attemptId } }),
     tx.amuxV22TaskPatch.findUnique({ where: { attemptId } }),
+    tx.amuxV52ReviewFindings.findUnique({ where: { attemptId } }),
     tx.amuxWorkItem.findUnique({ where: { id: found.taskId },
       select: { status: true, v4TerminalAt: true, archivedAt: true,
         updatedAt: true } }),
@@ -63,8 +66,17 @@ async function purgeOne(tx: Prisma.TransactionClient, attemptId: string) {
   const patchTarget: AmuxRetirableContent | null = patch ?
     { ideaId: row.ideaId, purpose: "task_patch", subjectId: attemptId } :
     null;
+  // A rejected review's findings are kept as long as the attempt's result
+  // (owner decision 2026-11-15) and go with it, key deletion queued the same way.
+  const findingsTarget: AmuxRetirableContent | null = findings ?
+    { ideaId: row.ideaId, purpose: "review_findings", subjectId: attemptId } : null;
   if (row.keyId !== amuxContentUnitKeyId(target) || row.keyVersion !== 1)
     throw new AmuxContentRetirementError("integrity_unavailable", target);
+  if (findings && findingsTarget && (findings.ideaId !== row.ideaId ||
+      findings.taskId !== row.taskId || findings.bodyPurgedAt ||
+      !findings.ciphertext || findings.keyId !== amuxContentUnitKeyId(findingsTarget) ||
+      findings.keyVersion !== 1))
+    throw new AmuxContentRetirementError("integrity_unavailable", findingsTarget);
   if (patch && patchTarget && (patch.ideaId !== row.ideaId ||
       patch.taskId !== row.taskId || patch.bodyPurgedAt ||
       !patch.ciphertext || patch.keyId !== amuxContentUnitKeyId(patchTarget) ||
@@ -81,6 +93,17 @@ async function purgeOne(tx: Prisma.TransactionClient, attemptId: string) {
       throw new AmuxContentRetirementError("integrity_unavailable",
         patchTarget);
   }
+  if (findings && findingsTarget) {
+    const cleared = await tx.amuxV52ReviewFindings.updateMany({
+      where: { attemptId, ideaId: row.ideaId, bodyPurgedAt: null,
+        ciphertext: { not: null } },
+      data: { ciphertext: null, keyId: null, keyVersion: null,
+        bodyPurgedAt: now },
+    });
+    if (cleared.count !== 1)
+      throw new AmuxContentRetirementError("integrity_unavailable",
+        findingsTarget);
+  }
   const changed = await tx.amuxV22TaskResult.updateMany({
     where: { attemptId, ideaId: row.ideaId, bodyPurgedAt: null,
       ciphertext: { not: null } },
@@ -94,13 +117,16 @@ async function purgeOne(tx: Prisma.TransactionClient, attemptId: string) {
   if (patch && patchTarget)
     await recordAmuxContentBodyPurge(tx, patchTarget, now,
       patch.digest, patch.digestKeyId);
+  if (findings && findingsTarget)
+    await recordAmuxContentBodyPurge(tx, findingsTarget, now,
+      findings.digest, findings.digestKeyId);
   return true;
 }
 
 /** Bounded retention tick; an uncertain database or key deletion stops work. */
 export async function purgeDueAmuxV22TaskResults() {
   const pending = await prisma.amuxIdeaContentKeyRetirement.findMany({
-    where: { purpose: { in: ["task_result", "task_patch"] },
+    where: { purpose: { in: ["task_result", "task_patch", "review_findings"] },
       keyDeletedAt: null },
     orderBy: [{ bodyPurgedAt: "asc" }], take: BATCH_SIZE,
     select: { ideaId: true, purpose: true, subjectId: true },

@@ -8173,6 +8173,7 @@ model AmuxWorkItem {
   v22ResultReviews  AmuxV22ResultReview[]
   dmOwnerSettlements AmuxDmOwnerSettlement[]
   v52ReviewRecords  AmuxV52ReviewRecord[]
+  v52ReviewFindings AmuxV52ReviewFindings[]
   humanEscalations  AmuxHumanEscalation[]
   costLedgerEntries AmuxCostLedgerEntry[]
   reviewProposals   AmuxReviewProposal[]
@@ -8293,6 +8294,7 @@ model AmuxExecutionAttempt {
   v22ResultReview   AmuxV22ResultReview?
   dmOwnerSettlements AmuxDmOwnerSettlement[]
   v52ReviewRecord   AmuxV52ReviewRecord?
+  v52ReviewFindings AmuxV52ReviewFindings?
   v22AssignmentId   String? @unique @db.Uuid
   v22Assignment     AmuxV22WorkerAssignment? @relation("AmuxV22ExecutionAssignment", fields: [v22AssignmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
@@ -8533,8 +8535,9 @@ model AmuxV22TaskPatch {
   @@index([ideaId, bodyPurgedAt])
 }
 
-/// One immutable review-server verdict for a v52 implement attempt. Findings
-/// stay on the review server; only the content-free binding is stored here.
+/// One immutable review-server verdict for a v52 implement attempt. The row is
+/// the content-free binding; a reject's findings are the attempt's sealed
+/// AmuxV52ReviewFindings body (owner decision 2026-11-15).
 model AmuxV52ReviewRecord {
   attemptId       String   @id
   taskId          String
@@ -8547,16 +8550,56 @@ model AmuxV52ReviewRecord {
   touchesContract Boolean
   requestDigest   String
   auditLogId      String   @unique
-  /// A reject's bounded, redacted reasons (lib/amux/v52ReviewFindingsCore.ts). Display only.
+  /// Legacy (owner decision 2026-11-14): a reject's bounded, redacted reasons
+  /// kept in the clear. New records leave it null; their findings are sealed in
+  /// AmuxV52ReviewFindings. Display only.
   findingsSummary String?
   createdAt       DateTime @default(now())
 
   attempt  AmuxExecutionAttempt @relation(fields: [attemptId, taskId], references: [id, taskId], onDelete: Restrict, onUpdate: Restrict)
   task     AmuxWorkItem         @relation(fields: [taskId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   auditLog AdminAuditLog        @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  findings AmuxV52ReviewFindings?
 
   @@unique([attemptId, taskId])
   @@index([taskId, createdAt])
+}
+
+/// A rejected v52 review's findings, sealed as one AMUX content unit (purpose
+/// `review_findings`, its own external key per attempt) in the same
+/// transaction as the review record (owner decision 2026-11-15): the
+/// reviewers, each one's reason, and per finding its severity, summary, file
+/// and line. Untrusted text for people, the Decision Maker and the next
+/// attempt's prompt, never authority. Kept until 90 days after the Task ends,
+/// as the attempt's result; the purge clears the body and queues the key's
+/// deletion (lib/amux/v22TaskResultRetention.ts).
+model AmuxV52ReviewFindings {
+  attemptId    String    @id
+  taskId       String
+  ideaId       String
+  ciphertext   Bytes?
+  keyId        String?
+  keyVersion   Int?
+  digest       String
+  digestKeyId  String
+  byteLength   Int
+  findingCount Int
+  /// The same reviewer vendor rejected the Task's previous review for a similar
+  /// blocking finding (lib/amux/v52ReviewFindingsCore.ts amuxV52FindingsRepeat),
+  /// judged when the review was recorded. Settlement reads it to hand a repeated
+  /// rejection to a person instead of running the Task again.
+  repeatsPrior Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+  bodyPurgedAt DateTime?
+
+  record  AmuxV52ReviewRecord  @relation(fields: [attemptId, taskId], references: [attemptId, taskId], onDelete: Restrict, onUpdate: Restrict)
+  attempt AmuxExecutionAttempt @relation(fields: [attemptId, taskId], references: [id, taskId], onDelete: Restrict, onUpdate: Restrict, map: "AmuxV52ReviewFindings_attempt_fkey")
+  task    AmuxWorkItem         @relation(fields: [taskId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  idea    AmuxIdeaSubmission   @relation(fields: [ideaId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([attemptId, taskId])
+  @@index([taskId, createdAt])
+  @@index([ideaId, bodyPurgedAt])
 }
 
 model AmuxCostLedgerEntry {
@@ -10674,6 +10717,7 @@ model AmuxIdeaSubmission {
   updatedAt           DateTime  @updatedAt
   v22TaskResults      AmuxV22TaskResult[]
   v22TaskPatches      AmuxV22TaskPatch[]
+  v52ReviewFindings   AmuxV52ReviewFindings[]
   laneAttempts        AmuxIdeaLaneAttempt[]
   cardCloseQuestions  AmuxIdeaCardCloseQuestion[]
 

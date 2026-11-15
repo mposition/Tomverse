@@ -10,7 +10,9 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 const SHA = /^[0-9a-f]{40}$/;
 const JOB = /^r-[0-9]{8}-[0-9]{6}-[0-9a-f]{6}$/;
 const VENDOR = /^[a-z][a-z0-9-]{0,63}$/;
-const MAX_OUTPUT = 65_536;
+// Internal development flow (owner decision 2026-11-15): a review server status
+// carries every finding whole, so its output is read up to 64 MiB.
+const MAX_OUTPUT = 64 * 1_024 * 1_024;
 
 function validInput(input) {
   return input && UUID.test(input.attemptId) && SHA.test(input.baseSha) &&
@@ -18,8 +20,18 @@ function validInput(input) {
     input.reviewRef === `refs/amux-v52-review/${input.attemptId}` &&
     ["claude", "codex", "cursor", "copilot", "antigravity"].includes(input.author) &&
     VENDOR.test(input.authorVendor) && typeof input.scope === "string" &&
-    input.scope.length > 0 && input.scope.length <= 8_192 &&
-    typeof input.touchesContract === "boolean";
+    input.scope.length > 0 && input.scope.length <= 20_000 &&
+    typeof input.touchesContract === "boolean" && validAvoid(input);
+}
+
+/** Vendors a review should prefer not to use (owner decision 2026-11-15); a preference, absent for most attempts. */
+function validAvoid(input) {
+  if (input.avoidReviewerVendors === undefined) return true;
+  const list = input.avoidReviewerVendors;
+  return Array.isArray(list) && list.length >= 1 && list.length <= 4 &&
+    new Set(list).size === list.length &&
+    list.every((vendor) => typeof vendor === "string" && VENDOR.test(vendor) &&
+      vendor !== input.authorVendor);
 }
 
 function evidence(input, verdict, jobId = null, reviewerVendors = []) {
@@ -170,6 +182,10 @@ export function reviewStep(input, options = {}) {
       "--scope", input.scope, "--head", input.commitSha,
       "--head-ref", input.reviewRef];
     if (input.touchesContract) args.push("--reviewers", "2");
+    // A preference the review server may ignore (an older server does): the
+    // same reviewer rejected the Task's last two reviews, so mix another in.
+    if (input.avoidReviewerVendors)
+      args.push("--avoid-vendor", input.avoidReviewerVendors.join(","));
     const reply = run("/usr/bin/node", args, repository, 30_000, objectsDir);
     let submitted;
     try { submitted = JSON.parse(reply.stdout); } catch {}
@@ -219,8 +235,11 @@ export function reviewStep(input, options = {}) {
     verdict === "unknown" ? [] : vendors);
   let findingsSummary = null;
   if (verdict === "reject") {
-    // Display text only: a summary that cannot be built never changes the verdict.
-    try { findingsSummary = rejectionSummary(status); } catch {}
+    // Display text only: findings that cannot be built never change the verdict.
+    try {
+      findingsSummary = rejectionFindings(status,
+        rejectionNotes(status, state.jobId, client, directory, run));
+    } catch {}
   }
   const done = findingsSummary ? { input, final, findingsSummary } : { input, final };
   durableWrite(path, done);
@@ -235,47 +254,106 @@ function finalStep(state) {
 }
 
 const SEVERITY_ORDER = ["blocker", "major", "minor", "nit"];
-const SUMMARY_LINES = 8;
-const SUMMARY_LINE_CHARS = 280;
-const SUMMARY_CHARS = 2_000;
+const REASON = /^[a-z0-9_]{1,80}$/;
+/**
+ * What the helper hands the bridge: the findings as the reviewers wrote them,
+ * whole. The guard is the sealed unit's own 1 MB; only past it are the least
+ * severe findings left out and counted. The app redacts and bounds the text
+ * once more before sealing it.
+ */
+const FINDINGS_JSON_CHARS = 900_000;
+const REPORT_TIMEOUT_MS = 8_000;
+
+const clean = (value) => String(value).trim();
 
 /**
- * The owner's short reason for a reject, built from the structured findings
- * the review server's own status already returned, so it costs no extra call
- * inside the step's time bound. Display text only: the app redacts and bounds
- * it again before storing it (lib/amux/v52ReviewFindingsCore.ts).
+ * What a rejecting reviewer said when it listed no finding: the prose of its
+ * report, read once per such slot with a short bound, so the owner is not told
+ * only that "a reviewer rejected". Best effort: a report that cannot be read
+ * leaves the slot without a note and never changes the verdict.
  */
-export function rejectionSummary(status) {
-  const found = [];
-  for (const review of Array.isArray(status?.reviews) ? status.reviews : []) {
-    if (review?.verdict !== "reject" || !Array.isArray(review.findings)) continue;
-    const vendor = VENDOR.test(review.vendor ?? "") ? review.vendor : null;
-    for (const finding of review.findings) {
-      const rank = SEVERITY_ORDER.indexOf(finding?.severity);
-      if (rank < 0 || typeof finding.summary !== "string" ||
-          !finding.summary.trim()) continue;
-      found.push({ rank, vendor, finding });
+export function rejectionNotes(status, jobId, client, directory, run) {
+  const notes = {};
+  const reviews = Array.isArray(status?.reviews) ? status.reviews.slice(0, 2) : [];
+  for (const review of reviews) {
+    if (review?.verdict !== "reject" || !Number.isInteger(review.slot)) continue;
+    const listed = Array.isArray(review.findings) &&
+      review.findings.some((finding) => SEVERITY_ORDER.includes(finding?.severity) &&
+        typeof finding.summary === "string" && finding.summary.trim());
+    if (listed) continue;
+    try {
+      const reply = run("/usr/bin/node", [client, "report", jobId, "--slot",
+        String(review.slot)], directory, REPORT_TIMEOUT_MS);
+      if (reply.code !== 0 || !reply.stdout.trim()) continue;
+      // The verdict block is machine text; the prose around it is the reason.
+      const prose = reply.stdout.replace(/```json[\s\S]*?```/g, "").trim();
+      if (prose) notes[review.slot] = prose;
+    } catch {}
+  }
+  return notes;
+}
+
+/**
+ * The findings of a rejected job as the document the app seals (lib/amux/
+ * v52ReviewFindingsCore.ts): per rejecting reviewer its vendor, the review
+ * server's reason code and, per finding, severity, summary, file and line,
+ * built from the structured status the server already returned. Returned as
+ * the JSON text the record request carries in `findings_summary`. Fitting the
+ * transport drops the least severe findings first and counts them in
+ * `omitted`; nothing else is cut silently. The app redacts and bounds it again.
+ * Null when no reviewer rejected.
+ */
+export function rejectionFindings(status, notes = {}) {
+  const reviewers = [];
+  for (const review of Array.isArray(status?.reviews) ? status.reviews.slice(0, 4) : []) {
+    if (review?.verdict !== "reject") continue;
+    const findings = [];
+    for (const finding of Array.isArray(review.findings) ? review.findings : []) {
+      if (!SEVERITY_ORDER.includes(finding?.severity) ||
+          typeof finding.summary !== "string" || !finding.summary.trim()) continue;
+      const entry = { severity: finding.severity, summary: clean(finding.summary) };
+      if (typeof finding.file === "string" && finding.file.trim()) {
+        entry.file = clean(finding.file);
+        if (Number.isInteger(finding.line) && finding.line > 0) entry.line = finding.line;
+      }
+      if (finding.repeats_earlier === true) entry.repeatsEarlier = true;
+      findings.push(entry);
     }
+    findings.sort((a, b) => SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity));
+    const reviewer = { vendor: VENDOR.test(review.vendor ?? "") ? review.vendor : null,
+      verdict: "reject",
+      reason: typeof review.reason === "string" && REASON.test(review.reason) ? review.reason : null,
+      note: findings.length === 0 && typeof notes[review.slot] === "string" ?
+        notes[review.slot] : null,
+      findings, omitted: 0 };
+    reviewers.push(reviewer);
   }
-  found.sort((a, b) => a.rank - b.rank);
-  const lines = [];
-  let length = 0;
-  for (const { vendor, finding } of found.slice(0, SUMMARY_LINES)) {
-    const line = typeof finding.line === "number" && Number.isInteger(finding.line) &&
-      finding.line > 0 ? `:${finding.line}` : "";
-    const where = typeof finding.file === "string" && finding.file.trim() ?
-      ` ${finding.file.trim()}${line}` : "";
-    const tag = vendor ? `${finding.severity} · ${vendor}` : finding.severity;
-    let text = `- [${tag}]${where} ${finding.summary.replace(/\s+/g, " ").trim()}`;
-    if (text.length > SUMMARY_LINE_CHARS)
-      text = `${text.slice(0, SUMMARY_LINE_CHARS - 1)}…`;
-    if (length + text.length + 1 > SUMMARY_CHARS) break;
-    lines.push(text);
-    length += text.length + 1;
+  if (reviewers.length === 0) return null;
+  const doc = { version: 1, reviewers };
+  const fits = () => JSON.stringify(doc).length <= FINDINGS_JSON_CHARS;
+  // The least severe finding of the fullest reviewer goes first.
+  while (!fits()) {
+    const worst = reviewers.filter((reviewer) => reviewer.findings.length > 0)
+      .sort((a, b) => SEVERITY_ORDER.indexOf(b.findings.at(-1).severity) -
+        SEVERITY_ORDER.indexOf(a.findings.at(-1).severity) ||
+        b.findings.length - a.findings.length)[0];
+    if (worst) {
+      // A slice never crosses into a more severe finding: only the tail of the
+      // least severe level is dropped, a twentieth of it at a time.
+      const level = worst.findings.at(-1).severity;
+      let tail = 0;
+      while (tail < worst.findings.length &&
+          worst.findings[worst.findings.length - 1 - tail].severity === level) tail += 1;
+      const drop = Math.max(1, Math.floor(tail / 20));
+      worst.findings.splice(worst.findings.length - drop, drop);
+      worst.omitted += drop;
+      continue;
+    }
+    const noted = reviewers.find((reviewer) => reviewer.note);
+    if (!noted) break;
+    noted.note = noted.note.length > 200 ? noted.note.slice(0, noted.note.length >> 1) : null;
   }
-  if (lines.length && found.length > lines.length)
-    lines.push(`- … ${found.length - lines.length} more`);
-  return lines.length ? lines.join("\n") : null;
+  return fits() ? JSON.stringify(doc) : null;
 }
 
 export function reviewFindings(jobId, options = {}) {
@@ -304,7 +382,7 @@ export function reviewFindings(jobId, options = {}) {
     reports.push(reply.stdout.trim());
   }
   if (reports.length === 0) throw new Error("review findings unavailable");
-  return reports.join("\n\n").slice(0, 8_192);
+  return reports.join("\n\n");
 }
 
 const entry = (() => {

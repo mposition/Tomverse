@@ -27,6 +27,8 @@ import { amuxDmT2MergeEnabled, amuxDmT2MergeGate, amuxDmT2MergePatchPaths } from
 import { parseAmuxV22Conclusion } from "./v22ConclusionCore.ts";
 import { openCompletionCriteria } from "./v22ResultReviewService.ts";
 import { openAmuxV22TaskResultRow, v22TaskResultIdeaId } from "./v22TaskResultStore.ts";
+import { openAmuxV52ReviewHistory, readAmuxV52RejectedReviews,
+  type AmuxV52ReviewHistoryRow } from "./v52ReviewFindingsStore.ts";
 
 /**
  * The AMUX owner queue through the Decision Maker (owner decision 2026-11-13).
@@ -48,6 +50,8 @@ import { openAmuxV22TaskResultRow, v22TaskResultIdeaId } from "./v22TaskResultSt
  */
 
 const CARD_ID = /^[A-Za-z0-9_-]{1,64}$/;
+/** Statements the sync makes for the rejected reviews' findings: the ranked ids and the rows, for every pending Task. */
+export const AMUX_DM_OWNER_SETTLEMENT_REVIEW_PRISMA_CALLS = 2;
 /** New settlements filed per tick, and cards handed to the relay per tick. */
 export const AMUX_DM_OWNER_SETTLEMENT_SYNC_LIMIT = 3;
 /** Pending settlements read per tick, so a few that cannot be filed never hide the rest. */
@@ -82,8 +86,9 @@ type SiblingRow = SealedTitle & { forTaskId: string; id: string; label: string; 
  * card yet are read with the rows their cards are opened from; the cards of
  * settlements no longer open that the relay has not closed come back to be
  * closed. While the switch is off, the settlements the owner asked for from
- * the owner queue are read and opened the same way. At most eight statements
- * past the boundary's own.
+ * the owner queue are read and opened the same way. At most ten statements
+ * past the boundary's own (the ninth and tenth rank and read the pending
+ * Tasks' rejected reviews, owner decision 2026-11-15).
  */
 export async function readAmuxDmOwnerSettlementSyncRows(tx: Prisma.TransactionClient,
   input: { enabled: boolean }) {
@@ -103,6 +108,7 @@ export async function readAmuxDmOwnerSettlementSyncRows(tx: Prisma.TransactionCl
   let pending: PendingSettlement[] = [];
   let siblings: SiblingRow[] = [];
   let pulls: Awaited<ReturnType<typeof readAmuxDmOwnerSettlementPullEvidence>> = [];
+  let reviews: AmuxV52ReviewHistoryRow[] = [];
   // While the switch is off, only the settlements the owner asked for from the
   // owner queue are filed (owner decision 2026-11-14): one more statement.
   const requested = input.enabled ? null :
@@ -171,6 +177,8 @@ export async function readAmuxDmOwnerSettlementSyncRows(tx: Prisma.TransactionCl
       ORDER BY x."forTaskId", x."position"`;
     const bindingIds = pending.flatMap((row) => row.bindingId ? [row.bindingId] : []);
     pulls = await readAmuxDmOwnerSettlementPullEvidence(tx, bindingIds);
+    // Why the review server rejected each Task's runs: the card's context.
+    reviews = await readAmuxV52RejectedReviews(tx, taskIds);
   }
   const closing = await tx.$queryRaw<Array<{ questionId: string; cardId: string }>>`
     SELECT s."id" AS "questionId", s."localCardId" AS "cardId"
@@ -179,7 +187,7 @@ export async function readAmuxDmOwnerSettlementSyncRows(tx: Prisma.TransactionCl
       AND s."localCardClosedAt" IS NULL
     ORDER BY s."updatedAt", s."id"
     LIMIT ${AMUX_DM_OWNER_SETTLEMENT_SYNC_LIMIT}`;
-  return { pending, siblings, pulls, closing };
+  return { pending, siblings, pulls, reviews, closing };
 }
 
 const sealedTitle = (row: SealedTitle & { id: string }) => readAmuxCardTitle({ id: row.id,
@@ -221,6 +229,12 @@ export async function openAmuxDmOwnerSettlementCards(rows: Awaited<ReturnType<
         else findings = parseAmuxV22Conclusion(text)?.findings ?? text;
       }
       if (readable && criteria) {
+        // The rejected runs' findings, opened here outside the transaction. A
+        // body that cannot be read leaves its run out and is counted instead.
+        const rejected = await openAmuxV52ReviewHistory(
+          rows.reviews.filter((review) => review.taskId === row.taskId));
+        const reviewEntries = rejected.flatMap((review) => review.opened?.doc ?
+          [{ attemptNumber: review.attemptNumber, doc: review.opened.doc }] : []);
         const mine = rows.siblings.filter((sibling) => sibling.forTaskId === row.taskId);
         const titles = await Promise.all([sealedTitle({ ...row, id: row.taskId }),
           ...mine.map((sibling) => sealedTitle(sibling))]);
@@ -229,6 +243,7 @@ export async function openAmuxDmOwnerSettlementCards(rows: Awaited<ReturnType<
           taskLabel: row.taskLabel, title: titles[0] ?? null, role: row.role, grade: row.grade,
           taskStatus: row.taskStatus, reason: row.reason, criteria, findings,
           rejections: row.rejections,
+          reviews: { entries: reviewEntries, unread: rejected.length - reviewEntries.length },
           siblings: mine.map((sibling, index) => ({ label: sibling.label, title: titles[index + 1] ?? null,
             status: sibling.status, waitsOnThis: sibling.waitsOnThis })),
           siblingTotal: mine[0]?.total ?? 0,

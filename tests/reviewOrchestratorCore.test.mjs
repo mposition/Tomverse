@@ -33,6 +33,28 @@ test("explicit reviewer options accumulate and require a capable server", () => 
   assert.equal(supportsReviewerSelection(null), false);
 });
 
+// Owner decision 2026-11-15: a vendor that rejected a Task's last two reviews is
+// avoided by the next one, as a preference only.
+test("an avoided vendor is set aside only while another vendor could still take the slot", () => {
+  const request = { providers: PROVIDERS, authorVendor: "openai", load: {}, avoidVendors: ["anthropic"] };
+  assert.equal(pickReviewer(request).provider.id, "cursor", "claude is avoided");
+  assert.equal(pickReviewer({ ...request, load: { cursor: { running: 1 } } }).kind, "wait",
+    "a busy other vendor is waited for");
+  assert.equal(pickReviewer({ ...request, blockedProviders: new Set(["cursor"]) }).provider.id, "claude",
+    "no other vendor can take it: the avoided one reviews as before");
+  assert.equal(pickReviewer({ ...request, avoidVendors: ["anthropic", "xai"] }).provider.id, "claude");
+  assert.equal(pickReviewer({ ...request, providers: [PROVIDERS[0]] }).provider.id, "claude",
+    "the only vendor available is still used");
+  assert.equal(pickReviewer({ ...request, requestedProvider: "claude" }).provider.id, "claude",
+    "an operator-pinned provider is never set aside");
+  const plan = planAssignments({ jobs: [{ job: { id: "r-1", authorVendor: "openai", avoidVendors: ["anthropic"] },
+    slots: [{ index: 0, status: "queued" }] }], providers: PROVIDERS, load: {}, now: 1 });
+  assert.equal(plan[0].provider, "cursor");
+  const retried = planAssignments({ jobs: [{ job: { id: "r-2", authorVendor: "openai" },
+    slots: [{ index: 0, status: "queued", excludeVendors: ["xai"] }] }], providers: PROVIDERS, load: {}, now: 1 });
+  assert.equal(retried[0].provider, "claude", "a slot that timed out on a vendor does not return to it");
+});
+
 test("a pinned reviewer ignores load ordering but retains independence, quota and concurrency", () => {
   const request = { providers: PROVIDERS, authorVendor: "openai", load: {}, requestedProvider: "cursor" };
   assert.equal(pickReviewer(request).provider.id, "cursor");
@@ -179,14 +201,85 @@ test("load counts running slots and only the last 24 hours", () => {
   assert.deepEqual(load.claude, { running: 1, recent24h: 2, lastAssignedAt: day * 2 });
 });
 
-test("verdict parsing fails closed and blocking findings override accept", () => {
+test("verdict parsing never guesses a verdict, reads what it can, and blocking findings override accept", () => {
   const block = (value) => `text\n\`\`\`json\n${JSON.stringify(value)}\n\`\`\``;
   assert.equal(parseReviewerOutput("").verdict, "unknown");
   assert.equal(parseReviewerOutput("looks good").reason, "no_verdict_block");
-  assert.equal(parseReviewerOutput("```json\n{nope\n```").reason, "verdict_not_json");
-  assert.equal(parseReviewerOutput(block({ verdict: "approve", findings: [] })).reason, "verdict_value_invalid");
-  assert.equal(parseReviewerOutput(block({ verdict: "accept", findings: [{ severity: "huge", summary: "x" }] })).verdict, "unknown");
+  assert.equal(parseReviewerOutput("```json\n{nope\n```").verdict, "unknown");
+  assert.equal(parseReviewerOutput(block({ verdict: "maybe", findings: [] })).reason, "verdict_value_invalid");
+  assert.equal(parseReviewerOutput(block({ findings: [{ severity: "minor", summary: "no verdict stated" }] })).verdict, "unknown");
+  // Owner decision 2026-11-15: a slip of format does not cost the review.
+  assert.equal(parseReviewerOutput(block({ verdict: "approve", findings: [] })).verdict, "accept");
+  assert.equal(parseReviewerOutput(block({ verdict: "Rejected", findings: [] })).verdict, "reject");
+  const huge = parseReviewerOutput(block({ verdict: "accept", findings: [{ severity: "huge", summary: "x" }] }));
+  assert.deepEqual(huge, { verdict: "accept", findings: [{ severity: "minor", summary: "x" }] }, "an unfamiliar severity keeps its finding");
+  const named = parseReviewerOutput(block({ verdict: "accept", findings: [{ severity: "Critical", summary: "c" }, { severity: "high", summary: "h" }] }));
+  assert.deepEqual([named.verdict, named.findings.map((f) => f.severity)], ["reject", ["blocker", "major"]]);
+  const mixed = parseReviewerOutput(block({ verdict: "reject", findings: [null, 7, { severity: "major", summary: 3 }, "a bare string",
+    { severity: "major", summary: "kept", file: "a.ts", line: "12" }, { summary: "no severity", file: 4, line: -1 }] }));
+  assert.deepEqual(mixed.findings, [{ severity: "minor", summary: "a bare string" },
+    { severity: "major", summary: "kept", file: "a.ts", line: 12 }, { severity: "minor", summary: "no severity" }]);
+  // No cap on how many findings or how long one is.
+  const long = parseReviewerOutput(block({ verdict: "reject", findings: Array.from({ length: 1_000 }, (_, i) => ({
+    severity: "nit", summary: `n${i} ${"y".repeat(10_000)}` })) }));
+  assert.equal(long.findings.length, 1_000);
+  assert.equal(long.findings[0].summary.length > 10_000, true);
+  // A block with no fence is still found; prose braces earlier are not mistaken for it.
+  const bare = parseReviewerOutput(`I checked {the parser}.\n{"verdict":"reject","findings":[{"severity":"major","summary":"bad {x}"}]}`);
+  assert.deepEqual([bare.verdict, bare.findings[0].summary], ["reject", "bad {x}"]);
   assert.deepEqual(parseReviewerOutput(block({ verdict: "accept", findings: [] })), { verdict: "accept", findings: [] });
+  // An earlier accept is not revived by a final block that says unknown or cannot be read.
+  const finalUnknown = parseReviewerOutput(`${block({ verdict: "accept", findings: [] })}\n${block({ verdict: "unknown", reason: "cannot tell" })}`);
+  assert.equal(finalUnknown.verdict, "unknown");
+  assert.equal(parseReviewerOutput(`${block({ verdict: "accept", findings: [] })}\n${block({ verdict: "maybe", findings: [] })}`).verdict, "unknown");
+  // The last place a verdict was written decides, whatever shape it has.
+  const accept = block({ verdict: "accept", findings: [] });
+  const fence = "```";
+  assert.equal(parseReviewerOutput(`${accept}\n${fence}json\n{"verdict": "reject", broken\n${fence}`).verdict, "unknown");
+  assert.equal(parseReviewerOutput(`${accept}\n{"verdict":"reject","findings":[{"severity":"major","summary":"late"}]}`).verdict, "reject");
+  // A final block that never closes, fenced or not, is unknown, not the accept before it.
+  assert.equal(parseReviewerOutput(`${accept}\n{"verdict":"reject","findings":[`).verdict, "unknown");
+  // A brace inside a JSON string is not an object start.
+  assert.equal(parseReviewerOutput(`{"findings":[{"severity":"major","summary":"The parser fails on { in a string."}],"verdict":"reject"}`).verdict, "reject");
+  // Findings in another container are read; ones that cannot be read next to an accept are not trusted.
+  const single = parseReviewerOutput(block({ verdict: "accept", findings: { severity: "major", summary: "one object" } }));
+  assert.deepEqual([single.verdict, single.findings.length], ["reject", 1]);
+  const keyed = parseReviewerOutput(block({ verdict: "accept", findings: { a: { severity: "blocker", summary: "keyed" } } }));
+  assert.equal(keyed.verdict, "reject");
+  assert.equal(parseReviewerOutput(block({ verdict: "accept", findings: [null, 7] })).reason, "findings_unreadable");
+  assert.equal(parseReviewerOutput(block({ verdict: "accept", findings: 42 })).reason, "findings_unreadable");
+  assert.equal(parseReviewerOutput(block({ verdict: "accept", findings: { severity: "major" } })).reason, "findings_unreadable",
+    "a bare finding object is one finding, not its values");
+  assert.equal(parseReviewerOutput(block({ verdict: "accept", findings: { file: "a.ts", line: 3 } })).reason, "findings_unreadable");
+  assert.equal(parseReviewerOutput(block({ verdict: "accept", findings: [{ severity: "major", summary: 3 }, { severity: "nit", summary: "style" }] })).reason,
+    "findings_unreadable", "one readable finding does not vouch for an unreadable one");
+  assert.equal(parseReviewerOutput(block({ verdict: "accept", findings: null })).verdict, "accept");
+  assert.equal(parseReviewerOutput(block({ verdict: "accept" })).verdict, "accept");
+  assert.equal(parseReviewerOutput(block({ verdict: "reject", findings: [null, 7] })).verdict, "reject");
+  // The reviewer's own flag that a finding repeats an earlier one is kept.
+  const flagged = parseReviewerOutput(block({ verdict: "reject", findings: [
+    { severity: "major", summary: "again", repeats_earlier: true }, { severity: "major", summary: "new" }] }));
+  assert.deepEqual(flagged.findings.map((finding) => finding.repeats_earlier ?? false), [true, false]);
+  assert.equal(parseReviewerOutput(`${accept}\n${fence}json\n{"verdict":"reject","findings":[]}`).verdict, "unknown");
+  // Keys in any order: a nested object before the verdict does not hide it.
+  assert.equal(parseReviewerOutput(`${accept}\n{"findings":[{"severity":"major","summary":"bad"}],"verdict":"reject"}`).verdict, "reject");
+  assert.equal(parseReviewerOutput(`${accept}\n${fence}json\n{"findings":[{"severity":"nit","summary":"x"}],"verdict":"reject"}\n${fence}`).verdict, "reject");
+  // The answer is the widest object with a verdict of its own, not one nested in a finding,
+  // and not limited by how many findings come before the verdict key.
+  const nested = parseReviewerOutput(`{"verdict":"reject","findings":[{"severity":"major","summary":"broken","expected":{"verdict":"accept"}}]}`);
+  assert.deepEqual([nested.verdict, nested.findings.length], ["reject", 1]);
+  const many = parseReviewerOutput(`{"findings":[${Array.from({ length: 60 }, (_, i) => `{"severity":"nit","summary":"n${i}"}`).join(",")}],"verdict":"reject"}`);
+  assert.deepEqual([many.verdict, many.findings.length], ["reject", 60]);
+  assert.equal(parseReviewerOutput(`{"verdict":"reject","findings":[{"expected":{"verdict":"accept"}}`).verdict, "unknown");
+  // A later json block with no verdict is the later answer, and says nothing: unknown.
+  assert.equal(parseReviewerOutput(`${accept}\n${fence}json\n{"note":"see above"}\n${fence}`).verdict, "unknown");
+  // A code block after the verdict is not mistaken for a verdict.
+  assert.equal(parseReviewerOutput(`${accept}\n${fence}ts\nconst a = {;\n${fence}`).verdict, "accept");
+  // A long answer of braces cannot stall the parser.
+  const started = Date.now();
+  assert.equal(parseReviewerOutput("{".repeat(2_000_000)).verdict, "unknown");
+  assert.equal(parseReviewerOutput('{"verdict" '.repeat(200_000)).verdict, "unknown");
+  assert.ok(Date.now() - started < 5_000);
   const overridden = parseReviewerOutput(block({ verdict: "accept", findings: [{ severity: "major", summary: "bad" }] }));
   assert.equal(overridden.verdict, "reject");
   // The last block wins: a quoted example earlier in the answer is not the verdict.
@@ -243,7 +336,10 @@ test("rpc round-trips and the SSH command yields only its token", () => {
   const longScope = "\u0001".repeat(6_000);
   assert.deepEqual(decodeRpc(encodeRpc({ command: "submit", scope: longScope })),
     { command: "submit", scope: longScope });
-  assert.throws(() => decodeRpc("A".repeat(65_537)), /rpc_invalid/);
+  // A scope note of 60,000 bytes (the v52 launcher's bound) is about 80,000 token characters.
+  const widest = "x".repeat(60_000);
+  assert.deepEqual(decodeRpc(encodeRpc({ command: "submit", scope: widest })), { command: "submit", scope: widest });
+  assert.throws(() => decodeRpc("A".repeat(120_001)), /rpc_invalid/);
   assert.equal(tokenFromSshCommand(`review-orchestrator rpc ${token}`), token);
   assert.throws(() => tokenFromSshCommand("rm -rf /"), /rpc_missing/);
   assert.throws(() => decodeRpc(encodeRpc({ command: "daemon" })), /rpc_command_invalid/);

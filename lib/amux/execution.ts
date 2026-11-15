@@ -55,7 +55,9 @@ import { amuxV52ReviewRequired, classifyAmuxExecutionPath,
   decideAmuxV52SettlementPaths } from "@/lib/amux/executionGradeCore";
 import { decideAmuxV52ReviewDisposition, validAmuxV52ReviewEvidence,
   type AmuxV52ReviewEvidence } from "@/lib/amux/v52ReviewCore";
-import { normalizeAmuxV52FindingsSummary } from "@/lib/amux/v52ReviewFindingsCore";
+import { createAmuxV52ReviewFindingsRow, sealAmuxV52ReviewFindings,
+  type AmuxV52PreparedFindings } from "@/lib/amux/v52ReviewFindingsStore";
+import { v22TaskResultIdeaId } from "@/lib/amux/v22TaskResultStore";
 import { amuxV52PriorReviewRejections } from "@/lib/amux/v52ReviewRejections";
 import { ENGINEERING_AGENT_POLICY_VERSION,
   v22RunOutcomeForProduct } from "@/lib/engineeringAgentCore";
@@ -1248,17 +1250,28 @@ export const heartbeatAmuxV22TaskExecution = (
   },
 }, true);
 
-/** The launcher records only the review server's binding, never findings.
- * A lost response is resolved by reading the attempt-keyed record, not by
- * submitting the same diff again. */
+/** The launcher records the review server's binding and, for a reject, its
+ * findings as a sealed body beside it (owner decision 2026-11-15). A lost
+ * response is resolved by reading the attempt-keyed record, not by submitting
+ * the same diff again. */
 export async function recordAmuxV52Review(input: {
   attemptId: string; worker: string; instanceId: string;
   generation: number; taskRevision: number;
   changedPaths: string[];
   evidence: AmuxV52ReviewEvidence;
-  /** The launcher's reasons for a reject; display only, never in the digest. */
-  findingsSummary?: string;
+  /** A reject's findings, already normalised, with the attempt's key made
+   * before this call (prepareAmuxV52ReviewFindings). Display and prompt data
+   * only: never in the request digest, never a reason to change the verdict.
+   * The key is cleared when this call ends. */
+  findings?: AmuxV52PreparedFindings | null;
 }) {
+  try {
+    return await recordAmuxV52ReviewWithFindings(input);
+  } finally { input.findings?.keys.masterKey.fill(0); }
+}
+
+async function recordAmuxV52ReviewWithFindings(
+  input: Parameters<typeof recordAmuxV52Review>[0]) {
   if (!validAmuxV52ReviewEvidence(input.evidence))
     return { recorded: false as const, reason: "review_evidence_invalid" as const };
   if (!adminAuditIntegrityKeys(process.env)[0])
@@ -1340,6 +1353,18 @@ export async function recordAmuxV52Review(input: {
       if (existing) return existing.requestDigest === requestDigest ?
         { recorded: true as const, duplicate: true as const } :
         { recorded: false as const, reason: "review_record_conflict" as const };
+      // A reject's findings are sealed here, in this transaction, only when the
+      // key made before it belongs to this very Task's idea.
+      let sealedFindings: ReturnType<typeof sealAmuxV52ReviewFindings> | null = null;
+      let findingsIdeaId: string | null = null;
+      if (input.findings && evidence.verdict === "reject") {
+        const owner = await tx.amuxWorkItem.findUnique({ where: { id: task.id },
+          select: { sourceSnapshot: true } });
+        findingsIdeaId = v22TaskResultIdeaId(owner?.sourceSnapshot);
+        if (findingsIdeaId && findingsIdeaId === input.findings.ideaId)
+          sealedFindings = sealAmuxV52ReviewFindings(input.findings.doc,
+            attempt.id, input.findings.keys);
+      }
       const auditLogId = await writeSystemAuditLog({
         tx, systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
         action: "amux.review.recorded", targetType: "AmuxWorkItem",
@@ -1349,7 +1374,9 @@ export async function recordAmuxV52Review(input: {
           baseSha: evidence.baseSha, commitSha: evidence.commitSha,
           verdict: evidence.verdict, authorVendor: evidence.authorVendor,
           reviewerVendors: evidence.reviewerVendors,
-          touchesContract: evidence.touchesContract, requestDigest },
+          touchesContract: evidence.touchesContract, requestDigest,
+          ...(sealedFindings ? { findingsDigest: sealedFindings.digest,
+            findingCount: sealedFindings.findingCount } : {}) },
       });
       const recordedAudit = await tx.adminAuditLog.findUnique({
         where: { id: auditLogId },
@@ -1365,9 +1392,11 @@ export async function recordAmuxV52Review(input: {
         verdict: evidence.verdict, authorVendor: evidence.authorVendor,
         reviewerVendors: evidence.reviewerVendors,
         touchesContract: evidence.touchesContract, requestDigest, auditLogId,
-        findingsSummary: evidence.verdict === "reject" ?
-          normalizeAmuxV52FindingsSummary(input.findingsSummary) : null,
       } });
+      if (sealedFindings && findingsIdeaId)
+        await createAmuxV52ReviewFindingsRow(tx, { attemptId: attempt.id,
+          taskId: task.id, ideaId: findingsIdeaId, sealed: sealedFindings,
+          repeatsPrior: input.findings!.repeatsPrior });
       context.requireLeaseAt(runtime.leaseExpiresAt);
       context.requireLeaseAt(attempt.leaseExpiresAt);
       return { recorded: true as const, duplicate: false as const };
@@ -1473,6 +1502,8 @@ export async function settleAmuxV22TaskExecution(input: {
           where: { attemptId: attempt.id },
           select: { jobId: true, baseSha: true, verdict: true,
             authorVendor: true,
+            // Whether the rejection repeats the previous one (judged at record time).
+            findings: { select: { repeatsPrior: true } },
             auditLog: { select: { entryHash: true } } },
         }) : null;
       if (reviewRequired && (!reviewRecord?.auditLog.entryHash ||
@@ -1487,7 +1518,8 @@ export async function settleAmuxV22TaskExecution(input: {
       const reviewDisposition = reviewRecord ?
         decideAmuxV52ReviewDisposition(
           reviewRecord.verdict as "accept" | "reject" | "unknown",
-          priorReviewRejections) : null;
+          priorReviewRejections, undefined,
+          reviewRecord.findings?.repeatsPrior === true) : null;
       const settlementRecovery = settlementAssignment?.recoveryApprovalId ?
         await readAmuxV22RecoveryAuthority(tx, attempt.taskId,
           settlementAssignment.taskRevision,

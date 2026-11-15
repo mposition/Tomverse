@@ -35,16 +35,20 @@ test("routing: evidence words no longer send a system card to the operator, a fi
   assert.ok(asked.refusals.includes("irreversible_term"), "a word in the fixed question still routes");
 });
 
-test("v52: every rejection returns to todo with the switch on; off, the second still blocks", async () => {
+test("v52: every rejection returns to todo unless switched off; off, the second still blocks", async () => {
   const { decideAmuxV52ReviewDisposition, amuxV52RejectRetryInBudgetEnabled } =
     await import("../lib/amux/v52ReviewCore.ts");
-  assert.equal(amuxV52RejectRetryInBudgetEnabled(undefined), false);
+  // Owner decision 2026-11-15: on by default; only `disabled` brings back the old rule.
+  assert.equal(amuxV52RejectRetryInBudgetEnabled(undefined), true);
   assert.equal(amuxV52RejectRetryInBudgetEnabled("enabled"), true);
+  assert.equal(amuxV52RejectRetryInBudgetEnabled("disabled"), false);
   assert.deepEqual(decideAmuxV52ReviewDisposition("reject", 1, false),
     { status: "blocked", reason: "review_server_rejected_twice" });
   assert.deepEqual(decideAmuxV52ReviewDisposition("reject", 3, true),
     { status: "todo", reason: "review_server_rejected" });
   assert.deepEqual(decideAmuxV52ReviewDisposition("unknown", 0, true),
+    { status: "todo", reason: "review_server_unknown" });
+  assert.deepEqual(decideAmuxV52ReviewDisposition("unknown", 0, false),
     { status: "blocked", reason: "review_server_unknown" });
   assert.deepEqual(decideAmuxV52ReviewDisposition("accept", 4, true),
     { status: "review", reason: "review_server_accepted" });

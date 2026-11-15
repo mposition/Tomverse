@@ -2751,6 +2751,26 @@ domains:
       Its expiry and key retirement do not by themselves decide account
       deletion or unified export; a public develop PR needs separate consent.
 
+  - domain: amuxV52ReviewFindings
+    prismaModel: AmuxV52ReviewFindings
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/engineering-agent.md v4, v22 Task patch account deletion and export gate
+    subjectReference:
+      kind: parent_row
+      parentColumn: ideaId
+      parentModel: AmuxIdeaSubmission
+    inUnifiedExport: unverified
+    note: >-
+      A rejected review's findings are encrypted and tied to an operator idea by
+      ideaId. They expire with the attempt's result, 90 days after the Task
+      ends, and the purge queues the key's deletion. That expiry does not by
+      itself decide account deletion or unified export.
+
   - domain: amuxPortfolioAssessment
     prismaModel: AmuxPortfolioAssessment
     userLinkageRole: actor

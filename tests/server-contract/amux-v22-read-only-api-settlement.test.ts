@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { mock, test } from "node:test";
+import { randomBytes } from "node:crypto";
 
 import { v22PatchNamedPaths } from "../../lib/engineeringAgentV22PatchApply.ts";
 
@@ -17,6 +18,7 @@ const attemptId = "00000000-0000-4000-8000-000000000003";
 const worker = "worker-one";
 const instanceId = "instance-one";
 const catalogDigest = "c".repeat(64);
+const ideaId = "7a1d2c3b-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
 
 type Outcome = "succeeded" | "failed";
 type World = ReturnType<typeof makeWorld>;
@@ -49,7 +51,10 @@ function makeWorld(outcome: Outcome) {
     ownerRetriedRejectionAttemptNumber: null as number | null,
     reviewRejectionCountWhere: null as Record<string, unknown> | null,
     reviewAuditCount: 0,
+    reviewRepeats: false,
     reviewCreated: null as Record<string, unknown> | null,
+    reviewAuditMetadata: null as Record<string, unknown> | null,
+    findingsCreated: null as Record<string, unknown> | null,
     assignmentAuditPresent: true,
     assignmentAuditAction: "amux.v22.worker.assigned",
     sourceApprovalId: null as string | null,
@@ -87,13 +92,16 @@ mock.module(mod("lib/amux/dbBoundary.ts"), { namedExports: {
 } });
 mock.module(mod("lib/adminAudit.ts"), { namedExports: {
   takeAuditChainLock: async () => {},
-  writeSystemAuditLog: async (input: { action: string }) => {
+  writeSystemAuditLog: async (input: { action: string; metadata?: Record<string, unknown> }) => {
     if (input.action === "amux.cli_usage.recorded") world.usageAudits += 1;
     if (input.action === "amux.v22.execution.settled")
       world.settlementAudits += 1;
     if (input.action === "amux.grade.escalated")
       world.gradeEscalationAudits.push(input as unknown as Record<string, unknown>);
-    if (input.action === "amux.review.recorded") world.reviewAuditCount += 1;
+    if (input.action === "amux.review.recorded") {
+      world.reviewAuditCount += 1;
+      world.reviewAuditMetadata = input.metadata ?? null;
+    }
     return `audit-${input.action}`;
   },
 } });
@@ -203,6 +211,7 @@ const tx = {
     findUnique: async () => world.reviewCreated ?? (world.reviewVerdict ? {
       jobId: "r-20261016-110000-abcdef", baseSha: world.patch?.baseSha,
       verdict: world.reviewVerdict, authorVendor: "anthropic",
+      findings: world.reviewRepeats ? { repeatsPrior: true } : null,
       auditLog: { entryHash: "a".repeat(64) },
     } : null),
     count: async ({ where }: { where: Record<string, unknown> }) => {
@@ -228,11 +237,20 @@ const tx = {
     updateMany: async () => { world.questionAnswerClears += 1; return { count: 0 }; },
     update: async () => { world.questionCancels += 1; },
   },
-  amuxWorkItem: { update: async (input: { data: Record<string, unknown> }) => {
-    world.taskUpdates += 1;
-    world.gradeAuditsAtTaskUpdate = world.gradeEscalationAudits.length;
-    world.taskUpdateData = input.data;
-  } },
+  amuxWorkItem: {
+    update: async (input: { data: Record<string, unknown> }) => {
+      world.taskUpdates += 1;
+      world.gradeAuditsAtTaskUpdate = world.gradeEscalationAudits.length;
+      world.taskUpdateData = input.data;
+    },
+    findUnique: async () => ({ sourceSnapshot: { schemaVersion: "amux-v4", ideaId } }),
+  },
+  amuxV52ReviewFindings: {
+    create: async ({ data }: { data: Record<string, unknown> }) => {
+      world.findingsCreated = data;
+      return data;
+    },
+  },
   amuxExecutionAttempt: {
     findUnique: async () => ({
       taskId: world.taskId, worker,
@@ -481,30 +499,46 @@ test("v52 settlement blocks a contract publish file omitted from the runner inve
   assert.equal(world.gradeEscalationAudits.length, 0);
 });
 
-test("v52 review reject retries once at the same grade, then blocks", async () => {
-  for (const [prior, expected, reason] of [
-    [0, "todo", "review_server_rejected"],
-    [1, "blocked", "review_server_rejected_twice"],
+// Owner decision 2026-11-15: no fixed count blocks a Task. A rejection runs it
+// again with the findings; only the same reviewer rejecting for the same
+// blocking finding again goes to a person or the Decision Maker.
+test("v52 review reject runs the Task again; the same finding rejected again blocks it", async () => {
+  for (const [prior, repeats, retryEnv, expected, reason] of [
+    [0, false, undefined, "todo", "review_server_rejected"],
+    [1, false, undefined, "todo", "review_server_rejected"],
+    [4, false, undefined, "todo", "review_server_rejected"],
+    [1, true, undefined, "blocked", "review_server_rejected_twice"],
+    [0, true, undefined, "todo", "review_server_rejected"],
+    [1, false, "disabled", "blocked", "review_server_rejected_twice"],
   ] as const) {
-    world = makeWorld("succeeded");
-    world.attemptNumber = 1;
-    world.gradeGuard = true;
-    world.assignmentRole = "implement";
-    world.taskGrade = "advanced";
-    world.reviewVerdict = "reject";
-    world.priorReviewRejections = prior;
-    world.patch = { taskId: world.taskId, baseSha: "a".repeat(40),
-      sha256: "b".repeat(64), text: "diff --git a/lib/ordinary.ts b/lib/ordinary.ts\n",
-      files: [{ path: "lib/ordinary.ts", mode: "100644", bytesBase64: "YQ==" }] };
-    const input = await settlementInput("succeeded");
-    const result = await (await execution).settleAmuxV22TaskExecution({
-      ...input, changedPaths: ["lib/ordinary.ts"],
-    });
-    assert.equal(result.settled, true);
-    assert.equal(world.taskUpdateData?.status, expected);
-    assert.equal(world.attemptUpdateData?.reason, reason);
-    assert.equal(world.taskUpdateData?.executionGrade, undefined,
-      "review rejection cannot escalate grade");
+    const previousEnv = process.env.TOMVERSE_AMUX_V52_REJECT_RETRY_IN_BUDGET;
+    if (retryEnv === undefined) delete process.env.TOMVERSE_AMUX_V52_REJECT_RETRY_IN_BUDGET;
+    else process.env.TOMVERSE_AMUX_V52_REJECT_RETRY_IN_BUDGET = retryEnv;
+    try {
+      world = makeWorld("succeeded");
+      world.attemptNumber = 1;
+      world.gradeGuard = true;
+      world.assignmentRole = "implement";
+      world.taskGrade = "advanced";
+      world.reviewVerdict = "reject";
+      world.reviewRepeats = repeats;
+      world.priorReviewRejections = prior;
+      world.patch = { taskId: world.taskId, baseSha: "a".repeat(40),
+        sha256: "b".repeat(64), text: "diff --git a/lib/ordinary.ts b/lib/ordinary.ts\n",
+        files: [{ path: "lib/ordinary.ts", mode: "100644", bytesBase64: "YQ==" }] };
+      const input = await settlementInput("succeeded");
+      const result = await (await execution).settleAmuxV22TaskExecution({
+        ...input, changedPaths: ["lib/ordinary.ts"],
+      });
+      assert.equal(result.settled, true);
+      assert.equal(world.taskUpdateData?.status, expected, JSON.stringify([prior, repeats, retryEnv]));
+      assert.equal(world.attemptUpdateData?.reason, reason);
+      assert.equal(world.taskUpdateData?.executionGrade, undefined,
+        "review rejection cannot escalate grade");
+    } finally {
+      if (previousEnv === undefined) delete process.env.TOMVERSE_AMUX_V52_REJECT_RETRY_IN_BUDGET;
+      else process.env.TOMVERSE_AMUX_V52_REJECT_RETRY_IN_BUDGET = previousEnv;
+    }
   }
 });
 
@@ -592,21 +626,32 @@ test("v52 review record binds an implement patch, assignment and audit once", as
   }
 });
 
-// Owner decision 2026-11-14: a reject keeps its reasons for the owner. The
-// text is display only: normalised, never in the request digest or the audit.
-test("a v52 reject stores its redacted reasons; another verdict stores none", async () => {
+// Owner decision 2026-11-15: a reject's findings are sealed as one AMUX content
+// unit beside the record, in the record's transaction. They are display and
+// prompt data: never in the request digest, never a reason to change the verdict.
+test("a v52 reject seals its findings under the attempt's key; another verdict stores none", async () => {
   const previousKey = process.env.ADMIN_AUDIT_INTEGRITY_KEY;
   process.env.ADMIN_AUDIT_INTEGRITY_KEY = "v52-review-test-key".repeat(4);
   try {
-    const summary = `- [major · openai] lib/ordinary.ts:3 leaks ghp_${"A".repeat(36)}\n` +
-      "- [minor · openai] see https://review.internal.example/x for the trace";
+    const core = await import(mod("lib/amux/v52ReviewFindingsCore.ts"));
+    const crypto = await import(mod("lib/amux/ideaCrypto.ts"));
+    const token = `ghp_${"A".repeat(36)}`;
+    const doc = core.parseAmuxV52FindingsTransport(JSON.stringify({ version: 1, reviewers: [{
+      vendor: "openai", verdict: "reject", findings: [
+        { severity: "major", file: "lib/ordinary.ts", line: 3, summary: `leaks ${token}` },
+        { severity: "minor", summary: "see https://review.internal.example/x for the trace" }] }] }));
+    const makeKeys = () => ({ masterKeyId: `amux2-${"k".repeat(20)}`, masterKeyVersion: 1,
+      masterKey: randomBytes(32), digestKeyId: "digest-one", digestKey: randomBytes(32) });
     const evidence = { jobId: "r-20261016-110000-abcdef", baseSha: "a".repeat(40),
       commitSha: "c".repeat(40), authorVendor: "anthropic", reviewerVendors: ["openai"],
       touchesContract: false };
-    const recorded: Array<Record<string, unknown> | null | undefined> = [];
+    const runs: Array<{ created: Record<string, unknown> | null;
+      findings: Record<string, unknown> | null; audit: Record<string, unknown> | null;
+      keys: ReturnType<typeof makeKeys>; keyCopy: ReturnType<typeof makeKeys> }> = [];
     const digests: unknown[] = [];
-    for (const [verdict, findingsSummary] of [
-      ["reject", summary], ["reject", undefined], ["accept", summary],
+    for (const [verdict, prepared, foreignIdea] of [
+      ["reject", true, false], ["reject", false, false], ["accept", true, false],
+      ["reject", true, true],
     ] as const) {
       world = makeWorld("succeeded");
       world.gradeGuard = true;
@@ -615,19 +660,51 @@ test("a v52 reject stores its redacted reasons; another verdict stores none", as
       world.patch = { taskId: world.taskId, baseSha: "a".repeat(40),
         sha256: "b".repeat(64), text: "diff --git a/lib/ordinary.ts b/lib/ordinary.ts\n",
         files: [{ path: "lib/ordinary.ts", mode: "100644", bytesBase64: "YQ==" }] };
+      const keys = makeKeys();
+      // The call clears its key when it ends, so a copy is kept to read the body back.
+      const keyCopy = { ...keys, masterKey: Buffer.from(keys.masterKey) };
       const result = await (await execution).recordAmuxV52Review({ attemptId, worker,
         instanceId, generation: 1, taskRevision: 5, changedPaths: ["lib/ordinary.ts"],
-        evidence: { ...evidence, verdict }, findingsSummary });
+        evidence: { ...evidence, verdict },
+        findings: prepared ? { doc, keys, ideaId: foreignIdea ?
+          "11111111-2222-4333-8444-555555555555" : ideaId } : null });
       assert.deepEqual(result, { recorded: true, duplicate: false });
-      recorded.push(world.reviewCreated);
+      runs.push({ created: world.reviewCreated, findings: world.findingsCreated,
+        audit: world.reviewAuditMetadata, keys, keyCopy });
       digests.push(world.reviewCreated?.requestDigest);
     }
-    assert.equal(recorded[0]?.findingsSummary,
-      "- [redacted: looked like a credential]\n- [minor · openai] see [link] for the trace");
-    assert.equal(recorded[1]?.findingsSummary, null);
-    assert.equal(recorded[2]?.findingsSummary, null);
-    // The reasons never enter the digest the bridge's readback compares.
+    const [sealed, bare, accepted, foreign] = runs;
+    assert.ok(sealed.findings, "a reject with findings stores the sealed body");
+    assert.equal(sealed.findings.attemptId, attemptId);
+    assert.equal(sealed.findings.taskId, taskId);
+    assert.equal(sealed.findings.ideaId, ideaId);
+    assert.equal(sealed.findings.findingCount, 2);
+    const ciphertext = Buffer.from(sealed.findings.ciphertext as Uint8Array);
+    assert.equal(ciphertext.includes("lib/ordinary.ts"), false, "the body is not stored in the clear");
+    const plain = crypto.openAmuxContent({ ciphertext, keyId: sealed.findings.keyId as string,
+      keyVersion: sealed.findings.keyVersion as number }, "review_findings", attemptId,
+    sealed.keyCopy);
+    assert.equal(crypto.verifyAmuxContentDigest(plain, "review_findings", attemptId,
+      sealed.findings.digest as string, sealed.findings.digestKeyId as string, sealed.keyCopy), true);
+    assert.deepEqual(core.decodeAmuxV52FindingsDoc(plain), doc);
+    assert.equal(plain.toString("utf8").includes("ghp_"), false, "a credential-like line never reaches the body");
+    assert.equal(plain.toString("utf8").includes("review.internal.example"), false);
+    // The key is cleared when the call ends.
+    assert.equal(sealed.keys.masterKey.every((byte) => byte === 0), true);
+    // The record no longer keeps the reasons in the clear; the audit names the body by digest and count.
+    assert.equal("findingsSummary" in (sealed.created ?? {}), false);
+    assert.equal(sealed.audit?.findingsDigest, sealed.findings.digest);
+    assert.equal(sealed.audit?.findingCount, 2);
+    assert.equal(JSON.stringify(sealed.audit).includes("lib/ordinary.ts"), false);
+    // A reject without findings, another verdict, or a key made for another idea stores no body.
+    assert.equal(bare.findings, null);
+    assert.equal(bare.audit?.findingsDigest, undefined);
+    assert.equal(accepted.findings, null);
+    assert.equal(foreign.findings, null);
+    assert.equal(foreign.created?.verdict, "reject", "the verdict is still recorded");
+    // The findings never enter the digest the bridge's readback compares.
     assert.equal(digests[0], digests[1]);
+    assert.equal(digests[0], digests[3]);
   } finally {
     if (previousKey === undefined) delete process.env.ADMIN_AUDIT_INTEGRITY_KEY;
     else process.env.ADMIN_AUDIT_INTEGRITY_KEY = previousKey;
@@ -658,7 +735,12 @@ test("an accepted patch whose start opened no publication run settles privately 
   assert.equal(world.escalations[0]?.reason, "human_review_required");
 });
 
-test("v52 review unknown blocks without another attempt", async () => {
+test("v52 review unknown asks for the review again by running the Task again; the old rule blocks", async () => {
+  for (const [retryEnv, expected] of [[undefined, "todo"], ["disabled", "blocked"]] as const) {
+  const previousEnv = process.env.TOMVERSE_AMUX_V52_REJECT_RETRY_IN_BUDGET;
+  if (retryEnv === undefined) delete process.env.TOMVERSE_AMUX_V52_REJECT_RETRY_IN_BUDGET;
+  else process.env.TOMVERSE_AMUX_V52_REJECT_RETRY_IN_BUDGET = retryEnv;
+  try {
   world = makeWorld("succeeded");
   world.attemptNumber = 1;
   world.gradeGuard = true;
@@ -673,8 +755,13 @@ test("v52 review unknown blocks without another attempt", async () => {
     ...input, changedPaths: ["lib/ordinary.ts"],
   });
   assert.equal(result.settled, true);
-  assert.equal(world.taskUpdateData?.status, "blocked");
+  assert.equal(world.taskUpdateData?.status, expected);
   assert.equal(world.attemptUpdateData?.reason, "review_server_unknown");
+  } finally {
+    if (previousEnv === undefined) delete process.env.TOMVERSE_AMUX_V52_REJECT_RETRY_IN_BUDGET;
+    else process.env.TOMVERSE_AMUX_V52_REJECT_RETRY_IN_BUDGET = previousEnv;
+  }
+  }
 });
 
 test("v52 contract touch on the final attempt blocks for human recovery", async () => {
