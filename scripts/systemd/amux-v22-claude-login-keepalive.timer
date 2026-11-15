@@ -1,0 +1,12 @@
+[Unit]
+Description=Check the operator Claude login on the AMUX box every five minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=5min
+AccuracySec=30s
+Persistent=false
+Unit=amux-v22-claude-login-keepalive.service
+
+[Install]
+WantedBy=timers.target
