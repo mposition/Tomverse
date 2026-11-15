@@ -40,6 +40,7 @@ export type MarketingInfoCopy = {
   updated?: string;
   introCtaLabel?: string;
   sectionNavLabel?: string;
+  sectionNavCollapsible?: boolean;
   keepWords?: boolean;
   mobileAccordion?: boolean;
   sections: MarketingInfoSection[];
@@ -118,16 +119,33 @@ export function MarketingInfoPage({
           {page.updated && <p className="mt-4 text-sm font-semibold text-zinc-500 dark:text-zinc-400">{page.updated}</p>}
         </div>
 
-        {page.sectionNavLabel ? (
-          <nav aria-label={page.sectionNavLabel} className="mt-8 rounded-2xl border border-zinc-200 p-4 dark:border-zinc-800">
-            <p className="text-sm font-bold">{page.sectionNavLabel}</p>
+        {page.sectionNavLabel ? (() => {
+          const sectionLinks = (
             <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
               {page.sections.filter((section) => section.id).map((section) => (
                 <a key={section.id} href={`#${section.id}`} className="inline-flex min-h-11 min-w-0 items-center rounded-lg border border-zinc-200 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50 focus-visible:outline-2 focus-visible:outline-blue-600 dark:border-zinc-700 dark:text-blue-300 dark:hover:bg-zinc-900">{section.title}</a>
               ))}
             </div>
-          </nav>
-        ) : null}
+          );
+          return (
+            <nav aria-label={page.sectionNavLabel} className="mt-8 rounded-2xl border border-zinc-200 p-4 dark:border-zinc-800">
+              {page.sectionNavCollapsible ? (
+                <details data-testid="marketing-info-section-nav" className="group">
+                  <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 text-sm font-bold focus-visible:outline-2 focus-visible:outline-blue-600 [&::-webkit-details-marker]:hidden">
+                    {page.sectionNavLabel}
+                    <ChevronDown aria-hidden="true" className="h-5 w-5 shrink-0 group-open:rotate-180" />
+                  </summary>
+                  {sectionLinks}
+                </details>
+              ) : (
+                <>
+                  <p className="text-sm font-bold">{page.sectionNavLabel}</p>
+                  {sectionLinks}
+                </>
+              )}
+            </nav>
+          );
+        })() : null}
 
         {template === "chatgpt-vs-claude" ? (
           <ChatGptVsClaudeGuide />
