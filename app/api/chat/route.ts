@@ -2306,8 +2306,12 @@ async function handleChatPost(
             // the question with no answer (docs/policy/external-conversation-continuation.md §5.1).
             !conversationRouting?.continuationBridge &&
             !admissionToken && !deepResearchDepth;
+        // A held Refiner decision does not exclude the image turn: in an
+        // existing Auto Chat the product Refiner holds one on every send, so
+        // excluding it answered every follow-up image request ("make it
+        // night") as text. The image turn ends before the decision is
+        // consumed, and is judged on the authored message (below).
         const autoImageTurnEligible = autoTextTurnEligible &&
-            !promptRefinerDecision &&
             // This message's own attachments, not the conversation's. A photo
             // is the one attachment the image turn can use: it may be edited.
             (!latestUserTurnHasAttachments(autoRoutingMessages) ||
@@ -2466,7 +2470,7 @@ async function handleChatPost(
             fusion = { key, userId, requestDigest, expiresAt, searchUtcDate, resume };
         }
         const imageRouting = createChatTurnImageRouting(autoImageTurnEligible
-            ? { userId: session!.user!.id!, conversationId: conversationId!, text: profileTextFor(autoRoutingMessages),
+            ? { userId: session!.user!.id!, conversationId: conversationId!, text: profileTextFor(messages),
                 plan: accountPlan, traceId, request: req, attachedPhoto: latestUserTurnHasAttachments(autoRoutingMessages) }
             : null, deterministicAutoSelection.routed && combinedChatImageIntentEnabled(), fusion?.resume?.image);
         let fusionRouterDigest: string | null = null;
