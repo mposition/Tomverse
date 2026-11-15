@@ -242,7 +242,7 @@ document.querySelector('[data-testid="chat-send-button"]').onclick = async () =>
  */
 const chatWithFiles = `<!doctype html><html lang="ko"><body>
 <div id="out"></div>
-<div id="tray"></div>
+<div id="tray" data-testid="attachment-tray"></div>
 <textarea data-testid="chat-textarea"></textarea>
 <button data-testid="chat-send-button">send</button>
 <script>
@@ -261,8 +261,8 @@ document.querySelector('[data-testid="chat-send-button"]').onclick = async () =>
   box.value = "";
   history.replaceState(null, "", "/chat?conversation=c2");
   const card = answer.ready
-    ? '<div data-testid="generated-artifact-download">documents.pdf 다운로드</div>'
-    : '<div data-testid="generated-artifact-failure">신분증.pdf 파일을 만들지 못했습니다.</div>';
+    ? '<li data-testid="generated-artifact-card" data-artifact-status="ready"><p data-testid="generated-artifact-filename">documents.pdf</p><span data-testid="generated-artifact-meta">PDF 문서 · 1.2 MB</span> <button data-testid="generated-artifact-download">다운로드</button></li>'
+    : '<li data-testid="generated-artifact-card" data-artifact-status="failed"><p data-testid="generated-artifact-filename">신분증.pdf</p><span data-testid="generated-artifact-failure">파일을 만들지 못했습니다.</span></li>';
   document.getElementById("out").insertAdjacentHTML("beforeend", '<div data-testid="chat-message" data-message-role="assistant">' + answer.text + card + '<button data-testid="memory-answer-feedback">report</button></div>');
 };
 </script></body></html>`;
@@ -412,7 +412,7 @@ test("new files in a later turn: attached into the conversation's draft, and a f
   const lines = subject.signals.split("\n");
   const step = (n) => lines.find((line) => new RegExp(`^Step ${n}( --|:)`).test(line)) ?? "";
   assert.match(step(0), /at \/chat; composer holds "첨부한 두 이미지를[^]*2 attachment\(s\)/);
-  assert.match(step(1), /send: at \/chat; [^]*file cards: answer 1 ready "documents\.pdf 다운로드"/);
+  assert.match(step(1), /send: at \/chat; [^]*file cards: answer 1 ready "documents\.pdf PDF 문서 · 1\.2 MB 다운로드"/, "the card's name and kind, not only its button");
   assert.match(step(2), /attach "receipt\.jpg" \(a café receipt[^]*this conversation's draft and reloaded the page[^]*1 attachment\(s\)/);
   assert.match(step(3), /attach "chart\.png"[^]*2 attachment\(s\)/);
   assert.match(step(4), /composer holds "이 두 이미지도 같은 방식으로/);
@@ -423,4 +423,17 @@ test("new files in a later turn: attached into the conversation's draft, and a f
   assert.equal(drafts.get("c2").attachmentReferences.length, 2, "the second turn's files went into the conversation's draft");
   assert.doesNotMatch(subject.signals, /refused these writes/);
   assert.equal(rules.allowWrite, null);
+});
+
+test("with answers on screen and no conversation named, an attach step adds nothing rather than guess the draft", async (context) => {
+  if (!browser) return context.skip("no browser can start here");
+  seen.length = 0;
+  const subject = await walkJourney(
+    browser,
+    rules,
+    admitJourney({ ...journey, start: { text: "", attachments: [] }, steps: [{ action: "type", value: "첫 질문" }, { action: "send", value: "" }, { action: "attach", value: "chart.png" }] }),
+    place(),
+  );
+  assert.match(subject.signals, /Step 3 -- attach "chart\.png", but the address names no conversation while answers are on screen, so the walker did not add it/);
+  assert.ok(!seen.some((request) => request.method === "PATCH"), "nothing was uploaded");
 });
