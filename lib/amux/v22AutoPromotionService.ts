@@ -890,7 +890,12 @@ export async function tickV22AutoPromotion() {
     try { context = await loadAmuxV4TaskReadyContext(candidate.taskId); }
     catch { unavailable += 1; continue; }
     const receiptId = randomUUID();
-    try { return await commitCandidate({ candidate, receiptId, context }); }
+    try {
+      const promoted = await commitCandidate({ candidate, receiptId, context });
+      // The cards passed over before this one still say why they wait.
+      await recordAmuxCardWaitReasons(waits);
+      return promoted;
+    }
     catch (error) {
       if (!(error instanceof BoardImportError)) throw error;
       if (error.code === "outcome_unknown") {

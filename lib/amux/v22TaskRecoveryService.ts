@@ -16,7 +16,8 @@ import { resolveV4TaskApiExecutionBasis } from "./v4TaskCostCatalogCore.ts";
 import { evaluateAmuxV4TaskReadyInTransaction, loadAmuxV4TaskReadyContext } from "./v4TaskReadyService.ts";
 import { lockAmuxResourcePolicies, evaluateLockedAmuxCostAdmission } from "./resourcePolicy.ts";
 import { amuxResourceRefs } from "./resourcePolicyCore.ts";
-import { amuxDefaultMaxAttempts, decideAmuxAttemptBudget } from "./executionBudgetCore.ts";
+import { decideAmuxAttemptBudget } from "./executionBudgetCore.ts";
+import { readAmuxAttemptBudgetFacts } from "./infraFailureStore.ts";
 import { AMUX_WORKER_RUNTIME_LEASE_MS } from "./workerRuntime.ts";
 import { recordAmuxV22RecoveryEvidenceAudit,
   recordAmuxV22SafeStopEvidenceAudit, recordAmuxV22ReadOnlyLaunchCheckAudit,
@@ -113,12 +114,16 @@ async function auditBound(tx: Prisma.TransactionClient, auditId: string,
       auditRowActorKind(row) === "human" : auditRowActorKind(row) === "system");
 }
 async function priorBudget(tx: Prisma.TransactionClient, taskId: string) {
-  const prior = await tx.amuxExecutionAttempt.aggregate({ where: { taskId },
-    _count: { _all: true }, _max: { attemptNumber: true }, _sum: { reservedCostMicrousd: true } });
-  const used = Math.max(prior._count._all, prior._max.attemptNumber ?? 0);
-  if (used >= amuxDefaultMaxAttempts()) throw new BoardImportError("attempt_budget_exhausted", 409);
-  return { historicalAttempts: prior._count._all, nextAttemptNumber: used + 1,
-    reserved: prior._sum.reservedCostMicrousd ?? BigInt(0) };
+  // The claim's own count (owner decision 2026-11-15): infrastructure
+  // failures use none of the card's attempts. The approval still binds the
+  // real row count and the next unique number.
+  const prior = await readAmuxAttemptBudgetFacts(tx, taskId);
+  const numbered = Math.max(prior.historicalRows, prior.greatestAttemptNumber ?? 0);
+  if (!decideAmuxAttemptBudget({ historical_rows: prior.historicalRows,
+    greatest_attempt_number: prior.greatestAttemptNumber, infra_rows: prior.infraRows }).allowed)
+    throw new BoardImportError("attempt_budget_exhausted", 409);
+  return { historicalAttempts: prior.historicalRows, nextAttemptNumber: numbered + 1,
+    reserved: prior.reservedMicrousd };
 }
 async function currentCost(tx: Prisma.TransactionClient,
   task: Awaited<ReturnType<typeof lockRecoveryTask>>) {
