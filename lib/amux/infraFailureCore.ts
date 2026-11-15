@@ -89,8 +89,16 @@ export type AmuxSidecarFailureReport = {
   elapsedMs?: number | null;
 };
 
-/** Sidecar failures that mean the worker did the card's work: they count. */
-const RESULT_FAILURES = new Set(["deadline", "output_limit"]);
+/**
+ * Sidecar failures that mean the worker did the card's work: they count.
+ * `stalled` is the local CLI flow's stop of a run that showed no sign of life
+ * for 30 minutes (lib/amux/v22LocalCliFlowCore.ts), the worker's own run as
+ * the old deadline was. The flow's other stop reasons are not the worker's
+ * doing and stay infrastructure (an unknown code below): `operator_stop` (a
+ * person stopped it) and `transcript_write_failed` (the sidecar could not
+ * write its record).
+ */
+const RESULT_FAILURES = new Set(["deadline", "output_limit", "stalled"]);
 
 /**
  * The kind of infrastructure failure a sidecar code names, or `"result"` when
