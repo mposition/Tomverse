@@ -92,6 +92,9 @@ export const AMUX_DM_T2_MERGE_CONTENT_ALARMS: readonly RegExp[] = [
   /\bfetch\b|https?:\/\/|\bXMLHttpRequest\b|\bWebSocket\b|\bEventSource\b|\bsendBeacon\b|\b(?:axios|undici|node-fetch|got)\b|\bhttps?\.(?:request|get)\s*\(|\bnet\.(?:connect|createConnection)\b|\bdgram\b|\bchild_process\b|\b(?:exec|execFile|execSync|spawn|spawnSync|fork)\s*\(|\beval\s*\(|\bFunction\s*\(|\bimport\s*\(\s*[^"'`\s]|\b(?:import|require)\s*\(\s*`[^`]*\$\{|\bglobalThis\b|\bprocess\.\w|\brequire\s*\(\s*[^"'`\s]/,
   // A Node built-in named anywhere (review r-20261115-120924-b09623: `import { request } from "node:https"`).
   /["'`]node:[a-z_/]+["'`]|["'`](?:https?|http2|net|tls|dgram|dns|child_process|fs|fs\/promises|worker_threads|cluster|vm|inspector)["'`]/,
+  // An import written so the specifier check below cannot read it (review r-20261115-122232-b03aef:
+  // `from /* storage */ "@/lib/r2"`): a comment right after the keyword, or a specifier built by `+`.
+  /\b(?:from|import|require)\s*\(?\s*\/[*/]|\b(?:require|import)\s*\(\s*["'`][^"'`\n]*["'`]\s*\+/,
   // Data at rest: the database (any query decides whose rows it reads or writes) and the file system.
   /\b(?:prisma|tx|db|client)\.[a-z]\w*\.(?:find\w*|create\w*|update\w*|upsert|delete\w*|count|aggregate|groupBy)\s*\(|\$queryRaw|@prisma\/client|@\/lib\/prisma\b|\b(?:writeFile|appendFile|unlink|rmdir|rm|mkdir|rename|copyFile|createWriteStream)(?:Sync)?\s*\(/,
   /\bdangerouslySetInnerHTML\b/,
@@ -169,8 +172,13 @@ function resolveRepoImport(fromPath: string, specifier: string): string | null {
  */
 export function amuxDmT2MergeImportAlarms(path: string, text: string): string[] {
   const alarms: string[] = [];
-  for (const match of text.matchAll(IMPORT_SPECIFIER)) {
-    const specifier = match[1]!;
+  // The app has no parser at run time (typescript is a dev dependency), so the specifiers are read twice:
+  // from the text as it is, and with every comment removed blindly (a comment-like run inside a string is
+  // removed too). What either reading names counts; an import neither can read sounds the alarm above.
+  const uncommented = text.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n]*/g, " ");
+  const specifiers = new Set([...text.matchAll(IMPORT_SPECIFIER), ...uncommented.matchAll(IMPORT_SPECIFIER)]
+    .map((match) => match[1]!));
+  for (const specifier of specifiers) {
     if (specifier.startsWith("@/") || specifier.startsWith(".")) {
       const target = resolveRepoImport(path, specifier);
       if (target === null || SOURCE_EXTENSIONS.some((ext) => !qaReleaseDmMergeAllowed(target + ext, [], "blocklist"))) {

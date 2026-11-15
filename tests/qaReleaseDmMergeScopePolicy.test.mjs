@@ -343,6 +343,18 @@ test("the app's fresh read holds only while the approved patch still passes, and
     ['import { useState } from "react";\nimport Link from "next/link";\nimport { z } from "zod";', []],
     ['import { MessageBubble } from "@/components/chat/MessageBubble";\nimport { limit } from "./webSearchCitations";', []],
   ]) assert.deepEqual(amuxDmT2MergeImportAlarms("lib/conversationSearch.ts", text), alarms, text);
+  // Review r-20261115-122232-b03aef: an import the specifier reading cannot see, with no parser at run time.
+  const r2Route = 'import { createR2ReadUrl } from /* storage */ "@/lib/r2";\nexport async function GET(request: Request) {\n  return Response.json({ url: await createR2ReadUrl(new URL(request.url).searchParams.get("key")) });\n}\n';
+  assert.deepEqual(amuxDmT2MergeChangeVerdict({ approved, change: change({ changedFiles: [route] }), scope: BLOCK,
+    patch: patchOf(route, "export {};", "export {};"), files: new Map([[route, r2Route]]) }),
+    { holds: false, reason: "outside_dm_merge_allowlist", paths: [route] });
+  assert.deepEqual(amuxDmT2MergeImportAlarms(route, r2Route), ["@/lib/r2"], "read once the comment is gone");
+  for (const text of ['import { a } from /* c */ "./webSearchCitations";', 'import { a } from // c\n "./webSearchCitations";',
+    'const s = "/*"; import { r } from /* */ "./webSearchCitations";', 'const m = require /* c */ ("./x");',
+    'const m = require("./web" + "SearchCitations");', 'const m = await import(/* webpackChunkName: "x" */ "./x");']) {
+    assert.equal(amuxDmT2MergeChangeVerdict({ approved, change: change({ changedFiles: ["lib/conversationSearch.ts"] }), scope: BLOCK,
+      patch: patchOf("lib/conversationSearch.ts"), files: new Map([["lib/conversationSearch.ts", text]]) }).holds, false, text);
+  }
   // A specifier assembled at run time is an alarm of its own.
   assert.equal(amuxDmT2MergePatchGate(patchOf("lib/conversationSearch.ts", "a", "await import(`./${name}`)"), BLOCK).pass, false);
   // A file not read, gone at the head, or no files at all: a person's.

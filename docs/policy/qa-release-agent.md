@@ -236,7 +236,9 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
        남깁니다(`AMUX_DM_T2_MERGE_HUNK_ALARMS`). 그리고 ready와 레인 목록에서는 허용 목록 밖의 바뀐 파일 **전체**를 승인된 head에서
        엔지니어링 읽기 토큰으로 읽어(`lib/amux/dmT2MergeFileRead.ts`), 파일 어디에든 위 경보가 하나라도 울리거나, Node 내장 모듈·
        허용된 소수 패키지(`AMUX_DM_T2_MERGE_SAFE_IMPORTS`) 밖의 npm 패키지·이 범위가 경로로 받지 않는 저장소 모듈을 import하거나,
-       읽지 못하면 사람에게 남깁니다(`amuxDmT2MergeFileGate`, `amuxDmT2MergeImportAlarms`). 그래서 이 범위가 새로 병합하는 코드는 돈·환경 변수·삭제·인증·비밀·메일·소유권·
+       읽지 못하면 사람에게 남깁니다(`amuxDmT2MergeFileGate`, `amuxDmT2MergeImportAlarms`). 앱에는 실행 중 쓸 수 있는 파서가
+       없으므로 import는 원문과 주석을 지운 본문에서 두 번 읽고, 키워드 바로 뒤의 주석이나 `+`로 이은 specifier처럼 읽을 수 없게
+       쓴 import는 그 자체로 사람에게 남깁니다. 그래서 이 범위가 새로 병합하는 코드는 돈·환경 변수·삭제·인증·비밀·메일·소유권·
        접근을 전혀 말하지 않고, 네트워크·다른 프로세스·DB·파일 시스템에 스스로 닿지 않는 파일뿐입니다. 레인은 앱이 넘긴 PR을 늘 차단 목록 범위로 다시
        판정합니다(`QA_RELEASE_LANE_DM_MERGE_SCOPE`).
      - **허용 목록(kill switch, 다른 모든 값).** 2026-11-13의 규칙 그대로입니다(`QA_RELEASE_DM_MERGE_ALLOW_PATTERNS`: `tests/**`,
