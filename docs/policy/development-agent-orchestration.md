@@ -3345,7 +3345,7 @@ v22 실행은 CLI 한 번이라 실행 중에 답을 기다릴 수 없다. 그�
 - **transcript.** Claude는 `--output-format stream-json --verbose`로 돌고, 모든 CLI의 stdout 전체가 sidecar state 디렉터리의 `<attempt>.transcript.jsonl`(0600, 30일 뒤 정리)에 남는다. journal에는 들어가지 않는다. 앱 저장과 Admin 보기는 아직 없다.
 - **모든 역할에 shell.** design·investigate·review(verify 포함)도 jail 안의 shell로 테스트를 돌린다(Claude `Read,Grep,Glob,Bash`, Codex workspace-write sandbox, Copilot shell 도구, Antigravity `run_command`). 파일 쓰기 도구는 implement만 가진다. 읽기 역할이 checkout을 바꾸면 그 diff를 보고 앞에 싣고 preserved patch로 남긴 뒤 checkout을 base로 되돌린다. 게시 후보가 아니므로 등급 판정의 변경 경로에는 넣지 않고 `readRoleChangedPaths`로 따로 적는다. Cursor는 shell을 jail에 가둘 수 없어 읽기 전용 ask mode 그대로다. operate는 사람 몫이다(운영자 결정 2026-10-30). 네트워크 차단, checkout만 쓰는 jail, 자격 증명 격리는 그대로다. 복구 점검은 shell을 가진 모든 역할에 checkout이 base 위에서 깨끗할 것을 요구한다.
 - **의존성 설치.** 모든 역할이 설치하고 시간은 30분이다. 실패하면 worker 프롬프트에 그 사실과 이유를 적고 결과의 `dependencies`에 남긴다.
-- **계약 경로 변경 보존.** 위 v52 6항. 아래 등급의 계약 경로 변경도 patch와 v52 검토 commit을 만들고, bridge는 frontier처럼 독립 검토를 돌리며, 정산은 그 검토 기록이 있을 때 등급을 `frontier`로 올리면서 검토 결과(review·todo·blocked)로 보낸다. DB guard(`amux_v4_task_approval_binding_guard`)는 그 승급의 도착 상태로 `todo` 외에 `review`·`blocked`도 받는다(migration `20261115140000`). 승급 감사 기록은 Task당 하나인 그대로다.
+- **계약 경로 변경 보존.** 위 v52 6항. 아래 등급의 계약 경로 변경도 patch와 v52 검토 commit을 만들고, bridge는 frontier처럼 독립 검토를 돌리며, 정산은 그 검토 기록이 있을 때 등급을 `frontier`로 올리면서 검토 결과(review·todo·blocked)로 보낸다. DB guard(`amux_v4_task_approval_binding_guard`)는 그 승급의 도착 상태로 `todo` 외에 `review`·`blocked`도 받는다(migration `20261115150000_amux_v52_in_place_grade_escalation`). 승급 감사 기록은 Task당 하나인 그대로다.
 
 ## v22 sidecar 재시작 뒤의 종료 증거 (운영자 결정 2026-11-07)
 
