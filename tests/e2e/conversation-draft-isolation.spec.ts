@@ -348,9 +348,10 @@ test.describe("conversation-scoped composer drafts", () => {
     await expect(textarea(page)).toHaveValue(DRAFT_B);
   });
 
-  test("the new-chat draft waits while another conversation is open, and only a second new chat blanks it", async ({
+  test("the new-chat draft survives a look at another conversation", async ({
     page,
   }) => {
+    const NEW_CHAT_DRAFT = "Draft written before this chat exists";
     await openChat(page);
 
     await textarea(page).fill(DRAFT_A);
@@ -359,16 +360,16 @@ test.describe("conversation-scoped composer drafts", () => {
 
     // A draft written on the new-chat screen is its own draft, and it must not
     // reappear inside an existing conversation either.
-    await textarea(page).fill("Draft written before this chat exists");
+    await textarea(page).fill(NEW_CHAT_DRAFT);
     await selectConversation(page, CONVERSATION_A);
     await expect(textarea(page)).toHaveValue(DRAFT_A);
 
-    // Coming back to the new chat from another conversation restores it
-    // (owner request 2026-11-15: a look at another conversation lost it).
+    // Going back to the new-chat screen is a navigation, not a reset: the
+    // unsent question is still there.
     await startNewChat(page);
-    await expect(textarea(page)).toHaveValue("Draft written before this chat exists");
+    await expect(textarea(page)).toHaveValue(NEW_CHAT_DRAFT);
 
-    // Asking for a new chat while already on it is the explicit blank.
+    // Pressing "new" while already on that screen is the explicit reset.
     await startNewChat(page);
     await expect(textarea(page)).toHaveValue("");
     await selectConversation(page, CONVERSATION_A);
@@ -531,6 +532,37 @@ test.describe("conversation-scoped composer drafts: attachments", () => {
       .evaluate((image) => (image as HTMLImageElement).naturalWidth > 0);
     expect(decoded, "A's preview no longer resolves after the switch").toBe(true);
     expect(uploadState.finalizeCount).toBe(2);
+  });
+
+  test("a new-chat attachment survives a look at another conversation", async ({
+    page,
+  }) => {
+    await prepareGuestPage(page, "ko");
+    await mockAuthenticatedApi(page, { selectedModels: SELECTED_MODELS });
+    await suppressTransientUi(page);
+    await mockConversationPair(page);
+    const uploadState = await mockAttachmentUpload(page);
+    await restoreActiveConversation(page, CONVERSATION_A);
+    await page.goto("/review?lang=ko");
+    await expect(textarea(page)).toBeVisible();
+    await expectConversationOpen(page, CONVERSATION_A);
+
+    await startNewChat(page);
+    await textarea(page).fill("New task with an image");
+    await pasteImage(page, "new-chat.png");
+    await expect(page.getByAltText("new-chat.png")).toBeVisible();
+    await expect.poll(() => uploadState.finalizeCount).toBe(1);
+
+    await selectConversation(page, CONVERSATION_B);
+    await expect(page.getByAltText("new-chat.png")).toHaveCount(0);
+
+    await startNewChat(page);
+    await expect(textarea(page)).toHaveValue("New task with an image");
+    await expect(page.getByAltText("new-chat.png")).toBeVisible();
+    const decoded = await page
+      .getByAltText("new-chat.png")
+      .evaluate((image) => (image as HTMLImageElement).naturalWidth > 0);
+    expect(decoded, "the new-chat preview no longer resolves").toBe(true);
   });
 });
 
