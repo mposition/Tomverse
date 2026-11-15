@@ -88,7 +88,7 @@ const CHECKPOINTED_SELECT = {
   createdAt: true,
   updatedAt: true,
   message: { select: PUBLIC_CHAT_MESSAGE_SELECT },
-  conversation: { select: { password: true } },
+  conversation: { select: { password: true, passwordVersion: true } },
   generations: {
     where: { status: { in: ["dispatch_started", "outcome_unknown"] } },
     select: { id: true },
@@ -134,7 +134,7 @@ export const toResearchPreviewRunDto = (
 };
 
 const canReadResearchRun = (row: DtoRow, userId: string, request?: Request) =>
-  !row.conversation.password || Boolean(request && hasConversationUnlockGrant(request, userId, row.conversationId, row.conversation.password));
+  row.conversation.password == null || Boolean(request && hasConversationUnlockGrant(request, userId, row.conversationId, row.conversation.passwordVersion));
 
 export async function readResearchPreviewRunDto(userId: string, id: string, request?: Request) {
   const row = await prisma.researchPreviewRun.findFirst({

@@ -51,7 +51,7 @@ export async function POST(request: Request) {
       payload.conversationId ? prisma.conversation.findFirst({
         where: { id: payload.conversationId, userId },
         select: {
-          id: true, password: true, kind: true, productKey: true, selectionMode: true,
+          id: true, password: true, passwordVersion: true, kind: true, productKey: true, selectionMode: true,
           selectedModels: true, assistantProfileVersionId: true,
         },
       }) : Promise.resolve(null),
@@ -81,7 +81,7 @@ export async function POST(request: Request) {
     const decision = decideResearchPreviewAdmission({
       signedIn: true, plan: plan.tier,
       conversationAvailable: payload.conversationId ? Boolean(conversation) : true,
-      conversationLocked: Boolean(conversation && !hasConversationUnlockGrant(request, userId, conversation.id, conversation.password)),
+      conversationLocked: Boolean(conversation && !hasConversationUnlockGrant(request, userId, conversation.id, conversation.password == null ? null : conversation.passwordVersion)),
       productKey: payload.conversationId ? conversation?.productKey ?? null : "chat", kind: payload.conversationId ? conversation?.kind ?? null : "chat",
       selectionMode: payload.conversationId ? conversation?.selectionMode ?? null : payload.selectionMode ?? null,
       selectedModelIds: payload.conversationId ? storedModelIds(conversation?.selectedModels) : [payload.modelId], model, backendReadiness, profileTools,
