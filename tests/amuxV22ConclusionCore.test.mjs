@@ -17,6 +17,10 @@ import {
   parseAmuxV22Conclusion,
 } from "../lib/amux/v22ConclusionCore.ts";
 
+// The earlier, strict reading (TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW=disabled);
+// amuxV22LocalCliFlow.test.mjs covers the local CLI flow's lenient one.
+process.env.TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW = "disabled";
+
 const line = (value) => `${AMUX_V22_CONCLUSION_MARKER} ${JSON.stringify(value)}`;
 const valid = { verdict: "proceed", findings: "The router fails on empty input.",
   handoff: [{ task: "AMUX-ROUTERFAIL-004", note: "Guard the empty case first." }],

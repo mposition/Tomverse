@@ -1099,3 +1099,116 @@ test("a question whose run fails is cancelled, never left holding the Task", asy
   assert.notEqual(world.attemptUpdateData?.reason, "owner_question");
   assert.equal(world.questionCancels, 1);
 });
+
+// Owner decision 2026-11-15 (local CLI flow, lib/amux/v22LocalCliFlowCore.ts):
+// a lower grade's contract change is kept and judged at frontier in place.
+function inPlaceWorld(reviewVerdict: "accept" | "reject" | null) {
+  world = makeWorld("succeeded");
+  world.attemptNumber = 1;
+  world.gradeGuard = true;
+  world.assignmentRole = "implement";
+  world.taskRole = "implement";
+  world.taskGrade = "routine";
+  world.sourceApprovalId = "source-one";
+  world.reviewVerdict = reviewVerdict;
+  world.patch = { taskId: world.taskId, baseSha: "a".repeat(40),
+    sha256: "b".repeat(64),
+    text: "diff --git a/lib/amux/execution.ts b/lib/amux/execution.ts\n",
+    files: [{ path: "lib/amux/execution.ts", mode: "100644", bytesBase64: "YQ==" }] };
+}
+
+test("local CLI flow: a reviewed lower-grade contract change rises to frontier in place", async () => {
+  inPlaceWorld("accept");
+  const result = await (await execution).settleAmuxV22TaskExecution({
+    ...await settlementInput("succeeded"), changedPaths: ["lib/amux/execution.ts"],
+  });
+  assert.deepEqual(result, { settled: true, taskRevision: 6 });
+  // No re-run: the kept change goes on to the frontier review path.
+  assert.equal(world.taskUpdateData?.status, "review");
+  assert.equal(world.taskUpdateData?.executionGrade, "frontier");
+  assert.equal(world.attemptUpdateData?.reason, "review_server_accepted");
+  assert.equal(world.gradeEscalationAudits.length, 1);
+  assert.equal(world.gradeAuditsAtTaskUpdate, 1);
+  const metadata = world.gradeEscalationAudits[0]?.metadata as Record<string, unknown>;
+  assert.equal(metadata.reason, "contract_path_touched");
+  assert.equal(metadata.inPlace, true);
+  assert.equal(metadata.toStatus, "review");
+  assert.equal(world.escalations[0]?.reason, "human_review_required");
+});
+
+test("local CLI flow: a rejected in-place change retries at frontier with its grade raised", async () => {
+  inPlaceWorld("reject");
+  const result = await (await execution).settleAmuxV22TaskExecution({
+    ...await settlementInput("succeeded"), changedPaths: ["lib/amux/execution.ts"],
+  });
+  assert.deepEqual(result, { settled: true, taskRevision: 6 });
+  assert.equal(world.taskUpdateData?.status, "todo");
+  assert.equal(world.taskUpdateData?.executionGrade, "frontier");
+  assert.equal(world.attemptUpdateData?.reason, "review_server_rejected");
+});
+
+test("local CLI flow: without a recorded review the contract change escalates as before", async () => {
+  inPlaceWorld(null);
+  const result = await (await execution).settleAmuxV22TaskExecution({
+    ...await settlementInput("succeeded"), changedPaths: ["lib/amux/execution.ts"],
+  });
+  assert.deepEqual(result, { settled: true, taskRevision: 6 });
+  assert.equal(world.taskUpdateData?.status, "todo");
+  assert.equal(world.taskUpdateData?.executionGrade, "frontier");
+  assert.equal(world.attemptUpdateData?.reason, "contract_path_touched");
+  assert.equal((world.gradeEscalationAudits[0]?.metadata as Record<string, unknown>)
+    .inPlace, undefined);
+});
+
+test("the earlier flow never judges a lower grade's contract change in place", async () => {
+  const previous = process.env.TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW;
+  process.env.TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW = "disabled";
+  try {
+    inPlaceWorld("accept");
+    const result = await (await execution).settleAmuxV22TaskExecution({
+      ...await settlementInput("succeeded"), changedPaths: ["lib/amux/execution.ts"],
+    });
+    assert.deepEqual(result, { settled: true, taskRevision: 6 });
+    assert.equal(world.taskUpdateData?.status, "todo");
+    assert.equal(world.attemptUpdateData?.reason, "contract_path_touched");
+  } finally {
+    if (previous === undefined) delete process.env.TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW;
+    else process.env.TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW = previous;
+  }
+});
+
+test("local CLI flow: a lower grade's kept contract change may record its review", async () => {
+  const previousKey = process.env.ADMIN_AUDIT_INTEGRITY_KEY;
+  const previousFlow = process.env.TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW;
+  process.env.ADMIN_AUDIT_INTEGRITY_KEY = "v52-review-test-key".repeat(4);
+  try {
+    const input = { attemptId, worker, instanceId, generation: 1, taskRevision: 5,
+      changedPaths: ["lib/amux/execution.ts"], evidence: {
+        jobId: "r-20261115-110000-abcdef", baseSha: "a".repeat(40),
+        commitSha: "c".repeat(40), verdict: "accept" as const,
+        authorVendor: "anthropic", reviewerVendors: ["openai", "xai"],
+        touchesContract: true } };
+    for (const [flow, expected] of [["disabled",
+      { recorded: false, reason: "review_patch_unverified" }],
+    [undefined, { recorded: true, duplicate: false }]] as const) {
+      if (flow === undefined) delete process.env.TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW;
+      else process.env.TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW = flow;
+      inPlaceWorld(null);
+      world.taskGrade = "advanced";
+      world.patch!.files = null;
+      assert.deepEqual(await (await execution).recordAmuxV52Review(input), expected);
+    }
+    // An invalid path is never recorded, whatever the flow.
+    inPlaceWorld(null);
+    world.taskGrade = "advanced";
+    world.patch!.files = null;
+    assert.deepEqual(await (await execution).recordAmuxV52Review({
+      ...input, changedPaths: ["lib/amux/execution.ts", "../escape.ts"] }),
+    { recorded: false, reason: "review_patch_unverified" });
+  } finally {
+    if (previousKey === undefined) delete process.env.ADMIN_AUDIT_INTEGRITY_KEY;
+    else process.env.ADMIN_AUDIT_INTEGRITY_KEY = previousKey;
+    if (previousFlow === undefined) delete process.env.TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW;
+    else process.env.TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW = previousFlow;
+  }
+});

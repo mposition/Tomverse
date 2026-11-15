@@ -153,13 +153,6 @@ export async function openAmuxV52ReviewFindingsRow(attemptId: string,
 export const AMUX_V52_REVIEW_HISTORY_PRISMA_CALLS = 1;
 /** Prisma calls `readAmuxV52RejectedReviews` makes. */
 export const AMUX_V52_REJECTED_REVIEWS_PRISMA_CALLS = 1;
-/**
- * Reviews read per Task for the next attempt's prompt and the vendor
- * preference: the newest few explain a retry. The prompt's room (30 KiB, the
- * sidecar's) still bounds this path; the Decision Maker's evidence reads every
- * rejection (readAmuxV52RejectedReviews).
- */
-export const AMUX_V52_REVIEW_HISTORY_TAKE = 4;
 
 const HISTORY_SELECT = { taskId: true, attemptId: true, verdict: true, jobId: true,
   reviewerVendors: true, findingsSummary: true,
@@ -173,16 +166,17 @@ const historyRow = (row: Prisma.AmuxV52ReviewRecordGetPayload<{
   sealed: row.findings });
 
 /**
- * The Task's newest review records with their sealed findings, newest first.
- * One statement, so a delivery's or a card's boundary pays for one call; the
- * rows are opened afterwards, outside it.
+ * Every review record of the Task with its sealed findings, newest first
+ * (owner decision 2026-11-15: the next attempt reads every earlier rejection,
+ * as the review-findings file; the earlier flow's prompt room still bounds its
+ * inline section). One statement, so a delivery's boundary pays for one call;
+ * the rows are opened afterwards, outside it.
  */
 export async function readAmuxV52ReviewHistory(tx: Prisma.TransactionClient,
   taskId: string) {
   const rows = await tx.amuxV52ReviewRecord.findMany({
     where: { taskId },
     orderBy: [{ createdAt: "desc" }, { attemptId: "desc" }],
-    take: AMUX_V52_REVIEW_HISTORY_TAKE,
     select: HISTORY_SELECT,
   });
   return rows.map(historyRow);

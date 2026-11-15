@@ -19,10 +19,14 @@ import { AMUX_V22_DELIVERY_BASE_SHA_ENV, AMUX_V22_TASK_EXECUTION_ENV,
 import { AMUX_V22_WORKER_AUTHORITY_NOTICE, amuxV22WorkspaceNotice } from
   "@/lib/amux/v22ExternalAuthorityCore";
 import { AMUX_V22_OWNER_QUESTION_RULES, AMUX_V22_RESUME_PROMPT_MAX_BYTES,
-  buildAmuxV22ResumeSection } from "@/lib/amux/v22OwnerQuestionCore";
-import { AMUX_V22_CONCLUSION_ENV, AMUX_V22_CONCLUSION_RULES,
+  buildAmuxV22ResumeContextFile, buildAmuxV22ResumeSection } from
+  "@/lib/amux/v22OwnerQuestionCore";
+import { AMUX_V22_CONCLUSION_ENV, amuxV22ConclusionRules,
   amuxV22ConclusionMode, buildAmuxV22PriorConclusionSection } from
   "@/lib/amux/v22ConclusionCore";
+import { AMUX_V22_CONTEXT_DIR, AMUX_V22_CONTEXT_FILES,
+  amuxV22ContextPromptSection, amuxV22EmbedContextFiles, amuxV22LocalCliFlowEnabled,
+  type AmuxV22ContextFile } from "@/lib/amux/v22LocalCliFlowCore";
 import { AMUX_V22_PRIOR_CONCLUSION_ROWS_PRISMA_CALLS,
   openAmuxV22PriorConclusions, readAmuxV22PriorConclusionRows } from
   "@/lib/amux/v22PriorConclusionService";
@@ -50,7 +54,7 @@ import { amuxV52ReviewAvoidVendorsEnabled, formatAmuxV52ReviewScope } from
   "@/lib/amux/v52ReviewCore";
 import { AMUX_V52_REVIEW_HISTORY_PRISMA_CALLS, openAmuxV52ReviewHistory,
   readAmuxV52ReviewHistory } from "@/lib/amux/v52ReviewFindingsStore";
-import { amuxV52VendorsToAvoid, buildAmuxV52PriorReviewSection,
+import { amuxV52VendorsToAvoid, buildAmuxV52PriorReviewFile, buildAmuxV52PriorReviewSection,
   formatAmuxV52ReviewEntries } from
   "@/lib/amux/v52ReviewFindingsCore";
 import { AMUX_V22_PROVIDERS, amuxV22ExecutionRole, amuxV22Provider,
@@ -318,6 +322,7 @@ export async function pullAmuxWorkDelivery(input: {
   const v22Enabled = amuxV22TaskExecutionEnabled(
     process.env[AMUX_V22_TASK_EXECUTION_ENV]);
   const conclusionMode = amuxV22ConclusionMode(process.env[AMUX_V22_CONCLUSION_ENV]);
+  const localCliFlow = amuxV22LocalCliFlowEnabled();
   const { sealedCandidate, candidateCard, resumeRows, priorRows, reviewHistory } = v22Enabled ?
     await withAmuxDbBoundary({ ...AMUX_DB_BOUNDARIES.deliveryKeyRead,
       prismaCallCeiling: AMUX_DB_BOUNDARIES.deliveryKeyRead.prismaCallCeiling +
@@ -614,7 +619,81 @@ export async function pullAmuxWorkDelivery(input: {
       // An investigate (or verify) run ends with a structured conclusion.
       const conclusionRules = conclusionMode !== "off" &&
         amuxV22ExecutionRole(assignment.role) === "investigate" ?
-        `${AMUX_V22_CONCLUSION_RULES}\n\n` : "";
+        `${amuxV22ConclusionRules(localCliFlow)}\n\n` : "";
+      // The sidecar runs the execution role; the assignment keeps the Task's.
+      const v22ExecutionProfile = () => ({ modelId: assignment.modelId,
+        role: amuxV22ExecutionRole(assignment.role),
+        budgetMicrousd: amuxV22DeliveryBudgetMicrousd(budgetMicrousd, !!readOnlyRetry),
+        ...(baseSha ? { baseSha } : {}),
+        ...(gradeGuard ? { gradeGuard: true as const,
+          executionGrade: assignment.grade,
+          ...(reviewScope ? {
+            // The review server's author is the CLI that wrote the change.
+            reviewAuthor: (() => {
+              const provider = amuxV22Provider(assignment.provider);
+              return provider ? AMUX_V22_PROVIDERS[provider].cli : assignment.provider;
+            })(),
+            reviewAuthorVendor: assignment.provider,
+            reviewScope,
+            ...(reviewFeedbackJobId ? { reviewFeedbackJobId } : {}),
+            // Preference only: the review server falls back when no other
+            // vendor is free (tools/review-orchestrator/lib/assign.mjs).
+            ...(reviewAvoidVendors.length > 0 ? { reviewAvoidVendors } : {}) } : {}),
+        } : {}),
+        ...(readOnlyRetry ? { readOnlyRetry } : {}) });
+      // The Task's earlier rejections, newest first, every one whose findings
+      // could be opened (owner decision 2026-11-15).
+      const rejected = reviewScope ? reviewOpened.flatMap((row) =>
+        row.verdict === "reject" && row.opened?.doc ?
+          [{ attemptNumber: row.attemptNumber, doc: row.opened.doc }] : []) : [];
+      const sha256 = (text: string) => createHash("sha256").update(text, "utf8").digest("hex");
+      // The local CLI flow (v22LocalCliFlowCore.ts): a CLI run with a checkout
+      // gets its brief, resume answer, previous change and prior conclusions
+      // as whole files in that checkout, and a prompt that points at them. No
+      // byte budget leaves anything out. A risk-accepted read-only retry (CLI
+      // or API) keeps its exact earlier launch and inline prompt.
+      if (localCliFlow && workspace !== "" && !readOnlyRetry) {
+        const contextFiles: AmuxV22ContextFile[] = [
+          { name: AMUX_V22_CONTEXT_FILES.brief, text: plain.toString("utf8") }];
+        if (resume) {
+          contextFiles.push({ name: AMUX_V22_CONTEXT_FILES.ownerAnswer,
+            text: buildAmuxV22ResumeContextFile({ question: resume.question,
+              answer: resume.answer, answerSource: resume.answerSource,
+              previousPatchFile: resume.previousPatch ?
+                `${AMUX_V22_CONTEXT_DIR}/${AMUX_V22_CONTEXT_FILES.priorPatch}` : null }) });
+          if (resume.previousPatch)
+            contextFiles.push({ name: AMUX_V22_CONTEXT_FILES.priorPatch,
+              text: resume.previousPatch });
+        }
+        const priorWhole = priorRows?.taskId === delivery.taskId && priorEntries.length > 0 ?
+          buildAmuxV22PriorConclusionSection({ entries: priorEntries, budgetBytes: null }) : null;
+        if (priorWhole) contextFiles.push({ name: AMUX_V22_CONTEXT_FILES.priorConclusions,
+          text: priorWhole.section });
+        // Every rejection's findings, whole, as the review findings file; the
+        // receipt audit names its digest as it named the inline section's.
+        const reviewFile = buildAmuxV52PriorReviewFile(rejected);
+        if (reviewFile) contextFiles.push({ name: AMUX_V22_CONTEXT_FILES.reviewFindings, text: reviewFile });
+        if (resumeRows?.question.state === "answered") {
+          const marked = await tx.amuxV22TaskQuestion.updateMany({ where: {
+            id: resumeRows.question.id, taskId: delivery.taskId,
+            state: "answered" }, data: { state: "resumed",
+            resumedAttemptId: delivery.attemptId } });
+          if (marked.count !== 1) throw new Error("v22 resume question changed");
+        }
+        // The files ride at the end of the prompt in one bounded block that
+        // only the sidecar's exact boundary opens: a bridge passes the prompt
+        // through unchanged, and an earlier sidecar shows the same text inline.
+        return {
+          prompt: head + `${amuxV22ContextPromptSection(contextFiles)}\n\n` +
+            `${AMUX_V22_OWNER_QUESTION_RULES}\n\n` + conclusionRules +
+            AMUX_V22_WORKER_AUTHORITY_NOTICE + "\n\n" +
+            amuxV22EmbedContextFiles(contextFiles),
+          priorConclusionDigest: priorWhole?.digest ?? null,
+          reviewFeedbackDigest: reviewFile ? sha256(reviewFile) : null,
+          v22Execution: v22ExecutionProfile(),
+          recoveryApprovalId,
+        };
+      }
       const tail = `Approved execution brief:\n${plain.toString("utf8")}\n\n` +
         `${AMUX_V22_OWNER_QUESTION_RULES}\n\n` + conclusionRules +
         AMUX_V22_WORKER_AUTHORITY_NOTICE;
@@ -634,10 +713,8 @@ export async function pullAmuxWorkDelivery(input: {
           budgetBytes: AMUX_V22_RESUME_PROMPT_MAX_BYTES - 2 -
             Buffer.byteLength(head + resumeSection + tail, "utf8") }) : null;
       const priorSection = prior ? `${prior.section}\n` : "";
-      // The Task's earlier rejections, newest first, in the room that is left.
-      const rejected = reviewScope ? reviewOpened.flatMap((row) =>
-        row.verdict === "reject" && row.opened?.doc ?
-          [{ attemptNumber: row.attemptNumber, doc: row.opened.doc }] : []) : [];
+      // The earlier flow (TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW=disabled): the
+      // rejections inline, newest first, in the room the 30 KiB prompt has left.
       const review = rejected.length > 0 ? buildAmuxV52PriorReviewSection({
         entries: rejected, budgetBytes: AMUX_V22_RESUME_PROMPT_MAX_BYTES - 2 -
           Buffer.byteLength(head + resumeSection + priorSection + tail, "utf8") }) : null;
@@ -654,29 +731,8 @@ export async function pullAmuxWorkDelivery(input: {
       return {
         prompt: head + resumeSection + priorSection + reviewSection + tail,
         priorConclusionDigest: prior?.digest ?? null,
-        reviewFeedbackDigest: review ?
-          createHash("sha256").update(review.section, "utf8").digest("hex") : null,
-        // The sidecar runs the execution role; the assignment keeps the Task's.
-        v22Execution: { modelId: assignment.modelId,
-          role: amuxV22ExecutionRole(assignment.role),
-          budgetMicrousd: amuxV22DeliveryBudgetMicrousd(budgetMicrousd, !!readOnlyRetry),
-          ...(baseSha ? { baseSha } : {}),
-          ...(gradeGuard ? { gradeGuard: true as const,
-            executionGrade: assignment.grade,
-            ...(reviewScope ? {
-              // The review server's author is the CLI that wrote the change.
-              reviewAuthor: (() => {
-                const provider = amuxV22Provider(assignment.provider);
-                return provider ? AMUX_V22_PROVIDERS[provider].cli : assignment.provider;
-              })(),
-              reviewAuthorVendor: assignment.provider,
-              reviewScope,
-              ...(reviewFeedbackJobId ? { reviewFeedbackJobId } : {}),
-              // Preference only: the review server falls back when no other
-              // vendor is free (tools/review-orchestrator/lib/assign.mjs).
-              ...(reviewAvoidVendors.length > 0 ? { reviewAvoidVendors } : {}) } : {}),
-          } : {}),
-          ...(readOnlyRetry ? { readOnlyRetry } : {}) },
+        reviewFeedbackDigest: review ? sha256(review.section) : null,
+        v22Execution: v22ExecutionProfile(),
         recoveryApprovalId,
       };
     } finally { plain?.fill(0); title?.fill(0); body?.fill(0); }

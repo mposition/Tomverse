@@ -29,8 +29,11 @@ export const AMUX_V22_OWNER_QUESTION_MARKER = "AMUX_OWNER_QUESTION:";
 export const AMUX_V22_OWNER_TEXT_MAX_CHARS = DM_CARD_TEXT_MAX_BYTES;
 export const AMUX_V22_OWNER_OPTIONS_MAX = 6;
 
-/** The v22 sidecar refuses a prompt over 32 KiB; the resume section keeps
- * the whole prompt under this so a long previous patch is left out instead. */
+/** The earlier flow's sidecar refuses a prompt over 32 KiB; the resume
+ * section keeps the whole prompt under this so a long previous patch is left
+ * out instead. The local CLI flow has no prompt bound: the resume goes whole
+ * into a context file (buildAmuxV22ResumeContextFile) and the previous patch
+ * is applied to the checkout. */
 export const AMUX_V22_RESUME_PROMPT_MAX_BYTES = 30 * 1_024;
 /**
  * An answer always goes whole into the resumed prompt, never cut, so its one
@@ -234,6 +237,35 @@ export function buildAmuxV22ResumeSection(input: {
     if (Buffer.byteLength(section, "utf8") <= budget) return section;
   }
   return null;
+}
+
+/**
+ * The local CLI flow's resume: the whole question, every option, what it
+ * unblocks and the answer, as the text of the delivery's owner-answer context
+ * file. Nothing is left out for size. The previous change travels beside it
+ * as its own file, which the runner applies to the checkout.
+ */
+export function buildAmuxV22ResumeContextFile(input: {
+  question: AmuxV22OwnerQuestion | null;
+  answer: string;
+  answerSource: AmuxV22OwnerAnswerSource;
+  previousPatchFile: string | null;
+}): string {
+  const question = input.question;
+  return [
+    RESUME_HEAD,
+    question ? `Your previous run asked: ${question.question}` : NO_QUESTION_TEXT,
+    ...(question ? [`It said the answer unblocks: ${question.unblocks}`] : []),
+    ...(question?.options.length ? ["Options you gave:",
+      ...question.options.map((option) => `- ${option.id}: ${option.label}`)] : []),
+    ...(question?.context ? ["What you found then:", question.context] : []),
+    answerLines(input.answer, input.answerSource),
+    input.previousPatchFile ? `Your previous run's change is in ${input.previousPatchFile}; ` +
+      "the runner applies it to your checkout before you start when it applies cleanly. " +
+      "Continue from it, following the answer." :
+      "Your previous run left no change to continue from.",
+    "",
+  ].join("\n");
 }
 
 /**
