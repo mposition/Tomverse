@@ -79,11 +79,11 @@ assert.equal(run.metadata.ownerQuestionSequence, 1);
 // A question left open by an earlier, lost attempt is closed first.
 assert.equal(run.cancelled.length, 1);
 
-// The fourth is recorded as over the limit.
+// There is no question limit: the fourth opens like the first.
 run = await record(asking, [1, 2, 3].map((sequence) =>
   ({ sequence, state: "resumed" })));
 assert.equal(run.created[0].sequence, 4);
-assert.equal(run.created[0].state, "cancelled");
+assert.equal(run.created[0].state, "open");
 
 // A question while another still waits is not recorded.
 for (const state of ["open", "answered"]) {

@@ -370,9 +370,9 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // constraints only; no commit-deadline marker, classifier or deferred
   // trigger changes.
   "20261114160000_amux_process_audit_report",
-  // Owner decision 2026-11-15: the Decision Maker body's per-field CHECK and
-  // its guard's request total grow; the guard body is otherwise unchanged. No
-  // commit-deadline marker, classifier or deferred trigger changes.
+  // Owner decision 2026-11-15: the Decision Maker body store's caps grow, a CHECK
+  // and one number of the body guard; no commit-deadline marker, classifier or
+  // deferred trigger changes.
   "20261115140000_amux_dm_card_text_cap",
   // Owner decision 2026-11-15: the sealed review findings table with its own
   // row trigger, and one more content-key purpose; no commit-deadline marker,

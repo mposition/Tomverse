@@ -293,7 +293,6 @@ test("a body holds one of the five fields, within its cap in bytes, once per fie
     // Not one of the five: the guard finds nothing it could belong to before the CHECK is reached.
     [{ field: "dm_verdict", text: "x", auditLogId: "" }, /AMUX_DM_BODY_UNAUDITED|AmuxDecisionMakerBody_field_check/],
     [{ field: "card_text", text: "", auditLogId: "" }, /AmuxDecisionMakerBody_text_size_check/],
-    // The card text cap is 256 KiB (20261115140000_amux_dm_card_text_cap, DM_CARD_TEXT_MAX_BYTES).
     [{ field: "card_text", text: "x".repeat(DM_CARD_TEXT_MAX_BYTES + 1), auditLogId: "" }, /AmuxDecisionMakerBody_text_size_check/],
     // Bytes, not characters: 87,382 three-byte characters are 262,146 bytes.
     [{ field: "card_text", text: "가".repeat(87_382), auditLogId: "" }, /AmuxDecisionMakerBody_text_size_check/],
@@ -718,7 +717,7 @@ test("a question routed to the operator stores no card text, and one the registr
     [routingBindingFor(), { ...ROUTED_CARD, question: "Deploy the cache to production?" }, "irreversible_term"],
     // Section 3-8: a card with a secret is never sent to a DM, and never stored.
     [routingBindingFor(), { ...ROUTED_CARD, context: `see ${pat}` }, "card_secret_detected"],
-    // Section 5: over the 256 KiB of card text the vendor prompt takes.
+    // Section 5: over the card text's cap.
     [routingBindingFor(), { ...ROUTED_CARD, context: "x".repeat(DM_CARD_TEXT_MAX_BYTES) }, "input_limit_exceeded"],
   ];
   for (const [binding, card, refusal] of operatorCases) {

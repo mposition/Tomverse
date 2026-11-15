@@ -294,7 +294,7 @@ export async function buildDmWorkspace(
   const git =
     options.git === undefined
       ? runGit(DM_GIT_EXECUTABLE, dmWorkspaceSystemGitEnvironment(directory), [])
-      : runGit(options.git.executable, { ...process.env, ...dmWorkspaceSystemGitEnvironment(directory), PATH: process.env.PATH }, [
+      : runGit(options.git.executable, { ...process.env, ...dmWorkspaceSystemGitEnvironment(directory) }, [
           "-c",
           "protocol.file.allow=always",
         ]);
