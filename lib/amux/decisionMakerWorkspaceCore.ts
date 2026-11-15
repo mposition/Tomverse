@@ -418,7 +418,7 @@ export const dmWorkspaceGuide = (input: {
 
 const EVIDENCE_WORDS: Readonly<Record<DmWorkspaceEvidenceName, string>> = Object.freeze({
   "PATCH.diff": "the whole patch, and repo-patched/ is repo/ with it applied when it applies",
-  "FINDINGS.md": "the run's whole report",
+  "FINDINGS.md": "the run's whole report, then every rejected review's findings when the review server rejected it",
   "CRITERIA.md": "the Task's approved completion criteria",
   "CONTEXT.md": "what the worker found, whole",
 });

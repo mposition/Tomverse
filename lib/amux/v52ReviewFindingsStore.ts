@@ -9,7 +9,7 @@ import { AmuxIdeaKeyStoreError, createAmuxContentUnitKeys,
 import { v22TaskResultIdeaId } from "@/lib/amux/v22TaskResultStore";
 import { amuxV52FindingsRepeat, amuxV52RejectingVendors, countAmuxV52Findings,
   decodeAmuxV52FindingsDoc, encodeAmuxV52FindingsDoc, fitAmuxV52FindingsDoc,
-  parseAmuxV52FindingsTransport, type AmuxV52FindingsDoc } from
+  parseAmuxV52FindingsTransport, type AmuxV52FindingsDoc, type AmuxV52ReviewEntry } from
   "@/lib/amux/v52ReviewFindingsCore";
 import { prisma } from "@/lib/prisma";
 
@@ -151,12 +151,15 @@ export async function openAmuxV52ReviewFindingsRow(attemptId: string,
 
 /** Prisma calls `readAmuxV52ReviewHistory` makes, for its caller's boundary. */
 export const AMUX_V52_REVIEW_HISTORY_PRISMA_CALLS = 1;
-/** Prisma calls `readAmuxV52RejectedReviews` makes: the ranked ids, then the rows. */
-export const AMUX_V52_REJECTED_REVIEWS_PRISMA_CALLS = 2;
-/** Reviews read per Task: the newest few explain a retry; older ones add noise. */
+/** Prisma calls `readAmuxV52RejectedReviews` makes. */
+export const AMUX_V52_REJECTED_REVIEWS_PRISMA_CALLS = 1;
+/**
+ * Reviews read per Task for the next attempt's prompt and the vendor
+ * preference: the newest few explain a retry. The prompt's room (30 KiB, the
+ * sidecar's) still bounds this path; the Decision Maker's evidence reads every
+ * rejection (readAmuxV52RejectedReviews).
+ */
 export const AMUX_V52_REVIEW_HISTORY_TAKE = 4;
-/** Rejected reviews of one Task a card shows. */
-export const AMUX_V52_REJECTED_REVIEWS_PER_TASK = 3;
 
 const HISTORY_SELECT = { taskId: true, attemptId: true, verdict: true, jobId: true,
   reviewerVendors: true, findingsSummary: true,
@@ -188,24 +191,15 @@ export type AmuxV52ReviewHistoryRow =
   Awaited<ReturnType<typeof readAmuxV52ReviewHistory>>[number];
 
 /**
- * The newest rejected reviews of several Tasks: at most three per Task, newest
- * first, for the cards the Decision Maker is shown. The Task's rank is taken in
- * SQL first, so a Task with many rejections cannot crowd another Task out of a
- * shared limit.
+ * Every rejected review of several Tasks, newest first, for the evidence the
+ * Decision Maker reads (owner decision 2026-11-15: internal flow, no count
+ * cap; the findings go whole into evidence/FINDINGS.md). One statement.
  */
 export async function readAmuxV52RejectedReviews(tx: Prisma.TransactionClient,
   taskIds: readonly string[]): Promise<AmuxV52ReviewHistoryRow[]> {
   if (taskIds.length === 0) return [];
-  const ranked = await tx.$queryRaw<Array<{ attemptId: string }>>`
-    SELECT r."attemptId" FROM (
-      SELECT "attemptId", row_number() OVER (PARTITION BY "taskId"
-        ORDER BY "createdAt" DESC, "attemptId" DESC) AS "rank"
-      FROM "AmuxV52ReviewRecord"
-      WHERE "taskId" = ANY(${[...taskIds]}) AND "verdict" = 'reject'
-    ) r WHERE r."rank" <= ${AMUX_V52_REJECTED_REVIEWS_PER_TASK}`;
-  if (ranked.length === 0) return [];
   const rows = await tx.amuxV52ReviewRecord.findMany({
-    where: { attemptId: { in: ranked.map((row) => row.attemptId) } },
+    where: { taskId: { in: [...taskIds] }, verdict: "reject" },
     orderBy: [{ createdAt: "desc" }, { attemptId: "desc" }],
     select: HISTORY_SELECT,
   });
@@ -239,4 +233,18 @@ export async function openAmuxV52ReviewHistory(
     out.push({ ...row, opened, rejectingVendors });
   }
   return out;
+}
+
+/**
+ * One Task's rejected reviews, opened (outside the DB transaction), as a
+ * Decision Maker card reads them: the readable ones newest first, and how many
+ * could not be read. The card's words and the workspace's FINDINGS.md both
+ * come from this, so they agree.
+ */
+export async function openAmuxV52RejectedReviewEntries(rows: readonly AmuxV52ReviewHistoryRow[]):
+  Promise<{ entries: AmuxV52ReviewEntry[]; unread: number }> {
+  const rejected = await openAmuxV52ReviewHistory(rows.filter((row) => row.verdict === "reject"));
+  const entries = rejected.flatMap((review) => review.opened?.doc ?
+    [{ attemptNumber: review.attemptNumber, doc: review.opened.doc }] : []);
+  return { entries, unread: rejected.length - entries.length };
 }

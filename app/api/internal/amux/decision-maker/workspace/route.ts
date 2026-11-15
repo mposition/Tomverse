@@ -63,10 +63,12 @@ export async function POST(request: Request) {
       });
       const { source } = read;
       if (source === null) return refused(404, "request_unknown");
-      // The evidence a card carries inline is a patch or a run's report (the
-      // criteria are in its question); a stopped Task that never ran has none.
+      // The evidence a card carries inline is a patch, a run's report or its
+      // rejected reviews' findings (the criteria are in its question); a
+      // stopped Task that never ran and was never rejected has none.
       const carriesEvidence = source.kind === "t2_draft" || source.kind === "result_review" ||
-        (source.kind === "settlement" && (source.settlementKind === "t2_pr" || source.resultIdeaId !== null));
+        (source.kind === "settlement" && (source.settlementKind === "t2_pr" || source.resultIdeaId !== null ||
+          source.reviews.length > 0));
       if (!workspaceOn && carriesEvidence && !read.cardText?.card.context.includes(DM_EVIDENCE_OPEN)) {
         // A DM never judges without the evidence: the bridge discards the request.
         return refused(409, "workspace_off_evidence_missing");

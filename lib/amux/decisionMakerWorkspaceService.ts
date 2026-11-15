@@ -11,10 +11,16 @@ import {
   type DmWorkspaceExclusion,
   type DmWorkspaceFile,
 } from "@/lib/amux/decisionMakerWorkspaceCore";
+import { amuxDmOwnerSettlementFindingsText } from "@/lib/amux/dmOwnerSettlementCore";
 import { readAmuxDmOwnerSettlementPullEvidence } from "@/lib/amux/dmOwnerSettlementRead";
 import { parseAmuxV22Conclusion } from "@/lib/amux/v22ConclusionCore";
 import { openCompletionCriteria } from "@/lib/amux/v22ResultReviewService";
 import { openAmuxV22TaskResultRow, v22TaskResultIdeaId } from "@/lib/amux/v22TaskResultStore";
+import {
+  openAmuxV52RejectedReviewEntries,
+  readAmuxV52RejectedReviews,
+  type AmuxV52ReviewHistoryRow,
+} from "@/lib/amux/v52ReviewFindingsStore";
 import { isSnapshotTargetSha } from "@/lib/amux/decisionMakerCore";
 
 /**
@@ -25,7 +31,8 @@ import { isSnapshotTargetSha } from "@/lib/amux/decisionMakerCore";
  * and the evidence is read again from that row -- whole.
  *
  *   T2 draft (EngineeringAgentDmReview)       PATCH.diff; the commit the draft was made on
- *   owner settlement (AmuxDmOwnerSettlement)  CRITERIA.md, FINDINGS.md, a review PR's PATCH.diff
+ *   owner settlement (AmuxDmOwnerSettlement)  CRITERIA.md, FINDINGS.md (the run's report, then
+ *                                             every rejected review's findings), a review PR's PATCH.diff
  *   result review (AmuxV22ResultReview)       CRITERIA.md, FINDINGS.md
  *   anything else (a worker's own typed ask)   no evidence; develop's public head
  *
@@ -54,12 +61,15 @@ type SealedBody = {
 export type DmWorkspaceSource =
   | { kind: "none" }
   | { kind: "t2_draft"; patchBody: string | null; baseSha: string | null }
-  | ({ kind: "settlement"; settlementKind: string; pullPatch: string | null } & SealedBody & SealedResult)
+  | ({ kind: "settlement"; settlementKind: string; pullPatch: string | null;
+      reviews: AmuxV52ReviewHistoryRow[] } & SealedBody & SealedResult)
   | ({ kind: "result_review" } & SealedBody & SealedResult);
 
 /**
  * The request's card and the one row it was filed from. Null for a request
- * that does not exist. At most four statements past the boundary's own.
+ * that does not exist. At most four statements past the boundary's own: the
+ * card id, the source row, then for a settlement its pull request's patch and
+ * its Task's rejected reviews.
  */
 export async function readDecisionMakerWorkspaceSource(tx: Prisma.TransactionClient, requestId: string):
   Promise<DmWorkspaceSource | null> {
@@ -112,7 +122,10 @@ export async function readDecisionMakerWorkspaceSource(tx: Prisma.TransactionCli
   if (row.source === "result_review") return { kind: "result_review", ...sealed };
   const pulls = row.settlementKind === "t2_pr" && row.bindingId ?
     await readAmuxDmOwnerSettlementPullEvidence(tx, [row.bindingId]) : [];
-  return { kind: "settlement", settlementKind: row.settlementKind ?? "", pullPatch: pulls[0]?.patchBody ?? null, ...sealed };
+  // The card says its rejections' findings are in FINDINGS.md: read every one, as the card's sync did.
+  const reviews = await readAmuxV52RejectedReviews(tx, [sealed.taskId]);
+  return { kind: "settlement", settlementKind: row.settlementKind ?? "", pullPatch: pulls[0]?.patchBody ?? null,
+    reviews, ...sealed };
 }
 
 /** The run's findings (its conclusion's, else the whole result), or null when it left none or it cannot be opened. */
@@ -140,28 +153,38 @@ const openCriteria = async (row: SealedBody & SealedResult) => {
  */
 export async function openDecisionMakerWorkspaceEvidence(source: DmWorkspaceSource): Promise<DmWorkspaceEvidence | null> {
   if (!amuxDmWorkspaceEnabled()) return null;
-  // `required`: the card points at this file, so one that cannot be read is
+  // `missing`: the card points at this text, so one that cannot be read is
   // counted as left out (`unreadable`), and the bridge then sends nothing --
   // a DM never judges a card without the evidence it names.
-  const files: Array<{ name: DmWorkspaceEvidenceName; text: string | null; required: boolean }> = [];
+  const files: Array<{ name: DmWorkspaceEvidenceName; text: string | null; missing: boolean }> = [];
   let targetSha: string | null = null;
   if (source.kind === "t2_draft") {
-    files.push({ name: "PATCH.diff", text: source.patchBody, required: true });
+    files.push({ name: "PATCH.diff", text: source.patchBody, missing: !source.patchBody });
     targetSha = source.baseSha && isSnapshotTargetSha(source.baseSha) ? source.baseSha : null;
   } else if (source.kind === "settlement" || source.kind === "result_review") {
     const criteria = await openCriteria(source);
-    files.push({ name: "CRITERIA.md", text: criteria ? criteria.map((criterion) => `- ${criterion}`).join("\n") : null,
-      required: true });
+    const criteriaText = criteria ? criteria.map((criterion) => `- ${criterion}`).join("\n") : null;
+    files.push({ name: "CRITERIA.md", text: criteriaText, missing: !criteriaText });
+    const report = await openFindings(source);
     // A settlement whose Task never ran has no result row; one whose row exists must open.
-    files.push({ name: "FINDINGS.md", text: await openFindings(source),
-      required: source.kind === "result_review" || source.resultIdeaId !== null });
+    const reportMissing = report === null && (source.kind === "result_review" || source.resultIdeaId !== null);
     if (source.kind === "settlement") {
-      files.push({ name: "PATCH.diff", text: source.pullPatch, required: source.settlementKind === "t2_pr" });
+      // The run's report, then every rejected review's findings, whole: the
+      // same text the card was filed with (amuxDmOwnerSettlementFindingsText).
+      // A rejection that cannot be read is counted in the file, as on the card.
+      const reviews = await openAmuxV52RejectedReviewEntries(source.reviews)
+        .catch(() => ({ entries: [], unread: source.reviews.length }));
+      files.push({ name: "FINDINGS.md", text: amuxDmOwnerSettlementFindingsText({ report, reviews }),
+        missing: reportMissing });
+      files.push({ name: "PATCH.diff", text: source.pullPatch,
+        missing: source.settlementKind === "t2_pr" && !source.pullPatch });
+    } else {
+      files.push({ name: "FINDINGS.md", text: report, missing: reportMissing });
     }
   }
   const accepted = dmWorkspaceAcceptFiles(files.flatMap((file) =>
     file.text ? [{ name: file.name, bytes: Buffer.from(file.text, "utf8") }] : []));
-  const unreadable = files.filter((file) => file.required && !file.text).length;
+  const unreadable = files.filter((file) => file.missing).length;
   return { targetSha, files: accepted.files,
     excluded: unreadable > 0 ? { ...accepted.excluded, unreadable } : accepted.excluded };
 }

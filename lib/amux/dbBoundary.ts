@@ -601,11 +601,12 @@ export const AMUX_DB_BOUNDARIES = {
   },
   // A Decision Maker request's workspace evidence
   // (lib/amux/decisionMakerWorkspaceService.ts): setup + the request's card +
-  // the one source row of that card + a pull request's patch + (with the
-  // workspace switched off) the card text + fence.
+  // the one source row of that card + a pull request's patch + a settlement
+  // Task's rejected reviews + (with the workspace switched off) the card text +
+  // fence.
   decisionMakerWorkspaceRead: {
     operation: "decision_maker_workspace_read",
-    prismaCallCeiling: 6,
+    prismaCallCeiling: 7,
     isolation: "read",
   },
   // Drafts no card could be written for, recorded once: setup + insert + fence.
@@ -632,10 +633,10 @@ export const AMUX_DB_BOUNDARIES = {
   // the same 12 statements. Sync: setup + the facts of open and claimed
   // settlements + the cancel of those whose Task moved + the candidate scan +
   // the insert + pending + their sibling cards + their pull request evidence +
-  // their rejected reviews' findings (ranked ids, then rows) + closing + fence.
+  // every rejected review's findings + closing + fence.
   decisionMakerOwnerSettlementSync: {
     operation: "decision_maker_owner_settlement_sync",
-    prismaCallCeiling: 12,
+    prismaCallCeiling: 11,
     isolation: "mutation",
   },
   // Hand off (unfilable evidence, or an answer that decides nothing): setup +
