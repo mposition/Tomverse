@@ -80,6 +80,7 @@ desktop-chromium과 mobile-chromium 각 project에서 **62개 파일, 866 test**
 | `external-import-settings.spec.ts` |
 | `feedback-modal.spec.ts` |
 | `generated-artifact-card.spec.ts` |
+| `generated-artifact-revision.spec.ts` |
 | `keyboard-and-heading-structure.spec.ts` |
 | `marketing-language-analytics.spec.ts` |
 | `marketing-language-focus.spec.ts` |
