@@ -80,6 +80,8 @@ const approval = (index) => ({
   settlementId: `s-${String(index).padStart(2, "0")}`, taskId: `t-${index}`, attemptId: `a-${index}`,
   bindingId: `b-${index}`, prNumber: 1000 + index, headRef: `agent/engineering/${700 + index}`,
   approvedHeadSha: HEAD, approvedDiffDigest: DIFF, decidedAt: new Date(), updatedAt: 0,
+  // The block list merge scope (the default) judges the stored patch too.
+  patchBody: "diff --git a/components/X.tsx b/components/X.tsx\n@@ -1 +1 @@\n-a\n+b\n",
 });
 const github = (behaviour) => {
   const checked = [];

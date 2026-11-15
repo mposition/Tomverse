@@ -51,7 +51,7 @@
  *   One exception (owner decision 2026-11-13: "develop 병합 권한은 DM에게
  *   승인합니다. main은 안됩니다."): a draft into develop the Decision Maker
  *   approved from the owner queue, at the approved head and diff, with every
- *   changed path on its merge allow list and never from a fork, is marked
+ *   change inside its merge scope and never from a fork, is marked
  *   ready by the round's own step after the line
  *   (lib/amux/dmT2MergeService.ts, TOMVERSE_AMUX_DM_T2_MERGE, default off).
  *   A Decision Maker ready is a person's ready: the pull request stays out of

@@ -24,7 +24,8 @@ import {
   AMUX_DM_OWNER_SETTLEMENT_RESOLVER, closeAmuxStoppedCardAsSystemWithin,
   completeAmuxStoppedCardAsSystemWithin, type AmuxStoppedCardLockedFacts,
 } from "./legacyCardSystemService.ts";
-import { amuxDmT2MergeEnabled, amuxDmT2MergeGate, amuxDmT2MergePatchPaths } from "./dmT2MergeCore.ts";
+import { amuxDmT2MergeEnabled, amuxDmT2MergePatchGate } from "./dmT2MergeCore.ts";
+import { qaReleaseDmMergeScope } from "../qaReleaseMergeLaneExclusionCore.ts";
 import { parseAmuxV22Conclusion } from "./v22ConclusionCore.ts";
 import { openCompletionCriteria } from "./v22ResultReviewService.ts";
 import { openAmuxV22TaskResultRow, v22TaskResultIdeaId } from "./v22TaskResultStore.ts";
@@ -503,11 +504,13 @@ export async function applyAmuxDmOwnerSettlementDecision(tx: Prisma.TransactionC
       null;
     // The pull request it was asked about is no longer the open one of this run.
     if (!facts) return cancel("binding_moved");
-    // Behind the develop merge switch (owner decision 2026-11-13): an approval
-    // of a change with any path outside the merge allow list -- or whose paths
-    // cannot be read -- is not recorded; the person merges it.
-    if (amuxDmT2MergeEnabled(input.env ?? process.env)) {
-      const gate = amuxDmT2MergeGate(amuxDmT2MergePatchPaths(facts.patchBody));
+    // Behind the develop merge switch (owner decisions 2026-11-13, 2026-11-15):
+    // an approval of a change its merge scope leaves to a person -- a path, or
+    // in the block list scope a line -- or whose paths cannot be read is not
+    // recorded; the person merges it.
+    const env = input.env ?? process.env;
+    if (amuxDmT2MergeEnabled(env)) {
+      const gate = amuxDmT2MergePatchGate(facts.patchBody, qaReleaseDmMergeScope(env));
       if (!gate.pass) return handOff(gate.reason, { bindingId: row.bindingId, paths: gate.paths });
     }
     await record({ approvedHeadSha: facts.verifiedHeadSha, approvedDiffDigest: facts.diffDigest });

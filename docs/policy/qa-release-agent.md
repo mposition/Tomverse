@@ -18,6 +18,7 @@ allowlistGenesisCommit: 8e3dbf64452ab75e3c6f080c8f5f531c02ace387
 | 7 (버전 유지) | 2026-10-19 mposition | 운영자 결정(AGENTS.md Frontier 절, 버전 증가 없음): develop의 배포 환경은 2026-10-13부터 Railway `dev`이므로 8절이 dev를 가리킴, S-M2에 필요한 S-M1 기간 7일 → 3일, 8절 3항의 복구 runbook은 `docs/ops/qa-release-merge-lane-dev-recovery.md`, 머리말의 개정 규칙을 AGENTS.md에 맞춤 |
 | 7 (버전 유지) | 2026-10-20 mposition | 운영자 결정(AGENTS.md Frontier 절, 버전 증가 없음): 릴리스 열차(1절 5항, 8절 12항) — `main:next` 라벨, AEST 출발 시각, `release/train-*` push와 main PR 생성, 기본 꺼진 `QA_RELEASE_TRAIN_ENABLED` |
 | 7 (버전 유지) | 2026-11-03 mposition | 운영자 결정(AGENTS.md Frontier 절, 버전 증가 없음): CI 자동 수정은 예외 없이 모든 열린 PR을 고침 — workflow·action 파일도, PR당 시도 상한도 없음(8절 3항). 레인의 제외 목록은 그대로 |
+| 7 (버전 유지) | 2026-11-15 mposition | 운영자 결정(AGENTS.md Frontier 절, 버전 증가 없음): DM 승인 PR의 병합 범위를 허용 목록에서 차단 목록으로(8절 3항 예외 하나) — 앱의 `TOMVERSE_AMUX_DM_MERGE_SCOPE`가 kill switch로 2026-11-13의 허용 목록에 돌림. 레인의 다른 제외와 main 제외는 그대로 |
 
 **규범은 이 파일의 `develop` 현재 내용 하나입니다.** 이전 버전의 본문은 그 버전을 병합한 PR(버전 1 #1946, 버전 2 #1950,
 버전 3 #1986, 버전 4 #2042, 버전 5 #2093, 버전 6 #2102)의 git 기록에 있으며, 효력이 없습니다. 이 버전의 승인 기록이 `develop`에 병합되는 순간 이 파일 전체가
@@ -202,23 +203,51 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
      `agent/engineering/<run>` PR 가운데 앱이 "Decision Maker가 승인했고 조건을 지금 다시 확인했다"고 넘겨준 것만 후보가 될 수
      있습니다. 레인은 제품 DB가 없으므로 앱이 상태 읽기(`lib/qaReleaseMergeLaneRoutes.ts`)의 `dmApproved`로 PR 번호·head·브랜치를
      넘겨 줍니다. 앱은 상태 읽기마다 가장 오래 확인하지 않은 승인 한 건만 골라 그 PR의 현재 diff와 파일 목록을 GitHub에서 다시
-     읽어, digest가 승인 때와 같고 파일이 모두 허용 목록 안일 때만 싣습니다(읽지 못하거나 다르면 싣지 않고, 그 승인은 다음
+     읽어, digest가 승인 때와 같고 파일이 모두 아래 병합 범위 안일 때만 싣습니다(읽지 못하거나 다르면 싣지 않고, 그 승인은 다음
      차례로 넘어갑니다). 앱이 DM 승인 PR을 ready로 바꾸는 것은 사람이 ready로 바꾸는 것과 같습니다(CI 입장 예약 없음, 앞선 DM
-     ready의 CI가 보이기 전에는 다음 ready를 하지 않으므로 넘침은 PR 한 건으로 묶입니다). **fork PR은 제외합니다**: 앱은 head 저장소가 base 저장소와 다르면 싣지 않고, 레인도 GitHub의
+     ready의 CI가 보이기 전에는 다음 ready를 하지 않으므로 넘침은 PR 한 건으로 묶입니다). 사람이 `ci:hold`를 붙인 PR은 ready로
+     바꾸지 않습니다. **fork PR은 제외합니다**: 앱은 head 저장소가 base 저장소와 다르면 싣지 않고, 레인도 GitHub의
      `isCrossRepository`가 `false`일 때만 이 예외를 씁니다. 레인은 지금 GitHub가 보여 주는 번호·head commit·브랜치가
      셋 다 같고 base가 develop일 때만 이 예외를 쓰고, 4항대로 그 head를 `sha`로 고정해 병합합니다. 앱은 병합 직전의 지시 소비에서
-     엔지니어링 PR이면 DM 승인을 같은 트랜잭션에서 다시 판정해(T2 스위치, DM kill switch, applied·approve 행, binding, Task, 그 head와 base)
-     하나라도 맞지 않으면 소비를 거절하고(`dm_approval_not_holding`), 레인은 소비 없이는 병합하지 않습니다. 레인은 소비 직전에
+     엔지니어링 PR이면 DM 승인을 같은 트랜잭션에서 다시 판정해(T2 스위치, DM kill switch, applied·approve 행, binding, Task, 그 head와 base,
+     저장된 patch가 앱의 병합 범위를 통과하는지) 하나라도 맞지 않으면 소비를 거절하고(`dm_approval_not_holding`), 레인은 소비 없이는 병합하지 않습니다. 레인은 소비 직전에
      그 PR의 현재 diff를 GitHub에서 읽어 엔지니어링 에이전트와 같은 함수(`lib/pullDiffDigestCore.ts`)로 digest를 계산해 소비 요청에
      싣고, 앱은 그 값이 승인 digest와 같을 때만 소비를 허락합니다(없거나 다르면 `dm_diff_changed`). diff를 읽지 못하면 그 PR은
      건너뜁니다
      (`TOMVERSE_AMUX_DM_T2_MERGE=enabled`, 기본 꺼짐; 꺼져 있으면 목록 자체가 없습니다). 그런 PR도 이 3항의 다른 제외(게이트
      파일, 정책 테스트, 부록 A, 보호 테이블 migration, 목록 미완)와 2항의 CI 판정을 그대로 받습니다. 그리고 **변경 파일이 모두
-     허용 목록 안에 있어야 합니다**(`QA_RELEASE_DM_MERGE_ALLOW_PATTERNS`: `tests/**`, `docs/**`, `locales/**`, `components/**`,
-     `app/**`의 `page.tsx`·`layout.tsx`·`loading.tsx`·`error.tsx`. 그 가운데 `docs/policy/**`·`docs/ui-contracts/**`·
-     `docs/agents/**`·`app/api/**`, `lib/agentAuthorityFiles.ts`의 control-plane 경로, 이름이나 정책 문서로 정해진 정책 테스트,
-     게이트 파일과 가격·크레딧·migration·schema·인증·비밀·감사 체인·삭제·보존 경로(`QA_RELEASE_DM_MERGE_BLOCK_PATTERNS`,
-     대소문자 무시)는 제외). 하나라도 밖이면 `dm_outside_allowlist`로 사람에게 남깁니다. **대상은 develop뿐이고 main은 제외입니다** — main 병합과 배포는 1항대로
+     병합 범위 안에 있어야 합니다**(운영자 결정 2026-11-15, "내부 개발용 Flow입니다. 제한을 줄 이유가 없습니다. 로컬 CLI처럼
+     편리한 Flow였으면 합니다."). 범위는 앱 서비스의 `TOMVERSE_AMUX_DM_MERGE_SCOPE`가 정합니다(`lib/qaReleaseMergeLaneExclusionCore.ts`):
+     - **차단 목록(기본, 값이 없거나 빈 값이거나 정확히 `blocklist`).** 엔지니어링 에이전트 권한 manifest의 product 경로이고
+       정책 테스트가 아니며 아래 어느 목록에도 걸리지 않으면 `lib/**`·`app/api/**`·`app/**`의 다른 파일·`packages/**`·`types/**`도
+       병합합니다. 허용 목록이 받던 경로는 그대로 받습니다. 사람에게 남는 것: control-plane 전부(AMUX `lib/amux/**`·`app/api/internal/**`·
+       `crates/**`·`apps/**`, 에이전트 자신 `lib/agent*`·`lib/engineeringAgent*`, `app/api/admin/**`·`components/admin/**`,
+       `scripts/**`·`bin/**`·`config/**`·`docker/**`·`tools/**`·`.github/**`, 루트 파일과 루트 dot-directory, `docs/policy/**`·
+       `docs/ui-contracts/**`·`docs/agents/**`, `prisma/**`, 가격·모델·앱 기본값·제품 식별자 파일), 게이트 파일
+       (`QA_RELEASE_MERGE_LANE_GATE_PATTERNS`), `QA_RELEASE_DM_MERGE_BLOCK_PATTERNS`, 어느 디렉터리든 raw SQL·키 파일·패키지
+       manifest·lockfile·`tsconfig*.json`·`*.config.*`, 공개 읽기·공유 route, 객체 저장소, 계정 route, Code managed route
+       (`QA_RELEASE_DM_MERGE_BLOCKLIST_SCOPE_PATTERNS`), 그리고 경로 어디에든 차단 이름 조각(`QA_RELEASE_DM_MERGE_BLOCK_NAME_TOKENS`,
+       대소문자 무시: 실제 비용·외부 발송·사용자 데이터 삭제·자격증명과 보안 경계·감사 체인·병합과 배포·에이전트 권한·DB의
+       단어)이 든 허용 목록 밖 경로입니다. 레인은 patch 본문을 보지 못하므로, 앱이 승인을 기록할 때와 ready·레인 목록·소비마다
+       저장된 patch의 바뀐 줄과 hunk 문맥에 사람에게 예약된 값(`creditWeight`·`maxOutputTokens`·`reservationOutputTokens` 등),
+       돈·환경 변수·저장된 스위치·삭제·raw SQL·인증·비밀·메일의 단어, 스스로 하는 외부 전송(`fetch(`·URL·WebSocket 등)·다른
+       프로세스 실행·실행 중 조립한 코드, DB 질의와 파일 쓰기, binary·실행 비트·symlink·submodule이 있는지 봅니다
+       (`AMUX_DM_T2_MERGE_CONTENT_ALARMS`; 있으면 사람에게 남깁니다). hunk의 바뀌지 않은 문맥 줄과 함수 이름에 인가·소유권·접근 검사가 있어도 사람에게
+       남깁니다(`AMUX_DM_T2_MERGE_HUNK_ALARMS`). 그리고 ready와 레인 목록에서는 허용 목록 밖의 바뀐 파일 **전체**를 승인된 head에서
+       엔지니어링 읽기 토큰으로 읽어(`lib/amux/dmT2MergeFileRead.ts`), 파일 어디에든 위 경보가 하나라도 울리거나, Node 내장 모듈·
+       허용된 소수 패키지(`AMUX_DM_T2_MERGE_SAFE_IMPORTS`) 밖의 npm 패키지·이 범위가 경로로 받지 않는 저장소 모듈을 import하거나,
+       읽지 못하면 사람에게 남깁니다(`amuxDmT2MergeFileGate`, `amuxDmT2MergeImportAlarms`). 앱에는 실행 중 쓸 수 있는 파서가
+       없으므로 import는 원문과 주석을 지운 본문에서 두 번 읽고, 키워드 바로 뒤의 주석이나 `+`로 이은 specifier처럼 읽을 수 없게
+       쓴 import는 그 자체로 사람에게 남깁니다. 그래서 이 범위가 새로 병합하는 코드는 돈·환경 변수·삭제·인증·비밀·메일·소유권·
+       접근을 전혀 말하지 않고, 네트워크·다른 프로세스·DB·파일 시스템에 스스로 닿지 않는 파일뿐입니다. 레인은 앱이 넘긴 PR을 늘 차단 목록 범위로 다시
+       판정합니다(`QA_RELEASE_LANE_DM_MERGE_SCOPE`).
+     - **허용 목록(kill switch, 다른 모든 값).** 2026-11-13의 규칙 그대로입니다(`QA_RELEASE_DM_MERGE_ALLOW_PATTERNS`: `tests/**`,
+       `docs/**`, `locales/**`, `components/**`, `app/**`의 `page.tsx`·`layout.tsx`·`loading.tsx`·`error.tsx`. 그 가운데
+       `docs/policy/**`·`docs/ui-contracts/**`·`docs/agents/**`·`app/api/**`, control-plane 경로, 정책 테스트, 게이트 파일과
+       `QA_RELEASE_DM_MERGE_BLOCK_PATTERNS`는 제외). 앱만 읽으면 됩니다: 앱의 승인 기록·ready·레인 목록·소비가 모두 이 범위로
+       판정하므로 레인에 변수를 둘 필요가 없습니다(레인의 시작 검사는 새 이름을 받지 않습니다).
+
+     하나라도 밖이면 `dm_outside_allowlist`로 사람에게 남깁니다. **대상은 develop뿐이고 main은 제외입니다** — main 병합과 배포는 1항대로
      사람이 합니다.
      **예외 둘(운영자 결정 2026-11-15, "dependabot이 생성한 PR들 모두 자체 병합 가능하게 권한 주세요"):** head가
      `dependabot/npm_and_yarn/develop/`로 시작하는 Dependabot npm 업데이트 PR도 후보가 됩니다. 레인이 GitHub에서 읽어

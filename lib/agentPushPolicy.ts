@@ -106,7 +106,7 @@ const RUNTIME_DISCOVERY_PATTERNS: ReadonlyArray<readonly [RegExp, string]> = [
  * control-plane files they are an alarm: the rule never narrows the path list,
  * it only adds T2 to changes the list would have let through.
  */
-const DECISION_VALUE_ALARMS: readonly RegExp[] = [
+export const DECISION_VALUE_ALARMS: readonly RegExp[] = [
   /\bcreditWeight\b/,
   /\bmaxOutputTokens\b/,
   /\breservationOutputTokens\b/,
