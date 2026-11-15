@@ -213,8 +213,8 @@ export const zhHant = {
         projectDeleteFailed: "無法刪除專案。",
     },
     chat: {
-        ...researchPreviewCopy["zh-Hant"],
        ...en.chat,
+        ...researchPreviewCopy["zh-Hant"],
         aiReviewComparedQuestion: "比較的問題",
         aiReviewFindings: "審查發現",
         aiReviewViewSource: "在原始回答中查看",

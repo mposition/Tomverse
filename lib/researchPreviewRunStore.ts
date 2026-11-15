@@ -2,6 +2,10 @@ import "server-only";
 
 import { createHash, randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
+import { ResearchPreviewRunError, researchPreviewSettlementForExpiry,
+  stoppedResearchPreviewUsage, type ResearchPreviewSettlementUsage } from "@/lib/deepResearchSettlementHandoff";
+export { ResearchPreviewRunError, parseResearchPreviewSettlementUsage, researchPreviewSettlementForExpiry,
+  type ResearchPreviewSettlementUsage } from "@/lib/deepResearchSettlementHandoff";
 import { prisma } from "@/lib/prisma";
 import { hasConversationUnlockGrant } from "@/lib/conversationLock";
 import {
@@ -21,80 +25,6 @@ export const RESEARCH_PREVIEW_RUN_ACTIVE_LIMIT_MS = 10 * 60 * 1_000;
 export const RESEARCH_PREVIEW_RUN_LEASE_MS = 90 * 1_000;
 export const RESEARCH_PREVIEW_PREPARING_STALE_MS = 90 * 1_000;
 export const RESEARCH_PREVIEW_RUN_MAX_CHECKPOINT_BYTES = 512 * 1024;
-
-export class ResearchPreviewRunError extends Error {
-  constructor(
-    readonly status: number,
-    readonly code: string,
-    message: string
-  ) {
-    super(message);
-    this.name = "ResearchPreviewRunError";
-  }
-}
-
-export type ResearchPreviewSettlementUsage = {
-  inputTokens?: number;
-  cachedInputTokens?: number;
-  cacheWriteInputTokens?: number;
-  outputTokens?: number;
-  reasoningTokens?: number;
-  usageFromProvider: boolean;
-  outcome: "completed" | "cancelled" | "failed" | "empty";
-  searchSurchargeCredits?: number;
-  searchExecuted?: boolean;
-  searchQueryCount?: number;
-  searchBackendRequestCount?: number;
-  searchQueriesObserved: boolean;
-};
-
-const boundedCount = (value: unknown, maximum: number) =>
-  Number.isSafeInteger(value) && Number(value) >= 0 && Number(value) <= maximum
-    ? Number(value)
-    : null;
-
-export const parseResearchPreviewSettlementUsage = (
-  value: unknown
-): ResearchPreviewSettlementUsage | null => {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const row = value as Record<string, unknown>;
-  const optionalToken = (key: string) =>
-    row[key] === undefined ? undefined : boundedCount(row[key], Number.MAX_SAFE_INTEGER);
-  const inputTokens = optionalToken("inputTokens");
-  const cachedInputTokens = optionalToken("cachedInputTokens");
-  const cacheWriteInputTokens = optionalToken("cacheWriteInputTokens");
-  const outputTokens = optionalToken("outputTokens");
-  const reasoningTokens = optionalToken("reasoningTokens");
-  const searchQueryCount = optionalToken("searchQueryCount");
-  const searchBackendRequestCount = optionalToken("searchBackendRequestCount");
-  const searchSurchargeCredits = optionalToken("searchSurchargeCredits");
-  if (
-    [inputTokens, cachedInputTokens, cacheWriteInputTokens, outputTokens, reasoningTokens,
-      searchQueryCount, searchBackendRequestCount, searchSurchargeCredits].some((entry) => entry === null) ||
-    typeof row.usageFromProvider !== "boolean" ||
-    typeof row.searchQueriesObserved !== "boolean" ||
-    !["completed", "cancelled", "failed", "empty"].includes(String(row.outcome)) ||
-    (row.searchExecuted !== undefined && typeof row.searchExecuted !== "boolean")
-  ) return null;
-  return {
-    ...(typeof inputTokens === "number" ? { inputTokens } : {}),
-    ...(typeof cachedInputTokens === "number" ? { cachedInputTokens } : {}),
-    ...(typeof cacheWriteInputTokens === "number" ? { cacheWriteInputTokens } : {}),
-    ...(typeof outputTokens === "number" ? { outputTokens } : {}),
-    ...(typeof reasoningTokens === "number" ? { reasoningTokens } : {}),
-    usageFromProvider: row.usageFromProvider,
-    outcome: row.outcome as ResearchPreviewSettlementUsage["outcome"],
-    ...(typeof searchSurchargeCredits === "number"
-      ? { searchSurchargeCredits }
-      : {}),
-    ...(typeof row.searchExecuted === "boolean" ? { searchExecuted: row.searchExecuted } : {}),
-    ...(typeof searchQueryCount === "number" ? { searchQueryCount } : {}),
-    ...(typeof searchBackendRequestCount === "number"
-      ? { searchBackendRequestCount }
-      : {}),
-    searchQueriesObserved: row.searchQueriesObserved,
-  };
-};
 
 export const researchPreviewQuestionDigest = (question: string) =>
   `sha256:${createHash("sha256").update(question, "utf8").digest("hex")}`;
@@ -769,49 +699,6 @@ export async function requestResearchPreviewCancellation(
   });
 }
 
-async function stoppedResearchPreviewUsage(
-  tx: Prisma.TransactionClient,
-  run: { id: string; settlementUsage: unknown; searchSurchargeCredits: number },
-  outcome: "cancelled" | "failed"
-): Promise<ResearchPreviewSettlementUsage> {
-  const unknown = await tx.researchPreviewGeneration.count({ where: {
-    runId: run.id, status: { in: ["dispatch_started", "outcome_unknown"] },
-  } });
-  const saved = parseResearchPreviewSettlementUsage(run.settlementUsage);
-  if (!unknown && saved) return { ...saved, outcome };
-  const completed = await tx.researchPreviewGeneration.count({ where: { runId: run.id, status: "completed" } });
-  if (unknown || completed > 0) return { usageFromProvider: false, outcome,
-    searchSurchargeCredits: run.searchSurchargeCredits, searchQueriesObserved: false };
-  return { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cacheWriteInputTokens: 0,
-    reasoningTokens: 0, usageFromProvider: true, outcome, searchSurchargeCredits: run.searchSurchargeCredits,
-    searchExecuted: false, searchQueryCount: 0, searchBackendRequestCount: 0, searchQueriesObserved: true };
-}
-
-/** Called under the reservation settlement lock: active work can never become a zero refund. */
-export async function researchPreviewSettlementForExpiry(
-  tx: Prisma.TransactionClient, reservationId: string, now = new Date()
-): Promise<ResearchPreviewSettlementUsage | null> {
-  await tx.$queryRaw`SELECT "id" FROM "ResearchPreviewRun" WHERE "reservationId" = ${reservationId} FOR UPDATE`;
-  const run = await tx.researchPreviewRun.findFirst({ where: { reservationId } });
-  if (!run) return null;
-  if (!["completed", "failed", "cancelled", "attention"].includes(run.status)) {
-    const neverStarted = run.status === "queued" && run.checkpoint === null && run.stepCount === 0;
-    if (!["checkpointed", "queued"].includes(run.status) ||
-        (!neverStarted && (!run.checkpointExpiresAt || run.checkpointExpiresAt > now))) {
-      throw new ResearchPreviewRunError(409, "RESEARCH_RUN_STILL_ACTIVE", "Research owns this reservation until its work is finalized.");
-    }
-    const usage = await stoppedResearchPreviewUsage(tx, run, "failed");
-    await tx.researchPreviewRun.update({ where: { id: run.id }, data: {
-      status: "failed", stopReason: neverStarted ? "timeout" : "checkpoint_expired", checkpoint: Prisma.DbNull,
-      checkpointExpiresAt: null, settlementUsage: checkpointJson(usage),
-      leaseOwner: null, leaseExpiresAt: null, activeDeadlineAt: null, completedAt: now,
-    } });
-    return usage;
-  }
-  return parseResearchPreviewSettlementUsage(run.settlementUsage) ??
-    stoppedResearchPreviewUsage(tx, run, "failed");
-}
-
 export async function expireResearchPreviewCheckpoints(limit = 50) {
   const now = new Date();
   const runs = await prisma.researchPreviewRun.findMany({ where: {
@@ -1056,4 +943,4 @@ export async function markResearchPreviewRunSettled(runId: string) {
   });
 }
 
-export const researchPreviewWorkerId = () => `research-preview:${process.pid}:${randomUUID()}`;
+export const researchPreviewWorkerId = () => `research-preview:${randomUUID()}`;

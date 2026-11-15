@@ -79,7 +79,9 @@ test("the privacy page renders the provider table only when every row is disclos
     assert.match(source, /PROVIDER_TRANSFER_ITEMS/);
     assert.match(source, /disclosableDataDestinations/);
     assert.match(source, /destinations\.length === PROVIDER_DATA_DESTINATIONS\.length/);
-    assert.equal(disclosableDataDestinations().length, PROVIDER_DATA_DESTINATIONS.length);
+    const undisclosed = PROVIDER_DATA_DESTINATIONS.filter((entry) => entry.status !== "proven");
+    assert.deepEqual(undisclosed.map((entry) => entry.provider), ["cohere"]);
+    assert.ok(disclosableDataDestinations().length < PROVIDER_DATA_DESTINATIONS.length);
     assert.ok(PROVIDER_DATA_DESTINATIONS.length > 0);
     const labels = [
         "providerTableTitle",

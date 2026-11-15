@@ -201,8 +201,8 @@ export const fr = {
         projectDeleteFailed: "Impossible de supprimer le projet.",
     },
     chat: {
-        ...researchPreviewCopy["fr"],
        ...en.chat,
+        ...researchPreviewCopy["fr"],
         aiReviewComparedQuestion: "Question comparée",
         aiReviewFindings: "Constats de la revue",
         aiReviewViewSource: "Voir dans la réponse originale",

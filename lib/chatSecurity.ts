@@ -9,7 +9,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { usageBucketCount } from "@/lib/chatUsageBucketCount";
 import { hashChatSubject, userChatUsageKey } from "@/lib/chatUsageKey";
-import { findDeepResearchHandoff } from "@/lib/deepResearchSettlementHandoff";
+import { findDeepResearchHandoff, researchPreviewSettlementForExpiry } from "@/lib/deepResearchSettlementHandoff";
 import { isE2EDatabaseDisabled } from "@/lib/e2eTestMode";
 import {
     AVAILABLE_MODELS,
@@ -5756,7 +5756,6 @@ export const reconcileExpiredChatCreditReservations = async (
                     reconciled: true,
                     reason: "reservation_expired",
                     resolveTurnUsage: async (tx) => {
-                              const { researchPreviewSettlementForExpiry } = await import("./researchPreviewRunStore");
                               const researchUsage = await researchPreviewSettlementForExpiry(tx, reservation.reservationId, now);
                               if (researchUsage) { researchHandoff = true; return { turnUsage: researchUsage }; }
                               if (!isDeepResearchReservation(row.modelId)) return null;

@@ -8,17 +8,20 @@ import { replayContractMismatches, replayDevelopment, replayGenerationContract, 
 import { replayPackageCompatible, REPLAY_SCRIPT_COMMAND, REPLAY_SCRIPT_NAME, REPLAY_COLLECTOR_SOURCE_PATHS, REPLAY_CORPUS_PATH, validateReplaySourceFiles } from "../lib/routerDevelopmentReplaySource.ts";
 import { control, identity, makeReplayFixture, savedReplayRow } from "./routerDevelopmentReplayFixture.mjs";
 
-const fixture = makeReplayFixture();
+// Freeze the historical router choices under test. Complete current-catalogue
+// coverage, including providers the collector cannot execute, has its own tests.
+const historicalModels = AVAILABLE_MODELS.filter((model) => model.provider !== "cohere");
+const fixture = makeReplayFixture({ models: historicalModels });
 const clone = () => structuredClone(fixture);
 const changedAnswer = (row, text) => { row.answerText = text; row.answerDigest = benchmarkDigest(text); };
 
 test("baseline cost signals and default-model control preserve the 24-case and 4-observation domains", () => {
   const report = replayDevelopment(fixture);
   const { baseline, candidate, paired, rows } = report.benchmarkDomain;
-  assert.equal(report.observationBundle.catalogueModels, 45);
-  assert.equal(report.observationBundle.catalogueRows, 1080);
+  assert.equal(report.observationBundle.catalogueModels, fixture.models.length);
+  assert.equal(report.observationBundle.catalogueRows, fixture.corpus.cases.length * fixture.models.length);
   assert.equal(report.observationBundle.importedRows, 72);
-  assert.equal(report.observationBundle.catalogueCoverage.length, 45);
+  assert.equal(report.observationBundle.catalogueCoverage.length, fixture.models.length);
   assert.equal(report.observationBundle.catalogueCoverage.find((row) => row.modelId === "gemini-2-5-flash").apiModel, "gemini-3.5-flash-lite");
   assert.ok(report.observationBundle.catalogueCoverage.every((row) => row.correctnessRate === null));
   assert.equal(baseline.populationCases, 24);
@@ -54,7 +57,7 @@ test("identity control is zero on complete coverage and null on missing coverage
   assert.equal(result.benchmarkDomain.paired.changedSelectionCases, 0);
   assert.equal(result.benchmarkDomain.paired.observedSubset.correctOutcomeShareDelta, 0);
   assert.equal(result.benchmarkDomain.paired.wholePopulationCorrectOutcomeShareDelta, null);
-  const full = makeReplayFixture({ allCases: true }); full.candidate = identity;
+  const full = makeReplayFixture({ allCases: true, models: historicalModels }); full.candidate = identity;
   assert.equal(replayDevelopment(full).benchmarkDomain.paired.wholePopulationCorrectOutcomeShareDelta, 0);
   partial.answers.rows = [];
   const empty = replayDevelopment(partial).benchmarkDomain;

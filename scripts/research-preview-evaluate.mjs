@@ -14,7 +14,7 @@ const sources = [
   "lib/researchPreviewEvaluation.ts", "scripts/research-preview-evaluate.mjs", "lib/researchPreviewStep.ts",
   "lib/researchPreviewExecution.ts", "lib/researchPreviewPrompt.ts", "lib/researchPreviewBudget.ts",
   "lib/researchPreviewReport.ts", "lib/researchPreviewPageRead.ts", "lib/researchPreviewPageEvidence.ts",
-  "lib/researchPreviewAdmission.ts", "lib/researchPreviewModel.ts", "lib/cohereResearchFetch.ts",
+  "lib/researchPreviewAdmission.ts", "lib/researchPreviewModel.ts",
   "lib/appManagedWebSearchTool.ts", "lib/appManagedWebSearchCore.ts", "lib/webSearchBackendAdapter.ts",
   "lib/webSearchBackendPricing.ts", "lib/webSearchBackendRuntime.ts", "lib/webSearchBackends.ts",
   "lib/webSearchCapability.ts", "lib/boundedBuffer.ts", "lib/models.ts", "lib/modelPricing.ts",

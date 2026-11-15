@@ -201,8 +201,8 @@ export const de = {
         projectDeleteFailed: "Projekt konnte nicht gelöscht werden.",
     },
     chat: {
-        ...researchPreviewCopy["de"],
        ...en.chat,
+        ...researchPreviewCopy["de"],
         draftConflictTitle: "Dieser Entwurf wurde in einem anderen Tab geändert",
         draftConflictBody: "Wähle den Serverentwurf oder überschreibe ihn ausdrücklich mit dem in diesem Tab behaltenen Entwurf.",
         draftConflictUseServer: "Serverentwurf verwenden",

@@ -201,8 +201,8 @@ export const es = {
         projectDeleteFailed: "No se pudo eliminar el proyecto.",
     },
     chat: {
-        ...researchPreviewCopy["es"],
        ...en.chat,
+        ...researchPreviewCopy["es"],
         aiReviewComparedQuestion: "Pregunta comparada",
         aiReviewFindings: "Hallazgos de la revisión",
         aiReviewViewSource: "Ver en la respuesta original",

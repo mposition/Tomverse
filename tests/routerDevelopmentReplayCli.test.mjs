@@ -81,7 +81,10 @@ test("CLI compares a full frozen plan using an independently selected source ref
   assert.equal(report.observationSource.benchmark.commit, ref);
   assert.equal(Object.keys(report.observationSource.collector.files).length, 37);
   assert.ok(report.replaySource.files["lib/routerDevelopmentReplay.ts"]);
-  assert.equal(report.benchmarkDomain.paired.commonObservedCases, 4);
+  assert.equal(report.benchmarkDomain.paired.commonObservedCases, 0);
+  assert.equal(report.benchmarkDomain.baseline.unavailableCases, fixture.corpus.cases.length);
+  assert.ok(report.benchmarkDomain.candidate.availableCases > 0);
+  assert.ok(report.benchmarkDomain.candidate.availableCases < fixture.corpus.cases.length);
   assert.equal(report.benchmarkDomain.paired.wholePopulationCorrectOutcomeShareDelta, null);
   assert.equal(report.productCompatibility.baselineObservedCompatibleCases, 0);
   assert.equal(report.inputFileDigests.manifest.length, 64);

@@ -449,6 +449,25 @@ test("CHECK replacement sidecars reject unbound, partial, ambiguous, and mixed d
   );
 });
 
+test("adjacent CHECK replacement statements keep the same table, name and transaction boundary", async () => {
+  const { replacedCheckTargetsIn } = await import("../scripts/baseline-presence-core.mjs");
+  const drop = 'ALTER TABLE "T" DROP CONSTRAINT "T_check";';
+  const add = 'ALTER TABLE "T" ADD CONSTRAINT "T_check" CHECK ("state" IN (\'a\', \'b\'));';
+  assert.deepEqual(replacedCheckTargetsIn(`${drop}\n${add}`), {
+    kind: "check-replacement", checks: [{ table: "T", constraint: "T_check" }],
+  });
+  assert.deepEqual(replacedCheckTargetsIn(`BEGIN;\n${drop}\n${add}\nCOMMIT;`), {
+    kind: "check-replacement", checks: [{ table: "T", constraint: "T_check" }],
+  });
+  for (const sql of [drop, add, `${drop}\n${drop}\n${add}`, `${drop}\n${add}\n${add}`,
+    `${drop}\n${add.replace('"T"', '"Other"')}`,
+    `${drop}\n${add.replace('"T_check"', '"Other_check"')}`,
+    `${drop}\nCOMMIT;\n${add}`, `${drop}\nSELECT true;\n${add}`,
+    `${drop}\nALTER TABLE "T" ADD COLUMN "extra" TEXT;\n${add}`]) {
+    assert.deepEqual(replacedCheckTargetsIn(sql), { kind: "invalid" }, sql);
+  }
+});
+
 test("CHECK replacement probes use a fixed read-only catalog question and fail closed", async () => {
   const {
     checkDefinitionQuery,

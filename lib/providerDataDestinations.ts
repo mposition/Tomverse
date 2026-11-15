@@ -19,7 +19,8 @@
  * answer (no) and the ban on sale and advertising. A field the contract
  * does not pin stays `NOT_SPECIFIED`. The Privacy page lists every row,
  * and only while every enrolled row is disclosable. One unproven row
- * takes the whole table off the page.
+ * takes the whole table off the page. Cohere is enrolled as unproven until
+ * its destination and retention facts have reviewed evidence.
  *
  * - **An unproven row still does not render.** A partial table would leave
  *   that provider out of the notice.
@@ -31,9 +32,9 @@
  *
  * ## Why this stays a report
  *
- * Every enrolled row is proven today. The report stays a report: a provider
- * added later without a reviewed row is an enrolment miss the test already
- * names, and refusing live traffic for it would be a separate decision.
+ * A newly enrolled provider may remain unproven. The report stays a report:
+ * missing enrollment fails a test, while refusing live traffic for missing
+ * disclosure evidence would be a separate decision.
  * `npm run report:provider-data-destinations` lists coverage without blocking.
  *
  * Pure: no database, no clock, no network.
@@ -443,6 +444,7 @@ const deepseekDestination = (): ProviderDataDestination =>
  * when one is missing.
  */
 export const PROVIDER_DATA_DESTINATIONS: readonly ProviderDataDestination[] = [
+    unproven("cohere"),
     ready({
         provider: "openai",
         recipientEntity: "OpenAI OpCo, LLC",

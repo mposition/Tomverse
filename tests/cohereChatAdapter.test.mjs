@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { asSchema, generateText, jsonSchema, streamText, tool } from "ai";
-import { getActiveAiModel } from "../lib/activeAiModel.ts";
+import { createCohereResearchFetch, getActiveAiModel } from "../lib/activeAiModel.ts";
 import { getModelGenerationSettings } from "../lib/modelGenerationCompatibility.ts";
-import { createCohereResearchFetch } from "../lib/cohereResearchFetch.ts";
 import { createResearchPreviewExecution } from "../lib/researchPreviewExecution.ts";
 
 const model = { id: "cohere-wire-fixture", provider: "cohere", apiModel: "command-a-plus-05-2026", reasoning: "none" };
