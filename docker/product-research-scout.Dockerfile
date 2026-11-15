@@ -12,7 +12,7 @@
 # lifecycle scripts; the walker needs none of them.
 # tests/productResearchScoutDockerfile.test.mjs holds this file to that.
 
-FROM mcr.microsoft.com/playwright:v1.65.0-noble@sha256:9beb546099e11f52d62e505537914870e01a67e0e6b00ae41da4775324e73dbe
+FROM mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
 
 WORKDIR /probe
 
