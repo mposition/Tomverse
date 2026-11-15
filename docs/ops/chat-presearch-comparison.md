@@ -101,8 +101,9 @@ turn where the router classified the request and the server attached search
 results, the primary answer model gets a search tool description that tells it
 to cite the existing evidence and to search for a missing fact, conflicting
 result or missing official source. If all excerpts returned by a subsequent
-search already appeared verbatim in the evidence sent to the model, the tool
-labels them as repeated. A changed snippet, date or URL preserves the original
+search already appeared verbatim in the evidence sent to the model, or in an
+earlier follow-up search result of the same answer, the tool labels them as
+repeated. A changed snippet, date or URL preserves the original
 notice. The model receives the original source records in either case.
 
 DashScope enables thinking by default on Qwen 3.8 Flash. For a direct lookup

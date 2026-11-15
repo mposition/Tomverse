@@ -213,3 +213,50 @@ test("names that only contain a gate file name are not gates", () => {
     assert.deepEqual(judge({ changedFiles: [{ path }] }), { excluded: false }, path);
   }
 });
+
+test("a Dependabot npm update the GitHub read vouches for is the lane's, manifests and lock files only (owner 2026-11-15)", () => {
+  const headBranch = "dependabot/npm_and_yarn/develop/ws-8.22.2";
+  const manifests = [
+    { path: "package.json" },
+    { path: "package-lock.json" },
+    { path: "apps/mobile/package.json" },
+    { path: "tools/marketing-video/package-lock.json" },
+  ];
+  assert.deepEqual(judge({ headBranch, dependabot: true, changedFiles: manifests }), { excluded: false });
+  // Unvouched, the prefix and the root manifest leave it to a person as ever.
+  assert.deepEqual(judge({ headBranch, changedFiles: manifests }), { excluded: true, reasons: ["excluded_branch", "gate_path"] });
+  // Any other path, a workflow included, leaves it to a person.
+  assert.deepEqual(
+    judge({ headBranch, dependabot: true, changedFiles: [{ path: "package.json" }, { path: ".github/workflows/ci.yml" }] }),
+    { excluded: true, reasons: ["dependabot_outside_manifests", "gate_path"] },
+  );
+  assert.deepEqual(
+    judge({ headBranch, dependabot: true, changedFiles: [{ path: "lib/a.ts" }] }),
+    { excluded: true, reasons: ["dependabot_outside_manifests"] },
+  );
+  // A rename into a manifest name is judged on both sides.
+  assert.deepEqual(
+    judge({ headBranch, dependabot: true, changedFiles: [{ path: "package.json", previousPath: "scripts/x.mjs" }] }),
+    { excluded: true, reasons: ["dependabot_outside_manifests"] },
+  );
+});
+
+test("the Dependabot exception holds only on its own develop npm prefix, whatever the caller says", () => {
+  for (const headBranch of [
+    "dependabot/github_actions/develop/actions/checkout-5",
+    "dependabot/npm_and_yarn/main/ws-8.22.2",
+    "dependabot/npm_and_yarn/ws-8.22.2",
+    "claude/to-develop/dependabot/npm_and_yarn/develop/x",
+    "agent/engineering/123",
+  ]) {
+    const result = judge({ headBranch, dependabot: true, changedFiles: [{ path: "package-lock.json" }] });
+    assert.equal(result.excluded, headBranch.startsWith("claude/") ? false : true, headBranch);
+    if (headBranch.startsWith("claude/")) continue;
+    assert.deepEqual(result.reasons, ["excluded_branch"], headBranch);
+  }
+  // A feature branch's root package.json is still a gate even if the flag is set.
+  assert.deepEqual(
+    judge({ headBranch: "claude/to-develop/x", dependabot: true, changedFiles: [{ path: "package.json" }] }),
+    { excluded: true, reasons: ["gate_path"] },
+  );
+});

@@ -326,9 +326,16 @@ const HANDLERS: Record<AuthoredArtifactKind, KindHandler> = {
       "Create a real, downloadable PowerPoint deck (.pptx) and attach it to " +
       "your reply. Use this whenever the user asks for slides, a deck or a " +
       "presentation. You supply the slides; the application writes the file. " +
-      "For a requested business-plan example with permitted assumptions, include " +
-      "a compact finance and execution slide: initial budget, monthly revenue " +
-      "and costs, break-even inputs and calculation, and week-by-week milestones. " +
+      "Balance the content across slides: one idea per bullet, a short phrase " +
+      "rather than a sentence, and no slide carrying far more than the others. " +
+      "When the slide count is fixed, compress concept and overview slides " +
+      "before overloading the last one. " +
+      "For a requested business-plan example with permitted assumptions, cover " +
+      "initial budget, monthly revenue and costs, break-even and week-by-week " +
+      "milestones. Write budget and monthly profit as one 'item: amount' bullet " +
+      "per line ending in the total or key figure, and the schedule as a short " +
+      "timeline ('Week 1-2: milestone'), each on its own slide when the deck has " +
+      "room; never pack them into one long sentence. " +
       "Label hypothetical figures as illustrative assumptions, keep their " +
       "arithmetic consistent and never present them as the user's actual figures. " +
       "Never write file bytes, base64 or a download link yourself.",

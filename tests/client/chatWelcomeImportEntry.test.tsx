@@ -14,12 +14,14 @@ function renderWelcome({
   product = "chat",
   lang = "en",
   starters = true,
+  recent = false,
 }: {
   signedIn?: boolean;
   enabled?: boolean;
   product?: "chat" | "review";
   lang?: Language;
   starters?: boolean;
+  recent?: boolean;
 } = {}) {
   return renderToStaticMarkup(
     <SessionProvider session={signedIn ? {
@@ -30,6 +32,8 @@ function renderWelcome({
         <HelpGuideAccessProvider enabledFlagKeys={enabled ? [HELP_FLAG_KEYS.externalImport] : []}>
           <ChatWelcomeScreen
             product={product}
+            recentConversations={recent ? [{ id: "fixture-conversation" }] : undefined}
+            onOpenRecentConversations={recent ? () => {} : undefined}
             starterGallery={starters ? <section data-testid="chat-starter-gallery">Starter choices</section> : undefined}
           />
         </HelpGuideAccessProvider>
@@ -48,6 +52,14 @@ test("the import card appears between the greeting and starter choices in all in
     assert.doesNotMatch(html, /journey\.entry|journey\.entryHint/);
     assert.equal(html.split('data-testid="chat-import-entry"').length - 1, 1);
   }
+});
+
+test("the mobile recent-chats row sits above the import card so a short screen cuts a card, not the row", () => {
+  const html = renderWelcome({ recent: true });
+  const row = html.indexOf('data-testid="recent-conversations-disclosure"');
+  assert.ok(row > html.indexOf('data-testid="chat-welcome-greeting"'));
+  assert.ok(row < html.indexOf('data-testid="chat-import-entry"'));
+  assert.match(html, /data-testid="recent-conversations-disclosure"[^>]*class="[^"]*\bmin-h-11\b[^"]*\bshrink-0\b/);
 });
 
 test("an available import entry does not depend on the starter catalogue being enabled", () => {
