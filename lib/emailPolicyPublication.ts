@@ -110,12 +110,15 @@ export const AMENDED_DOCUMENT_EVIDENCE: Readonly<
   // historical version on 2026-11-05. Later observations may differ; they need
   // their own approval before this gate permits release-note publication.
   // Current observed copy is evidence only; its digest is not a new approval.
+  // The 2026-11-15 provider-table repair preserves reviewed rows and names
+  // Cohere with an explicit unverified-account notice. This observation does
+  // not add its digest to APPROVED_AMENDED_DIGESTS or authorize any email.
   // The semantic-search notice (flag false, so the page does not show it yet)
   // moved this digest on 2026-11-12: evidence only, not approval, and it is not
   // in APPROVED_AMENDED_DIGESTS.
   "/privacy": {
     date: "2026-11-16",
-    contentSha256: "88ade436786085aaf6370b39fc10746082af45bc4d7b173e8192e503e1f5f177",
+    contentSha256: "41c38af3e71258de96593153175857e201c073749d7f4b60b064a5ac395ab4c2",
   },
   "/terms": {
     date: "2026-11-16",

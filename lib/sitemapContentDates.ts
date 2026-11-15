@@ -21,10 +21,12 @@
  * `/privacy` qualified while it showed "Effective: September 28, 2026" in all seven
  * locales. That date is the chat-provider notice, including the per-provider
  * table of recipient, place, training, retention, and sale or advertising.
- * The table is on the page only while every enrolled row is disclosable.
+ * Reviewed table rows keep their facts; unverified providers remain named with
+ * an explicit notice instead of hiding existing disclosures.
  *
  * `contentSha256` is what keeps that true. It is the digest of exactly what
- * the page renders from -- the component (LF line endings), then
+ * the page renders from -- PrivacyPolicy.tsx and ProviderDestinationTable.tsx
+ * (LF line endings), then
  * `lib/providerDataDestinations.ts` (LF line endings, because the table reads
  * it), then `lib/privacyNoticeStatus.ts` (which decides whether the comment
  * section is shown), followed by each locale's `privacyPolicy` object as JSON, in the order

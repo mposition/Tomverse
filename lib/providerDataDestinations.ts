@@ -18,12 +18,13 @@
  * and the owner accepted the privacy-policy sentence as both the training
  * answer (no) and the ban on sale and advertising. A field the contract
  * does not pin stays `NOT_SPECIFIED`. The Privacy page lists every row,
- * and only while every enrolled row is disclosable. One unproven row
- * takes the whole table off the page. Cohere is enrolled as unproven until
- * its destination and retention facts have reviewed evidence.
+ * with reviewed facts only for disclosable rows. An unproven provider remains
+ * named with an explicit notice; its missing facts cannot hide other providers
+ * or be presented as reviewed guarantees. Cohere remains unproven until its
+ * account-specific destination, training and retention facts are verified.
  *
- * - **An unproven row still does not render.** A partial table would leave
- *   that provider out of the notice.
+ * - **Unproven facts do not render.** The provider's known identity and source
+ *   remain visible alongside the notice that its account terms are unverified.
  * - **Nothing here admits a request.** Proven is a disclosure fact. It does
  *   not cut traffic or change a host.
  * - **Nothing becomes `proven` without an `evidenceRef`.** A destination that
@@ -444,7 +445,13 @@ const deepseekDestination = (): ProviderDataDestination =>
  * when one is missing.
  */
 export const PROVIDER_DATA_DESTINATIONS: readonly ProviderDataDestination[] = [
-    unproven("cohere"),
+    {
+        ...unproven("cohere"),
+        recipientEntity: "Cohere Inc.",
+        // Public entity identity only. This is not evidence of this account's
+        // training opt-out, processing locations or retention arrangement.
+        evidenceRef: "https://cohere.com/privacy",
+    },
     ready({
         provider: "openai",
         recipientEntity: "OpenAI OpCo, LLC",

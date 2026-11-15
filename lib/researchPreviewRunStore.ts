@@ -943,4 +943,4 @@ export async function markResearchPreviewRunSettled(runId: string) {
   });
 }
 
-export const researchPreviewWorkerId = () => `research-preview:${randomUUID()}`;
+export const researchPreviewWorkerId = () => `research-preview:${process.pid}:${randomUUID()}`;
