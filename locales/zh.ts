@@ -218,7 +218,7 @@ export const zh = {
         projectDeleteFailed: "无法删除项目。",
     },
     chat: {
-       ...en.chat,
+        ...en.chat,
         ...researchPreviewCopy["zh"],
         aiReviewComparedQuestion: "对比的问题",
         aiReviewFindings: "审查发现",
