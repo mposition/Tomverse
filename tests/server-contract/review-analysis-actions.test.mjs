@@ -7,17 +7,21 @@ import { makeReviewReportFixture } from "../fixtures/reviewAnalysisReport.ts";
 import { reviewReportSelection } from "../../lib/reviewAnalysisReport.ts";
 
 const mod = path => pathToFileURL(resolve(import.meta.dirname, "../..", path)).href;
+process.env.NEXTAUTH_SECRET = "review-analysis-report-test-secret-only";
 let state;
 const noWrite = () => { throw Error("Unexpected data creation or model execution"); };
+const project = (record, select) => !record || !select ? record : Object.fromEntries(
+  Object.keys(select).filter(key => select[key]).map(key => [key, record[key]]),
+);
 const prisma = {
   conversation: {
-    findUnique: async () => state.conversation,
-    findFirst: async ({ where }) => {
+    findUnique: async ({ select }) => project(state.conversation, select),
+    findFirst: async ({ where, select }) => {
       state.ownerReads++;
       if (where.shareToken) return state.published ? { shareSnapshot: state.published, shareExpiresAt: new Date(Date.now() + 60000), productKey: "review" } : null;
       if (where.userId !== state.conversation?.userId) return null;
-      if (state.ownerReads > 1 && state.afterRead) return state.afterRead();
-      return state.conversation;
+      if (state.ownerReads > 1 && state.afterRead) return project(state.afterRead(), select);
+      return project(state.conversation, select);
     },
     create: noWrite, update: noWrite,
   },
@@ -41,10 +45,6 @@ mock.module(mod("lib/prisma.ts"), { namedExports: { prisma } });
 mock.module(mod("lib/chatRouteSession.ts"), { namedExports: { resolveChatRouteSession: async () => ({ session: state.session }) } });
 mock.module(mod("lib/comparisonReviewTurn.ts"), { namedExports: { latestComparableConversationTurn: async () => state.turn } });
 mock.module(mod("lib/appSettings.ts"), { namedExports: { getOperationalFeatureFlags: async () => ({ publicSharingEnabled: state.sharingEnabled }), isMemoryInjectionEnabled: async () => false } });
-mock.module(mod("lib/conversationLock.ts"), { namedExports: {
-  hasConversationUnlockGrant: (_request, _owner, _id, password) => password === null,
-  conversationLockedResponse: () => Response.json({ code: "CONVERSATION_LOCKED" }, { status: 423 }),
-} });
 mock.module(mod("lib/billingEntitlements.ts"), { namedExports: {
   getUserBillingPlan: async () => ({ allowDownloads: state.downloads, allowSharing: state.sharePlan }),
   featureNotIncludedResponse: () => Response.json({ code: "FEATURE_NOT_INCLUDED" }, { status: 403 }),
@@ -64,13 +64,14 @@ mock.module(mod("lib/publicUrl.ts"), { namedExports: { getPublicAppOrigin: () =>
 const { POST: exportReport } = await import(mod("app/api/conversations/[conversationId]/analysis/export/route.ts"));
 const { POST: shareReport } = await import(mod("app/api/conversations/[conversationId]/share/route.ts"));
 const { GET: readPublic } = await import(mod("app/api/public/shares/[shareToken]/route.ts"));
+const { createConversationUnlockCookie } = await import(mod("lib/conversationLock.ts"));
 const context = { params: Promise.resolve({ conversationId: "qa-conversation" }) };
 
 beforeEach(() => {
   const source = makeReviewReportFixture();
   const createdAt = new Date("2026-11-15T00:00:00Z");
   state = { source, session: { user: { id: "owner-a" } }, sharingEnabled: true, downloads: true, sharePlan: true,
-    conversation: { id: "qa-conversation", userId: "owner-a", password: null, kind: "chat", title: "Private source", createdAt, shareToken: null, shareEnabled: false, shareRevokedAt: null, chatRecoveryEpoch: 0, continuationBridge: null },
+    conversation: { id: "qa-conversation", userId: "owner-a", password: null, passwordVersion: 0, kind: "chat", title: "Private source", createdAt, shareToken: null, shareEnabled: false, shareRevokedAt: null, chatRecoveryEpoch: 0, continuationBridge: null },
     messages: [{ id: "prompt-1", role: "user", content: source.setup.source.question, modelId: null, createdAt },
       ...source.setup.source.responses.map((response, index) => ({ id: response.messageId, role: "assistant", content: response.content, modelId: source.review.responseMap[index].modelId, createdAt }))],
     stored: { id: "review-1", userId: "owner-a", conversationId: "qa-conversation", inputHash: "hash", promptMessageId: "prompt-1", assistantMessageIds: ["answer-a", "answer-b"], reviewerModelId: source.review.reviewerModelId, result: source.review.result, isStale: false },
@@ -78,9 +79,44 @@ beforeEach(() => {
     publications: 0, reviewReads: 0, ownerReads: 0,
   };
 });
-const requestFor = async (action, overrides = {}) => new Request(`https://tomverse.test/api/conversations/qa-conversation/${action}`, {
-  method: "POST", headers: { "Content-Type": "application/json" },
+const requestFor = async (action, overrides = {}, headers = {}) => new Request(`https://tomverse.test/api/conversations/qa-conversation/${action}`, {
+  method: "POST", headers: { "Content-Type": "application/json", ...headers },
   body: JSON.stringify({ analysis: await reviewReportSelection(state.source, "ko"), ...overrides }),
+});
+
+const unlockCookie = (version, owner = "owner-a", conversation = "qa-conversation") =>
+  createConversationUnlockCookie(owner, conversation, version).split(";")[0];
+
+test("analysis export accepts the current signed password version and refuses stale or unrelated grants", async () => {
+  state.conversation.password = "stored-password-hash";
+  state.conversation.passwordVersion = 7;
+  for (const cookie of ["", unlockCookie(6), unlockCookie(7, "other-owner"), unlockCookie(7, "owner-a", "other-conversation")]) {
+    state.ownerReads = 0;
+    const denied = await exportReport(await requestFor("analysis/export", { format: "txt" }, { cookie }), context);
+    assert.equal(denied.status, 423);
+    assert.equal(state.reviewReads, 0);
+  }
+  state.ownerReads = 0;
+  const allowed = await exportReport(await requestFor("analysis/export", { format: "txt" }, { cookie: unlockCookie(7) }), context);
+  assert.equal(allowed.status, 200);
+  assert.match(await allowed.text(), /Unconfirmed quote/);
+});
+
+test("a version change with the same stored password withholds the rendered analysis", async () => {
+  state.conversation.password = "same-password-hash";
+  state.conversation.passwordVersion = 7;
+  state.afterRead = () => ({ ...state.conversation, passwordVersion: 8 });
+  const response = await exportReport(await requestFor("analysis/export", { format: "pdf" }, { cookie: unlockCookie(7) }), context);
+  assert.equal(response.status, 423);
+  assert.equal((await response.json()).code, "CONVERSATION_LOCKED");
+  assert.equal(response.headers.get("X-Export-SHA256"), null);
+  assert.equal(state.ownerReads, 2);
+  assert.equal(state.reviewReads, 1);
+});
+
+test("an unlocked conversation with a retained password version does not require a grant", async () => {
+  state.conversation.passwordVersion = 12;
+  assert.equal((await exportReport(await requestFor("analysis/export", { format: "txt" }), context)).status, 200);
 });
 
 test("export authenticates owner, kind, unlock, downloads and continuation before reading a report", async () => {
