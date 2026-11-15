@@ -386,15 +386,22 @@ export const UNKNOWN_OUTCOME_DECISION_CAUSE_PREFIX = "unknown:";
 /**
  * Read back, then proceed (owner decision 2026-11-14, AMUXFLOW/B1): an
  * unknown outcome is looked up again by the publisher on its own once its
- * decision has waited this long, at most this many times per publish item.
- * A lookup only reads GitHub, and a lookup that settles the result closes
- * the open decisions with it. Off unless exactly `enabled`.
+ * decision has waited this long -- twice as long for each decision the item
+ * already opened, up to 2^MAX_DOUBLINGS times (owner decision 2026-11-15; at
+ * most three decisions until then). A lookup only reads GitHub, and a lookup
+ * that settles the result closes the open decisions with it. Off unless
+ * exactly `enabled`.
  */
 export const ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_ENV = "ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP";
 export const engineeringAgentUnknownAutoLookupEnabled = (value: string | undefined) =>
   value?.trim() === "enabled";
 export const ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_AFTER_MS = 30 * 60_000;
-export const ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_MAX_DECISIONS = 3;
+export const ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_MAX_DOUBLINGS = 5;
+/** How long an item's open decision waits before the next lookup, given how
+ * many decisions the item has opened in all. */
+export const engineeringAgentUnknownAutoLookupWaitMs = (decisions: number) =>
+  ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_AFTER_MS *
+    2 ** Math.min(Math.max(decisions - 1, 0), ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_MAX_DOUBLINGS);
 export const unknownOutcomeDecisionCauseKey = (workItemId: string, fencingToken: bigint | number) =>
   `${UNKNOWN_OUTCOME_DECISION_CAUSE_PREFIX}${workItemId}:${fencingToken}`;
 

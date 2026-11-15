@@ -3,6 +3,8 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { mock, test } from "node:test";
 
+import { v22PatchNamedPaths } from "../../lib/engineeringAgentV22PatchApply.ts";
+
 const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path: string) => pathToFileURL(resolve(root, path)).href;
 const now = new Date("2026-10-13T12:00:00.000Z");
@@ -100,7 +102,10 @@ mock.module(mod("lib/amux/escalation.ts"), { namedExports: {
   },
 } });
 mock.module(mod("lib/engineeringAgentV22SettlementPatch.ts"), {
-  namedExports: { loadEngineeringAgentV22SettlementPatch: async () => world.patch },
+  // As the real loader adds them: every path the text names, and stored files.
+  namedExports: { loadEngineeringAgentV22SettlementPatch: async () => world.patch &&
+    { ...world.patch, paths: v22PatchNamedPaths(world.patch.text,
+      world.patch.files ?? null) } },
 });
 mock.module(mod("lib/engineeringAgentStore.ts"), { namedExports: {
   EngineeringAgentStoreRefusedError: class extends Error {},

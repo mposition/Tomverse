@@ -504,7 +504,9 @@ snapshot과 같아야 한다) → 사람이 병합하고 본 앱이 병합을 �
    들어갈 수 없다 — `.github/**`, `scripts/**`, `AGENTS.md`, `CLAUDE.md`,
    `docs/policy/**`, `docs/release-gates/**`, `docs/ui-contracts/**`, 그리고 계약
    문서가 경로로 이름 댄 test 파일과 이름에 `Policy`·`Contract`·`Invariant`가 든 test
-   파일. 파일 유형과 변경 크기에도 상한이 있다.
+   파일. 파일 유형·개수·변경 크기의 상한은 없다(2026-11-15 운영자 결정: 내부 개발 흐름이라
+   크기로 막을 이유가 없다. 그 전에는 파일 5개·300줄·파일당 200 KiB·확장자 7개였다). binary·
+   symlink·실행 파일·submodule·`.gitattributes`가 적용되는 경로는 크기와 무관하게 T2다.
 6. **ruleset**으로 게시 App의 push를 에이전트 branch namespace로 제한하고 force push를
    막는다. 삭제는 정리를 위해 허용한다.
 7. **허용 판정의 authority는 본 앱 하나다.** 게시 서비스는 새 clone에 patch를 실제로
@@ -630,8 +632,9 @@ snapshot과 같아야 한다) → 사람이 병합하고 본 앱이 병합을 �
   확인하면 다음 회차가 한 번 조회하고, 그래도 모르면 결정 항목 하나를 새로 연다. 같은 게시
   항목의 결정 항목을 확인하면 그 항목의 이전 결정 항목도 함께 확인 처리된다(감사 기록에 목록).
   예외(운영자 결정 2026-11-14, AMUXFLOW/B1): `ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP=enabled`이면
-  열린 결정 항목이 모두 30분 이상 기다린 게시 항목은 사람 확인 없이 다시 조회한다. 조회는 읽기뿐이고,
-  한 게시 항목이 연 결정 항목이 3개가 되면 더 조회하지 않고 사람을 기다린다. 조회가 결과를 확정하면
+  열린 결정 항목이 기다림을 채운 게시 항목은 사람 확인 없이 다시 조회한다. 조회는 읽기뿐이다.
+  기다림은 30분이고, 그 게시 항목이 연 결정 항목 하나마다 두 배가 된다(최대 32배, 16시간).
+  횟수 상한은 없다(2026-11-15 운영자 결정. 그 전에는 결정 항목 3개에서 멈추고 사람을 기다렸다). 조회가 결과를 확정하면
   (`lookup_no_prior_write`, `lookup_found_result`) 그 항목의 열린 결정 항목은 함께 확인 처리되고
   `work_item_settled` 감사 기록에 `closedDecisionIds`로 남는다. 기본은 꺼짐이다.
 - **branch는 있고 PR이 없으며 branch head가 소비된 capability가 허락한 commit 그대로인 경우**
@@ -664,29 +667,60 @@ snapshot과 같아야 한다) → 사람이 병합하고 본 앱이 병합을 �
 patch 본문을 실행하지 않는다(파싱·적용의 유일한 예외는 아래 재구성이다). 제출에 빠진 변경이나 거짓 내용이 있더라도
 별도 Publisher가 실제 patch를 적용해 얻은 tree hash가 기대값과 다르면 원격 push 전에
 거절한다. 결과가 불완전하거나 바이트·mode·경로·base를 검증할 수 없으면 T1은 거절한다.
-**v4 구현 현황:** 현재 v22
-구현은 기존 `100644` 일반 파일의 본문 수정과 새 `100644` 일반 텍스트 파일의 추가를
-완전한 변경 바이트로 제출한다(새 파일 추가는 2026-11-15 운영자 결정). 새 파일의 경로는
-base에 없어야 하고, 위의 디렉터리는 base의 tree이거나 새로 생기며(앱이 그 tree 항목을
-만든다), 새로 생기는 이름이 base의 이름과 대소문자·Unicode 정규형만 다르면 거절한다.
-경로·텍스트·secret 검사와 파일 수·크기 상한은 수정과 같다. 삭제·이름 변경·mode 변경과
-새 실행 파일·symlink·submodule·binary·빈 파일은 아직 구현되지 않았으므로 게시 후보가
-되지 않고 비공개 결과로만 남는다. 삭제의 무바이트 표현을 지원한다고 간주하거나 T1로
-분류하지 않는다. 새 파일도 tier 판정(§4)을 그대로 받는다.
+**v4 구현 현황(2026-11-15 운영자 결정 반영):** 앱은 게시 후보를 저장된 patch 본문
+하나로만 만든다(아래 재구성). 예전 sidecar가 본문 옆에 함께 보내는 파일 5개·48 KiB의 변경
+바이트는 저장은 하지만 후보에 쓰지 않는다. `git diff --binary`가 일반 파일·실행 파일·symlink에
+쓰는 모든 형태를 후보로 만든다: 수정, 새 파일·삭제(빈 파일 포함), mode 변경(`100755` 포함),
+이름 변경·복사(sidecar는 `--no-renames`라 이름 변경을 삭제와 새 파일로 쓴다), binary
+파일(literal·delta). 새로 생기는 경로는 결과 tree에서 비어 있어야 하고, 위의 디렉터리는
+기존 tree이거나 새로 생기며(앱이 그 tree 항목을 만든다), 삭제로 빈 디렉터리는 tree에서
+사라진다. 새로 생기는 이름이 결과의 다른 이름과 대소문자·Unicode 정규형만 다르면
+`path_conflict`로 거절한다. 거절하는 것은 다시 만들 수 없는 것뿐이다: submodule 변경,
+데이터 없이 쓴 binary(`Binary files … differ`), git 형식이 아닌 본문, 비정규 경로, 그리고
+바뀐 파일 내용에서 secret 패턴이 보이는 patch(binary는 바이트 그대로 검사한다). T2 초안도
+공개 draft PR이 될 수 있으므로 secret은 거절이다. `.gitattributes`가 적용되는 경로, 중첩
+`.gitattributes`, submodule처럼 tree 검증이 지원하지 않는다고 보고하는 변경은 거절하지 않고
+tier gate의 `unsupported_tree_change` finding으로 T2가 된다. binary·symlink·실행 파일·삭제도
+기존 규칙(§4: `not_text`, `symlink`, `executable_bit` 등)대로 tier 판정을 받는다.
 
-**저장된 patch에서 변경 바이트 재구성(2026-11-10, 운영자 승인 대기).** sidecar는 파일
-5개·원본 48 KiB까지만 변경 바이트를 함께 보내고, 그보다 큰 변경은 patch 본문만 저장한다
-(AMUX-FILEGEN-003: 파일 6개·74.7 KB). 그런 patch는 앱이 같은 고정 base commit에서 GitHub로
-읽은 기존 blob에 **메모리 안에서 정확히** 적용해 변경 바이트를 만든다. 받는 형태는
-`git diff --binary --no-renames`가 기존 `100644` 텍스트 파일 수정과 새 `100644` 텍스트
-파일 추가(`new file mode 100644`, `--- /dev/null`, 빈 상태에서 모든 줄을 더하는 hunk 하나)에
-쓰는 형태뿐이고, hunk는 적힌 위치에서 문맥까지 그대로 맞아야 하며(offset·fuzz 없음), base
-blob과 결과 blob의 id가 patch의 `index` 줄과 같아야 한다(새 파일은 base blob을 읽지 않는다).
-삭제·이름 변경·mode 변경·새 실행 파일·binary·인용 경로는 거절한다. 재구성한 바이트도 저장된 바이트와 같은 경로·텍스트·secret 검사를 거치고, 프로세스
-실행·git 호출은 없다. 이 결과는 T1 권한이 아니며 tier 판정(§4, 파일 수 상한 포함)과
-Publisher의 실제 적용 tree hash 대조는 그대로다. tier 라운드가 비공개로 남긴 v22 초안은
-운영자가 Admin › 엔지니어링 Agent 대기열의 "다시 판정"으로 `tier_pending`에 되돌릴 수 있다(감사 기록,
-보여 준 digest·base에 결속). 이 동작은 게시하지 않으며, 다음 라운드가 스위치·v22 latch·카드
+**크기 상한(2026-11-15 운영자 결정).** 우리 쪽 크기·개수 상한은 두지 않고, patch가 지나는
+시스템의 한계만 둔다(`lib/amux/v22PatchLimit.ts`). 파일 하나는 GitHub의 100 MiB다(push
+거부선이자 blob API 한도). patch 하나는 4 MiB다. 정산 요청은 `proxy.ts`를 지나고, Next.js는
+proxy를 지나는 요청 본문을 10 MB까지 버퍼한다(`proxyClientMaxBodySize`, 기본값 유지: 올리면
+모든 공개 경로가 더 큰 본문을 메모리에 받는다). JSON escape로 두 배가 된 patch와 Task 결과가
+그 안에 들어가야 한다. 예전의 64 KiB patch 증거, 파일 20개·200 KiB·합계 2 MiB 후보 한도,
+blob 읽기 200 KiB 기본값·2 MiB 상한, tree 20,000 항목, 바뀐 blob 50개·2 MiB, tier 분석의
+파일당 2 MiB·합계 128 MiB·GitHub 추가 읽기 1,000개는 모두 없앴다(GitHub이 거절한 읽기는
+판정이 아니라 다음 회차의 재시도다). blob은 base64 JSON 대신 원본(raw media type)으로,
+상한 안에서 흘려 읽고 hash를 검증한다. tree는 GitHub이 잘리지 않았다고 답한 목록(최대
+100,000 항목)만 받는다. DB의 두 CHECK(`AmuxV22TaskPatch_digest_check`의 `byteLength`,
+`EngineeringAgentWorkItem_patchBody_check`)는 4 MiB로 넓혔다. box sidecar와 bridge도 같은
+값을 쓴다. tier gate의 T1 한도(`PUSH_LIMITS`: 파일 5개·300줄·파일 200 KiB)는 patch 크기
+상한이 아니었다. 그 T1 한도와 확장자 목록도 같은 날 없앴다(§9-5). sidecar는 patch 본문 옆에
+파일 바이트를 더 보내지 않고, v52 정산은 저장된 파일 대신 patch 본문이 적는 모든 경로(이름
+변경의 양쪽 포함)를 실행 inventory와 대조한다. 게시 서비스의 cycle은 40분(claim lease 45분
+안), runner의 cycle은 60분까지 돈다(그 전 8분·10분·20분). Railway는 이전 실행이 끝나지 않으면
+다음 예약 실행을 건너뛰므로 cycle은 겹치지 않는다. 그대로 둔 것은 두 가지다: GitHub PR 파일
+목록 3,000개(GitHub API 자체의 한계), 그리고 Decision Maker 병합 gate·QA 병합 lane·AMUX 검토와
+함께 쓰는 PR diff binding 1 MiB(`PULL_DIFF_DIGEST_MAX_BYTES`, 다른 에이전트의 병합 근거라 이
+결정 밖이다). 1 MiB를 넘는 diff의 PR도 열리지만 자동 binding 없이 사람이 맡는다.
+
+**저장된 patch에서 변경 바이트 재구성(2026-11-10 도입, 2026-11-15 확장).** 앱은 같은 고정
+base commit에서 GitHub로 읽은 기존 blob에 patch를 **메모리 안에서 정확히** 적용해 변경
+바이트를 만든다. hunk는 적힌 위치에서 문맥까지 그대로 맞아야 하고(offset·fuzz 없음), binary
+delta는 base blob에 git delta 형식 그대로 적용하며, base blob과 결과 blob의 id가 patch의
+`index` 줄과 같아야 한다(새 파일은 base blob을 읽지 않는다). 프로세스 실행·git 호출은 없다
+(§11: 앱은 patch를 실행하지 않는다). 같은 patch를 Publisher가 `git apply --cached`로 적용해
+얻은 tree hash가 앱의 기대값과 다르면 push하지 않는다. 테스트는 모든 형태에서 앱의 tree가
+git의 tree와 같은지 실제 git으로 대조한다. 이 결과는 T1 권한이 아니며 tier 판정(§4)과
+Publisher의 tree hash 대조는 그대로다.
+
+tier 라운드가 후보를 만들지 못했거나 증거를 읽지 못해 비공개로 남긴 v22 초안은, 배포 뒤
+처음 도는 라운드가 한 번 `tier_pending`으로 되돌린다(2026-11-15 운영자 결정). 대상은
+"다시 판정" 버튼과 같은 조건의 초안 가운데 그 프로세스가 시작되기 전에 마지막으로 바뀐 것뿐이라,
+같은 코드가 남긴 초안을 거듭 읽지 않는다. 이 시스템 동작도 감사 기록을 남긴다. 운영자는
+Admin › 엔지니어링 Agent 대기열의 "다시 판정"으로도 `tier_pending`에 되돌릴 수 있다(감사 기록,
+보여 준 digest·base에 결속). 어느 쪽도 게시하지 않으며, 다음 라운드가 스위치·v22 latch·카드
 공개 PR 동의·대기열·tier를 모두 다시 확인한다.
 
 - 제출된 blob의 hash가 목록의 object id와 같아야 하고, 바뀌지 않은 항목은 base 목록과
@@ -998,9 +1032,10 @@ Task의 게시 경로**(버전 2)뿐이다. engineering Agent 자신의 카드 �
    패치로 그 run의 publish 항목과 단회 capability를 연다. DB는 끝난 run의 publish 항목을
    이 경우에만, PR 대기열에 자리가 있을 때만 받는다. 자리가 없으면 판정하지 않고 초안은
    다음 회차까지 대기로 남는다. T1이 아니면 그 사유를 단 보통 T2 초안으로 둔다. 근거 읽기가
-   예외로 끝나면(GitHub·DB에 닿지 못함 등) 판정이 아니므로 초안은 대기로 남아 다른 대기
-   초안 뒤로 가고, 같은 프로세스에서 3회차째도 예외면 `tier_evidence_unavailable` 사유의 보통
-   T2 초안이 된다. 각 회차의 `v22_tier_promotion` 로그는 예외의 class·code·단계(권한 확인,
+   예외로 끝나면(GitHub·DB에 닿지 못함, GitHub rate limit 등) 판정이 아니므로 초안은 대기로
+   남아 다른 대기 초안 뒤로 가고, 5분부터 실패마다 두 배씩(최대 6시간) 기다린 뒤 다시 읽는다.
+   몇 번 실패해도 비공개로 굳히지 않는다(2026-11-15 운영자 결정. 그 전에는 3회째 예외에서
+   `tier_evidence_unavailable` 사유의 보통 T2 초안이 됐다). 각 회차의 `v22_tier_promotion` 로그는 예외의 class·code·단계(권한 확인,
    patch 읽기, candidate 재구성, base 근거, 재확인)만 적고 메시지·patch·파일 내용은 적지 않는다.
    판정 뒤 쓰는 순간 스위치·동의·대기열이 바뀌어 거절되면 `publish_refused`
    사유의 보통 T2 초안이 된다. 살아 있는 capability 없이 대기 중인 publish 항목(claim되기

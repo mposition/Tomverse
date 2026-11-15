@@ -10,7 +10,7 @@ import {
   checkListing,
   diffLines,
   gitObjectId,
-  resultListingFromModifiedBlobs,
+  resultListingFromChanges,
   toPolicyChanges,
   verifyResultListing,
 } from "../lib/engineeringAgentTreeVerify.ts";
@@ -115,14 +115,14 @@ test("a listing that is inconsistent in itself is refused", () => {
   });
 });
 
-test("v22 sparse modified blobs reproduce Git's tree without applying a patch", () => {
+test("v22 sparse changes reproduce Git's tree without applying a patch", () => {
   withRepo(({ put, snapshot }) => {
     put("lib/a.ts", "old\n");
     put("lib/nested/b.ts", "keep\n");
     const base = snapshot();
-    const derived = resultListingFromModifiedBlobs({ base: base.listing,
-      baseRootTreeId: base.root, files: [{ path: "lib/a.ts",
-        mode: "100644", bytes: bytes("new\n") }] });
+    const derived = resultListingFromChanges({ base: base.listing,
+      baseRootTreeId: base.root, changes: [{ kind: "write", path: "lib/a.ts",
+        mode: "100644", bytes: bytes("new\n"), exists: true }] });
     assert.equal(derived.ok, true);
     put("lib/a.ts", "new\n");
     const actual = snapshot();
@@ -137,39 +137,43 @@ test("v22 sparse modified blobs reproduce Git's tree without applying a patch", 
   });
 });
 
-test("v22 sparse transport rejects omission-shaped invalid paths and modes", () => {
-  withRepo(({ put, snapshot }) => {
+// Owner decision 2026-11-15: any change git writes for a regular file, an
+// executable or a symlink is a candidate; only what cannot be rebuilt is not.
+test("v22 sparse deletes, creates, mode and type changes reproduce Git's tree", () => {
+  withRepo(({ put, remove, snapshot }) => {
     put("lib/a.ts", "old\n");
-    const base = snapshot();
-    const input = { base: base.listing, baseRootTreeId: base.root };
-    for (const files of [[], [{ path: "lib/missing.ts", mode: "100644",
-      bytes: bytes("new\n") }], [{ path: "../lib/a.ts", mode: "100644",
-      bytes: bytes("new\n") }], [{ path: "lib/a.ts", mode: "100755",
-      bytes: bytes("new\n") }], [{ path: "lib/a.ts", mode: "100644",
-      bytes: bytes("old\n") }]]) {
-      assert.equal(resultListingFromModifiedBlobs({ ...input, files }).ok, false);
-    }
-  });
-});
-
-// Operator, 2026-11-15: a v22 patch may add new regular text files.
-test("v22 sparse new files, in new and existing directories, reproduce Git's tree", () => {
-  withRepo(({ put, snapshot }) => {
-    put("lib/a.ts", "old\n");
+    put("lib/gone/only.ts", "only\n");
+    put("lib/dir/inner.ts", "inner\n");
+    put("bin.sh", "#!/bin/sh\n");
     put("tests/keep.test.mjs", "keep\n");
+    put("swap.ts", "file\n");
     const base = snapshot();
-    const derived = resultListingFromModifiedBlobs({ base: base.listing,
-      baseRootTreeId: base.root, files: [
-        { path: "lib/a.ts", mode: "100644", bytes: bytes("new\n") },
-        { path: "tests/added.test.mjs", mode: "100644", bytes: bytes("a\n"),
-          added: true },
-        { path: "lib/deep/er/c.ts", mode: "100644", bytes: bytes("c\n"),
-          added: true },
-        { path: "top.md", mode: "100644", bytes: bytes("keep\n"),
-          added: true },
+    const derived = resultListingFromChanges({ base: base.listing,
+      baseRootTreeId: base.root, changes: [
+        { kind: "write", path: "lib/a.ts", mode: "100644", bytes: bytes("new\n"), exists: true },
+        // A deletion that empties its directory removes the directory.
+        { kind: "delete", path: "lib/gone/only.ts" },
+        // A directory becomes a file of the same name.
+        { kind: "delete", path: "lib/dir/inner.ts" },
+        { kind: "write", path: "lib/dir", mode: "100644", bytes: bytes("now a file\n"), exists: false },
+        // A mode change alone keeps the bytes.
+        { kind: "write", path: "bin.sh", mode: "100755", bytes: bytes("#!/bin/sh\n"), exists: true },
+        // A type change is a delete and a create of the same path.
+        { kind: "delete", path: "swap.ts" },
+        { kind: "write", path: "swap.ts", mode: "120000", bytes: bytes("lib/a.ts"), exists: false },
+        // New paths, in new and existing directories, one a copy of a base blob.
+        { kind: "write", path: "tests/added.test.mjs", mode: "100644", bytes: bytes("a\n"), exists: false },
+        { kind: "write", path: "lib/deep/er/c.ts", mode: "100644", bytes: bytes("c\n"), exists: false },
+        { kind: "write", path: "top.md", mode: "100644", bytes: bytes("keep\n"), exists: false },
       ] });
     assert.equal(derived.ok, true, derived.reason);
     put("lib/a.ts", "new\n");
+    remove("lib/gone/only.ts");
+    remove("lib/dir/inner.ts");
+    put("lib/dir", "now a file\n");
+    put("bin.sh", "#!/bin/sh\n", "100755");
+    remove("swap.ts");
+    put("swap.ts", "lib/a.ts", "120000");
     put("tests/added.test.mjs", "a\n");
     put("lib/deep/er/c.ts", "c\n");
     put("top.md", "keep\n");
@@ -177,54 +181,96 @@ test("v22 sparse new files, in new and existing directories, reproduce Git's tre
     assert.equal(derived.rootTreeId, actual.root);
     assert.deepEqual(derived.result.map((entry) => entry.path).sort(),
       actual.listing.map((entry) => entry.path).sort());
-    // `top.md` copies a base blob, so only the three new blobs are submitted.
-    assert.equal(derived.changedBlobs.size, 3);
     const verified = verifyResultListing({ base: base.listing,
       baseTruncated: false, baseRootTreeId: base.root,
       result: derived.result, claimedResultRootTreeId: derived.rootTreeId,
       changedBlobs: derived.changedBlobs, baseGitattributes: null });
     assert.equal(verified.ok, true);
     assert.deepEqual(verified.changes.map((change) =>
-      [change.path, change.status]), [["lib/a.ts", "modified"],
-      ["lib/deep/er/c.ts", "added"], ["tests/added.test.mjs", "added"],
-      ["top.md", "added"]]);
+      [change.path, change.status, change.oldMode, change.newMode]), [
+      ["bin.sh", "modified", "100644", "100755"],
+      ["lib/a.ts", "modified", "100644", "100644"],
+      ["lib/deep/er/c.ts", "added", null, "100644"],
+      ["lib/dir", "added", null, "100644"],
+      ["lib/dir/inner.ts", "deleted", "100644", null],
+      ["lib/gone/only.ts", "deleted", "100644", null],
+      ["swap.ts", "modified", "100644", "120000"],
+      ["tests/added.test.mjs", "added", null, "100644"],
+      ["top.md", "added", null, "100644"]]);
   });
 });
 
-test("v22 sparse new files refuse a taken path, a file parent and a case twin", () => {
-  withRepo(({ put, snapshot }) => {
+test("v22 sparse changes refuse a taken path, a file parent, a case twin and a non-file", () => {
+  withRepo(({ put, gitlink, snapshot }) => {
     put("lib/a.ts", "old\n");
     put("lib/sub/b.ts", "b\n");
+    put("Readme.md", "r\n");
+    gitlink("vendor/sub", "1".repeat(40));
     const base = snapshot();
     const input = { base: base.listing, baseRootTreeId: base.root };
-    const added = (path) => ({ path, mode: "100644", bytes: bytes("n\n"),
-      added: true });
-    for (const files of [
-      [added("lib/a.ts")], // an existing file
-      [added("lib/sub")], // an existing directory
-      [added("lib/a.ts/x.ts")], // under an existing file
-      [added("lib/A.ts")], // a case twin of a file
-      [added("Lib/x.ts")], // a case twin of a directory
-      [added("lib/Sub/x.ts")],
-      [added(`lib/n${String.fromCharCode(0x303)}.ts`), // one name, two forms
-        added(`lib/${String.fromCharCode(0xf1)}.ts`)],
-      [added("lib/new.ts"), added("lib/NEW.ts")],
-      [added("lib/new"), added("lib/new/x.ts")], // a new file, then under it
-      [added("lib/new/x.ts"), added("lib/new")],
+    const create = (path) => ({ kind: "write", path, mode: "100644",
+      bytes: bytes("n\n"), exists: false });
+    for (const changes of [
+      [create("lib/a.ts")], // an existing file
+      [create("lib/sub")], // an existing directory
+      [create("lib/a.ts/x.ts")], // under an existing file
+      [create("vendor/sub/x.ts")], // under a submodule
+      [create("lib/A.ts")], // a case twin of a file
+      [create("Lib/x.ts")], // a case twin of a directory
+      [create("lib/Sub/x.ts")],
+      [create(`lib/n${String.fromCharCode(0x303)}.ts`), // one name, two forms
+        create(`lib/${String.fromCharCode(0xf1)}.ts`)],
+      [create("lib/new.ts"), create("lib/NEW.ts")],
+      [create("lib/new"), create("lib/new/x.ts")], // a new file, then under it
+      [create("lib/new/x.ts"), create("lib/new")],
     ]) {
-      assert.deepEqual(resultListingFromModifiedBlobs({ ...input, files }),
-        { ok: false, reason: "path_conflict" }, files.map((f) => f.path).join());
+      assert.deepEqual(resultListingFromChanges({ ...input, changes }),
+        { ok: false, reason: "path_conflict" }, changes.map((c) => c.path).join());
     }
-    // Without `added`, a path the base lacks is still refused.
-    assert.deepEqual(resultListingFromModifiedBlobs({ ...input,
-      files: [{ ...added("lib/new.ts"), added: false }] }),
+    // A rename that only changes letter case leaves no twin behind.
+    assert.equal(resultListingFromChanges({ ...input, changes: [
+      { kind: "delete", path: "Readme.md" }, create("README.md")] }).ok, true);
+    for (const changes of [
+      [], // nothing
+      [{ ...create("lib/missing.ts"), exists: true }], // replaces nothing
+      [{ kind: "delete", path: "lib/missing.ts" }],
+      [{ kind: "delete", path: "lib/sub" }], // a directory is not a file
+      [{ kind: "delete", path: "vendor/sub" }], // nor a submodule
+      [{ ...create("lib/a.ts"), bytes: bytes("old\n"), exists: true }], // no change
+      [{ ...create("../x.ts") }],
+      [{ ...create("lib/x.ts"), mode: "160000" }],
+      [{ ...create("lib/x.ts"), mode: "040000" }],
+      [create("lib/x.ts"), create("lib/x.ts")],
+    ]) {
+      assert.deepEqual(resultListingFromChanges({ ...input, changes }),
+        { ok: false, reason: "files_invalid" }, JSON.stringify(changes.map((c) => [c.kind, c.path])));
+    }
+  });
+});
+
+test("v22 sparse changes carry no count or size limit below GitHub's file limit", () => {
+  withRepo(({ put, snapshot }) => {
+    put("lib/a.ts", "old\n");
+    const base = snapshot();
+    const input = { base: base.listing, baseRootTreeId: base.root };
+    // 300 new files and one 534 KB file: past the old 20 file / 200 KiB caps.
+    const changes = Array.from({ length: 300 }, (_, i) => ({ kind: "write",
+      path: `tests/many/f${i}.test.mjs`, mode: "100644",
+      bytes: bytes(`export const v${i} = ${i};\n`), exists: false }));
+    changes.push({ kind: "write", path: "lib/a.ts", mode: "100644",
+      bytes: new Uint8Array(534 * 1024).fill(120), exists: true });
+    const derived = resultListingFromChanges({ ...input, changes });
+    assert.equal(derived.ok, true, derived.reason);
+    assert.equal(derived.changedBlobs.size, 301);
+    assert.equal(verifyResultListing({ base: base.listing, baseTruncated: false,
+      baseRootTreeId: base.root, result: derived.result,
+      claimedResultRootTreeId: derived.rootTreeId,
+      changedBlobs: derived.changedBlobs, baseGitattributes: null }).ok, true);
+    // GitHub refuses a file over 100 MiB, so a candidate does too.
+    assert.deepEqual(resultListingFromChanges({ ...input, changes: [{
+      kind: "write", path: "lib/huge.bin", mode: "100644",
+      bytes: new Uint8Array(100 * 1024 * 1024 + 1), exists: false }] }),
     { ok: false, reason: "files_invalid" });
-    // A new file is still bounded and still only `100644`.
-    for (const file of [{ ...added("lib/x.ts"), mode: "100755" },
-      { ...added("lib/x.ts"), bytes: new Uint8Array(200 * 1024 + 1) }]) {
-      assert.deepEqual(resultListingFromModifiedBlobs({ ...input,
-        files: [file] }), { ok: false, reason: "files_invalid" });
-    }
   });
 });
 
@@ -561,18 +607,25 @@ test("content paired with the wrong id is refused, so the tier is decided on the
   assert.match(honest.entries[0].newText, /import\(name\)/);
 });
 
-test("a diff past the size limit is reported just over the limit", () => {
-  const before = Array.from({ length: 400 }, (_, i) => `a${i}`).join("\n") + "\n";
-  const after = Array.from({ length: 400 }, (_, i) => `b${i}`).join("\n") + "\n";
-  const { input } = scenario({
-    base: ({ put }) => put("lib/a.ts", before),
-    result: ({ put }) => put("lib/a.ts", after),
-  });
-  const verification = verifyResultListing(input);
-  const built = toPolicyChanges(
-    verification,
-    new Map([[gitObjectId("blob", bytes(before)), bytes(before)]]),
-  );
-  assert.equal(built.ok, true);
-  assert.equal(built.entries[0].addedLines + built.entries[0].removedLines, 301);
+// There is no line limit (owner decision 2026-11-15); the walk has a
+// performance budget, past which the whole new file counts as added.
+test("a diff is counted exactly within its budget and read whole past it", () => {
+  const build = (lines) => {
+    const before = Array.from({ length: lines }, (_, i) => `a${i}`).join("\n") + "\n";
+    const after = Array.from({ length: lines }, (_, i) => `b${i} creditWeight`).join("\n") + "\n";
+    const { input } = scenario({
+      base: ({ put }) => put("lib/a.ts", before),
+      result: ({ put }) => put("lib/a.ts", after),
+    });
+    const built = toPolicyChanges(verifyResultListing(input),
+      new Map([[gitObjectId("blob", bytes(before)), bytes(before)]]));
+    assert.equal(built.ok, true);
+    return { entry: built.entries[0], after };
+  };
+  const within = build(400);
+  assert.equal(within.entry.addedLines + within.entry.removedLines, 800);
+  const past = build(600);
+  assert.equal(past.entry.addedLines, 600);
+  assert.equal(past.entry.removedLines, 600);
+  assert.equal(past.entry.addedText, past.after);
 });
