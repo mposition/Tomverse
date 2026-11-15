@@ -23,8 +23,30 @@ test("settlement patch is read before the transaction and bound to the card and 
       assert.equal(card, row.taskId);
       read++;
       return evidence;
-    } })), { taskId: row.taskId, ...evidence });
+    } })), { taskId: row.taskId, ...evidence, paths: null });
   assert.equal(read, 1);
+});
+
+// Owner decision 2026-11-15: the v52 inventory check covers every path the
+// patch text names, not only the (at most five) files an older sidecar
+// stored bytes for.
+test("the settlement patch names every path its text changes, both sides of a rename", async () => {
+  const text = ["diff --git a/lib/a.ts b/lib/a.ts",
+    "deleted file mode 100644",
+    "index 0123456..0000000",
+    "--- a/lib/a.ts",
+    "+++ /dev/null",
+    "@@ -1 +0,0 @@",
+    "-a",
+    "diff --git a/lib/old.ts b/lib/new.ts",
+    "similarity index 100%",
+    "rename from lib/old.ts",
+    "rename to lib/new.ts"].join("\n") + "\n";
+  const value = await loadEngineeringAgentV22SettlementPatch(attemptId,
+    ports({ readEvidence: async () => ({ ...evidence, text,
+      files: [{ path: "lib/stored.ts", mode: "100644", bytesBase64: "YQ==" }] }) }));
+  assert.deepEqual(value.paths.map((entry) => entry.path).sort(),
+    ["lib/a.ts", "lib/new.ts", "lib/old.ts", "lib/stored.ts"]);
 });
 
 test("missing patch is a private result, but purged or corrupt patch blocks settlement", async () => {

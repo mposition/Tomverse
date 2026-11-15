@@ -3,6 +3,8 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { mock, test } from "node:test";
 
+import { v22PatchNamedPaths } from "../../lib/engineeringAgentV22PatchApply.ts";
+
 // The result-review Decision Maker card is on by default (owner decision 2026-11-15); these settlement
 // cases are about the usage ledger and the Task's destination, and their world has no review table.
 process.env.TOMVERSE_AMUX_V22_RESULT_REVIEW_DM = "disabled";
@@ -104,7 +106,10 @@ mock.module(mod("lib/amux/escalation.ts"), { namedExports: {
   },
 } });
 mock.module(mod("lib/engineeringAgentV22SettlementPatch.ts"), {
-  namedExports: { loadEngineeringAgentV22SettlementPatch: async () => world.patch },
+  // As the real loader adds them: every path the text names, and stored files.
+  namedExports: { loadEngineeringAgentV22SettlementPatch: async () => world.patch &&
+    { ...world.patch, paths: v22PatchNamedPaths(world.patch.text,
+      world.patch.files ?? null) } },
 });
 mock.module(mod("lib/engineeringAgentStore.ts"), { namedExports: {
   EngineeringAgentStoreRefusedError: class extends Error {},

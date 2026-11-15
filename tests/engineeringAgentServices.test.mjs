@@ -14,6 +14,7 @@ import { RAILWAY_CRON_SERVICES, buildScheduledJobResources } from "../.railway/s
 import { CAPABILITY_TTL_MS } from "../lib/engineeringAgentCapability.ts";
 import { PUBLISHER_HARD_DEADLINE_MS, PUBLISHER_VARIABLES } from "../scripts/engineering-agent-publisher.mjs";
 import { RUNNER_HARD_DEADLINE_MS, RUNNER_VARIABLES } from "../scripts/engineering-agent-runner.mjs";
+import { SUPERVISOR_TERM_GRACE_MS } from "../scripts/engineering-agent-supervisor.mjs";
 
 // The engineering agent's two services as deployed (docs/policy/engineering-
 // agent.md §8, §12): one image built on main with nothing but the services'
@@ -83,12 +84,21 @@ test("each service declares exactly the variables it reads, in production only",
   assert.ok(!PUBLISHER_VARIABLES.some((name) => /ANTHROPIC|RUNNER|DATABASE|AMUX/.test(name)));
 });
 
-test("no cycle outlives its schedule, and each service runs its own entry point", () => {
+// Railway skips a scheduled run while the previous one is still running
+// (docs.railway.com/cron-jobs), so a cycle may outlast its period (owner
+// decision 2026-11-15: room for a large change). What it may never outlast is
+// its claim's lease, or a push could follow the lookup that lease hands on.
+test("a publish cycle ends inside its claim's lease, and each service runs its own entry point", () => {
   const minutes = (cron) => Number(/^\*\/(\d+) \* \* \* \*$/.exec(cron)?.[1]);
   const runner = service("engineering_agent_runner");
   const publisher = service("engineering_agent_publisher");
-  assert.ok(minutes(runner.cronSchedule) * 60_000 > RUNNER_HARD_DEADLINE_MS);
-  assert.ok(minutes(publisher.cronSchedule) * 60_000 > PUBLISHER_HARD_DEADLINE_MS);
+  const store = readFileSync("lib/engineeringAgentStore.ts", "utf8");
+  const lease = /ENGINEERING_AGENT_PUBLISH_CLAIM_LEASE_MS = (\d+) \* 60 \* 1000;/.exec(store);
+  assert.ok(lease, "the claim lease is stated in minutes");
+  assert.ok(PUBLISHER_HARD_DEADLINE_MS + SUPERVISOR_TERM_GRACE_MS < Number(lease[1]) * 60_000);
+  assert.equal(PUBLISHER_HARD_DEADLINE_MS, 40 * 60_000);
+  assert.equal(RUNNER_HARD_DEADLINE_MS, 60 * 60_000);
+  assert.ok(minutes(runner.cronSchedule) > 0 && minutes(publisher.cronSchedule) > 0);
   // A capability is issued just after one claim; the next claim, even a late
   // one, must find it live rather than lapsed.
   assert.ok(CAPABILITY_TTL_MS >= 2 * minutes(publisher.cronSchedule) * 60_000 + 5 * 60_000);

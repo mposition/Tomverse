@@ -209,6 +209,8 @@ for (const key of [
   "chatStarter.lockedPlan",
   "chatStarter.lockedSignInShort",
   "chatStarter.lockedPlanShort",
+  "chatStarter.lockedSignInTitle",
+  "chatStarter.lockedSignInReason",
 ]) {
   for (const locale of LOCALES) {
     const value = readKey(bundles[locale], key);

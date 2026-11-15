@@ -1,13 +1,12 @@
 import "server-only";
 
-import { isCanonicalRepoPath } from "@/lib/agentAuthorityFiles";
 import { classifyAmuxExecutionPath } from "@/lib/amux/executionGradeCore";
-import { V22_CANDIDATE_FILE_LIMITS, type V22PublishFile } from
-  "@/lib/amux/v22PatchEvidence";
+import { AMUX_V22_PATCH_MAX_BYTES } from "@/lib/amux/v22PatchLimit";
 import { readEngineeringAgentGitBlob,
   readEngineeringAgentPinnedBaseTree } from
   "@/lib/engineeringAgentGitHubRead";
-import { applyV22FileDiff, parseV22GitDiff } from
+import type { V22TreeChange } from "@/lib/engineeringAgentTreeVerify";
+import { applyV22FileDiff, parseV22GitDiff, type V22FileMode } from
   "@/lib/engineeringAgentV22PatchApply";
 import { verifyEngineeringAgentV22SparseCandidate } from
   "@/lib/engineeringAgentV22SparseCandidate";
@@ -18,8 +17,7 @@ type Ports = { readBase: (sha: string, onDevelop: boolean) => Promise<Base>;
 const livePorts: Ports = {
   readBase: (sha, onDevelop) =>
     readEngineeringAgentPinnedBaseTree(sha, {}, { onDevelop }),
-  readBlob: (oid) => readEngineeringAgentGitBlob(oid,
-    {}, V22_CANDIDATE_FILE_LIMITS.maxFileBytes),
+  readBlob: (oid) => readEngineeringAgentGitBlob(oid, {}),
 };
 type VerifiedCandidate = ReturnType<typeof verifyEngineeringAgentV22SparseCandidate>;
 type LoadedCandidate =
@@ -27,69 +25,76 @@ type LoadedCandidate =
     baseTree: Base["base"]; baseCommitterDate: string | null }) |
   Extract<VerifiedCandidate, { ok: false }>;
 
-const validFiles = (files: readonly V22PublishFile[]) =>
-  files.length >= 1 && files.length <= V22_CANDIDATE_FILE_LIMITS.maxFiles &&
-  files.every((file) => isCanonicalRepoPath(file.path) &&
-    file.mode === "100644");
+const FILE_MODES: ReadonlySet<string> = new Set(["100644", "100755", "120000"]);
 
-/** Read only the old blobs named by a sparse v22 patch. GitHub is pinned to
+/**
+ * The candidate a stored v22 patch makes: the patch text, rebuilt in memory
+ * against the old blobs it names (engineeringAgentV22PatchApply), into the
+ * tree the publisher's `git apply --cached` must write. GitHub is pinned to
  * the fixed repository's current develop head (with `onDevelop`, to a commit
  * that head contains); the worker supplies no URL or tree listing. A failure
  * gives no permission to publish.
  *
- * A stored patch whose evidence carries no file bytes (more files or bytes
- * than the sidecar keeps) names its files by `patchText` instead: each one's
- * new bytes are rebuilt from its pinned base blob by an exact in-memory
- * application, and must hash to the blob id the patch itself names. Only
- * modified `100644` text files qualify, as with stored file bytes. */
+ * Only the patch text is read. A sidecar that still stores the bytes of up to
+ * five changed files beside it (before 2026-11-15) is not trusted for them:
+ * the text names everything the publisher applies.
+ *
+ * A failure is named by a reason this builder alone writes, so a draft an
+ * earlier builder kept (`base_blob_missing`, `files_invalid`, ...) can be
+ * told apart and judged again (engineeringAgentV22TierPromotion):
+ * `patch_over_limit` past the one patch bound, `patch_unreadable` for text
+ * that is not a diff this can rebuild, `path_invalid` for a name no execution
+ * path may hold, `base_mismatch` when the base lacks what the patch changes,
+ * `patch_mismatch` when it does not apply exactly or yields another blob,
+ * `path_conflict` and `secret_detected` from the change set, `tree_invalid`
+ * when the listing does not verify.
+ */
 export async function loadEngineeringAgentV22Candidate(input: {
-  baseSha: string; onDevelop?: boolean } & (
-    { files: readonly V22PublishFile[]; patchText?: undefined } |
-    { files?: undefined; patchText: string }),
+  baseSha: string; onDevelop?: boolean; patchText: string },
 ports: Ports = livePorts): Promise<LoadedCandidate> {
   if (!/^[0-9a-f]{40}$/.test(input.baseSha))
-    return { ok: false, reason: "files_invalid" };
-  const diff = input.files ? null : parseV22GitDiff(input.patchText ?? "");
-  if (diff && (!diff.ok || diff.files.length >
-      V22_CANDIDATE_FILE_LIMITS.maxFiles ||
-      diff.files.some((file) =>
-        classifyAmuxExecutionPath(file.path) === "invalid")))
-    return { ok: false, reason: "patch_unsupported" };
-  if (input.files && !validFiles(input.files))
-    return { ok: false, reason: "files_invalid" };
+    return { ok: false, reason: "patch_unreadable" };
+  if (Buffer.byteLength(input.patchText, "utf8") > AMUX_V22_PATCH_MAX_BYTES)
+    return { ok: false, reason: "patch_over_limit" };
+  const diff = parseV22GitDiff(input.patchText);
+  if (!diff.ok) return { ok: false, reason: diff.reason };
+  if (diff.files.some((file) => [file.oldPath, file.newPath].some((path) =>
+    path !== null && classifyAmuxExecutionPath(path) === "invalid")))
+    return { ok: false, reason: "path_invalid" };
   const pinned = await ports.readBase(input.baseSha,
     input.onDevelop === true);
   const paths = new Map(pinned.base.map((entry) => [entry.path, entry]));
   const bytes = new Map<string, Uint8Array>();
   const rebuilt: Uint8Array[] = [];
   try {
-    const named = input.files ?? (diff?.ok ? diff.files : []);
-    for (const file of named) {
-      const previous = paths.get(file.path);
-      if (previous?.type !== "blob" || previous.mode !== "100644" ||
-          ("oldOid" in file && !previous.oid.startsWith(file.oldOid)))
-        return { ok: false, reason: "base_blob_missing" };
+    for (const file of diff.files) {
+      if (file.oldPath === null) continue;
+      const previous = paths.get(file.oldPath);
+      if (previous?.type !== "blob" || !FILE_MODES.has(previous.mode) ||
+          (file.oldMode !== null && previous.mode !== file.oldMode) ||
+          (file.oldOid !== null && !previous.oid.startsWith(file.oldOid)))
+        return { ok: false, reason: "base_mismatch" };
       if (!bytes.has(previous.oid))
         bytes.set(previous.oid, await ports.readBlob(previous.oid));
     }
-    let files = input.files;
-    if (!files && diff?.ok) {
-      const built: V22PublishFile[] = [];
-      for (const file of diff.files) {
-        const next = applyV22FileDiff(bytes.get(paths.get(file.path)!.oid)!,
-          file);
-        if (!next) return { ok: false, reason: "patch_does_not_apply" };
-        rebuilt.push(next);
-        built.push({ path: file.path, mode: "100644",
-          bytesBase64: Buffer.from(next).toString("base64") });
-      }
-      files = built;
+    const changes: V22TreeChange[] = [];
+    for (const file of diff.files) {
+      const previous = file.oldPath === null ? null : paths.get(file.oldPath)!;
+      const old = previous ? bytes.get(previous.oid)! : null;
+      const next = applyV22FileDiff(old, file);
+      if (!next) return { ok: false, reason: "patch_mismatch" };
+      if (next !== old) rebuilt.push(next);
+      if (file.oldPath !== null && !file.copy && file.newPath !== file.oldPath)
+        changes.push({ kind: "delete", path: file.oldPath });
+      if (file.newPath !== null)
+        changes.push({ kind: "write", path: file.newPath, bytes: next,
+          mode: file.newMode ?? (previous!.mode as V22FileMode),
+          exists: file.newPath === file.oldPath });
     }
-    if (!files) return { ok: false, reason: "files_invalid" };
     const verified = verifyEngineeringAgentV22SparseCandidate({
       base: pinned.base, baseRootTreeId: pinned.rootTreeId,
       baseGitattributes: pinned.baseGitattributes,
-      files, baseBlobs: bytes,
+      changes, baseBlobs: bytes,
     });
     return verified.ok ? { ...verified,
       baseRootTreeId: pinned.rootTreeId, baseTree: pinned.base,
