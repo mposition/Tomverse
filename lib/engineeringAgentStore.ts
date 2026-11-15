@@ -488,6 +488,8 @@ export async function readEngineeringAgentKnownPublishes(
    */
   legacyHalts: boolean;
   observedHalt: ObservableHalt | null;
+  /** When that halt was observed: a clean reading clears exactly this one, never a later one. */
+  observedHaltAt: string | null;
 }> {
   const [capabilities, bindings, settings] = await Promise.all([
     db.engineeringAgentCapability.findMany({
@@ -518,6 +520,7 @@ export async function readEngineeringAgentKnownPublishes(
       .map((row) => ({ runId: row.workItem.runId as string, commitDigest: row.commitDigest })),
     legacyHalts,
     observedHalt: holds ? observed!.halt : null,
+    observedHaltAt: holds ? observed!.at.toISOString() : null,
   };
 }
 
@@ -2282,6 +2285,7 @@ const observedHaltSubjectAudit = (subject: ObservedHaltSubject | null): Record<s
  */
 export async function clearEngineeringAgentObservedHalt(
   tx: EngineeringAgentTransaction,
+  input: { observedAt: string },
 ): Promise<{ cleared: boolean }> {
   if (engineeringAgentLegacyHalts(process.env[ENGINEERING_AGENT_LEGACY_HALTS_ENV])) return { cleared: false };
   await lockEngineeringAgentHalt(tx);
@@ -2291,7 +2295,9 @@ export async function clearEngineeringAgentObservedHalt(
   ]);
   const observed = parseObservedHalt(setting?.value);
   const acknowledgedAt = parseSettingInstant(acknowledgement?.value);
-  if (observed === null || observed.clearedAt !== null ||
+  // The clean reading clears the halt it saw, by when it was observed: a halt
+  // recorded after that reading (review r-20261115-120115-261135) still holds.
+  if (observed === null || observed.clearedAt !== null || observed.at.toISOString() !== input.observedAt ||
       (acknowledgedAt !== null && observed.at.getTime() <= acknowledgedAt.getTime())) return { cleared: false };
   const clearedAt = await databaseNow(tx);
   await tx.appSetting.update({

@@ -18,6 +18,8 @@ import { amuxV22KeptResultExistsSql } from "./v22KeptResultRead.ts";
 export type AmuxDmOwnerSettlementCandidate = {
   taskId: string; escalationId: string; taskStatus: "review" | "blocked";
   attemptId: string | null;
+  /** The newest attempt that ended succeeded into review: a review pull request's attempt. */
+  reviewAttemptId: string | null;
   /** The open review pull request's binding, when the publisher opened one as a draft. */
   bindingId: string | null;
 };
@@ -48,18 +50,27 @@ export async function scanAmuxDmOwnerSettlementCandidates(tx: Prisma.Transaction
   const keepsNoResult = !amuxV22KeptResultPublicationEnabled();
   return tx.$queryRaw<AmuxDmOwnerSettlementCandidate[]>`
     SELECT w."id" AS "taskId", e."id" AS "escalationId", w."status" AS "taskStatus",
-      a."id" AS "attemptId", b."id" AS "bindingId"
+      a."id" AS "attemptId", ra."id" AS "reviewAttemptId", b."id" AS "bindingId"
     FROM "AmuxHumanEscalation" e
     JOIN "AmuxWorkItem" w ON w."id" = e."taskId"
     LEFT JOIN LATERAL (
       SELECT x."id" FROM "AmuxExecutionAttempt" x WHERE x."taskId" = w."id"
       ORDER BY x."taskRevision" DESC, x."startedAt" DESC, x."id" DESC LIMIT 1
     ) a ON true
+    -- The attempt the card's review is for (amuxV22ReviewAttempt): its newest that
+    -- ended succeeded into review. A review pull request is that attempt's, so a
+    -- kept result published after later attempts failed is found (owner decision
+    -- 2026-11-15); when the newest attempt is the review one, the two are the same.
+    LEFT JOIN LATERAL (
+      SELECT x."id" FROM "AmuxExecutionAttempt" x WHERE x."taskId" = w."id"
+        AND x."outcome" = 'succeeded' AND x."toStatus" = 'review'
+      ORDER BY x."attemptNumber" DESC NULLS LAST, x."startedAt" DESC, x."id" DESC LIMIT 1
+    ) ra ON true
     LEFT JOIN LATERAL (
       SELECT bb."id" FROM "EngineeringAgentBinding" bb
       JOIN "EngineeringAgentRun" r ON r."id" = bb."runId"
       JOIN "EngineeringAgentWorkItem" i ON i."causeKey" = (${reviewPrefix}::text || r."id")
-      WHERE r."amuxAttemptId" = a."id" AND r."cardId" = w."id"
+      WHERE r."amuxAttemptId" = ra."id" AND r."cardId" = w."id"
         AND bb."state" = 'open' AND bb."supersededAt" IS NULL AND i."kind" = 'publish'
       ORDER BY bb."createdAt" DESC, bb."id" DESC LIMIT 1
     ) b ON true

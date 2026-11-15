@@ -105,14 +105,33 @@ test("the Decision Maker is never asked to run a kept result again, and the read
     "the engineering reads only read (scripts/check-protected-table-writers-core.mjs)");
 });
 
+test("a review pull request's DM settlement follows the card's review attempt, not its newest one", async () => {
+  // Review r-20261115-120115-261135: attempt 3's kept result published after attempts 4 and 5 failed.
+  const { amuxDmOwnerSettlementMoved } = await import("../lib/amux/dmOwnerSettlementCore.ts");
+  const facts = { taskStatus: "review", attemptId: "a3", status: "review", sourceSystem: "admin-idea-v4",
+    archivedAt: null, lastAttempt: { id: "a5" }, activeDelivery: false, liveAttempt: false, escalationOpen: true };
+  assert.equal(amuxDmOwnerSettlementMoved({ ...facts, kind: "t2_pr", reviewAttempt: { id: "a3" } }), null);
+  assert.equal(amuxDmOwnerSettlementMoved({ ...facts, kind: "t2_pr", reviewAttempt: { id: "a6" } }), "task_moved",
+    "a newer accepted result is a new review");
+  assert.equal(amuxDmOwnerSettlementMoved({ ...facts, kind: "stopped", reviewAttempt: { id: "a3" } }), "task_moved",
+    "a stopped card is still judged by its newest attempt");
+  const scan = read("lib/amux/dmOwnerSettlementRead.ts");
+  assert.match(scan, /WHERE r\."amuxAttemptId" = ra\."id" AND r\."cardId" = w\."id"/);
+  const service = read("lib/amux/dmOwnerSettlementService.ts");
+  assert.match(service, /attemptId: kind === "t2_pr" \? row\.reviewAttemptId : row\.attemptId/);
+  const lane = read("lib/amux/dmT2MergeRead.ts");
+  assert.match(lane, /AND x\."outcome" = 'succeeded' AND x\."toStatus" = 'review'\n\s+ORDER BY x\."attemptNumber" DESC NULLS LAST, x\."startedAt" DESC, x\."id" DESC LIMIT 1\) = s\."attemptId"/);
+});
+
 test("the runner's round carries the kept results after the bindings are released", () => {
   const route = read("app/api/internal/engineering-agent/observe/pull-requests/route.ts");
   const released = route.indexOf("await releaseEngineeringAgentBindings();");
   const kept = route.indexOf("await publishAmuxV22KeptResults();");
   assert.ok(released > 0 && kept > released);
   const halt = read("app/api/internal/engineering-agent/observe/halt/route.ts");
-  assert.match(halt, /z\.object\(\{ halt: z\.literal\("none"\) \}\)\.strict\(\)/);
-  assert.match(halt, /clearEngineeringAgentObservedHalt\(tx\)/);
+  // A clean reading names the halt it saw (review r-20261115-120115-261135).
+  assert.match(halt, /z\.object\(\{ halt: z\.literal\("none"\), observedAt: z\.string\(\)\.datetime\(\) \}\)\.strict\(\)/);
+  assert.match(halt, /clearEngineeringAgentObservedHalt\(tx, \{ observedAt \}\)/);
 });
 
 test("the kept result publication writes in one transaction, through the stores, and runs nothing", () => {

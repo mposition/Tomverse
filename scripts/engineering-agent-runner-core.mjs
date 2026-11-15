@@ -237,11 +237,12 @@ export async function runRunnerCycle(ports) {
     // already shows, and a merge it records may be what explains the reading.
     const recorded = await ports.app("observe/halt", { halt: observed, ...(reading.subject ? { subject: reading.subject } : {}) });
     if (recorded.status !== 200) return { finishedNormally: false, halt: observed, reason: "observed_unbound" };
-  } else if (observed === "none" && known.json.observedHalt) {
+  } else if (observed === "none" && known.json.observedHalt && known.json.observedHaltAt) {
     // Owner decision 2026-11-15: nothing unbound now explains the halt an
     // earlier reading recorded -- merged, closed, deleted or bound since. A
     // failed clear decides nothing; the next clean reading asks again.
-    await ports.app("observe/halt", { halt: "none" });
+    // It names the halt it saw, so a halt recorded after this reading is not cleared by it.
+    await ports.app("observe/halt", { halt: "none", observedAt: known.json.observedHaltAt });
   }
 
   // The app reads its published pull requests' approvals and merges itself

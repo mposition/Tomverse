@@ -184,11 +184,14 @@ test("a branch or pull request passes only at a bound head or an allowed commit,
   assert.deepEqual(old.calls.at(-1).body, { halt: "unbound_app_ref" });
 
   // A later clean reading clears the halt an earlier one recorded; with none holding, nothing is sent.
-  const explained = fakeApp({ "observe/known": { status: 200, json: { bindings: [], consumed: [], observedHalt: "unbound_app_pr" } } });
+  const at = "2026-11-15T01:02:03.004Z";
+  const explained = fakeApp({ "observe/known": { status: 200,
+    json: { bindings: [], consumed: [], observedHalt: "unbound_app_pr", observedHaltAt: at } } });
   assert.deepEqual(await runRunnerCycle(ports(explained.app)), { finishedNormally: true, halt: "none", reason: "observed" });
-  assert.deepEqual(explained.calls.find((call) => call.path === "observe/halt").body, { halt: "none" });
+  // It names the halt it saw (review r-20261115-120115-261135): a later halt is not cleared by this reading.
+  assert.deepEqual(explained.calls.find((call) => call.path === "observe/halt").body, { halt: "none", observedAt: at });
   const legacyExplained = fakeApp({ "observe/known": { status: 200,
-    json: { bindings: [], consumed: [], observedHalt: "unbound_app_pr", legacyHalts: true } } });
+    json: { bindings: [], consumed: [], observedHalt: "unbound_app_pr", observedHaltAt: at, legacyHalts: true } } });
   await runRunnerCycle(ports(legacyExplained.app));
   assert.equal(legacyExplained.calls.some((call) => call.path === "observe/halt"), false, "only a person clears it then");
 

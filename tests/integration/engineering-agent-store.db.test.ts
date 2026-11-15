@@ -1259,33 +1259,40 @@ test("an unbound branch the runner observed halts like a recorded halt, until a 
     );
     await inTx((tx) => acknowledgeEngineeringAgentHalt(tx, { session: owner }));
     assert.equal((await readEngineeringAgentHaltState(prisma)).unacknowledgedHalt, null, "acknowledged, it no longer holds");
-    assert.deepEqual(await inTx((tx) => clearEngineeringAgentObservedHalt(tx)), { cleared: false },
-      "nothing to clear once acknowledged");
+    assert.deepEqual(await inTx((tx) => clearEngineeringAgentObservedHalt(tx, { observedAt: new Date().toISOString() })),
+      { cleared: false }, "nothing to clear once acknowledged");
 
     // Owner decision 2026-11-15: a later clean reading clears it, naming what it was about.
     await new Promise((resolve) => setTimeout(resolve, 20));
     await inTx((tx) => recordEngineeringAgentObservedHalt(tx, { halt: "unbound_app_pr", subject: { prNumber: 3942 } }));
     const named = await readEngineeringAgentHaltState(prisma);
     assert.deepEqual(named.observedHalt, { halt: "unbound_app_pr", subject: { prNumber: 3942 } });
-    assert.equal((await readEngineeringAgentKnownPublishes(prisma)).observedHalt, "unbound_app_pr");
-    assert.deepEqual(await inTx((tx) => clearEngineeringAgentObservedHalt(tx)), { cleared: true });
+    const seen = await readEngineeringAgentKnownPublishes(prisma);
+    assert.equal(seen.observedHalt, "unbound_app_pr");
+    assert.ok(seen.observedHaltAt);
+    // A clean reading clears only the halt it saw (review r-20261115-120115-261135).
+    assert.deepEqual(await inTx((tx) => clearEngineeringAgentObservedHalt(tx, { observedAt: "2000-01-01T00:00:00.000Z" })),
+      { cleared: false }, "a reading of an earlier halt clears nothing later");
+    assert.deepEqual(await inTx((tx) => clearEngineeringAgentObservedHalt(tx, { observedAt: seen.observedHaltAt! })), { cleared: true });
     assert.equal((await readEngineeringAgentHaltState(prisma)).unacknowledgedHalt, null, "explained, it no longer holds");
     assert.equal((await readEngineeringAgentKnownPublishes(prisma)).observedHalt, null);
     const cleared = await prisma.adminAuditLog.findFirstOrThrow({
       where: { action: "engineering_agent.halt_cleared", targetId: observedKey }, orderBy: { createdAt: "desc" } });
     assert.equal(systemActorOf(cleared), "engineering-agent-runner");
     assert.equal((cleared.metadata as Record<string, unknown>).subjectPrNumber, 3942);
-    assert.deepEqual(await inTx((tx) => clearEngineeringAgentObservedHalt(tx)), { cleared: false }, "once");
+    assert.deepEqual(await inTx((tx) => clearEngineeringAgentObservedHalt(tx, { observedAt: seen.observedHaltAt! })),
+      { cleared: false }, "once");
     // With the kill switch only a person clears it.
     await inTx((tx) => recordEngineeringAgentObservedHalt(tx, { halt: "unbound_app_ref" }));
+    const later = (await readEngineeringAgentKnownPublishes(prisma)).observedHaltAt!;
     process.env.ENGINEERING_AGENT_LEGACY_HALTS = "enabled";
     try {
-      assert.deepEqual(await inTx((tx) => clearEngineeringAgentObservedHalt(tx)), { cleared: false });
+      assert.deepEqual(await inTx((tx) => clearEngineeringAgentObservedHalt(tx, { observedAt: later })), { cleared: false });
       assert.equal((await readEngineeringAgentHaltState(prisma)).unacknowledgedHalt, "unbound_app_ref");
     } finally {
       delete process.env.ENGINEERING_AGENT_LEGACY_HALTS;
     }
-    await inTx((tx) => clearEngineeringAgentObservedHalt(tx));
+    await inTx((tx) => clearEngineeringAgentObservedHalt(tx, { observedAt: later }));
     const known = await readEngineeringAgentKnownPublishes(prisma);
     assert.ok(Array.isArray(known.bindings) && Array.isArray(known.consumed));
     assert.equal(known.legacyHalts, false);

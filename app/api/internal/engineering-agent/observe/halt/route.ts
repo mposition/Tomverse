@@ -23,7 +23,8 @@ import { prisma } from "@/lib/prisma";
 // Recorded as a reading with the database's clock, naming the pull request or
 // branch; it halts claims, runs and pushes until a person acknowledges it or
 // -- owner decision 2026-11-15 -- the runner's later reading finds nothing
-// unbound (`none`), which clears it (a no-op when nothing holds, and with
+// unbound (`none`, naming when the halt it saw was observed), which clears that
+// halt and no later one (a no-op when nothing holds, and with
 // ENGINEERING_AGENT_LEGACY_HALTS). Only these values: a circuit or a mismatch
 // is the app's to read, never a service's to assert.
 
@@ -33,7 +34,7 @@ const subjectSchema = z.union([
 ]);
 const requestSchema = z.union([
   z.object({ halt: z.enum(OBSERVABLE_HALTS), subject: subjectSchema.optional() }).strict(),
-  z.object({ halt: z.literal("none") }).strict(),
+  z.object({ halt: z.literal("none"), observedAt: z.string().datetime() }).strict(),
 ]);
 
 export async function POST(request: Request) {
@@ -42,7 +43,8 @@ export async function POST(request: Request) {
   try {
     const body = await readLimitedJson(request, 512, requestSchema);
     if (body.halt === "none") {
-      const cleared = await runEngineeringAgentTransaction(prisma, (tx) => clearEngineeringAgentObservedHalt(tx));
+      const observedAt = body.observedAt;
+      const cleared = await runEngineeringAgentTransaction(prisma, (tx) => clearEngineeringAgentObservedHalt(tx, { observedAt }));
       return engineeringAgentJson({ cleared: cleared.cleared }, 200);
     }
     const subject = "subject" in body && body.subject ? parseObservedHaltSubject(body.subject) : null;
