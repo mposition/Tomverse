@@ -54,7 +54,9 @@ Research·이미지·voice·Guest/public share는 이번 지원 범위 밖이다
 | handoff preflight | 2개 통과: native reference 비용 산입, 잠금 상태 admission 전 거절 |
 | Message receipt/recovery API | 17개 통과: 일반 Review 거절, handoff target의 정확한 scope/text-only만 허용 |
 | Native transport/bearer gate | 63개 통과 |
+| Native 단일 모델 참조·세션 재검증 후 transport | 54개 통과, mobile typecheck 통과 |
 | Native UI | 기존·신규 11개와 한도/미지원 오류 안내 2개 통과 |
+| Web 신규 handoff UI | desktop/mobile browser 8개 통과: long draft, CAS, reload/Back, 잠금 거절, consume, anchor generation, 첨부, 일반 Review 격리 |
 | PostgreSQL migration | 별도 loopback DB에 422개 적용, schema drift 0 |
 | durable transaction DB | 24개 통과 |
 | handoff 생성 DB | 4개 통과 |
@@ -69,4 +71,26 @@ Research·이미지·voice·Guest/public share는 이번 지원 범위 밖이다
 `node:crypto` → `lib/amux/decisionMakerBodyCore.ts` →
 `lib/amux/decisionMakerAdminCore.ts` → `components/admin/AmuxDecisionMakerRequestsPanel.tsx`.
 해당 클라이언트 번들 문제는 이 작업에서 수정하지 않는다.
+Web 기능 검증은 외부 호출을 차단한 별도 로컬 Next development 서버에서 수행했다.
+모델 카탈로그 등 배경 API는 기존 E2E fixture 방식으로 명시적으로 mock했다.
+메모리 압박에서 경로가 반복 컴파일되는 것을 막기 위한 개발 서버 설정은 검증에만
+사용하며 제품 변경으로 남기지 않는다.
 임시 PostgreSQL은 검증 후 종료했고 사용한 loopback 포트가 해제된 것을 확인했다.
+
+## 독립 검토
+
+`r-20261115-110226-00bf41`은 구현 커밋 `f3e50cee8`을 검토했다.
+Claude(Anthropic)는 `accept` 및 minor/nit 의견을 반환했다. 두 번째 검토자
+Copilot(Moonshot)은 `reviewer_exit_1`로 종료해 종합 결과는 **unknown**이다.
+orchestrator의 unknown 재요청 금지 절차에 따라 자동 재제출하지 않았다.
+
+완료 Message와 manifest를 함께 롤백하는 동작을 best-effort로 바꾸라는 minor 의견은
+이번 원자성 요구와 상충하므로 적용하지 않는다. native prefix는 명시한 상한과 누락
+고지를 유지한다. 일반 Review의 handoff probe는 서버 marker가 확인된 target에만
+한정한다. 단일 모델 handoff는 기존 continuation GET으로 Message 저장 전에 참조를
+재검증하며, 기존 다중 모델 admission의 최소 모델 수를 바꾸지 않는다.
+Native는 이 요청에도 기존 parent unlock grant를 전달한다. Native bearer로 잠긴
+external source를 해제하는 기능은 기존에도 지원하지 않으며 이번에도 거절을 유지한다.
+참조 확인을 기다리는 동안 A→B→A로 계정이 전환돼도 이전 send가 Message를 저장하지
+못하도록 기존 session revision을 확인한다.
+검토 결과는 병합·배포 승인으로 사용하지 않는다.

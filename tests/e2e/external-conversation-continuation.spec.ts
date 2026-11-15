@@ -1,4 +1,5 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
+import { mockReviewHandoffBackground } from "./support/review-handoff-background-fixtures";
 
 import {
     mockAuthenticatedApi,
@@ -1373,6 +1374,7 @@ test.describe("continuing an imported conversation", () => {
  * immediately never sees it.
  */
 test.describe("navigating out of a continuation", () => {
+    test.beforeEach(async ({ page }) => { await mockReviewHandoffBackground(page); });
     const ORDINARY_ID = "qa-ordinary";
     const OTHER_CONTINUATION_ID = "qa-second-continuation";
 
@@ -2257,6 +2259,7 @@ test.describe("searching an imported original @ui-risk", () => {
   compare, reached from the Chat one by an explicit button.
 */
 test.describe("a continuation opens in its product's workspace", () => {
+    test.beforeEach(async ({ page }) => { await mockReviewHandoffBackground(page); });
     const openContinuationAs = async (page: Page, product: "chat" | "review") => {
         await mockAuthenticatedApi(page, { autoSelectionOffered: product === "chat" });
         const api = await mockContinuationApi(page, { product });
@@ -2445,7 +2448,7 @@ test.describe("a continuation opens in its product's workspace", () => {
         await page.getByTestId("chat-compare-in-review").last().click();
         await expect(page).toHaveURL(new RegExp(`/continuations/${target}$`));
         await expect(page.getByTestId("chat-textarea")).toHaveValue(question);
-        await expect(page.getByTestId("review-context-handoff-notice")).toContainText("Some original context cannot be restored");
+        await expect(page.getByTestId("review-context-handoff-notice")).toContainText("original selected or retrieved excerpts cannot be verified");
         await expect(page.getByTestId("review-context-handoff-notice")).toContainText("Every selected model");
         expect(handoffBodies).toHaveLength(1);
         expect(Object.keys(handoffBodies[0]).sort()).toEqual(["assistantMessageId", "idempotencyKey"]);
@@ -2478,6 +2481,20 @@ test.describe("a continuation opens in its product's workspace", () => {
         expect(consumed).toHaveLength(0);
         await page.getByTestId("draft-conflict-overwrite-local").click();
         await expect.poll(() => draft?.text).toBe(localAfterConflict);
+        let referenceLocked = true;
+        let rejectedReferenceChecks = 0;
+        await page.route(`**/api/conversations/${target}/continuation?*`, route => {
+            if (!referenceLocked) return route.fallback();
+            rejectedReferenceChecks += 1;
+            return route.fulfill(json({ reviewHandoff: { ...preview, status: "unavailable", reason: "REVIEW_HANDOFF_PARENT_LOCKED" } }));
+        });
+        await page.getByTestId("chat-send-button").click();
+        await expect.poll(() => rejectedReferenceChecks).toBe(1);
+        await expect(page.getByTestId("chat-textarea")).toHaveValue(localAfterConflict);
+        expect(draft?.text).toBe(localAfterConflict);
+        expect(consumed).toHaveLength(0);
+        expect(api.chatRequests).toBe(0);
+        referenceLocked = false;
         await page.getByTestId("chat-send-button").click();
         await expect.poll(() => consumed.length).toBe(1);
         await expect.poll(() => api.chatRequests).toBe(1);
@@ -2545,6 +2562,21 @@ test.describe("a continuation opens in its product's workspace", () => {
         expect(api.chatRequests).toBe(0);
         expect(api.reviewForkBodies).toHaveLength(0);
         expect(api.createBodies).toHaveLength(0);
+    });
+
+    test("an ordinary Review continuation does not enable handoff recovery when its timeline fails", async ({ page }) => {
+        await prepareGuestPage(page, "en");
+        await mockAuthenticatedApi(page);
+        const api = await mockContinuationApi(page, { product: "review" });
+        let handoffDraftReads = 0;
+        page.on("request", request => { if (request.url().includes("/review-handoff/draft")) handoffDraftReads += 1; });
+        await page.route(`**/api/conversations/${CONVERSATION_ID}/continuation?*`, route => route.fulfill(json({ error: "Timeline temporarily unavailable" }, 503)));
+        await page.goto(`/continuations/${CONVERSATION_ID}`);
+        await page.getByTestId("chat-textarea").fill("An ordinary Review question");
+        await expect(page.getByTestId("review-context-handoff-notice")).toHaveCount(0);
+        await page.getByTestId("chat-send-button").click();
+        await expect.poll(() => api.chatRequests).toBe(1);
+        expect(handoffDraftReads).toBe(0);
     });
 
     test("a Review continuation is the Review workspace, with no Chat-only controls", async ({

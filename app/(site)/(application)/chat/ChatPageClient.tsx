@@ -151,6 +151,7 @@ import { ContinuationPassageCard } from "@/components/continuations/Continuation
 import { encodePassages, type Passage } from "@/lib/continuationPassages";
 import { useContinuationSource } from "@/components/continuations/useContinuationSource";
 import { useReviewContinuationDraftAccess, useReviewContinuationHandoff } from "@/components/continuations/useReviewContinuationHandoff";
+import { reviewHandoffReferencesAvailable } from "@/lib/reviewContinuationHandoffClient";
 import { reviewContinuationHandoffCopy } from "@/locales/reviewContinuationHandoff";
 import { useContinuationLauncher } from "@/components/imports/useContinuationLauncher";
 import { reviewPrefillHref } from "@/lib/chatReviewHandoff";
@@ -1216,11 +1217,13 @@ export function ChatPageClient({
     pendingCreatedDraftScope.identityKey === identityKey
       ? null
       : currentChatId;
-  const hasReviewHandoffMarker = routeSurface === "continuation" && mountedSurface === "workspace" &&
-    conversations.some(conversation => conversation.id === currentChatId && conversation.reviewHandoff === true);
+  const [confirmedReviewHandoff, setConfirmedReviewHandoff] = useState<{ identityKey: string | null; conversationId: string } | null>(null);
+  const hasReviewHandoffMarker = routeSurface === "continuation" && mountedSurface === "workspace" && (
+    (confirmedReviewHandoff?.identityKey === identityKey && confirmedReviewHandoff?.conversationId === currentChatId) ||
+    conversations.some(conversation => conversation.id === currentChatId && conversation.reviewHandoff === true));
   const reviewHandoffAccess = useReviewContinuationDraftAccess(
     identityKey,
-    routeSurface === "continuation" && mountedSurface === "workspace" ? currentChatId : null,
+    hasReviewHandoffMarker ? currentChatId : null,
     hasReviewHandoffMarker
   );
   const isReviewHandoff = Boolean(reviewHandoffAccess.preview) || hasReviewHandoffMarker;
@@ -3949,6 +3952,9 @@ export function ChatPageClient({
         // own guess and must not invalidate a request made against it.
         if (targetChatId) {
           conversationSettingsRevisionRef.current += 1;
+          setConfirmedReviewHandoff(data.reviewHandoff === true
+            ? { identityKey: identityNamespaceKey(identityNamespaceRef.current), conversationId: targetChatId }
+            : null);
           if (data.reviewHandoff === true) {
             setConversations(rows => rows.map(row => row.id === targetChatId ? { ...row, reviewHandoff: true as const } : row));
           }
@@ -6973,6 +6979,14 @@ export function ChatPageClient({
       */
       const imageTurnSend = (Boolean(imageTurn) && activeModelIds.length === 1) ||
         (Boolean(options?.imageTurnsByModel) && activeModelIds.every(id => Object.hasOwn(options!.imageTurnsByModel!, id)));
+      if (isReviewHandoff && activeModelIds.length === 1) {
+        const referencesAvailable = await reviewHandoffReferencesAvailable(activeChatId);
+        if (!chatSendIsCurrent()) return;
+        if (!referencesAvailable) {
+          showToast(reviewContinuationHandoffCopy.unavailable, "error");
+          return;
+        }
+      }
       const finishPreflight = preparation.stage("preflightMs");
       const preflight = (imageTurnSend || options?.researchMode === "preview")
         ? { allowed: true as const, admissionToken: null, contextBundle: null }

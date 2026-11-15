@@ -6,7 +6,7 @@ export const reviewContinuationHandoffCopy = {
     `${nativeOmittedCount} earlier Chat messages are outside this comparison's context limit.`,
   sourceOmitted: (sourceOmittedCount: number) =>
     `${sourceOmittedCount} imported messages are outside this comparison's context limit.`,
-  legacy: "Some original context cannot be restored. Past selected or retrieved excerpts are unavailable; recent source excerpts are used instead.",
+  legacy: "This answer has no recorded source excerpts. Recent imported messages are reconstructed; the original selected or retrieved excerpts cannot be verified.",
   multiModel: "Every selected model receives the same references after you press Send.",
   preparing: "Preparing a new Review draft…",
   attachmentsUnsupported: "Comparisons that need attachments are not supported yet.",

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseReviewHandoffPreview, reviewHandoffAttemptFor, reviewHandoffDraftEndpoint } from "../lib/reviewContinuationHandoffClient.ts";
+import { parseReviewHandoffPreview, reviewHandoffAttemptFor, reviewHandoffDraftEndpoint, reviewHandoffReferencesAvailable } from "../lib/reviewContinuationHandoffClient.ts";
 
 test("a lost answer handoff retries its key, changing anchors starts a new attempt", () => {
   let next = 0;
@@ -23,4 +23,18 @@ test("preview allowlists counts and availability without retaining reference con
   assert.equal(parseReviewHandoffPreview({ ...preview, sourceMode: "exact-replay" }), null);
   assert.equal(parseReviewHandoffPreview({ ...preview, status: "unknown" }), null);
   assert.equal(reviewHandoffDraftEndpoint("target"), "/api/conversations/target/continuation/review-handoff/draft");
+});
+
+test("single-model handoff validation requires current explicit available metadata", async () => {
+  const preview = { status: "available", sourceMode: "recorded", nativeTurnCount: 2, nativeOmittedCount: 0,
+    sourceTurnCount: 3, sourceOmittedCount: 0, attachmentsSupported: false };
+  const requests = [];
+  const successful = async (url, options) => { requests.push({ url, options }); return Response.json({ reviewHandoff: preview }); };
+  assert.equal(await reviewHandoffReferencesAvailable("target", successful), true);
+  assert.deepEqual(requests, [{ url: "/api/conversations/target/continuation?offset=end&limit=1", options: { cache: "no-store" } }]);
+  for (const reviewHandoff of [{ ...preview, status: "unavailable" }, { ...preview, status: undefined }, null]) {
+    assert.equal(await reviewHandoffReferencesAvailable("target", async () => Response.json({ reviewHandoff })), false);
+  }
+  assert.equal(await reviewHandoffReferencesAvailable("target", async () => Response.json({ reviewHandoff: preview }, { status: 403 })), false);
+  assert.equal(await reviewHandoffReferencesAvailable("target", async () => { throw new Error("Network unavailable"); }), false);
 });

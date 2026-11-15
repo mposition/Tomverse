@@ -39,3 +39,15 @@ export function parseReviewHandoffPreview(value: unknown): ReviewHandoffPreview 
 
 export const reviewHandoffDraftEndpoint = (conversationId: string) =>
   `/api/conversations/${encodeURIComponent(conversationId)}/continuation/review-handoff/draft`;
+
+/** Revalidate references before a single-model send consumes its editable draft. */
+export async function reviewHandoffReferencesAvailable(conversationId: string, fetcher: typeof fetch = fetch): Promise<boolean> {
+  try {
+    const response = await fetcher(`/api/conversations/${encodeURIComponent(conversationId)}/continuation?offset=end&limit=1`, { cache: "no-store" });
+    const body = await response.json().catch(() => null);
+    return response.ok && body?.reviewHandoff?.status === "available" &&
+      parseReviewHandoffPreview(body.reviewHandoff)?.status === "available";
+  } catch {
+    return false;
+  }
+}

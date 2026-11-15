@@ -545,8 +545,17 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     sendReview: async (conversation, text, files, signal, progress, draft) => {
       // Match the ordinary message persistence route before pricing its query.
       const prompt = draft ? text : text.trim();
+      const handoffTarget = conversation.productKey === "review" && Boolean(conversation.reviewHandoff ?? conversation.imported?.reviewHandoff);
+      const handoffSessionRevision = handoffTarget ? sessionRevision : null;
       let admission: { admissionToken: string; contextBundle?: string } | undefined;
-      try { if (conversation.selectedModels.length > 1) {
+      try {
+        if (handoffTarget && conversation.selectedModels.length === 1) {
+          // The existing source loader validates both resources and every linked
+          // reference before a single-model send can consume its editable draft.
+          const context = await request<{ reviewHandoff?: { status?: string } }>(`${pathFor(conversation.id)}/continuation?limit=1&offset=end`, { signal });
+          if (context.reviewHandoff?.status !== "available") throw new ApiClientError(409, "REVIEW_HANDOFF_UNAVAILABLE");
+        }
+        if (conversation.selectedModels.length > 1) {
         await requireParity();
         const input = { comparisonId: Date.now().toString(), conversationId: conversation.id, modelIds: conversation.selectedModels, prompt, attachments: files.map(file => ({ mediaType: file.mediaType, size: file.size })), webSearchMode: conversation.webSearchMode ?? "off" };
         for (let attempt = 0; attempt < 2; attempt++) {
@@ -571,6 +580,9 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
           }
         }
       } } catch (error) { throw Object.assign(error instanceof Error ? error : new Error("COMPARISON_PREFLIGHT_FAILED"), { questionPersisted: false }); }
+      if (handoffTarget && handoffSessionRevision !== sessionRevision) {
+        throw Object.assign(new DOMException("Session changed", "AbortError"), { questionPersisted: false });
+      }
       if (signal.aborted) throw new DOMException("Stopped", "AbortError");
       const { persisted, sourceId } = await persistQuestion(conversation, prompt, files, signal, draft);
       const outcomes = await Promise.allSettled(persisted.selectedModels.map(modelId =>

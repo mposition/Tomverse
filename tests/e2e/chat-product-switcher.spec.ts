@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { mockReviewHandoffBackground } from "./support/review-handoff-background-fixtures";
 
 import {
   expectNoHorizontalOverflow,
@@ -54,6 +55,7 @@ async function openProductSwitcher(page: Page) {
 
 test.describe("Tomverse Chat and Review product switcher", () => {
   test.beforeEach(async ({ page }) => {
+    await mockReviewHandoffBackground(page);
     await prepareGuestPage(page, "en");
     await mockAuthenticatedApi(page, { autoSelectionOffered: true });
     await page.route("**/api/products/chat/capabilities", async (route) => {
@@ -260,6 +262,7 @@ test.describe("Tomverse Chat and Review product switcher", () => {
 
 test.describe("Guest Chat and Review product entry", () => {
   test("a guest switches directly between products and retains each idle draft", async ({ page }) => {
+    await mockReviewHandoffBackground(page);
     await prepareGuestPage(page, "en");
     const writes: string[] = [];
     page.on("request", (request) => {

@@ -40,7 +40,7 @@ test("continuation Compare opens a bound long draft, preserves other drafts, rel
   const draft = page.locator(".review-workspace textarea");
   await expect(draft).toHaveValue(question);
   await expect(page.getByTestId("review-handoff-context")).toContainText("selected answer is excluded");
-  await expect(page.getByTestId("review-handoff-context")).toContainText("Some original context cannot be restored");
+  await expect(page.getByTestId("review-handoff-context")).toContainText("This answer has no recorded source excerpts");
   const target = await page.evaluate(storage => JSON.parse(localStorage.getItem(storage)!).find((row: { productKey?: string }) => row.productKey === "review"), storage);
   expect(target.messages).toEqual([]);
   expect(JSON.stringify(target)).not.toContain("Kyoto with AUD 1,500");

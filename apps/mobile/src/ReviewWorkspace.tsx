@@ -200,7 +200,7 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
       }).catch(() => { /* Preserve the stored title on background generation failure. */ });
     } catch (error) {
       const beforePersistence = (error as { questionPersisted?: boolean }).questionPersisted === false;
-      if (current === request.current) { setError(mobileErrorText(error, language, copy.error)); setUncertain(dispatched && !beforePersistence); if (beforePersistence) setConversation(item); }
+      if (current === request.current) { setError(handoff && (error as { code?: string }).code === "REVIEW_HANDOFF_UNAVAILABLE" ? handoffCopy.unavailable : mobileErrorText(error, language, copy.error)); setUncertain(dispatched && !beforePersistence); if (beforePersistence) setConversation(item); }
       if (beforePersistence) dispatched = false;
       if (current === request.current) setPartial(previous => Object.fromEntries(Object.entries(previous).filter(([, text]) => text)));
       if (beforePersistence || !dispatched) return false;
