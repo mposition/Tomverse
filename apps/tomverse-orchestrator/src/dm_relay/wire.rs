@@ -81,7 +81,7 @@ pub const DM_RESULT_LINE_MAX_BYTES: usize = 2 * 1024 * 1024;
 /// `MAX_BODY_BYTES` of app/api/internal/amux/decision-maker/results/route.ts.
 /// A larger body is refused before the store and records nothing, so the
 /// relay does not send one (it records the result as unknown instead).
-pub const DM_RESULT_BODY_MAX_BYTES: usize = 256 * 1024;
+pub const DM_RESULT_BODY_MAX_BYTES: usize = 1152 * 1024;
 
 // ---------------------------------------------------------------------------
 // Identifier grammars (lib/amux/decisionMakerRequestCore.ts, decisionMakerCore.ts)

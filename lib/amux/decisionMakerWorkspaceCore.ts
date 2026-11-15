@@ -103,7 +103,7 @@ export const DM_WORKSPACE_PATCH_NAME: DmWorkspaceEvidenceName = "PATCH.diff";
 export type DmWorkspaceFile = { name: DmWorkspaceEvidenceName; text: string };
 
 /** Why an evidence file was left out. Counted, never named or shown. */
-export const DM_WORKSPACE_EXCLUSIONS = ["name_refused", "repeated", "not_text", "secret_path", "secret_content", "too_large"] as const;
+export const DM_WORKSPACE_EXCLUSIONS = ["name_refused", "repeated", "not_text", "secret_path", "secret_content", "too_large", "unreadable"] as const;
 export type DmWorkspaceExclusion = (typeof DM_WORKSPACE_EXCLUSIONS)[number];
 
 /** Git's blob id of these bytes. */

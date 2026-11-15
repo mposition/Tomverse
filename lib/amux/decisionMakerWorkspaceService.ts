@@ -140,18 +140,28 @@ const openCriteria = async (row: SealedBody & SealedResult) => {
  */
 export async function openDecisionMakerWorkspaceEvidence(source: DmWorkspaceSource): Promise<DmWorkspaceEvidence | null> {
   if (!amuxDmWorkspaceEnabled()) return null;
-  const files: Array<{ name: DmWorkspaceEvidenceName; text: string | null }> = [];
+  // `required`: the card points at this file, so one that cannot be read is
+  // counted as left out (`unreadable`), and the bridge then sends nothing --
+  // a DM never judges a card without the evidence it names.
+  const files: Array<{ name: DmWorkspaceEvidenceName; text: string | null; required: boolean }> = [];
   let targetSha: string | null = null;
   if (source.kind === "t2_draft") {
-    files.push({ name: "PATCH.diff", text: source.patchBody });
+    files.push({ name: "PATCH.diff", text: source.patchBody, required: true });
     targetSha = source.baseSha && isSnapshotTargetSha(source.baseSha) ? source.baseSha : null;
   } else if (source.kind === "settlement" || source.kind === "result_review") {
     const criteria = await openCriteria(source);
-    files.push({ name: "CRITERIA.md", text: criteria ? criteria.map((criterion) => `- ${criterion}`).join("\n") : null });
-    files.push({ name: "FINDINGS.md", text: await openFindings(source) });
-    if (source.kind === "settlement") files.push({ name: "PATCH.diff", text: source.pullPatch });
+    files.push({ name: "CRITERIA.md", text: criteria ? criteria.map((criterion) => `- ${criterion}`).join("\n") : null,
+      required: true });
+    // A settlement whose Task never ran has no result row; one whose row exists must open.
+    files.push({ name: "FINDINGS.md", text: await openFindings(source),
+      required: source.kind === "result_review" || source.resultIdeaId !== null });
+    if (source.kind === "settlement") {
+      files.push({ name: "PATCH.diff", text: source.pullPatch, required: source.settlementKind === "t2_pr" });
+    }
   }
   const accepted = dmWorkspaceAcceptFiles(files.flatMap((file) =>
     file.text ? [{ name: file.name, bytes: Buffer.from(file.text, "utf8") }] : []));
-  return { targetSha, files: accepted.files, excluded: accepted.excluded };
+  const unreadable = files.filter((file) => file.required && !file.text).length;
+  return { targetSha, files: accepted.files,
+    excluded: unreadable > 0 ? { ...accepted.excluded, unreadable } : accepted.excluded };
 }
