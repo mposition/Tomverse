@@ -193,3 +193,37 @@ test("a draft refused for an unbounded thinking cost offers the billing measurem
   assert.doesNotMatch(renderToStaticMarkup(<ImageModelDetail m={ko} item={wan} {...props} />), /model-catalog-measure-open/);
   assert.doesNotMatch(renderToStaticMarkup(<ImageModelDetail m={ko} item={qwen} {...props} onMeasure={noop} />), /model-catalog-measure-open/);
 });
+
+test("a served image model shows its routing note for editing; an unresolved row has none to write", () => {
+  // Owner request 2026-11-15: the image router picks by fit, so the operator
+  // writes what each model is good and bad at on the model's own screen.
+  const note = "Best for: posters with text; weaker at: speed.";
+  const [pending, served] = imageCatalogItems({
+    models: [
+      {
+        id: "gpt-image-2",
+        name: "GPT Image 2",
+        provider: "openai",
+        source: "code",
+        routingNote: note,
+        enabled: null,
+        holdReason: null,
+        disabledReason: null,
+        pricingVersion: "gpt-image-2-v3",
+        admissionIfEnabled: { admitted: true },
+        draft: null,
+      },
+    ],
+    pending: [
+      { modelId: "wan2.7-image", profile: { provider: "qwen", apiModelId: "wan2.7-image", name: "Wan 2.7 Image" }, draft: null, problem: "no_price_revision" },
+    ],
+  });
+  assert.equal(served.routingNote, note);
+  assert.equal(pending.routingNote, null);
+  const props = { edits: {}, drafting: null, onBack: noop, onEdit: noop, onResetEdits: noop, onApply: noop, onAction: noop, onHold: noop, onRename: async () => true, onRoutingNote: async () => true };
+  const detail = renderToStaticMarkup(<ImageModelDetail m={ko} item={served} {...props} />);
+  assert.match(detail, /data-testid="model-catalog-routing-note-form"/);
+  assert.match(detail, />라우팅 노트</);
+  assert.ok(detail.includes(note));
+  assert.doesNotMatch(renderToStaticMarkup(<ImageModelDetail m={ko} item={pending} {...props} />), /model-catalog-routing-note/);
+});

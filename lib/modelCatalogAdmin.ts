@@ -28,6 +28,7 @@ import {
   imageFullProfileSchema,
   imagePriceListSchema,
   imageProfileOverrideSchema,
+  imageRoutingNoteSchema,
   imageVerificationSchema,
   isOfficialSourceUrl,
   judgeImageModel,
@@ -38,6 +39,7 @@ import {
   STORED_CATALOG_CATEGORIES,
   type StoredCatalogCategory,
 } from "@/lib/modelCatalogCore";
+import { IMAGE_USE_CASES, type ImageUseCase } from "@/lib/runtimeImageProviders";
 import { prisma } from "@/lib/prisma";
 
 export class CatalogRefusal extends Error {
@@ -62,6 +64,14 @@ export const catalogEntryPatchSchema = z
      * profile. The name is not part of the request, so a priced model takes it.
      */
     name: z.string().trim().min(1).max(80).optional(),
+    /**
+     * An image model's router note (what it is good and bad at), written into
+     * the stored profile the same way as the name. Null removes it. It is not
+     * part of the request either, so a priced model takes it.
+     */
+    routingNote: imageRoutingNoteSchema.nullable().optional(),
+    /** What the model is for, shown to users under its name. Written like the name; null removes it. */
+    useCase: z.enum(IMAGE_USE_CASES).nullable().optional(),
   })
   .strict();
 export type CatalogEntryPatch = z.infer<typeof catalogEntryPatchSchema>;
@@ -86,20 +96,35 @@ const validateProfile = (category: StoredCatalogCategory, modelId: string, profi
 };
 
 /**
- * The stored image profile with only its name changed. A code model's row holds
- * an override (an empty one is fine); a runtime model's must already be a whole
- * profile, since a name alone does not say what to call.
+ * The stored image profile with only its name or router note changed. A code
+ * model's row holds an override (an empty one is fine); a runtime model's must
+ * already be a whole profile, since a label alone does not say what to call.
  */
-const renamedImageProfile = (modelId: string, stored: unknown, name: string) => {
+const relabelledImageProfile = (
+  modelId: string,
+  stored: unknown,
+  labels: { name?: string; routingNote?: string | null; useCase?: ImageUseCase | null }
+) => {
+  const apply = <T extends { name?: string; routingNote?: string; useCase?: ImageUseCase }>(profile: T) => {
+    const { routingNote: storedNote, useCase: storedUseCase, ...rest } = profile;
+    const routingNote = labels.routingNote === undefined ? storedNote : labels.routingNote;
+    const useCase = labels.useCase === undefined ? storedUseCase : labels.useCase;
+    return {
+      ...rest,
+      ...(labels.name === undefined ? {} : { name: labels.name }),
+      ...(routingNote === null || routingNote === undefined ? {} : { routingNote }),
+      ...(useCase === null || useCase === undefined ? {} : { useCase }),
+    };
+  };
   if (IMAGE_MODEL_REGISTRY.some((model) => model.id === modelId)) {
     const current = stored === null || stored === undefined ? {} : stored;
     const parsed = imageProfileOverrideSchema.safeParse(current);
     if (!parsed.success) throw new CatalogRefusal("invalid_profile", ["stored_override"], 409);
-    return validateProfile("image", modelId, { ...parsed.data, name });
+    return validateProfile("image", modelId, apply(parsed.data));
   }
   const parsed = imageFullProfileSchema.safeParse(stored);
   if (!parsed.success) throw new CatalogRefusal("invalid_profile", ["no_saved_profile"], 409);
-  return validateProfile("image", modelId, { ...parsed.data, name });
+  return validateProfile("image", modelId, apply(parsed.data));
 };
 
 /** Would this image model serve if `enabled: true` were written? */
@@ -146,7 +171,8 @@ export const updateCatalogEntry = async (input: {
 }) => {
   const { category, modelId, patch, session } = input;
   if (!MODEL_ID_PATTERN.test(modelId)) throw new CatalogRefusal("invalid_model_id", [], 400);
-  if (patch.name !== undefined && (category !== "image" || "profile" in patch)) {
+  const relabels = patch.name !== undefined || patch.routingNote !== undefined || patch.useCase !== undefined;
+  if (relabels && (category !== "image" || "profile" in patch)) {
     throw new CatalogRefusal("invalid_patch", [category !== "image" ? "name_is_image_only" : "name_with_profile"], 400);
   }
   const profileInput = "profile" in patch ? validateProfile(category, modelId, patch.profile) : undefined;
@@ -162,8 +188,10 @@ export const updateCatalogEntry = async (input: {
     const before = await tx.modelCatalogEntry.findUnique({
       where: { category_modelId: { category, modelId } },
     });
-    // A rename keeps every other field of the stored profile.
-    const profile = patch.name === undefined ? profileInput : renamedImageProfile(modelId, before?.profile, patch.name);
+    // A rename or a new router note keeps every other field of the stored profile.
+    const profile = relabels
+      ? relabelledImageProfile(modelId, before?.profile, { name: patch.name, routingNote: patch.routingNote, useCase: patch.useCase })
+      : profileInput;
     const next = {
       enabled: patch.enabled === undefined ? (before?.enabled ?? null) : patch.enabled,
       holdReason: patch.holdReason === undefined ? (before?.holdReason ?? null) : patch.holdReason,

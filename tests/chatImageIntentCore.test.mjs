@@ -5,6 +5,8 @@ import {
   CHAT_IMAGE_INTENT_MAX_PROMPT_CHARS,
   CHAT_IMAGE_INTENT_MAX_REWRITE_CHARS,
   CHAT_IMAGE_INTENT_SYSTEM,
+  IMAGE_SPEED_MIN_SAMPLES,
+  typicalImageSeconds,
   chatImageIntentOutputSchema,
   chatImageIntentPrompt,
   chatImageIntentUserMessage,
@@ -16,6 +18,8 @@ import {
 } from "../lib/chatImageIntentCore.ts";
 import { askChatImageIntent, askChatImageTurn } from "../lib/chatImageIntentClient.ts";
 import { IMAGE_MODEL_REGISTRY } from "../lib/imageModelRegistry.ts";
+import { imageRoutingNoteSchema } from "../lib/modelCatalogCore.ts";
+import { IMAGE_ROUTING_NOTE_MAX_CHARS } from "../lib/runtimeImageProviders.ts";
 
 const price = (quality, size, credits) => ({
   quality,
@@ -104,11 +108,70 @@ test("the schema requires the decision, a listed model and a preset", () => {
   });
 });
 
-test("the instructions triage by complexity and keep code graphics in chat", () => {
+test("the instructions pick by fit, then speed, then price, and keep code graphics in chat", () => {
   assert.match(CHAT_IMAGE_INTENT_SYSTEM, /SVG/);
   assert.match(CHAT_IMAGE_INTENT_SYSTEM, /When unsure, answer image=false/);
-  assert.match(CHAT_IMAGE_INTENT_SYSTEM, /cheaper or faster model/);
-  assert.match(CHAT_IMAGE_INTENT_SYSTEM, /stronger, pricier model/);
+  assert.match(CHAT_IMAGE_INTENT_SYSTEM, /by fit first, speed second and price third/);
+  assert.match(CHAT_IMAGE_INTENT_SYSTEM, /between models that fit about equally, pick the clearly faster one/);
+  assert.match(CHAT_IMAGE_INTENT_SYSTEM, /only between models that fit about equally and take about as long, pick the one with fewer credits/);
+  // Price alone must not decide: that sent every request to one provider.
+  assert.doesNotMatch(CHAT_IMAGE_INTENT_SYSTEM, /choose the cheapest model/);
+  const fit = CHAT_IMAGE_INTENT_SYSTEM.indexOf("whose note fits the request best");
+  const speed = CHAT_IMAGE_INTENT_SYSTEM.indexOf("clearly faster one");
+  const price = CHAT_IMAGE_INTENT_SYSTEM.indexOf("fewer credits");
+  assert.ok(fit > 0 && fit < speed && speed < price);
+});
+
+test("a model's routing note reaches the call on its line; a model without one is listed as before", () => {
+  const noted = chatImageModelCandidates([
+    { ...models[0], routingNote: "  Best for: posters with text; weaker at: speed.  " },
+    models[1],
+    { ...models[1], id: "blank", routingNote: "   " },
+  ]);
+  assert.equal(noted.length, 3);
+  assert.equal(noted[0].note, "Best for: posters with text; weaker at: speed.");
+  assert.ok(noted.slice(1).every((candidate) => !("note" in candidate)));
+  const message = chatImageIntentUserMessage("draw a poster", noted);
+  assert.match(
+    message,
+    /- strong \(Strong Image; slow\): draft 15, standard 70, final 250 -- Best for: posters with text; weaker at: speed\.\n/
+  );
+  assert.match(message, /- quick \(Quick Image; fast\): standard 30\n/);
+});
+
+test("a model with enough finished generations shows how long they took; others show their band alone", () => {
+  // Owner decision 2026-11-15: fit, then speed, then price. The band of a
+  // runtime model is the add form's default, so the comparison uses what
+  // users actually waited.
+  const at = (seconds) => ({ startedAt: new Date(0), completedAt: new Date(seconds * 1000) });
+  const typical = typicalImageSeconds([
+    ...[9, 11, 400].map((seconds) => ({ modelId: "strong", ...at(seconds) })),
+    ...[4, 6].map((seconds) => ({ modelId: "quick", ...at(seconds) })),
+    { modelId: "strong", startedAt: null, completedAt: new Date(5_000) },
+    { modelId: "strong", startedAt: new Date(9_000), completedAt: new Date(5_000) },
+  ]);
+  // The median, so one stuck request does not make a model look slow; two runs say too little.
+  assert.deepEqual(typical, { strong: 11 });
+  assert.equal(IMAGE_SPEED_MIN_SAMPLES, 3);
+  assert.deepEqual(
+    typicalImageSeconds([10, 20, 30, 40].map((seconds) => ({ modelId: "even", ...at(seconds) }))),
+    { even: 25 }
+  );
+
+  const timed = chatImageModelCandidates(models, { ...typical, quick: Number.NaN, held: 3 });
+  assert.equal(timed[0].seconds, 11);
+  assert.ok(!("seconds" in timed[1]));
+  const message = chatImageIntentUserMessage("draw", timed);
+  assert.match(message, /- strong \(Strong Image; slow, typically 11s\): draft 15/);
+  assert.match(message, /- quick \(Quick Image; fast\): standard 30/);
+});
+
+test("every seed routing note is one line within the router's limit", () => {
+  const notes = IMAGE_MODEL_REGISTRY.flatMap((model) => (model.routingNote ? [model.routingNote] : []));
+  assert.ok(notes.length >= 1);
+  for (const note of notes) assert.equal(imageRoutingNoteSchema.safeParse(note).success, true, note);
+  assert.equal(imageRoutingNoteSchema.safeParse("two\nlines").success, false);
+  assert.equal(imageRoutingNoteSchema.safeParse("x".repeat(IMAGE_ROUTING_NOTE_MAX_CHARS + 1)).success, false);
 });
 
 test("a valid image answer keeps the triaged model and preset", () => {
