@@ -242,6 +242,8 @@ type ChatAppProps = {
    */
   otherPanelModelIds?: readonly string[];
   onRestorePrompt?: (prompt: ChatRecoveryPrompt) => void;
+  /** Chat: send a failed reply's question again without touching the draft. */
+  onRetryPrompt?: (prompt: ChatRecoveryPrompt) => void;
   /** Chat: open a Review draft prefilled from one answer's question. */
   onCompareInReview?: (seed: string) => void;
   initialConversationId?: string | null;
@@ -485,6 +487,7 @@ function ChatAppComponent({
   reviewProvider,
   otherPanelModelIds,
   onRestorePrompt,
+  onRetryPrompt,
   onCompareInReview,
   initialConversationId = null,
   sendEcho = null,
@@ -2793,6 +2796,17 @@ function ChatAppComponent({
     if (prompt) onRestorePrompt(prompt);
   }, [initialConversationId, onRestorePrompt, transcriptScope]);
 
+  const handleRetryQuestion = useCallback((assistantMessageId: string) => {
+    if (transcriptScope !== "conversation" || !onRetryPrompt ||
+        isChatRuntimeStreaming(runtimeKeyRef.current)) return;
+    const prompt = recoveryPromptForMessage(
+      getChatRuntimeSnapshot(runtimeKeyRef.current).messages,
+      assistantMessageId,
+      initialConversationId
+    );
+    if (prompt && prompt.attachments.length === 0) onRetryPrompt(prompt);
+  }, [initialConversationId, onRetryPrompt, transcriptScope]);
+
   /**
    * Sends a concurrency-refused question again, in place of the refused turn.
    *
@@ -3328,6 +3342,10 @@ function ChatAppComponent({
         }
         onRestoreQuestion={transcriptScope === "conversation" && onRestorePrompt
           ? handleRestoreQuestion : undefined}
+        onRetryQuestion={transcriptScope === "conversation" && onRetryPrompt
+          ? handleRetryQuestion : undefined}
+        // In Chat the shell's close-model handler opens the model picker.
+        onChooseAnotherModel={transcriptScope === "conversation" ? onRequestCloseModel : undefined}
         // Built from this transcript, which is the one on screen.
         onCompareInReview={transcriptScope === "conversation" && onCompareInReview
           ? (messageId) => {
