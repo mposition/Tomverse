@@ -112,7 +112,7 @@ export async function POST(request: Request) {
                 where: { id: conversationId },
                 select: {
                     userId: true,
-                    password: true,
+                    password: true, passwordVersion: true,
                     kind: true,
                     memoryMode: true,
                     assistantProfileVersionId: true,
@@ -133,7 +133,7 @@ export async function POST(request: Request) {
                     request,
                     userId,
                     conversationId,
-                    conversation.password
+                    conversation.password == null ? null : conversation.passwordVersion
                 )
             ) {
                 return conversationLockedResponse();

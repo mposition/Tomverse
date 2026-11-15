@@ -19,14 +19,14 @@ test('old servers receive no history writes or searches and do not destroy a val
   assert.deepEqual(calls,['/api/products/mobile/capabilities']);assert.equal(lost,0);
 });
 test('native unlocks remain owner, conversation, password and resource-bound; bearer never borrows cookies',()=>{
-  const cookie=createConversationUnlockCookie('owner','c','stored-hash');const token=cookie.split(';')[0].split('=')[1];
+  const cookie=createConversationUnlockCookie('owner','c',0);const token=cookie.split(';')[0].split('=')[1];
   const headers={authorization:'Bearer fixture','X-Tomverse-Conversation-Unlocks':`c=${token}`};const request=new Request('https://tomverse.app/api/conversations/c',{headers});
-  assert.equal(hasConversationUnlockGrant(request,'owner','c','stored-hash'),true);
-  for(const [owner,id,password] of [['other','c','stored-hash'],['owner','other','stored-hash'],['owner','c','new-hash']])assert.equal(hasConversationUnlockGrant(request,owner,id,password),false);
-  assert.equal(hasResourceUnlockGrant('external',request,'owner','c','stored-hash'),false);
-  assert.equal(hasConversationUnlockGrant(new Request('https://tomverse.app',{headers:{authorization:'Bearer fixture',cookie}}),'owner','c','stored-hash'),false);
-  assert.equal(hasConversationUnlockGrant(new Request('https://tomverse.app',{headers:{'X-Tomverse-Conversation-Unlocks':`c=${token}`}}),'owner','c','stored-hash'),false);
-  assert.equal(hasConversationUnlockGrant(new Request('https://tomverse.app',{headers:{...headers,'X-Tomverse-Conversation-Unlocks':'x'.repeat(8193)}}),'owner','c','stored-hash'),false);
+  assert.equal(hasConversationUnlockGrant(request,'owner','c',0),true);
+  for(const [owner,id,password] of [['other','c',0],['owner','other',0],['owner','c',1]])assert.equal(hasConversationUnlockGrant(request,owner,id,password),false);
+  assert.equal(hasResourceUnlockGrant('external',request,'owner','c',0),false);
+  assert.equal(hasConversationUnlockGrant(new Request('https://tomverse.app',{headers:{authorization:'Bearer fixture',cookie}}),'owner','c',0),false);
+  assert.equal(hasConversationUnlockGrant(new Request('https://tomverse.app',{headers:{'X-Tomverse-Conversation-Unlocks':`c=${token}`}}),'owner','c',0),false);
+  assert.equal(hasConversationUnlockGrant(new Request('https://tomverse.app',{headers:{...headers,'X-Tomverse-Conversation-Unlocks':'x'.repeat(8193)}}),'owner','c',0),false);
 });
 test('proof is sent only to conversation APIs and is cleared before logout',async()=>{
   const token=`${Math.floor(Date.now()/1000)+600}.fingerprint.signature`;const calls=[];

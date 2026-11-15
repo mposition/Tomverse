@@ -73,7 +73,7 @@ export async function GET(req: Request) {
     // copy of a shared conversation and is allowed to reach 5 MB
     // (MAX_SHARE_SNAPSHOT_BYTES), and `password`, the lock hash. Neither is
     // returned: the snapshot was dropped on the floor and the hash was blanked
-    // at the response layer with `password: undefined`, one line away from
+    // at the response layer with `password: undefined, passwordVersion: undefined`, one line away from
     // being emitted by a later edit.
     //
     // Withholding a column is a property of the query, not of the mapping over
@@ -105,7 +105,7 @@ export async function GET(req: Request) {
         shareExpiresAt: true,
         // Read to derive `isLocked`, never emitted. Selecting it is the point
         // at which that decision is visible.
-        password: true,
+        password: true, passwordVersion: true,
         // Whether this row opens at its own surface rather than in the
         // workspace (docs/policy/external-conversation-continuation.md §8.2).
         // Selected as a relation existence check, not a join of the bridge's
@@ -143,7 +143,7 @@ export async function GET(req: Request) {
               query already treats the conversation's own password.
             */
             externalConversation: {
-              select: { title: true, password: true },
+              select: { title: true, password: true, passwordVersion: true },
             },
             /*
               For the name a row gets when the source cannot give one, and
@@ -275,7 +275,7 @@ export async function DELETE(req: Request) {
 
     const conversations = await prisma.conversation.findMany({
       where: { userId },
-      select: { id: true, password: true },
+      select: { id: true, password: true, passwordVersion: true },
     });
     const inaccessibleLockedConversation = conversations.find(
       (conversation) =>
@@ -284,7 +284,7 @@ export async function DELETE(req: Request) {
           req,
           userId,
           conversation.id,
-          conversation.password
+          conversation.password == null ? null : conversation.passwordVersion
         )
     );
     if (inaccessibleLockedConversation) {

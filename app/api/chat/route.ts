@@ -1924,7 +1924,7 @@ async function handleChatPost(
                       // a miss here simply reads as "not an Auto conversation".
                       where: { id: conversationId, userId: session.user.id },
                       select: {
-                          ...(contextBundle || wantsFusion ? { password: true, kind: true, memoryMode: true, assistantProfileVersionId: true } : {}),
+                          ...(contextBundle || wantsFusion ? { password: true, passwordVersion: true, kind: true, memoryMode: true, assistantProfileVersionId: true } : {}),
                           ...(wantsFusion ? {
                               selectedModels: true, disabledPanels: true, chatRecoveryEpoch: true,
                               messages: fusionHead,
@@ -2409,7 +2409,7 @@ async function handleChatPost(
             ? async () => {
                 // The earlier routing row is owner-scoped. Do not inspect memory
                 // or profile knowledge for a locked or non-Chat conversation.
-                if (!hasConversationUnlockGrant(req, ownerIdForContext, conversationId, conversationRouting.password ?? null)) {
+                if (!hasConversationUnlockGrant(req, ownerIdForContext, conversationId, conversationRouting.password == null ? null : conversationRouting.passwordVersion)) {
                     earlyContextRefusal = conversationLockedResponse();
                     return false;
                 }
@@ -2436,7 +2436,7 @@ async function handleChatPost(
         if (wantsFusion && conversationId && sourceUserMessageId && assistantMessageId && session?.user?.id) {
             const userId = session.user.id;
             if (!conversationRouting) throw routerLocationRefused();
-            if (!hasConversationUnlockGrant(req, userId, conversationId, conversationRouting.password ?? null)) return conversationLockedResponse();
+            if (!hasConversationUnlockGrant(req, userId, conversationId, conversationRouting.password == null ? null : conversationRouting.passwordVersion)) return conversationLockedResponse();
             if (resumeToken === undefined && conversationRouting.routerLocationPreparations?.length) throw routerLocationRefused();
             if (!deterministicAutoSelection.routed || !(existingFusion ? autoTextTurnEligible : autoImageTurnEligible) ||
                 !isChatConversationKind(conversationRouting.kind)) return refuseFusion();
@@ -3030,7 +3030,7 @@ async function handleChatPost(
                 where: { id: conversationId },
                 select: {
                     userId: true,
-                    password: true,
+                    password: true, passwordVersion: true,
                     selectedModels: true,
                     kind: true,
                     memoryMode: true,
@@ -3063,7 +3063,7 @@ async function handleChatPost(
                     req,
                     session.user.id,
                     conversationId,
-                    conversation.password
+                    conversation.password == null ? null : conversation.passwordVersion
                 )
             ) {
                 return conversationLockedResponse();

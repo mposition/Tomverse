@@ -113,6 +113,7 @@ type OwnedSnapshot = {
     digestVersion: number;
     messageCount: number;
     password: string | null;
+    passwordVersion: number;
     finalized: boolean;
 };
 
@@ -144,7 +145,7 @@ async function loadUnlockedSnapshot(
             conversationDigest: true,
             digestVersion: true,
             messageCount: true,
-            password: true,
+            password: true, passwordVersion: true,
             finalized: true,
         },
     });
@@ -157,7 +158,7 @@ async function loadUnlockedSnapshot(
             request,
             userId,
             row.id,
-            row.password
+            row.password == null ? null : row.passwordVersion
         )
     ) {
         throw new ConversationLockError(
@@ -586,7 +587,7 @@ export async function getContinuationTimeline(
             id: true,
             title: true,
             messageCount: true,
-            password: true,
+            password: true, passwordVersion: true,
         },
     });
     if (!snapshot) {
@@ -609,7 +610,7 @@ export async function getContinuationTimeline(
             options.request,
             userId,
             snapshot.id,
-            snapshot.password
+            snapshot.password == null ? null : snapshot.passwordVersion
         )
     ) {
         return { ...base, source: { status: "locked" } };
@@ -784,7 +785,7 @@ export async function loadContinuationTurnSeed(input: {
             userId: input.userId,
             finalized: true,
         },
-        select: { id: true, messageCount: true, password: true },
+        select: { id: true, messageCount: true, password: true, passwordVersion: true },
     });
     // The foreign key still names a row this account cannot read. Reported as
     // deleted rather than as its own reason: to the owner it is the same fact,
@@ -797,7 +798,7 @@ export async function loadContinuationTurnSeed(input: {
             input.request,
             input.userId,
             snapshot.id,
-            snapshot.password
+            snapshot.password == null ? null : snapshot.passwordVersion
         )
     ) {
         return { seed: null, outcome: "locked" };

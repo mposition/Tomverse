@@ -178,7 +178,7 @@ export async function GET(
                 id: true,
                 title: true,
                 createdAt: true,
-                password: true,
+                password: true, passwordVersion: true,
                 kind: true,
                 productKey: true,
                 // The naming columns the conversation list reads, read the
@@ -197,7 +197,7 @@ export async function GET(
                 req,
                 userId,
                 conversationId,
-                conversation.password
+                conversation.password == null ? null : conversation.passwordVersion
             )
         ) {
             return conversationLockedResponse();

@@ -76,7 +76,7 @@ export async function POST(
       where: { id: conversationId },
       select: {
         userId: true,
-        password: true,
+        password: true, passwordVersion: true,
         kind: true,
         // D1 applies to every title writer, not only rename
         // (lib/continuationTitlePreservation.ts).
@@ -97,7 +97,7 @@ export async function POST(
     }
     if (
       existingConv.password &&
-      !hasConversationUnlockGrant(req, userId, conversationId, existingConv.password)
+      !hasConversationUnlockGrant(req, userId, conversationId, existingConv.password == null ? null : existingConv.passwordVersion)
     ) {
       return conversationLockedResponse();
     }

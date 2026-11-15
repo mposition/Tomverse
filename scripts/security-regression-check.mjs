@@ -982,13 +982,13 @@ const checks = [
       // Both lock columns are read, inside the one snapshot the candidates are
       // read from...
       /readOnlySnapshotTransaction\(/.test(source) &&
-      /where:\s*\{\s*userId,\s*password:\s*\{\s*not:\s*null\s*\}\s*\},\s*select:\s*\{\s*id:\s*true,\s*password:\s*true\s*\}/.test(
+      /where:\s*\{\s*userId,\s*password:\s*\{\s*not:\s*null\s*\}\s*\},\s*select:\s*\{(?=[^}]*\bpassword:\s*true)(?=[^}]*\bpasswordVersion:\s*true)[^}]*\}/.test(
         source
       ) &&
-      /externalConversation:\s*\{\s*select:\s*\{\s*password:\s*true\s*\}\s*\}/.test(source) &&
+      /externalConversation:\s*\{\s*select:\s*\{(?=[^}]*\bpassword:\s*true)(?=[^}]*\bpasswordVersion:\s*true)[^}]*\}\s*\}/.test(source) &&
       // ...each is passed to its own grant check...
-      /resourceUnlockAccess\(\s*"conversation"[^)]*row\.password[^)]*\)/.test(source) &&
-      /resourceUnlockAccess\(\s*"external_conversation"[^)]*bridge\.externalConversation\.password[^)]*\)/.test(
+      /resourceUnlockAccess\(\s*"conversation"[^)]*row\.passwordVersion[^)]*\)/.test(source) &&
+      /resourceUnlockAccess\(\s*"external_conversation"[^)]*bridge\.externalConversation\.passwordVersion[^)]*\)/.test(
         source
       ) &&
       // ...and the decision is inside the candidate queries, before any cap:
