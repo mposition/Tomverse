@@ -99,8 +99,9 @@ test("model picker prioritizes exact credits and shows the final input estimate"
     '[data-testid="model-option"][data-model-id="gpt-5-4-mini"]'
   );
   await expect(gptMini).toBeVisible();
-  await expect(gptMini.getByTestId("model-credit-badge")).toContainText("1");
-  await expect(gptMini.getByTestId("model-credit-badge").getByTestId("credit-coin-icon")).toBeVisible();
+  // A row shows how heavy the model is on credits, never the credit number.
+  await expect(gptMini.getByTestId("model-credit-badge")).toHaveAttribute("data-usage-level", "1");
+  await expect(gptMini.getByTestId("model-credit-badge").getByTestId("credit-coin-icon")).toHaveCount(0);
   await expect(gptMini).not.toContainText("Available");
   await expect(gptMini).not.toContainText("Standard ·");
   await expect(gptMini).not.toContainText("Best for");

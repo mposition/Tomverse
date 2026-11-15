@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { ReviewChatHandoffProvider, ReviewChatAction } from "@/components/chat/ReviewChatHandoff";
+import { AvailableCreditsProvider } from "@/components/credits/UsageMeter";
 import { ReviewChatDraftReceiver } from "@/components/chat/ReviewChatDraftReceiver";
 import { REVIEW_CHAT_PARAM, type ReviewChatSource } from "@/lib/reviewToChat";
 
@@ -10526,6 +10527,10 @@ export function ChatPageClient({
     // composer's chip and credit estimate, the picker's badge and "Web search"
     // filter, and the per-message badge. One provider rather than a prop through
     // five intermediate components that do not use it.
+    // The model lists say how many uses the credits left would cover
+    // (components/credits/UsageMeter.tsx); the picker is several components
+    // below this one, none of which use the balance themselves.
+    <AvailableCreditsProvider value={comparisonAvailableCredits}>
     <ReviewChatHandoffProvider identity={identityKey}
       supported={routeSurface === "workspace" && !isGuestMode && Boolean(currentChatId)}
       sourceScope={reviewChatSourceScope}
@@ -11783,5 +11788,6 @@ export function ChatPageClient({
     </GeneratedArtifactRevisionContext.Provider>
     </WebSearchBackendReadinessProvider>
     </ReviewChatHandoffProvider>
+    </AvailableCreditsProvider>
   );
 }
