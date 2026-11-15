@@ -13,6 +13,7 @@
 import {
   JOURNEY_ACTIONS,
   JOURNEY_ANCHORS,
+  JOURNEY_ATTACHES_MAX,
   JOURNEY_KEYS,
   JOURNEY_PATHS,
   JOURNEY_SENDS_MAX,
@@ -50,35 +51,48 @@ export type ScoutJourney = {
 const fixtureLines = Object.entries(SCOUT_FIXTURES as Record<string, { description: string }>)
   .map(([name, fixture]) => `- ${name}: ${fixture.description}`)
   .join("\n");
+/**
+ * The families of defects that live between screens. The planner is told to pick
+ * a different one each day; the day's suggested family rotates through all of
+ * them, so none is left out for long because the model keeps choosing another.
+ */
+export const JOURNEY_FAMILIES = Object.freeze([
+  "state that should survive moving around: a draft, an attachment, a model choice, a scroll position -- left for another conversation or screen and come back to",
+  "navigation that should finish its job: a drawer, menu or dialog that should close after a choice, the screen that should show what was picked, Back that should go where it came from",
+  "follow-ups that build on the turn before: change the image or file just made, ask about the last answer, correct it",
+  "a later turn that brings new files: after a turn with attachments worked, attach new files in the same conversation and ask again -- the second answer must read the new files and be as good as the first",
+  "the same flow on a phone and on a desktop, switching conversations mid-answer, starting a new chat twice, Escape and Enter where a person would press them",
+  "labels that show internal ids, codes or untranslated keys where a person expects words",
+]);
+const familyLines = JOURNEY_FAMILIES.map((family, index) => `${index + 1}. ${family};`).join("\n");
+
 const anchorLines = Object.entries(JOURNEY_ANCHORS as Record<string, string>)
   .map(([name, description]) => `- ${name}: ${description}`)
   .join("\n");
 
 export const JOURNEY_SYSTEM_PROMPT = `You plan one test for Tomverse, an AI chat platform, as a demanding QA engineer who uses it like a real person.
 Signed-in users chat with many AI models (Smart Auto picks one per message), keep a history of conversations in a sidebar (a drawer on a phone, a History button in the studio rail), write drafts that should survive moving around, attach files, ask for files and images to be made and then changed, compare answers, use memory, assistants, plugins and settings.
-Plan ONE journey of a few steps that a person would really take and that is likely to expose a defect that only shows BETWEEN screens. Pick a different family each day, and do not repeat what the findings in <recent> already cover:
-- state that should survive moving around: a draft, an attachment, a model choice, a scroll position -- left for another conversation or screen and come back to;
-- navigation that should finish its job: a drawer, menu or dialog that should close after a choice, the screen that should show what was picked, Back that should go where it came from;
-- follow-ups that build on the turn before: change the image or file just made, ask about the last answer, correct it;
-- the same flow on a phone and on a desktop, switching conversations mid-answer, starting a new chat twice, Escape and Enter where a person would press them;
-- labels that show internal ids, codes or untranslated keys where a person expects words.
+Plan ONE journey of a few steps that a person would really take and that is likely to expose a defect that only shows BETWEEN screens. Plan it in today's family (named after the date) unless the findings in <recent> already cover that family; then pick another, and never repeat what <recent> covers:
+${familyLines}
 The walker starts on a new chat in Korean. Steps use only these actions, each with a value (empty when none):
 - open: go to one of ${JOURNEY_PATHS.join(", ")}
 - click: a named control below, or a button, link, tab or menu item by the exact words a Korean user sees (at most ${JOURNEY_TARGET_MAX_CHARS} characters)
 - type: replace the chat composer's text (at most ${JOURNEY_TEXT_MAX_CHARS} characters, natural Korean)
+- attach: add one of the synthetic files below to the composer, as a person adds a file to their next message (at most ${JOURNEY_ATTACHES_MAX} per journey)
 - send: press send and wait for the answer (at most ${JOURNEY_SENDS_MAX} per journey; each is a real paid turn, so send only when the journey needs an answer)
 - back: the browser's Back
 - press: one of ${JOURNEY_KEYS.join(", ")}
 Named controls:
 ${anchorLines}
-You may start with a draft already in the new chat: text, and up to ${SCENARIO_ATTACHMENTS_MAX} of these synthetic files:
+You may also start with a draft already in the new chat: text, and up to ${SCENARIO_ATTACHMENTS_MAX} of these synthetic files:
 ${fixtureLines}
 At most ${JOURNEY_STEPS_MAX} steps, on a ${JOURNEY_VIEWPORTS.join(" or ")} screen. Never delete, rename, share, sign out, buy, connect accounts or change settings: the walker refuses those writes anyway. Nothing about real people.
 Return the viewport, the start draft, the steps, and in one Korean sentence what a person would expect to see along the way (at most ${SCENARIO_EXPECTATION_MAX_CHARS} characters).`;
 
 export function journeyPromptText(recentTitles: readonly string[], today: Date): string {
   const recent = recentTitles.slice(0, JOURNEY_RECENT_TITLES_MAX).map((title) => `- ${title}`).join("\n");
-  return [`Today is ${today.toISOString().slice(0, 10)}.`, `<recent>\n${recent || "none"}\n</recent>`].join("\n");
+  const family = Math.floor(today.getTime() / 86_400_000) % JOURNEY_FAMILIES.length + 1;
+  return [`Today is ${today.toISOString().slice(0, 10)}. Today's family is ${family}.`, `<recent>\n${recent || "none"}\n</recent>`].join("\n");
 }
 
 export const JOURNEY_OUTPUT_SCHEMA = {
