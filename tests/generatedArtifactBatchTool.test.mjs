@@ -5,6 +5,7 @@ import { ARTIFACT_LIMITS } from "../lib/generatedArtifactCore.ts";
 import { ArtifactToolRejectionLog } from "../lib/generatedArtifactRejectionLog.ts";
 import {
   ALL_ARTIFACT_TOOL_NAMES,
+  ARTIFACT_TOOL_NAMES,
   CREATE_DOCUMENT_BATCH_TOOL_NAME,
   CREATE_SPREADSHEET_TOOL_NAME,
   GeneratedArtifactCollector,
@@ -144,8 +145,21 @@ test("the spreadsheet tool asks for totals and derived columns that add up", () 
   assert.match(description, /revenue minus cost/);
 });
 
+test("the presentation tool spreads finance and schedule instead of packing one slide", () => {
+  // A business-plan deck once arrived with budget, monthly P&L, break-even and
+  // a six-week schedule crammed into long sentences on its last slide.
+  const description = buildGeneratedArtifactToolConfig(collector()).tools[
+    ARTIFACT_TOOL_NAMES.presentation
+  ].description;
+  assert.match(description, /no slide carrying far more than the others/);
+  assert.match(description, /'item: amount' bullet/);
+  assert.match(description, /short\s+timeline/);
+  assert.match(description, /never pack them into one long sentence/);
+  assert.doesNotMatch(description, /compact finance and execution slide/);
+});
+
 /* -------------------------------------------------------------------------- */
-/* Refusals that never touch storage                                            */
+/* Refusals that never touch storage                                          */
 /* -------------------------------------------------------------------------- */
 
 test("a handle that names nothing on this turn is refused, and the real ones are listed", async () => {
