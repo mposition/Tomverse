@@ -5,6 +5,7 @@ import { after, test } from "node:test";
 import type { Session } from "next-auth";
 
 import { writeAdminAuditLog } from "@/lib/adminAudit";
+import { AMUX_MAX_EXECUTION_ATTEMPTS } from "@/lib/amux/executionBudgetCore";
 import {
   createAmuxReviewProposal,
   getAmuxReviewDetail,
@@ -388,7 +389,8 @@ test("planning retry requires a valid due and cannot reset five historical attem
   });
   const now = new Date();
   let latestAttemptId = "";
-  for (let attemptNumber = 1; attemptNumber <= 5; attemptNumber++) {
+  // The review proposal guard's runaway bound (20261116011400), not five.
+  for (let attemptNumber = 1; attemptNumber <= AMUX_MAX_EXECUTION_ATTEMPTS; attemptNumber++) {
     latestAttemptId = `amux-review-budget-${randomUUID()}`;
     await prisma.amuxExecutionAttempt.create({
       data: {

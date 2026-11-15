@@ -17,6 +17,7 @@ import {
   settleAmuxExecution,
   startAmuxExecution,
 } from "@/lib/amux/execution";
+import { AMUX_MAX_EXECUTION_ATTEMPTS } from "@/lib/amux/executionBudgetCore";
 import { recordAmuxReviewPullRequest } from "@/lib/amux/reviewPullRequest";
 import {
   heartbeatAmuxWorkerRuntime,
@@ -869,8 +870,9 @@ test("a card that reached review without asking for one is marked for review by 
 
 test("a run that may not start leaves no AMUX trace, even on a card AMUX would block", async () => {
   const fixture = await readyWorkerWithCard();
-  // Five ended attempts spend the card's attempt budget: a start would block it.
-  for (let attemptNumber = 1; attemptNumber <= 5; attemptNumber += 1) {
+  // Ended attempts up to the runaway guard spend the card's attempt budget
+  // (no fixed count of five since 2026-11-15): a start would block it.
+  for (let attemptNumber = 1; attemptNumber <= AMUX_MAX_EXECUTION_ATTEMPTS; attemptNumber += 1) {
     await prisma.amuxExecutionAttempt.create({
       data: {
         id: randomUUID(),
