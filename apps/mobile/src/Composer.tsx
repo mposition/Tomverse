@@ -13,9 +13,13 @@ import { WorkspaceNavigation, type MobileProduct } from "./WorkspaceNavigation";
 import { useCompactBottomDock, useVisibleViewportHeight } from "../../../components/chat/useVisualViewport";
 import { mobileComposerCopy } from "../../../locales/mobileComposer";
 import { UploadProgressDialog, type UploadProgress } from "./UploadProgressDialog";
+import type { NativeFileUpdate } from "./nativeRevisionDraft";
+import { mobileArtifactRevisionCopy } from "../../../locales/mobileArtifactRevision";
 
 type Props = {
   locationIdentity?: string | null;
+  files?: MobileAttachment[]; onFilesChange?: (update: NativeFileUpdate) => void; onRemoveFile?: (file: MobileAttachment) => void;
+  onFileUploaded?: (file: MobileAttachment) => "added" | "count" | "name" | "stale";
   voiceConversation?: (disabled: boolean) => ReactNode;
   copy: typeof mobileCopy.en; transport: ChatTransport; draft: string; setDraft: (text: string) => void;
   language: MobileLanguage;
@@ -25,11 +29,13 @@ type Props = {
   productBusy?: boolean; productLoading?: boolean; selectionControl?: ReactNode;
   offline?: boolean; disabled: boolean; streaming: boolean; onSend: (text: string, files: MobileAttachment[]) => Promise<void | boolean>; onStop: () => void;
 };
-export function Composer({ locationIdentity = null, copy, language, transport, draft, setDraft, disabled, offline = false, streaming, onSend, onStop, conversation, onConfigureTools, extraTools, voiceConversation, product = "chat", onProductChange, productBusy, productLoading, selectionControl }: Props) {
+export function Composer({ locationIdentity = null, files: controlledFiles, onFilesChange, onRemoveFile, onFileUploaded, copy, language, transport, draft, setDraft, disabled, offline = false, streaming, onSend, onStop, conversation, onConfigureTools, extraTools, voiceConversation, product = "chat", onProductChange, productBusy, productLoading, selectionControl }: Props) {
   const shortViewport = useCompactBottomDock();
   const visibleHeight = useVisibleViewportHeight();
   const compact = shortViewport || (visibleHeight > 0 && visibleHeight < 640);
-  const [files, setFiles] = useState<MobileAttachment[]>([]);
+  const [localFiles, setLocalFiles] = useState<MobileAttachment[]>([]);
+  const files = controlledFiles ?? localFiles;
+  const setFiles = onFilesChange ?? setLocalFiles;
   const [upload, setUpload] = useState<UploadProgress | null>(null);
   const uploading = upload !== null;
   const [error, setError] = useState("");
@@ -41,11 +47,11 @@ export function Composer({ locationIdentity = null, copy, language, transport, d
   const voiceCopy = mobileVoiceCopy(language);
   useEffect(() => { const node = input.current; if (node) { node.style.height = "0px"; node.style.height = `${Math.min(120, Math.max(44, node.scrollHeight))}px`; } }, [draft]);
   const composing = useRef(false);
-  const previousConversation = useRef(conversation?.id);
-  useEffect(() => {
-    if (previousConversation.current && previousConversation.current !== conversation?.id) { setFiles([]); setError(""); setTools(false); }
-    previousConversation.current = conversation?.id;
-  }, [conversation?.id]);
+  const [previousConversation, setPreviousConversation] = useState(conversation?.id);
+  if (previousConversation !== conversation?.id) {
+    setPreviousConversation(conversation?.id);
+    if (previousConversation) { if (!onFilesChange) setLocalFiles([]); setError(""); setTools(false); }
+  }
   const voice = useVoiceRecorder({
     scopeId: `mobile-composer:${conversation?.id ?? "new"}`,
     onTranscript: (text) => setDraft(draft ? `${draft}\n${text}` : text),
@@ -68,20 +74,27 @@ export function Composer({ locationIdentity = null, copy, language, transport, d
       for (const [completed, file] of pending.entries()) {
         setUpload({ file, completed, total: pending.length });
         const uploaded = await transport.upload(file);
-        setFiles((previous) => [...previous, uploaded]);
+        const added = onFileUploaded?.(uploaded);
+        if (added === "stale") break;
+        if (added === "count" || added === "name") {
+          void transport.discardAttachment?.(uploaded.uploadId).catch(() => {});
+          setError(added === "name" ? mobileArtifactRevisionCopy(language).nameConflict : copy.fileLimit); break;
+        }
+        if (!onFileUploaded) setFiles((previous) => [...previous, uploaded]);
       }
     } catch (error) { setError(mobileErrorText(error, language, parityCopy.uploadFailed)); }
     finally { setUpload(null); if (picker.current) picker.current.value = ""; if (photos.current) photos.current.value = ""; }
   }
   function submit() {
     if (disabled || offline || streaming || uploading || voiceBusy || composing.current || (!draft.trim() && files.length === 0)) return;
-    void onSend(draft, files).then(result => { if (result !== false) setFiles([]); });
+    const sent = new Set(files.map(file => file.uploadId));
+    void onSend(draft, files).then(result => { if (result !== false) setFiles(current => current.filter(file => !sent.has(file.uploadId))); });
   }
   return <div className="composer-area" data-compact={compact || undefined}>
     {onProductChange && !compact && <WorkspaceNavigation product={product} language={language} disabled={productBusy || streaming || uploading || voiceBusy} loading={productLoading} onChange={onProductChange} />}
     {error && <p role="alert" className="notice error">{error}</p>}
     {voice.state.status === "error" && <p role="alert" className="notice error">{mobileVoiceError(language, voice.state.code, voice.serverCode)}<button onClick={voice.dismissError}>×</button></p>}
-    {files.length > 0 && <ul className="attachments">{files.map((file) => <li key={file.uploadId}>{file.name}<button aria-label={`${copy.remove}: ${file.name}`} onClick={() => setFiles((items) => items.filter((item) => item.uploadId !== file.uploadId))}>×</button></li>)}</ul>}
+    {files.length > 0 && <ul className="attachments">{files.map((file) => <li key={file.uploadId}>{file.name}<button aria-label={`${copy.remove}: ${file.name}`} onClick={() => onRemoveFile ? onRemoveFile(file) : setFiles((items) => items.filter((item) => item.uploadId !== file.uploadId))}>×</button></li>)}</ul>}
     <input data-testid="file-picker" ref={picker} type="file" multiple hidden accept={chatAttachmentAcceptAttribute({})} onChange={event => void attach(event.target.files)} />
     <input data-testid="photo-picker" ref={photos} type="file" multiple hidden accept="image/*" onChange={event => void attach(event.target.files)} />
     <form className={`composer compact-composer${voiceBusy ? " is-recording" : ""}`} onSubmit={event => { event.preventDefault(); submit(); }}>

@@ -42,6 +42,7 @@ import { officeRenderingEnabled } from "@/lib/officeRenderer";
 import {
   ARTIFACT_BATCH_TOOL_DEFINITION_TOKENS,
   ARTIFACT_TOOL_DEFINITION_TOKENS,
+  ARTIFACT_REVISION_TOOL_DEFINITION_TOKENS,
   planGeneratedArtifactTool,
   type ArtifactToolPlan,
 } from "@/lib/generatedArtifactToolPolicy";
@@ -58,6 +59,7 @@ import type { TurnAttachmentDescriptor } from "@/lib/messageAttachmentCore";
 import { buildChatLocationContext, buildChatLocationPrompt, CHAT_LOCATION_INPUT_TOKEN_RESERVE } from "@/lib/chatLocationPrompt";
 import { buildChatCurrentDatePrompt } from "@/lib/chatCurrentDatePrompt";
 import type { ChatLocation } from "@tomverse/chat-core";
+import { generatedArtifactRevisionEnabled } from "@/lib/generatedArtifactRevisionCore";
 
 export type ChatTurnSystemBlocksInput = {
   /** The turn's clock, for the date block. Defaults to now; tests pin it. */
@@ -284,6 +286,8 @@ export const buildChatTurnSystemBlocks = (
         APP_MANAGED_WEB_SEARCH_TOOL_DEFINITION_TOKENS
       : 0) +
     (artifactPlan.registerTool ? ARTIFACT_TOOL_DEFINITION_TOKENS : 0) +
+    (artifactPlan.registerTool && input.isAuthenticated && input.canPersist && generatedArtifactRevisionEnabled()
+      ? ARTIFACT_REVISION_TOOL_DEFINITION_TOKENS : 0) +
     (artifactPlan.registerDocumentBatch
       ? ARTIFACT_BATCH_TOOL_DEFINITION_TOKENS
       : 0) +

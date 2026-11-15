@@ -978,3 +978,139 @@ PDF를 원본 그대로 받아 스캔 페이지까지 읽는다. 그래서 "이 
 - 슬라이드(`create_presentation`)와 스프레드시트에 그림 넣기.
 - 원본 PDF의 레이아웃을 그대로 Word로 옮기는 일. 상용 엔진도 완벽하지 않은
   "복원"이며, 여기서는 모델이 다시 쓴다.
+
+## 17. 선택한 생성 파일의 내용으로 새 파일 만들기 (P0)
+
+운영자 요청(2026-11-15)에 따라 `GENERATED_ARTIFACT_REVISION_ENABLED` 미설정 시
+웹 Chat의 ready 카드에서 수정 입력을 선택할 수 있다. `true`도 켜짐이며 명시적 `false`는
+연결을 끈다. 잘못된 값은 켜짐으로 해석하지 않는다. 이 코드 변경은 merge·deploy나
+운영 설정 변경을 수행하지 않는다.
+켜짐 상태에서 수정 필드를 포함한 파일 도구를 제공하는 인증·저장 가능 turn에는 기존
+`ARTIFACT_REVISION_TOOL_DEFINITION_TOKENS` 500토큰 추정 예산이 quote와 Send에 동일하게
+추가된다. 이는 실제 스키마 입력의 기존 요율 과금 효과이며 가격·크레딧 정책 변경이나
+별도 모델 호출은 아니다. 운영자의 기본 켜짐 지시와 이 효과를 검증 기록에 함께 남긴다.
+클릭한 artifact의 opaque ID가 선택 기준이다. 파일명·현재 모델·최신 카드로
+원본을 추정하지 않는다. 기존 다운로드와 Native 다운로드는 그대로 유지한다.
+
+서버는 기존 `PUT /api/chat` import 경로에서 계정과 동일 대화, 현재 unlock,
+ready 상태, 생성/첨부 형식 표의 교집합, 실제 bytes와 기존 첨부 권한·quota를
+확인한다. 원본을 비파괴 bounded read로 읽고 새 private 입력 객체에 복사한 뒤
+기존 opaque uploadId를 반환한다. 같은 준비 operation의 재시도는 원본이나 이미
+결속된 승자 사본을 삭제하지 않는다. 파일 선택만으로 Message나 모델 호출을
+만들지 않는다. 사본의 독립 수명과 미전송 보관 한계는
+`user-attachment-persistence.md` §8.1을 따른다.
+
+준비가 성공하면 원래 계정·대화의 최신 draft에 일반 첨부 chip과 짧고 편집 가능한
+새 파일 생성 요청문을 앞에 추가한다. 기존 글·첨부와 준비 중 작성문을 보존하고,
+동명 입력 충돌·첨부 상한·준비 실패 때 초안을 바꾸지 않는다. 선택은 자동 Send가
+아니다. 사용자가 보는 문장을 그대로 저장하고 Auto와 답변 provider에 전달하며
+Send 때 숨은 wrapper를 붙이지 않는다. reload는 기존 chip과 요청문으로 복원한다.
+
+지원 범위는 TXT/MD, 기존 생성·첨부 표 모두가 허용하는 text/code/config, 한도 내
+CSV와 DOCX/PPTX다. DOCX/PPTX는 기존 Office parser가 추출한 **텍스트 내용으로
+새 문서를 만드는 것**이다. 원본 서식·그림·슬라이드 구조 보존 편집이 아니다.
+준비 시 nonempty와 strict 추출 한도를 확인하고 Send 시 실제 남은 예산으로 다시
+확인한다. 최신 사용자 turn의 일반 Office 첨부에도 strict overflow를 적용한다.
+최신 text/CSV도 조용히 자른 채 실행하지 않는다. 과거 이력 처리의 재설계는 없다.
+
+기존 turn당 5개·전체 이력 30개·파일 10MiB·전체 25MiB·추출 텍스트 300,000자
+상한은 유지한다. 생성 한도와 재입력 한도는 다르므로 모든 생성물이 재입력되거나
+무제한 반복 수정된다고 약속하지 않는다. 초과는 최종 답변 provider dispatch 전에
+거부한다. 현재 Auto는 추출보다 먼저 실행될 수 있으므로 이 거부가 Auto 비용까지
+0임을 뜻하지 않는다. 과거 첨부를 지우거나 상한을 늘려 통과시키지 않는다.
+
+실제 `create_*` 실행 결과가 새 파일 성공의 기준이다. text-only 답변은 수정 성공이
+아니지만 파일 행이 없다면 가짜 failed 카드를 만들지 않는다. 원본과 새 결과의
+카드·다운로드를 모두 유지하며 새 결과를 다시 선택할 수 있다. 기존 모델 capability,
+`requiresFileGeneration`, 도구 제공 turn의 fallback 제한과 token/reservation/settlement를
+그대로 사용하고 별도 classifier·평가 호출·가격 변경은 추가하지 않는다.
+
+canonical spec·버전 계보·XLSX 구조 보존·Native 수정 선택의 후속 구현은 §18을 따른다.
+PDF/ZIP 편집, WYSIWYG와 이미지 생성 workspace 변경은 여전히 이 흐름의 범위 밖이다.
+
+## 18. XLSX 구조 보존, 실제 버전 계보와 Native 수정 선택 (P1)
+
+### 18.1 검증된 WorkbookSpec과 값 수정
+
+`GENERATED_ARTIFACT_REVISION_ENABLED`의 기본 켜짐과 명시적 off를 따른다. 꺼진 상태에서는 새
+canonical 내용 보관과 수정 도구 확장을 활성화하지 않는다. XLSX를 성공적으로 만든
+경우에만 기존 admission을 통과한 WorkbookSpec을 `{version: 1, kind: "spreadsheet",
+spec: ...}` 형태로 저장한다. 전체 직렬화 명세는 기존 300,000자 입력 예산 안이어야
+한다. 명세가 너무 큰 생성 결과는 다운로드할 수 있지만 다시 수정할 수 있다고
+보장하지 않는다. 파일 생성 한도·입력 한도·업로드 quota를 늘리지 않는다.
+
+꺼진 상태에서는 새 canonical/parent/group을 저장하지 않고 기존 app DTO의 계보 필드도
+내보내지 않는다. 이미 보관한 내용과 원래 다운로드는 삭제하지 않는다. 같은 operation의
+등록 완료 재시도는 새 I/O나 byte quota 예약이 없지만, 등록 전 동시 시도는 각각 실제
+쓰기 bytes를 예약한다. 경합에서 진 사본을 정리해도 그 일일 upload quota를 되돌리지 않는다.
+
+수정 선택은 원본 bytes와 명세의 독립 사용자 입력 사본을 만든다. Send에서는 실제
+남은 공유 추출 예산으로 명세를 다시 검사한다. 모델은 기존 `create_spreadsheet`에
+요청 범위 `revisionOf: "att_1"`과 바꿀 데이터 셀의 `cellUpdates`를 준다. 행·열은
+제목/헤더를 제외한 1부터 시작하는 데이터 위치이며 정확한 sheet 이름을 사용한다.
+서버는 대상·타입·범위를 검사하고 기존 명세의 해당 셀 값만 바꾼 뒤 기존 admission과
+writer로 새 XLSX를 만든다. 수정하지 않은 sheet 순서·제목·열 정의·데이터 행/셀·
+width·명명된 표시 형식·header style·freeze 설정을 그대로 재사용한다.
+
+이는 기존 값 전용 생성 범위의 수정이다. 수식·매크로·차트·pivot·임의의 셀 서식이나
+범용 Office round-trip 편집을 추가하지 않는다. 행/열 추가·삭제와 구조 재편은 이 작은
+셀 수정 동작으로 자동 추측하지 않는다. 원본은 덮어쓰지 않는다.
+
+이전 XLSX에는 canonical 명세가 없다. 이 경우 기존 OfficeParser와 기존 spreadsheet
+grid reader를 재사용하여 지원되는 sheet·typed cell·행/열 위치를 읽는다. 원래 열 너비와
+표시 layout처럼 읽을 수 없는 정보는 보존을 약속하지 않는다. 입력 사본의 `fidelity:
+"values"`를 유지하고, 앱에는 안전한 `revisionMode: "workbook-values"`만 전달하여
+그 한계를 보이는 수정 요청문에 넣는다. 새 canonical 사본은 `revisionMode: "workbook"`
+이다. 재시도도 같은 mode를 유지한다. 지원 범위 밖 구조·불완전 추출·한도 초과는
+조용히 평탄화하거나 자르지 않고 거절한다.
+
+### 18.2 실제 source와 버전 그룹
+
+`MessageArtifact`는 nullable `canonicalSpec`, `parentArtifactId`, `lineageId`를 가진다.
+입력 upload와 attachment에는 별도의 `sourceArtifactId`, `sourceLineageId`,
+`sourceConversationId`, `sourceCanonicalSpec`을 둔다. Attachment→Attachment 용도인
+`sourceAttachmentId`와 혼용하지 않는다. 명세는 내부 사용자 내용이며 일반 app DTO,
+공개 공유·대화 TXT·모델 도구의 권한 필드·로그에 보내지 않는다.
+
+계보는 도구의 명시적 `revisionOf` handle을 서버가 이미 소유권·대화 범위 확인을 마친
+현재 입력에 해석한 경우에만 연결한다. 파일명·최신 카드·현재 모델·같은 turn의 존재만으로
+부모를 추정하지 않는다. 모델은 DB artifact ID나 lineage ID를 받지 않는다. 일반 새 파일,
+text-only 답변, 미실행/거절된 도구 호출에 가짜 수정 관계를 만들지 않는다.
+
+완료된 답변을 저장할 때 source/group을 다시 검증한다. 그 사이 source와 독립 입력
+증거가 모두 사라지거나 관계를 확인할 수 없으면 답변과 새 파일은 독립 root로 저장하고
+확인되지 않은 parent/group만 버린다. 외부 소유자나 다른 대화의 관계도 만들지 않는다.
+DB 자체의 실패를 성공으로 숨기지는 않는다.
+최종 stream 카드도 DB에서 읽은 parent/group으로 맞추며 reload와 다른 관계를 표시하지
+않는다. 검증되지 않은 관계를 제외한 경우 내용·파일명·ID 없는 사유와 건수만 기록한다.
+
+부모 FK는 `ON DELETE SET NULL`이다. source 삭제는 파생 파일이나 독립 사용자 입력을
+삭제하지 않는다. 독립 명세 사본은 기존 입력 첨부와 같은 수명을 따르며, source가 없어도
+자기 내용으로 재시도할 수 있다. 안정된 group 식별자는 남은 버전을 묶고, 앱은 사라진
+부모를 존재하는 것처럼 표시하지 않는다. 대화/계정 삭제의 기존 cleanup 계약은 유지한다.
+
+`GET /api/artifacts/{artifactId}/versions`는 현재 owner·대화·unlock을 검사하고 같은
+사용자·대화·실제 그룹의 ready 파일을 한 번에 최대 50개씩 반환한다. 같은 이름의
+다른 파일을 포함하지 않는다. cursor도 같은 범위에서 확인한다. 응답에는 기존 공개
+파일 정보와 parent/group/createdAt만 있고 canonical 내용·objectKey·storage URL은 없다.
+앱은 실제 부모로 이동하고 각 버전을 다운로드하거나 정확히 선택하여 다시 수정할 수 있다.
+
+### 18.3 Native와 export
+
+Native Chat은 서버의 `generatedFileRevisions` capability를 따라 같은 준비
+API·동일 artifact ID·보이는 수정 요청문을 사용한다. 선택은 자동 Send가 아니다. 작성 중인
+text·첨부, 준비 중 새 작성문과 원래 대화 scope를 보존하며 상한/동명 충돌 때 사본만 정리한다.
+다른 신원으로 전환된 뒤 완료한 준비는 새 신원 초안에 반영하지 않는다. 기존 다운로드는
+유지하고, Review나 이미지 workspace로 조용히 연결하지 않는다.
+
+Native 첨부 chip은 기존 device draft의 신원·대화 key 아래 opaque upload 메타데이터로
+복원한다. 기존 24시간 local draft TTL과 logout clear를 따른다. 이 TTL은 서버 upload
+객체의 만료가 아니다. 사라진 local draft의 unbound 사본 보관 한계는 §17과 입력 첨부
+정책을 그대로 따른다. 불명확한 Send 결과의 기존 saved-response 복구를 유지하고 자동으로
+재전송하지 않는다. native bearer의 새 versions GET/unbound cleanup DELETE 경로도 같은
+revision switch와 기존 Native Chat/Parity gate 아래 owner/unlock/opaque ID 검사로 제한한다.
+revision 기본값 변경은 기존 Native gate를 켜지 않는다. 새 device 권한이나 자격증명은 없다.
+
+소유자 계정 JSON export에는 새로 보관한 canonical/source 명세의 내용을 포함한다.
+파일 bytes는 여전히 포함하지 않으며, 일반 앱/공유 DTO에 이 내용을 노출하지 않는다.
+schema migration과 로컬 검증은 운영 migration·활성화·merge·deploy 승인과 별개다.
