@@ -11,14 +11,13 @@ import {
   Star,
   X,
 } from "lucide-react";
-import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
+import { UsageMeter } from "@/components/credits/UsageMeter";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { ModelSelectionBadge } from "@/components/chat/ModelSelectionBadge";
 import { useHasCoarsePointer } from "@/components/chat/useHasCoarsePointer";
 import { useWebSearchBackendReadiness } from "@/components/chat/WebSearchBackendReadinessProvider";
 import { getModelUsageProfile } from "@/components/chat/types";
 import { getModelExperienceStatus } from "@/lib/modelExperience";
-import { englishCreditUnit, formatCountedUnit } from "@/lib/pricingFormat";
 import {
   canUseModelWithPlan,
   modelSupportsImageInput,
@@ -157,7 +156,7 @@ export function ModelCatalogue({
         model.provider.toLowerCase().includes(normalizedQuery) ||
         description.includes(normalizedQuery);
       const matchesTask =
-        filters.task === "all" || modelMatchesUseCase(model.id, filters.task);
+        filters.task === "all" || modelMatchesUseCase(model.id, filters.task, model);
       const matchesProvider =
         filters.provider === "all" || model.provider === filters.provider;
       const matchesUsageBand =
@@ -531,15 +530,7 @@ export function ModelCatalogue({
                           )}
                       </span>
                       <span className="flex shrink-0 flex-col items-end gap-2">
-                        <CreditCostBadge
-                          credits={usageProfile.credits}
-                          testId="model-credit-badge"
-                          label={
-                            lang === "ko"
-                              ? `기본 ${usageProfile.credits}크레딧 차감`
-                              : `Base cost ${formatCountedUnit(usageProfile.credits, englishCreditUnit, "en")}`
-                          }
-                        />
+                        <UsageMeter credits={usageProfile.credits} kind="chat" testId="model-credit-badge" />
                         <ModelSelectionBadge
                           isSelected={isSelected}
                           isLocked={isPlanLocked}

@@ -148,19 +148,45 @@ const USE_CASE_CANDIDATES: Record<
 };
 
 /**
- * Models the registry describes as multilingual. On a non-English interface
- * they move to the front of the cost-efficient slot, so the cheapest
- * recommendation is also one that answers well in the user's language.
+ * The providers a newcomer looks for by name. There are more providers than
+ * cards, so these are placed first; the rest follow in catalogue order.
  */
-const MULTILINGUAL_MODEL_IDS = [
-  "mistral-small-4",
-  "qwen3.6-flash",
-  "glm-5.2",
-] as const;
+export const FEATURED_PROVIDERS = ["openai", "anthropic", "google", "xai"] as const;
 
-const LANGUAGE_SENSITIVE_USE_CASES: readonly ModelRecommendationUseCase[] = [
-  "value",
-];
+const LISTED_MODEL_IDS: ReadonlySet<string> = new Set(
+  MODEL_RECOMMENDATION_USE_CASES.flatMap((useCase) => USE_CASE_CANDIDATES[useCase])
+);
+
+const ANALYSIS_USAGE_CLASSES: readonly string[] = ["premium", "reasoning", "premium-reasoning", "frontier", "apex"];
+
+/**
+ * Which tasks a model fits by its catalogue profile alone, for a model the
+ * tables above do not list. It labels the model's card and backs the task
+ * filter; it never decides which models are recommended. Coding has no
+ * profile signal and stays table-only.
+ */
+const profileFitsUseCase = (model: AiModel, useCase: ModelRecommendationUseCase): boolean => {
+  const usageClass: string = model.usageClass;
+  switch (useCase) {
+    case "everyday":
+      return usageClass === "standard";
+    case "writing":
+      return usageClass === "standard" || usageClass === "advanced";
+    case "analysis":
+      return ANALYSIS_USAGE_CLASSES.includes(usageClass);
+    case "multimodal":
+      return (usageClass === "standard" || usageClass === "advanced") && modelSupportsImageInput(model);
+    case "search":
+      return usageClass === "research" || usageClass === "deep-research";
+    case "value":
+      return getModelUsageProfile(model).credits <= 1;
+    case "coding":
+      return false;
+  }
+};
+
+/** The most telling task first, for a card's single reason line. */
+const PROFILE_USE_CASE_ORDER: readonly ModelRecommendationUseCase[] = ["search", "analysis", "everyday", "writing", "multimodal", "value"];
 
 export type ModelRecommendationInput = {
   /** Live catalogue (ModelCatalogProvider), so registry edits take effect. */
@@ -202,22 +228,6 @@ export type ModelRecommendation = {
   isSelected: boolean;
 };
 
-const orderCandidatesForLanguage = (
-  useCase: ModelRecommendationUseCase,
-  candidates: readonly string[],
-  language: ModelPickerLanguage
-) => {
-  if (language === "en" || !LANGUAGE_SENSITIVE_USE_CASES.includes(useCase)) {
-    return candidates;
-  }
-  const multilingual = candidates.filter((modelId) =>
-    (MULTILINGUAL_MODEL_IDS as readonly string[]).includes(modelId)
-  );
-  return multilingual.length
-    ? [...multilingual, ...candidates.filter((id) => !multilingual.includes(id))]
-    : candidates;
-};
-
 const getLock = (
   model: AiModel,
   plan: ModelTier | "Guest",
@@ -246,7 +256,6 @@ export const getModelRecommendations = ({
   personalizedModelIds = [],
   recentModelIds = [],
   selectedModelIds = [],
-  language = "en",
   requiresImageInput = false,
   searchBackendReadiness,
 }: ModelRecommendationInput): ModelRecommendation[] => {
@@ -293,11 +302,14 @@ export const getModelRecommendations = ({
     };
   };
 
+  // The card's one-line reason. A listed model keeps its hand-written task; a
+  // model the Admin catalogue added is described by its profile.
   const bestUseCaseFor = (modelId: string): ModelRecommendationUseCase => {
     for (const useCase of MODEL_RECOMMENDATION_USE_CASES) {
       if (USE_CASE_CANDIDATES[useCase].includes(modelId)) return useCase;
     }
-    return "everyday";
+    const model = byId.get(modelId);
+    return (model && PROFILE_USE_CASE_ORDER.find((useCase) => profileFitsUseCase(model, useCase))) ?? "everyday";
   };
 
   const picks: ModelRecommendation[] = [];
@@ -350,29 +362,48 @@ export const getModelRecommendations = ({
     }
   }
 
-  for (const useCase of MODEL_RECOMMENDATION_USE_CASES) {
-    const candidates = orderCandidatesForLanguage(
-      useCase,
-      USE_CASE_CANDIDATES[useCase],
-      language
-    );
-    const ranked = candidates
-      .map((modelId, index) => ({ modelId, index }))
-      .filter(({ modelId }) => byId.has(modelId) && !usedIds.has(modelId))
-      .map((entry) => {
-        const built = build(entry.modelId, useCase, useCase);
-        return built ? { ...entry, built } : null;
+  // One card per provider: its top model. Owner decision 2026-11-15 -- the
+  // first screen used to fill seven task slots from tables of model ids, so a
+  // model added in the Admin catalogue could never appear (no enabled Gemini
+  // or Grok model was listed) while one provider could take two slots.
+  //
+  // "Top" is the highest-grade model the viewer can run now: a healthy,
+  // unlocked model before a degraded or gated one, then the dearer model,
+  // which is the provider's more capable one. A model the user already has
+  // selected is that provider's card, so the selection stays visible here.
+  const shownProviders = new Set(picks.map((pick) => byId.get(pick.modelId)?.provider));
+  const providers = [...new Set([...byId.values()].map((model) => model.provider))];
+  // Never by selection: selecting a model must not reshuffle the screen.
+  const providerOrder = (provider: string) => {
+    const featured = (FEATURED_PROVIDERS as readonly string[]).indexOf(provider);
+    return featured >= 0 ? featured : FEATURED_PROVIDERS.length;
+  };
+  const orderedProviders = providers
+    .map((provider, index) => ({ provider, index }))
+    .sort((left, right) => providerOrder(left.provider) - providerOrder(right.provider) || left.index - right.index);
+
+  for (const { provider } of orderedProviders) {
+    if (shownProviders.has(provider)) continue;
+    const ranked = [...byId.values()]
+      .filter((model) => model.provider === provider && !usedIds.has(model.id))
+      .map((model, index) => {
+        const useCase = bestUseCaseFor(model.id);
+        const built = build(model.id, useCase, useCase);
+        return built ? { index, built } : null;
       })
       .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
-      .sort((left, right) => {
-        const rankDelta =
-          candidateRank(left.built.status, left.built.lock) -
-          candidateRank(right.built.status, right.built.lock);
-        return rankDelta !== 0 ? rankDelta : left.index - right.index;
-      });
-
+      .sort(
+        (left, right) =>
+          Number(right.built.isSelected) - Number(left.built.isSelected) ||
+          candidateRank(left.built.status, left.built.lock) - candidateRank(right.built.status, right.built.lock) ||
+          right.built.credits - left.built.credits ||
+          left.index - right.index
+      );
     for (const entry of ranked) {
-      if (take(entry.built)) break;
+      if (take(entry.built)) {
+        shownProviders.add(provider);
+        break;
+      }
     }
   }
 
@@ -385,8 +416,12 @@ export const getModelRecommendations = ({
  */
 export const modelMatchesUseCase = (
   modelId: string,
-  useCase: ModelRecommendationUseCase
-) => USE_CASE_CANDIDATES[useCase].includes(modelId);
+  useCase: ModelRecommendationUseCase,
+  /** The catalogue row, so a model no table lists is matched by its profile. */
+  model?: AiModel
+) =>
+  USE_CASE_CANDIDATES[useCase].includes(modelId) ||
+  (model !== undefined && !LISTED_MODEL_IDS.has(modelId) && profileFitsUseCase(model, useCase));
 
 /** Every model id referenced by the use-case tables, for registry validation. */
 export const getReferencedRecommendationModelIds = () =>

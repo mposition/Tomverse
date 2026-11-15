@@ -29,7 +29,7 @@ its own complete full-width row.
 | Workspace: composer, option rows, timeline, comparison grid | `components/images/ImageGenerationWorkspace.tsx` |
 | Unified new-conversation launcher (split button / menu rows) | `components/chat/NewConversationLauncher.tsx` |
 | Catalogue `Chat \| Image` tabs | `components/chat/ModelPickerPanel.tsx` |
-| Image tab rows, logos, "from" pricing | `components/chat/ImageModelTabPanel.tsx` |
+| Image tab rows, logos, usage meter | `components/chat/ImageModelTabPanel.tsx` |
 | Composer model-picker wiring | `components/chat/ChatInput.tsx` |
 | Draft carry-over/restore, lock derivation, workspace mounting | `app/(site)/(application)/chat/ChatPageClient.tsx` |
 | Sidebar placement of the launcher | `components/chat/ChatSidebar.tsx` |

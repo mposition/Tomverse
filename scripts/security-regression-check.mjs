@@ -2422,12 +2422,15 @@ const checks = [
       const searchIndex = panel.indexOf('data-testid="model-search-input"');
       const catalogueBranchIndex = panel.indexOf("showCatalogue ? (");
       return (
+        // Owner decision 2026-11-15: a model row shows how heavy the model is
+        // on credits as a five-step meter and a count of remaining uses, not a
+        // credit number. The picker's estimated-usage summary keeps the number.
         catalogue.includes('testId="model-credit-badge"') &&
-        catalogue.includes("CreditCostBadge") &&
+        catalogue.includes("UsageMeter") &&
+        !catalogue.includes("CreditCostBadge") &&
+        panel.includes('testId="recommended-model-credit-badge"') &&
         panel.includes("CreditCostBadge") &&
-        read("components/credits/CreditCostBadge.tsx").includes(
-          'data-testid="credit-coin-icon"'
-        ) &&
+        read("components/credits/UsageMeter.tsx").includes("data-usage-level") &&
         catalogue.includes("getModelPickerDescription") &&
         catalogue.includes("getModelPickerFeatures") &&
         // Recommendation reasons come from the task-language label table, never

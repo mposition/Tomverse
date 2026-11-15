@@ -37,7 +37,7 @@ test("opening the picker shows recommendations only, not the full catalogue", { 
   await expectNoHorizontalOverflow(page);
 });
 
-test("every recommendation explains itself in task language with an exact cost", { tag: "@ui-risk" }, async ({ page }) => {
+test("every recommendation explains itself in task language with a usage level", { tag: "@ui-risk" }, async ({ page }) => {
   await modelMenuTrigger(page).click();
   const dialog = page.locator("#chat-input-popover");
   const cards = dialog.getByTestId("recommended-model-option");
@@ -46,7 +46,7 @@ test("every recommendation explains itself in task language with an exact cost",
     const card = cards.nth(index);
     await expect(card).toHaveAttribute("aria-pressed", /true|false/);
     await expect(card).toHaveAttribute("data-recommendation-source", /.+/);
-    await expect(card.getByTestId("recommended-model-credit-badge")).toBeVisible();
+    await expect(card.getByTestId("recommended-model-credit-badge")).toHaveAttribute("data-usage-level", /^[1-5]$/);
     // Provider names may appear in the model name, never as the reason.
     const reason = await card.getAttribute("data-recommendation-source");
     expect(reason).not.toBe("");
