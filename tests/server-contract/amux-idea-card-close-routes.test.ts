@@ -214,7 +214,7 @@ test("the sync lists a card close question beside the v22 ones, three at most, i
 
 test("a v22 result review rides the same tick after the others, filed only while its switch is on", async () => {
   const reviewEntry = { question_id: OTHER, worker: "amux-result-review" };
-  delete process.env.TOMVERSE_AMUX_V22_RESULT_REVIEW_DM;
+  process.env.TOMVERSE_AMUX_V22_RESULT_REVIEW_DM = "disabled"; // on by default since 2026-11-15
   reset({ reviewPending: [reviewEntry], reviewClosing: [{ questionId: QUESTION, cardId: "RR-1" }] });
   const off = await (await syncRoute.POST(post({}))).json();
   assert.deepEqual(off.pending, [], "no new review card while the switch is off");
@@ -233,7 +233,7 @@ test("a v22 result review rides the same tick after the others, filed only while
 
 test("a T2 draft's advice card rides the tick last, filed only while its switch is on", async () => {
   const t2Entry = { question_id: IDEA, worker: "engineering-t2-review" };
-  delete process.env.TOMVERSE_ENGINEERING_AGENT_T2_DM_REVIEW;
+  process.env.TOMVERSE_ENGINEERING_AGENT_T2_DM_REVIEW = "disabled"; // on by default since 2026-11-15
   reset({ t2Pending: [t2Entry], t2Closing: [{ questionId: IDEA, cardId: "T2-1" }] });
   const off = await (await syncRoute.POST(post({}))).json();
   assert.deepEqual(off.pending, [], "no new advice card while the switch is off");
@@ -264,7 +264,7 @@ test("an owner queue settlement rides the tick before the T2 drafts, filed only 
   const SETTLEMENT = "44444444-5555-8666-8777-888888888888";
   const settlementEntry = { question_id: SETTLEMENT, worker: "amux-owner-settlement" };
   const t2Entry = { question_id: IDEA, worker: "engineering-t2-review" };
-  delete process.env.TOMVERSE_AMUX_DM_OWNER_SETTLEMENT;
+  process.env.TOMVERSE_AMUX_DM_OWNER_SETTLEMENT = "disabled"; // on by default since 2026-11-15
   reset({ settlementPending: [settlementEntry], settlementClosing: [{ questionId: SETTLEMENT, cardId: "OS-1" }] });
   const off = await (await syncRoute.POST(post({}))).json();
   assert.equal(world.settlementEnabled, false, "nothing is filed while the switch is off");

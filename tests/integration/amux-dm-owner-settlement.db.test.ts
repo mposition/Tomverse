@@ -782,7 +782,8 @@ test("the owner queue names, per card, where the Decision Maker stands and what 
     const card = await stoppedTask(tx);
     const saved = { routing: process.env.TOMVERSE_AMUX_DM_ROUTING, settlement: process.env.TOMVERSE_AMUX_DM_OWNER_SETTLEMENT };
     process.env.TOMVERSE_AMUX_DM_ROUTING = "enabled";
-    delete process.env.TOMVERSE_AMUX_DM_OWNER_SETTLEMENT;
+    // On unless exactly `disabled` (owner decision 2026-11-15).
+    process.env.TOMVERSE_AMUX_DM_OWNER_SETTLEMENT = "disabled";
     try {
       const { readAmuxOwnerQueueDmStatus } = await import("@/lib/amux/ownerQueueDmStatusRead");
       const { recordAmuxDmRelaySync } = await import("@/lib/amux/dmRelayHeartbeat");

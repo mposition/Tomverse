@@ -1335,7 +1335,7 @@ async function recordAmuxV52ReviewWithFindings(
         return { recorded: false as const,
           reason: "review_assignment_unverified" as const };
       if (decideAmuxV52SettlementPaths(assignment.grade,
-          input.changedPaths, candidate.files) !== "pass")
+          input.changedPaths, candidate.paths) !== "pass")
         return { recorded: false as const,
           reason: "review_patch_unverified" as const };
       const patch = await tx.amuxV22TaskPatch.findUnique({
@@ -1490,7 +1490,7 @@ export async function settleAmuxV22TaskExecution(input: {
       const pathDecision = gradeGuard && settlementAssignment &&
         input.outcome !== "blocked" && !ownerQuestion ?
         decideAmuxV52SettlementPaths(settlementAssignment.grade,
-          input.changedPaths, patch?.files ?? null) : "pass";
+          input.changedPaths, patch?.paths ?? null) : "pass";
       const reviewRequired = !ownerQuestion && amuxV52ReviewRequired({ gradeGuard,
         role: settlementAssignment ?
           amuxV22ExecutionRole(settlementAssignment.role) : null,

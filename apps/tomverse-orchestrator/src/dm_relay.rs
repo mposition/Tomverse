@@ -33,14 +33,14 @@
 //! tick it reports the operator's direct answer records so the app closes
 //! their questions' requests (`direct`, §2-7).
 //!
-//! The repository snapshot (stage S2b) is the broker's to fetch; the relay
-//! checks it and records it (dm_relay::snapshot). Not here: any Admin screen.
+//! The workspace (a checkout and the card's whole evidence) is the broker's to build; the relay
+//! checks its manifest and records it (dm_relay::workspace). Not here: any Admin screen.
 
 pub mod delivery;
 pub mod direct;
 pub mod flow;
 pub mod io;
-pub mod snapshot;
+pub mod workspace;
 pub mod v22_question;
 pub mod wire;
 

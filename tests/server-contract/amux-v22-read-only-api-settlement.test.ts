@@ -4,6 +4,12 @@ import { pathToFileURL } from "node:url";
 import { mock, test } from "node:test";
 import { randomBytes } from "node:crypto";
 
+import { v22PatchNamedPaths } from "../../lib/engineeringAgentV22PatchApply.ts";
+
+// The result-review Decision Maker card is on by default (owner decision 2026-11-15); these settlement
+// cases are about the usage ledger and the Task's destination, and their world has no review table.
+process.env.TOMVERSE_AMUX_V22_RESULT_REVIEW_DM = "disabled";
+
 const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path: string) => pathToFileURL(resolve(root, path)).href;
 const now = new Date("2026-10-13T12:00:00.000Z");
@@ -108,7 +114,10 @@ mock.module(mod("lib/amux/escalation.ts"), { namedExports: {
   },
 } });
 mock.module(mod("lib/engineeringAgentV22SettlementPatch.ts"), {
-  namedExports: { loadEngineeringAgentV22SettlementPatch: async () => world.patch },
+  // As the real loader adds them: every path the text names, and stored files.
+  namedExports: { loadEngineeringAgentV22SettlementPatch: async () => world.patch &&
+    { ...world.patch, paths: v22PatchNamedPaths(world.patch.text,
+      world.patch.files ?? null) } },
 });
 mock.module(mod("lib/engineeringAgentStore.ts"), { namedExports: {
   EngineeringAgentStoreRefusedError: class extends Error {},
@@ -1052,9 +1061,26 @@ test("a run that ended with an owner question waits blocked, unreviewed and unpu
   assert.equal(world.questionAnswerClears, 1);
 });
 
-test("a question over the limit blocks the Task for a person", async () => {
+test("a fourth question opens like the first: there is no question limit", async () => {
+  // Owner decision 2026-11-15: the three-question limit is gone. The question row a run's fourth
+  // question is recorded as is open, and settlement parks the Task for its answer, no escalation.
+  const { amuxV22OwnerQuestionSettlement } = await import(mod("lib/amux/v22OwnerQuestionCore.ts"));
+  assert.deepEqual(amuxV22OwnerQuestionSettlement(), { questionState: "open", reason: "owner_question" });
   world = makeWorld("succeeded");
-  world.ownerQuestion = { id: "question-four", state: "cancelled" };
+  world.ownerQuestion = { id: "question-four", state: "open" };
+  const result = await (await execution).settleAmuxV22TaskExecution(
+    await settlementInput("succeeded"));
+  assert.equal(result.settled, true);
+  assert.equal(world.taskUpdateData?.status, "blocked");
+  assert.equal(world.attemptUpdateData?.reason, "owner_question");
+  assert.notEqual(world.attemptUpdateData?.reason, "owner_question_limit");
+  assert.deepEqual(world.escalations, []);
+});
+
+test("a question row that was cancelled still blocks the Task for a person", async () => {
+  // Rows recorded under the old limit read back as before: settlement escalates a cancelled question.
+  world = makeWorld("succeeded");
+  world.ownerQuestion = { id: "question-cancelled", state: "cancelled" };
   const result = await (await execution).settleAmuxV22TaskExecution(
     await settlementInput("succeeded"));
   assert.equal(result.settled, true);

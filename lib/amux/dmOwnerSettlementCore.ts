@@ -15,28 +15,19 @@
 import { createHash } from "node:crypto";
 
 import { engineeringAgentPatchFiles } from "../engineeringAgentOwnerItemContextCore.ts";
-import { patchEvidenceContext } from "../engineeringAgentT2DmReviewCore.ts";
+import { patchContextPaths } from "../engineeringAgentT2DmReviewCore.ts";
 import { DM_EVIDENCE_CLOSE, DM_EVIDENCE_OPEN } from "./decisionMakerCore.ts";
+import { dmCardEvidenceContext, type DmWorkspaceEvidenceName } from "./decisionMakerWorkspaceCore.ts";
 import { formatAmuxV52ReviewEntries, type AmuxV52ReviewEntry } from "./v52ReviewFindingsCore.ts";
 
-const CUT_NOTE = " (cut to fit this card)";
-
 /**
- * A run's words as one evidence block within `room` characters, markers
- * included, cut with a note when longer; null when not even the note fits.
+ * Filing a settlement card starts a Decision Maker turn. On unless exactly
+ * `disabled` (owner decision 2026-11-15: the switches that make the Decision
+ * Maker work default on, and are kill switches).
  */
-function evidenceBlock(text: string, room: number): string | null {
-  const wrap = (body: string) => `${DM_EVIDENCE_OPEN}\n${body}\n${DM_EVIDENCE_CLOSE}`;
-  const whole = wrap(text);
-  if (whole.length <= room) return whole;
-  const keep = room - wrap("").length - CUT_NOTE.length;
-  return keep > 40 ? wrap(text.slice(0, keep) + CUT_NOTE) : null;
-}
-
-/** Default off. Filing a settlement card starts a Decision Maker turn. */
 export const AMUX_DM_OWNER_SETTLEMENT_ENV = "TOMVERSE_AMUX_DM_OWNER_SETTLEMENT";
 export const amuxDmOwnerSettlementEnabled = (env: Record<string, string | undefined> = process.env) =>
-  env[AMUX_DM_OWNER_SETTLEMENT_ENV] === "enabled";
+  env[AMUX_DM_OWNER_SETTLEMENT_ENV]?.trim() !== "disabled";
 
 export const AMUX_DM_OWNER_SETTLEMENT_KINDS = ["t2_pr", "stopped"] as const;
 export type AmuxDmOwnerSettlementKind = (typeof AMUX_DM_OWNER_SETTLEMENT_KINDS)[number];
@@ -87,12 +78,8 @@ export function amuxDmOwnerSettlementMoved(facts: AmuxDmOwnerSettlementTaskFacts
 export const AMUX_DM_OWNER_SETTLEMENT_DM_WORKER = "amux-owner-settlement";
 /** As the result review: `claude` routes to `decision-maker-openai`. */
 export const AMUX_DM_OWNER_SETTLEMENT_DM_PROVIDER = "claude";
-/** The card context's limit (lib/amux/v22OwnerQuestionCore.ts DM_CARD_CONTEXT_MAX). */
+/** The room the review findings block gets in a stopped card's context. */
 export const AMUX_DM_OWNER_SETTLEMENT_CONTEXT_MAX = 4_000;
-/** The relay's typed-ask question limit, as every other card's. */
-export const AMUX_DM_OWNER_SETTLEMENT_QUESTION_MAX = 2_000;
-const TITLE_MAX = 200;
-const SIBLING_TITLE_MAX = 80;
 /** Cards beside it listed by name; the rest are counted. */
 export const AMUX_DM_OWNER_SETTLEMENT_SIBLINGS_SHOWN = 8;
 
@@ -173,10 +160,6 @@ export type AmuxDmOwnerSettlementSibling = {
 };
 
 const oneLine = (text: string) => text.replace(/\s+/g, " ").trim();
-const shortTitle = (title: string) => {
-  const line = oneLine(title);
-  return line.length > SIBLING_TITLE_MAX ? `${line.slice(0, SIBLING_TITLE_MAX - 3)}...` : line;
-};
 
 function siblingLines(siblings: readonly AmuxDmOwnerSettlementSibling[], total: number) {
   if (total === 0) return ["No other cards share its parent."];
@@ -184,7 +167,7 @@ function siblingLines(siblings: readonly AmuxDmOwnerSettlementSibling[], total: 
   return [
     `Other cards under the same parent (${total}):`,
     ...shown.map((card) => `- ${card.label} (${card.status}${card.waitsOnThis ? ", waits on this card" : ""})` +
-      (card.title ? `: ${shortTitle(card.title)}` : "")),
+      (card.title ? `: ${oneLine(card.title)}` : "")),
     ...(total > shown.length ? [`(${total - shown.length} more are not shown.)`] : []),
   ];
 }
@@ -209,12 +192,14 @@ const REMAKE_LINE =
 
 /**
  * The card the relay files, in the shape of a v22 question's pending entry,
- * or null when the evidence does not fit whole (the person decides it then).
- * The criteria and, for a stopped Task, the run's findings are never cut. A
- * review pull request's file list is in the question and its file diffs ride
- * in the card's context, whole while that has room; its findings are there
- * only when they fit, and the card says what it left out. Words in the evidence may send the card to
- * the operator: that is the routing working.
+ * or null when its evidence is missing (the person decides it then): no
+ * completion criteria, or a review pull request with no patch. The question is
+ * the summary -- the Task, why it stopped, its criteria, the cards beside it
+ * and a pull request's file list -- and the run's report and the patch are in
+ * the Decision Maker's workspace, whole (owner decision 2026-11-15), or in the
+ * card's context, whole, with the workspace switched off. Nothing is cut to
+ * fit a card. Words in the criteria may send the card to the operator: that is
+ * the routing working.
  */
 export function amuxDmOwnerSettlementCard(input: {
   settlementId: string;
@@ -240,11 +225,12 @@ export function amuxDmOwnerSettlementCard(input: {
   siblingTotal: number;
   /** A review pull request: its number and patch. */
   pull: { number: number; patch: string | null } | null;
+  /** Whether the Decision Maker has a workspace; the switch decides by default. */
+  workspace?: boolean;
 }) {
   if (input.criteria.length === 0) return null;
   if (input.kind === "t2_pr" && !input.pull?.patch) return null;
-  const findingsLine = input.findings !== null && input.findings.trim() ?
-    `Its findings: ${input.findings}` : "Its run left no result to read.";
+  const findings = input.findings !== null && input.findings.trim() ? input.findings : null;
   const head = [
     input.kind === "t2_pr" ?
       "A v22 Task's pull request waits for the owner's approval. You decide what happens to it." :
@@ -253,6 +239,7 @@ export function amuxDmOwnerSettlementCard(input: {
     `Why it stopped: ${amuxDmOwnerSettlementReasonText(input.reason)}.`,
     "Its completion criteria:",
     ...input.criteria.map((criterion) => `- ${criterion}`),
+    findings === null ? "Its run left no result to read." : "Its run's report is in the evidence named below.",
   ];
   const reviewContext = input.kind === "stopped" && input.reviews?.entries.length ?
     amuxDmOwnerSettlementReviewContext(input.reviews.entries) : null;
@@ -263,24 +250,20 @@ export function amuxDmOwnerSettlementCard(input: {
           (input.reviews!.unread > 0 ? `, except for ${input.reviews!.unread} rejection${input.reviews!.unread === 1 ? "" : "s"} whose findings could not be read.` : ".") :
         "its findings are not in this card; they are kept with the Task in Admin.")] : [];
   const siblings = siblingLines(input.siblings, input.siblingTotal);
-  const max = AMUX_DM_OWNER_SETTLEMENT_QUESTION_MAX;
+  const evidence: Array<{ name: DmWorkspaceEvidenceName; heading: string; text: string }> = [
+    ...(findings === null ? [] : [{ name: "FINDINGS.md" as const, heading: "Its run's report", text: findings }]),
+  ];
   if (input.kind === "stopped") {
-    // The run's words are evidence (AMUXFLOW/B2): marked for the term check,
-    // and cut to the room the card has rather than leaving the card unfiled.
-    const ask = "Should the Task run again, be marked done because its work is in, or be closed?";
-    const fixed = [...head, ...rejected, ...siblings, REMAKE_LINE, ask].join("\n");
-    const room = max - fixed.length - 1;
-    const evidence = evidenceBlock(findingsLine, room);
-    const question = [...head, ...(evidence ? [evidence] : []), ...rejected, ...siblings,
-      REMAKE_LINE, ask].join("\n");
-    if (question.length > max) return null;
+    const context = dmCardEvidenceContext(evidence, input.workspace);
+    if (context === null) return null;
     return {
       question_id: input.settlementId,
       worker: AMUX_DM_OWNER_SETTLEMENT_DM_WORKER,
       provider: AMUX_DM_OWNER_SETTLEMENT_DM_PROVIDER,
-      title: `Owner queue: ${input.taskLabel}`.slice(0, TITLE_MAX),
-      question,
-      ...(reviewContext ? { context: reviewContext } : {}),
+      title: `Owner queue: ${input.taskLabel}`,
+      question: [...head, ...rejected, ...siblings, REMAKE_LINE,
+        "Should the Task run again, be marked done because its work is in, or be closed?"].join("\n"),
+      context: [reviewContext, context].filter((part) => part).join("\n"),
       unblocks: "A retry runs the Task again; done lets the Tasks after it start; a close takes the card off the board; a remake files one new idea in place of the cards it closes.",
       options: [
         { id: "retry", label: "Run the Task again" },
@@ -292,31 +275,20 @@ export function amuxDmOwnerSettlementCard(input: {
   const patch = input.pull!.patch!;
   const files = engineeringAgentPatchFiles(patch);
   if (files.length === 0) return null;
-  const pullHead = [`Pull request #${input.pull!.number}, files (${files.length}):`,
-    ...files.map((file) => `- ${file.path} (+${file.added} -${file.removed})`)];
-  const tail = ["Should the pull request be approved, the Task run again, or the card closed?"];
-  const fixed = [...head, ...rejected, ...siblings, ...pullHead, ...tail].join("\n");
-  if (fixed.length > max) return null;
-  // The findings are evidence (AMUXFLOW/B2): whole when they fit beside the
-  // rest, in their markers. The patch no longer shares this room: it rides in
-  // the card's context (patchEvidenceContext), so the question keeps the
-  // findings and the diffs get a room of their own.
-  const marks = DM_EVIDENCE_OPEN.length + DM_EVIDENCE_CLOSE.length + 2;
-  const findingsFit = fixed.length + 1 + findingsLine.length + marks + 80 <= max;
-  const shownFindings = findingsFit ? evidenceBlock(findingsLine, Number.MAX_SAFE_INTEGER)! :
-    "Its run's report does not fit this card; judge it from the patch.";
-  const evidence = patchEvidenceContext(patch);
-  if (!evidence) return null;
-  const question = [...head, shownFindings, ...rejected, ...siblings, ...pullHead,
-    "The patch is in this card's context.", ...tail].join("\n");
-  if (question.length > max) return null;
+  const context = dmCardEvidenceContext([{ name: "PATCH.diff", heading: "The pull request's patch", text: patch }, ...evidence],
+    input.workspace);
+  if (context === null) return null;
   return {
     question_id: input.settlementId,
     worker: AMUX_DM_OWNER_SETTLEMENT_DM_WORKER,
     provider: AMUX_DM_OWNER_SETTLEMENT_DM_PROVIDER,
-    title: `Owner queue: ${input.taskLabel}`.slice(0, TITLE_MAX),
-    question,
-    context: evidence.context,
+    title: `Owner queue: ${input.taskLabel}`,
+    question: [...head, ...rejected, ...siblings,
+      `Pull request #${input.pull!.number}, files (${files.length}):`,
+      ...files.map((file) => `- ${file.path} (+${file.added} -${file.removed})`),
+      "Should the pull request be approved, the Task run again, or the card closed?"].join("\n"),
+    context,
+    context_paths: patchContextPaths(patch),
     unblocks: "An approval is kept for the merge lane, which acts on it later; a retry runs the Task again; a close takes the card off the board and leaves the pull request.",
     options: [
       { id: "approve", label: "Approve the pull request" },

@@ -492,10 +492,10 @@ test("implement refuses a dirty baseline before CLI and holds a patch only in me
   const patchBody = "diff --git a/example b/example\n";
   const patchDigest = (await import("node:crypto")).createHash("sha256")
     .update(patchBody).digest("hex");
+  // A capture that still names file bytes (a sidecar before 2026-11-15) has
+  // none of them sent: the patch text alone is the evidence.
   const publishFiles = [{ path: "tests/example.test.mjs", mode: "100644",
     bytesBase64: "YQ==" }];
-  const filesDigest = (await import("node:crypto")).createHash("sha256")
-    .update(JSON.stringify(publishFiles)).digest("hex");
   try {
     const fake = fakeSpawn(JSON.stringify(usage));
     const handler = createAmuxV22SidecarHandler({ worker: "worker-a",
@@ -510,18 +510,16 @@ test("implement refuses a dirty baseline before CLI and holds a patch only in me
     const result = await readFinished(handler);
     assert.equal(result.patchBody, patchBody);
     assert.equal(result.patchDigest, patchDigest);
-    assert.deepEqual(result.publishFiles, publishFiles);
-    assert.equal(result.publishFilesDigest, filesDigest);
+    assert.equal(result.publishFiles, undefined);
+    assert.equal(result.publishFilesDigest, undefined);
     assert.equal((await readFile(join(stateDir, `${attemptId}.result`),
       "utf8")).includes(patchBody), false);
-    assert.equal((await readFile(join(stateDir, `${attemptId}.result`),
-      "utf8")).includes(filesDigest), true);
     assert.equal((await handler({ op: "confirm_patch", attemptId,
       patchDigest })).kind, "confirmed");
     assert.equal((await handler({ op: "readback", attemptId })).patchBody,
       undefined);
     assert.equal((await handler({ op: "readback", attemptId }))
-      .publishFilesDigest, filesDigest);
+      .publishFilesDigest, undefined);
   } finally { await rm(stateDir, { recursive: true, force: true }); }
 });
 

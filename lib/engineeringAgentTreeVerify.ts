@@ -20,7 +20,8 @@
 import { createHash } from "node:crypto";
 
 import { isCanonicalRepoPath } from "./agentAuthorityFiles.ts";
-import { PUSH_LIMITS, type ChangedEntry } from "./agentPushPolicy.ts";
+import type { ChangedEntry } from "./agentPushPolicy.ts";
+import { AMUX_V22_FILE_MAX_BYTES } from "./amux/v22PatchLimit.ts";
 
 export const TREE_MODES = {
   blob: "100644",
@@ -37,11 +38,16 @@ export type TreeEntry = {
   oid: string;
 };
 
-/** Proposed ceilings on what one verification will look at. */
+/**
+ * What one verification will look at: as many entries as GitHub lists for one
+ * recursive tree (past 100,000 it truncates the listing, which the app
+ * refuses), and each new blob up to GitHub's own file limit
+ * (lib/amux/v22PatchLimit.ts, owner decision 2026-11-15). There is no count
+ * of changed blobs: the patch size bounds it.
+ */
 export const TREE_LIMITS = {
-  maxEntries: 20_000,
-  maxChangedBlobs: 50,
-  maxChangedBlobBytes: 2 * 1024 * 1024,
+  maxEntries: 100_000,
+  maxChangedBlobBytes: AMUX_V22_FILE_MAX_BYTES,
 } as const;
 
 const OID = /^[0-9a-f]{40}$/;
@@ -198,46 +204,111 @@ export const checkListing = (entries: readonly TreeEntry[]): ListingCheck => {
   return { ok: true, rootTreeId };
 };
 
-/** v22's bounded sparse transport: compute a result listing from app-read
- * GitHub base entries and complete replacement bytes for existing regular
- * files. This function never parses or applies the worker's patch (bytes
- * rebuilt from a stored patch come from engineeringAgentV22PatchApply). The
- * Publisher must still apply that patch independently and match this exact
- * root before push. `maxFiles` defaults to `PUSH_LIMITS.maxFiles`; the tier
- * gate judges the count for T1 either way. */
-export const resultListingFromModifiedBlobs = (input: {
+/** One file a v22 patch writes or deletes. A write with `exists` replaces a
+ * file the base has (its bytes, its mode or both); one without creates a new
+ * path. A rename is a delete and a create; a type change (a file becoming a
+ * symlink, say) is a delete and a create of the same path. */
+export type V22TreeChange =
+  | { kind: "delete"; path: string }
+  | { kind: "write"; path: string; mode: "100644" | "100755" | "120000";
+      bytes: Uint8Array; exists: boolean };
+
+const WRITE_MODES: ReadonlySet<string> = new Set([TREE_MODES.blob,
+  TREE_MODES.executable, TREE_MODES.symlink]);
+
+/** v22's sparse transport: compute a result listing from app-read GitHub
+ * base entries and the files a patch deletes, replaces or creates, the way
+ * `git apply --cached` changes an index: deletions first, a directory a
+ * deletion empties gone, then each write. A created path must be free (after
+ * the deletions), every directory above it an existing tree or new (made
+ * here), and no name the patch introduces may equal another name of the
+ * result but for case or Unicode form, which a case-insensitive checkout
+ * would write to the same place; otherwise `path_conflict`. A replaced path
+ * must be a file of the base. This function never parses or applies the
+ * worker's patch (engineeringAgentV22PatchApply rebuilds the bytes). The
+ * Publisher still applies that patch independently and must match this exact
+ * root before push. No count or size limit applies here beyond GitHub's file
+ * limit (lib/amux/v22PatchLimit.ts); the tier gate judges size for T1. */
+export const resultListingFromChanges = (input: {
   base: readonly TreeEntry[];
   baseRootTreeId: string;
-  files: readonly { path: string; mode: "100644"; bytes: Uint8Array }[];
-  maxFiles?: number;
+  changes: readonly V22TreeChange[];
 }): { ok: true; result: TreeEntry[]; rootTreeId: string;
   changedBlobs: ReadonlyMap<string, Uint8Array> } |
-  { ok: false; reason: "base_invalid" | "files_invalid" | "result_invalid" } => {
+  { ok: false; reason: "base_invalid" | "files_invalid" | "path_conflict" |
+    "result_invalid" } => {
   const checked = checkListing(input.base);
   if (!checked.ok || checked.rootTreeId !== input.baseRootTreeId)
     return { ok: false, reason: "base_invalid" };
-  if (input.files.length < 1 ||
-      input.files.length > (input.maxFiles ?? PUSH_LIMITS.maxFiles))
-    return { ok: false, reason: "files_invalid" };
+  if (input.changes.length < 1) return { ok: false, reason: "files_invalid" };
   const entries = new Map(input.base.map((entry) => [entry.path, { ...entry }]));
-  const seen = new Set<string>();
+  const basePaths = new Set(input.base.map((entry) => entry.path));
   const baseBlobIds = new Set(input.base.filter((entry) =>
     entry.type === "blob").map((entry) => entry.oid));
   const changedBlobs = new Map<string, Uint8Array>();
-  for (const file of input.files) {
-    const old = entries.get(file.path);
-    if (!isCanonicalRepoPath(file.path) || seen.has(file.path) ||
-        file.mode !== "100644" || old?.type !== "blob" ||
-        old.mode !== file.mode || !(file.bytes instanceof Uint8Array) ||
-        file.bytes.byteLength > PUSH_LIMITS.maxFileBytes) {
-      return { ok: false, reason: "files_invalid" };
-    }
-    seen.add(file.path);
-    const oid = gitObjectId("blob", file.bytes);
-    if (oid === old.oid) return { ok: false, reason: "files_invalid" };
-    entries.set(file.path, { ...old, oid });
-    if (!baseBlobIds.has(oid)) changedBlobs.set(oid, file.bytes);
+  const deleted = new Set<string>();
+  const written = new Set<string>();
+  for (const change of input.changes) {
+    if (change.kind !== "delete") continue;
+    const old = entries.get(change.path);
+    if (!isCanonicalRepoPath(change.path) || deleted.has(change.path) ||
+        old?.type !== "blob") return { ok: false, reason: "files_invalid" };
+    deleted.add(change.path);
+    entries.delete(change.path);
   }
+  // A tree left with no entries is not written (git has no empty trees).
+  for (let pruned = true; pruned;) {
+    pruned = false;
+    const parents = new Set<string>();
+    for (const path of entries.keys()) {
+      const slash = path.lastIndexOf("/");
+      if (slash > 0) parents.add(path.slice(0, slash));
+    }
+    for (const [path, entry] of entries) {
+      if (entry.type === "tree" && !parents.has(path)) {
+        entries.delete(path);
+        pruned = true;
+      }
+    }
+  }
+  for (const change of input.changes) {
+    if (change.kind !== "write") continue;
+    if (!isCanonicalRepoPath(change.path) || written.has(change.path) ||
+        !WRITE_MODES.has(change.mode) || !(change.bytes instanceof Uint8Array) ||
+        change.bytes.byteLength > AMUX_V22_FILE_MAX_BYTES)
+      return { ok: false, reason: "files_invalid" };
+    written.add(change.path);
+    const old = entries.get(change.path);
+    const oid = gitObjectId("blob", change.bytes);
+    if (change.exists) {
+      if (old?.type !== "blob" ||
+          (old.oid === oid && old.mode === change.mode))
+        return { ok: false, reason: "files_invalid" };
+    } else {
+      if (old !== undefined) return { ok: false, reason: "path_conflict" };
+      const segments = change.path.split("/");
+      for (let depth = 1; depth < segments.length; depth += 1) {
+        const path = segments.slice(0, depth).join("/");
+        const existing = entries.get(path);
+        if (existing !== undefined && existing.type !== "tree")
+          return { ok: false, reason: "path_conflict" };
+        // A tree's id is computed below, once its children are known.
+        if (existing === undefined) entries.set(path, { path,
+          mode: TREE_MODES.tree, type: "tree", oid: "" });
+      }
+    }
+    entries.set(change.path, { path: change.path, mode: change.mode,
+      type: "blob", oid });
+    if (!baseBlobIds.has(oid)) changedBlobs.set(oid, change.bytes);
+  }
+  const twins = new Map<string, string[]>();
+  for (const path of entries.keys()) {
+    const key = path.normalize("NFC").toLowerCase();
+    twins.set(key, [...(twins.get(key) ?? []), path]);
+  }
+  for (const paths of twins.values())
+    if (paths.length > 1 && paths.some((path) => !basePaths.has(path)))
+      return { ok: false, reason: "path_conflict" };
   const children = new Map<string, TreeEntry[]>();
   for (const entry of entries.values()) {
     const slash = entry.path.lastIndexOf("/");
@@ -448,9 +519,6 @@ export const verifyResultListing = (input: VerificationInput): VerificationResul
       )
       .map((change) => change.newOid as string),
   );
-  if (needed.size > TREE_LIMITS.maxChangedBlobs) {
-    problems.push({ problem: "too_many_changed_blobs", path: null });
-  }
   for (const oid of needed) {
     const content = input.changedBlobs.get(oid);
     if (content === undefined) problems.push({ problem: "blob_missing", path: oid });
@@ -568,11 +636,10 @@ const splitLines = (text: string) => {
 
 /**
  * Lines added and removed between two texts, by Myers' shortest edit script,
- * computed only up to `maxEdits`. The count is exact within that bound, so the
- * size limit cannot be dodged by a diff that looks smaller than it is. Past the
- * bound the answer is simply "exceeded" -- the change is T2 by size whatever
- * the exact number, and memory stays proportional to the bound rather than to
- * the files, so a 200 KB file of unrelated lines costs nothing unbounded.
+ * computed only up to `maxEdits`. The count is exact within that bound. Past
+ * it the answer is simply "exceeded", and the caller reads the whole new file
+ * as added; memory stays proportional to the bound rather than to the files,
+ * so a large file of unrelated lines costs nothing unbounded.
  */
 export const diffLines = (
   before: string,
@@ -644,6 +711,12 @@ export const diffLines = (
   };
 };
 
+/**
+ * How far one file's diff is walked. A performance bound, not a policy one:
+ * the walk keeps a row per edit, so a budget of a thousand holds a few MiB.
+ */
+const DIFF_EDIT_BUDGET = 1_000;
+
 export type PolicyChangesResult =
   | { ok: true; entries: ChangedEntry[] }
   | { ok: false; problems: Array<{ problem: "blob_missing" | "blob_content_mismatch"; oid: string }> };
@@ -692,13 +765,17 @@ export const toPolicyChanges = (
         : afterText !== null && (change.status === "added" || beforeText !== null);
     const diff =
       beforeText !== null && afterText !== null
-        ? diffLines(beforeText, afterText, PUSH_LIMITS.maxChangedLines + 1)
+        ? diffLines(beforeText, afterText, DIFF_EDIT_BUDGET)
         : null;
+    // Past the budget every line of the new file counts as added: the
+    // decision-value alarms and the slice then read more, never less.
     const lines =
       diff === null
         ? { addedLines: 0, removedLines: 0, addedText: "" }
         : diff.exceeded
-          ? { addedLines: PUSH_LIMITS.maxChangedLines + 1, removedLines: 0, addedText: "" }
+          ? { addedLines: splitLines(afterText ?? "").length,
+              removedLines: splitLines(beforeText ?? "").length,
+              addedText: afterText ?? "" }
           : diff;
     return {
       path: change.path,

@@ -3,6 +3,7 @@ import {
   type AmuxAnalysisSchemaRejectAt,
 } from "./ideaAnalysisChunkCore.ts";
 import { amuxSessionAnswerQuestion } from "./ideaSessionAnswerCore.ts";
+import { DM_CARD_TEXT_MAX_BYTES } from "./decisionMakerCore.ts";
 
 /**
  * Why a session analysis answer became no plan, read back for the owner from
@@ -31,7 +32,11 @@ export type AmuxSessionReview =
   | { reason: "owner_question"; question: string }
   | { reason: "not_a_plan"; detail?: AmuxSessionReviewDetail; at?: AmuxAnalysisSchemaRejectAt };
 
-const QUESTION_MAX = 2_000;
+/**
+ * The owner question becomes a Decision Maker card, so its one cap is the
+ * card's (owner decision 2026-11-15 removed the 2,000-character copy).
+ */
+const QUESTION_MAX = DM_CARD_TEXT_MAX_BYTES;
 
 export function classifyAmuxSessionReviewAnswer(raw: string): AmuxSessionReview {
   let parsed: unknown;

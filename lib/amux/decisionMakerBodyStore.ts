@@ -713,7 +713,7 @@ export type DecisionMakerRoutedRequest = DecisionMakerRequestRecord & {
  *
  * The text passes `dmBodyRefusal()`, the secret scan included (§10: "저장 전에
  * secret 검사를 통과해야 한다"), before it is sent. The router never sends a
- * card it would refuse: `routeDmQuestion()` measures §5's 16 KiB on the same
+ * card it would refuse: `routeDmQuestion()` measures §5's cap on the same
  * text and scans it with the same scanner, so a card over the cap or with a
  * secret goes to the operator (`input_limit_exceeded`,
  * `card_secret_detected`) and stores nothing here. A refusal at this point
