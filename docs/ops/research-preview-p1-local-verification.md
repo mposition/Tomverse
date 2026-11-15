@@ -33,7 +33,9 @@ the fetched main `6ca4eccdf011a9c3e13e727caf6a85a1a677a3b5`.
 Research feature switches remain opt-in: `RESEARCH_PREVIEW_ENABLED`,
 `RESEARCH_PREVIEW_PAGE_READING_ENABLED`, `RESEARCH_PREVIEW_DURABLE_ENABLED`
 and `RESEARCH_PREVIEW_NATIVE_ENABLED`. Native also retains its existing bearer
-and parity gates. The current product admission shortlist remains the P0 list;
+and parity gates. The owner subsequently approved adding the exact Google
+`gemini-4-argon` identity to the product shortlist for dev UI validation. Both
+shortlisted models still require explicit `RESEARCH_PREVIEW_MODEL_IDS` activation;
 development evaluation clones do not alter runtime model settings or prices.
 
 ## Cohere Chat connection
@@ -86,7 +88,7 @@ output limits; this session did not query the production DB to verify them:
 | --- | --- | --- |
 | GPT Astra | 128,000 | Candidate; exact operating API ID, pricing and reasoning configuration not yet captured |
 | Claude Fable 5.2 | 128,000 | Candidate; exact operating API ID, pricing and reasoning configuration not yet captured |
-| Gemini 4 Argon | 32,768 | HTTP 400 isolated to nested report maxItems and repaired; three HTTP 200 steps and one successful original-page read; final report rejected by validation |
+| Gemini 4 Argon | 32,768 | HTTP 400 isolated to nested report maxItems and repaired; later live original-read investigation submitted a validated complete report |
 
 The product's shared 4,096-token run cap is independent of those model limits.
 There is no measured basis for excluding Astra or Fable on output-limit,
@@ -391,3 +393,31 @@ Implementation, verification, independent review and release are separate.
 No push, PR, CI start/retry, AMUX mutation, production migration, merge or
 deployment is part of this local implementation. The original dirty workspace
 and P0 worktree are preserved.
+
+### Dev integration preparation
+
+The owner then requested a PR, dev deployment and actual UI save/resume
+verification. A new `codex/research-preview-to-develop` branch starts at current
+develop `39e9696b1`, cherry-picking only the Research P0/P1 and Cohere commits.
+The previous main-based implementation branch remains intact. Conflict
+resolution preserves develop's source-continuation receipts, file-revision
+drafts, Native workspace routes and newer SDK versions. Research excludes
+continuation context at the new preparation boundary as well as at dispatch.
+The exact Cohere SDK adds its two older protocol dependencies as nested lockfile
+entries instead of downgrading the current provider packages.
+
+For controlled work batches, `worker:research-preview -- --once
+--max-steps-per-claim=1` saves a safe checkpoint after a completed generation.
+The default remains three. Values outside 1–3 are rejected before queue work;
+the option cannot raise the shared three-generation/output/search limits.
+The database regression exercises actual service creation, one generation,
+checkpoint read, the resume route and completion under the same reservation.
+
+The owner selected Argon for the UI validation instead of Pro. Dev has no
+existing Argon registry row. A read-only transaction on production inspected
+only its exact Argon row; no production write was made. The dev plan copies
+that profile's existing prices, credits and 32,768 output limit, with dev-only
+low reasoning and app-managed search. Its frozen maximum reservation for one
+three-generation case is US$4.440248; earlier full reservations plus this case
+are US$16.282508, within the proposed cumulative US$16.50 ceiling. This is
+preparation, not evidence of an executed UI case or a successful deployment.

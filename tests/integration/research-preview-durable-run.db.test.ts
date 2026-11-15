@@ -256,7 +256,7 @@ function completedDurableModel() {
   });
 }
 
-test("the real durable service reserves once, dispatches three known steps and serves the persisted report read-only", async () => {
+for (const pauseAfterFirst of [false, true]) test(`the real durable service reserves once and completes three steps${pauseAfterFirst ? " across an explicit checkpoint and resume" : " in one claim"}`, async () => {
   const user = await prisma.user.create({
     data: {
       email: `durable-service-${randomUUID()}@example.test`,
@@ -311,6 +311,21 @@ test("the real durable service reserves once, dispatches three known steps and s
   assert.equal(held[0]?.status, "reserved");
   reservations.push(held[0]!.id);
 
+  if (pauseAfterFirst) {
+    await assert.rejects(service.processOneResearchPreviewRun("invalid-worker", { maxStepsPerClaim: 4 }), /step limit/);
+    assert.equal(activeModel.doGenerateCalls.length, 0);
+    assert.equal(await service.processOneResearchPreviewRun("checkpoint-worker", { maxStepsPerClaim: 1 }), true);
+    const paused = await readResearchPreviewRunDto(user.id, created.run.id);
+    assert.equal(paused?.status, "checkpointed");
+    assert.equal(paused?.canResume, true);
+    assert.equal(activeModel.doGenerateCalls.length, 1);
+    assert.equal(await prisma.chatCreditReservation.count({ where: { userId: user.id } }), 1);
+    const { POST } = await import(mod("app/api/chat/research-preview/runs/[id]/resume/route.ts"));
+    const resumed = await POST(new Request(`http://127.0.0.1/api/chat/research-preview/runs/${created.run.id}/resume`, { method: "POST" }),
+      { params: Promise.resolve({ id: created.run.id }) });
+    assert.equal(resumed.status, 200);
+    assert.equal(activeModel.doGenerateCalls.length, 1, "resume queues the existing checkpoint without dispatching");
+  }
   assert.equal(await service.processOneResearchPreviewRun("durable-service-worker"), true);
   const run = await prisma.researchPreviewRun.findUniqueOrThrow({
     where: { id: created.run.id },

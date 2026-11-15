@@ -22,6 +22,7 @@ import { prisma } from "@/lib/prisma";
 import {
   decideResearchPreviewAdmission,
   researchPreviewGate,
+  RESEARCH_PREVIEW_MAX_STEPS,
 } from "@/lib/researchPreviewAdmission";
 import { createResearchPreviewBudget } from "@/lib/researchPreviewBudget";
 import {
@@ -488,14 +489,20 @@ export async function recoverStaleResearchPreviewRuns(limit = 50) {
 }
 
 export async function processOneResearchPreviewRun(
-  ownerId = researchPreviewWorkerId()
+  ownerId = researchPreviewWorkerId(),
+  options: { maxStepsPerClaim?: number } = {}
 ) {
+  const maxStepsPerClaim = options.maxStepsPerClaim ?? RESEARCH_PREVIEW_MAX_STEPS;
+  if (!Number.isInteger(maxStepsPerClaim) || maxStepsPerClaim < 1 || maxStepsPerClaim > RESEARCH_PREVIEW_MAX_STEPS) {
+    throw new Error("Research worker step limit must be between one and three.");
+  }
   await recoverStaleResearchPreviewRuns();
   const claimed = await claimNextResearchPreviewRun(ownerId);
   if (!claimed) return false;
   let chatLeaseId: string | null = null;
   let generationId: string | undefined;
   let dispatched = false;
+  let completedStepsInClaim = 0;
   let checkpoint = claimed.checkpoint
     ? parseResearchPreviewCheckpoint(claimed.checkpoint)
     : null;
@@ -652,8 +659,9 @@ export async function processOneResearchPreviewRun(
       checkpoint = next;
       generationId = undefined;
       dispatched = false;
+      completedStepsInClaim += 1;
       if (result.finished) break;
-      if (Date.now() + 5_000 >= activeDeadline) {
+      if (completedStepsInClaim >= maxStepsPerClaim || Date.now() + 5_000 >= activeDeadline) {
         await checkpointResearchPreviewRun({
           runId: current.id,
           ownerId,

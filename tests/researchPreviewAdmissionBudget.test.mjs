@@ -93,6 +93,17 @@ test("shared admission is default-off and requires manual one-model/profile perm
   );
 });
 
+test("owner-approved Argon admission pins its Google API identity and still requires explicit activation", () => {
+  const argon = { ...model, id: "gemini-4-argon", provider: "google", apiModel: "gemini-4-argon", webSearchOverride: "app-managed" };
+  const env = { RESEARCH_PREVIEW_ENABLED: "true", RESEARCH_PREVIEW_MODEL_IDS: argon.id };
+  assert.equal(researchPreviewGate(argon, {}), false);
+  assert.equal(researchPreviewGate(argon, env), true);
+  assert.equal(researchPreviewGate({ ...argon, apiModel: "different-model" }, env), false);
+  assert.equal(researchPreviewGate({ ...argon, provider: "openai" }, env), false);
+  assert.equal(decideResearchPreviewAdmission({ ...readyInput(), model: argon,
+    selectedModelIds: [argon.id], gateEnabled: researchPreviewGate(argon, env) }).offered, true);
+});
+
 test("one budget reserves three prompt passes, prior output, schema and worst-case evidence", () => {
   const capability = getWebSearchCapability(model);
   const searchReservation = reserveTurnSearchCost({

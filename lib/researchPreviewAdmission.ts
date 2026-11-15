@@ -52,6 +52,11 @@ export const RESEARCH_PREVIEW_P0_MODEL_SHORTLIST = [
     provider: "google",
     apiModel: "gemini-3.1-pro-preview",
   },
+  {
+    id: "gemini-4-argon",
+    provider: "google",
+    apiModel: "gemini-4-argon",
+  },
 ] as const;
 
 export const researchPreviewModelIsShortlisted = (
