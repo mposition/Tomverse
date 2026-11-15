@@ -4556,11 +4556,13 @@ export function ChatPageClient({
         }
         localComparisonResponsesRef.current.clear();
         latestLocalComparisonPromptRef.current = null;
-    // Asking for a new chat is an explicit request for a blank composer, so
-    // the conversation this lands on gives its draft up. Every *other*
-    // conversation keeps its own -- coming back to one still restores what
-    // was being written there.
-    let blankedDraftScope: string | null = currentChatIdRef.current;
+    // Asking for a new chat from the new-chat screen itself is an explicit
+    // request for a blank composer, so that draft is given up. Arriving from
+    // another conversation is not: the new-chat draft (text and attachments)
+    // waits like every other conversation's draft, so looking at another
+    // conversation and coming back restores what was being written there
+    // (owner request 2026-11-15). `undefined` means nothing is discarded.
+    let blankedDraftScope: string | null | undefined = currentChatIdRef.current;
     if (isGuestMode) {
       const existingCurrent = conversations.find((c) => c.id === currentChatIdRef.current);
       if (
@@ -4608,7 +4610,8 @@ export function ChatPageClient({
             models: clampSelectedModels(uniqueStrings(userDefaultModelIds)),
             fallbackModelId: APP_DEFAULTS.defaultModelId,
         }));
-        blankedDraftScope = null;
+        // Only a second click on the new-chat screen blanks its draft.
+        blankedDraftScope = blankedDraftScope === null ? null : undefined;
     }
 
     setDisabledPanels([]);
@@ -4617,7 +4620,7 @@ export function ChatPageClient({
     setIsDeepResearchPending(false);
     setIsImageDraftActive(false);
     setReviewImageModelId(null);
-    discardDraft(blankedDraftScope);
+    if (blankedDraftScope !== undefined) discardDraft(blankedDraftScope);
       setPromptPayload(null);
       setIsInitialConversationResolved(true);
 
