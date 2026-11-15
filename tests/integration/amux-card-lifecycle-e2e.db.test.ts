@@ -170,8 +170,11 @@ test("a review recorded before the merge completes the card on that review", asy
 });
 
 test("a merge by anyone else with no review holds that card for a person, and only that card", async () => {
+  const { readEngineeringAgentHaltState, currentEngineeringAgentHalt, engineeringAgentHalted } =
+    await import("@/lib/engineeringAgentStore");
   await lifecycle(async (tx) => {
     const card = await publishedCard(tx);
+    const before = await readEngineeringAgentHaltState(tx);
     const outcome = await observe(card, () => mergedPull({ mergedByApprover: false }));
     assert.equal(outcome?.outcome, "merged_without_approval");
     assert.equal((await cardRow(tx, card)).status, "review");
@@ -181,11 +184,13 @@ test("a merge by anyone else with no review holds that card for a person, and on
     assert.equal(await openMismatches(tx, card), 1);
     assert.equal(((await bindingRow(tx, card)).mergeObservation as { merged: boolean }).merged, true);
     // Owner decision 2026-11-15: it is that card's decision; the agent goes on.
-    const { readEngineeringAgentHaltState, currentEngineeringAgentHalt, engineeringAgentHalted } =
-      await import("@/lib/engineeringAgentStore");
+    // Compared with the reading before it, so another suite's rows decide nothing here.
     const state = await readEngineeringAgentHaltState(tx);
-    assert.equal(engineeringAgentHalted(state), false);
-    assert.equal(currentEngineeringAgentHalt(state), "none");
+    assert.equal(state.cardScoped, true);
+    assert.equal(state.openStateMismatches, before.openStateMismatches + 1);
+    assert.equal(state.unscopedStateMismatches, before.unscopedStateMismatches, "the mismatch is the card's");
+    assert.equal(engineeringAgentHalted(state), engineeringAgentHalted(before));
+    assert.equal(currentEngineeringAgentHalt(state), currentEngineeringAgentHalt(before));
   });
 });
 
