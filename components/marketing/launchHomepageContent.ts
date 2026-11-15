@@ -145,7 +145,7 @@ export const launchAccountEntryCopy: Record<Language, {
 
 export const launchHomepageContent: Record<Language, LaunchHomepageCopy> = {
   ko: {
-    actions: { chat: "Chat 시작하기", review: "Review 시작하기", reviewInfo: "Review 둘러보기", pricing: "요금제 살펴보기", safety: "안전 · 데이터 처리 살펴보기", motionOff: "첫 화면 모션 끄기", motionOn: "첫 화면 모션 켜기" },
+    actions: { chat: "채팅 시작하기", review: "리뷰 시작하기", reviewInfo: "리뷰 둘러보기", pricing: "요금제 살펴보기", safety: "안전 · 데이터 처리 살펴보기", motionOff: "첫 화면 모션 끄기", motionOn: "첫 화면 모션 켜기" },
     hero: {
       title: ["어떤 AI를 쓸지,","고민은 Tomverse에."],
       body: "GPT, Claude, Gemini를 따로 찾아다니지 않아도 됩니다. Tomverse Chat의 Smart Adaptive는 질문에 필요한 기능과 모델의 비용·품질을 고려해 선택을 돕고, 질문 다듬기 제안은 직접 확인하고 적용할 수 있습니다. 다른 관점이 필요하다면 Tomverse Review에서 여러 답변을 나란히 읽고, AI Review로 차이와 빠진 내용을 인용과 함께 살펴보세요.",

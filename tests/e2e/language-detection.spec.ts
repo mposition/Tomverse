@@ -25,7 +25,7 @@ test("a fresh private-style session uses the browser language before opening a p
   const startHref = guestChatAvailable ? `${CHAT_WORKSPACE_PATH}?lang=ko` : "/review?lang=ko";
   const destination = new URL(startHref, page.url()).href;
   const startProduct = page.getByTestId("landing-primary-cta");
-  await expect(startProduct).toContainText(guestChatAvailable ? "Chat 시작하기" : "Review 시작하기");
+  await expect(startProduct).toContainText(guestChatAvailable ? "채팅 시작하기" : "리뷰 시작하기");
   await expect(startProduct).toHaveAttribute("href", startHref);
 
   await startProduct.click();
