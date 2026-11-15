@@ -33,7 +33,6 @@ type ModelQueryContract = { maxQueryTokens: number };
 
 /** Exact public Cohere model IDs whose v2 query limits are documented. */
 const MODEL_QUERY_CONTRACTS: Readonly<Record<string, ModelQueryContract>> = {
-    "rerank-v3.0": { maxQueryTokens: 2_048 },
     "rerank-v3.5": { maxQueryTokens: 2_048 },
     "rerank-v4.0-fast": { maxQueryTokens: 16_384 },
     "rerank-v4.0-pro": { maxQueryTokens: 16_384 },

@@ -163,11 +163,15 @@ test("core, pinned and answer-style memories are stated as never sent, in Korean
     assert.match(en.privacyPolicy.semanticSearchTransfer1, /never sends core memories/);
 });
 
-test("the notice says no account identifier, email or IP is attached, and that the lexical search sends nothing", () => {
+test("the notice distinguishes provider failure fallback from input rejected before transfer", () => {
     assert.match(ko.privacyPolicy.semanticSearch, /계정 식별자, 이메일, 클라이언트 IP를 붙이지 않습니다/);
-    assert.match(ko.privacyPolicy.semanticSearch, /Cohere로 전송하지 않습니다/);
+    assert.match(ko.privacyPolicy.semanticSearch, /요청이 실패하면 Tomverse는 기존의 단어 기반 검색을 사용합니다/);
+    assert.doesNotMatch(ko.privacyPolicy.semanticSearch, /그때는 Cohere로 전송하지 않습니다/);
+    assert.match(ko.privacyPolicy.semanticSearchTransfer1, /한도 안에 들어가는지 검증할 수 없으면 외부 기억 순위 매기기 요청 없이/);
     assert.match(en.privacyPolicy.semanticSearch, /do not include your account identifier, email address or client IP address/);
-    assert.match(en.privacyPolicy.semanticSearch, /nothing is sent to Cohere/);
+    assert.match(en.privacyPolicy.semanticSearch, /a request fails, Tomverse uses its word-based search instead\./);
+    assert.doesNotMatch(en.privacyPolicy.semanticSearch, /nothing is sent to Cohere/);
+    assert.match(en.privacyPolicy.semanticSearchTransfer1, /cannot be verified to fit it, Tomverse uses word-based search without a memory rerank request/);
 });
 
 test("every locale names the recipient and its privacy contact", () => {

@@ -97,6 +97,14 @@ test("unknown model and unverified model/billing pairs fail before dispatch", ()
     );
     assert.deepEqual(
         prepareMemorySemanticInput({
+            model: "rerank-v3.0",
+            billing: searchUnitBilling,
+            currentQuery: "query",
+        }),
+        { ok: false, reason: "model_query_contract_unknown" }
+    );
+    assert.deepEqual(
+        prepareMemorySemanticInput({
             model: "rerank-v4.0-fast",
             billing: tokenBilling,
             currentQuery: "query",
