@@ -18,7 +18,9 @@
 
 import { DECISION_VALUE_ALARMS } from "../agentPushPolicy.ts";
 import { CI_ADMISSION_HOLD_LABEL, ciRunKey } from "../ciAdmissionCore.ts";
-import { qaReleaseDmApprovedHumanPaths, type QaReleaseDmMergeScope } from "../qaReleaseMergeLaneExclusionCore.ts";
+import {
+  qaReleaseDmApprovedHumanPaths, qaReleaseDmMergeInAllowList, type QaReleaseDmMergeScope,
+} from "../qaReleaseMergeLaneExclusionCore.ts";
 
 /** Default off. On, the app marks Decision Maker approved review pull requests ready and the lane may merge them into develop. */
 export const AMUX_DM_T2_MERGE_ENV = "TOMVERSE_AMUX_DM_T2_MERGE";
@@ -72,8 +74,9 @@ export function amuxDmT2MergeGate(paths: readonly string[] | null,
  * the change to a person: the values AGENTS.md reserves for a person
  * (lib/agentPushPolicy.ts), the words of money, environment and stored
  * switches (a default-off switch turned on is a paid call enabled), deletion
- * and raw SQL, authentication and secrets, and mail. Cheap and loose by
- * design: a false alarm only means a person merges.
+ * and raw SQL, authentication and secrets, mail, and whose data a query or a
+ * check is about (an ownership condition dropped from a removed line). Cheap
+ * and loose by design: a false alarm only means a person merges.
  */
 export const AMUX_DM_T2_MERGE_CONTENT_ALARMS: readonly RegExp[] = [
   ...DECISION_VALUE_ALARMS,
@@ -82,8 +85,22 @@ export const AMUX_DM_T2_MERGE_CONTENT_ALARMS: readonly RegExp[] = [
   /\b(?:delete\w*|purge\w*|erase\w*|wipe\w*|truncate)\b|\.delete(?:Many)?\s*\(|\$executeRaw|\$queryRawUnsafe|\bdrop\s+(?:table|column|schema|index|trigger|function)\b/i,
   /\b(?:auth\w*|session\w*|secret\w*|token|password\w*|cookie\w*|csrf\w*|permission\w*|api_?key\w*|bearer|credential\w*|reauth\w*|require(?:Admin|User|Session|Auth)\w*)\b/i,
   /\b(?:send\w*(?:Email|Mail)\w*|mail\w*|resend|smtp|webhook\w*|notify\w*)\b/i,
+  /\w*(?:userid|ownerid|tenantid|accountid|organizationid|orgid|createdbyid|authorid|memberid)\b|\b(?:user|owner|session|viewer|actor|member)\.id\b|\bsession\.user\b|\bis(?:Admin|Owner|Member)\b|\bvisibility\b|\bisPublic\b/i,
   /\bdangerouslySetInnerHTML\b/,
   /^Subproject commit [0-9a-f]+$/,
+];
+
+/**
+ * Read on every line of a hunk, unchanged context included, and on the
+ * function Git names after `@@` (review r-20261115-112039-771ce1: an
+ * ownership check weakened with no keyword on the changed line, right above
+ * an unchanged `throw new ApiSecurityError`): a change beside an
+ * authorization or ownership check, or inside a function named for one, is a
+ * security boundary change and stays a person's.
+ */
+export const AMUX_DM_T2_MERGE_HUNK_ALARMS: readonly RegExp[] = [
+  /ApiSecurityError|\bforbidden\b|\bunauthori[sz]ed\b|\bnotFound\s*\(|\bstatus:\s*40[134]\b|\brequire(?:User|Admin|Session|Auth|Owner|Member|Access)\w*|\bassert\w*(?:Owner|Access|Permission|Member)\w*|\bgetServerSession\b|\bauth\s*\(\s*\)|owned|ownership|\bcan(?:Read|Write|Edit|Access|View|Delete|Manage)\w*/i,
+  /\w*(?:userid|ownerid|tenantid|accountid|organizationid|orgid|createdbyid|authorid|memberid)\b|\b(?:user|owner|session|viewer|actor|member)\.id\b|\bsession\.user\b|\bis(?:Admin|Owner|Member)\b/i,
 ];
 
 /** A file header line that says the change is not reviewable text: binary, or a mode other than a plain file. */
@@ -91,9 +108,12 @@ const NOT_PLAIN_TEXT = /^(?:GIT binary patch|Binary files .* differ)$|^(?:old|ne
 
 /**
  * The files of a unified diff that the block list scope leaves to a person
- * for what they say rather than where they are: a changed line or hunk
- * context that sounds an alarm (AMUX_DM_T2_MERGE_CONTENT_ALARMS), or a header
- * that is not plain text (binary, executable bit, symlink, submodule).
+ * for what they say rather than where they are: a changed line or the hunk's
+ * function that sounds an alarm (AMUX_DM_T2_MERGE_CONTENT_ALARMS), any hunk
+ * line beside an authorization or ownership check
+ * (AMUX_DM_T2_MERGE_HUNK_ALARMS), or a header that is not plain text
+ * (binary, executable bit, symlink, submodule). A file inside the allow list
+ * of 2026-11-13 on both sides is judged by its path alone, as it always was.
  */
 export function amuxDmT2MergeContentAlarmPaths(patch: string): string[] {
   const flagged = new Set<string>();
@@ -103,22 +123,31 @@ export function amuxDmT2MergeContentAlarmPaths(patch: string): string[] {
     const line = raw.replace(/\r$/, "");
     const header = /^diff --git a\/(.+?) b\/(.+)$/.exec(line);
     if (header) {
-      path = header[2]!;
+      const judged = !(qaReleaseDmMergeInAllowList(header[1]!) && qaReleaseDmMergeInAllowList(header[2]!));
+      path = judged ? header[2]! : null;
       inHunk = false;
       continue;
     }
     if (path === null || flagged.has(path)) continue;
-    let text: string | null = null;
+    let changed: string | null = null;
+    let context: string | null = null;
     if (line.startsWith("@@")) {
       inHunk = true;
-      text = line.replace(/^@@[^@]*@@/, "");
+      changed = line.replace(/^@@[^@]*@@/, "");
     } else if (!inHunk) {
       if (NOT_PLAIN_TEXT.test(line)) flagged.add(path);
       continue;
     } else if (line.startsWith("+") || line.startsWith("-")) {
-      text = line.slice(1);
+      changed = line.slice(1);
+    } else if (line.startsWith(" ")) {
+      context = line.slice(1);
     }
-    if (text !== null && AMUX_DM_T2_MERGE_CONTENT_ALARMS.some((alarm) => alarm.test(text))) flagged.add(path);
+    const text = changed ?? context;
+    if (text === null) continue;
+    if (AMUX_DM_T2_MERGE_HUNK_ALARMS.some((alarm) => alarm.test(text)) ||
+        (changed !== null && AMUX_DM_T2_MERGE_CONTENT_ALARMS.some((alarm) => alarm.test(changed)))) {
+      flagged.add(path);
+    }
   }
   return [...flagged];
 }

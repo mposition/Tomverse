@@ -240,10 +240,32 @@ test("what a path cannot say: the approved patch's changed lines and hunk contex
   // The function a hunk sits in, as Git names it, counts too.
   assert.equal(amuxDmT2MergePatchGate(patchOf("lib/conversationSearch.ts", "a", "b", " export async function DELETE(request) {"), BLOCK).pass, false);
   assert.equal(amuxDmT2MergePatchGate(patchOf("lib/conversationSearch.ts", "a", "b", " function debitCredits(user) {"), BLOCK).pass, false);
-  // Unchanged context lines do not.
-  const context = ["diff --git a/lib/conversationSearch.ts b/lib/conversationSearch.ts", "@@ -1,3 +1,3 @@",
-    " const session = await auth();", "-const limit = 10;", "+const limit = 12;", " process.env.X;", ""].join("\n");
-  assert.deepEqual(amuxDmT2MergePatchGate(context, BLOCK), { pass: true });
+  // Unchanged context lines sound only the authorization and ownership alarms.
+  const hunk = (header, lines) => ["diff --git a/lib/memoryService.ts b/lib/memoryService.ts", `@@ -10,5 +10,5 @@${header}`,
+    ...lines, ""].join("\n");
+  assert.deepEqual(amuxDmT2MergePatchGate(hunk("", [" const total = items.length;", "-const limit = 10;", "+const limit = 12;",
+    " process.env.X;"]), BLOCK), { pass: true });
+  // Review r-20261115-112039-771ce1: an ownership check weakened with no keyword on the added line.
+  const weakened = [" const item = await tx.memory.findFirst({ where: { id } });", "-  if (!item || item.userId !== userId) {",
+    "+  if (!item) {", "     throw new ApiSecurityError(\"not_found\", 404);", "   }"];
+  assert.deepEqual(amuxDmT2MergePatchGate(hunk(" export async function loadOwnedMemory(tx, userId, id) {", weakened), BLOCK),
+    { pass: false, reason: "outside_dm_merge_allowlist", paths: ["lib/memoryService.ts"] });
+  // Each of its three signals alone is enough: the removed line, the unchanged guard beside it, the function's name.
+  assert.equal(amuxDmT2MergePatchGate(hunk("", ["-  if (!item || item.userId !== userId) {", "+  if (!item) {"]), BLOCK).pass, false);
+  assert.equal(amuxDmT2MergePatchGate(hunk("", ["-  if (!item || item.u !== u) {", "+  if (!item) {",
+    "     throw new ApiSecurityError(\"not_found\", 404);"]), BLOCK).pass, false);
+  assert.equal(amuxDmT2MergePatchGate(hunk(" export async function loadOwnedMemory(tx, u, id) {",
+    ["-  if (!item || item.u !== u) {", "+  if (!item) {"]), BLOCK).pass, false);
+  for (const guard of [" return NextResponse.json({ error: \"forbidden\" }, { status: 403 });", " const viewer = await requireUser(request);",
+    " if (!canEditProject(viewer, project)) {", " where: { id, ownerId: viewer.id },", " const session = await auth();"]) {
+    assert.equal(amuxDmT2MergePatchGate(hunk("", ["-const limit = 10;", "+const limit = 12;", guard]), BLOCK).pass, false, guard);
+  }
+  // A file the allow list took is judged by its path alone, as before, on both sides of a rename.
+  assert.deepEqual(amuxDmT2MergePatchGate(patchOf("components/settings/SessionList.tsx", "a", "const session = useSession();"), BLOCK),
+    { pass: true });
+  const renamed = ["diff --git a/components/X.tsx b/lib/conversationSearch.ts", "similarity index 90%",
+    "rename from components/X.tsx", "rename to lib/conversationSearch.ts", "@@ -1 +1 @@", "-a", "+if (process.env.X) b", ""].join("\n");
+  assert.deepEqual(amuxDmT2MergePatchGate(renamed, BLOCK).paths, ["lib/conversationSearch.ts"]);
   // Not plain text: binary, an executable bit, a symlink, a submodule.
   const header = (lines) => ["diff --git a/lib/x.ts b/lib/x.ts", ...lines, ""].join("\n");
   for (const lines of [["Binary files a/lib/x.ts and b/lib/x.ts differ"], ["index 1111111..2222222", "GIT binary patch", "literal 1"],

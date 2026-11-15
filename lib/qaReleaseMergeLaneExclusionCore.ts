@@ -316,6 +316,16 @@ const DM_BLOCK_MATCHERS = [...QA_RELEASE_MERGE_LANE_GATE_PATTERNS, ...QA_RELEASE
 const DM_BLOCKLIST_SCOPE_MATCHERS = QA_RELEASE_DM_MERGE_BLOCKLIST_SCOPE_PATTERNS
   .map((pattern) => new RegExp(compileManifestPattern(pattern).source, "i"));
 
+/**
+ * Inside the allow list of 2026-11-13 and outside its exceptions. Both scopes
+ * take such a path on the same terms as before; only what lies outside it is
+ * judged by the block list scope's names and lines.
+ */
+export function qaReleaseDmMergeInAllowList(path: string): boolean {
+  return DM_ALLOW_MATCHERS.some((matcher) => matcher.test(path)) &&
+    !DM_ALLOW_EXCEPT_MATCHERS.some((matcher) => matcher.test(path));
+}
+
 /** A block list scope name fragment anywhere in the path, without regard to case. */
 export function qaReleaseDmMergeBlockedName(path: string): boolean {
   const lower = path.toLowerCase();
@@ -339,8 +349,7 @@ export function qaReleaseDmMergeAllowed(path: unknown, policyTestPaths: readonly
   scope: QaReleaseDmMergeScope = "allowlist"): boolean {
   if (!isReadablePath(path)) return false;
   const blocklist = scope === "blocklist";
-  const inAllowList = DM_ALLOW_MATCHERS.some((matcher) => matcher.test(path)) &&
-    !DM_ALLOW_EXCEPT_MATCHERS.some((matcher) => matcher.test(path));
+  const inAllowList = qaReleaseDmMergeInAllowList(path);
   if (!blocklist && !inAllowList) return false;
   if (classifyPath(path) !== "product") return false;
   if (isPolicyTestName(path) || policyTestPaths.includes(path)) return false;
