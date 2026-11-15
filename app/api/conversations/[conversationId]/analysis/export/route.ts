@@ -22,10 +22,10 @@ export async function POST(request: Request, context: { params: Promise<{ conver
     const userId = authentication.session?.user?.id;
     if (!userId) return Response.json({ code: "AUTH_REQUIRED" }, { status: 401 });
     const { conversationId } = await context.params;
-    const conversation = await prisma.conversation.findFirst({ where: { id: conversationId, userId }, select: { password: true, kind: true, continuationBridge: { select: { id: true } } } });
+    const conversation = await prisma.conversation.findFirst({ where: { id: conversationId, userId }, select: { password: true, passwordVersion: true, kind: true, continuationBridge: { select: { id: true } } } });
     if (!conversation) return Response.json({ code: "NOT_FOUND" }, { status: 404 });
     if (!isChatConversationKind(conversation.kind)) return conversationKindNotSupportedResponse();
-    if (!hasConversationUnlockGrant(request, userId, conversationId, conversation.password)) return conversationLockedResponse();
+    if (!hasConversationUnlockGrant(request, userId, conversationId, conversation.password == null ? null : conversation.passwordVersion)) return conversationLockedResponse();
     const refusal = continuationShareRefusal({ hasContinuationBridge: Boolean(conversation.continuationBridge) });
     if (refusal) return Response.json({ code: refusal.code }, { status: refusal.status });
     if (!(await getUserBillingPlan(userId)).allowDownloads) return featureNotIncludedResponse("downloads");
@@ -35,11 +35,11 @@ export async function POST(request: Request, context: { params: Promise<{ conver
     const rendered = renderDocumentArtifact({ ...report.spec, filename: `answer-analysis.${payload.format}`, format: payload.format });
     // CPU rendering does not keep a revoked lock grant alive. Recheck immediately
     // before releasing bytes; no Conversation, artifact or Message is written.
-    const current = await prisma.conversation.findFirst({ where: { id: conversationId, userId }, select: { password: true, kind: true, continuationBridge: { select: { id: true } } } });
+    const current = await prisma.conversation.findFirst({ where: { id: conversationId, userId }, select: { password: true, passwordVersion: true, kind: true, continuationBridge: { select: { id: true } } } });
     if (!current) return Response.json({ code: "NOT_FOUND" }, { status: 404 });
     if (!isChatConversationKind(current.kind)) return conversationKindNotSupportedResponse();
     if (current.continuationBridge) return Response.json({ code: "REVIEW_REPORT_SOURCE_CHANGED" }, { status: 409 });
-    if (!hasConversationUnlockGrant(request, userId, conversationId, current.password)) return conversationLockedResponse();
+    if (!hasConversationUnlockGrant(request, userId, conversationId, current.password == null ? null : current.passwordVersion)) return conversationLockedResponse();
     await loadReviewAnalysisReport(userId, conversationId, payload.analysis);
     return new Response(rendered.bytes as unknown as BodyInit, { headers: {
       "Content-Type": rendered.mediaType, "Content-Disposition": artifactContentDisposition(`answer-analysis.${payload.format}`, payload.format),
