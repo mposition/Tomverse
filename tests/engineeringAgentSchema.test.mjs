@@ -15,7 +15,6 @@ import {
   ENGINEERING_AGENT_V22_TIER_PENDING_REASON,
   ENGINEERING_AGENT_WORK_ITEM_KINDS,
   HALT_VALUES,
-  OWNER_QUEUE_LIMITS,
   PARTIAL_REGISTRATION_DECISION_CAUSE_PREFIX,
   REGISTRATION_RESULTS,
   REGISTRATION_TRANSITIONS,
@@ -48,6 +47,8 @@ const migration = (name) =>
   readFileSync(new URL(`../prisma/migrations/${name}/migration.sql`, import.meta.url), "utf8").replace(/\r\n/g, "\n");
 const ownerQueueRunSql = migration("20261109200000_engineering_agent_owner_queue_run_guard");
 const ownerQueueWorkItemSql = migration("20261109200100_engineering_agent_owner_queue_work_item_guard");
+const uncappedRunSql = migration("20261115200000_engineering_agent_run_guard_uncapped");
+const uncappedWorkItemSql = migration("20261115200100_engineering_agent_work_item_guard_uncapped");
 const outcomeSql = readFileSync(
   new URL("../prisma/migrations/20261007010000_engineering_agent_private_result/migration.sql", import.meta.url),
   "utf8",
@@ -61,7 +62,7 @@ const functionBodies = (text) =>
 /** Each function as the latest migration that writes it leaves it, in migration order. */
 const latestFunctions = () => {
   const latest = new Map();
-  for (const text of [sql, promotionSql, ownerQueueRunSql, ownerQueueWorkItemSql]) {
+  for (const text of [sql, promotionSql, ownerQueueRunSql, ownerQueueWorkItemSql, uncappedRunSql, uncappedWorkItemSql]) {
     for (const [name, body] of functionBodies(text)) latest.set(name, body);
   }
   return latest;
@@ -164,8 +165,6 @@ test("every cap the database counts is the number the code holds", () => {
   // Read from each trigger function's latest body: a later migration that
   // replaces a function replaces its caps.
   const expected = {
-    "OWNER_QUEUE_LIMITS.pr": OWNER_QUEUE_LIMITS.pr,
-    "OWNER_QUEUE_LIMITS.decision": OWNER_QUEUE_LIMITS.decision,
     "REGISTRATION_CAPS.perRound": REGISTRATION_CAPS.perRound,
     "REGISTRATION_CAPS.perUtcDay": REGISTRATION_CAPS.perUtcDay,
     "REGISTRATION_CAPS.unpromoted": REGISTRATION_CAPS.unpromoted,
@@ -180,9 +179,37 @@ test("every cap the database counts is the number the code holds", () => {
     }
   }
   assert.deepEqual(sorted(seen), sorted(Object.keys(expected)));
-  // The run guard and the work item guard count the same pull request cap.
+  // Owner decision 2026-11-15: neither guard caps the owner queues any more.
   for (const name of ["engineering_agent_run_guard", "engineering_agent_work_item_guard"]) {
-    assert.match(latest.get(name), /-- limit: OWNER_QUEUE_LIMITS\.pr\n/, name);
+    assert.doesNotMatch(latest.get(name), /OWNER_QUEUE_LIMITS|owner queue is full|pr_limit|decision_limit/, name);
+  }
+});
+
+test("the uncapped guards drop only the queue caps, from exactly the bodies they replace", () => {
+  const blocks = (text) =>
+    [...text.matchAll(/-- transitions: (\w+ \w+)\n([\s\S]*?)-- end transitions/g)].map(
+      (m) => `${m[1]} ${sorted(pairs(m[2])).join(",")}`,
+    );
+  const digest = (text) => createHash("sha256").update(text, "utf8").digest("hex");
+  for (const [name, before, after] of [
+    ["engineering_agent_run_guard", ownerQueueRunSql, uncappedRunSql],
+    ["engineering_agent_work_item_guard", ownerQueueWorkItemSql, uncappedWorkItemSql],
+  ]) {
+    const previous = functionBodies(before).get(name);
+    const next = functionBodies(after).get(name);
+    assert.deepEqual([...functionBodies(after).keys()], [name], "one function per migration");
+    assert.deepEqual(blocks(next), blocks(previous), `${name} keeps every transition`);
+    const header = new RegExp(
+      `^-- baseline-check: replace-function-if-body-sha256 "${name}" "([0-9a-f]{64})" "([0-9a-f]{64})"$`, "m",
+    ).exec(after);
+    assert.ok(header, `${name} pins the body it replaces`);
+    assert.deepEqual([header[1], header[2]], [digest(previous), digest(next)], name);
+    assert.doesNotMatch(after, /INSERT INTO|\bnow\(\)/i, name);
+    // Everything else the guard refuses, it still refuses.
+    for (const kept of [...previous.matchAll(/RAISE EXCEPTION '([^']*)'/g)].map((m) => m[1])
+      .filter((message) => !/owner queue is full/.test(message)))
+      assert.ok(next.includes(`RAISE EXCEPTION '${kept}'`), `${name} still refuses: ${kept}`);
+    assert.doesNotMatch(next, /owner queue is full/, name);
   }
 });
 

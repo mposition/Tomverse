@@ -319,6 +319,8 @@ type SettlementFacts = AmuxStoppedCardLockedFacts & {
   remakeIdeaId: string | null;
   lastAttempt: { id: string; attemptNumber: number; endedAt: string | null; outcome: string | null;
     reason: string | null } | null;
+  /** The card's review attempt, which a review pull request's settlement is judged against. */
+  reviewAttempt: { id: string } | null;
 };
 type LockedSettlement = SettlementFacts;
 
@@ -343,7 +345,10 @@ const SETTLEMENT_FACTS = Prisma.sql`
       (SELECT json_build_object('id', a."id", 'attemptNumber', a."attemptNumber",
           'endedAt', a."endedAt", 'outcome', a."outcome", 'reason', a."reason")
         FROM "AmuxExecutionAttempt" a WHERE a."taskId" = w."id"
-        ORDER BY a."taskRevision" DESC, a."startedAt" DESC, a."id" DESC LIMIT 1) AS "lastAttempt"
+        ORDER BY a."taskRevision" DESC, a."startedAt" DESC, a."id" DESC LIMIT 1) AS "lastAttempt",
+      (SELECT json_build_object('id', a."id") FROM "AmuxExecutionAttempt" a WHERE a."taskId" = w."id"
+          AND a."outcome" = 'succeeded' AND a."toStatus" = 'review'
+        ORDER BY a."attemptNumber" DESC NULLS LAST, a."startedAt" DESC, a."id" DESC LIMIT 1) AS "reviewAttempt"
     FROM "AmuxDmOwnerSettlement" s
     JOIN "AmuxWorkItem" w ON w."id" = s."taskId"`;
 

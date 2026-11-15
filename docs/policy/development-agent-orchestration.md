@@ -2985,7 +2985,11 @@ Task의 `taskRole`, 예상 경로(`expectedPaths`), intake의 등급 제안뿐�
   작업할 때 runner가 검토 서버에서 읽어 다음 시도의 prompt에 데이터로 넣는다.
 - **판정별 처리.**
   - `accept`: v49의 게시 경로(Engineering Publisher의 `develop` PR)로 간다. `done`은 v49·v50의 병합
-    관측이다.
+    관측이다. 실행 시작 때 게시 run을 열 수 없었으면 그 patch는 게시 대기(kept result)로 남고, 막힌
+    조건이 풀리면 엔지니어링 관측 round가 같은 게시 경로에 태운다. 그런 결과를 다시 실행하지 않는다
+    (운영자 결정 2026-11-15, `engineering-agent.md` §11, `amux-decision-maker.md` §11). 카드의 검토
+    대상 시도는 가장 최근에 성공해 `review`로 간 시도다. 뒤이은 시도가 실패해 예산을 다 써도 그 결과가
+    카드의 결과다.
   - `reject`: Task는 같은 등급으로 `todo`에 돌아간다. 두 번째 reject 뒤에는 `blocked`가 되고 사람에게
     간다. 운영자 결정(2026-11-07): 그 시도는 패치와 판정 기록이 있는 끝난 실행이므로 운영자 검토에서
     재시도할 수 있다(시도 예산 안에서, 그 시도의 reject 기록이 있을 때만). 재시도는 마지막 reject의

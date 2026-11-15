@@ -51,6 +51,13 @@ export type AmuxDmOwnerSettlementTaskFacts = {
   status: string; sourceSystem: string | null; archivedAt: Date | string | null;
   /** The newest attempt now, ordered as the owner's settlement orders it. */
   lastAttempt: { id: string } | null;
+  /**
+   * A review pull request's settlement is filed on the card's review attempt
+   * (its newest that ended succeeded into review) and judged against it: the
+   * kind and that attempt, when the read carries them.
+   */
+  kind?: string;
+  reviewAttempt?: { id: string } | null;
   /** A queued or leased delivery, or an attempt still open. */
   activeDelivery: boolean; liveAttempt: boolean;
   /** The settlement's own escalation is still open or acknowledged. */
@@ -67,8 +74,9 @@ export type AmuxDmOwnerSettlementTaskFacts = {
 export function amuxDmOwnerSettlementMoved(facts: AmuxDmOwnerSettlementTaskFacts):
   "escalation_resolved" | "task_moved" | null {
   if (!facts.escalationOpen) return "escalation_resolved";
+  const anchor = facts.kind === "t2_pr" && facts.reviewAttempt !== undefined ? facts.reviewAttempt : facts.lastAttempt;
   return facts.status !== facts.taskStatus || facts.archivedAt !== null ||
-    (facts.lastAttempt?.id ?? null) !== facts.attemptId || facts.activeDelivery || facts.liveAttempt ||
+    (anchor?.id ?? null) !== facts.attemptId || facts.activeDelivery || facts.liveAttempt ||
     facts.sourceSystem !== "admin-idea-v4" ? "task_moved" : null;
 }
 

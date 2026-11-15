@@ -233,7 +233,6 @@ const action = (overrides) =>
     lookupVerifiedNoWrite: false,
     mergeObserved: false,
     boundReviewPrRecorded: false,
-    recurrences: 0,
     ...overrides,
   });
 
@@ -335,9 +334,10 @@ test("A and D preconditions hold", () => {
   assert.equal(action({ kind: "D", action: "escalate_incident", runActive: false, workItemState: "queued" }).allowed, false);
 });
 
-test("after two recurrences only escalation is left", () => {
-  assert.deepEqual(action({ recurrences: 2 }), { allowed: false, reason: "recurred_only_escalation_left" });
-  assert.deepEqual(action({ recurrences: 2, action: "escalate_incident" }), { allowed: true, resolves: true });
+test("no recurrence limit narrows a person's actions (owner decision 2026-11-15)", async () => {
+  const mismatch = await import("../lib/engineeringAgentStateMismatch.ts");
+  assert.equal("MISMATCH_RECURRENCE_LIMIT" in mismatch, false);
+  assert.deepEqual(action({ action: "escalate_incident" }), { allowed: true, resolves: true });
 });
 
 test("B resolves only when AMUX concludes the same way; otherwise C; never guessed", () => {

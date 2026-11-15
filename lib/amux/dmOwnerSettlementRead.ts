@@ -4,6 +4,8 @@ import type { Prisma } from "@prisma/client";
 
 import { ENGINEERING_AGENT_V22_REVIEW_CAUSE_PREFIX } from "@/lib/engineeringAgentCore";
 import { AMUX_OWNER_QUEUE_DM_REQUESTED_ACTION, AMUX_OWNER_QUEUE_DM_RESENT_ACTION } from "./ownerQueueDmRequestCore.ts";
+import { amuxV22KeptResultPublicationEnabled } from "./v22KeptResultCore.ts";
+import { amuxV22KeptResultExistsSql, amuxV22ReviewAttemptLateralSql } from "./v22KeptResultRead.ts";
 
 /**
  * The reads of the owner queue settlement (lib/amux/dmOwnerSettlementService.ts)
@@ -16,6 +18,8 @@ import { AMUX_OWNER_QUEUE_DM_REQUESTED_ACTION, AMUX_OWNER_QUEUE_DM_RESENT_ACTION
 export type AmuxDmOwnerSettlementCandidate = {
   taskId: string; escalationId: string; taskStatus: "review" | "blocked";
   attemptId: string | null;
+  /** The newest attempt that ended succeeded into review; `attemptId` is it when a review pull request is open. */
+  reviewAttemptId: string | null;
   /** The open review pull request's binding, when the publisher opened one as a draft. */
   bindingId: string | null;
 };
@@ -37,20 +41,35 @@ export type AmuxDmOwnerSettlementCandidate = {
 export async function scanAmuxDmOwnerSettlementCandidates(tx: Prisma.TransactionClient, limit: number,
   escalationIds: string[] | null = null) {
   const reviewPrefix = ENGINEERING_AGENT_V22_REVIEW_CAUSE_PREFIX;
+  // Owner decision 2026-11-15: a Task holding a kept result -- a reviewed
+  // patch whose publication never opened -- needs publishing, not running
+  // again, so it is never put to the Decision Maker, whose answers include a
+  // retry (v22KeptResultCore.ts). The publication round takes it; a person
+  // still settles it from the owner queue. With ENGINEERING_AGENT_LEGACY_HALTS,
+  // or with v22 publication off, nothing publishes it, and it is filed as before.
+  const keepsNoResult = !amuxV22KeptResultPublicationEnabled();
   return tx.$queryRaw<AmuxDmOwnerSettlementCandidate[]>`
     SELECT w."id" AS "taskId", e."id" AS "escalationId", w."status" AS "taskStatus",
-      a."id" AS "attemptId", b."id" AS "bindingId"
+      -- The attempt a settlement is filed on: a review pull request's own (the
+      -- review attempt), every other card's newest. Every caller files this one.
+      CASE WHEN b."id" IS NOT NULL THEN ra."id" ELSE a."id" END AS "attemptId",
+      ra."id" AS "reviewAttemptId", b."id" AS "bindingId"
     FROM "AmuxHumanEscalation" e
     JOIN "AmuxWorkItem" w ON w."id" = e."taskId"
     LEFT JOIN LATERAL (
       SELECT x."id" FROM "AmuxExecutionAttempt" x WHERE x."taskId" = w."id"
       ORDER BY x."taskRevision" DESC, x."startedAt" DESC, x."id" DESC LIMIT 1
     ) a ON true
+    -- The attempt the card's review is for (amuxV22ReviewAttempt): its newest that
+    -- ended succeeded into review. A review pull request is that attempt's, so a
+    -- kept result published after later attempts failed is found (owner decision
+    -- 2026-11-15); when the newest attempt is the review one, the two are the same.
+    ${amuxV22ReviewAttemptLateralSql}
     LEFT JOIN LATERAL (
       SELECT bb."id" FROM "EngineeringAgentBinding" bb
       JOIN "EngineeringAgentRun" r ON r."id" = bb."runId"
       JOIN "EngineeringAgentWorkItem" i ON i."causeKey" = (${reviewPrefix}::text || r."id")
-      WHERE r."amuxAttemptId" = a."id" AND r."cardId" = w."id"
+      WHERE r."amuxAttemptId" = ra."id" AND r."cardId" = w."id"
         AND bb."state" = 'open' AND bb."supersededAt" IS NULL AND i."kind" = 'publish'
       ORDER BY bb."createdAt" DESC, bb."id" DESC LIMIT 1
     ) b ON true
@@ -83,6 +102,7 @@ export async function scanAmuxDmOwnerSettlementCandidates(tx: Prisma.Transaction
       AND (b."id" IS NOT NULL OR NOT EXISTS (SELECT 1 FROM "EngineeringAgentBinding" ob
         JOIN "EngineeringAgentRun" r ON r."id" = ob."runId"
         WHERE r."cardId" = w."id" AND ob."state" = 'open'))
+      AND (${keepsNoResult} OR NOT ${amuxV22KeptResultExistsSql})
     ORDER BY e."createdAt", e."id"
     LIMIT ${limit}`;
 }

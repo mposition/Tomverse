@@ -58,8 +58,11 @@ export async function readAmuxDmT2MergeApprovals(db: Reader, input: {
       AND r."cardId" = s."taskId" AND r."amuxAttemptId" = s."attemptId"
       AND w."status" = 'review' AND w."archivedAt" IS NULL
       AND w."sourceSystem" = 'admin-idea-v4' AND w."cardType" = 'task'
+      -- The card's review attempt is still the settled one (amuxV22ReviewAttempt): the
+      -- newest that ended succeeded into review, and nothing is running.
       AND (SELECT x."id" FROM "AmuxExecutionAttempt" x WHERE x."taskId" = w."id"
-        ORDER BY x."taskRevision" DESC, x."startedAt" DESC, x."id" DESC LIMIT 1) = s."attemptId"
+          AND x."outcome" = 'succeeded' AND x."toStatus" = 'review'
+        ORDER BY x."attemptNumber" DESC NULLS LAST, x."startedAt" DESC, x."id" DESC LIMIT 1) = s."attemptId"
       AND NOT EXISTS (SELECT 1 FROM "AmuxExecutionAttempt" x
         WHERE x."taskId" = w."id" AND x."endedAt" IS NULL)
     ORDER BY s."updatedAt", s."id"

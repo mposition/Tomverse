@@ -14,7 +14,9 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 
 import {
-  OWNER_QUEUE_LIMITS,
+  ENGINEERING_AGENT_LEGACY_HALTS_ENV,
+  OWNER_QUEUE_LEGACY_LIMITS,
+  engineeringAgentLegacyHalts,
   killSwitchEngaged,
   ENGINEERING_AGENT_KILL_SWITCH_ENV,
   unknownOutcomeDecisionWorkItemId,
@@ -153,8 +155,9 @@ export type EngineeringAgentConsolePayload = {
     mode: string;
     frozen: boolean;
     killSwitch: boolean;
-    pullRequests: { occupied: number; limit: number };
-    decisions: { occupied: number; limit: number };
+    /** The queue's length; `limit` is null while it is uncapped (owner decision 2026-11-15). */
+    pullRequests: { occupied: number; limit: number | null };
+    decisions: { occupied: number; limit: number | null };
   };
 };
 
@@ -446,6 +449,7 @@ export async function readEngineeringAgentConsole(
   }
 
   const switches = await readEngineeringAgentSwitches(prisma);
+  const legacyCaps = engineeringAgentLegacyHalts(process.env[ENGINEERING_AGENT_LEGACY_HALTS_ENV]);
   const [bindings, pendingPublish, activeRuns, openOwnerItems] = await Promise.all([
     prisma.engineeringAgentBinding.count({ where: { state: { in: ["open", "closed"] }, supersededAt: null } }),
     prisma.engineeringAgentWorkItem.count({
@@ -460,8 +464,10 @@ export async function readEngineeringAgentConsole(
       mode: switches.mode,
       frozen: switches.frozen,
       killSwitch: killSwitchEngaged(process.env[ENGINEERING_AGENT_KILL_SWITCH_ENV]),
-      pullRequests: { occupied: bindings + pendingPublish + activeRuns, limit: OWNER_QUEUE_LIMITS.pr },
-      decisions: { occupied: openOwnerItems + activeRuns, limit: OWNER_QUEUE_LIMITS.decision },
+      pullRequests: { occupied: bindings + pendingPublish + activeRuns,
+        limit: legacyCaps ? OWNER_QUEUE_LEGACY_LIMITS.pr : null },
+      decisions: { occupied: openOwnerItems + activeRuns,
+        limit: legacyCaps ? OWNER_QUEUE_LEGACY_LIMITS.decision : null },
     },
   };
 }
