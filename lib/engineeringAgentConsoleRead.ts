@@ -21,7 +21,6 @@ import {
 } from "@/lib/engineeringAgentCore";
 import { engineeringAgentPullRequestResumable, readEngineeringAgentSwitches } from "@/lib/engineeringAgentStore";
 import {
-  ENGINEERING_AGENT_PATCH_FILE_LIMIT,
   ENGINEERING_AGENT_CARD_ITEM_KINDS,
   ENGINEERING_AGENT_REVIEW_PR_CAUSE_PREFIX,
   engineeringAgentCardItems,
@@ -86,7 +85,7 @@ export type EngineeringAgentOwnerItemContext = {
     endedAt: string | null;
   };
   pullRequests: EngineeringAgentItemPullRequest[];
-  /** The draft's changed files, at most ENGINEERING_AGENT_PATCH_FILE_LIMIT; `fileCount` is all of them. */
+  /** The draft's changed files, all of them; `fileCount` is their number. */
   files: EngineeringAgentPatchFile[];
   fileCount: number;
   /** The cross-vendor review of the run's commit, when one was recorded. */
@@ -280,7 +279,7 @@ async function readOwnerItemContexts(
         endedAt: run.endedAt?.toISOString() ?? null,
       },
       pullRequests: run.bindings.map(engineeringAgentItemPullRequest),
-      files: files.slice(0, ENGINEERING_AGENT_PATCH_FILE_LIMIT),
+      files,
       fileCount: files.length,
       review: review
         ? {

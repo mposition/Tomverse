@@ -34,8 +34,22 @@ import {
   amuxResourceRefs,
 } from "@/lib/amux/resourcePolicyCore";
 
+/**
+ * The most rows one queue answer carries: the orchestrator's wire contract
+ * (apps/tomverse-orchestrator, `MAX_QUEUE_ITEMS`) and its 512 KiB response
+ * bound. A longer queue is not refused: the selection answer keeps the first
+ * `AMUX_QUEUE_MAX_ITEMS` rows in the scheduler's own order, the owned answer
+ * the oldest ones, and the rest are read on a later tick.
+ */
 export const AMUX_QUEUE_MAX_ITEMS = 512;
 export const AMUX_OWNED_QUEUE_MAX_ITEMS = 512;
+/**
+ * The most todo rows one selection read scores. The rows are ranked in this
+ * process after the read, so the read has to see every runnable row; this is
+ * the size one read transaction finishes inside its 200 ms statement timeout
+ * and the queue route's 2.8 s budget, not a policy about the board.
+ */
+export const AMUX_QUEUE_READ_MAX_ROWS = 2_000;
 export const PRISMA_INT_MAX = 2_147_483_647;
 
 export class AmuxQueueCapacityError extends Error {
@@ -270,7 +284,8 @@ const legacyDispatchSourceFilter = (): Prisma.AmuxWorkItemWhereInput => ({
  *
  * Do not introduce a "top N" database cut here: ranking before truncation would
  * make a lower-priority row invisible to starvation ageing and dependent-count
- * scoring. The caller ranks the whole returned set deterministically.
+ * scoring. The caller ranks the whole returned set deterministically. The one
+ * trim is the wire limit, applied after scoring (`keepAmuxQueueHead`).
  */
 export async function listDispatchable(): Promise<AmuxQueueTask[]> {
   return withAmuxDbBoundary(
@@ -329,16 +344,16 @@ export async function listDispatchable(): Promise<AmuxQueueTask[]> {
             },
           },
         },
-        take: AMUX_QUEUE_MAX_ITEMS + 1,
+        take: AMUX_QUEUE_READ_MAX_ROWS + 1,
       });
 
-      if (rows.length > AMUX_QUEUE_MAX_ITEMS) {
+      if (rows.length > AMUX_QUEUE_READ_MAX_ROWS) {
         throw new AmuxQueueCapacityError("selection");
       }
 
       const schedulerInputs = await schedulerInputsForRows(rows, tx);
 
-      return rows.map((row) => {
+      const queue = rows.map((row): AmuxQueueTask => {
         const input = schedulerInputs.get(row);
         if (!input) {
           throw new Error(`AMUX scheduler inputs missing for ${row.id}`);
@@ -361,9 +376,36 @@ export async function listDispatchable(): Promise<AmuxQueueTask[]> {
           scheduler_signals: score,
         };
       });
+      return keepAmuxQueueHead(queue);
     },
   );
 }
+
+/**
+ * A queue longer than one answer carries keeps its head in the order the
+ * orchestrator ranks it (score, then oldest, then id), so the rows dropped are
+ * the ones it would try last. A queue that fits is returned as read.
+ */
+const keepAmuxQueueHead = (queue: AmuxQueueTask[]): AmuxQueueTask[] => {
+  if (queue.length <= AMUX_QUEUE_MAX_ITEMS) return queue;
+  console.warn(
+    JSON.stringify({
+      subsystem: "amux",
+      event: "queue_trimmed_to_wire_limit",
+      queue: "selection",
+      kept_rows: AMUX_QUEUE_MAX_ITEMS,
+      deferred_rows: queue.length - AMUX_QUEUE_MAX_ITEMS,
+    }),
+  );
+  return [...queue]
+    .sort(
+      (a, b) =>
+        b.scheduler_score - a.scheduler_score ||
+        (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : 0) ||
+        (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+    )
+    .slice(0, AMUX_QUEUE_MAX_ITEMS);
+};
 
 /**
  * Revalidate one scheduler-selected task before worker routing.
@@ -794,13 +836,9 @@ export async function listOwnedTodos(): Promise<AmuxOwnedTodo[]> {
           sourceSystem: true,
           v22AssignmentId: true,
         },
-        take: AMUX_OWNED_QUEUE_MAX_ITEMS + 1,
+        take: AMUX_OWNED_QUEUE_MAX_ITEMS,
       }),
   );
-
-  if (rows.length > AMUX_OWNED_QUEUE_MAX_ITEMS) {
-    throw new AmuxQueueCapacityError("owned");
-  }
 
   return rows.flatMap((row) =>
     row.owner

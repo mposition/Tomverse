@@ -1007,7 +1007,7 @@ test("execution board and Safety & recovery count distinct actions without dupli
   assert.match(queueRead, /prisma\.amuxWorkItem\.count\(\{ where: amuxOwnerQueueWhere\(\) \}\)/);
   assert.match(queueRead, /const where = amuxOwnerQueueWhere\(\);/);
   assert.match(queueRead, /findMany\(\{\s*where, orderBy/);
-  assert.match(queueRead, /take: AMUX_OWNER_QUEUE_LIMIT/);
+  assert.match(queueRead, /take: limit/);
   // The list is bounded and says so: its total counts the same set as the badge.
   assert.match(queueRead, /return \{ items, total, processedToday/);
   // The page's tab badge turns a failed read into no badge.

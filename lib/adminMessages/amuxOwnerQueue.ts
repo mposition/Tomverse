@@ -36,6 +36,7 @@ export const adminAmuxOwnerQueueMessages = defineAdminMessages({
       partial: (shown: number, total: number) =>
         `Showing the newest ${shown} of ${total} cards. The rest appear as you finish these.`,
       listLabel: "Cards waiting on you",
+      showMore: (count: number) => `Show ${count} more`,
     },
     empty: {
       title: "Nothing is waiting on you",
@@ -256,6 +257,7 @@ export const adminAmuxOwnerQueueMessages = defineAdminMessages({
       partial: (shown: number, total: number) =>
         `전체 ${total}장 중 최근 ${shown}장만 보여 드려요. 이 카드를 처리하면 나머지가 이어서 나와요.`,
       listLabel: "내 확인을 기다리는 카드",
+      showMore: (count: number) => `${count}장 더 보기`,
     },
     empty: {
       title: "내 확인을 기다리는 카드가 없어요",
