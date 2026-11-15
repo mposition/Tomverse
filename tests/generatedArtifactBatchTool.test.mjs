@@ -158,6 +158,13 @@ test("the presentation tool spreads finance and schedule instead of packing one 
   assert.doesNotMatch(description, /compact finance and execution slide/);
 });
 
+test("document headings describe the full schedule and respect the requested time span", () => {
+  const description = buildGeneratedArtifactToolConfig(collector()).tools[ARTIFACT_TOOL_NAMES.document].description;
+  assert.match(description, /Match every heading and table caption to the full time span/);
+  assert.match(description, /first-day, first-week and first-month rows/);
+  assert.match(description, /if the user asks for only the first week, keep the rows within that week/);
+});
+
 /* -------------------------------------------------------------------------- */
 /* Refusals that never touch storage                                          */
 /* -------------------------------------------------------------------------- */
