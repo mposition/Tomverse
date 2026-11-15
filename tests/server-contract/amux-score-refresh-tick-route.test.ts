@@ -4,7 +4,8 @@ import { pathToFileURL } from "node:url";
 import { after, mock, test } from "node:test";
 
 // Owner decision 2026-11-14: the admitted auto-promotion tick extends
-// unchanged scores before claim and promotion, behind a default-off switch.
+// unchanged scores before claim and promotion (on by default since owner
+// direction 2026-11-15; "disabled" or the intake legacy-limits switch stops it).
 // A refusal never fails the tick; a refresh whose COMMIT outcome is lost stops
 // it before any claim or promotion, answered like a lost promotion write.
 
@@ -48,7 +49,8 @@ let loaded: ReturnType<typeof load> | undefined;
 const modules = () => (loaded ??= load());
 
 const ENV = ["TOMVERSE_AMUX_V22_AUTO_PROMOTE", "TOMVERSE_AMUX_V22_WORKER_CLAIM",
-  "TOMVERSE_AMUX_V4_SCORE_AUTO_REFRESH", "TOMVERSE_AMUX_BOARD_AUTO_PROMOTE"] as const;
+  "TOMVERSE_AMUX_V4_SCORE_AUTO_REFRESH", "TOMVERSE_AMUX_BOARD_AUTO_PROMOTE",
+  "TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS"] as const;
 const previous = Object.fromEntries(ENV.map((key) => [key, process.env[key]]));
 after(() => {
   for (const key of ENV) {
@@ -71,17 +73,28 @@ const tick = async (refreshSwitch: string | undefined) => {
       "x-amux-instance-id": "00000000-0000-4000-8000-000000000002" } }));
 };
 
-test("the refresh is off by default and runs before claim and promotion when enabled", async () => {
-  const off = await tick(undefined);
+test("the refresh is on by default, runs before claim and promotion, and only \"disabled\" turns it off", async () => {
+  // Owner direction 2026-11-15: on unless exactly "disabled".
+  refresh = async () => ({ refreshed: 2, skipped: 1, failed: 0, outcomes: [], orphaned: [] });
+  const byDefault = await tick(undefined);
+  assert.equal(byDefault.status, 200);
+  assert.deepEqual(calls, ["refresh", "claim", "promote"]);
+  assert.equal((await tick("enabled")).status, 200);
+  assert.deepEqual(calls, ["refresh", "claim", "promote"]);
+  const off = await tick("disabled");
   assert.equal(off.status, 200);
   assert.deepEqual(calls, ["claim", "promote"]);
-  assert.equal((await tick("true")).status, 200);
-  assert.deepEqual(calls, ["claim", "promote"]);
 
-  refresh = async () => ({ refreshed: 2, skipped: 1, failed: 0, outcomes: [], orphaned: [] });
-  const on = await tick("enabled");
-  assert.equal(on.status, 200);
-  assert.deepEqual(calls, ["refresh", "claim", "promote"]);
+  // The intake legacy-limits switch restores the 2026-11-14 default-off rule.
+  process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS = "enabled";
+  try {
+    assert.equal((await tick(undefined)).status, 200);
+    assert.deepEqual(calls, ["claim", "promote"]);
+    assert.equal((await tick("enabled")).status, 200);
+    assert.deepEqual(calls, ["refresh", "claim", "promote"]);
+  } finally {
+    delete process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS;
+  }
 });
 
 test("a refused refresh never fails the tick", async () => {

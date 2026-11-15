@@ -1023,6 +1023,29 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 4,
     reason: "The replaced key-intent guard reads the same-transaction intent, retirement-claim and deletion audit rows unchanged. It never writes AdminAuditLog.",
   },
+  ...[
+    ["AmuxIdeaSessionAnalysisBudgetClaim", 1, "reads and locks the result's claim"],
+    ["AmuxIdeaSessionAnalysisReservation", 1, "joins the claim's queue reservation to read its idea"],
+    ["AmuxIdeaTrackedCheckoutEvidence", 2, "reads the claim-bound checkout evidence"],
+    ["AmuxIdeaTrackedCheckoutReadManifest", 1, "reads the claim-bound read manifest"],
+    ["AmuxIdeaReadManifestKeyIntent", 1, "matches the manifest's key-intent audit target"],
+    ["AmuxIdeaOperatingScopeSetting", 1, "reads the newest operating scope"],
+    ["AdminAuditLog", 3, "reads the claim-bound evidence and the same-transaction result audit"],
+  ].map(([table, tableMentions, what]) => ({
+    path: "prisma/migrations/20261115230100_amux_v19_session_result_open_deadline/migration.sql",
+    table, tableMentions, writeVerbs: 2,
+    reason: `Owner direction 2026-11-15: the migration replaces the session-result insert guard with the same signature and trigger, without its fixed seven-day clause. The guard only ${what}; it writes no row of this table.`,
+  })),
+  ...[
+    ["AmuxIdeaTrackedCheckoutEvidence", 1, "reads the pinned evidence"],
+    ["AmuxIdeaTrackedCheckoutReadManifest", 3, "reads whether the intent's own manifest exists"],
+    ["AmuxIdeaReadManifestKeyIntent", 3, "checks the intent row the trigger is guarding"],
+    ["AdminAuditLog", 3, "reads the same-transaction intent, retirement-claim and deletion audit rows"],
+  ].map(([table, tableMentions, what]) => ({
+    path: "prisma/migrations/20261115230200_amux_v19_read_manifest_intent_open_deadline/migration.sql",
+    table, tableMentions, writeVerbs: 2,
+    reason: `Owner direction 2026-11-15: the migration replaces the key-intent guard with the same signature and trigger, without its fixed seven-day insert clause and with an ended-analysis condition on the orphan retirement claim. The guard only ${what}; it writes no row of this table.`,
+  })),
   {
     path: "lib/amux/ideaSessionAnalysisResultOrphanRetention.ts",
     table: "AmuxIdeaSessionAnalysisBudgetClaim",
@@ -1299,6 +1322,14 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 1,
     reason:
       "Owner decision 2026-11-14: the score guard replacement reads the referenced audit to admit the system score refresher's same-transaction entry beside the existing confirmations. CREATE OR REPLACE affects only the guard function; it never writes AdminAuditLog.",
+  },
+  {
+    path: "prisma/migrations/20261115210100_amux_portfolio_score_rolling_baseline_guard/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 1,
+    reason:
+      "Owner direction 2026-11-15: the score guard replacement lets the system refresher's repeat move the baseline forward and keeps a confirmation's exact baseline; it reads the referenced audit exactly as before. CREATE OR REPLACE affects only the guard function; it never writes AdminAuditLog.",
   },
   {
     path: "prisma/migrations/20261016070500_amux_v19_system_registration_refusal/migration.sql",

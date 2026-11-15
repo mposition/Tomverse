@@ -54,6 +54,15 @@ import {
   inspectAmuxIdeaSessionSubmission,
 } from "@/lib/amux/ideaSessionSubmissionCore";
 import { prisma } from "@/lib/prisma";
+import { analysisDeadlineAt as deadlineFor,
+  amuxSessionContentRetentionDays } from "@/lib/amux/ideaRetentionCore";
+
+/** A synthetic idea backdated past its content retention, with the seven-day
+ * deadline every idea before 2026-11-15 carries: its analysis has ended, so
+ * its content is due. */
+const RETENTION_DAYS = amuxSessionContentRetentionDays();
+const pastRetention = () => new Date(Date.now() - (RETENTION_DAYS + 1) * 24 * 60 * 60_000);
+const sevenDayDeadline = (submittedAt: Date) => deadlineFor(submittedAt, true);
 
 const commitAmuxIdeaSessionSubmission = (
   tx: Parameters<typeof commitPinnedSessionSubmission>[0],
@@ -185,7 +194,7 @@ async function readProgressOfBackdatedIdea() {
     await prisma.$transaction(async (tx) => {
       await tx.$executeRawUnsafe('ALTER TABLE "AmuxIdeaSubmission" DISABLE TRIGGER "AmuxIdeaSubmission_identity_guard"');
       const submittedAt = new Date();
-      const analysisDeadlineAt = amuxReadManifestDueAt(submittedAt);
+      const analysisDeadlineAt = sevenDayDeadline(submittedAt);
       await tx.amuxIdeaSubmission.update({ where: { id: ideaId },
         data: { submittedAt, analysisDeadlineAt, rawPurgeAfter: analysisDeadlineAt } });
       throw new ProgressReadRollback(
@@ -489,8 +498,9 @@ test("seven-day read-manifest purge clears paths and retires only its key", asyn
     secondKeys.masterKey.fill(0);
     secondKeys.digestKey.fill(0);
   }
+  // Owner direction 2026-11-15: ninety days after intake, not seven.
   assert.equal(amuxReadManifestDueAt(new Date("2026-10-01T00:00:00Z"))
-    .toISOString(), "2026-10-08T00:00:00.000Z");
+    .toISOString(), "2026-12-30T00:00:00.000Z");
   assert.equal(await prisma.$transaction((tx) =>
     commitAmuxDueReadManifestPurge(tx, manifest.id)), "skipped");
   assert.deepEqual(await prisma.$transaction((tx) =>
@@ -501,8 +511,8 @@ test("seven-day read-manifest purge clears paths and retires only its key", asyn
     session, request, id: holdId, ideaId, reasonCode: "legal_request",
     days: 1, expectedRemainingBodies: 3, expectedAlreadyPurgedBodies: 0,
   }));
-  const submittedAt = new Date(Date.now() - 8 * 24 * 60 * 60_000);
-  const analysisDeadlineAt = amuxReadManifestDueAt(submittedAt);
+  const submittedAt = pastRetention();
+  const analysisDeadlineAt = sevenDayDeadline(submittedAt);
   // The real insert guard forbids an expired idea. Move only this synthetic
   // fixture's immutable clock after insertion; re-enable its guard before
   // exercising the real retention and audit transition.
@@ -638,8 +648,8 @@ test("a full pending-key batch leaves due manifest bodies for the next tick", as
       readKeys.digestKey.fill(0);
     }
   }
-  const submittedAt = new Date(Date.now() - 8 * 24 * 60 * 60_000);
-  const analysisDeadlineAt = amuxReadManifestDueAt(submittedAt);
+  const submittedAt = pastRetention();
+  const analysisDeadlineAt = sevenDayDeadline(submittedAt);
   await prisma.$transaction(async (tx) => {
     await tx.$executeRawUnsafe('ALTER TABLE "AmuxIdeaSubmission" DISABLE TRIGGER "AmuxIdeaSubmission_identity_guard"');
     await tx.amuxIdeaSubmission.update({ where: { id: batchIdeaId }, data: {
@@ -704,8 +714,8 @@ test("an uncommitted manifest leaves a seven-day key identity and audited deleti
     throw new Error("not due: must not touch object store");
   }), { keysDeleted: 0, scanned: 0, batchLimit: 8 });
 
-  const submittedAt = new Date(Date.now() - 8 * 24 * 60 * 60_000);
-  const analysisDeadlineAt = amuxReadManifestDueAt(submittedAt);
+  const submittedAt = pastRetention();
+  const analysisDeadlineAt = sevenDayDeadline(submittedAt);
   await prisma.$transaction(async (tx) => {
     await tx.$executeRawUnsafe('ALTER TABLE "AmuxIdeaSubmission" DISABLE TRIGGER "AmuxIdeaSubmission_identity_guard"');
     await tx.amuxIdeaSubmission.update({ where: { id: orphanIdeaId }, data: {
@@ -781,4 +791,95 @@ test("an uncommitted manifest leaves a seven-day key identity and audited deleti
   await assert.rejects(prisma.amuxIdeaReadManifestKeyIntent.update({
     where: { id: manifestId }, data: { keyDeletedAt: new Date() },
   }));
+});
+
+test("an analysis still running past day seven records new pages and keeps every manifest and key until it ends", async () => {
+  // Owner direction 2026-11-15: an idea is never stopped or purged for its age
+  // while its analysis runs. The idea is backdated past its content retention
+  // with the hundred-year deadline a new submission stores.
+  const runningIdeaId = randomUUID();
+  const repository = authority.scope.repositories[0];
+  if (!repository) throw new Error("Synthetic repository unavailable");
+  const inspected = inspectAmuxIdeaSessionSubmission({
+    version: 1, requestId: randomUUID(),
+    input: { version: 1, idea: "Synthetic long-running session analysis",
+      repositories: [repository], pullRequests: [{ repository, number: 1 }] },
+    source: { toolName: "Codex", modelProvider: "OpenAI",
+      sessionDisplay: "AMUX v19 open-deadline DB test" },
+  });
+  if (!inspected.ok) throw new Error("Synthetic session input rejected");
+  await prisma.$transaction((tx) => commitAmuxIdeaSessionSubmission(tx, {
+    inspected, expectedAuthority: authority, ideaId: runningIdeaId,
+    keys: keysFor(runningIdeaId),
+  }));
+  const stored = await prisma.amuxIdeaSubmission.findUniqueOrThrow({
+    where: { id: runningIdeaId } });
+  assert.equal(stored.analysisDeadlineAt.getTime(),
+    deadlineFor(stored.submittedAt, false).getTime());
+  for (const ordinal of [0, 1]) {
+    await prisma.$transaction((tx) =>
+      recordAmuxTrackedCheckoutEvidence(tx, evidenceInput(runningIdeaId, ordinal)));
+  }
+  const submittedAt = pastRetention();
+  const openDeadline = deadlineFor(submittedAt, false);
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe('ALTER TABLE "AmuxIdeaSubmission" DISABLE TRIGGER "AmuxIdeaSubmission_identity_guard"');
+    await tx.amuxIdeaSubmission.update({ where: { id: runningIdeaId }, data: {
+      submittedAt, analysisDeadlineAt: openDeadline, rawPurgeAfter: openDeadline } });
+    await tx.$executeRawUnsafe('ALTER TABLE "AmuxIdeaSubmission" ENABLE TRIGGER "AmuxIdeaSubmission_identity_guard"');
+  });
+  // Ninety-one days in, a page may still reserve and record its manifest: the
+  // key-intent guard no longer refuses on a fixed seven days.
+  const manifestId = randomUUID();
+  const readKeys = { masterKeyId: amuxContentUnitKeyId(
+    amuxTrackedCheckoutReadManifestKeyIdentity(runningIdeaId, manifestId)),
+    masterKeyVersion: 1, masterKey: randomBytes(32),
+    digestKeyId: "synthetic-checkout-read-digest", digestKey: randomBytes(32) };
+  try {
+    await prisma.$transaction(async (tx) => {
+      const input = { manifestId, ideaId: runningIdeaId, referenceOrdinal: 0,
+        pinnedCommitSha: "a".repeat(40),
+        observed: { kind: "verified_success" as const, readFiles: ["docs/late.md"] } };
+      await recordAmuxTrackedCheckoutReadManifestKeyIntent(tx, input);
+      return recordAmuxTrackedCheckoutReadManifest(tx, input, readKeys);
+    });
+  } finally {
+    readKeys.masterKey.fill(0);
+    readKeys.digestKey.fill(0);
+  }
+  const orphanId = randomUUID();
+  await prisma.$transaction((tx) => recordAmuxTrackedCheckoutReadManifestKeyIntent(tx, {
+    manifestId: orphanId, ideaId: runningIdeaId, referenceOrdinal: 1,
+    pinnedCommitSha: "a".repeat(40),
+    observed: { kind: "verified_success", readFiles: ["docs/orphan-late.md"] } }));
+  // Past its retention but still running: nothing of this idea is due.
+  assert.equal(await prisma.$transaction((tx) =>
+    commitAmuxDueReadManifestPurge(tx, manifestId)), "skipped");
+  assert.equal(await ownerMayReadManifest(authority.approvedByUserId,
+    runningIdeaId, manifestId), true);
+  await purgeDueAmuxOrphanReadManifestKeys(async (identity) => {
+    if (identity.ideaId === runningIdeaId) throw new Error("a running analysis' key is no orphan");
+  });
+  assert.equal((await prisma.amuxIdeaReadManifestKeyIntent.findUniqueOrThrow({
+    where: { id: orphanId } })).keyRetirementClaimedAt, null);
+  // The database refuses the retirement claim itself while the analysis runs.
+  await assert.rejects(prisma.amuxIdeaReadManifestKeyIntent.update({
+    where: { id: orphanId }, data: { keyRetirementClaimedAt: new Date(),
+      claimAuditLogId: randomUUID() } }), /not due for retirement claim/);
+
+  // The analysis ends; its retention has passed, so its content is due now.
+  const endedAt = new Date();
+  await prisma.amuxIdeaSubmission.update({ where: { id: runningIdeaId }, data: {
+    state: "cancelled", cancelledAt: endedAt, rawPurgeAfter: endedAt } });
+  assert.equal(await ownerMayReadManifest(authority.approvedByUserId,
+    runningIdeaId, manifestId), false);
+  assert.equal(await prisma.$transaction((tx) =>
+    commitAmuxDueReadManifestPurge(tx, manifestId)), "purged");
+  const retired: string[] = [];
+  await purgeDueAmuxOrphanReadManifestKeys(async (identity) => {
+    retired.push(identity.subjectId);
+  });
+  assert.ok(retired.includes(orphanId));
+  assert.ok((await prisma.amuxIdeaReadManifestKeyIntent.findUniqueOrThrow({
+    where: { id: orphanId } })).keyDeletedAt);
 });

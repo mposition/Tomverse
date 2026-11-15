@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { BOARD_IMPORT_CANONICAL_SOURCE_SYSTEM } from "./boardImportCore.ts";
-import { AMUX_IDEA_INPUT_MAX_BYTES } from "./ideaInputCore.ts";
+import { amuxIdeaInputMaxBytes } from "./ideaInputCore.ts";
 
 /**
  * Cards the owner can only remake (owner decision 2026-11-08). Two kinds have
@@ -241,7 +241,10 @@ export function amuxLegacyCardIdeaText(card: {
     " (코드 수정이 아닌 작업입니다. 결과는 보고서로 남기고 코드를 바꾸지 않습니다)" : ""}`] : [];
   const head = [title, "", ...nature, ...(nature.length ? [""] : []), ...body,
     ...(brief ? [...(body.length ? [""] : []), "승인된 실행 브리프:", brief] : [])].join("\n").trim();
-  const room = AMUX_IDEA_INPUT_MAX_BYTES - Buffer.byteLength(`\n\n…\n\n${footer}`, "utf8");
+  // Owner direction 2026-11-15: the remade idea keeps the card's whole text;
+  // it is cut to the idea input ceiling only under the legacy switch, and
+  // otherwise only past the 4 MiB safety ceiling no real card reaches.
+  const room = amuxIdeaInputMaxBytes() - Buffer.byteLength(`\n\n…\n\n${footer}`, "utf8");
   const cut = cutToBytes(head, room);
   const truncated = cut !== head;
   return { ok: true, title, truncated,

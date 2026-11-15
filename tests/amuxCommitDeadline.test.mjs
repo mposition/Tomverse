@@ -378,6 +378,26 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // row trigger, and one more content-key purpose; no commit-deadline marker,
   // classifier or deferred trigger changes.
   "20261115140000_amux_v52_review_findings_body",
+  // Owner direction 2026-11-15: one session analysis answer may be up to
+  // 4 MiB; one CHECK on the result table, no commit-deadline marker,
+  // classifier or deferred trigger changes.
+  "20261115200000_amux_session_result_answer_size",
+  // Owner direction 2026-11-15: the rolling score baseline relaxes one CHECK
+  // and replaces the score guard body on the score table only; no
+  // commit-deadline marker, classifier or deferred trigger changes.
+  "20261115210000_amux_portfolio_score_rolling_baseline_check",
+  "20261115210100_amux_portfolio_score_rolling_baseline_guard",
+  // Owner direction 2026-11-15: the idea title CHECK loses its 80-character
+  // cap; one CHECK on the submission table, no commit-deadline marker,
+  // classifier or deferred trigger changes.
+  "20261115220000_amux_idea_title_no_length_cap",
+  // Owner direction 2026-11-15: a new idea's analysis has a 36,500-day
+  // deadline; one CHECK on the submission table and two guard bodies that
+  // compare the stored deadline instead of submittedAt + 7 days. No
+  // commit-deadline marker, classifier or deferred trigger changes.
+  "20261115230000_amux_idea_analysis_open_deadline",
+  "20261115230100_amux_v19_session_result_open_deadline",
+  "20261115230200_amux_v19_read_manifest_intent_open_deadline",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {

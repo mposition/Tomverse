@@ -1,11 +1,26 @@
+import { AMUX_INTAKE_SAFETY_MAX_BYTES, amuxIntakeCap, amuxIntakeLegacyLimits } from
+  "@/lib/amux/intakeLimitsCore";
 import { scanLocalIntakeInput } from "@/lib/amux/localIntakeCore";
 
 /** A no-write entry validation step. It is not the external model payload. */
 export const AMUX_IDEA_INPUT_VERSION = 1 as const;
+/** The former input limits. Owner direction 2026-11-15 (intakeLimitsCore.ts):
+ * an idea is refused for its content, never its length or its number of
+ * repositories and pull requests; these hold only under
+ * TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS. */
 export const AMUX_IDEA_INPUT_MAX_BYTES = 8_192;
 export const AMUX_IDEA_INPUT_ENVELOPE_MAX_BYTES = 65_536;
 export const AMUX_IDEA_REPOSITORY_MAX = 8;
 export const AMUX_IDEA_PR_MAX = 16;
+
+/** The idea text ceiling under the current switch. */
+export const amuxIdeaInputMaxBytes = (legacy: boolean = amuxIntakeLegacyLimits()): number =>
+  legacy ? AMUX_IDEA_INPUT_MAX_BYTES : AMUX_INTAKE_SAFETY_MAX_BYTES;
+
+/** The request carrying one idea: JSON escaping at most doubles admitted text
+ * (control characters are refused), plus room for the references. */
+export const amuxIdeaInputEnvelopeMaxBytes = (legacy: boolean = amuxIntakeLegacyLimits()): number =>
+  legacy ? AMUX_IDEA_INPUT_ENVELOPE_MAX_BYTES : 2 * AMUX_INTAKE_SAFETY_MAX_BYTES + 64 * 1024;
 
 const REPOSITORY = /^[A-Za-z0-9_.-]{1,64}\/[A-Za-z0-9_.-]{1,100}$/;
 const validRepository = (value: string) =>
@@ -26,7 +41,8 @@ const exactKeys = (value: Record<string, unknown>, names: readonly string[]) =>
   Object.keys(value).sort().join("\0") === [...names].sort().join("\0");
 
 export function inspectAmuxIdeaInput(raw: string): IdeaInputInspection {
-  if (Buffer.byteLength(raw, "utf8") > AMUX_IDEA_INPUT_ENVELOPE_MAX_BYTES) {
+  const legacy = amuxIntakeLegacyLimits();
+  if (Buffer.byteLength(raw, "utf8") > amuxIdeaInputEnvelopeMaxBytes(legacy)) {
     return { ok: false, code: "too_large" };
   }
   let parsed: unknown;
@@ -46,18 +62,20 @@ export function inspectAmuxIdeaInput(raw: string): IdeaInputInspection {
   const idea = record.idea.trim();
   const ideaBytes = Buffer.byteLength(idea, "utf8");
   if (ideaBytes === 0) return { ok: false, code: "metadata_incomplete" };
-  if (ideaBytes > AMUX_IDEA_INPUT_MAX_BYTES) return { ok: false, code: "too_large" };
-  const scanned = scanLocalIntakeInput(idea);
+  if (ideaBytes > amuxIdeaInputMaxBytes(legacy)) return { ok: false, code: "too_large" };
+  const scanned = scanLocalIntakeInput(idea, amuxIdeaInputMaxBytes(legacy));
   if (!scanned.ok) {
     return {
       ok: false,
       code: scanned.code === "too_large" ? "too_large" : "content_refused",
     };
   }
-  if (!Array.isArray(record.repositories) || record.repositories.length > AMUX_IDEA_REPOSITORY_MAX) {
+  if (!Array.isArray(record.repositories) ||
+      record.repositories.length > amuxIntakeCap(AMUX_IDEA_REPOSITORY_MAX, legacy)) {
     return { ok: false, code: "schema_rejected" };
   }
-  if (!Array.isArray(record.pullRequests) || record.pullRequests.length > AMUX_IDEA_PR_MAX) {
+  if (!Array.isArray(record.pullRequests) ||
+      record.pullRequests.length > amuxIntakeCap(AMUX_IDEA_PR_MAX, legacy)) {
     return { ok: false, code: "schema_rejected" };
   }
   const repositories = record.repositories;

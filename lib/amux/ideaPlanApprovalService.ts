@@ -33,8 +33,9 @@ export class AmuxV4PlanError extends Error {
 }
 
 /**
- * The whole plan approval (amux-intake.md v18 item 3): every proposed node,
- * then every proposed Story and Task (the first round of a large plan), then
+ * The whole plan approval (amux-intake.md v18 item 3): the proposed nodes (a
+ * round of at most twelve, parents first), then, once no node waits, every
+ * proposed Story and Task (the first round of a large plan), then
  * the assessments and Task scores the owner confirmed -- ONE transaction, with
  * no partial registration. Each part runs exactly the writers of its own
  * route; the node and card ids are made before the transaction, so a card can
@@ -53,9 +54,12 @@ export async function approveAmuxV4Plan(session: Session, request: Request, inpu
     { ideaId: input.ideaId, reasons: input.reasons }, { allowEmpty: true });
   const pendingFeatures = new Map(nodes.plan.filter((entry) => entry.level === "feature")
     .map((entry) => [entry.localRef, entry.nodeId]));
+  // A plan with more nodes than one round approves its nodes first, a round at
+  // a time; its cards follow once every node is approved (owner direction
+  // 2026-11-15), so no card waits on a Feature that does not exist yet.
   const cards = await prepareAmuxV4CardPlan(session, request,
     { ideaId: input.ideaId, reasons: input.reasons, publicPrConsentOff: input.publicPrConsentOff },
-    { allowEmpty: true, pendingFeatures });
+    { allowEmpty: true, pendingFeatures, deferAll: nodes.remaining > 0 });
 
   // The owner approves what the screen showed: every unit this approval would
   // register, and nothing else. A difference (another analysis page, a
@@ -99,7 +103,7 @@ export async function approveAmuxV4Plan(session: Session, request: Request, inpu
       const scored = await runAmuxV4ScorePlanInTx(tx, score);
       callbackReturned = true;
       return { ideaId: input.ideaId, nodes: createdNodes, cards: createdCards,
-        remainingCards: cards.remaining, ...scored,
+        remainingNodes: nodes.remaining, remainingCards: cards.remaining, ...scored,
         backlogOnly: true as const, executionAuthorized: false as const };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
       ...AMUX_IDEA_PLAN_APPROVAL_TRANSACTION });
