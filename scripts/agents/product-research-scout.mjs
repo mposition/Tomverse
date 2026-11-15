@@ -38,6 +38,7 @@ import {
   errorCode,
   isScoutCausedConsoleError,
   isSignedOutPath,
+  admitJourney,
   journeyTask,
   launchFailure,
   originOf,
@@ -336,6 +337,14 @@ async function walkSignedIn(browser, rules) {
       } else {
         outcomes.skipped += 1;
       }
+      continue;
+    }
+    if (generation?.journey) {
+      // A fixed journey (a regression check): the same walker, the steps from SCOUT_GENERATIONS.
+      const journey = admitJourney(generation.journey);
+      const subject = journey ? await walkJourney(browser, rules, journey, { walk, cookie: access.cookie, subject: id, author: "a fixed regression check" }) : null;
+      outcomes[subject ? "generated" : "skipped"] += 1;
+      if (subject) await deliver(subject);
       continue;
     }
     if (id === SCOUT_EXPLORE_GENERATION) {
