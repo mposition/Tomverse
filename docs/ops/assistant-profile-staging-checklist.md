@@ -21,7 +21,7 @@
 상태입니다. 실행 결과는 `assistant-profile-staging-verification-records/`에
 **날짜와 전체 deploy SHA로 이름 붙인 별도 파일**로 남습니다.
 
-- **template revision**: `2026-08-24a` — 항목이 바뀌면 이 값을 올리고, 실행
+- **template revision**: `2026-11-14a` — 항목이 바뀌면 이 값을 올리고, 실행
   기록은 자기가 어느 revision으로 실행됐는지 적습니다.
 
   `2026-08-20`에서 `2026-08-20a`로 올린 이유는 발견성·생성 UX 변경(#690)이 §F의
@@ -42,6 +42,10 @@
   기대하므로, 지금 제품에서는 **정상 동작이 fail로 적히게 됩니다.** 같은 변경이
   거절 문구를 코드 기반 현지화로 옮겼고(#868·#892), 그것을 볼 자리가 없어 §J를
   새로 만들었습니다.
+
+  `2026-11-14a`로 올린 이유는 **§C의 "옛 revision의 instructions로 답한다"를
+  관찰로 판정할 수 없었기** 때문입니다(#880). 답의 내용만 보고는 어느 개정이
+  적용됐는지 알 수 없으므로, 개정마다 다른 marker를 넣고 답의 첫 줄로 판정합니다.
 - 실행 방법과 파일 이름 규칙:
   `assistant-profile-staging-verification-records/README.md`
 - 기록 template:
@@ -202,7 +206,12 @@ flag가 꺼진 상태에서 먼저 봅니다. 켜고 나면 다시 만들기 어
       (`assistant-option-{id}-detail` = "개정 1 사용 중 · 최신 3"). 최신 개정
       번호만 적힌 행에 체크 표시가 붙으면 이동하지 않은 대화가 이동한 것으로
       읽힙니다
-- [ ] 그 상태에서 turn을 보내면 **옛 revision의 instructions**로 답한다
+- [ ] 그 상태에서 turn을 보내면 **옛 revision의 instructions**로 답한다 —
+      답의 어조가 아니라 **revision마다 다른 marker**로 판정합니다. 개정 1의
+      instructions에 "모든 답을 `[REV-1]`로 시작하라"를, 개정 2에는 `[REV-2]`를
+      넣고 publish합니다. 이동하지 않은 대화의 답이 `[REV-1]`로 시작하면 pass,
+      `[REV-2]`로 시작하면 fail(최신으로 소급), 둘 다 없으면 fail(profile이 통째로
+      빠짐 — `17b144e`가 고친 결함). 기록에는 답의 첫 줄만 옮겨 적습니다
 - [ ] 최신으로 이동(`assistant-move-to-latest`)은 **사용자가 눌러야만** 일어난다
 - [ ] 이동 후에도 이미 저장된 과거 답변은 소급해 바뀌지 않는다
 

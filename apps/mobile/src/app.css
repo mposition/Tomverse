@@ -381,3 +381,8 @@ h1 { white-space: pre-line; font-size: 34px; line-height: 1.5; font-weight: 650;
 .imported-source-context input { width: 20px; height: 20px; }
 .imported-source-excerpt { white-space: pre-wrap; overflow-wrap: anywhere; }
 [data-testid="continuation-receipt"] { margin: 8px 0; color: var(--mobile-muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.artifact-versions { list-style: none; padding: 0; margin: .5rem 0; display: grid; gap: .75rem; }
+.artifact-versions li { min-width: 0; display: grid; gap: .4rem; padding: .75rem; border: 1px solid var(--mobile-border); border-radius: .5rem; overflow-wrap: anywhere; }
+.artifact-versions li:focus { outline: 2px solid var(--mobile-action); outline-offset: 2px; }
+.artifact-versions button { text-align: start; white-space: normal; overflow-wrap: anywhere; }
+.artifact-versions time { font-size: .8rem; color: var(--mobile-muted); }

@@ -2603,7 +2603,26 @@ export function ChatInput({
         // copy silently drops whichever one landed first. `scopeId` sends it
         // to the conversation the file was picked in, which may no longer be
         // the one on screen.
-        onAttachmentsChange((current) => [...current, attachment], scopeId);
+        let capacityRejected = false;
+        onAttachmentsChange((current) => {
+          if (current.length >= maxAttachments) {
+            capacityRejected = true;
+            return current;
+          }
+          return [...current, attachment];
+        }, scopeId);
+        if (capacityRejected) {
+          // A prepared revision may have occupied a slot while this upload ran.
+          // Remove only this unused upload; a bound upload is kept by the API.
+          try {
+            const response = await fetch("/api/chat", { method: "DELETE",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ uploadId: attachment.uploadId }) });
+            await discardResponseBody(response);
+          } catch { /* An unbound upload retains the existing account-cleanup lifetime. */ }
+          dispatchAppToast(t("chat.attachmentCountError"), "error");
+          return;
+        }
         noticeArchiveExclusions(finalized.archive);
       } catch (error) {
         console.error("Attachment upload failed:", error);
@@ -2615,6 +2634,7 @@ export function ChatInput({
       guestAttachmentErrorMessage,
       isEphemeralAttachment,
       maxAttachmentBytes,
+      maxAttachments,
       noticeArchiveExclusions,
       onAttachmentsChange,
       requestGuestVerificationToken,

@@ -1555,14 +1555,26 @@ const checks = [
         "admitTextFileSpec",
         "admitArchiveSpec",
       ];
+      // A revision may rewrite the input (an XLSX source plus cell updates
+      // becomes a whole workbook spec) or refuse it, but it never admits it:
+      // whatever it produces still goes through the same `handler.admit`.
+      // Each tool's schema may be extended with `revisionOf`, so the check is
+      // that the tool's own base schema is what `inputSchema` is built from.
+      const toolSchemas = [
+        "workbookSpecSchema",
+        "documentSpecSchema",
+        "presentationSpecSchema",
+        "textFileSpecSchema",
+        "archiveSpecSchema",
+      ];
       return (
         admissions.every((admission) => code.includes(`admit: ${admission},`)) &&
-        code.includes("const admission = handler.admit(rawInput);") &&
-        code.includes("inputSchema: workbookSpecSchema") &&
-        code.includes("inputSchema: documentSpecSchema") &&
-        code.includes("inputSchema: presentationSpecSchema") &&
-        code.includes("inputSchema: textFileSpecSchema") &&
-        code.includes("inputSchema: archiveSpecSchema") &&
+        code.includes("let admittedInput = rawInput;") &&
+        code.includes(": handler.admit(admittedInput);") &&
+        code.includes('{ ok: false, code: "SCHEMA_INVALID", detail: revisionRejection }') &&
+        toolSchemas.every((schema) =>
+          new RegExp(`inputSchema:[^\\n]*\\b${schema}\\b`).test(code)
+        ) &&
         // Nothing the model is handed back may address the stored object.
         !code.includes("objectKey:") &&
         !code.includes("createR2ReadUrl")

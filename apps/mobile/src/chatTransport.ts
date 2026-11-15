@@ -45,7 +45,7 @@ export type MobileImageGroup = {
   generations: Array<{ generationId: string; status: string; prompt: string; quality?: string; preset?: string; assets: Array<{ role: string; url: string; urlExpiresAt?: string }> }>;
 };
 export type MobileImageModel = { id: string; name: string; provider: string; pricingVersion: string; prices: Array<{ quality: "low" | "medium" | "high"; size: "1024x1024" | "1536x1024" | "1024x1536"; credits: number }> };
-export type MobileCapabilities = { workspace?: import("./iosWorkspaceContract").WorkspaceFeatures; historyFeatures?: { sharing: boolean; downloads: boolean }; historyActions?: boolean; conversationTitles?: boolean; accountUsage?: boolean; chatImageTurns?: boolean; chatImageEdits?: boolean; reviewEasy: boolean; maxModels: number; assistants: boolean; images?: { enabled: boolean; maxModels: number; models: MobileImageModel[] }; plan: import("../../../lib/models").ModelTier | "Guest" };
+export type MobileCapabilities = { generatedFileRevisions?: boolean; workspace?: import("./iosWorkspaceContract").WorkspaceFeatures; historyFeatures?: { sharing: boolean; downloads: boolean }; historyActions?: boolean; conversationTitles?: boolean; accountUsage?: boolean; chatImageTurns?: boolean; chatImageEdits?: boolean; reviewEasy: boolean; maxModels: number; assistants: boolean; images?: { enabled: boolean; maxModels: number; models: MobileImageModel[] }; plan: import("../../../lib/models").ModelTier | "Guest" };
 export type AccountUsage = { plan: string; usage: { creditsMonth: number }; limits: { creditsMonth: number } };
 export type UserPreferences = { reviewEasyEffectiveProviders?: string[]; reviewEasyProviderOptions?: string[]; reviewEasyMaxProviders?: number; theme: "system" | "light" | "dark"; language: string; defaultModel: string; timeZone: string; timeZoneChangeAllowedAt?: string | null; imageHandoffAutoGenerate: boolean };
 export type MemoryPreferences = { masterEnabled: boolean; styleEnabled: boolean; defaultConversationMode: "on" | "off" };
@@ -74,6 +74,7 @@ export type ContinuationTurnContext = {
   sourcePassages?: readonly import("../../../lib/continuationPassages").Passage[];
   onReceipt?: (receipt: import("../../../lib/continuationReceipt").ContinuationReceipt) => void;
 };
+export type PreparedArtifactRevision = MobileAttachment & { revisionMode?: "workbook" | "workbook-values" };
 export type MobileModel = { id: string; name: string; provider: string; minimumPlan: import("../../../lib/models").AiModel["minimumPlan"] };
 export interface ChatTransport {
   workspace?: import("./iosWorkspaceContract").WorkspaceTransport;
@@ -115,6 +116,9 @@ export interface ChatTransport {
   exportAccount(): Promise<void>;
   deleteAccount(confirmationText: string): Promise<void>;
   downloadArtifact(artifact: import("../../../lib/generatedArtifactCore").ChatStreamArtifact): Promise<void>;
+  prepareArtifactRevision?(input: { artifactId: string; conversationId: string; operationId: string }): Promise<PreparedArtifactRevision>;
+  discardAttachment?(uploadId: string): Promise<void>;
+  artifactVersions?(artifactId: string, cursor?: string | null): Promise<import("../../../lib/generatedArtifactVersions").GeneratedArtifactVersions>;
   onSessionLost?(listener: () => void): () => void;
   session(): Promise<boolean>;
   signIn(): Promise<void>;

@@ -6,6 +6,7 @@ import {
   MOBILE_IDENTITY_HEADERS,
   applyMobileIdentityHeaders,
   nativeBearerVerdict,
+  nativeArtifactRevisionBearerRoute,
   stripInternalAuthHeaders,
 } from "../lib/nativeBearerGate.ts";
 import { N1B_BEARER_ROUTES } from "../lib/mobileAuthContract.ts";
@@ -20,6 +21,19 @@ import { N1B_BEARER_ROUTES } from "../lib/mobileAuthContract.ts";
  */
 
 const REGISTERED = "/api/conversations";
+
+test("generated-file Native enrollment fails closed without a resolved switch and permits only versions and input cleanup", () => {
+  for (const [path, method] of [["/api/chat", "DELETE"], ["/api/artifacts/file-1/versions", "GET"]]) {
+    assert.equal(nativeArtifactRevisionBearerRoute(path, method), false);
+    assert.equal(nativeArtifactRevisionBearerRoute(path, method, false), false);
+    assert.equal(nativeArtifactRevisionBearerRoute(path, method, true), true);
+  }
+  for (const [path, method] of [["/api/chat", "GET"], ["/api/chat/other", "DELETE"],
+    ["/api/artifacts/file-1/versions", "POST"], ["/api/artifacts/file-1/versions/more", "GET"],
+    ["/api/artifacts/%2Fadmin/versions", "GET"], ["/api/admin/versions", "GET"]]) {
+    assert.equal(nativeArtifactRevisionBearerRoute(path, method, true), false);
+  }
+});
 const identity = { subject: "user_1", device: "device_1", family: "family_1" };
 
 const verdict = (options = {}) =>

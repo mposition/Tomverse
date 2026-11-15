@@ -12,6 +12,7 @@ import { isPubliclySelectableModel } from "../../../lib/models";
 import type { PublicCatalogModel } from "../../../lib/publicModelCatalog";
 import { mobileApiFetch, MobileAuth } from "./authBridge";
 import { artifactDownloadPath, ARTIFACT_LIMITS } from "../../../lib/generatedArtifactCore";
+import { artifactVersionsPath, parseGeneratedArtifactVersions } from "../../../lib/generatedArtifactVersions";
 import { saveMobileResponse } from "./fileSave";
 import { askReviewRoute } from "../../../lib/reviewRoutingClient";
 import { displayTimeZoneHeaders } from "../../../lib/continuationTitleContext";
@@ -19,7 +20,7 @@ import { readChatImageTurnRequest, readChatImageTurnRef, type ChatImageTurnReque
 import { askChatImageIntent } from "../../../lib/chatImageIntentClient";
 import { IMAGE_EDIT_SOURCE_MEDIA_TYPES } from "../../../lib/imageGenerationPricing";
 import { uploadMobileFile } from "./nativeUpload";
-import type { ChatTransport, Conversation, ImportedTranscript, MobileAttachment, MobileCapabilities, ContinuationTurnContext } from "./chatTransport";
+import type { ChatTransport, Conversation, ImportedTranscript, MobileAttachment, MobileCapabilities, ContinuationTurnContext, PreparedArtifactRevision } from "./chatTransport";
 
 import { nativeChatLocation } from "./chatLocation";
 import type { MobileRequestInit } from "./authenticatedFetch";
@@ -35,18 +36,22 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
   let locationIdentity: string | null = null;
   let sessionRevision = 0;
   let capabilityCache: { value: MobileCapabilities; expires: number } | null = null;
-  let capabilityRequest: Promise<MobileCapabilities> | null = null;
+  let capabilityRequest: { revision: number; promise: Promise<MobileCapabilities> } | null = null;
   const routedModelByMessage = new Map<string, string>();
   const sourceReceiptByMessage = new Map<string, ContinuationReceipt>();
-  const clearSessionState = () => { sessionRevision++; locationIdentity = null; location.setIdentity(null); capabilityCache = null; unlockGrants.clear(); pinSequences.clear(); routedModelByMessage.clear(); sourceReceiptByMessage.clear(); };
+  const clearSessionState = () => { sessionRevision++; locationIdentity = null; location.setIdentity(null); capabilityCache = null; capabilityRequest = null; unlockGrants.clear(); pinSequences.clear(); routedModelByMessage.clear(); sourceReceiptByMessage.clear(); };
   const notifySessionLost = () => { clearSessionState(); for (const listener of listeners) listener(); };
   const run = async (path: string, init?: MobileRequestInit): Promise<Response> => {
     try {
       for (const [id, token] of unlockGrants) if (Number(token.split(".")[0]) <= Date.now() / 1000) unlockGrants.delete(id);
-      if (typeof init !== "function" && unlockGrants.size && /^\/api\/conversations(?:\/|\?)/.test(path)) {
-        const headers = new Headers(init?.headers);
-        headers.set("X-Tomverse-Conversation-Unlocks", [...unlockGrants].map(([id, token]) => `${id}=${token}`).join("; "));
-        init = { ...init, headers };
+      if (unlockGrants.size && (/^\/api\/(?:conversations|artifacts)(?:\/|\?)/.test(path) || path === "/api/chat")) {
+        const grantHeaders = (value?: RequestInit) => {
+          const headers = new Headers(value?.headers);
+          headers.set("X-Tomverse-Conversation-Unlocks", [...unlockGrants].map(([id, token]) => `${id}=${token}`).join("; "));
+          return { ...value, headers };
+        };
+        const original = init;
+        init = typeof original === "function" ? () => grantHeaders(original()) : grantHeaders(original);
       }
       const response = await source(path, init);
       if (response.status === 401) notifySessionLost();
@@ -60,11 +65,13 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
   async function requireParity(refresh = false) {
     if (refresh) capabilityCache = null;
     if (capabilityCache && capabilityCache.expires > Date.now()) return capabilityCache.value;
-    capabilityRequest ??= request<MobileCapabilities>("/api/products/mobile/capabilities");
-    try { const value = await capabilityRequest;
+    const pending = capabilityRequest ?? { revision: sessionRevision, promise: request<MobileCapabilities>("/api/products/mobile/capabilities") };
+    capabilityRequest = pending;
+    try { const value = await pending.promise;
+      if (pending.revision !== sessionRevision) throw new DOMException("Session changed", "AbortError");
       if (typeof value.reviewEasy !== "boolean" || typeof value.assistants !== "boolean" || !["Guest", "Free", "Pro", "Max"].includes(value.plan) || !Number.isInteger(value.maxModels) || value.maxModels < 1 || value.maxModels > 8) throw Error("NATIVE_CAPABILITIES_INVALID");
       capabilityCache = { value, expires: Date.now() + 30_000 }; return value; }
-    finally { capabilityRequest = null; }
+    finally { if (capabilityRequest === pending) capabilityRequest = null; }
   }
   const json = (method: string, body: unknown): RequestInit => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const pathFor = (id: string) => `/api/conversations/${encodeURIComponent(id)}`;
@@ -420,6 +427,33 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       const bytes = await response.arrayBuffer();
       if (bytes.byteLength > ARTIFACT_LIMITS.maxOutputBytes || bytes.byteLength !== artifact.byteSize) throw Error("ARTIFACT_SIZE_MISMATCH");
       await saveFile(new Response(bytes, { headers: response.headers }), artifact.filename);
+    },
+    prepareArtifactRevision: async (input) => {
+      if (!(await requireParity()).generatedFileRevisions) throw new ApiClientError(503, "GENERATED_ARTIFACT_REVISION_DISABLED");
+      const revision = sessionRevision;
+      const result = await request<PreparedArtifactRevision>("/api/chat", json("PUT", { action: "generated-artifact-copy", ...input }));
+      if (revision !== sessionRevision) throw new DOMException("Session changed", "AbortError");
+      if (!result || typeof result.uploadId !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(result.uploadId) ||
+          typeof result.name !== "string" || !result.name || result.name.length > 255 ||
+          typeof result.mediaType !== "string" || result.mediaType.length > 200 ||
+          !Number.isSafeInteger(result.size) || result.size <= 0 || result.size > 10 * 1024 * 1024) throw Error("ARTIFACT_REVISION_RECEIPT_INVALID");
+      return { uploadId: result.uploadId, name: result.name, mediaType: result.mediaType, size: result.size,
+        ...(["workbook", "workbook-values"].includes(result.revisionMode ?? "") ? { revisionMode: result.revisionMode } : {}) };
+    },
+    discardAttachment: async (uploadId) => {
+      if (!(await requireParity()).generatedFileRevisions) return;
+      if (!/^[A-Za-z0-9_-]{1,64}$/.test(uploadId)) throw Error("ATTACHMENT_RECEIPT_INVALID");
+      const response = await run("/api/chat", json("DELETE", { uploadId }));
+      if (!response.ok) throw new ApiClientError(response.status, "ATTACHMENT_CLEANUP_FAILED");
+      await response.body?.cancel().catch(() => {});
+    },
+    artifactVersions: async (artifactId, cursor) => {
+      if (!(await requireParity()).generatedFileRevisions) throw new ApiClientError(503, "GENERATED_ARTIFACT_REVISION_DISABLED");
+      const revision = sessionRevision;
+      const result = parseGeneratedArtifactVersions(await request(artifactVersionsPath(artifactId, cursor), { cache: "no-store" }));
+      if (revision !== sessionRevision) throw new DOMException("Session changed", "AbortError");
+      if (!result) throw Error("ARTIFACT_VERSIONS_INVALID");
+      return result;
     },
     onSessionLost: (listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
     session: async () => { const active = (await bridge.hasSession()).signedIn; if (!active) clearSessionState(); return active; },
