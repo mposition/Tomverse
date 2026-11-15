@@ -755,7 +755,8 @@ const checks = [
       // would be the same skip this check exists to catch -- it would silently
       // fall back to the largest margin for every request.
       source.includes("toReservedInputTokens(estimatedInput,") &&
-      source.includes("toolOverheadTokens: estimateToolInputTokenOverhead"),
+      source.includes("toolOverheadTokens: toolInputTokens") &&
+      /const toolInputTokens =\s*estimateToolInputTokenOverhead\(/.test(source),
   },
   {
     // Class identity belongs to the module instance. A second evaluation of
