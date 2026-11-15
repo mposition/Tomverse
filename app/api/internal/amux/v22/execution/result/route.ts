@@ -9,6 +9,7 @@ import { createAmuxContentUnitKeys } from "@/lib/amux/ideaKeyStore";
 import { loadAmuxContentUnitKeys } from "@/lib/amux/ideaKeyStore";
 import { amuxContentDigest } from "@/lib/amux/ideaCrypto";
 import { normalizeV22OptionalPatch } from "@/lib/amux/v22OptionalPatch";
+import { AMUX_V22_PATCH_ENVELOPE_MAX_BYTES } from "@/lib/amux/v22PatchLimit";
 import { encodeV22PatchEvidence, v22PublishFilesSha256 } from
   "@/lib/amux/v22PatchEvidence";
 import { AmuxV22TaskResultError, recordAmuxV22TaskResult,
@@ -73,7 +74,9 @@ export async function POST(request: Request): Promise<Response> {
     return amuxJsonNoStore({ error: "Invalid content type." }, 415);
   let body: z.infer<typeof bodySchema>;
   try {
-    body = await readLimitedJson(request, 327_680, bodySchema);
+    // The result text and one patch up to the one patch bound, JSON-escaped.
+    body = await readLimitedJson(request, AMUX_V22_PATCH_ENVELOPE_MAX_BYTES,
+      bodySchema);
     if (v22TaskResultSha256(body.resultText) !== body.sourceSha256)
       return amuxJsonNoStore({ error: "Invalid request." }, 400);
   } catch { return amuxJsonNoStore({ error: "Invalid request." }, 400); }
