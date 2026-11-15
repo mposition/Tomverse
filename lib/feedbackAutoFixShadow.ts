@@ -119,6 +119,7 @@ const processClaimedCase = async (claimed: ClaimedCase) => {
           release: true,
           routeClass: true,
           phase: true,
+          failureLayer: true,
           errorCode: true,
           classificationSource: true,
           httpStatus: true,
@@ -197,6 +198,7 @@ const processClaimedCase = async (claimed: ClaimedCase) => {
           errorCode: evidence.errorCode,
           retryable: evidence.retryable,
           httpStatus: evidence.httpStatus,
+          failureLayer: evidence.failureLayer,
         }
       : null,
   });
@@ -223,6 +225,7 @@ const processClaimedCase = async (claimed: ClaimedCase) => {
       evidence?.classificationSource ?? feedback.errorClassificationSource,
     routeClass: evidence?.routeClass ?? null,
     phase: evidence?.phase ?? null,
+    failureLayer: evidence?.failureLayer ?? null,
     httpStatus: evidence?.httpStatus ?? null,
     provider: evidence?.provider ?? null,
     modelId: evidence?.modelId ?? null,

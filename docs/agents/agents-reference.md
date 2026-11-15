@@ -1151,8 +1151,10 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   구분하고, 사용자 입력 Trace만으로 자동화 적격성을 인정하지 않습니다.
 - **token은 서버가 직접 생성한 Trace의 server-classified 오류에만 중앙
   발급합니다** (`issueChatErrorReportGrant` 한 곳). client/Edge Trace와
-  client-classified `EMPTY_RESPONSE`에는 발급하지 않고, 정상 stream에
-  선발급하지 않습니다. token 모듈은 Node 전용이며 `proxy.ts`/Edge bundle에
+  client가 분류한 오류 코드에는 발급하지 않고, 정상 stream에
+  선발급하지 않습니다. 200으로 시작된 뒤 서버가 stream 정산에서 실패로 판정한
+  턴(빈 응답, stream 실패)은 서버 코드로 발급해 stream trailer에 싣습니다
+  (운영자 결정 2026-11-16, 정책 §3.3). token 모듈은 Node 전용이며 `proxy.ts`/Edge bundle에
   import하지 않습니다.
 - **원시 token은 저장·전송 금지.** feedback 제출 body 1회가 유일한 예외이고
   서버는 검증 후 즉시 버립니다. `Message.errorReport`는 runtime 전용이며

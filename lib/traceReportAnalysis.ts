@@ -191,7 +191,7 @@ const CASE_SELECT = {
  * free text the reporter controls. The error code they get is the fingerprint's,
  * from the signed token.
  */
-const SENT = ["classificationSource", "routeClass", "phase", "httpStatus", "provider", "modelId", "retryable", "release", "environment", "occurredAt", "providerEventCount", "limitEventCount"];
+const SENT = ["classificationSource", "routeClass", "phase", "failureLayer", "httpStatus", "provider", "modelId", "retryable", "release", "environment", "occurredAt", "providerEventCount", "limitEventCount"];
 
 const summaryOf = (row: CaseRow) => (row.diagnosticSummary ?? {}) as Record<string, unknown>;
 const serverErrorCodeOf = (row: CaseRow) => {
