@@ -432,7 +432,7 @@
     "ajv": "^6.15.0"
   },
   "devDependencies": {
-    "@playwright/test": "^1.63.0",
+    "@playwright/test": "^1.65.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^22.20.4",
     "@types/pg": "^8.23.1",
@@ -441,11 +441,11 @@
     "@types/ws": "^8.18.1",
     "esbuild": "0.28.1",
     "eslint": "^9",
-    "eslint-config-next": "16.4.5",
-    "parse5": "^8.1.0",
+    "eslint-config-next": "16.4.6",
+    "parse5": "^8.1.1",
     "tailwindcss": "^4",
     "typescript": "^6",
-    "vite": "^8.3.6"
+    "vite": "^8.3.8"
   },
   "overrides": {
     "@eslint/config-array": {
