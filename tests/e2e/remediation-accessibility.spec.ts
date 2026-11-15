@@ -98,12 +98,28 @@ test.describe("RECON-A11Y-001: desktop panel model selects", () => {
       page,
     }) => {
       await prepareGuestPage(page, lang);
+      // Seeded history, so the panels are the live controls of a conversation
+      // under way. With no turns they sit `inert` behind the welcome surface
+      // (UI-EMPTY-001): nobody can operate those selects, and they are not the
+      // ones a screen reader meets.
       await mockAuthenticatedApi(page, {
         selectedModels: ["gpt-5-4-mini", "claude-haiku-4-5", "claude-sonnet-5"],
+        messages: [
+          { id: "seed-user", role: "user", content: "seeded question" },
+          {
+            id: "seed-assistant",
+            role: "assistant",
+            content: "seeded answer",
+            modelId: "gpt-5-4-mini",
+          },
+        ],
       });
       await page.addInitScript({ path: AXE_PATH });
       await page.goto(`/review?lang=${lang}`);
       await openRecentConversation(page);
+      await expect(
+        page.getByTestId("desktop-model-panel").first().getByText("seeded answer")
+      ).toBeVisible();
 
       const selects = page.locator('[data-testid="desktop-model-panel"] select');
       await expect(selects).toHaveCount(3);
