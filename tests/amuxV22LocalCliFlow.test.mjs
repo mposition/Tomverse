@@ -440,6 +440,56 @@ test("the risk-accepted read-only retry keeps its exact signed launch", async ()
   assert.equal(hanging.calls[0].spawnOptions.env.CLAUDE_CODE_SHELL_PREFIX, undefined);
 });
 
+test("context files land in an excluded directory and the previous patch applies three-way", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const { mkdir: makeDir, symlink, writeFile: write } = await import("node:fs/promises");
+  const { applyAmuxV22PriorPatch, writeAmuxV22ContextFiles } =
+    await import("../lib/amux/v22OneShotSidecar.mjs");
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  // The sidecar pins PATH to Ubuntu's /usr/bin:/bin; this host's git may live elsewhere.
+  const hostRun = (binary, args, options) => promisify(execFile)(binary,
+    ["-c", "core.autocrlf=false", ...args], { ...options, env: process.env });
+  const repo = await mkdtemp(join(tmpdir(), "amux-v22-flow-git-"));
+  const git = (...args) => execFileSync("git", ["-c", "user.email=t@example.invalid",
+    "-c", "user.name=t", "-c", "core.autocrlf=false", ...args], { cwd: repo }).toString();
+  try {
+    git("init", "-q");
+    await write(join(repo, "a.txt"), "one\ntwo\n");
+    git("add", "a.txt"); git("commit", "-q", "-m", "base");
+    await write(join(repo, "a.txt"), "one\nTWO\n");
+    const patch = git("diff");
+    git("checkout", "-q", "--", "a.txt");
+    const files = [{ name: "brief.md", text: "Do it." }, { name: "prior.patch", text: patch }];
+    assert.deepEqual(await writeAmuxV22ContextFiles(repo, files, { run: hostRun }),
+      { ok: true, written: ["brief.md", "prior.patch"] });
+    assert.equal(await readFile(join(repo, ".amux", "context", "brief.md"), "utf8"), "Do it.");
+    assert.equal(git("status", "--porcelain", "--untracked-files=all"), "",
+      "the context directory never shows as a change");
+    assert.deepEqual(await applyAmuxV22PriorPatch(repo, { run: hostRun }), { applied: true });
+    assert.equal(await readFile(join(repo, "a.txt"), "utf8"), "one\nTWO\n");
+    assert.equal(git("diff", "--cached"), "", "the applied change stays unstaged");
+    // A patch that cannot apply leaves the clean base for the worker to merge.
+    git("checkout", "-q", "--", "a.txt");
+    await write(join(repo, "a.txt"), "zero\n");
+    git("commit", "-q", "-am", "moved");
+    assert.deepEqual(await applyAmuxV22PriorPatch(repo, { run: hostRun }), { applied: false });
+    assert.equal(git("status", "--porcelain"), "");
+    // A non-directory where the context directory goes is refused.
+    await rm(join(repo, ".amux"), { recursive: true, force: true });
+    await write(join(repo, ".amux"), "not a directory");
+    await assert.rejects(() => writeAmuxV22ContextFiles(repo, files, { run: hostRun }));
+    if (process.platform === "linux") {
+      await rm(join(repo, ".amux"), { force: true });
+      const outside = await mkdtemp(join(tmpdir(), "amux-v22-flow-outside-"));
+      await makeDir(join(outside, "context"));
+      await symlink(outside, join(repo, ".amux"));
+      await assert.rejects(() => writeAmuxV22ContextFiles(repo, files, { run: hostRun }));
+      await rm(outside, { recursive: true, force: true });
+    }
+  } finally { await rm(repo, { recursive: true, force: true }); }
+});
+
 test("other CLIs give a read role the jailed shell but no file write", () => {
   const read = { ...request, role: "investigate", modelId: "gpt-6-luna" };
   const codex = amuxV22ChannelArgs("openai", read, config.worktreePath, { readRoleShell: true });
