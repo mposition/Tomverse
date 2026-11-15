@@ -91,29 +91,34 @@ export type AmuxV22KeptResultFacts = {
 
 export type AmuxV22KeptResultVerdict =
   | { publish: true; moveToReview: boolean; tierPending: boolean }
-  | { publish: false; reason: "disabled" | "orchestrator_halted" | "engineering_off" | "task_moved" };
+  | { publish: false; reason: "disabled" | "orchestrator_halted" | "engineering_off" | "shadow_mode" | "task_moved" };
 
 /**
- * Whether a kept result goes on its way now, and how. Wherever a run can be
- * admitted, it opens one of the two products settlement opens: with a public
- * pull request allowed (t1, the Task's consent) a draft whose tier the
- * Publisher reads next, which becomes a pull request or the owner's T2 draft;
- * otherwise -- shadow, or no consent -- the owner's T2 draft directly, an
- * internal decision item with the patch, never a public write (review
- * r-20261115-112638-578ac8: waiting for t1 or consent left a shadow result
- * with no path at all). A person can send that draft back to the tier round
- * once publishing is allowed (rejudgeEngineeringAgentV22Draft). A blocked card
- * -- one whose later attempts failed until its budget ran out -- goes back to
- * review. Only an engineering agent that is off or frozen, or a halted AMUX,
- * keeps it waiting, and the next round asks again.
+ * Whether a kept result goes on its way now, and how. Under `t1`, with nothing
+ * frozen, it opens one of the two products settlement opens: with the Task's
+ * public pull request consent, a draft whose tier the Publisher reads next,
+ * which becomes a pull request or the owner's T2 draft; without it, the
+ * owner's T2 draft directly -- an internal decision item with the patch,
+ * never a public write -- which a person sends back to the tier round once
+ * the consent is there (rejudgeEngineeringAgentV22Draft, which takes a run
+ * that started under `t1`).
+ *
+ * Under `shadow` it waits (review r-20261115-115151-9e04dc): a run opened now
+ * would be recorded as a shadow run for good, and a shadow run's product can
+ * never become a pull request -- the database refuses its publish item and
+ * the rejudge refuses its draft -- so the result would be stuck as a draft
+ * once t1 returned. Kept, it is published then; meanwhile a person can still
+ * settle it from the owner queue. An agent that is off or frozen, or a halted
+ * AMUX, keeps it waiting too, and the next round asks again. A blocked card --
+ * one whose later attempts failed until its budget ran out -- goes back to
+ * review.
  */
 export function decideAmuxV22KeptResult(facts: AmuxV22KeptResultFacts): AmuxV22KeptResultVerdict {
   if (!facts.publicationEnabled || facts.legacy) return { publish: false, reason: "disabled" };
   if (facts.orchestratorHalted) return { publish: false, reason: "orchestrator_halted" };
   if (facts.taskStatus !== "review" && facts.taskStatus !== "blocked") return { publish: false, reason: "task_moved" };
-  if (!facts.claimAllowed || (facts.mode !== "shadow" && facts.mode !== "t1")) {
-    return { publish: false, reason: "engineering_off" };
-  }
+  if (!facts.claimAllowed) return { publish: false, reason: "engineering_off" };
+  if (facts.mode !== "t1") return { publish: false, reason: facts.mode === "shadow" ? "shadow_mode" : "engineering_off" };
   return { publish: true, moveToReview: facts.taskStatus === "blocked",
-    tierPending: facts.mode === "t1" && facts.publishAllowed && facts.consent };
+    tierPending: facts.publishAllowed && facts.consent };
 }

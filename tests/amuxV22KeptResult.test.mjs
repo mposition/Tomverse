@@ -76,14 +76,15 @@ test("a kept result is published once publication could open, the way settlement
   assert.deepEqual(decideAmuxV22KeptResult(open), { publish: true, moveToReview: false, tierPending: true });
   assert.deepEqual(decideAmuxV22KeptResult({ ...open, taskStatus: "blocked" }),
     { publish: true, moveToReview: true, tierPending: true }, "a card whose budget ran out goes back to review");
-  // No public pull request allowed (shadow, or no consent): the owner's T2 draft, never a wait for t1.
-  for (const change of [{ mode: "shadow", publishAllowed: false }, { consent: false }])
-    assert.deepEqual(decideAmuxV22KeptResult({ ...open, ...change }), { publish: true, moveToReview: false, tierPending: false },
-      JSON.stringify(change));
+  // No public pull request consent under t1: the owner's T2 draft, rejudged once the consent is there.
+  assert.deepEqual(decideAmuxV22KeptResult({ ...open, consent: false }), { publish: true, moveToReview: false, tierPending: false });
+  // Review r-20261115-115151-9e04dc: under shadow it waits, since a shadow run's product can never become a PR.
   for (const [change, reason] of [
     [{ publicationEnabled: false }, "disabled"], [{ legacy: true }, "disabled"],
     [{ orchestratorHalted: true }, "orchestrator_halted"], [{ taskStatus: "todo" }, "task_moved"],
-    [{ mode: "off", claimAllowed: false }, "engineering_off"], [{ claimAllowed: false }, "engineering_off"]])
+    [{ mode: "shadow", publishAllowed: false }, "shadow_mode"],
+    [{ mode: "off", claimAllowed: false, publishAllowed: false }, "engineering_off"],
+    [{ claimAllowed: false, publishAllowed: false }, "engineering_off"]])
     assert.deepEqual(decideAmuxV22KeptResult({ ...open, ...change }), { publish: false, reason }, JSON.stringify(change));
   // Whether kept results are published at all, which also decides whether the DM leaves them out.
   assert.equal(amuxV22KeptResultPublicationEnabled({ TOMVERSE_AMUX_V22_ENGINEERING_PUBLICATION: "enabled" }), true);

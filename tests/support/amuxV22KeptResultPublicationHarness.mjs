@@ -162,23 +162,20 @@ assert.deepEqual(moved.where, { id: "card", status: "blocked", owner: null, arch
 assert.deepEqual(moved.data, { status: "review", revision: { increment: 1 } });
 assert.ok(kinds().indexOf("task") > kinds().indexOf("admission") && kinds().indexOf("task") < kinds().indexOf("run_start"));
 
-// Review r-20261115-112638-578ac8: with no public pull request allowed --
-// shadow mode, or no consent -- the result still goes on: as the owner's T2
-// draft, an internal decision item, never waiting for t1 or consent.
-for (const setup of [
-  () => { switches = { ...switches, mode: "shadow", publishAllowed: false }; modeAtStart = "shadow"; },
-  () => { consent = false; },
-]) {
-  reset();
-  setup();
-  assert.deepEqual(await round(), [{ taskId: "card", attemptId: "attempt-3", outcome: "published" }]);
-  assert.equal(calls.find(([kind]) => kind === "product")[1].tierPending, false, "the owner's T2 draft");
-  assert.equal(calls.find(([kind]) => kind === "audit")[1].metadata.tierPending, false);
-}
+// Review r-20261115-112638-578ac8: with no public pull request consent under
+// t1 the result still goes on, as the owner's T2 draft of a t1 run, which a
+// person sends back to the tier round once the consent is there.
+reset();
+consent = false;
+assert.deepEqual(await round(), [{ taskId: "card", attemptId: "attempt-3", outcome: "published" }]);
+assert.equal(calls.find(([kind]) => kind === "product")[1].tierPending, false, "the owner's T2 draft");
+assert.equal(calls.find(([kind]) => kind === "audit")[1].metadata.tierPending, false);
 
-// Only an agent that is off or frozen, a halted AMUX or the run's own
-// admission keeps the result waiting, and then nothing is written.
+// Only shadow (review r-20261115-115151-9e04dc: a shadow run's product can
+// never become a pull request), an agent that is off or frozen, a halted AMUX
+// or the run's own admission keeps the result waiting, and then nothing is written.
 for (const [setup, reason] of [
+  [() => { switches = { ...switches, mode: "shadow", publishAllowed: false }; }, "shadow_mode"],
   [() => { switches = { ...switches, mode: "off", claimAllowed: false, publishAllowed: false }; }, "engineering_off"],
   [() => { switches = { ...switches, frozen: true, claimAllowed: false, publishAllowed: false }; }, "engineering_off"],
   [() => { orchestratorHalt = { id: "halt" }; }, "orchestrator_halted"],
