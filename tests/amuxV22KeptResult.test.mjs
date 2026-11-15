@@ -98,7 +98,7 @@ test("the Decision Maker is never asked to run a kept result again, and the read
   assert.match(scan, /AND \(\$\{keepsNoResult\} OR NOT \$\{amuxV22KeptResultExistsSql\}\)/);
   const kept = read("lib/amux/v22KeptResultRead.ts");
   const sql = [...kept.matchAll(/(?:Prisma\.sql|\$queryRaw<[\s\S]*?>)`([\s\S]*?)`/g)].map((m) => m[1]).join("\n");
-  assert.match(sql, /NOT EXISTS \(SELECT 1 FROM "EngineeringAgentRun" kr WHERE kr\."amuxAttemptId" = ka\."id"\)/);
+  assert.match(sql, /NOT EXISTS \(SELECT 1 FROM "EngineeringAgentRun" kr WHERE kr\."amuxAttemptId" = ra\."id"\)/);
   assert.match(sql, /kp\."bodyPurgedAt" IS NULL/);
   assert.match(sql, /ke\."resolutionOutcome" IN \('retry', 'block'\)/, "a person's rejection is honoured");
   assert.doesNotMatch(sql.toLowerCase(), /\b(insert|update|delete|merge|upsert|truncate|alter|drop)\b/,
@@ -117,8 +117,11 @@ test("a review pull request's DM settlement follows the card's review attempt, n
     "a stopped card is still judged by its newest attempt");
   const scan = read("lib/amux/dmOwnerSettlementRead.ts");
   assert.match(scan, /WHERE r\."amuxAttemptId" = ra\."id" AND r\."cardId" = w\."id"/);
-  const service = read("lib/amux/dmOwnerSettlementService.ts");
-  assert.match(service, /attemptId: kind === "t2_pr" \? row\.reviewAttemptId : row\.attemptId/);
+  // Review r-20261115-121651-2c22aa: the scan itself names the attempt to file, so the
+  // owner's manual request (ownerQueueDmRequestService.ts) files the review attempt too.
+  assert.match(scan, /CASE WHEN b\."id" IS NOT NULL THEN ra\."id" ELSE a\."id" END AS "attemptId"/);
+  for (const caller of ["lib/amux/dmOwnerSettlementService.ts", "lib/amux/ownerQueueDmRequestService.ts"])
+    assert.match(read(caller), /attemptId/, caller);
   const lane = read("lib/amux/dmT2MergeRead.ts");
   assert.match(lane, /AND x\."outcome" = 'succeeded' AND x\."toStatus" = 'review'\n\s+ORDER BY x\."attemptNumber" DESC NULLS LAST, x\."startedAt" DESC, x\."id" DESC LIMIT 1\) = s\."attemptId"/);
 });

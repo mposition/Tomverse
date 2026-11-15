@@ -113,8 +113,7 @@ export async function readAmuxDmOwnerSettlementSyncRows(tx: Prisma.TransactionCl
       const kind = amuxDmOwnerSettlementKind({ openBinding: row.bindingId ? "review_draft" : null,
         engineeringInFlight: false });
       return kind ? [{ id: amuxDmOwnerSettlementId(row.escalationId), taskId: row.taskId,
-        // A review pull request is filed on its own attempt, the card's review one.
-        escalationId: row.escalationId, attemptId: kind === "t2_pr" ? row.reviewAttemptId : row.attemptId, kind,
+        escalationId: row.escalationId, attemptId: row.attemptId, kind,
         taskStatus: row.taskStatus, bindingId: row.bindingId }] : [];
     });
     if (filed.length > 0) await tx.$executeRaw`
