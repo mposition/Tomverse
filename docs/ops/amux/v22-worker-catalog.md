@@ -200,9 +200,12 @@ What a worker gets:
 - The brief, the owner's answer, the previous patch (already applied for
   implement), prior conclusions and review findings are files under
   `.amux/context/` in the checkout, kept out of Git by `.git/info/exclude`.
-- No fixed deadline: a run stops only at a 30-minute stall (no output and no
-  checkout change), the operator's stop, or the 6-hour safety cap. Its change
-  and output are kept.
+- No time limit: a run stops only at the operator's stop, or when it shows no
+  sign of life for 30 minutes: no new output, no checkout change and no CPU
+  time used by the CLI's process tree (children and its process group
+  included, read from `/proc/<pid>/stat`). A quiet test or build that uses CPU
+  is never stopped; where `/proc` cannot be read, the first two signals
+  decide. Its change and output are kept.
 
 What the sidecar keeps in its state directory (mode 0600, beside the journal,
 never in it): `<attempt>.transcript.jsonl` (the CLI's whole stdout; Claude

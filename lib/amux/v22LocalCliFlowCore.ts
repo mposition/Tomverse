@@ -6,10 +6,12 @@
  *
  * What changes while the flow is on (the default):
  *
- * - No fixed wall-clock deadline. A run ends when its CLI ends, when it makes
- *   no progress (no output and no checkout change) for AMUX_V22_RUN_STALL_MS,
- *   when the operator stops it, or at the generous AMUX_V22_RUN_SAFETY_CAP_MS.
- *   Whatever stops it, the checkout's change and the CLI's output are kept.
+ * - No time limit at all. A run ends when its CLI ends, when the operator
+ *   stops it, or when it shows no sign of life for AMUX_V22_RUN_STALL_MS: no
+ *   output, no checkout change, and no CPU time used by the CLI's process
+ *   tree (children included; Linux /proc, where it can be read). A quiet test
+ *   or build that is working is never stopped. Whatever stops a run, the
+ *   checkout's change and the CLI's output are kept.
  * - No prompt, report, output or conclusion byte limits. The brief, the
  *   previous change, prior conclusions, the owner's answer and review
  *   findings travel as files in the worker's checkout (AMUX_V22_CONTEXT_DIR)
@@ -38,15 +40,14 @@ export function amuxV22LocalCliFlowEnabled(
   return value?.trim() !== "disabled";
 }
 
-/** The last stop on a run that still makes progress. */
-export const AMUX_V22_RUN_SAFETY_CAP_MS = 6 * 60 * 60_000;
-/** No output and no checkout change for this long reads as a hung run. A
- * single CLI tool call (a long test suite, say) is bounded well inside it. */
+/** No sign of life for this long reads as a hung run: no output, no checkout
+ * change and no CPU time in the CLI's process tree (where /proc can be read;
+ * elsewhere the first two signals decide). There is no other time limit. */
 export const AMUX_V22_RUN_STALL_MS = 30 * 60_000;
 export const AMUX_V22_RUN_PROGRESS_POLL_MS = 60_000;
 
 /** Why a run the flow stopped ended; the checkout and output are kept. */
-export const AMUX_V22_RUN_STOP_REASONS = ["stalled", "run_cap", "operator_stop"] as const;
+export const AMUX_V22_RUN_STOP_REASONS = ["stalled", "operator_stop"] as const;
 export type AmuxV22RunStopReason = (typeof AMUX_V22_RUN_STOP_REASONS)[number];
 
 /**

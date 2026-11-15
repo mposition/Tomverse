@@ -7,7 +7,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { AMUX_V22_CONTEXT_FILES, AMUX_V22_TRANSPORT_MAX_BYTES,
+import { AMUX_V22_CONTEXT_FILES, AMUX_V22_RUN_STOP_REASONS, AMUX_V22_TRANSPORT_MAX_BYTES,
   amuxV22ContextPromptSection, amuxV22EmbedContextFiles, amuxV22ExtractContextFiles,
   amuxV22FitReportText, amuxV22LocalCliFlowEnabled, amuxV22LocalCliLeaseMs,
   amuxV22RoleHasShell, parseAmuxV22ContextFiles } from "../lib/amux/v22LocalCliFlowCore.ts";
@@ -162,17 +162,19 @@ test("a run past the earlier ten-minute deadline goes on while it makes progress
   assert.equal(result.usageReceipt.completeness, "reported_complete");
 });
 
-test("a silent run stops as stalled, a busy one at the safety cap, and the operator can stop one", async () => {
+test("a run with no sign of life stops as stalled; there is no time cap; the operator can stop one", async () => {
   const silent = fakeSpawn({ chunks: [], hang: true });
   const stalled = await runAmuxV22OneShot(request, config, { syntheticPlatform: true,
     spawnChild: silent.spawnChild, localCliFlow: true, stallMs: 30, progressPollMs: 10 });
   assert.deepEqual([stalled.kind, stalled.failure], ["outcome_unknown", "stalled"]);
-  const busy = fakeSpawn({ chunks: Array.from({ length: 100 }, () => "{}\n"),
-    everyMs: 5, hang: true });
-  const capped = await runAmuxV22OneShot(request, config, { syntheticPlatform: true,
-    spawnChild: busy.spawnChild, localCliFlow: true, runCapMs: 60, stallMs: 1_000,
-    progressPollMs: 10 });
-  assert.deepEqual([capped.kind, capped.failure], ["outcome_unknown", "run_cap"]);
+  assert.deepEqual([...AMUX_V22_RUN_STOP_REASONS], ["stalled", "operator_stop"]);
+  // The earlier safety cap is gone: a busy run goes on until its CLI ends.
+  const busy = fakeSpawn({ chunks: [...Array.from({ length: 40 }, () => "{}\n"),
+    stream(resultEvent)], everyMs: 5 });
+  const long = await runAmuxV22OneShot(request, config, { syntheticPlatform: true,
+    spawnChild: busy.spawnChild, localCliFlow: true, runCapMs: 20, deadlineMs: 20,
+    stallMs: 1_000, progressPollMs: 10 });
+  assert.equal(long.kind, "succeeded");
   const controller = new AbortController();
   const waiting = fakeSpawn({ chunks: [], hang: true });
   const pending = runAmuxV22OneShot(request, config, { syntheticPlatform: true,
@@ -180,6 +182,63 @@ test("a silent run stops as stalled, a busy one at the safety cap, and the opera
   setTimeout(() => controller.abort(), 20);
   const stopped = await pending;
   assert.deepEqual([stopped.kind, stopped.failure], ["outcome_unknown", "operator_stop"]);
+});
+
+test("CPU time in the process tree keeps a quiet run alive; with none, and nothing else, it stalls", async () => {
+  // A quiet test or build: no output, no checkout change, but CPU in use.
+  let ticks = 0;
+  const controller = new AbortController();
+  const quiet = runAmuxV22OneShot(request, config, { syntheticPlatform: true,
+    spawnChild: fakeSpawn({ chunks: [], hang: true }).spawnChild, localCliFlow: true,
+    stallMs: 40, progressPollMs: 10, signal: controller.signal,
+    probeCpu: () => { ticks += 3; return ticks; } });
+  setTimeout(() => controller.abort(), 250);
+  assert.equal((await quiet).failure, "operator_stop", "never stalled while it used CPU");
+  // The same tree once it stops using CPU, and a tree /proc cannot read.
+  for (const probeCpu of [() => 7, () => null, () => { throw new Error("no /proc"); }]) {
+    const idle = await runAmuxV22OneShot(request, config, { syntheticPlatform: true,
+      spawnChild: fakeSpawn({ chunks: [], hang: true }).spawnChild, localCliFlow: true,
+      stallMs: 40, progressPollMs: 10, probeCpu });
+    assert.equal(idle.failure, "stalled");
+  }
+});
+
+test("the process-tree CPU reading sums the CLI, its descendants and its group only", async () => {
+  const { readAmuxV22ProcessTreeCpuTicks } = await import("../lib/amux/v22OneShotSidecar.mjs");
+  // pid (comm) state ppid pgrp session tty tpgid flags minflt cminflt majflt cmajflt
+  // utime stime cutime cstime ...
+  const stat = (pid, comm, ppid, pgrp, utime, stime, cutime = 0, cstime = 0) =>
+    `${pid} (${comm}) S ${ppid} ${pgrp} ${pgrp} 0 -1 0 0 0 0 0 ${utime} ${stime} ${cutime} ${cstime} 20 0 1 0 0`;
+  const proc = { "1": stat(1, "init", 0, 1, 900, 900), "100": stat(100, "claude", 1, 100, 10, 5, 2, 1),
+    "101": stat(101, "bash (jail) x)", 100, 100, 4, 1), "102": stat(102, "npm test", 101, 102, 30, 3),
+    "103": stat(103, "setsid", 1, 100, 6, 0), "200": stat(200, "other", 1, 200, 500, 500),
+    "self": "ignored" };
+  const fs = { readdir: async () => Object.keys(proc),
+    readFile: async (path) => { const key = path.split(/[\\/]/).at(-2);
+      if (!proc[key]) throw Object.assign(new Error("gone"), { code: "ENOENT" }); return proc[key]; } };
+  // 100 (18) + 101 (5) + its child 102 (33) + group member 103 (6); not 1 or 200.
+  assert.equal(await readAmuxV22ProcessTreeCpuTicks(100, { fs }), 62);
+  assert.equal(await readAmuxV22ProcessTreeCpuTicks(999, { fs }), null, "a gone root reads as unknown");
+  assert.equal(await readAmuxV22ProcessTreeCpuTicks(100, { fs: { ...fs,
+    readdir: async () => { throw new Error("no /proc"); } } }), null);
+  assert.equal(await readAmuxV22ProcessTreeCpuTicks(0, { fs }), null);
+});
+
+test("on Linux a real quiet busy child is kept and a real sleeping one stalls", {
+  skip: process.platform === "linux" ? undefined : "reads /proc",
+}, async () => {
+  const { spawn } = await import("node:child_process");
+  const real = (script) => (_binary, _args, options) =>
+    spawn(process.execPath, ["-e", script], { ...options, env: process.env });
+  const busy = `const end=Date.now()+900;while(Date.now()<end){}` +
+    `process.stdout.write(${JSON.stringify(stream(resultEvent))})`;
+  const kept = await runAmuxV22OneShot(request, config, { syntheticPlatform: true,
+    spawnChild: real(busy), localCliFlow: true, stallMs: 300, progressPollMs: 50 });
+  assert.equal(kept.kind, "succeeded", "900 ms of silent CPU is not a stall");
+  const asleep = await runAmuxV22OneShot(request, config, { syntheticPlatform: true,
+    spawnChild: real("setTimeout(()=>{},10000)"), localCliFlow: true, stallMs: 300,
+    progressPollMs: 50 });
+  assert.equal(asleep.failure, "stalled");
 });
 
 test("a stopped run keeps its checkout change and writes it beside the journal", async () => {
