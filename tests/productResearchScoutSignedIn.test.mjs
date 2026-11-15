@@ -203,8 +203,8 @@ test("every signed-in screen and generation is a subject the route admits and th
     const info = scoutSubjectInfo(generation.id);
     assert.equal(info.kind, "file", generation.id);
     assert.equal(messages.split(`"${info.format}":`).length, 3, `both languages name ${info.format}`);
-    // The model-written turn has no fixed sentence: the scenario route writes it on the day.
-    if (generation.id === SCOUT_EXPLORE_GENERATION) assert.equal(generation.prompt, "");
+    // The model-written turn and journey have no fixed sentence: their routes write them on the day.
+    if ([SCOUT_EXPLORE_GENERATION, "generated.journey"].includes(generation.id)) assert.equal(generation.prompt, "");
     else assert.ok(generation.prompt.length > 0 && generation.prompt.length < 500);
     for (const name of generation.attachments) assert.ok(Object.hasOwn(SCOUT_FIXTURES, name), name);
   }
