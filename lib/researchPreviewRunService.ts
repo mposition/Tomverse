@@ -45,6 +45,7 @@ import {
 } from "@/lib/researchPreviewStep";
 import {
   RESEARCH_PREVIEW_RUN_ACTIVE_LIMIT_MS,
+  RESEARCH_PREVIEW_RUN_CHECKPOINT_TTL_MS,
   activateResearchPreviewRun,
   beginResearchPreviewGeneration,
   checkpointResearchPreviewRun,
@@ -143,7 +144,7 @@ export async function createDurableResearchPreviewRun(input: {
     ) {
       throw new Error("RESEARCH_RUN_ID_REUSED");
     }
-    const dto = await readResearchPreviewRunDto(input.userId, existing.id);
+    const dto = await readResearchPreviewRunDto(input.userId, existing.id, input.request);
     if (!dto) throw new Error("RESEARCH_RUN_READ_FAILED");
     return { created: false as const, run: dto };
   }
@@ -264,7 +265,7 @@ export async function createDurableResearchPreviewRun(input: {
     searchSurchargeCredits,
   });
   if (!preparing.created) {
-    const dto = await readResearchPreviewRunDto(input.userId, preparing.run.id);
+    const dto = await readResearchPreviewRunDto(input.userId, preparing.run.id, input.request);
     if (!dto) throw new Error("RESEARCH_RUN_READ_FAILED");
     return { created: false as const, run: dto };
   }
@@ -323,7 +324,7 @@ export async function createDurableResearchPreviewRun(input: {
       });
     }
   }
-  const dto = await readResearchPreviewRunDto(input.userId, preparing.run.id);
+  const dto = await readResearchPreviewRunDto(input.userId, preparing.run.id, input.request);
   if (!dto) throw new Error("RESEARCH_RUN_READ_FAILED");
   return { created: true as const, run: dto };
 }
@@ -468,8 +469,12 @@ export async function settlePendingResearchPreviewRuns(limit = 50) {
   const runs = await researchPreviewRunsAwaitingSettlement(limit);
   let settled = 0;
   for (const run of runs) {
-    await settleStoredResearchPreviewRun(run);
-    settled += 1;
+    try {
+      await settleStoredResearchPreviewRun(run);
+      settled += 1;
+    } catch {
+      console.error(JSON.stringify({ event: "research_settlement_deferred", runId: run.id }));
+    }
   }
   return settled;
 }
@@ -527,7 +532,7 @@ export async function processOneResearchPreviewRun(
     chatLeaseId = chatLease.leaseId;
     await extendChatReservationExpiry(
       claimed.reservationId,
-      24 * 60 * 60
+      (RESEARCH_PREVIEW_RUN_CHECKPOINT_TTL_MS + RESEARCH_PREVIEW_RUN_ACTIVE_LIMIT_MS) / 1_000
     );
     const heartbeat = async () => {
       const [runAlive, chatAlive] = await Promise.all([
@@ -722,15 +727,32 @@ export async function processOneResearchPreviewRun(
         subjectScope: access.subjectKey,
       });
     }
-    const final = await readResearchPreviewRunForWorker(claimed.id);
+    const finalizeCancellation = async () => {
+      const current = await readResearchPreviewRunForWorker(claimed.id);
+      if (current?.status === "running" && current.cancelRequestedAt) {
+        await finishResearchPreviewRunWithoutReport({ runId: current.id, ownerId, leaseEpoch: claimed.leaseEpoch,
+          status: dispatched ? "attention" : "cancelled", stopReason: dispatched ? "outcome_unknown" : "cancelled",
+          ...(generationId ? { generationId, generationStatus: dispatched ? "outcome_unknown" as const : "dispatch_refused" as const } : {}),
+          settlementUsage: dispatched ? unknownSettlement(current) : knownSettlement(current, checkpoint, "cancelled") });
+        return readResearchPreviewRunForWorker(claimed.id);
+      }
+      return current;
+    };
+    let final = await finalizeCancellation();
     if (final && ["completed", "failed", "cancelled", "attention"].includes(final.status)) {
       await settleStoredResearchPreviewRun(final).catch(() => undefined);
     } else if (final?.status === "running") {
-      await releaseResearchPreviewClaimToQueue({
+      const released = await releaseResearchPreviewClaimToQueue({
         runId: final.id,
         ownerId,
         leaseEpoch: claimed.leaseEpoch,
       });
+      if (!released) {
+        final = await finalizeCancellation();
+        if (final && ["completed", "failed", "cancelled", "attention"].includes(final.status)) {
+          await settleStoredResearchPreviewRun(final).catch(() => undefined);
+        }
+      }
     }
   }
   return true;
@@ -765,13 +787,15 @@ export async function resumeDurableResearchPreviewRun(input: {
   if (!run.reservationId) throw new Error("RESEARCH_RESERVATION_MISSING");
   await readOpenChatUsageReservation(run.reservationId, input.userId);
   await resumeResearchPreviewRun(input.userId, run.id);
-  return readResearchPreviewRunDto(input.userId, run.id);
+  return readResearchPreviewRunDto(input.userId, run.id, input.request);
 }
 
 export async function cancelDurableResearchPreviewRun(input: {
+  request?: Request;
   userId: string;
   runId: string;
 }) {
+  if (!await readResearchPreviewRunDto(input.userId, input.runId, input.request)) return null;
   const cancelled = await requestResearchPreviewCancellation(
     input.userId,
     input.runId
@@ -781,7 +805,7 @@ export async function cancelDurableResearchPreviewRun(input: {
     const run = await readResearchPreviewRunForWorker(input.runId);
     await settleStoredResearchPreviewRun(run);
   }
-  return readResearchPreviewRunDto(input.userId, input.runId);
+  return readResearchPreviewRunDto(input.userId, input.runId, input.request);
 }
 
 export { listResearchPreviewRunDtos, readResearchPreviewRunDto };

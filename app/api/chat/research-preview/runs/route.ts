@@ -70,7 +70,7 @@ export async function GET(request: Request) {
       assistantMessageId:
         url.searchParams.get("assistantMessageId") ?? undefined,
     });
-    const runs = await listResearchPreviewRunDtos({ userId, ...query });
+    const runs = await listResearchPreviewRunDtos({ userId, ...query, request });
     return Response.json({ runs }, { headers: noStore });
   } catch (error) {
     return errorResponse(error);

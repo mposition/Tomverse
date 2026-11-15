@@ -34,6 +34,7 @@ export async function POST(
       day: 1_000,
     });
     const run = await cancelDurableResearchPreviewRun({
+      request,
       userId,
       runId: parsed.data,
     });

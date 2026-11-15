@@ -16,13 +16,16 @@ import {
   markResearchPreviewDispatchStarted,
   readEligibleResearchPreviewSource,
   readResearchPreviewRunDto,
+  listResearchPreviewRunDtos,
   recoverStaleResearchPreviewRun,
   requestResearchPreviewCancellation,
+  releaseResearchPreviewClaimToQueue,
   researchPreviewQuestionDigest,
   resumeResearchPreviewRun,
 } from "@/lib/researchPreviewRunStore";
 import { parseResearchPreviewCheckpoint } from "@/lib/researchPreviewStep";
 import { reconcileExpiredChatCreditReservations } from "@/lib/chatSecurity";
+import { createConversationUnlockCookie } from "@/lib/conversationLock";
 
 const root = resolve(import.meta.dirname, "../..");
 const mod = (file: string) => pathToFileURL(resolve(root, file)).href;
@@ -204,7 +207,7 @@ function checkpoint(input: {
   });
 }
 
-function completedDurableModel() {
+function completedDurableModel(onGenerate?: () => Promise<unknown>) {
   const report = {
     status: "partial",
     summary: "The saved public sources support a bounded answer.",
@@ -224,6 +227,7 @@ function completedDurableModel() {
     provider: "google",
     modelId: "gemini-3.1-pro-preview",
     doGenerate: async () => {
+      await onGenerate?.();
       const index = activeModel.doGenerateCalls.length - 1;
       assert.ok(index < 3, "durable Research must never add a repair generation");
       return {
@@ -327,6 +331,60 @@ test("cancelling an undispatched queued run settles known zero tokens, search co
   assert.equal(activeModel.doGenerateCalls.length, 0);
   const attempts = await prisma.chatAttemptUsage.findMany({ where: { reservationId: reservation.id } });
   assert.ok(attempts.every(attempt => attempt.inputTokens === 0 && attempt.outputTokens === 0 && attempt.costMicroUsd === BigInt(0)));
+});
+
+test("a cancellation during a completed step terminalizes instead of stranding a queued hold", async () => {
+  const { user, service, created, held } = await createServiceFixture("cancel-after-step");
+  activeModel = completedDurableModel(() => requestResearchPreviewCancellation(user.id, created.run.id));
+  await service.processOneResearchPreviewRun("cancel-after-step-worker");
+  const run = await prisma.researchPreviewRun.findUniqueOrThrow({ where: { id: created.run.id } });
+  assert.equal(run.status, "cancelled");
+  assert.equal(run.checkpoint, null);
+  assert.equal(activeModel.doGenerateCalls.length, 1);
+  const reservation = await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id: held[0]!.id } });
+  assert.notEqual(reservation.status, "reserved");
+  assert.equal(reservation.settledInputTokens, 200);
+  assert.equal(reservation.settledOutputTokens, 100);
+});
+
+test("a late cancellation cannot be returned to the queue and stale recovery finalizes it", async () => {
+  const row = await fixture("cancel-before-release");
+  const ownerId = "cancel-before-release-worker";
+  const claimed = await claimNextResearchPreviewRun(ownerId);
+  assert.equal(claimed?.id, row.runId);
+  if (!claimed) throw new Error("Expected claim");
+  await requestResearchPreviewCancellation(row.user.id, row.runId);
+  assert.equal(await releaseResearchPreviewClaimToQueue({ runId: row.runId, ownerId, leaseEpoch: claimed.leaseEpoch }), false);
+  await prisma.researchPreviewRun.update({ where: { id: row.runId }, data: { leaseExpiresAt: new Date(Date.now() - 1000) } });
+  assert.equal(await recoverStaleResearchPreviewRun(row.runId), "cancelled");
+  const run = await prisma.researchPreviewRun.findUniqueOrThrow({ where: { id: row.runId } });
+  assert.equal(run.status, "cancelled");
+  assert.equal(run.checkpoint, null);
+  assert.equal((run.settlementUsage as { inputTokens: number }).inputTokens, 0);
+});
+
+test("password-locked Research reads and lists require the current conversation unlock grant", async () => {
+  const { user, conversation, service, created } = await createServiceFixture("locked-research");
+  await service.processOneResearchPreviewRun("locked-research-worker");
+  const password = "stored-password-fingerprint-fixture";
+  await prisma.conversation.update({ where: { id: conversation.id }, data: { password } });
+  await assert.rejects(readResearchPreviewRunDto(user.id, created.run.id), { code: "RESEARCH_CONVERSATION_LOCKED" });
+  await assert.rejects(listResearchPreviewRunDtos({ userId: user.id, conversationId: conversation.id }), { code: "RESEARCH_CONVERSATION_LOCKED" });
+  assert.deepEqual(await listResearchPreviewRunDtos({ userId: user.id }), []);
+  const { GET } = await import(mod("app/api/chat/research-preview/runs/[id]/route.ts"));
+  const url = `http://127.0.0.1/api/chat/research-preview/runs/${created.run.id}`;
+  const locked = await GET(new Request(url), { params: Promise.resolve({ id: created.run.id }) });
+  assert.equal(locked.status, 423);
+  assert.equal(JSON.stringify(await locked.json()).includes("bounded answer"), false);
+  const cookie = createConversationUnlockCookie(user.id, conversation.id, password).split(";", 1)[0]!;
+  const request = new Request(url, { headers: { Cookie: cookie } });
+  const unlocked = await GET(request, { params: Promise.resolve({ id: created.run.id }) });
+  assert.equal(unlocked.status, 200);
+  assert.match(JSON.stringify(await unlocked.json()), /bounded answer/i);
+  assert.equal((await listResearchPreviewRunDtos({ userId: user.id, conversationId: conversation.id, request })).length, 1);
+  await prisma.conversation.update({ where: { id: conversation.id }, data: { password: "changed-password" } });
+  await assert.rejects(readResearchPreviewRunDto(user.id, created.run.id, request), { code: "RESEARCH_CONVERSATION_LOCKED" });
+  assert.equal(activeModel.doGenerateCalls.length, 3, "locked/unlocked reads never dispatch");
 });
 
 for (const viaSweep of [false, true]) test(`expired paid checkpoints preserve known usage and clear private data through ${viaSweep ? "generic reservation expiry" : "worker recovery"}`, async () => {
@@ -822,4 +880,19 @@ test("account deletion cascades run/checkpoint rows while the financial reservat
   });
   assert.equal(reservation.userId, null);
   users.splice(users.indexOf(row.user.id), 1);
+});
+
+test("one poisoned settlement cannot block a later valid cancelled reservation", async () => {
+  const bad = await fixture("poisoned-settlement");
+  await prisma.researchPreviewRun.update({ where: { id: bad.runId }, data: {
+    status: "failed", completedAt: new Date(0), settlementUsage: { usageFromProvider: true,
+      inputTokens: 0, outputTokens: 0, outcome: "failed", searchQueriesObserved: true, searchExecuted: false },
+  } });
+  const good = await createServiceFixture("settlement-after-poison");
+  await requestResearchPreviewCancellation(good.user.id, good.created.run.id);
+  await good.service.settlePendingResearchPreviewRuns();
+  const reservation = await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id: good.held[0]!.id } });
+  assert.equal(reservation.status, "refunded");
+  const poisoned = await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id: bad.reservationId } });
+  assert.equal(poisoned.status, "reserved");
 });

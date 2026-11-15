@@ -443,3 +443,16 @@ default-on instruction recorded above; the exact hosted zero-price profile and
 opt-out remain unchanged. One reviewer in the rejected job was unknown; this
 is a changed-diff submission after fixing the other reviewer's major findings,
 not a blind retry of an unchanged unknown review.
+
+Review `r-20261115-032346-8f477f` accepted the previous settlement repair but
+identified missing conversation-password checks on run reads and a cancellation
+race while a step finishes. The store's public read/list projection now requires
+the same current unlock grant as conversation messages; all routes pass their
+request, and cancellation checks access before mutation. Both cancellation and
+dispatch-start serialize on the run row. Normal worker exit finalizes a pending
+cancel, release-to-queue refuses a cancelled claim, and stale recovery finalizes
+known cancelled work. The reservation lasts through the full active window plus
+the checkpoint TTL, so a resumable checkpoint cannot outlive its hold. One
+poisoned settlement is deferred without blocking later runs. Fifteen real-DB
+cases now cover these paths, including missing/valid/revoked unlock grants,
+late cancellation, stale cancellation recovery and settlement error isolation.

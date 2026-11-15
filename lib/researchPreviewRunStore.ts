@@ -3,6 +3,7 @@ import "server-only";
 import { createHash, randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { hasConversationUnlockGrant } from "@/lib/conversationLock";
 import {
   PUBLIC_CHAT_MESSAGE_SELECT,
   toPublicChatMessage,
@@ -157,6 +158,7 @@ const CHECKPOINTED_SELECT = {
   createdAt: true,
   updatedAt: true,
   message: { select: PUBLIC_CHAT_MESSAGE_SELECT },
+  conversation: { select: { password: true } },
   generations: {
     where: { status: { in: ["dispatch_started", "outcome_unknown"] } },
     select: { id: true },
@@ -201,11 +203,17 @@ export const toResearchPreviewRunDto = (
   };
 };
 
-export async function readResearchPreviewRunDto(userId: string, id: string) {
+const canReadResearchRun = (row: DtoRow, userId: string, request?: Request) =>
+  !row.conversation.password || Boolean(request && hasConversationUnlockGrant(request, userId, row.conversationId, row.conversation.password));
+
+export async function readResearchPreviewRunDto(userId: string, id: string, request?: Request) {
   const row = await prisma.researchPreviewRun.findFirst({
     where: { id, userId },
     select: CHECKPOINTED_SELECT,
   });
+  if (row && !canReadResearchRun(row, userId, request)) throw new ResearchPreviewRunError(
+    423, "RESEARCH_CONVERSATION_LOCKED", "Unlock this conversation before reading Research."
+  );
   return row ? toResearchPreviewRunDto(row) : null;
 }
 
@@ -213,6 +221,7 @@ export async function listResearchPreviewRunDtos(input: {
   userId: string;
   conversationId?: string;
   assistantMessageId?: string;
+  request?: Request;
 }) {
   const rows = await prisma.researchPreviewRun.findMany({
     where: {
@@ -226,7 +235,10 @@ export async function listResearchPreviewRunDtos(input: {
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: input.assistantMessageId ? 1 : 100,
   });
-  return rows.map((row) => toResearchPreviewRunDto(row));
+  if (input.conversationId && rows.some(row => !canReadResearchRun(row, input.userId, input.request))) {
+    throw new ResearchPreviewRunError(423, "RESEARCH_CONVERSATION_LOCKED", "Unlock this conversation before reading Research.");
+  }
+  return rows.filter(row => canReadResearchRun(row, input.userId, input.request)).map(row => toResearchPreviewRunDto(row));
 }
 
 export async function createPreparingResearchPreviewRun(input: {
@@ -379,6 +391,7 @@ export async function releaseResearchPreviewClaimToQueue(input: {
       status: "running",
       leaseOwner: input.ownerId,
       leaseEpoch: input.leaseEpoch,
+      cancelRequestedAt: null,
     },
     data: {
       status: "queued",
@@ -461,6 +474,7 @@ export async function markResearchPreviewDispatchStarted(input: {
   leaseEpoch: number;
 }) {
   const changed = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "ResearchPreviewRun" WHERE "id" = ${input.runId} FOR UPDATE`;
     const now = new Date();
     const run = await tx.researchPreviewRun.findFirst({
       where: {
@@ -721,6 +735,7 @@ export async function requestResearchPreviewCancellation(
 ) {
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`research-preview-run:${runId}`}))`;
+    await tx.$queryRaw`SELECT "id" FROM "ResearchPreviewRun" WHERE "id" = ${runId} FOR UPDATE`;
     const run = await tx.researchPreviewRun.findFirst({ where: { id: runId, userId } });
     if (!run) return null;
     if (["completed", "failed", "cancelled", "attention"].includes(run.status)) {
@@ -981,6 +996,19 @@ export async function recoverStaleResearchPreviewRun(runId: string) {
         },
       });
       return "outcome_unknown" as const;
+    }
+    if (run.cancelRequestedAt) {
+      const usage = await stoppedResearchPreviewUsage(tx, run, "cancelled");
+      if (generation?.status === "intent") await tx.researchPreviewGeneration.update({
+        where: { id: generation.id }, data: { status: "dispatch_refused", stopReason: "cancelled", completedAt: now },
+      });
+      await tx.researchPreviewRun.update({ where: { id: run.id }, data: {
+        status: usage.usageFromProvider ? "cancelled" : "attention",
+        stopReason: usage.usageFromProvider ? "cancelled" : "outcome_unknown",
+        checkpoint: Prisma.DbNull, checkpointExpiresAt: null, settlementUsage: checkpointJson(usage),
+        leaseOwner: null, leaseExpiresAt: null, activeDeadlineAt: null, completedAt: now,
+      } });
+      return "cancelled" as const;
     }
     if (generation?.status === "intent") {
       await tx.researchPreviewGeneration.update({
