@@ -3,6 +3,7 @@ import test from "node:test";
 import { AVAILABLE_MODELS, PUBLIC_MODELS, getModel } from "../lib/models.ts";
 import {
   MAX_LOCKED_MODEL_RECOMMENDATIONS,
+  FEATURED_PROVIDERS,
   MAX_MODEL_RECOMMENDATIONS,
   MODEL_RECOMMENDATION_USE_CASES,
   TARGET_MIN_MODEL_RECOMMENDATIONS,
@@ -134,50 +135,88 @@ test("guests see mostly usable models, with gated ones labelled and capped", () 
   }
 });
 
+const providerOf = (models, modelId) => models.find((model) => model.id === modelId)?.provider;
+const creditsOf = (recommendations, modelId) => recommendations.find((item) => item.modelId === modelId)?.credits;
+
 test("signed-in users on Free are told to upgrade rather than sign in", () => {
-  const recommendations = getModelRecommendations({
-    ...freeInput,
-    // Force a gated slot by removing the Free-tier research models.
-    models: PUBLIC_MODELS.filter(
-      (model) => model.id !== "perplexity/sonar" && model.id !== "perplexity/sonar-pro"
-    ),
-  });
-  const research = recommendations.find(
-    (item) => item.modelId === "perplexity/sonar-reasoning-pro"
-  );
-  assert.ok(research, "the search slot should fall through to the Pro model");
-  assert.equal(research.lock, "upgrade");
+  const recommendations = getModelRecommendations(freeInput);
+  const gated = recommendations.filter((item) => item.lock !== "none");
+  assert.ok(gated.length >= 1, "a provider with only Pro models is shown gated");
+  for (const item of gated) assert.equal(item.lock, "upgrade");
+});
+
+test("the first screen is one card per provider: its top model the viewer can run", () => {
+  // Owner decision 2026-11-15. The screen used to fill seven task slots from
+  // tables of model ids: one provider could take two cards while a provider
+  // whose models were added in the Admin catalogue could take none.
+  for (const input of [guestInput, freeInput, { ...freeInput, plan: "Pro" }]) {
+    const recommendations = getModelRecommendations(input);
+    const providers = recommendations.map((item) => providerOf(input.models, item.modelId));
+    assert.equal(new Set(providers).size, providers.length, `${input.plan}: ${providers.join(",")}`);
+    // The featured providers lead, in their own order.
+    assert.deepEqual(providers.slice(0, FEATURED_PROVIDERS.length), [...FEATURED_PROVIDERS]);
+    for (const pick of recommendations.filter((item) => item.lock === "none" && item.status === "available")) {
+      const provider = providerOf(input.models, pick.modelId);
+      const dearer = getModelRecommendations({
+        ...input,
+        models: input.models.filter((model) => model.provider === provider),
+      }).find((item) => item.lock === "none" && item.status === "available");
+      // Asked about that provider alone, the answer is the same model.
+      assert.equal(dearer.modelId, pick.modelId);
+    }
+  }
+  const pro = getModelRecommendations({ ...freeInput, plan: "Pro" });
+  const free = getModelRecommendations(freeInput);
+  const openAi = (list) => list.find((item) => providerOf(PUBLIC_MODELS, item.modelId) === "openai");
+  // A higher plan sees a higher model of the same provider.
+  assert.ok(openAi(pro).credits > openAi(free).credits);
+});
+
+test("a model the Admin catalogue added needs no table entry to be its provider's card", () => {
+  // In production on 2026-11-15 no enabled Gemini or Grok model was in any
+  // table, so neither provider could reach the first screen.
+  const models = [
+    ...PUBLIC_MODELS.filter((model) => model.provider !== "google"),
+    { ...getModel("gpt-6-luna"), id: "gemini-next", name: "Gemini Next", provider: "google", usageClass: "advanced", minimumPlan: "Free" },
+  ];
+  const recommendations = getModelRecommendations({ ...freeInput, models });
+  const card = recommendations.find((item) => item.modelId === "gemini-next");
+  assert.ok(card);
+  assert.equal(card.lock, "none");
+  // Its reason line and the task filter come from its profile.
+  assert.equal(card.useCase, "writing");
+  const model = models.find((entry) => entry.id === "gemini-next");
+  assert.equal(modelMatchesUseCase("gemini-next", "writing", model), true);
+  assert.equal(modelMatchesUseCase("gemini-next", "coding", model), false);
+  // A listed model keeps its hand-written tasks, whatever its profile says.
+  assert.equal(modelMatchesUseCase("perplexity/sonar", "everyday", getModel("perplexity/sonar")), false);
+  assert.equal(MODEL_RECOMMENDATION_USE_CASES.includes(card.source), true);
 });
 
 test("a provider outage removes the model instead of recommending a dead slot", () => {
   const healthy = getModelRecommendations(freeInput);
-  const everydayPick = healthy.find((item) => item.useCase === "everyday");
-  assert.equal(everydayPick.modelId, "gpt-6-luna");
-
+  const openAi = healthy.find((item) => providerOf(PUBLIC_MODELS, item.modelId) === "openai");
   const degraded = getModelRecommendations({
     ...freeInput,
-    modelStatuses: { "gpt-6-luna": "unavailable" },
+    modelStatuses: { [openAi.modelId]: "unavailable" },
   });
-  assert.equal(
-    degraded.some((item) => item.modelId === "gpt-6-luna"),
-    false
-  );
-  // Falls through to the next everyday candidate, which is the model GPT 6
-  // Luna replaced as the default on 2026-10-12 and which is still enabled.
-  assert.equal(
-    degraded.find((item) => item.useCase === "everyday").modelId,
-    "gpt-5-6-luna"
-  );
+  assert.equal(degraded.some((item) => item.modelId === openAi.modelId), false);
+  // The provider keeps its card: its next model takes it.
+  const next = degraded.find((item) => providerOf(PUBLIC_MODELS, item.modelId) === "openai");
+  assert.ok(next);
+  assert.ok(next.credits <= creditsOf(healthy, openAi.modelId));
 });
 
-test("a degraded provider loses its slot to a healthy alternative but is still selectable", () => {
+test("a degraded model loses its provider's card to a healthy one but is still selectable", () => {
+  const healthy = getModelRecommendations(freeInput);
+  const openAi = healthy.find((item) => providerOf(PUBLIC_MODELS, item.modelId) === "openai");
   const recommendations = getModelRecommendations({
     ...freeInput,
-    modelStatuses: { "gpt-5-4-mini": "limited" },
+    modelStatuses: { [openAi.modelId]: "limited" },
   });
-  const everyday = recommendations.find((item) => item.useCase === "everyday");
-  assert.equal(everyday.modelId, "gpt-6-luna");
-  assert.equal(everyday.status, "available");
+  const card = recommendations.find((item) => providerOf(PUBLIC_MODELS, item.modelId) === "openai");
+  assert.notEqual(card.modelId, openAi.modelId);
+  assert.equal(card.status, "available");
 
   // With no healthy alternative left, the limited model is offered and says so.
   const onlyLimited = getModelRecommendations({
@@ -189,30 +228,15 @@ test("a degraded provider loses its slot to a healthy alternative but is still s
   assert.equal(onlyLimited[0].status, "limited");
 });
 
-test("each use case is filled by a model that actually matches it", () => {
-  const recommendations = getModelRecommendations(freeInput);
-  const useCasePicks = recommendations.filter((item) =>
-    MODEL_RECOMMENDATION_USE_CASES.includes(item.source)
-  );
-  assert.equal(useCasePicks.length, MODEL_RECOMMENDATION_USE_CASES.length);
-  for (const pick of useCasePicks) {
-    assert.equal(modelMatchesUseCase(pick.modelId, pick.useCase), true);
-  }
-
-  const byUseCase = new Map(useCasePicks.map((item) => [item.useCase, item.modelId]));
-  assert.equal(byUseCase.get("search"), "perplexity/sonar");
-  assert.equal(byUseCase.get("coding"), "deepseek-v4-flash");
-  assert.equal(byUseCase.get("multimodal"), "gemini-3-6-flash");
-});
-
 test("recommended cards carry the cost and capabilities the card renders", () => {
-  const recommendations = getModelRecommendations(freeInput);
-  const research = recommendations.find(
-    (item) => item.modelId === "perplexity/sonar"
-  );
-  assert.equal(research.credits, 16);
-  assert.deepEqual(research.features, ["search"]);
-  for (const recommendation of recommendations) {
+  const research = getModelRecommendations({
+    ...freeInput,
+    models: PUBLIC_MODELS.filter((model) => model.provider === "perplexity"),
+  });
+  assert.equal(research.length, 1);
+  assert.equal(research[0].useCase, "search");
+  assert.deepEqual(research[0].features, ["search"]);
+  for (const recommendation of getModelRecommendations(freeInput)) {
     assert.ok(recommendation.credits > 0);
     assert.ok(recommendation.features.length <= 2);
   }
@@ -255,23 +279,16 @@ test("a thin registry returns only what is available instead of padding", () => 
 });
 
 test("registry edits flow straight through to the recommendations", () => {
-  const withoutFlash = PUBLIC_MODELS.map((model) =>
-    model.id === "gemini-3-6-flash"
-      ? { ...model, enabled: false, status: "disabled" }
-      : model
+  const google = getModelRecommendations(freeInput).find(
+    (item) => providerOf(PUBLIC_MODELS, item.modelId) === "google"
   );
-  const recommendations = getModelRecommendations({
-    ...freeInput,
-    models: withoutFlash,
-  });
-  assert.equal(
-    recommendations.some((item) => item.modelId === "gemini-3-6-flash"),
-    false
+  const withoutIt = PUBLIC_MODELS.map((model) =>
+    model.id === google.modelId ? { ...model, enabled: false, status: "disabled" } : model
   );
-  assert.equal(
-    recommendations.find((item) => item.useCase === "multimodal").modelId,
-    "gemini-2-5-flash"
-  );
+  const recommendations = getModelRecommendations({ ...freeInput, models: withoutIt });
+  assert.equal(recommendations.some((item) => item.modelId === google.modelId), false);
+  const next = recommendations.find((item) => providerOf(withoutIt, item.modelId) === "google");
+  assert.ok(next, "another Google model takes the provider's card");
 });
 
 test("guests get a stable set that does not depend on personalization", () => {
@@ -294,23 +311,6 @@ test("guests get a stable set that does not depend on personalization", () => {
   );
   assert.equal(withSelection[0].isSelected, true);
   assert.equal(withSelection[1].isSelected, false);
-});
-
-test("a non-English interface prefers a multilingual cost-efficient model", () => {
-  const english = getModelRecommendations({ ...freeInput, language: "en" });
-  const korean = getModelRecommendations({ ...freeInput, language: "ko" });
-  // gpt-6-luna heads both the "everyday" and "value" candidate lists, but a
-  // model is only ever recommended once per response, so once it takes the
-  // everyday slot as the app default the value slot falls to the next
-  // candidate: the guest trio's Gemini slot.
-  assert.equal(
-    english.find((item) => item.useCase === "value").modelId,
-    "gemini-flash-lite-latest"
-  );
-  assert.equal(
-    korean.find((item) => item.useCase === "value").modelId,
-    "mistral-small-4"
-  );
 });
 
 test("every guest trio model is a recommendation candidate, so a new guest sees its selection in the picker", async () => {

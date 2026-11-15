@@ -157,7 +157,7 @@ export function ModelCatalogue({
         model.provider.toLowerCase().includes(normalizedQuery) ||
         description.includes(normalizedQuery);
       const matchesTask =
-        filters.task === "all" || modelMatchesUseCase(model.id, filters.task);
+        filters.task === "all" || modelMatchesUseCase(model.id, filters.task, model);
       const matchesProvider =
         filters.provider === "all" || model.provider === filters.provider;
       const matchesUsageBand =
