@@ -267,6 +267,10 @@ test("a reviewed result whose publication never opened is kept for publication, 
     const kept = await readAmuxV22KeptResultCandidates(tx, 10, card.taskId);
     assert.deepEqual(kept.map((row) => [row.taskId, row.attemptId, row.taskStatus, row.baseSha]),
       [[card.taskId, card.attemptId, "review", BASE]], "the publication round will take it");
+    // The round's own read finds it, and leaves it out while the round defers it.
+    assert.ok((await readAmuxV22KeptResultCandidates(tx, 50)).some((row) => row.taskId === card.taskId));
+    assert.equal((await readAmuxV22KeptResultCandidates(tx, 50, null, [card.taskId]))
+      .some((row) => row.taskId === card.taskId), false);
     // The Decision Maker, whose answers include a retry, is never asked about
     // it; with the kill switch it is filed as before.
     assert.deepEqual(await scanAmuxDmOwnerSettlementCandidates(tx, 10, [card.escalationId]), []);

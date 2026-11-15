@@ -46,9 +46,21 @@ import { loadEngineeringAgentV22SettlementPatch } from "@/lib/engineeringAgentV2
 export const AMUX_V22_KEPT_RESULT_ROUND_LIMIT = 3;
 export const AMUX_V22_KEPT_RESULT_PUBLISHED_ACTION = "amux.v22.kept_result.published";
 const RUN_LEASE_MS = 10 * 60 * 1000;
-/** A Task whose publication threw this many times in this process goes behind the others. */
-const FAILURES_BEFORE_BEHIND = 3;
-const failures = new Map<string, number>();
+/**
+ * A kept result that waited or failed is left out of the reads for this long
+ * (in this process), so the oldest -- a card with no consent, one held by its
+ * own mismatch -- never takes every round's turn from the ones behind it.
+ * It is read again after it; nothing about it is decided by the wait.
+ */
+export const AMUX_V22_KEPT_RESULT_DEFER_MS = 10 * 60 * 1000;
+/** The most Tasks one process keeps deferred; past it the oldest deferral is dropped. */
+const DEFERRED_MAX = 500;
+const deferredUntil = new Map<string, number>();
+const defer = (taskId: string, now: number) => {
+  deferredUntil.delete(taskId);
+  deferredUntil.set(taskId, now + AMUX_V22_KEPT_RESULT_DEFER_MS);
+  if (deferredUntil.size > DEFERRED_MAX) deferredUntil.delete(deferredUntil.keys().next().value!);
+};
 
 export type AmuxV22KeptResultOutcome = {
   taskId: string;
@@ -141,46 +153,47 @@ async function publishOne(candidate: AmuxV22KeptResultCandidate, patch: Patch): 
 /**
  * One round: up to AMUX_V22_KEPT_RESULT_ROUND_LIMIT kept results, oldest
  * first, each on its own so one that cannot be published never holds the
- * rest. Off with ENGINEERING_AGENT_LEGACY_HALTS or with v22 publication off.
+ * rest. One that waits (no consent, its card held, the queue under the kill
+ * switch) or fails is deferred, so the next round reads the ones behind it
+ * instead of the same few again. Off with ENGINEERING_AGENT_LEGACY_HALTS or
+ * with v22 publication off.
  */
 export async function publishAmuxV22KeptResults(
   limit = AMUX_V22_KEPT_RESULT_ROUND_LIMIT,
+  nowMs: () => number = Date.now,
 ): Promise<AmuxV22KeptResultOutcome[]> {
   if (!amuxV22KeptResultPublicationEnabled()) return [];
-  const behind = new Set([...failures].filter(([, count]) => count >= FAILURES_BEFORE_BEHIND).map(([id]) => id));
+  const now = nowMs();
+  for (const [taskId, until] of deferredUntil) if (until <= now) deferredUntil.delete(taskId);
   let read: AmuxV22KeptResultCandidate[];
   try {
     read = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.executionRecoveryRead,
-      (tx) => readAmuxV22KeptResultCandidates(tx, Math.min(Math.max(limit, 1), 10) + behind.size));
+      (tx) => readAmuxV22KeptResultCandidates(tx, Math.min(Math.max(limit, 1), 10), null, [...deferredUntil.keys()]));
   } catch (error) {
     // The round that carries it goes on; the next one reads again.
     console.warn(JSON.stringify({ subsystem: "amux", event: "v22_kept_result_read_failed",
       code: error instanceof Error ? error.name : "unknown" }));
     return [];
   }
-  const ordered = [...read.filter((row) => !behind.has(row.taskId)), ...read.filter((row) => behind.has(row.taskId))]
-    .slice(0, Math.min(Math.max(limit, 1), 10));
   const outcomes: AmuxV22KeptResultOutcome[] = [];
-  for (const candidate of ordered) {
+  for (const candidate of read) {
+    let outcome: AmuxV22KeptResultOutcome;
     try {
       // Decrypted outside the transaction, as settlement does; the transaction reads the row again.
       const patch = await loadEngineeringAgentV22SettlementPatch(candidate.attemptId);
-      if (!patch) {
-        outcomes.push({ taskId: candidate.taskId, attemptId: candidate.attemptId, outcome: "moved" });
-        continue;
-      }
-      const outcome = await publishOne(candidate, patch);
-      if (outcome.outcome === "published") failures.delete(candidate.taskId);
-      outcomes.push(outcome);
+      outcome = patch ? await publishOne(candidate, patch) :
+        { taskId: candidate.taskId, attemptId: candidate.attemptId, outcome: "moved" };
     } catch (error) {
-      failures.set(candidate.taskId, (failures.get(candidate.taskId) ?? 0) + 1);
       const code = error instanceof EngineeringAgentStoreRefusedError ? error.code :
         error instanceof Error ? error.name : "unknown";
       // Ids and a code only: a patch never goes in a log.
       console.warn(JSON.stringify({ subsystem: "amux", event: "v22_kept_result_publication_failed",
         taskId: candidate.taskId, attemptId: candidate.attemptId, code }));
-      outcomes.push({ taskId: candidate.taskId, attemptId: candidate.attemptId, outcome: "failed", reason: code });
+      outcome = { taskId: candidate.taskId, attemptId: candidate.attemptId, outcome: "failed", reason: code };
     }
+    if (outcome.outcome === "waiting" || outcome.outcome === "failed") defer(candidate.taskId, now);
+    else deferredUntil.delete(candidate.taskId);
+    outcomes.push(outcome);
   }
   return outcomes;
 }

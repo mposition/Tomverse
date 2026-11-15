@@ -59,9 +59,10 @@ mock.module(mod("lib/amux/v22PublicPrConsent.ts"), {
 });
 mock.module(mod("lib/amux/v22KeptResultRead.ts"), {
   namedExports: {
-    readAmuxV22KeptResultCandidates: async (_tx, limit, taskId = null) => {
+    readAmuxV22KeptResultCandidates: async (_tx, limit, taskId = null, skip = []) => {
       calls.push(["candidates", limit, taskId]);
-      if (taskId === null) return candidates.slice(0, limit);
+      if (taskId === null) skipped.push([...skip]);
+      if (taskId === null) return candidates.filter((row) => !skip.includes(row.taskId)).slice(0, limit);
       return (locked ?? candidates).filter((row) => row.taskId === taskId);
     },
   },
@@ -96,10 +97,17 @@ mock.module(mod("lib/engineeringAgentV22SettlementPatch.ts"), {
     { ...patch, taskId: candidates.find((row) => row.attemptId === attemptId)?.taskId ?? patch.taskId } },
 });
 
-const { publishAmuxV22KeptResults, AMUX_V22_KEPT_RESULT_PUBLISHED_ACTION } =
+const { publishAmuxV22KeptResults, AMUX_V22_KEPT_RESULT_PUBLISHED_ACTION, AMUX_V22_KEPT_RESULT_DEFER_MS } =
   await import(mod("lib/amux/v22KeptResultPublication.ts"));
 
+// The round's clock: each scenario starts past every deferral the last one left.
+let clock = Date.parse("2026-11-15T00:00:00Z");
+let skipped = [];
+const round = (limit) => publishAmuxV22KeptResults(limit, () => clock);
+
 const reset = () => {
+  clock += AMUX_V22_KEPT_RESULT_DEFER_MS + 1;
+  skipped = [];
   calls = [];
   candidates = [{ taskId: "card", taskStatus: "review", attemptId: "attempt-3", baseSha: BASE, cardKind: "task" }];
   switches = { mode: "t1", frozen: false, claimAllowed: true, publishAllowed: true, registrationAllowed: false,
@@ -119,7 +127,7 @@ const kinds = () => calls.map(([kind]) => kind);
 // attempt that produced it, the product settlement would have opened is
 // opened, the run ends with its outcome, and one audit entry says so.
 reset();
-assert.deepEqual(await publishAmuxV22KeptResults(), [{ taskId: "card", attemptId: "attempt-3", outcome: "published" }]);
+assert.deepEqual(await round(), [{ taskId: "card", attemptId: "attempt-3", outcome: "published" }]);
 assert.deepEqual(kinds(), ["boundary", "candidates", "boundary", "sql", "lock", "sql", "candidates", "admission",
   "run_start", "product", "run_end", "audit"]);
 // The attempt is locked shared before the audit chain, the card after it (AMUX's lock order).
@@ -144,7 +152,7 @@ assert.equal(kinds().includes("task"), false, "a card in review stays where it i
 // A card blocked after its budget ran out goes back to review with its pull request on the way.
 reset();
 candidates[0].taskStatus = "blocked";
-await publishAmuxV22KeptResults();
+await round();
 const moved = calls.find(([kind]) => kind === "task")[1];
 assert.deepEqual(moved.where, { id: "card", status: "blocked", owner: null, archivedAt: null, v22AssignmentId: null });
 assert.deepEqual(moved.data, { status: "review", revision: { increment: 1 } });
@@ -160,7 +168,7 @@ for (const [setup, reason] of [
 ]) {
   reset();
   setup();
-  assert.deepEqual(await publishAmuxV22KeptResults(),
+  assert.deepEqual(await round(),
     [{ taskId: "card", attemptId: "attempt-3", outcome: "waiting", reason }], reason);
   for (const write of ["task", "run_start", "product", "run_end", "audit"])
     assert.equal(kinds().includes(write), false, `${reason}: ${write}`);
@@ -169,36 +177,44 @@ for (const [setup, reason] of [
 // The card moved between the read and its lock: nothing is written.
 reset();
 locked = [];
-assert.deepEqual(await publishAmuxV22KeptResults(), [{ taskId: "card", attemptId: "attempt-3", outcome: "moved" }]);
+assert.deepEqual(await round(), [{ taskId: "card", attemptId: "attempt-3", outcome: "moved" }]);
 assert.equal(kinds().includes("run_start"), false);
 // So did its stored patch: a body purged or gone is nothing to publish.
 reset();
 patch = null;
-assert.deepEqual(await publishAmuxV22KeptResults(), [{ taskId: "card", attemptId: "attempt-3", outcome: "moved" }]);
+assert.deepEqual(await round(), [{ taskId: "card", attemptId: "attempt-3", outcome: "moved" }]);
 assert.equal(kinds().includes("boundary"), true);
 assert.equal(kinds().includes("run_start"), false);
 
 // A throw after the first write fails that card's transaction (so it rolls
-// back) and the round goes on to the next card; three failures put a card behind the rest.
+// back) and the round goes on to the next card.
 reset();
 candidates.push({ taskId: "card-2", taskStatus: "review", attemptId: "attempt-9", baseSha: BASE, cardKind: "task" });
 modeAtStart = "shadow";
-const mixed = await publishAmuxV22KeptResults();
+const mixed = await round();
 assert.deepEqual(mixed.map((row) => [row.taskId, row.outcome]), [["card", "failed"], ["card-2", "failed"]]);
-await publishAmuxV22KeptResults();
-await publishAmuxV22KeptResults();
+// Review r-20261115-110851-297f45: the oldest that keep waiting or failing
+// must not take every round's turn. They are left out of the next reads, so
+// the one behind them is published, and they are read again after the deferral.
 modeAtStart = "t1";
-candidates = [candidates[0], candidates[1],
-  { taskId: "card-3", taskStatus: "review", attemptId: "attempt-4", baseSha: BASE, cardKind: "task" }];
-const after = await publishAmuxV22KeptResults(1);
-assert.deepEqual(after.map((row) => row.taskId), ["card-3"], "a card that keeps failing never holds the others back");
+candidates.push({ taskId: "card-3", taskStatus: "review", attemptId: "attempt-4", baseSha: BASE, cardKind: "task" });
+const after = await round(1);
+assert.deepEqual(after.map((row) => [row.taskId, row.outcome]), [["card-3", "published"]],
+  "a card that keeps failing never holds the others back");
+assert.deepEqual(skipped, [[], ["card", "card-2"]], "the round's reads leave out what it deferred");
+consent = false;
+clock += AMUX_V22_KEPT_RESULT_DEFER_MS + 1;
+assert.deepEqual((await round(1)).map((row) => [row.taskId, row.outcome]), [["card", "waiting"]], "read again after it");
+consent = true;
+assert.deepEqual((await round(1)).map((row) => [row.taskId, row.outcome]), [["card-2", "published"]],
+  "a waiting card is deferred as a failing one is");
 
 // Off with the kill switch, or with v22 publication off: no read at all.
 reset();
 process.env.ENGINEERING_AGENT_LEGACY_HALTS = "enabled";
-assert.deepEqual(await publishAmuxV22KeptResults(), []);
+assert.deepEqual(await round(), []);
 assert.deepEqual(calls, []);
 reset();
 delete process.env.TOMVERSE_AMUX_V22_ENGINEERING_PUBLICATION;
-assert.deepEqual(await publishAmuxV22KeptResults(), []);
+assert.deepEqual(await round(), []);
 assert.deepEqual(calls, []);

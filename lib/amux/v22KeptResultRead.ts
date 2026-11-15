@@ -43,7 +43,9 @@ export type AmuxV22KeptResultCandidate = {
 
 /**
  * Up to `limit` Tasks whose kept result could be published now, oldest result
- * first; with `taskId`, that Task only (read again under its row lock). A
+ * first, leaving out `skipTaskIds` (the ones a recent round found waiting, so
+ * the oldest never hold the rest back); with `taskId`, that Task only (read
+ * again under its row lock). A
  * Task qualifies while it waits for a person -- in review, or blocked once its
  * budget is spent -- with nothing of it running or queued, no owner question
  * of a later run waiting, and no publication of any of its runs still under
@@ -51,7 +53,7 @@ export type AmuxV22KeptResultCandidate = {
  * mismatch item not yet settled.
  */
 export async function readAmuxV22KeptResultCandidates(
-  tx: Prisma.TransactionClient, limit: number, taskId: string | null = null,
+  tx: Prisma.TransactionClient, limit: number, taskId: string | null = null, skipTaskIds: readonly string[] = [],
 ): Promise<AmuxV22KeptResultCandidate[]> {
   return tx.$queryRaw<AmuxV22KeptResultCandidate[]>`
     SELECT w."id" AS "taskId", w."status" AS "taskStatus", a."id" AS "attemptId", p."baseSha",
@@ -66,6 +68,7 @@ export async function readAmuxV22KeptResultCandidates(
     JOIN "AmuxV22TaskPatch" p ON p."attemptId" = a."id" AND p."taskId" = w."id"
     WHERE w."sourceSystem" = 'admin-idea-v4' AND w."cardType" = 'task' AND w."archivedAt" IS NULL
       AND (${taskId}::text IS NULL OR w."id" = ${taskId})
+      AND NOT (w."id" = ANY(${[...skipTaskIds]}::text[]))
       AND w."status" IN ('review', 'blocked') AND w."owner" IS NULL AND w."v22AssignmentId" IS NULL
       AND ${amuxV22KeptResultExistsSql}
       AND NOT EXISTS (SELECT 1 FROM "AmuxExecutionAttempt" o
