@@ -22,6 +22,7 @@
 import "server-only";
 
 import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 
 import type { Prisma } from "@prisma/client";
 
@@ -64,6 +65,12 @@ export type MessageAttachmentCleanupReason =
 
 const CLEANUP_MAX_ATTEMPTS = 5;
 
+async function lockAttachmentObjects(db: Pick<Prisma.TransactionClient, "$executeRaw">, keys: string[]) {
+  for (const key of [...new Set(keys)].sort()) {
+    await db.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`attachment-object:${key}`}, 0))`;
+  }
+}
+
 /* ------------------------------------------------------------------------ */
 /* Upload registration                                                        */
 /* ------------------------------------------------------------------------ */
@@ -74,6 +81,15 @@ export type RegisteredUpload = {
   mediaType: string;
   size: number;
   kind: MessageAttachmentKind;
+  revisionMode?: "workbook" | "workbook-values";
+};
+
+/** Server-only receipt for a selected generated output, never a client claim. */
+export type ArtifactRevisionSourceFields = {
+  sourceArtifactId?: string | null;
+  sourceLineageId?: string | null;
+  sourceConversationId?: string | null;
+  sourceCanonicalSpec?: Prisma.InputJsonValue | null;
 };
 
 /**
@@ -84,7 +100,9 @@ export type RegisteredUpload = {
  * Idempotent on the object key: a client that finalises twice gets the same
  * handle instead of a second row pointing at the same bytes.
  */
-export const registerFinalizedUpload = async (input: {
+export const registerFinalizedUpload = async (input: ArtifactRevisionSourceFields & {
+  /** Optional opaque operation identity for a server-side import. */
+  uploadId?: string;
   userId: string;
   objectKey: string;
   ownPrefix: string;
@@ -101,12 +119,22 @@ export const registerFinalizedUpload = async (input: {
    * for every format the table places by extension.
    */
   kind: MessageAttachmentKind;
-}): Promise<RegisteredUpload> => {
+}, db: Pick<Prisma.TransactionClient, "messageAttachmentUpload" | "messageAttachmentCleanup" | "$executeRaw" | "$queryRaw"> = prisma): Promise<RegisteredUpload> => {
   if (!input.objectKey.startsWith(input.ownPrefix)) {
     throw new Error("Refusing to register an upload outside the caller's prefix.");
   }
+  if ((input.sourceArtifactId || input.sourceCanonicalSpec || input.sourceConversationId) && !input.sourceLineageId ||
+      input.sourceLineageId && !input.sourceConversationId) {
+    throw new Error("Refusing incomplete generated input provenance.");
+  }
+  if (db === prisma) return prisma.$transaction(tx => registerFinalizedUpload(input, tx));
+  await db.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${input.userId} FOR KEY SHARE`;
+  await lockAttachmentObjects(db, [input.objectKey]);
+  if (await db.messageAttachmentCleanup.findUnique({ where: { objectKey: input.objectKey }, select: { id: true } })) {
+    throw new Error("Refusing to register a discarded upload.");
+  }
   const kind = input.kind;
-  const existing = await prisma.messageAttachmentUpload.findUnique({
+  const existing = await db.messageAttachmentUpload.findUnique({
     where: { objectKey: input.objectKey },
     select: { id: true, userId: true, name: true, mediaType: true, size: true, kind: true },
   });
@@ -125,14 +153,21 @@ export const registerFinalizedUpload = async (input: {
       kind: existing.kind === "text" ? "text" : "file",
     };
   }
-  const created = await prisma.messageAttachmentUpload.create({
+  const created = await db.messageAttachmentUpload.create({
     data: {
+      ...(input.uploadId ? { id: input.uploadId } : {}),
       userId: input.userId,
       objectKey: input.objectKey,
       name: input.name,
       mediaType: input.mediaType,
       size: input.size,
       kind,
+      ...(input.sourceLineageId ? {
+        sourceArtifactId: input.sourceArtifactId ?? null,
+        sourceLineageId: input.sourceLineageId,
+        sourceConversationId: input.sourceConversationId,
+        ...(input.sourceCanonicalSpec ? { sourceCanonicalSpec: input.sourceCanonicalSpec } : {}),
+      } : {}),
     },
     select: { id: true },
   });
@@ -157,21 +192,34 @@ export const discardUnboundUpload = async (input: {
   userId: string;
   uploadId: string;
 }): Promise<{ removed: boolean; kept: boolean }> => {
-  const upload = await prisma.messageAttachmentUpload.findFirst({
-    where: { id: input.uploadId, userId: input.userId },
-    select: { id: true, objectKey: true },
+  const outcome = await prisma.$transaction(async tx => {
+    await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${input.userId} FOR KEY SHARE`;
+    const initial = await tx.messageAttachmentUpload.findFirst({
+      where: { id: input.uploadId, userId: input.userId },
+      select: { objectKey: true, sourceArtifactId: true, sourceConversationId: true },
+    });
+    if (!initial) return { removed: false, kept: false, objectKey: null };
+    if (initial.sourceConversationId) await tx.$queryRaw`SELECT "id" FROM "Conversation" WHERE "id" = ${initial.sourceConversationId} AND "userId" = ${input.userId} FOR KEY SHARE`;
+    if (initial.sourceArtifactId) await tx.$queryRaw`SELECT "id" FROM "MessageArtifact" WHERE "id" = ${initial.sourceArtifactId} AND "userId" = ${input.userId} FOR KEY SHARE`;
+    await lockAttachmentObjects(tx, [initial.objectKey]);
+    const upload = await tx.messageAttachmentUpload.findFirst({
+      where: { id: input.uploadId, userId: input.userId }, select: { id: true, objectKey: true },
+    });
+    if (!upload) return { removed: false, kept: false, objectKey: null };
+    const bound = await tx.messageAttachment.findUnique({ where: { objectKey: upload.objectKey }, select: { id: true } });
+    if (bound) return { removed: false, kept: true, objectKey: null };
+    await tx.messageAttachmentUpload.delete({ where: { id: upload.id } });
+    await tx.messageAttachmentCleanup.createMany({
+      data: [{ objectKey: upload.objectKey, reason: "upload_abandoned" }], skipDuplicates: true,
+    });
+    return { removed: true, kept: false, objectKey: upload.objectKey };
   });
-  if (!upload) return { removed: false, kept: false };
-
-  const bound = await prisma.messageAttachment.findUnique({
-    where: { objectKey: upload.objectKey },
-    select: { id: true },
-  });
-  if (bound) return { removed: false, kept: true };
-
-  await prisma.messageAttachmentUpload.delete({ where: { id: upload.id } });
-  await deleteR2Object(upload.objectKey);
-  return { removed: true, kept: false };
+  if (outcome.objectKey) {
+    // The DB tombstone is authoritative before storage I/O. A later bind can
+    // no longer claim this key; a storage failure remains in the same queue.
+    await drainMessageAttachmentCleanupQueue(1, new Date(), [outcome.objectKey]).catch(() => undefined);
+  }
+  return { removed: outcome.removed, kept: outcome.kept };
 };
 
 /* ------------------------------------------------------------------------ */
@@ -247,18 +295,24 @@ export const bindMessageAttachments = async (
     );
   }
 
-  const uploads = await tx.messageAttachmentUpload.findMany({
+  await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${input.userId} FOR KEY SHARE`;
+  await tx.$queryRaw`SELECT "id" FROM "Conversation" WHERE "id" = ${input.conversationId} AND "userId" = ${input.userId} FOR KEY SHARE`;
+  const uploadSelect = {
+    id: true, userId: true, name: true, mediaType: true, size: true, kind: true,
+    objectKey: true, sourceArtifactId: true, sourceLineageId: true,
+    sourceConversationId: true, sourceCanonicalSpec: true,
+  } as const;
+  let uploads = await tx.messageAttachmentUpload.findMany({
     where: { id: { in: input.uploadIds } },
-    select: {
-      id: true,
-      userId: true,
-      name: true,
-      mediaType: true,
-      size: true,
-      kind: true,
-      objectKey: true,
-    },
+    select: uploadSelect,
   });
+  const liveSources = new Set<string>();
+  for (const sourceId of [...new Set(uploads.flatMap((upload) => upload.sourceArtifactId ? [upload.sourceArtifactId] : []))].sort()) {
+    const rows = await tx.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "MessageArtifact" WHERE "id" = ${sourceId} AND "userId" = ${input.userId} AND "conversationId" = ${input.conversationId} FOR KEY SHARE`;
+    for (const row of rows) liveSources.add(row.id);
+  }
+  await lockAttachmentObjects(tx, uploads.map(upload => upload.objectKey));
+  uploads = await tx.messageAttachmentUpload.findMany({ where: { id: { in: input.uploadIds } }, select: uploadSelect });
   const byId = new Map(uploads.map((upload) => [upload.id, upload]));
 
   const rows = input.uploadIds.map((uploadId, index) => {
@@ -284,6 +338,12 @@ export const bindMessageAttachments = async (
         "An attachment upload in this message is stored outside this account."
       );
     }
+    if (upload.sourceLineageId && upload.sourceConversationId !== input.conversationId) {
+      throw new MessageAttachmentBindError(
+        "ATTACHMENT_UPLOAD_FORBIDDEN",
+        "A generated input copy belongs to a different conversation."
+      );
+    }
     return {
       messageId: input.messageId,
       conversationId: input.conversationId,
@@ -296,6 +356,12 @@ export const bindMessageAttachments = async (
       objectKey: upload.objectKey,
       uploadId: upload.id,
       sourceAttachmentId: input.sourceAttachmentIds?.[index] ?? null,
+      ...(upload.sourceLineageId ? {
+        sourceArtifactId: upload.sourceArtifactId && liveSources.has(upload.sourceArtifactId) ? upload.sourceArtifactId : null,
+        sourceLineageId: upload.sourceLineageId,
+        sourceConversationId: upload.sourceConversationId,
+        ...(upload.sourceCanonicalSpec ? { sourceCanonicalSpec: upload.sourceCanonicalSpec } : {}),
+      } : {}),
     };
   });
 
@@ -338,6 +404,10 @@ export const bindMessageAttachments = async (
       objectKey: true,
       uploadId: true,
       sourceAttachmentId: true,
+      sourceArtifactId: true,
+      sourceLineageId: true,
+      sourceConversationId: true,
+      sourceCanonicalSpec: true,
     },
   });
   if (
@@ -348,7 +418,11 @@ export const bindMessageAttachments = async (
         row.ordinal !== expected.ordinal ||
         row.objectKey !== expected.objectKey ||
         row.uploadId !== expected.uploadId ||
-        row.sourceAttachmentId !== expected.sourceAttachmentId;
+        row.sourceAttachmentId !== expected.sourceAttachmentId ||
+        (row.sourceArtifactId ?? null) !== (expected.sourceArtifactId ?? null) ||
+        (row.sourceLineageId ?? null) !== (expected.sourceLineageId ?? null) ||
+        (row.sourceConversationId ?? null) !== (expected.sourceConversationId ?? null) ||
+        !isDeepStrictEqual(row.sourceCanonicalSpec ?? null, expected.sourceCanonicalSpec ?? null);
     })
   ) {
     throw new MessageAttachmentBindError(
@@ -377,6 +451,10 @@ export type ResolvedAttachment = {
   kind: MessageAttachmentKind;
   /** Server-only. Never returned to a client by any route. */
   objectKey: string;
+  sourceArtifactId?: string | null;
+  sourceLineageId?: string;
+  sourceConversationId?: string;
+  sourceCanonicalSpec?: Prisma.JsonValue | null;
   /**
    * Set when a previous turn already confirmed a 404 for this object.
    *
@@ -461,6 +539,10 @@ export const resolveMessageAttachmentReferences = async (input: {
             objectKey: true,
             unavailableAt: true,
             unavailableReason: true,
+            sourceArtifactId: true,
+            sourceLineageId: true,
+            sourceConversationId: true,
+            sourceCanonicalSpec: true,
           },
         })
       : Promise.resolve([]),
@@ -474,6 +556,10 @@ export const resolveMessageAttachmentReferences = async (input: {
             size: true,
             kind: true,
             objectKey: true,
+            sourceArtifactId: true,
+            sourceLineageId: true,
+            sourceConversationId: true,
+            sourceCanonicalSpec: true,
           },
         })
       : Promise.resolve([]),
@@ -506,6 +592,9 @@ export const resolveMessageAttachmentReferences = async (input: {
         "An attachment in this request is stored outside this account."
       );
     }
+    if (row.sourceLineageId && row.sourceConversationId !== input.conversationId) {
+      throw new MessageAttachmentResolveError("ATTACHMENT_NOT_FOUND", "The attachment is not available in this conversation.");
+    }
     const marked = row as {
       unavailableAt?: Date | null;
       unavailableReason?: string | null;
@@ -520,6 +609,12 @@ export const resolveMessageAttachmentReferences = async (input: {
       size: row.size,
       kind: row.kind === "text" ? "text" : "file",
       objectKey: row.objectKey,
+      ...(row.sourceLineageId ? {
+        sourceArtifactId: row.sourceArtifactId,
+        sourceLineageId: row.sourceLineageId,
+        sourceConversationId: row.sourceConversationId!,
+        sourceCanonicalSpec: row.sourceCanonicalSpec,
+      } : {}),
       unavailableAt: marked.unavailableAt ?? null,
       unavailableReason: isUnavailableReason(marked.unavailableReason)
         ? marked.unavailableReason
@@ -768,10 +863,11 @@ export type MessageAttachmentCleanupSweepResult = {
  */
 export const drainMessageAttachmentCleanupQueue = async (
   limit = 200,
-  now = new Date()
+  now = new Date(),
+  objectKeys?: string[]
 ): Promise<MessageAttachmentCleanupSweepResult> => {
   const pending = await prisma.messageAttachmentCleanup.findMany({
-    where: { completedAt: null, attempts: { lt: CLEANUP_MAX_ATTEMPTS } },
+    where: { completedAt: null, attempts: { lt: CLEANUP_MAX_ATTEMPTS }, ...(objectKeys ? { objectKey: { in: objectKeys } } : {}) },
     orderBy: { createdAt: "asc" },
     take: limit,
     select: { id: true, objectKey: true, reason: true, attempts: true },
@@ -806,7 +902,7 @@ export const drainMessageAttachmentCleanupQueue = async (
           reason: item.reason,
           attempts,
           exhausted: attempts >= CLEANUP_MAX_ATTEMPTS,
-          error: String(error).slice(0, 300),
+          error: classifyStorageError(error),
           timestamp: now.toISOString(),
         })
       );

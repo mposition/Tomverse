@@ -11,6 +11,7 @@ import { selectedMcpConnection } from "@/lib/mcpConnectorSelection";
 
 import { ChatPwaControls } from "@/components/chat/ChatPwaControls";
 import type { PendingSendEcho } from "@/components/chat/ChatMessageList";
+import { GeneratedArtifactRevisionContext, useGeneratedArtifactRevision } from "@/components/chat/GeneratedArtifactRevisionContext";
 
 import { ReviewUnsupportedProviders } from "@/components/chat/ReviewStudioChrome";
 import { useReviewWorkspace, useWorkspaceAppearance } from "@/components/chat/useReviewWorkspace";
@@ -794,6 +795,7 @@ export function ChatPageClient({
   guestDefaultModelId,
   guestBrandTrioModelIds = GUEST_BRAND_TRIO_MODEL_IDS,
   imageGenerationEnabled = false,
+  generatedArtifactRevisionEnabled = false,
   chatImageIntentEnabled = false,
   chatLocationIntentEnabled = true,
   chatParallelPreparationEnabled = false,
@@ -826,6 +828,7 @@ export function ChatPageClient({
   guestBrandTrioModelIds?: readonly string[];
   /** The image generation opt-in flag, resolved server-side in page.tsx. */
   imageGenerationEnabled?: boolean;
+  generatedArtifactRevisionEnabled?: boolean;
   /**
    * Whether a chat send first asks the Auto router's model (POST
    * /api/chat/image-intent) and hands an image request to the image
@@ -1213,6 +1216,7 @@ export function ChatPageClient({
     draftAttachments: attachments,
     setDraftText: setInputValue,
     setDraftAttachments,
+    updateDraft,
     readDraft,
     hasDraft,
     discardDraft,
@@ -10508,6 +10512,17 @@ export function ChatPageClient({
     reviewWorkspace.setMode(mode);
   };
 
+  const artifactRevisionAction = useGeneratedArtifactRevision({
+    enabled: generatedArtifactRevisionEnabled && mountedSurface === "chat" &&
+      !isGuestMode && identityKey?.startsWith("account:") === true &&
+      accountUsage?.limits.allowAttachments !== false,
+    scopeKey: activeDraftKey,
+    conversationId: currentChatId,
+    readDraft,
+    updateDraft,
+    t,
+  });
+
   return (
     // Every surface that decides whether a model searches reads this: the
     // composer's chip and credit estimate, the picker's badge and "Web search"
@@ -10522,6 +10537,7 @@ export function ChatPageClient({
       selectionTicket={() => conversationSelectionTicketRef.current} readDraft={readDraft} setDraftText={setInputValue}
       notify={text => showToast(text, "info")} />}
     <WebSearchBackendReadinessProvider readiness={webSearchBackendReadiness}>
+    <GeneratedArtifactRevisionContext.Provider value={artifactRevisionAction}>
       <ModelFinder
         enabled={Boolean(sessionUserId && isUserSettingsLoaded)}
         onComplete={handleModelFinderComplete}
@@ -11766,6 +11782,7 @@ export function ChatPageClient({
         </form>
       </div>
     )}
+    </GeneratedArtifactRevisionContext.Provider>
     </WebSearchBackendReadinessProvider>
     </ReviewChatHandoffProvider>
   );

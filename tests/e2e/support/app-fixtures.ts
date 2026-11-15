@@ -1504,7 +1504,7 @@ const FINALIZED_UPLOADS = new WeakMap<
   Map<string, { name: string; mediaType: string; size: number; kind: "text" | "file" }>
 >();
 
-const finalizedUploadRegistry = (page: Page) => {
+export const finalizedUploadRegistry = (page: Page) => {
   const existing = FINALIZED_UPLOADS.get(page);
   if (existing) return existing;
   const created = new Map<string, { name: string; mediaType: string; size: number; kind: "text" | "file" }>();

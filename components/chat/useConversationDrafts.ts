@@ -61,6 +61,8 @@ export type ConversationDraftsApi = {
     update: DraftUpdate<ChatAttachment[]>,
     scopeId?: string | null
   ) => void;
+  /** Atomically edits text and attachments against the latest scoped snapshot. */
+  updateDraft: (update: DraftUpdate<ConversationDraft>, scopeId?: string | null) => void;
   /** The draft as it stands right now, without waiting for a re-render. */
   readDraft: (scopeId?: string | null) => ConversationDraft;
   hasDraft: (scopeId?: string | null) => boolean;
@@ -1041,6 +1043,21 @@ export function useConversationDrafts(
     [resolveKey]
   );
 
+  const updateDraft = useCallback(
+    (update: DraftUpdate<ConversationDraft>, scopeId?: string | null) => {
+      const key = resolveKey(scopeId);
+      const current = draftsRef.current;
+      const next = writeDraftEntry(current, key, (existing) => resolveDraftUpdate(update, existing));
+      if (next === current) return;
+      replaceDrafts(next);
+      const meta = metaFor(key, serverScopeKeyForDraft(scopeId, currentConversationId));
+      meta.generation += 1;
+      scheduleSave(key);
+      bumpSyncRevision();
+    },
+    [bumpSyncRevision, currentConversationId, metaFor, replaceDrafts, resolveKey, scheduleSave]
+  );
+
   const hasDraft = useCallback(
     (scopeId?: string | null) => !isDraftEmpty(readDraft(scopeId)),
     [readDraft]
@@ -1506,6 +1523,7 @@ export function useConversationDrafts(
     draftHydrated: !durableSyncEnabled || hydratedDraftKey === activeDraftKey,
     setDraftText,
     setDraftAttachments,
+    updateDraft,
     readDraft,
     hasDraft,
     discardDraft,

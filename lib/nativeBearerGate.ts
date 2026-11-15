@@ -204,3 +204,19 @@ export function nativeParityBearerRoute(path: string, method: string, enabled = 
   if (/^\/api\/images\/groups\/[A-Za-z0-9_-]{1,100}$/.test(path)) return method === "GET";
   return false;
 }
+
+/**
+ * The generated-file revision switch. Enabled by default; an explicit false
+ * disables the connection, not downloads. `generatedArtifactRevisionCore`
+ * re-exports it; it lives here because proxy.ts needs it and this file has no
+ * imports.
+ */
+export const generatedArtifactRevisionEnabled = () =>
+  (process.env.GENERATED_ARTIFACT_REVISION_ENABLED ?? "true") === "true";
+
+/** Callers resolve the revision switch; Native enrollment still fails closed. */
+export function nativeArtifactRevisionBearerRoute(path: string, method: string, enabled = false): boolean {
+  if (!enabled) return false;
+  if (path === "/api/chat") return method === "DELETE";
+  return method === "GET" && /^\/api\/artifacts\/[A-Za-z0-9_-]{1,64}\/versions$/.test(path);
+}

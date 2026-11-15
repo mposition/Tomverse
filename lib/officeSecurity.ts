@@ -164,9 +164,35 @@ const { OfficeParser } = require("officeparser");
     try {
         const document = await OfficeParser.parseOffice(
             Buffer.from(workerData.buffer),
-            { extractAttachments: false, ocr: false }
+            { extractAttachments: false, ocr: false,
+              ...(workerData.workbook ? {
+                decompressionLimits: { maxTableCells: workerData.maxWorkbookCells,
+                  maxRepeatedContent: workerData.maxCharacters } } : {}) }
         );
+        if (workerData.workbook) {
+            if (document.type !== "xlsx" || document.warnings.length) {
+                parentPort.postMessage({ ok: false }); return;
+            }
+            let size = 0;
+            const sheets = document.content.map(sheet => ({
+                type: sheet.type, metadata: sheet.metadata,
+                rows: (sheet.children || []).map(row => ({
+                    type: row.type, metadata: row.metadata,
+                    cells: (row.children || []).map(cell => {
+                        const text = cell.text || "";
+                        size += text.length;
+                        if (size > workerData.maxCharacters) throw Object.assign(new Error(), { code: "WORKBOOK_OVERFLOW" });
+                        return { type: cell.type, text, metadata: cell.metadata };
+                    })
+                }))
+            }));
+            parentPort.postMessage({ ok: true, workbook: sheets }); return;
+        }
         const text = (await document.to("text")).value.trim();
+        if (workerData.strictOverflow && text.length > workerData.maxCharacters) {
+            parentPort.postMessage({ ok: false, overflow: true });
+            return;
+        }
         parentPort.postMessage({
             ok: true,
             text:
@@ -174,17 +200,26 @@ const { OfficeParser } = require("officeparser");
                     ? text.slice(0, workerData.maxCharacters) + "\\n\\n[Document truncated]"
                     : text,
         });
-    } catch {
-        parentPort.postMessage({ ok: false });
+    } catch (error) {
+        parentPort.postMessage({ ok: false, overflow: workerData.workbook && error.code === "WORKBOOK_OVERFLOW" });
     }
 })();
 `;
 
-export const parseOfficeSafely = async (
+/** An intact text layer would exceed the caller's remaining extraction budget. */
+export class OfficeTextOverflowError extends Error {
+    constructor() {
+        super("Office text exceeds the extraction limit.");
+        this.name = "OfficeTextOverflowError";
+    }
+}
+
+const runOfficeWorker = async <T>(
     buffer: Buffer,
     mediaType: string,
-    maxCharacters: number
-) => {
+    maxCharacters: number,
+    options: { strictOverflow?: boolean; workbook?: boolean; maxWorkbookCells?: number } = {}
+): Promise<T> => {
     assertSafeOfficeArchive(buffer, mediaType);
 
     const transferableBuffer = Uint8Array.from(buffer).buffer;
@@ -193,6 +228,9 @@ export const parseOfficeSafely = async (
         workerData: {
             buffer: transferableBuffer,
             maxCharacters,
+            strictOverflow: options.strictOverflow === true,
+            workbook: options.workbook === true,
+            maxWorkbookCells: options.maxWorkbookCells,
         },
         transferList: [transferableBuffer],
         resourceLimits: {
@@ -202,15 +240,15 @@ export const parseOfficeSafely = async (
         },
     });
 
-    return await new Promise<string>((resolve, reject) => {
+    return await new Promise<T>((resolve, reject) => {
         let settled = false;
-        const finish = (error?: Error, text?: string) => {
+        const finish = (error?: Error, value?: T) => {
             if (settled) return;
             settled = true;
             clearTimeout(timeout);
             void worker.terminate();
             if (error) reject(error);
-            else resolve(text || "");
+            else resolve(value!);
         };
 
         const timeout = setTimeout(
@@ -220,12 +258,16 @@ export const parseOfficeSafely = async (
 
         worker.once(
             "message",
-            (result: { ok?: boolean; text?: unknown }) => {
-                if (!result?.ok || typeof result.text !== "string") {
+            (result: { ok?: boolean; text?: unknown; workbook?: unknown; overflow?: boolean }) => {
+                if (result?.overflow === true) {
+                    finish(new OfficeTextOverflowError());
+                    return;
+                }
+                if (!result?.ok || (options.workbook ? !Array.isArray(result.workbook) : typeof result.text !== "string")) {
                     finish(new Error("The Office file could not be parsed."));
                     return;
                 }
-                finish(undefined, result.text);
+                finish(undefined, (options.workbook ? result.workbook : result.text) as T);
             }
         );
         worker.once("error", () =>
@@ -238,3 +280,16 @@ export const parseOfficeSafely = async (
         });
     });
 };
+
+export const parseOfficeSafely = (
+    buffer: Buffer,
+    mediaType: string,
+    maxCharacters: number,
+    options: { strictOverflow?: boolean } = {}
+) => runOfficeWorker<string>(buffer, mediaType, maxCharacters, options);
+
+/** Existing parser's typed sheet/cell AST, never a flattened text reconstruction. */
+export const parseOfficeWorkbookSafely = (buffer: Buffer, maxCharacters: number, maxCells: number) =>
+    runOfficeWorker<unknown[]>(buffer,
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", maxCharacters,
+        { strictOverflow: true, workbook: true, maxWorkbookCells: maxCells });

@@ -705,9 +705,22 @@ model MessageArtifact {
   /// and the card has to name the right model for each without a second read.
   modelId String?
 
+  /// Versioned, validated spreadsheet input. Never part of an app/model DTO.
+  canonicalSpec Json?
+  /// A real source edge, written only from an owned input attachment handle.
+  parentArtifactId String?
+  parentArtifact MessageArtifact? @relation("GeneratedArtifactRevisions", fields: [parentArtifactId], references: [id], onDelete: SetNull)
+  revisions MessageArtifact[] @relation("GeneratedArtifactRevisions")
+  /// Stable group identity remains when a parent is deleted.
+  lineageId String?
+  copiedAttachments MessageAttachment[] @relation("GeneratedArtifactAttachmentSource")
+  copiedUploads MessageAttachmentUpload[] @relation("GeneratedArtifactUploadSource")
+
   createdAt DateTime @default(now())
 
   @@unique([messageId, ordinal])
+  @@index([userId, conversationId, lineageId, createdAt])
+  @@index([parentArtifactId])
   @@index([conversationId, createdAt])
   @@index([userId, createdAt])
 }
@@ -790,6 +803,15 @@ model MessageAttachment {
   /// receipt for the saved message.
   sourceAttachmentId String?
 
+  /// Explicit output-to-input provenance, distinct from attachment resends.
+  sourceArtifactId String?
+  sourceArtifact MessageArtifact? @relation("GeneratedArtifactAttachmentSource", fields: [sourceArtifactId], references: [id], onDelete: SetNull)
+  sourceLineageId String?
+  /// Non-FK receipt: an independent input can outlive its source conversation.
+  sourceConversationId String?
+  /// Independent validated snapshot; survives deletion of the original output.
+  sourceCanonicalSpec Json?
+
   /// When storage confirmed, with a 404, that this object is gone.
   ///
   /// Nullable, and set only from a confirmed 404 -- never from a read that
@@ -823,6 +845,7 @@ model MessageAttachment {
   @@index([conversationId, createdAt])
   @@index([userId, createdAt])
   @@index([unavailableAt])
+  @@index([sourceArtifactId])
 }
 
 /// A finalised upload that has not been bound to a message yet.
@@ -848,12 +871,19 @@ model MessageAttachmentUpload {
 
   objectKey String @unique
 
+  sourceArtifactId String?
+  sourceArtifact MessageArtifact? @relation("GeneratedArtifactUploadSource", fields: [sourceArtifactId], references: [id], onDelete: SetNull)
+  sourceLineageId String?
+  sourceConversationId String?
+  sourceCanonicalSpec Json?
+
   /// When this upload was first bound to a message. Informational: a second
   /// send of the same draft is legitimate and is not refused here.
   boundAt   DateTime?
   createdAt DateTime  @default(now())
 
   @@index([userId, createdAt])
+  @@index([sourceArtifactId])
 }
 
 /// DB-first deletion tombstone for user-supplied attachments, mirroring

@@ -334,7 +334,8 @@ const readSheetGrid = (
    * use for four thousand characters. A table being converted is the user's
    * data, and a cut cell there is a file that looks complete and is not.
    */
-  strictValueLength?: number
+  strictValueLength?: number,
+  structure?: { emptyTextCells: string[]; hasFormulas: boolean }
 ): string[][] => {
   const bytes = parts[sheet.path];
   if (!bytes) {
@@ -361,6 +362,9 @@ const readSheetGrid = (
     // anyway; a conversion must put them back, or row 4 arrives as row 2.
     if (strictValueLength !== undefined) {
       const rowNumber = Number(rowMatch[1].match(/\br="(\d+)"/)?.[1] ?? "0");
+      if (structure && (!Number.isSafeInteger(rowNumber) || rowNumber < 1 || rowNumber > maxRows + 1)) {
+        throw new SpreadsheetDataError("DATA_TOO_MANY_ROWS", "The worksheet exceeds the supported row limit.");
+      }
       while (rowNumber > grid.length + 1) {
         grid.push([]);
         if (grid.length > maxRows + 1) {
@@ -382,6 +386,10 @@ const readSheetGrid = (
         const reference = attributes.match(/r="([A-Z]+\d+)"/)?.[1];
         const index = reference ? columnIndex(reference) : cells.length;
         const type = attributes.match(/t="([^"]+)"/)?.[1] ?? "n";
+        if (structure && index >= SPREADSHEET_DATA_LIMITS.maxColumns) {
+          throw new SpreadsheetDataError("DATA_UNREADABLE", "The worksheet exceeds the supported column limit.");
+        }
+        if (structure && /<f[\s>/]/.test(inner)) structure.hasFormulas = true;
         const styleIndex = Number(attributes.match(/s="(\d+)"/)?.[1] ?? "-1");
 
         // A formula whose result the file does not carry. This reader never
@@ -450,6 +458,9 @@ const readSheetGrid = (
             "DATA_VALUE_TOO_LONG",
             `A cell holds more than ${strictValueLength} characters.`
           );
+        }
+        if (structure && value === "" && ["s", "inlineStr", "str"].includes(type)) {
+          structure.emptyTextCells.push(`${grid.length}:${index}`);
         }
         cells[index] =
           strictValueLength !== undefined
@@ -654,8 +665,11 @@ export const readSpreadsheetGrid = (
     sheet?: string;
     maxRows: number;
     maxValueLength: number;
+    /** Revision reconstruction keeps intentionally empty physical rows. */
+    preserveEmptyRows?: boolean;
   }
-): { grid: string[][]; sheetName: string; sheetNames: string[] } => {
+): { grid: string[][]; sheetName: string; sheetNames: string[];
+  headerRow?: number; emptyTextCells?: string[]; hasFormulas?: boolean; hasMergedCells?: boolean } => {
   const trim = (grid: string[][]) => {
     let end = grid.length;
     while (end > 0 && !grid[end - 1].some((cell) => cell.trim() !== "")) end -= 1;
@@ -698,19 +712,25 @@ export const readSpreadsheetGrid = (
       `The data file has no worksheet named "${options.sheet}".`
     );
   }
-  const grid = trim(
-    readSheetGrid(
+  const structure = options.preserveEmptyRows ? { emptyTextCells: [] as string[], hasFormulas: false } : undefined;
+  const rawGrid = readSheetGrid(
       parts,
       sheet,
       readSharedStrings(parts),
       readStyles(parts),
       options.maxRows,
-      options.maxValueLength
-    )
-  );
+      options.maxValueLength,
+      structure
+    );
+  const grid = options.preserveEmptyRows ? rawGrid : trim(rawGrid);
+  const sheetXml = structure && parts[sheet.path] ? decoder.decode(parts[sheet.path]) : "";
+  const header = sheetXml.match(/<autoFilter\b[^>]*\bref="[A-Z]+(\d+):[A-Z]+\d+"/)?.[1];
   return {
     grid,
     sheetName: sheet.name,
     sheetNames: sheets.map((entry) => entry.name),
+    ...(structure ? { emptyTextCells: structure.emptyTextCells, hasFormulas: structure.hasFormulas,
+      hasMergedCells: /<mergeCell\b/.test(sheetXml),
+      ...(header ? { headerRow: Number(header) - 1 } : {}) } : {}),
   };
 };

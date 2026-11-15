@@ -60,8 +60,15 @@ const db = {
     kind: state.conversationKind,
     productKey: state.conversationProductKey,
   } : null },
-  $queryRaw: async (strings) => {
+  $queryRaw: async (strings, ...values) => {
     const query = strings.join("?");
+    if (/FROM "User".*FOR KEY SHARE/.test(query)) {
+      assert.equal(values[0], "owner"); return [{ id: "owner" }];
+    }
+    if (/FROM "Conversation".*FOR KEY SHARE/.test(query)) {
+      assert.equal(values[0], "conversation"); assert.equal(values[1], "owner");
+      return [{ id: "conversation" }];
+    }
     assert.match(query, /FROM "PromptRefinerProductAttempt" a/);
     assert.match(query, /FOR UPDATE OF a/);
     return state.productAttempt ? [state.productAttempt] : [];

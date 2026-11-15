@@ -348,7 +348,11 @@ export function ModelsPageContent() {
                 </div>
               </div>
               <p data-testid={lang === "ko" || lang === "en" ? "model-selection-criteria" : undefined} className="mt-4 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-                {lang === "ko" ? `이미지 입력: ${modelSupportsImageInput(model) ? "지원" : "미지원"}` : lang === "en" ? `Access from: ${t(`modelTiers.${model.minimumPlan.toLowerCase()}`)} · Short request: ${usageProfile.credits} ${creditUnit} · Image input: ${modelSupportsImageInput(model) ? "supported" : "not supported"} · Catalog context maximum: ${model.contextWindowTokens ? `${model.contextWindowTokens.toLocaleString("en-US")} tokens` : "not listed"}` : t(getModelBestFor(model))}
+                {lang === "ko" ? `이미지 입력: ${modelSupportsImageInput(model) ? "지원" : "미지원"}` : lang === "en" ? <>
+                  {/* Phones already show access and base credits in the fact grid below, so keep only the facts it lacks. */}
+                  <span data-testid="model-mobile-criteria" className="sm:hidden">{`Images: ${modelSupportsImageInput(model) ? "yes" : "no"} · Context: ${model.contextWindowTokens ? `${new Intl.NumberFormat("en-US", { notation: "compact" }).format(model.contextWindowTokens)} tokens` : "not listed"}`}</span>
+                  <span className="hidden sm:inline">{`Access from: ${t(`modelTiers.${model.minimumPlan.toLowerCase()}`)} · Short request: ${usageProfile.credits} ${creditUnit} · Image input: ${modelSupportsImageInput(model) ? "supported" : "not supported"} · Catalog context maximum: ${model.contextWindowTokens ? `${model.contextWindowTokens.toLocaleString("en-US")} tokens` : "not listed"}`}</span>
+                </> : t(getModelBestFor(model))}
               </p>
               <div className="mt-3 flex flex-wrap content-start items-start gap-1.5">
                 {tags.map((tag) => (
