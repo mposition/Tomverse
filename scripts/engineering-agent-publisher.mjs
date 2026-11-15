@@ -29,8 +29,11 @@ import {
 import { runPublisherCycle } from "./engineering-agent-publisher-core.mjs";
 import { isSupervisedWorker, superviseCycle } from "./engineering-agent-supervisor.mjs";
 
-/** The hard deadline of one cycle, inside the claim's ten-minute lease (§12). */
-export const PUBLISHER_HARD_DEADLINE_MS = 8 * 60 * 1000;
+/** The hard deadline of one cycle, inside the claim's 45-minute lease (§12).
+ * Railway skips a scheduled run while the last one still runs, so a long cycle
+ * delays the next rather than overlapping it. Eight minutes until 2026-11-15:
+ * a large change needs room to fetch, apply, push and be read back. */
+export const PUBLISHER_HARD_DEADLINE_MS = 40 * 60 * 1000;
 const TIMEOUT_MS = 20_000;
 const OWNER = "mposition";
 const REPOSITORY = "Tomverse";

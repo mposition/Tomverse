@@ -49,7 +49,7 @@ test("a review commit is made from the exact patch and leaves HEAD clean", async
   assert.equal(calls.at(-1)[0], "status");
 });
 
-test("v52 includes a new regular file in the patch, publish evidence, and review commit", async () => {
+test("v52 includes a new regular file in the patch and the review commit", async () => {
   const newPatch = "diff --git a/lib/new.ts b/lib/new.ts\n" +
     "new file mode 100644\n--- /dev/null\n+++ b/lib/new.ts\n@@ -0,0 +1 @@\n+new\n";
   const calls = [];
@@ -83,8 +83,9 @@ test("v52 includes a new regular file in the patch, publish evidence, and review
   const candidate = await captureAmuxV22Patch("/repo", BASE, options);
   assert.equal(candidate.ok, true);
   assert.equal(candidate.patchBody, newPatch);
-  assert.deepEqual(candidate.publishFiles, [{ path: "lib/new.ts", mode: "100644",
-    bytesBase64: Buffer.from("new\n").toString("base64") }]);
+  // No file bytes ride beside the text (owner decision 2026-11-15).
+  assert.equal(candidate.publishFiles, undefined);
+  assert.ok(!calls.some((call) => call[0] === "diff" && call.includes("--name-status")));
   assert.ok(calls.some((call) => call[0] === "add" &&
     call.includes("-N") && call.includes(":(literal)lib/new.ts")));
   assert.ok(calls.some((call) => call[0] === "reset" &&
@@ -149,24 +150,20 @@ test("clean fixed base yields only a bounded local candidate, never publication"
   assert.deepEqual(candidate, {
     ok: true, baseSha: BASE, patchBody: PATCH,
     patchDigest: createHash("sha256").update(PATCH).digest("hex"),
-    publishFiles: [{ path: "lib/example.ts", mode: "100644",
-      bytesBase64: Buffer.from("new\n").toString("base64") }],
   });
   assert.equal(options.calls.at(-1)[0], "diff");
   assert.ok(options.calls.every((call) => call[0] !== "diff" ||
     call.includes("--no-ext-diff")));
 });
 
-test("non-modified or oversized files keep the private patch but no publish evidence", async () => {
-  const added = await captureAmuxV22Patch("/repo", BASE,
-    fixture({ names: "A\0lib/example.ts\0" }));
-  assert.equal(added.ok, true);
-  assert.equal(added.publishReason, "publish_files_unsupported");
-  assert.equal(added.publishFiles, undefined);
-  const oversized = await captureAmuxV22Patch("/repo", BASE,
-    fixture({ file: "x".repeat(48 * 1024 + 1) }));
-  assert.equal(oversized.ok, true);
-  assert.equal(oversized.publishReason, "publish_files_unsupported");
+test("the patch text alone is the evidence: no file is read beside it", async () => {
+  for (const options of [fixture({ names: "A\0lib/example.ts\0" }),
+    fixture({ file: "x".repeat(48 * 1024 + 1) })]) {
+    const candidate = await captureAmuxV22Patch("/repo", BASE, options);
+    assert.equal(candidate.ok, true);
+    assert.equal(candidate.publishFiles, undefined);
+    assert.equal(candidate.publishReason, undefined);
+  }
 });
 
 test("dirty or foreign baseline is rejected before a model run", async () => {
@@ -225,8 +222,18 @@ test("empty, binary and oversized patches fail closed", async () => {
   assert.deepEqual(await captureAmuxV22Patch("/repo", BASE,
     fixture({ patch: "abc\0def" })),
     { ok: false, reason: "patch_not_bounded_text" });
+  // The one patch bound (lib/amux/v22PatchLimit.ts): 4 MiB, 64 KiB until
+  // 2026-11-15. A patch of 65,537 bytes is now an ordinary patch.
+  const large = await captureAmuxV22Patch("/repo", BASE,
+    fixture({ patch: PATCH + `+${"x".repeat(65_537)}\n` }));
+  assert.equal(large.ok, true);
   assert.deepEqual(await captureAmuxV22Patch("/repo", BASE,
-    fixture({ patch: "x".repeat(65_537) })),
+    fixture({ patch: "x".repeat(4 * 1024 * 1024 + 1) })),
+    { ok: false, reason: "patch_not_bounded_text" });
+  // Under the bound, but escaped for JSON past twice it (other control
+  // characters are six bytes each): the settlement body could not carry it.
+  assert.deepEqual(await captureAmuxV22Patch("/repo", BASE,
+    fixture({ patch: PATCH + `+${"\u0001".repeat(2 * 1024 * 1024)}\n` })),
     { ok: false, reason: "patch_not_bounded_text" });
 });
 
@@ -235,10 +242,10 @@ test("local scanner refuses patch secrets and withholds unsafe file evidence", a
   assert.deepEqual(await captureAmuxV22Patch("/repo", BASE,
     fixture({ patch: PATCH + `+${secret}\n` })),
     { ok: false, reason: "patch_secret_detected" });
+  // A file is not read beside the patch; the app scans every rebuilt file.
   const file = await captureAmuxV22Patch("/repo", BASE,
     fixture({ file: `token = ${secret}\n` }));
   assert.equal(file.ok, true);
-  assert.equal(file.publishReason, "publish_files_secret_or_binary");
   assert.equal(file.publishFiles, undefined);
 });
 

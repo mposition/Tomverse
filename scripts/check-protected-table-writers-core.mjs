@@ -760,6 +760,13 @@ export const RAW_SQL_ALLOWLIST = [
     reason: "The additive migration creates EngineeringAgentDmReview with a restrictive foreign key to the work item (ALTER TABLE ... ON DELETE/UPDATE RESTRICT); it writes no work item row.",
   },
   {
+    path: "prisma/migrations/20261115140000_v22_patch_size_bound/migration.sql",
+    table: "EngineeringAgentWorkItem",
+    tableMentions: 1,
+    writeVerbs: 4,
+    reason: "The migration only replaces the patchBody size CHECK constraint (ALTER TABLE ... DROP/ADD CONSTRAINT); it writes no work item row.",
+  },
+  {
     path: "lib/amux/ideaLaneService.ts",
     table: "AdminAuditLog",
     tableMentions: 1,
