@@ -1774,11 +1774,11 @@ export const en = {
     accountDataExport: {
         dataTabTitle: "Your account data",
         dataTabDescription:
-            "Download everything Tomverse holds for your account -- conversations, memories, imports, payments and usage -- as a single file.",
+            "Download your exportable account data -- conversations, memories, imports, payments and usage -- as a single file. Operator records and other non-user data are excluded.",
         dataTabOpen: "Download your data",
         pageTitle: "Download your account data",
         pageDescription:
-            "One file with everything Tomverse holds for your account. It names what it contains and what it leaves out, and says why.",
+            "One file with your exportable account data: conversations, memories, imports, payments and usage. Operator records and other non-user data are excluded. The file lists included and excluded categories and explains why.",
         securityNote:
             "Downloading requires a recent sign-in. The link you get back works once and stops working after five minutes, so a link that ends up somewhere else is already spent.",
         prepareDownload: "Prepare a download",
