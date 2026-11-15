@@ -131,7 +131,10 @@ test("Router, shadow and provider formatting use the consumed view; signed conte
   );
   assert.match(route, /const latestMessage = executionMessages\[executionMessages.length - 1\]/);
   assert.match(route, /query: latestUserPromptText\(messages\)/);
-  assert.match(route, /for \(const msg of executionMessages\)/);
+  assert.match(route, /for \(const \[messageIndex, msg\] of executionMessages\.entries\(\)\)/);
+  // The consumed view replaces every message object after `latestMessage` is
+  // taken, so the provider loop must not find the current turn by identity.
+  assert.doesNotMatch(route, /msg === latestMessage/);
   assert.match(route, /verifyDurableChatSourceMessage\(\{[\s\S]*?messages,\s*\}\)/);
   assert.match(route, /chatResponseAttemptRequestPayloadDigest\(\{[\s\S]*?messages: executionMessages/);
 });
