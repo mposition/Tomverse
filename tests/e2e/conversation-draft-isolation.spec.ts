@@ -346,7 +346,7 @@ test.describe("conversation-scoped composer drafts", () => {
     await expect(textarea(page)).toHaveValue(DRAFT_B);
   });
 
-  test("an explicit new chat opens empty without discarding the other drafts", async ({
+  test("the new-chat draft waits while another conversation is open, and only a second new chat blanks it", async ({
     page,
   }) => {
     await openChat(page);
@@ -361,8 +361,16 @@ test.describe("conversation-scoped composer drafts", () => {
     await selectConversation(page, CONVERSATION_A);
     await expect(textarea(page)).toHaveValue(DRAFT_A);
 
+    // Coming back to the new chat from another conversation restores it
+    // (owner request 2026-11-15: a look at another conversation lost it).
+    await startNewChat(page);
+    await expect(textarea(page)).toHaveValue("Draft written before this chat exists");
+
+    // Asking for a new chat while already on it is the explicit blank.
     await startNewChat(page);
     await expect(textarea(page)).toHaveValue("");
+    await selectConversation(page, CONVERSATION_A);
+    await expect(textarea(page)).toHaveValue(DRAFT_A);
   });
 
   test("deleting a conversation drops its draft and leaves the others alone", async ({
