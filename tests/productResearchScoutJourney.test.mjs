@@ -5,9 +5,12 @@ import { after, before, test } from "node:test";
 import { installCdpRules, launch } from "../lib/productResearchScoutBrowser.mjs";
 import {
   JOURNEY_ANCHORS,
+  JOURNEY_ATTACHES_MAX,
   JOURNEY_PATHS,
   JOURNEY_SENDS_MAX,
   JOURNEY_STEPS_MAX,
+  SCOUT_ATTACHMENT_FOLLOW_UP_GENERATION,
+  SCOUT_ATTACHMENT_FOLLOW_UP_TASK_ENV,
   SCOUT_FIXTURES,
   SCOUT_GENERATIONS,
   SCOUT_JOURNEY_GENERATION,
@@ -16,8 +19,9 @@ import {
   journeyTask,
   scoutJourneyWrites,
 } from "../lib/productResearchScoutBrowserPolicy.mjs";
-import { walkJourney } from "../lib/productResearchScoutJourney.mjs";
+import { fitSignals, walkJourney } from "../lib/productResearchScoutJourney.mjs";
 import {
+  JOURNEY_FAMILIES,
   JOURNEY_JUDGE_CALLS,
   JOURNEY_OUTPUT_SCHEMA,
   JOURNEY_SUBJECT,
@@ -57,6 +61,22 @@ test("a planned journey is kept only when the walker can follow it", () => {
   assert.equal(admitJourney({ ...journey, expectation: "" }), null);
   assert.deepEqual(admitJourney({ ...journey, steps: [{ action: "back", value: "ignored" }] }).steps, [{ action: "back", value: "" }]);
   for (const path of JOURNEY_PATHS) assert.ok(admitJourney({ ...journey, steps: [{ action: "open", value: path }] }), path);
+  assert.deepEqual(admitJourney({ ...journey, steps: [{ action: "attach", value: " chart.png " }] }).steps, [{ action: "attach", value: "chart.png" }]);
+  assert.equal(admitJourney({ ...journey, steps: [{ action: "attach", value: "passport.jpg" }] }), null, "only the synthetic files");
+  assert.equal(admitJourney({ ...journey, steps: Array(JOURNEY_ATTACHES_MAX + 1).fill({ action: "attach", value: "chart.png" }) }), null);
+});
+
+test("files, then new files in the same conversation: a fixed journey behind its own switch", () => {
+  const entry = SCOUT_GENERATIONS.find((generation) => generation.id === SCOUT_ATTACHMENT_FOLLOW_UP_GENERATION);
+  assert.equal(entry.switchEnv, SCOUT_ATTACHMENT_FOLLOW_UP_TASK_ENV);
+  const fixed = admitJourney(entry.journey);
+  assert.ok(fixed, "the walker can follow it");
+  assert.deepEqual(fixed.start.attachments, ["chart.png", "receipt.jpg"]);
+  assert.deepEqual(fixed.steps.map((step) => step.action), ["send", "attach", "attach", "type", "send"]);
+  const all = { generations: SCOUT_GENERATIONS.map((generation) => generation.id) };
+  assert.ok(!requestedScoutGenerations(all, {}).includes(SCOUT_ATTACHMENT_FOLLOW_UP_GENERATION));
+  assert.ok(requestedScoutGenerations(all, { [SCOUT_ATTACHMENT_FOLLOW_UP_TASK_ENV]: "1" }).includes(SCOUT_ATTACHMENT_FOLLOW_UP_GENERATION));
+  assert.deepEqual(scoutSubjectInfo(SCOUT_ATTACHMENT_FOLLOW_UP_GENERATION), { kind: "file", format: "generated-attachment-follow-up" });
 });
 
 test("between sends a journey writes only Chat drafts; a send opens one turn's writes, at most twice", () => {
@@ -94,7 +114,13 @@ test("the planner is told the walker's actions, places, controls and files, and 
   for (const name of Object.keys(SCOUT_FIXTURES)) assert.ok(JOURNEY_SYSTEM_PROMPT.includes(`- ${name}:`), name);
   assert.match(JOURNEY_SYSTEM_PROMPT, /BETWEEN screens/);
   assert.deepEqual(JOURNEY_OUTPUT_SCHEMA.properties.start.properties.attachments.items.enum, Object.keys(SCOUT_FIXTURES));
-  assert.match(journeyPromptText(["초안이 사라짐"], new Date("2026-11-15T18:00:00Z")), /Today is 2026-11-15\.\n<recent>\n- 초안이 사라짐\n<\/recent>/);
+  assert.match(journeyPromptText(["초안이 사라짐"], new Date("2026-11-15T18:00:00Z")), /Today is 2026-11-15\. Today's family is \d\.\n<recent>\n- 초안이 사라짐\n<\/recent>/);
+  assert.match(JOURNEY_SYSTEM_PROMPT, /- attach: /);
+  for (const family of JOURNEY_FAMILIES) assert.ok(JOURNEY_SYSTEM_PROMPT.includes(family), family);
+  const families = new Set(Array.from({ length: JOURNEY_FAMILIES.length }, (_, day) =>
+    /Today's family is (\d)/.exec(journeyPromptText([], new Date(Date.UTC(2026, 10, 15 + day, 18))))[1]));
+  assert.equal(families.size, JOURNEY_FAMILIES.length, "every family comes round");
+  assert.match(SCOUT_SYSTEM_PROMPT, /later turn that brought new files[^]*could not read or load the files[^]*file card failed/);
   assert.match(SCOUT_SYSTEM_PROMPT, /journey of several steps[^]*vanished after moving away and back[^]*still open after its job was done/);
 });
 
@@ -208,12 +234,50 @@ document.querySelector('[data-testid="chat-send-button"]').onclick = async () =>
 };
 </script></body></html>`;
 
+/**
+ * A second chat page that reproduces the attachment defect of 2026-11-15: two
+ * images made into a PDF, then two new images in the same conversation and the
+ * same request, answered "the images could not be loaded" with a failed card.
+ * Drafts are kept per conversation, as the product keys them.
+ */
+const chatWithFiles = `<!doctype html><html lang="ko"><body>
+<div id="out"></div>
+<div id="tray" data-testid="attachment-tray"></div>
+<textarea data-testid="chat-textarea"></textarea>
+<button data-testid="chat-send-button">send</button>
+<script>
+const box = document.querySelector('[data-testid="chat-textarea"]');
+const tray = document.getElementById("tray");
+const scope = () => new URLSearchParams(location.search).get("conversation") || "new";
+fetch("/api/products/chat/drafts/" + scope()).then((r) => r.json()).then(({ draft }) => {
+  if (!draft) return;
+  box.value = draft.text;
+  for (const reference of draft.attachmentReferences) tray.insertAdjacentHTML("beforeend", '<span data-testid="attachment-complete">' + reference.uploadId + '</span>');
+});
+document.querySelector('[data-testid="chat-send-button"]').onclick = async () => {
+  const files = tray.children.length;
+  const answer = await (await fetch("/api/chat", { method: "POST", body: JSON.stringify({ text: box.value, files }) })).json();
+  tray.innerHTML = "";
+  box.value = "";
+  history.replaceState(null, "", "/chat?conversation=c2");
+  const card = answer.ready
+    ? '<li data-testid="generated-artifact-card" data-artifact-status="ready"><p data-testid="generated-artifact-filename">documents.pdf</p><span data-testid="generated-artifact-meta">PDF 문서 · 1.2 MB</span> <button data-testid="generated-artifact-download">다운로드</button></li>'
+    : '<li data-testid="generated-artifact-card" data-artifact-status="failed"><p data-testid="generated-artifact-filename">신분증.pdf</p><span data-testid="generated-artifact-failure">파일을 만들지 못했습니다.</span></li>';
+  document.getElementById("out").insertAdjacentHTML("beforeend", '<div data-testid="chat-message" data-message-role="assistant">' + answer.text + card + '<button data-testid="memory-answer-feedback">report</button></div>');
+};
+</script></body></html>`;
+
 let server;
 let origin;
 let browser;
 let rules;
 const seen = [];
 let draft = null;
+const drafts = new Map();
+let uploads = 0;
+let fileTurns = 0;
+/** While set, /chat is the page with files and its drafts are kept per conversation. */
+let filesMode = false;
 
 before(async () => {
   server = createServer((request, response) => {
@@ -227,6 +291,18 @@ before(async () => {
         response.writeHead(status, { "content-type": "application/json" });
         response.end(JSON.stringify(value));
       };
+      if (filesMode && pathname === "/chat") {
+        response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+        return response.end(chatWithFiles);
+      }
+      const scoped = /^\/api\/products\/chat\/drafts\/(new|c2)$/.exec(pathname);
+      if (filesMode && scoped) {
+        if (request.method === "PUT") {
+          const written = JSON.parse(body);
+          drafts.set(scoped[1], { text: written.text, attachmentReferences: written.attachmentReferences ?? [], revision: (drafts.get(scoped[1])?.revision ?? 0) + 1 });
+        }
+        return json(200, { draft: drafts.get(scoped[1]) ?? null });
+      }
       if (pathname === "/chat" || pathname === "/chat/c1") {
         response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
         return response.end(chatPage);
@@ -237,6 +313,16 @@ before(async () => {
           draft = { text: written.text, attachmentReferences: written.attachmentReferences ?? [], revision: (draft?.revision ?? 0) + 1 };
         }
         return json(200, { draft });
+      }
+      if (pathname.startsWith("/upload/")) return json(200, {});
+      if (pathname === "/api/chat" && request.method === "PUT") return json(200, { key: "k", uploadUrl: `${origin}/upload/k`, uploadHeaders: {} });
+      if (pathname === "/api/chat" && request.method === "PATCH") return json(200, { uploadId: `u${(uploads += 1)}` });
+      if (filesMode && pathname === "/api/chat") {
+        const { files } = JSON.parse(body);
+        fileTurns += 1;
+        return json(200, fileTurns === 1
+          ? { text: `첨부해 주신 ${files}장의 이미지를 하나의 PDF로 만들었습니다.`, ready: true }
+          : { text: "첨부해 주신 이미지를 읽어오는 과정에서 일시적인 문제가 발생해 파일을 불러오지 못했습니다.", ready: false });
       }
       if (pathname === "/api/chat") return json(200, { text: "답변입니다" });
       response.writeHead(404);
@@ -307,4 +393,56 @@ test("Enter in the composer sends like the send button: counted, written and wai
   assert.equal(seen.filter((request) => request.method === "POST" && request.pathname === "/api/chat").length, 1);
   assert.doesNotMatch(subject.signals, /refused these writes/);
   assert.equal(rules.allowWrite, null);
+});
+
+test("new files in a later turn: attached into the conversation's draft, and a failed second card reaches the model", async (context) => {
+  if (!browser) return context.skip("no browser can start here");
+  seen.length = 0;
+  drafts.clear();
+  uploads = 0;
+  fileTurns = 0;
+  filesMode = true;
+  context.after(() => {
+    filesMode = false;
+  });
+  const entry = SCOUT_GENERATIONS.find((generation) => generation.id === SCOUT_ATTACHMENT_FOLLOW_UP_GENERATION);
+  const subject = await walkJourney(browser, rules, admitJourney(entry.journey), { ...place(), subject: SCOUT_ATTACHMENT_FOLLOW_UP_GENERATION, author: "a fixed regression check" });
+  assert.equal(subject.subject, SCOUT_ATTACHMENT_FOLLOW_UP_GENERATION);
+  assert.match(subject.signals, /following steps a fixed regression check wrote/);
+  const lines = subject.signals.split("\n");
+  const step = (n) => lines.find((line) => new RegExp(`^Step ${n}( --|:)`).test(line)) ?? "";
+  assert.match(step(0), /at \/chat; composer holds "첨부한 두 이미지를[^]*2 attachment\(s\)/);
+  assert.match(step(1), /send: at \/chat; [^]*file cards: answer 1 ready "documents\.pdf PDF 문서 · 1\.2 MB 다운로드"/, "the card's name and kind, not only its button");
+  assert.match(step(2), /attach "receipt\.jpg" \(a café receipt[^]*this conversation's draft and reloaded the page[^]*1 attachment\(s\)/);
+  assert.match(step(3), /attach "chart\.png"[^]*2 attachment\(s\)/);
+  assert.match(step(4), /composer holds "이 두 이미지도 같은 방식으로/);
+  // The fixture page shows no history after the walker's reload, so the failed card is on the only answer shown.
+  assert.match(step(5), /send: [^]*answer \d failed "신분증\.pdf 파일을 만들지 못했습니다\."[^]*불러오지 못했습니다/);
+  assert.equal(seen.filter((request) => request.method === "POST" && request.pathname === "/api/chat").length, 2);
+  assert.equal(seen.filter((request) => request.method === "PATCH" && request.pathname === "/api/chat").length, 4, "four files added, each finalised once");
+  assert.equal(drafts.get("c2").attachmentReferences.length, 2, "the second turn's files went into the conversation's draft");
+  assert.doesNotMatch(subject.signals, /refused these writes/);
+  assert.equal(rules.allowWrite, null);
+});
+
+test("with answers on screen and no conversation named, an attach step adds nothing rather than guess the draft", async (context) => {
+  if (!browser) return context.skip("no browser can start here");
+  seen.length = 0;
+  const subject = await walkJourney(
+    browser,
+    rules,
+    admitJourney({ ...journey, start: { text: "", attachments: [] }, steps: [{ action: "type", value: "첫 질문" }, { action: "send", value: "" }, { action: "attach", value: "chart.png" }] }),
+    place(),
+  );
+  assert.match(subject.signals, /Step 3 -- attach "chart\.png", but the address names no conversation while answers are on screen, so the walker did not add it/);
+  assert.ok(!seen.some((request) => request.method === "PATCH"), "nothing was uploaded");
+});
+
+test("a long journey keeps its setup and its latest steps", () => {
+  const facts = ["setup line", ...Array.from({ length: 40 }, (_, index) => `Step ${index} ${"x".repeat(150)}`), "The walker's own rule refused these writes: DELETE /api/conversations/c1."];
+  const signals = fitSignals(facts);
+  assert.ok(signals.length <= 4_000);
+  assert.ok(signals.startsWith("setup line"));
+  assert.match(signals, /\[earlier steps cut to fit\][^]*Step 39[^]*refused these writes/);
+  assert.equal(fitSignals(["a", "b"]), "a\nb");
 });
