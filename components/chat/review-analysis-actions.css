@@ -10,6 +10,8 @@
 .dark .review-analysis-action-note { color:#a1a1aa; }
 .dark .review-analysis-actions button { border-color:#52525b; }
 @media (max-width:768px) {
+  .review-quick-summary-panel.review-quick-summary-panel { overflow-y:auto; }
+  .review-quick-summary-body.review-quick-summary-body { flex:0 0 auto; overflow:visible; }
   .review-analysis-actions { padding:12px 16px max(12px,env(safe-area-inset-bottom)); gap:8px; }
   .review-analysis-action-note { flex-basis:100%; }
   .review-analysis-action-buttons { width:100%; }

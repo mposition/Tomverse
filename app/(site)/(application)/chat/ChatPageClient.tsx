@@ -11397,7 +11397,7 @@ export function ChatPageClient({
           aria-modal="true"
           aria-labelledby="model-comparison-title"
           aria-describedby="model-comparison-note"
-          className="flex max-h-full w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-900"
+          className="review-quick-summary-panel flex max-h-full w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-900"
         >
           <div className="flex shrink-0 items-start justify-between gap-4 border-b border-zinc-200 p-4 dark:border-zinc-800 sm:p-5">
             <div className="min-w-0">
@@ -11439,7 +11439,7 @@ export function ChatPageClient({
               {t("auth.cancel")}
             </button>
           </div>
-          <div className="grid min-h-0 flex-1 touch-pan-y gap-4 overflow-y-auto overscroll-contain p-4 [scrollbar-gutter:stable] sm:p-5">
+          <div className="review-quick-summary-body grid min-h-0 flex-1 touch-pan-y gap-4 overflow-y-auto overscroll-contain p-4 [scrollbar-gutter:stable] sm:p-5">
             <section data-testid="quick-summary-consensus" className="rounded-xl border border-blue-200 bg-blue-50/70 p-4 dark:border-blue-900/70 dark:bg-blue-950/30">
               <h3 className="text-sm font-bold text-blue-950 dark:text-blue-100">
                 {t("chat.quickSummaryCommonConclusions")}

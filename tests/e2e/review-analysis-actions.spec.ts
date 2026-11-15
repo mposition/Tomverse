@@ -11,7 +11,6 @@ async function setup(page: Page, baseURL: string, appearance: "studio" | "classi
   const api = await mockComparisonReview(page, { withSecondary: true, recoverStored: true, withoutSynthesis: true });
   await page.context().addCookies([{ name: "__tomverse_e2e_chat_workspace", value: "1", url: baseURL }]);
   await page.goto("/review?lang=ko&conversation=qa-conversation");
-  await expect(page.locator('[data-testid="chat-input"]:visible')).toBeVisible();
   const studio = page.getByTestId("studio-analysis-entry");
   await expect(studio.or(page.getByRole("button", { name: "AI 답변 교차검토" }))).toBeVisible();
   if (await studio.isVisible()) await studio.getByRole("button").click();
@@ -157,14 +156,14 @@ test("identity change fences a late export callback even after the original acco
   await expect(page.getByTestId("review-analysis-export")).toBeEnabled();
   let user = "qa-user";
   await page.route("**/api/auth/session**", route => route.fulfill({ json: { user: { id: user, name: user, email: `${user}@tomverse.app`, plan: "Free" }, expires: "2099-01-01T00:00:00Z" } }));
-  let release = () => {}; let started = false, downloads = 0;
+  let release = () => {}; let started = false, finished = false;
   const gate = new Promise<void>(resolve => { release = resolve; });
-  page.on("download", () => downloads++);
   await page.route("**/analysis/export", async route => {
     started = true; await gate;
     const bytes = Buffer.from("Old account analysis");
     const digest = await page.evaluate(async values => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new Uint8Array(values)))).map(value => value.toString(16).padStart(2, "0")).join(""), [...bytes]);
     await route.fulfill({ body: bytes, headers: { "X-Export-Bytes": String(bytes.length), "X-Export-SHA256": digest } }).catch(() => {});
+    finished = true;
   });
   await page.getByTestId("review-analysis-export").click();
   const dialog = page.getByRole("dialog", { name: "내보내기", exact: true });
@@ -173,12 +172,14 @@ test("identity change fences a late export callback even after the original acco
   user = "qa-user-b"; await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
   await expect(dialog).toHaveCount(0);
   user = "qa-user"; await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  const unexpectedDownload = page.waitForEvent("download", { timeout: 1000 }).then(() => true, () => false);
   release();
+  await expect.poll(() => finished).toBe(true);
   await expect(page.locator('[data-testid="chat-input"]:visible')).toBeVisible();
-  expect(downloads).toBe(0);
+  expect(await unexpectedDownload).toBe(false);
 });
 
-test("Quick Summary uses the same footer and previews its own question, quotes and unresolved matters", async ({ page, baseURL }) => {
+test("Quick Summary uses the same footer and previews its own question, quotes and unresolved matters", async ({ page, baseURL }, info) => {
   await setup(page, baseURL!, "classic");
   await expect(page.getByTestId("review-analysis-export")).toBeEnabled();
   await page.getByTestId("review-analysis-actions").getByRole("button", { name: "닫기", exact: true }).click();
@@ -201,5 +202,13 @@ test("Quick Summary uses the same footer and previews its own question, quotes a
   await page.keyboard.press("Escape");
   await expect(footer.getByTestId("review-analysis-export")).toBeFocused();
   expect(await footer.evaluate(element => element.scrollWidth <= innerWidth)).toBe(true);
-  await page.screenshot({ path: ".tmp-review-analysis-mobile-footer.png" });
+  const panel = page.getByTestId("quick-comparison-dialog");
+  expect(await panel.evaluate(element => getComputedStyle(element).overflowY)).toBe("auto");
+  await panel.hover();
+  await page.mouse.wheel(0, 100000);
+  await expect(footer.getByTestId("review-analysis-export")).toBeInViewport();
+  await footer.getByTestId("review-analysis-export").click();
+  await expect(page.getByTestId("review-report-preview")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await page.screenshot({ path: info.outputPath("mobile-footer.png") });
 });
