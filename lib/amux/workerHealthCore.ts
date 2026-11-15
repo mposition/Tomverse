@@ -59,10 +59,15 @@ export type AmuxWorkerHealthView = {
   signals: AmuxWorkerHealthSignalView[];
 };
 
-/** Why the claim would not assign this worker work now; null when it would. */
+/**
+ * Why the claim would not assign this worker work now; null when it would.
+ * Only the claim's own rules hold a worker here. A box sign-in signal is a
+ * warning (`amuxWorkerHealthNotice`): the worker's copy may still be valid
+ * for hours after the source login is gone, and the claim keeps assigning it
+ * until its runs fail or its usage can no longer be read.
+ */
 export type AmuxWorkerHealthHold =
   | "infra_quarantined"
-  | "login_required"
   | "usage_unobserved"
   | "usage_exhausted";
 
@@ -70,8 +75,6 @@ export function amuxWorkerHealthHold(view: AmuxWorkerHealthView | null | undefin
   input: { provider: string; nonClaudeQuotaGate: boolean }): AmuxWorkerHealthHold | null {
   if (!view) return null;
   if (view.circuit.state === "open") return "infra_quarantined";
-  if (view.signals.some((signal) => amuxWorkerHealthSignalBlocks(signal.signal)))
-    return "login_required";
   const anthropic = input.provider.trim().toLowerCase() === "anthropic" ||
     input.provider.trim().toLowerCase() === "claude";
   if (anthropic && view.usage.state !== "fresh") return "usage_unobserved";
@@ -80,10 +83,13 @@ export function amuxWorkerHealthHold(view: AmuxWorkerHealthView | null | undefin
   return null;
 }
 
-/** A warning shown beside a worker that can still take work. */
+/** A warning shown beside a worker, whatever its status. */
+export type AmuxWorkerHealthNotice = "login_attention" | "relogin_soon" | "probing";
+
 export function amuxWorkerHealthNotice(view: AmuxWorkerHealthView | null | undefined):
-  "relogin_soon" | "probing" | null {
+  AmuxWorkerHealthNotice | null {
   if (!view) return null;
+  if (view.signals.some((signal) => amuxWorkerHealthSignalBlocks(signal.signal))) return "login_attention";
   if (view.signals.some((signal) => amuxWorkerHealthSignalWarns(signal.signal))) return "relogin_soon";
   if (view.circuit.state === "probing") return "probing";
   return null;

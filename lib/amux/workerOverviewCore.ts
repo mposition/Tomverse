@@ -7,7 +7,8 @@ import type {
   AmuxWorkerRegistryAdminView,
   AmuxWorkerRoleCeiling,
 } from "./workerRegistryCore.ts";
-import { type AmuxWorkerHealthView, amuxWorkerHealthHold, amuxWorkerHealthNotice } from
+import { type AmuxWorkerHealthNotice, type AmuxWorkerHealthView, amuxWorkerHealthHold,
+  amuxWorkerHealthNotice } from
   "./workerHealthCore.ts";
 
 /**
@@ -40,7 +41,6 @@ export const AMUX_WORKER_STATUS_KINDS = [
   "assignable_busy",
   "assignable_starting",
   "infra_quarantined",
-  "login_required",
   "usage_unobserved",
   "usage_exhausted",
   "connection_lost",
@@ -89,7 +89,7 @@ export type AmuxWorkerOverviewRow = {
   /** The claim's view of the worker (2026-11-15); null when it was not read. */
   health: AmuxWorkerHealthView | null;
   /** A warning beside a worker that can still take work. */
-  healthNotice: "relogin_soon" | "probing" | null;
+  healthNotice: AmuxWorkerHealthNotice | null;
 };
 
 export type AmuxWorkerProviderCount = { providerClass: AmuxWorkerProviderClass; count: number };
@@ -165,7 +165,6 @@ const STATUS_GROUP: Readonly<Record<AmuxWorkerStatusKind, AmuxWorkerOverviewGrou
   assignable_busy: "assignable",
   assignable_starting: "assignable",
   infra_quarantined: "attention",
-  login_required: "attention",
   usage_unobserved: "attention",
   usage_exhausted: "attention",
   connection_lost: "attention",

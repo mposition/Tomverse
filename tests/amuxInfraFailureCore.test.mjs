@@ -47,6 +47,17 @@ test("the review proposal guard counts attempts as the app does", async () => {
   assert.deepEqual([...listed.matchAll(/'([a-z_]+)'/g)].map((match) => match[1]).sort(),
     [...AMUX_INFRA_FAILURE_REASONS].sort());
   assert.match(sql, new RegExp(`IF attempts_used >= ${AMUX_MAX_EXECUTION_ATTEMPTS} THEN`));
+  // The attempt-number bounds hold every number the app can reach: the
+  // runaway guard plus the infrastructure bound.
+  for (const [file, pattern] of [
+    ["20261115140200_amux_v22_attempt_number_bound", /NEW\."attemptNumber" NOT BETWEEN 1 AND (\d+) THEN/],
+    ["20261115140300_amux_v22_recovery_attempt_bound", /recovery\."nextAttemptNumber" NOT BETWEEN 1 AND (\d+) OR/],
+    ["20261115140400_amux_v22_recovery_approval_attempt_bound", /"nextAttemptNumber" BETWEEN 1 AND (\d+) AND/],
+  ]) {
+    const text = await readFile(new URL(`../prisma/migrations/${file}/migration.sql`, import.meta.url), "utf8");
+    const bound = Number(text.match(pattern)?.[1]);
+    assert.ok(bound >= AMUX_MAX_EXECUTION_ATTEMPTS + AMUX_MAX_INFRA_FAILURES_PER_TASK, file);
+  }
 });
 
 test("the switch is on unless exactly disabled", () => {

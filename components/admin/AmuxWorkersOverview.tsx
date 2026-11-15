@@ -143,11 +143,12 @@ export function amuxWorkerReasonText(m: Messages, row: Pick<AmuxWorkerOverviewRo
       (health.circuit.retryAt ? ` · ${m.health.retryAt(formatAestDateTime(health.circuit.retryAt) ?? health.circuit.retryAt)}` : ""));
   }
   if (row.healthNotice === "probing") parts.push(m.health.probing);
+  if (row.healthNotice === "login_attention") parts.push(m.health.loginAttention);
   if (row.healthNotice === "relogin_soon") {
     const expiry = health?.signals.find((signal) => signal.signal === "relogin_soon")?.expiresAt ?? null;
     parts.push(m.health.reloginSoon(expiry ? formatAestDateTime(expiry) ?? expiry : null));
   }
-  if (health && (row.status === "login_required" || row.healthNotice === "relogin_soon")) {
+  if (health && (row.healthNotice === "login_attention" || row.healthNotice === "relogin_soon")) {
     for (const signal of health.signals) parts.push(m.health.signal(m.health.source[signal.source] ?? signal.source,
       m.health.signalText[signal.signal] ?? signal.signal, formatAestDateTime(signal.observedAt) ?? signal.observedAt));
   }

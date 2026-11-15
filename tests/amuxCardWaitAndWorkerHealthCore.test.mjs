@@ -106,8 +106,11 @@ test("can take work means the claim would assign it work", () => {
     { provider: "cursor", nonClaudeQuotaGate: true }), "usage_exhausted");
   assert.equal(amuxWorkerHealthHold(view({ circuit: { state: "open", consecutive: 3, lastKind: "early_exit",
     lastAt: null, retryAt: null } }), anthropic), "infra_quarantined");
-  assert.equal(amuxWorkerHealthHold(view({ signals: [{ source: "auth_stage", signal: "auth_stage_failed",
-    observedAt: "x", firstSeenAt: "x", expiresAt: null }] }), anthropic), "login_required");
+  // A box sign-in signal warns; it never claims a hold the claim does not apply.
+  const staged = view({ signals: [{ source: "auth_stage", signal: "auth_stage_failed",
+    observedAt: "x", firstSeenAt: "x", expiresAt: null }] });
+  assert.equal(amuxWorkerHealthHold(staged, anthropic), null);
+  assert.equal(amuxWorkerHealthNotice(staged), "login_attention");
   assert.equal(amuxWorkerHealthNotice(view({ signals: [{ source: "login_keepalive", signal: "relogin_soon",
     observedAt: "x", firstSeenAt: "x", expiresAt: "2026-11-16T04:05:50.000Z" }] })), "relogin_soon");
   assert.equal(amuxWorkerHealthNotice(view({ circuit: { state: "probing", consecutive: 3, lastKind: "early_exit",
