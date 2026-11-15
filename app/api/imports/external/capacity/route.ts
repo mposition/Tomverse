@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import {
     apiSecurityResponse,
     consumeApiRateLimit,
@@ -8,7 +8,6 @@ import {
     assertExternalImportEnabled,
     ExternalImportDisabledError,
 } from "@/lib/appSettings";
-import { authOptions } from "@/lib/auth";
 import { getExternalImportCapacity } from "@/lib/externalImportService";
 
 // Remaining account quota, served BEFORE the client parses anything: the
@@ -17,7 +16,9 @@ import { getExternalImportCapacity } from "@/lib/externalImportService";
 // client mirror of these numbers is display-only.
 export async function GET(req: Request) {
     try {
-        const session = await getServerSession(authOptions);
+        const authentication = await resolveChatRouteSession(req);
+        if (authentication.response) return authentication.response;
+        const session = authentication.session;
         if (!session?.user) {
             return NextResponse.json({ error: "권한 없음" }, { status: 401 });
         }
