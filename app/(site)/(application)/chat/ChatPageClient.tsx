@@ -150,6 +150,8 @@ import { continuationTitleCopy } from "@/components/chat/continuationTitleCopy";
 import { ContinuationPassageCard } from "@/components/continuations/ContinuationPassageCard";
 import { encodePassages, type Passage } from "@/lib/continuationPassages";
 import { useContinuationSource } from "@/components/continuations/useContinuationSource";
+import { useReviewContinuationDraftAccess, useReviewContinuationHandoff } from "@/components/continuations/useReviewContinuationHandoff";
+import { reviewContinuationHandoffCopy } from "@/locales/reviewContinuationHandoff";
 import { useContinuationLauncher } from "@/components/imports/useContinuationLauncher";
 import { reviewPrefillHref } from "@/lib/chatReviewHandoff";
 import {
@@ -1214,6 +1216,16 @@ export function ChatPageClient({
     pendingCreatedDraftScope.identityKey === identityKey
       ? null
       : currentChatId;
+  const hasReviewHandoffMarker = routeSurface === "continuation" && mountedSurface === "workspace" &&
+    conversations.some(conversation => conversation.id === currentChatId && conversation.reviewHandoff === true);
+  const reviewHandoffAccess = useReviewContinuationDraftAccess(
+    identityKey,
+    routeSurface === "continuation" && mountedSurface === "workspace" ? currentChatId : null,
+    hasReviewHandoffMarker
+  );
+  const isReviewHandoff = Boolean(reviewHandoffAccess.preview) || hasReviewHandoffMarker;
+  const durableComposerEnabled = (mountedSurface === "chat" || isReviewHandoff) &&
+    identityKey?.startsWith("account:") === true;
   const {
     activeDraftKey,
     draftText: inputValue,
@@ -1239,8 +1251,9 @@ export function ChatPageClient({
   } = useConversationDrafts(
     composerDraftConversationId,
     identityKey,
-    mountedSurface === "chat" && identityKey?.startsWith("account:") === true,
-    mountedSurface === "chat" ? "chat" : "review"
+    durableComposerEnabled,
+    mountedSurface === "chat" ? "chat" : "review",
+    isReviewHandoff ? "review-handoff" : "chat"
   );
   /*
     The first real ChatInput caller is deliberately fixture-only. It proves
@@ -3916,6 +3929,7 @@ export function ChatPageClient({
   }, [openGuestImportPicker]);
 
     const applyConversationSettings = useCallback((data: {
+        reviewHandoff?: boolean;
         selectedModels?: unknown;
         storedSelectedModels?: unknown;
         disabledPanels?: unknown;
@@ -3933,7 +3947,12 @@ export function ChatPageClient({
         // confirmed read counts (`targetChatId` is what tells the two apart):
         // the optimistic seeding from the conversation list is this client's
         // own guess and must not invalidate a request made against it.
-        if (targetChatId) conversationSettingsRevisionRef.current += 1;
+        if (targetChatId) {
+          conversationSettingsRevisionRef.current += 1;
+          if (data.reviewHandoff === true) {
+            setConversations(rows => rows.map(row => row.id === targetChatId ? { ...row, reviewHandoff: true as const } : row));
+          }
+        }
         const storedModeUnknown = storedSelectionModeUnknownRef.current;
         if (
           targetChatId &&
@@ -5896,6 +5915,15 @@ export function ChatPageClient({
   const handleGlobalSubmit = async (
     options?: GlobalSubmitOptions
   ): Promise<void> => {
+    if (reviewHandoffAccess.pending || reviewHandoffAccess.failed ||
+        (isReviewHandoff && (!draftHydrated || draftConflict || draftSyncFailed))) {
+      showToast(reviewContinuationHandoffCopy.draftFailed, "info");
+      return;
+    }
+    if (isReviewHandoff && (attachments.length > 0 || options?.researchMode || options?.deepResearchDepth || options?.imageTurnsByModel)) {
+      showToast(attachments.length > 0 ? reviewContinuationHandoffCopy.attachmentsUnsupported : reviewContinuationHandoffCopy.unsupported, "info");
+      return;
+    }
     const submittedAtMonotonicMs = options?.submittedAtMonotonicMs ?? performance.now();
     if (promptRefinerMode === "e2e_fixture") {
       // This mode only exercises a no-cost pre-send proposal. It cannot
@@ -6595,7 +6623,7 @@ export function ChatPageClient({
     );
     const originDraftScopeId =
       preparedBlankDraft || continuesPendingCreatedDraft ? null : currentChatId;
-    const draftSendCapture = !isGuestMode && !isOverrideSend && mountedSurface === "chat"
+    const draftSendCapture = !isGuestMode && !isOverrideSend && durableComposerEnabled
       ? suppliedPreparedDraft ? null : captureDraftSend(
           { text: authoredPrompt, attachments: sendInputAttachments },
           originDraftScopeId
@@ -8939,6 +8967,15 @@ export function ChatPageClient({
     `handleGlobalSubmit` go through its ref and never come back here.
   */
   const handleComposerSubmit = async () => {
+    if (reviewHandoffAccess.pending || reviewHandoffAccess.failed ||
+        (isReviewHandoff && (!draftHydrated || draftConflict || draftSyncFailed))) {
+      showToast(reviewContinuationHandoffCopy.draftFailed, "info");
+      return;
+    }
+    if (isReviewHandoff && (attachments.length > 0 || researchPreview.selected)) {
+      showToast(attachments.length > 0 ? reviewContinuationHandoffCopy.attachmentsUnsupported : reviewContinuationHandoffCopy.unsupported, "info");
+      return;
+    }
     if (researchPreview.selected && (!researchPreview.offered || attachments.length > 0 || !inputValue.trim() || inputValue.trim().length > 4000)) {
       showToast(t(attachments.length > 0 ? "chat.researchPreviewAttachments" : !inputValue.trim() || inputValue.trim().length > 4000 ? "chat.researchPreviewQuestionLimit" : "chat.researchPreviewUnavailable"), "info");
       return;
@@ -10485,12 +10522,28 @@ export function ChatPageClient({
     selectionModePending ||
     Boolean(productSwitchHasUnknownWrite) ||
     draftConflict ||
-    draftSyncFailed;
+    draftSyncFailed ||
+    (isReviewHandoff && !draftHydrated) || reviewHandoffAccess.pending;
+  const reviewAnswerTicketRef = useRef<number | null>(null);
+  const reviewAnswerHandoff = useReviewContinuationHandoff({
+    identityKey,
+    conversationId: routeSurface === "continuation" && mountedSurface === "chat" ? shellConversationId : null,
+    isOwnerCurrent: () => reviewAnswerTicketRef.current === conversationSelectionTicketRef.current &&
+      currentChatIdRef.current === shellConversationId,
+    beforeNavigate: () => !productSwitchDisabled && preserveDraftsForProductSwitch(),
+  });
+  const compareContinuationAnswer = routeSurface === "continuation" && mountedSurface === "chat" && !isGuestMode
+    ? (assistantMessageId: string) => {
+        if (productSwitchDisabled) { showToast(t("chat.compareInReviewBlocked"), "info"); return; }
+        reviewAnswerTicketRef.current = conversationSelectionTicketRef.current;
+        void reviewAnswerHandoff.start(assistantMessageId);
+      }
+    : undefined;
   const handleProductSwitch = () => {
     const admitted = !productSwitchDisabled && preserveDraftsForProductSwitch();
     // Leaving for the other product: a Compare-in-Review answer still in
     // flight is no longer this screen's to navigate.
-    if (admitted) reviewForkTicketRef.current = null;
+    if (admitted) { reviewForkTicketRef.current = null; reviewAnswerTicketRef.current = null; }
     return admitted;
   };
   /*
@@ -10516,11 +10569,25 @@ export function ChatPageClient({
     return conversationSelectionTicketRef.current;
   }, []);
   const compareChatInReview =
-    mountedSurface === "chat" && !isGuestMode ? handleCompareChatInReview : undefined;
+    mountedSurface === "chat" && routeSurface !== "continuation" && !isGuestMode ? handleCompareChatInReview : undefined;
   useLayoutEffect(() => {
     reviewForkAdmissionRef.current = () =>
       !productSwitchDisabled && preserveDraftsForProductSwitch();
   });
+  const reviewHandoffNotice = (reviewHandoffAccess.preview || reviewHandoffAccess.failed || reviewAnswerHandoff.pending || reviewAnswerHandoff.error) ? (
+    <div data-testid="review-context-handoff-notice" role="status" className="rounded-xl border border-zinc-200 px-3 py-2 text-xs text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
+      {reviewAnswerHandoff.pending && <p>{reviewContinuationHandoffCopy.preparing}</p>}
+      {reviewAnswerHandoff.error && <p>{reviewAnswerHandoff.error}</p>}
+      {reviewHandoffAccess.failed && <p>{reviewContinuationHandoffCopy.unavailable} <button type="button" onClick={reviewHandoffAccess.retry} className="underline">{reviewContinuationHandoffCopy.retryDraft}</button></p>}
+      {reviewHandoffAccess.preview && <>
+        <p>{reviewContinuationHandoffCopy.scope(reviewHandoffAccess.preview.sourceTurnCount, reviewHandoffAccess.preview.nativeTurnCount)}</p>
+        {reviewHandoffAccess.preview.sourceOmittedCount > 0 && <p>{reviewContinuationHandoffCopy.sourceOmitted(reviewHandoffAccess.preview.sourceOmittedCount)}</p>}
+        {reviewHandoffAccess.preview.nativeOmittedCount > 0 && <p>{reviewContinuationHandoffCopy.omitted(reviewHandoffAccess.preview.nativeOmittedCount)}</p>}
+        {reviewHandoffAccess.preview.sourceMode === "legacy" && <p>{reviewContinuationHandoffCopy.legacy}</p>}
+        <p>{reviewContinuationHandoffCopy.multiModel}</p>
+      </>}
+    </div>
+  ) : null;
   const visibleReviewModels = mountedSurface === "workspace" && reviewWorkspace.mode === "easy"
     ? reviewProviderPanels(selectedModels, effectiveDisabledPanels, id => getModel(id)?.provider)
     : selectedModels;
@@ -10602,6 +10669,7 @@ export function ChatPageClient({
         <ChatShellSkeleton label={t("auth.loading")} />
       ) : isMobileViewport && !(mountedSurface === "workspace" && reviewWorkspace.appearance === "studio") ? (
         <MobileChatShell
+          continuationNotice={reviewHandoffNotice}
           workspaceNotice={mountedSurface === "chat" ? <ChatPwaControls ownerKey={identityKey} language={lang} onRestore={(text) => setInputValue((current) => current ? `${current}\n${text}` : text)} /> : undefined}
           chatWorkspace={mountedSurface === "chat" ? chatWorkspace : undefined}
           review={mountedSurface === "workspace" ? {
@@ -10617,6 +10685,7 @@ export function ChatPageClient({
           productSwitchDisabled={productSwitchDisabled}
           onProductSwitch={handleProductSwitch}
           onCompareInReview={compareChatInReview}
+          onCompareContinuationInReview={compareContinuationAnswer}
           transcriptScope={mountedSurface === "chat" ? "conversation" : "model"}
           onRestorePrompt={restoreChatPrompt}
           onRetryPrompt={retryChatPrompt}
@@ -10641,8 +10710,9 @@ export function ChatPageClient({
           isConversationSelectionResolved={isInitialConversationResolved}
           pendingSubmission={pendingSubmission}
           durableDraftLocked={
-            guestAutoCapabilityPending ||
-            mountedSurface === "chat" && !isGuestMode && Boolean(pendingSubmission)
+            guestAutoCapabilityPending || reviewHandoffAccess.pending ||
+            (isReviewHandoff && !draftHydrated) ||
+            durableComposerEnabled && Boolean(pendingSubmission)
           }
           blockSubmitWhileVoiceBusy={mountedSurface === "chat" && !isGuestMode}
           allowEditingWhileSending={mountedSurface === "chat" && !isGuestMode}
@@ -10781,6 +10851,7 @@ export function ChatPageClient({
               refreshGuestUsage();
             }
           }}
+          continuationNotice={reviewHandoffNotice}
           workspaceNotice={mountedSurface === "chat" ? <ChatPwaControls ownerKey={identityKey} language={lang} onRestore={(text) => setInputValue((current) => current ? `${current}\n${text}` : text)} /> : undefined}
           chatWorkspace={mountedSurface === "chat" ? chatWorkspace : undefined}
           studioStarterCards={starterCards}
@@ -10812,6 +10883,7 @@ export function ChatPageClient({
           productSwitchDisabled={productSwitchDisabled}
           onProductSwitch={handleProductSwitch}
           onCompareInReview={compareChatInReview}
+          onCompareContinuationInReview={compareContinuationAnswer}
           transcriptScope={mountedSurface === "chat" ? "conversation" : "model"}
           onRestorePrompt={restoreChatPrompt}
           onRetryPrompt={retryChatPrompt}
@@ -10835,8 +10907,9 @@ export function ChatPageClient({
           isConversationSelectionResolved={isInitialConversationResolved}
           pendingSubmission={pendingSubmission}
           durableDraftLocked={
-            guestAutoCapabilityPending ||
-            mountedSurface === "chat" && !isGuestMode && Boolean(pendingSubmission)
+            guestAutoCapabilityPending || reviewHandoffAccess.pending ||
+            (isReviewHandoff && !draftHydrated) ||
+            durableComposerEnabled && Boolean(pendingSubmission)
           }
           blockSubmitWhileVoiceBusy={mountedSurface === "chat" && !isGuestMode}
           allowEditingWhileSending={mountedSurface === "chat" && !isGuestMode}

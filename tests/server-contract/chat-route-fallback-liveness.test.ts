@@ -153,6 +153,7 @@ const continuationPlan = planSelectedContinuationSeed({
   passages: [{ ordinal: 0, start: 0, end: 22 }], sourceMessageCount: 201,
 });
 const continuationPrompt = buildContinuationSeedPrompt({ provider: "chatgpt", importedAt: null, plan: continuationPlan });
+const handoffTranscript = "Imported reference: Kyoto / AUD 1,500.\nPrior Tomverse reference: Option two is food and gardens.";
 mock.module(mod("lib/externalContinuationService.ts"), { namedExports: { ...realContinuation,
   searchContinuationHistory: async (input: Parameters<typeof realContinuation.searchContinuationHistory>[0]) => {
     historyQueries.push(input.queries);
@@ -166,9 +167,15 @@ mock.module(mod("lib/externalContinuationService.ts"), { namedExports: { ...real
   loadContinuationTurnSeed: async (input: Parameters<typeof realContinuation.loadContinuationTurnSeed>[0]) => {
     if (!continuationScenario) return realContinuation.loadContinuationTurnSeed(input);
     continuationScenario.reads++;
+    if (continuationBridge?.reviewHandoff && continuationScenario.reads >= continuationScenario.revokeAt) {
+      throw new TestApiSecurityError(409, "REVIEW_HANDOFF_CONTEXT_UNAVAILABLE", "The linked reference is unavailable.");
+    }
     return continuationScenario.reads >= continuationScenario.revokeAt
       ? { seed: null, outcome: continuationScenario.outcome }
-      : input.prepared ? { outcome: "seeded", seed: input.prepared } : { outcome: "seeded", seed: { plan: continuationPlan, prompt: continuationPrompt } };
+      : input.prepared ? { outcome: "seeded", seed: input.prepared } : { outcome: "seeded", seed: {
+        sourceId: "source", sourceConversationDigest: "source-digest", sourceDigestVersion: 1,
+        plan: continuationPlan, prompt: continuationBridge?.reviewHandoff
+          ? { ...continuationPrompt, transcriptText: handoffTranscript } : continuationPrompt } };
   },
 } });
 const realSettings = require(resolve(ROOT, "lib/appSettings.ts")) as typeof import("../../lib/appSettings");
@@ -850,7 +857,7 @@ mock.module(mod("lib/r2.ts"), { namedExports: {
   },
 } });
 let conversationProductKey: "chat" | "review" = "chat";
-let continuationBridge: { id: string } | null = null;
+let continuationBridge: { id: string; reviewHandoff?: object } | null = null;
 let messageFindFirstArgs: Array<Record<string, unknown>> = [];
 let lastDurableClaimInput: Record<string, unknown> | null = null;
 type InstrumentationAttemptRow = {
@@ -1052,7 +1059,8 @@ mock.module(mod("lib/chatResponseAttemptPersistence.ts"), {
       createdAt: new Date("2026-09-13T00:00:00.000Z"),
       updatedAt: new Date("2026-09-13T00:00:00.000Z"),
     }),
-    terminalChatResponseAttempt: async (input: Record<string, unknown>) => {
+    terminalChatResponseAttempt: async (input: Record<string, unknown>, tx?: unknown) => {
+      if (input.continuationSourcePlan) assert.equal(tx, prismaProxy, "source evidence shares the completed Message transaction");
       world.terminals.push(input);
       if (durableTerminalFails) throw new Error("DURABLE_TERMINAL_TEST_FAILURE");
       return undefined;
@@ -4495,6 +4503,55 @@ test("default-on continuation Auto and final provider share the exact transient 
   assert.equal(receipt.plannerVersion, "ext-seed-v3-selected-recent");
   const trailer = parseChatStreamTrailer(splitSearchMetadataTrailer(body).searchMetadataJson);
   assert.deepEqual(trailer?.continuationReceipt, { ...receipt, status: "dispatched" });
+});
+
+test("completed continuation evidence belongs to the provider attempt that produced the saved Message", async t => {
+  const previous = process.env.CHAT_CONTINUATION_AUTO_SOURCE_ENABLED;
+  process.env.CHAT_CONTINUATION_AUTO_SOURCE_ENABLED = "false";
+  continuationBridge = { id: "external-continuation" };
+  continuationScenario = { reads: 0, revokeAt: Infinity, outcome: "locked" };
+  t.after(() => { continuationBridge = null; continuationScenario = null;
+    if (previous === undefined) delete process.env.CHAT_CONTINUATION_AUTO_SOURCE_ENABLED;
+    else process.env.CHAT_CONTINUATION_AUTO_SOURCE_ENABLED = previous; });
+  const { body } = await ask("answers", "claimed", 200, false, undefined, true, true);
+  assert.ok(body.includes(ANSWER));
+  assert.equal(attempts.length, 2);
+  const terminal = world.terminals.find(row => row.status === "completed")!;
+  const manifest = terminal.continuationSourcePlan as { attempt: { attemptIndex: number; actualModelId: string; sourceUserMessageId: string }; plan: unknown };
+  assert.ok(manifest);
+  assert.equal(manifest.attempt.attemptIndex, 1);
+  assert.equal(manifest.attempt.actualModelId, world.messages[0].modelId);
+  assert.equal(manifest.attempt.sourceUserMessageId, SOURCE_USER_MESSAGE_ID);
+  assert.doesNotMatch(JSON.stringify(manifest), /Earlier budget|Latest correction/);
+});
+
+test("Review handoff sends the same user-role references to each model and subsequent questions", async t => {
+  continuationBridge = { id: "handoff", reviewHandoff: {} };
+  conversationProductKey = "review"; conversationSelectionMode = "manual";
+  selectedConversationModels = [REQUESTED_MODEL_ID, "gpt-5-6-luna"];
+  t.after(() => { continuationBridge = null; continuationScenario = null; conversationProductKey = "chat";
+    conversationSelectionMode = "auto"; selectedConversationModels = [REQUESTED_MODEL_ID]; });
+  for (const model of selectedConversationModels) for (const prompt of ["Use the second option.", "What should I book first?"]) {
+    continuationScenario = { reads: 0, revokeAt: Infinity, outcome: "locked" };
+    await ask("answers", "claimed", 200, false, [{ id: SOURCE_USER_MESSAGE_ID, role: "user", content: prompt }], true, false,
+      undefined, "off", "none", model);
+    const references = attempts[0].messages.filter(message => JSON.stringify(message.content).includes("Kyoto"));
+    assert.equal(references.length, 1);
+    assert.equal(references[0].role, "user");
+    assert.match(JSON.stringify(references[0].content), /AUD 1,500|Option two/);
+    assert.doesNotMatch(JSON.stringify(attempts[0].messages), /clicked answer|later correction/);
+  }
+});
+
+for (const revokeAt of [1, 3]) test(`Review handoff reference revocation at read ${revokeAt} never dispatches without context`, async t => {
+  continuationBridge = { id: "handoff", reviewHandoff: {} };
+  continuationScenario = { reads: 0, revokeAt, outcome: "locked" };
+  conversationProductKey = "review"; conversationSelectionMode = "manual";
+  t.after(() => { continuationBridge = null; continuationScenario = null; conversationProductKey = "chat"; conversationSelectionMode = "auto"; });
+  await ask("answers", "claimed", 409, false, undefined, true, false);
+  assert.equal(attempts.length, 0);
+  if (revokeAt === 1) assert.equal(ledger.accessAcquisitions, 0);
+  assert.equal(world.messages.length, 0);
 });
 
 for (const stage of ["before_dispatch", "entered_boundary"] as const) test(`continuation receipt distinguishes ${stage} failure from delivered input`, async t => {

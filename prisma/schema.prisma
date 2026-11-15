@@ -1591,6 +1591,9 @@ model ChatResponseAttempt {
   finishReason        String?
   failureCode         String?
   terminalAt          DateTime?
+  /// Reference-only description of the imported source ranges used by the
+  /// provider attempt that produced a completed saved answer. Never source text.
+  continuationSourcePlan Json?
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
@@ -6506,6 +6509,12 @@ model ConversationContinuationBridge {
   /// browser or by a flaky network resolves to the same conversation; a second
   /// deliberate fork carries a new key and is a new conversation.
   idempotencyKey String
+
+  /// Reference-only binding for an answer-level Chat -> Review handoff.
+  /// NULL is every ordinary continuation and every source-level Review fork.
+  /// The JSON contains parent/message ids, content digests and omission counts;
+  /// it never contains parent or imported transcript text.
+  reviewHandoff Json?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

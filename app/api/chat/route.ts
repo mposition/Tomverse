@@ -193,6 +193,7 @@ import {
 } from "@/lib/chatTurnSystemBlocks";
 import { continuationReceipt, deliveryReceipt, CONTINUATION_RECEIPT_HEADER, type ContinuationReceipt } from "@/lib/continuationReceipt";
 import { PASSAGE_HEADER } from "@/lib/continuationPassages";
+import { serializeContinuationSourcePlan } from "@/lib/continuationSourceManifest";
 import { continuationAutoSourceEnabledFromValue } from "@/lib/externalContinuationAccess";
 import { loadContinuationTurnSeed, searchContinuationHistory, type ContinuationTurnSeedResult } from "@/lib/externalContinuationService";
 import { continuationHistorySearchEnabledFromValue, HISTORY_SOURCE_MAX_BYTES } from "@/lib/continuationHistorySearch";
@@ -2069,7 +2070,7 @@ async function handleChatPost(
                           routerModelId: true,
                           routerChallengerTurns: true,
                           productKey: true,
-                          continuationBridge: { select: { id: true } },
+                          continuationBridge: { select: { id: true, reviewHandoff: true } },
                       },
                   })
                 : null;
@@ -2639,15 +2640,21 @@ async function handleChatPost(
         let historySearchActive = false;
         let preparedContinuation: ContinuationTurnSeedResult = { seed: null, outcome: "no_bridge" };
         const hasContinuation = Boolean(conversationRouting?.continuationBridge);
+        const hasReviewHandoff = conversationRouting?.continuationBridge?.reviewHandoff != null;
+        if (hasReviewHandoff && (isResearchPreview || deepResearchDepth || requestedModelConfig.usageClass === "deep-research" ||
+            turnCarriesAttachments(messages))) {
+            throw new ChatAccessError(400, "REVIEW_HANDOFF_TEXT_ONLY", "This comparison supports text questions and text models only.");
+        }
         const readContinuation = async (): Promise<ContinuationTurnSeedResult> => {
             if (!session?.user?.id || !conversationId || !hasContinuation) return { seed: null, outcome: "no_bridge" };
             if (isResearchPreview || deepResearchDepth || requestedModelConfig.usageClass === "deep-research") return { seed: null, outcome: "no_bridge" };
             try {
                 if (historySearchActive && !continuationHistorySearchEnabledFromValue(process.env.CHAT_CONTINUATION_HISTORY_SEARCH_ENABLED))
                     return { seed: null, outcome: "flag_off" };
-                if (!(await isExternalContinuationEnabledCached())) return { seed: null, outcome: "flag_off" };
+                if (!hasReviewHandoff && !(await isExternalContinuationEnabledCached())) return { seed: null, outcome: "flag_off" };
                 return await loadContinuationTurnSeed({ userId: session.user.id, conversationId, request: req, prepared: preparedContinuation.seed });
             } catch (error) {
+                if (hasReviewHandoff) throw error;
                 logRequestError("chat_continuation_seed_failed", traceId, error);
                 return { seed: null, outcome: "read_failed" };
             }
@@ -5728,10 +5735,29 @@ async function handleChatPost(
             );
         }
         if (continuationSeed && !replanned) {
-            let checked = await readContinuation();
+            let checked: ContinuationTurnSeedResult;
+            try {
+                checked = await readContinuation();
+            } catch (error) {
+                // A handoff cannot shed its references. This request has not crossed
+                // the provider boundary, so close its prepared dispatch as unused.
+                if (hasReviewHandoff && dispatchRecord) {
+                    await recordNotDispatched(dispatchRecord, "continuation_source_revoked", "application");
+                    dispatchRecord = null;
+                }
+                throw error;
+            }
             if (importedSource && !continuationAutoSourceEnabledFromValue(process.env.CHAT_CONTINUATION_AUTO_SOURCE_ENABLED))
                 checked = { seed: null, outcome: "flag_off" };
             if (!checked.seed || checked.seed.prompt.transcriptText !== continuationSeed.transcriptText) {
+                if (hasReviewHandoff) {
+                    if (dispatchRecord) {
+                        await recordNotDispatched(dispatchRecord, "continuation_source_revoked", "application");
+                        dispatchRecord = null;
+                    }
+                    throw new ChatAccessError(409, "REVIEW_HANDOFF_CONTEXT_UNAVAILABLE",
+                        "This comparison's references changed. Reopen it from the original Chat.");
+                }
                 // No answer provider has run. Close this unused plan and rerun the ordinary
                 // model/capability/token/price/admission path, without another Router call.
                 if (dispatchRecord) {
@@ -5850,6 +5876,8 @@ async function handleChatPost(
         // have made it two models wrong instead of one.
         const dispatched = {
             attemptIndex: 0,
+            // Carried by the execution that produced the saved answer, not by preflight.
+            continuationSource: finalContinuation.seed ?? finalContinuation.sourceEvidence,
             modelId: modelConfig.id,
             provider: modelConfig.provider,
             reasoning: modelConfig.reasoning,
@@ -7749,6 +7777,23 @@ async function handleChatPost(
                                                 actualModelId: dispatched.modelId,
                                                 provider: dispatched.provider,
                                                 finishReason: normalizedFinishReason,
+                                                ...(completionOutcome.status === "normal" && dispatched.continuationSource?.sourceId &&
+                                                    dispatched.continuationSource.sourceConversationDigest &&
+                                                    dispatched.continuationSource.sourceDigestVersion !== undefined ? {
+                                                    continuationSourcePlan: serializeContinuationSourcePlan({
+                                                        plan: dispatched.continuationSource.plan,
+                                                        sourceId: dispatched.continuationSource.sourceId,
+                                                        sourceConversationDigest: dispatched.continuationSource.sourceConversationDigest,
+                                                        sourceDigestVersion: dispatched.continuationSource.sourceDigestVersion,
+                                                        attempt: {
+                                                            assistantMessageId: durableAttempt.assistantMessageId,
+                                                            sourceUserMessageId: durableAttempt.sourceUserMessageId,
+                                                            attemptIndex: dispatched.attemptIndex,
+                                                            actualModelId: dispatched.modelId,
+                                                            provider: dispatched.provider,
+                                                        },
+                                                    }),
+                                                } : {}),
                                             },
                                             tx
                                         );

@@ -1,5 +1,6 @@
 import type { ContinuationReceipt } from "../../../lib/continuationReceipt";
 import { createDemoWorkspace } from "./demoWorkspace";
+import { createDemoReviewHandoff } from "./demoReviewHandoff";
 import type { ChatTransport, Conversation, UserPreferences, MemoryPreferences, HistoryProject, ChatSummary } from "./chatTransport";
 
 /** Synthetic transport. Imported only by the explicitly selected development demo. */
@@ -22,6 +23,7 @@ export function createDemoTransport(): ChatTransport {
   const preferences = (): UserPreferences => JSON.parse(localStorage.getItem(key + ":preferences") ?? JSON.stringify({ theme: "system", language: "en", defaultModel: "demo", timeZone: "UTC", imageHandoffAutoGenerate: false, reviewEasyEffectiveProviders: ["Synthetic A", "Synthetic B", "Synthetic C"], reviewEasyProviderOptions: ["Synthetic A", "Synthetic B", "Synthetic C"], reviewEasyMaxProviders: 3 }));
   const memory = (): MemoryPreferences => JSON.parse(localStorage.getItem(key + ":memory") ?? JSON.stringify({ masterEnabled: true, styleEnabled: true, defaultConversationMode: "on" }));
   const workspaceFixture = createDemoWorkspace(key, item => write([item, ...read()]));
+  const reviewHandoff = createDemoReviewHandoff(key, read, write);
   return {
     workspace: workspaceFixture.workspace,
     history: {
@@ -46,12 +48,19 @@ export function createDemoTransport(): ChatTransport {
     configureTools: async (id, input) => { const items = read(); const item = items.find(value => value.id === id)!; Object.assign(item, input); write(items); return item; },
     listReview: async () => read().filter(item => item.surface === "workspace" || (item.surface === "continuation" && item.productKey === "review")),
     createReview: async (models, assistantProfileId) => { const item: Conversation = { id: crypto.randomUUID(), title: "New Review", assistantProfileId, selectedModels: models, selectionMode: "manual", webSearchMode: "always", surface: "workspace", messages: [] }; write([item, ...read()]); return item; },
+    prepareReviewHandoff: reviewHandoff.prepare,
+    reviewHandoffDraft: reviewHandoff.draft,
     configureReview: async (id, models) => { const items = read(); const item = items.find(value => value.id === id)!; item.selectedModels = models; write(items); return item; },
     // Counted so the synthetic UI suite can prove a route was or was not asked for.
     routeReview: async input => (localStorage.setItem("tomverse-native-synthetic-demo:review-routes", String(Number(localStorage.getItem("tomverse-native-synthetic-demo:review-routes") ?? "0") + 1)), { kind: "text", preset: "standard", choices: input.providers.map(provider => ({ provider, modelId: catalog.find(model => model.provider === provider)?.id ?? null })) }),
-    sendReview: async (conversation, text, files, signal, progress) => {
+    sendReview: async (conversation, text, files, signal, progress, draft) => {
       const item = read().find(value => value.id === conversation.id)!;
+      if (draft) await reviewHandoff.consume(item.id, text, draft.revision);
       item.title = text.slice(0,48); item.messages.push({ id: crypto.randomUUID(), role: "user", content: text }); write(read().map(value => value.id === item.id ? item : value));
+      if (localStorage.getItem(`${key}:review-send-unknown`) === "true") {
+        localStorage.removeItem(`${key}:review-send-unknown`);
+        throw Error("Synthetic connection loss after saving the question");
+      }
       await Promise.all(item.selectedModels.map(async modelId => {
         const answer = `## ${catalog.find(model => model.id === modelId)?.name}\n\nA synthetic perspective on “${text}”.\n\n- One saved question\n- An independent response\n- Restore this comparison after reopening the app`;
         for (let index=0;index<answer.length;index+=12) { if(signal.aborted) throw new DOMException("Stopped", "AbortError"); progress(modelId,answer.slice(0,index)); await new Promise(resolve=>setTimeout(resolve,15)); }
@@ -71,8 +80,8 @@ export function createDemoTransport(): ChatTransport {
     list: async () => read().filter(item => item.surface !== "workspace" && !(item.surface === "continuation" && item.productKey === "review")),
     // A fixture continuation stores its end page as `imported` and earlier pages
     // by offset, so the older-messages button can be exercised without a server.
-    continuationSource: async (id, offset) => { const item = read().find(value => value.id === id) as (Conversation & { importedPages?: Record<string, NonNullable<Conversation["imported"]>> }) | undefined; const page = offset === undefined ? item?.imported : item?.importedPages?.[String(offset)]; if (!page) throw Error("Conversation unavailable"); return page; },
-    load: async (id) => { const item = read().find((c) => c.id === id); if (!item) throw Error("Conversation unavailable"); return item; },
+    continuationSource: async (id, offset) => { const item = read().find(value => value.id === id) as (Conversation & { importedPages?: Record<string, NonNullable<Conversation["imported"]>> }) | undefined; const page = offset === undefined ? item && reviewHandoff.imported(item) : item?.importedPages?.[String(offset)]; if (!page) throw Error("Conversation unavailable"); return page; },
+    load: async (id) => { const item = read().find((c) => c.id === id); if (!item) throw Error("Conversation unavailable"); return { ...item, imported: reviewHandoff.imported(item) }; },
     create: async (title, assistantProfileId) => {
       const item: Conversation = { id: crypto.randomUUID(), title: title ?? "New chat", assistantProfileId, selectedModels: ["demo"], selectionMode: "auto", autoSelection: { offered: true }, webSearchMode: "always", surface: "chat", messages: [] };
       write([item, ...read()]); return item;

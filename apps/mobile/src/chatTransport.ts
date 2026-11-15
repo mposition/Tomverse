@@ -16,6 +16,7 @@ export type ChatMessage = {
 };
 /** The imported original above a continuation's own turns. Read-only. */
 export type ImportedTranscript = {
+  reviewHandoff?: ReviewHandoffSummary;
   provider: string;
   importedAt: string;
   status: "available" | "deleted" | "locked";
@@ -24,6 +25,27 @@ export type ImportedTranscript = {
   /** Index of the first loaded message; earlier ones load a page at a time. */
   offset: number;
   pageSize: number;
+};
+export type ReviewHandoffSummary = {
+  sourceMode: "recorded" | "legacy";
+  nativeTurnCount: number;
+  nativeOmittedCount: number;
+  sourceTurnCount: number;
+  sourceOmittedCount: number;
+  attachmentsSupported: false;
+};
+export type ReviewHandoffDraft = {
+  scopeKey: string;
+  text: string;
+  revision: number;
+  attachmentReferences: [];
+};
+export type ReviewHandoffDraftEnvelope = { scopeKey: string; draft: ReviewHandoffDraft | null };
+export type ReviewHandoffResult = {
+  conversationId: string;
+  route: string;
+  idempotentReplay: boolean;
+  reviewHandoff: ReviewHandoffSummary;
 };
 export type Conversation = {
   id: string;
@@ -39,6 +61,7 @@ export type Conversation = {
   assistantProfileId?: string | null;
   productKey?: string | null;
   imported?: ImportedTranscript;
+  reviewHandoff?: true | ReviewHandoffSummary;
 };
 export type MobileImageGroup = {
   status: string;
@@ -99,9 +122,15 @@ export interface ChatTransport {
   imageRequest?(key: string): Promise<{ groupId: string; conversationId: string }>;
   listReview?(): Promise<ChatSummary[]>;
   createReview?(models: string[], assistantProfileId?: string): Promise<Conversation>;
+  prepareReviewHandoff?(id: string, input: { assistantMessageId: string; idempotencyKey: string }, signal?: AbortSignal): Promise<ReviewHandoffResult>;
+  reviewHandoffDraft?: {
+    get(id: string): Promise<ReviewHandoffDraftEnvelope>;
+    put(id: string, input: { text: string; attachmentReferences: []; expectedRevision: number }): Promise<ReviewHandoffDraftEnvelope>;
+    remove(id: string, expectedRevision: number): Promise<ReviewHandoffDraftEnvelope>;
+  };
   configureReview?(id: string, models: string[]): Promise<Conversation>;
   routeReview?(input: { text: string; context: string; providers: string[]; hasImages: boolean }): Promise<import("../../../lib/reviewRoutingCore").ReviewRouteDecision>;
-  sendReview?(conversation: Conversation, text: string, files: MobileAttachment[], signal: AbortSignal, progress: (modelId: string, text: string) => void): Promise<{ failedModelIds: string[] }>;
+  sendReview?(conversation: Conversation, text: string, files: MobileAttachment[], signal: AbortSignal, progress: (modelId: string, text: string) => void, draft?: { revision: number }): Promise<{ failedModelIds: string[] }>;
   mobileCapabilities?(refresh?: boolean): Promise<MobileCapabilities>;
   usage?(): Promise<AccountUsage>;
   generateTitle?(conversation: Conversation): Promise<string | null>;

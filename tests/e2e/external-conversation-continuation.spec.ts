@@ -2376,49 +2376,175 @@ test.describe("a continuation opens in its product's workspace", () => {
         expect(api.createBodies).toHaveLength(0);
     });
 
-    test("a Chat answer opens its question, with earlier questions, as a new Review draft", async ({
-        page,
-    }) => {
-        /*
-          Owner request 2026-10-26: a way from Chat to Review. The Chat
-          conversation stays as it is; the answer's question opens as a Review
-          draft the user sends themselves (lib/chatReviewHandoff.ts).
-        */
-        await prepareGuestPage(page, "ko");
+    test("an answer handoff opens a durable long question and restores edited target drafts without executing", async ({ page }) => {
+        await prepareGuestPage(page, "en");
         await mockAuthenticatedApi(page, { autoSelectionOffered: true });
-        const api = await mockContinuationApi(page, {
-            product: "chat",
-            tomverseMessages: [
-                { id: "q1", role: "user", content: "도쿄 3일 여행 계획 짜줘" },
-                { id: "r1", role: "assistant", content: "1일차 ...", modelId: PRIMARY_MODEL },
-                { id: "q2", role: "user", content: "더 저렴하게" },
-                { id: "r2", role: "assistant", content: "저렴한 계획 ...", modelId: PRIMARY_MODEL },
-            ],
-        });
+        const question = "Use the second option under those conditions. " + "More detail. ".repeat(120);
+        const api = await mockContinuationApi(page, { product: "chat", tomverseMessages: [
+            { id: "q1", role: "user", content: "Give me two Kyoto itineraries under AUD 1,500." },
+            { id: "r1", role: "assistant", content: "First option A; second option B.", modelId: PRIMARY_MODEL },
+            { id: "q2", role: "user", content: question },
+            { id: "r2", role: "assistant", content: "The clicked answer must not be a reference.", modelId: PRIMARY_MODEL },
+        ] });
+        const target = "qa-answer-review-handoff";
+        const preview = { status: "available", sourceMode: "legacy", nativeTurnCount: 2, nativeOmittedCount: 1,
+            sourceTurnCount: 2, sourceOmittedCount: 0, attachmentsSupported: false };
+        const handoffBodies: Array<{ assistantMessageId: string; idempotencyKey: string }> = [];
+        let draft: { scopeKey: string; text: string; attachmentReferences: never[]; attachments: never[]; revision: number; createdAt: string; updatedAt: string } | null = {
+            scopeKey: target, text: question, attachmentReferences: [], attachments: [], revision: 1,
+            createdAt: "2026-11-15T00:00:00.000Z", updatedAt: "2026-11-15T00:00:00.000Z",
+        };
         await mockConversationList(page, [
-            {
-                id: CONVERSATION_ID,
-                title: "Continued from an imported chat",
-                surface: "continuation",
-                sourceTitle: SOURCE_CONVERSATION_TITLE,
-            },
+            { id: CONVERSATION_ID, title: "Original Chat", surface: "continuation" },
+            { id: target, title: "Independent Review", surface: "continuation" },
         ]);
+        await page.route(`**/api/conversations/${CONVERSATION_ID}/continuation/review-handoff`, route => {
+            handoffBodies.push(route.request().postDataJSON());
+            return route.fulfill(json({ conversationId: target, route: `/continuations/${target}`, reviewHandoff: preview }, 201));
+        });
+        await page.route(new RegExp(`.*/api/conversations/${target}(\\?.*)?$`), route => route.fulfill(json({
+            id: target, title: "Independent Review", surface: "continuation", productKey: "review", kind: "chat", reviewHandoff: true,
+            selectedModels: [PRIMARY_MODEL], storedSelectedModels: [PRIMARY_MODEL], disabledPanels: [], selectionMode: "manual",
+            webSearchMode: "off", messages: [], messagePage: { hasMore: false, nextCursor: null },
+        })));
+        await page.route(`**/api/conversations/${target}/continuation?*`, route => route.fulfill(json({
+            conversationId: target, provider: "chatgpt", importedAt: "2026-11-15T00:00:00.000Z", reviewHandoff: preview,
+            seed: { messageCount: 2, truncatedMessageCount: 0, omittedMessageCount: 0 },
+            source: { status: "available", title: "Original", messageTotal: 2, offset: 0, limit: 100, messages: importedMessages() },
+        })));
+        await page.route(`**/api/conversations/${target}/continuation/review-handoff/draft`, route => {
+            if (route.request().method() === "PUT") {
+                const body = route.request().postDataJSON();
+                if (body.expectedRevision !== (draft?.revision ?? 0)) return route.fulfill(json({
+                    code: "CHAT_DRAFT_REVISION_CONFLICT", currentRevision: draft?.revision ?? null, currentDraft: draft,
+                }, 409));
+                draft = { ...draft!, scopeKey: target, text: body.text, attachmentReferences: [], attachments: [], revision: body.expectedRevision + 1 };
+            }
+            if (route.request().method() === "DELETE") { draft = null; return route.fulfill({ status: 204 }); }
+            return route.fulfill(json({ scopeKey: target, draft }));
+        });
+        const consumed: unknown[] = [];
+        const targetQuestions: string[] = [];
+        await page.route(`**/api/conversations/${target}/messages`, route => {
+            const body = route.request().postDataJSON();
+            const message = body.messages[0];
+            if (message.role === "user" && (!draft || body.draftConsume?.scopeKey !== target || body.draftConsume.expectedRevision !== draft.revision || message.content !== draft.text)) {
+                return route.fulfill(json({ code: "CHAT_DRAFT_REVISION_CONFLICT" }, 409));
+            }
+            if (message.role === "user") {
+                consumed.push(body.draftConsume);
+                targetQuestions.push(message.content);
+                draft = null;
+            }
+            return route.fulfill(json({ success: true, created: 1, draftConsumed: message.role === "user", attachments: [],
+                messageMappings: [{ requestId: message.clientRequestId, messageId: qaPersistedMessageId(target, message.clientRequestId) }],
+            }, 201));
+        });
         await page.goto(`/continuations/${CONVERSATION_ID}`);
-
-        const compare = page.getByTestId("chat-compare-in-review");
-        // One per finished Tomverse answer; never on an imported bubble.
-        await expect(compare).toHaveCount(2);
-        await expect(
-            page.locator('[data-message-source="imported"]').getByTestId("chat-compare-in-review")
-        ).toHaveCount(0);
-        await compare.last().click();
-
-        await expect(page).toHaveURL(/\/review(\?|$)/);
-        await expect(page.getByTestId("chat-textarea")).toHaveValue(
-            "이전 질문:\n- 도쿄 3일 여행 계획 짜줘\n\n더 저렴하게"
-        );
-        // Prefilled, not sent.
+        await expect(page.getByTestId("chat-compare-in-review")).toHaveCount(2);
+        await page.getByTestId("chat-compare-in-review").last().click();
+        await expect(page).toHaveURL(new RegExp(`/continuations/${target}$`));
+        await expect(page.getByTestId("chat-textarea")).toHaveValue(question);
+        await expect(page.getByTestId("review-context-handoff-notice")).toContainText("Some original context cannot be restored");
+        await expect(page.getByTestId("review-context-handoff-notice")).toContainText("Every selected model");
+        expect(handoffBodies).toHaveLength(1);
+        expect(Object.keys(handoffBodies[0]).sort()).toEqual(["assistantMessageId", "idempotencyKey"]);
+        expect(handoffBodies[0].assistantMessageId).toBe("r2");
+        expect(handoffBodies[0].idempotencyKey).toMatch(/^[0-9a-f-]{36}$/);
+        expect(page.url()).not.toContain("prompt=");
+        const browserStorage = await page.evaluate(() => JSON.stringify({ ...localStorage }));
+        expect(browserStorage).not.toContain("First option A; second option B.");
+        expect(browserStorage).not.toContain("You decided to expand first and contract later.");
+        const edited = `${question} Please add a quiet morning.`;
+        await page.getByTestId("chat-textarea").fill(edited);
+        await expect.poll(() => draft?.text).toBe(edited);
+        await page.reload();
+        await expect(page.getByTestId("chat-textarea")).toHaveValue(edited);
+        await page.goBack();
+        await expect(page).toHaveURL(new RegExp(`/continuations/${CONVERSATION_ID}$`));
+        await page.goForward();
+        await expect(page.getByTestId("chat-textarea")).toHaveValue(edited);
         expect(api.chatRequests).toBe(0);
+        expect(api.savedMessages).toHaveLength(0);
+        expect(api.preflightBodies).toHaveLength(0);
+        expect(api.reviewForkBodies).toHaveLength(0);
+        // Another tab wins a revision; no send or navigation can consume its
+        // draft until this tab explicitly chooses how to resolve the conflict.
+        draft = { ...draft!, text: "An edit from another tab", revision: draft!.revision + 1 };
+        const localAfterConflict = `${edited} Keep this local edit.`;
+        await page.getByTestId("chat-textarea").fill(localAfterConflict);
+        await expect(page.getByTestId("draft-conflict-dialog")).toBeVisible();
+        expect(api.chatRequests).toBe(0);
+        expect(consumed).toHaveLength(0);
+        await page.getByTestId("draft-conflict-overwrite-local").click();
+        await expect.poll(() => draft?.text).toBe(localAfterConflict);
+        await page.getByTestId("chat-send-button").click();
+        await expect.poll(() => consumed.length).toBe(1);
+        await expect.poll(() => api.chatRequests).toBe(1);
+        expect(targetQuestions).toEqual([localAfterConflict]);
+        await expect(page.getByTestId("chat-textarea")).toHaveValue("");
+        await page.reload();
+        await expect(page.getByTestId("chat-textarea")).toHaveValue("");
+        expect(draft).toBeNull();
+        expect(api.chatRequests).toBe(1);
+    });
+
+    test("answer handoff A to B to A starts new keys and ignores the first late response", async ({ page }) => {
+        await prepareGuestPage(page, "en");
+        await mockAuthenticatedApi(page, { autoSelectionOffered: true });
+        const api = await mockContinuationApi(page, { product: "chat", tomverseMessages: [
+            { id: "q1", role: "user", content: "Question A" },
+            { id: "r1", role: "assistant", content: "Answer A", modelId: PRIMARY_MODEL },
+            { id: "q2", role: "user", content: "Question B" },
+            { id: "r2", role: "assistant", content: "Answer B", modelId: PRIMARY_MODEL },
+        ] });
+        await mockConversationList(page, [{ id: CONVERSATION_ID, title: "Original Chat", surface: "continuation" }]);
+        const bodies: Array<{ assistantMessageId: string; idempotencyKey: string }> = [];
+        let releaseFirst: (() => void) | undefined;
+        await page.route(`**/api/conversations/${CONVERSATION_ID}/continuation/review-handoff`, async route => {
+            bodies.push(route.request().postDataJSON());
+            if (bodies.length === 1) {
+                await new Promise<void>(resolve => { releaseFirst = resolve; });
+                await route.fulfill(json({ conversationId: REVIEW_FORK_ID }, 201));
+            } else await route.fulfill(json({ code: "REVIEW_HANDOFF_UNAVAILABLE" }, 409));
+        });
+        await page.goto(`/continuations/${CONVERSATION_ID}`);
+        const compare = page.getByTestId("chat-compare-in-review");
+        await expect(compare).toHaveCount(2);
+        await compare.first().click();
+        await expect.poll(() => bodies.length).toBe(1);
+        await compare.last().click();
+        await expect.poll(() => bodies.length).toBe(2);
+        await expect(page.getByTestId("review-context-handoff-notice")).toContainText("could not be prepared");
+        await compare.first().click();
+        await expect.poll(() => bodies.length).toBe(3);
+        expect(bodies.map(body => body.assistantMessageId)).toEqual(["r1", "r2", "r1"]);
+        expect(new Set(bodies.map(body => body.idempotencyKey)).size).toBe(3);
+        const staleResponse = page.waitForResponse(response => response.url().endsWith("/continuation/review-handoff") && response.status() === 201);
+        releaseFirst?.();
+        await staleResponse;
+        await expect(page.getByTestId("review-context-handoff-notice")).toContainText("could not be prepared");
+        await expect(page).toHaveURL(new RegExp(`/continuations/${CONVERSATION_ID}$`));
+        expect(api.chatRequests).toBe(0);
+    });
+
+    test("an attachment-dependent answer handoff explains refusal without a prompt URL fallback", async ({ page }) => {
+        await prepareGuestPage(page, "en");
+        await mockAuthenticatedApi(page, { autoSelectionOffered: true });
+        const api = await mockContinuationApi(page, { product: "chat", tomverseMessages: [
+            { id: "q1", role: "user", content: "Use the attached plan." },
+            { id: "r1", role: "assistant", content: "Saved answer", modelId: PRIMARY_MODEL },
+        ] });
+        await mockConversationList(page, [{ id: CONVERSATION_ID, title: "Original Chat", surface: "continuation" }]);
+        await page.route(`**/api/conversations/${CONVERSATION_ID}/continuation/review-handoff`, route =>
+            route.fulfill(json({ code: "REVIEW_HANDOFF_ATTACHMENTS_UNSUPPORTED" }, 409)));
+        await page.goto(`/continuations/${CONVERSATION_ID}`);
+        await page.getByTestId("chat-compare-in-review").click();
+        await expect(page.getByTestId("review-context-handoff-notice")).toContainText("attachments are not supported");
+        await expect(page).toHaveURL(new RegExp(`/continuations/${CONVERSATION_ID}$`));
+        expect(api.chatRequests).toBe(0);
+        expect(api.reviewForkBodies).toHaveLength(0);
+        expect(api.createBodies).toHaveLength(0);
     });
 
     test("a Review continuation is the Review workspace, with no Chat-only controls", async ({
