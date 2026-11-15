@@ -1,4 +1,5 @@
 import { isCanonicalRepoPath } from "@/lib/agentAuthorityFiles";
+import { v22PatchBinaryPayloads } from "@/lib/amux/v22PatchBinary";
 import { AMUX_V22_PATCH_MAX_BYTES } from "@/lib/amux/v22PatchLimit";
 import { detectSecrets } from "@/lib/engineeringAgentSecretPatterns";
 import { createHash } from "node:crypto";
@@ -61,10 +62,27 @@ export function checkV22PublishFiles(files: readonly V22PublishFile[],
   return checked;
 }
 
+const utf8Strict = new TextDecoder("utf-8", { fatal: true });
+const latin1 = new TextDecoder("latin1");
+
+/** A secret in the patch text, or inside a binary file it carries (whose
+ * bytes are base85 text of deflated data, so the text shows none of them).
+ * A binary section that cannot be read cannot be shown clean. */
+function patchCarriesSecret(text: string): boolean {
+  if (detectSecrets(text).length) return true;
+  const payloads = v22PatchBinaryPayloads(text);
+  if (payloads === null) return true;
+  return payloads.some((payload) => {
+    let content: string;
+    try { content = utf8Strict.decode(payload); } catch { content = latin1.decode(payload); }
+    return detectSecrets(content).length > 0;
+  });
+}
+
 /** Sparse file evidence is never publication authority by itself. */
 export function encodeV22PatchEvidence(text: string,
   files?: readonly V22PublishFile[]): Buffer {
-  if (!text.startsWith("diff --git ") || detectSecrets(text).length)
+  if (!text.startsWith("diff --git ") || patchCarriesSecret(text))
     throw new Error("invalid_patch_evidence");
   if (!files) {
     const bytes = Buffer.from(text, "utf8");

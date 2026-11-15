@@ -1,6 +1,5 @@
-import { inflateSync } from "node:zlib";
-
 import { isCanonicalRepoPath } from "@/lib/agentAuthorityFiles";
+import { decodeV22Base85, inflateV22BinaryHunk } from "@/lib/amux/v22PatchBinary";
 import { AMUX_V22_FILE_MAX_BYTES } from "@/lib/amux/v22PatchLimit";
 import { gitObjectId } from "@/lib/engineeringAgentTreeVerify";
 
@@ -125,49 +124,6 @@ function markerPath(line: string, marker: string, prefix: string):
   if (name.endsWith("\t")) name = name.slice(0, -1);
   return stripPrefix(unquote(name), prefix) ?? undefined;
 }
-
-const B85 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz" +
-  "!#$%&()*+-;<=>?@^_`{|}~";
-const B85_VALUE = new Map(Array.from(B85, (char, index) => [char, index]));
-
-/** Git's base85 lines: a length letter, then five characters per four bytes. */
-function decodeBase85(lines: readonly string[]): Uint8Array | null {
-  const counts = lines.map((line) => {
-    const code = line.charCodeAt(0);
-    return code >= 65 && code <= 90 ? code - 64 :
-      code >= 97 && code <= 122 ? code - 70 : 0;
-  });
-  if (counts.some((count, index) => count === 0 ||
-      lines[index].length !== 1 + Math.ceil(count / 4) * 5)) return null;
-  const total = counts.reduce((sum, count) => sum + count, 0);
-  if (total > AMUX_V22_FILE_MAX_BYTES) return null;
-  const out = Buffer.alloc(total);
-  let offset = 0;
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index];
-    let left = counts[index];
-    for (let at = 1; at < line.length; at += 5) {
-      let value = 0;
-      for (let k = 0; k < 5; k += 1) {
-        const digit = B85_VALUE.get(line[at + k]);
-        if (digit === undefined) return null;
-        value = value * 85 + digit;
-      }
-      if (value > 0xffffffff) return null;
-      for (let k = 3; k >= 0 && left > 0; k -= 1, left -= 1)
-        out[offset++] = (value >>> (8 * k)) & 0xff;
-    }
-  }
-  return out;
-}
-
-const inflate = (data: Uint8Array, size: number): Uint8Array | null => {
-  if (size > AMUX_V22_FILE_MAX_BYTES) return null;
-  try {
-    const out = inflateSync(data, { maxOutputLength: Math.max(size, 1) });
-    return out.length === size ? out : null;
-  } catch { return null; }
-};
 
 /** Git's delta: the base and result sizes, then copy and insert commands. */
 function applyDelta(base: Uint8Array, delta: Uint8Array): Uint8Array | null {
@@ -338,7 +294,7 @@ export function parseV22GitDiff(text: string): Parsed {
         const data: string[] = [];
         while (i < lines.length && lines[i] !== "") data.push(lines[i++]);
         if (lines[i++] !== "") return null;
-        const bytes = decodeBase85(data);
+        const bytes = decodeV22Base85(data);
         const size = Number(header[2]);
         return bytes && Number.isSafeInteger(size) ? { kind:
           header[1] as V22BinaryHunk["kind"], size, data: bytes } : null;
@@ -441,7 +397,7 @@ export function applyV22FileDiff(base: Uint8Array | null,
   if (file.body.kind === "text") next = applyHunks(before, file.body.hunks);
   else if (file.body.kind === "binary") {
     const { forward } = file.body;
-    const data = inflate(forward.data, forward.size);
+    const data = inflateV22BinaryHunk(forward.data, forward.size);
     next = data === null ? null : forward.kind === "literal" ? data :
       applyDelta(before, data);
   } else next = file.newPath === null ? new Uint8Array() : before;
