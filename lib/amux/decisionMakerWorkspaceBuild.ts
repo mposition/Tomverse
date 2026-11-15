@@ -149,7 +149,7 @@ export const DM_WORKSPACE_GIT_FLAGS = [
 ];
 
 /** The fixed environment of the system's git: no variable of the broker's own. */
-export const dmWorkspaceSystemGitEnvironment = (home: string): NodeJS.ProcessEnv => ({
+export const dmWorkspaceSystemGitEnvironment = (home: string): Record<string, string> => ({
   PATH: "/usr/bin:/bin",
   HOME: home,
   LANG: "C.UTF-8",
@@ -166,14 +166,14 @@ export const dmWorkspaceSystemGitEnvironment = (home: string): NodeJS.ProcessEnv
  * step resolves only once git has exited. Off POSIX (the test host on
  * Windows) only git itself is killed.
  */
-const runGit = (executable: string, env: NodeJS.ProcessEnv, extraFlags: string[]): DmGitRunner =>
+const runGit = (executable: string, env: Record<string, string | undefined>, extraFlags: string[]): DmGitRunner =>
   (args, options) =>
     new Promise((resolve) => {
       const posix = process.platform !== "win32";
       let child: ReturnType<typeof spawn>;
       try {
         child = spawn(executable, [...DM_WORKSPACE_GIT_FLAGS, ...extraFlags, ...args],
-          { cwd: options.cwd, env, detached: posix, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
+          { cwd: options.cwd, env: env as NodeJS.ProcessEnv, detached: posix, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
       } catch {
         resolve({ ok: false, stdout: "" });
         return;
