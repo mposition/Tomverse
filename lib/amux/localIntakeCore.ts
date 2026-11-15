@@ -1,6 +1,7 @@
 import { createHash, createHmac } from "node:crypto";
 
 import { amuxCanonicalJson } from "./boardImportCore.ts";
+import { AMUX_INTAKE_SAFETY_MAX_BYTES, amuxIntakeLegacyLimits } from "./intakeLimitsCore.ts";
 
 /**
  * Local Frontier analysis packages for AMUX intake.
@@ -224,8 +225,11 @@ export const amuxV4RepositoryContainsSecret = v4SecretPattern;
 // contains it, so a.support@tomverse.app or support@tomverse.app.evil.com still counts.
 const PUBLIC_SUPPORT_EMAIL = /(?<![A-Za-z0-9._%+-])support@tomverse\.app(?![A-Za-z0-9-]|\.[A-Za-z0-9])/gi;
 
+// The same match as `[A-Za-z0-9._%+-]+@...`, anchored on the "@": the former
+// form retried a long run of address characters from every start, which was
+// quadratic once a text may be megabytes long (owner direction 2026-11-15).
 const emailPattern = (value: string): boolean =>
-  /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/.test(value.replace(PUBLIC_SUPPORT_EMAIL, " "));
+  /(?<=[A-Za-z0-9._%+-])@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/.test(value.replace(PUBLIC_SUPPORT_EMAIL, " "));
 
 const phonePattern = (value: string): boolean => /\b\d{3}[-. ]\d{3}[-. ]\d{4}\b/.test(value);
 
@@ -248,10 +252,11 @@ const privateUrl = (value: string): boolean => {
 const scanIntakeInputWithSecret = (
   value: string,
   hasSecret: (value: string) => boolean,
+  maxBytes: number,
 ): { ok: true } | { ok: false; code: string } => {
   if (typeof value !== "string") return { ok: false, code: "schema_rejected" };
   if (bytes(value) < 1) return { ok: false, code: "metadata_incomplete" };
-  if (bytes(value) > LOCAL_INTAKE_INPUT_MAX_BYTES) return { ok: false, code: "too_large" };
+  if (bytes(value) > maxBytes) return { ok: false, code: "too_large" };
   if (controlChar(value)) return { ok: false, code: "control_character" };
   if (hasSecret(value)) return { ok: false, code: "secret" };
   if (emailPattern(value) || phonePattern(value)) return { ok: false, code: "personal_data" };
@@ -260,13 +265,19 @@ const scanIntakeInputWithSecret = (
   return { ok: true };
 };
 
-/** Operator text, before any v3 model process starts. */
-export const scanLocalIntakeInput = (value: string): { ok: true } | { ok: false; code: string } =>
-  scanIntakeInputWithSecret(value, secretPattern);
+/** Operator text, before any v3 model process starts. The v4 idea input passes
+ * its own size ceiling (lib/amux/ideaInputCore.ts); v3 keeps 8 KiB. */
+export const scanLocalIntakeInput = (value: string,
+  maxBytes: number = LOCAL_INTAKE_INPUT_MAX_BYTES): { ok: true } | { ok: false; code: string } =>
+  scanIntakeInputWithSecret(value, secretPattern, maxBytes);
 
-/** Separate v4 input gate; this does not change the already enabled v3 path. */
+/** Separate v4 input gate; this does not change the already enabled v3 path.
+ * Owner direction 2026-11-15: the AMUX idea flow refuses text for its content
+ * (secrets, personal data, paths, private hosts), not its length; the former
+ * 8 KiB holds only under TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS. */
 export const scanAmuxV4Input = (value: string): { ok: true } | { ok: false; code: string } =>
-  scanIntakeInputWithSecret(value, v4SecretPattern);
+  scanIntakeInputWithSecret(value, v4SecretPattern,
+    amuxIntakeLegacyLimits() ? LOCAL_INTAKE_INPUT_MAX_BYTES : AMUX_INTAKE_SAFETY_MAX_BYTES);
 
 const proseRefused = (value: string): string | null => {
   if (controlChar(value)) return "control_character";

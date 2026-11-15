@@ -9,6 +9,7 @@ import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import { prisma } from "@/lib/prisma";
 import { amuxCanonicalJson } from "./boardImportCore.ts";
+import { amuxIntakeCap } from "./intakeLimitsCore.ts";
 import { inspectAmuxStoredAnalysisUnit, amuxAnalysisTextSafe,
   type AmuxAnalysisCard } from "./ideaAnalysisChunkCore.ts";
 import { amuxContentDigest, openAmuxContent, sealAmuxContent,
@@ -57,7 +58,8 @@ function assertShape(input: AmuxDerivationInput): void {
       !UUID.test(input.requestId) || !["split", "merge"].includes(input.operation) ||
       !Array.isArray(input.sourceUnitIds) || !Array.isArray(input.targetUnitIds) ||
       !Array.isArray(input.cards) || input.targetUnitIds.length !== input.cards.length ||
-      input.sourceUnitIds.length > 40 || input.targetUnitIds.length > 40 ||
+      input.sourceUnitIds.length > amuxIntakeCap(40) ||
+      input.targetUnitIds.length > amuxIntakeCap(40) ||
       (input.operation === "split" ?
         input.sourceUnitIds.length !== 1 || input.cards.length < 2 :
         input.sourceUnitIds.length < 2 || input.cards.length !== 1) ||

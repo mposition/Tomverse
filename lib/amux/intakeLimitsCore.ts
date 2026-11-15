@@ -21,6 +21,10 @@ const readSwitch = (): string | undefined =>
 export const amuxIntakeLegacyLimits = (value: string | undefined = readSwitch()): boolean =>
   value === "enabled";
 
+/** A former length or count limit: itself under the switch, otherwise none. */
+export const amuxIntakeCap = (former: number, legacy: boolean = amuxIntakeLegacyLimits()): number =>
+  legacy ? former : Number.POSITIVE_INFINITY;
+
 /**
  * The one ceiling left on a single model answer or request body in this flow.
  * It is not a policy limit: no model returns more than about 128k output

@@ -312,8 +312,8 @@ test("session submission encrypts idea and provenance under the scope owner with
   assert.equal(row.sessionOperatingScopeSettingId, authority.settingId);
   assert.equal(row.submissionAuditLogId, audit.id);
   // The session path stores the same plaintext list title as the owner path.
-  assert.ok(row.title?.startsWith("Synthetic session idea " + committedIdeaId));
-  assert.ok(Array.from(row.title ?? "").length <= 80);
+  // Owner direction 2026-11-15: the whole first line, with no 80-character cut.
+  assert.equal(row.title, "Synthetic session idea " + committedIdeaId + oversizedIdeaTail);
   assert.equal(row.sourceProvenanceKeyId, row.rawKeyId);
   assert.equal(row.sourceProvenanceKeyVersion, row.rawKeyVersion);
   assert.notEqual(row.sourceProvenanceDigest, row.rawDigest);

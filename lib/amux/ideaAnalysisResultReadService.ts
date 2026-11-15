@@ -10,6 +10,7 @@ import { prisma } from "@/lib/prisma";
 import { amuxAnalysisTextSafe, inspectAmuxAnalysisChunk,
   inspectAmuxStoredAnalysisUnit } from "./ideaAnalysisChunkCore.ts";
 import { amuxAnalysisFreeformSubjectId } from "./ideaAnalysisDraftSealCore.ts";
+import { amuxIntakeCap } from "./intakeLimitsCore.ts";
 import { matchesAmuxIdeaAnalysisUnitCommitments } from
   "./ideaAnalysisResultReadCore.ts";
 import type { AmuxIdeaAnalysisResultView, AmuxVisibleAnalysisUnit } from
@@ -151,7 +152,7 @@ export async function readAmuxFirstIdeaAnalysisResultForDataOwner(
         !(needsOwnerInput ? meta.outcome === "needs_information" :
           partial ? meta.outcome === "propose" :
           ["propose", "reject"].includes(String(meta.outcome))) ||
-        units.length > 40) {
+        units.length > amuxIntakeCap(40)) {
       throw new AmuxIdeaAnalysisResultReadError("integrity_unavailable");
     }
     if (partial) {

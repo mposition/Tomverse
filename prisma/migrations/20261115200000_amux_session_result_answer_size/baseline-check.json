@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "migrationSqlSha256": "25eb2a1e92c04ad939731523f8907f7e9ed9dc3d424916b99dea462c0c4a0730",
+  "replacedChecks": [
+    {
+      "table": "AmuxIdeaSessionAnalysisResult",
+      "constraint": "AmuxIdeaSessionAnalysisResult_shape_check",
+      "previousDefinitionSha256": "dbb32fc9bfc27aa60980c14e19519f7549f8a658f30d720d77d2feb410883835"
+    }
+  ]
+}

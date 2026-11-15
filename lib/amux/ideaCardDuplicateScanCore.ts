@@ -1,4 +1,5 @@
 import { amuxCanonicalJson } from "./boardImportCore.ts";
+import { amuxIntakeCap } from "./intakeLimitsCore.ts";
 import { amuxContentDigest, type AmuxDigestKey } from "./ideaCrypto.ts";
 import type { AmuxIdeaDuplicateScan } from "./ideaUnitConfirmationCore.ts";
 
@@ -39,7 +40,7 @@ export function scanAmuxCardDuplicates(input: {
 }): AmuxCardDuplicateScanResult {
   if (!input || !ID.test(input.unitId) || !ID.test(input.featureNodeId) ||
       typeof input.title !== "string" || input.title.length < 1 ||
-      input.title.length > 200 || !["story", "task"].includes(input.cardType) ||
+      input.title.length > amuxIntakeCap(200) || !["story", "task"].includes(input.cardType) ||
       (input.cardType === "story" ? !["general", "bug"].includes(input.storyKind ?? "") :
         input.storyKind !== null) || !Array.isArray(input.explicitRefs) ||
       input.explicitRefs.some((ref) => !ID.test(ref)) ||

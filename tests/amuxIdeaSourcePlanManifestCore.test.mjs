@@ -76,12 +76,23 @@ test("malformed identities, units and key configuration hold without raw echo", 
   assert.deepEqual(buildAmuxSourcePlanManifest(plan(),
     { digestKeyId: "synthetic", digestKey: Buffer.alloc(3) }),
   { decision: "hold", reason: "invalid_key" });
-  for (const orderedUnits of [[], [unit("")], [unit("x".repeat(AMUX_SOURCE_PLAN_UNIT_MAX_BYTES + 1))],
+  for (const orderedUnits of [[], [unit("")], [unit("x".repeat(4 * 1024 * 1024 + 1))],
     [unit("x", "unknown")], [unit("x", "operator_idea", "not-a-digest")],
     [unit("x"), , unit("z")]]) {
     assert.deepEqual(buildAmuxSourcePlanManifest(plan({ orderedUnits }), key),
       { decision: "hold", reason: "invalid_units" });
   }
+});
+
+test("a session idea past the former 8 KiB unit limit still gets a source plan", () => {
+  // Owner direction 2026-11-15; the legacy switch restores the former limit.
+  const large = [unit("x".repeat(AMUX_SOURCE_PLAN_UNIT_MAX_BYTES + 1))];
+  assert.equal(buildAmuxSourcePlanManifest(plan({ orderedUnits: large }), key).decision, "ready");
+  process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS = "enabled";
+  try {
+    assert.deepEqual(buildAmuxSourcePlanManifest(plan({ orderedUnits: large }), key),
+      { decision: "hold", reason: "invalid_units" });
+  } finally { delete process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS; }
 });
 
 test("accessor-bearing unit arrays and records are refused", () => {

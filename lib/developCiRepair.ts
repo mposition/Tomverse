@@ -17,13 +17,16 @@ import type { Session } from "next-auth";
 
 import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { isAdminOwnerAccount } from "@/lib/adminAuth";
-import { AMUX_IDEA_INPUT_MAX_BYTES } from "@/lib/amux/ideaInputCore";
+import { AMUX_IDEA_INPUT_MAX_BYTES, amuxIdeaInputMaxBytes, inspectAmuxIdeaInput } from
+  "@/lib/amux/ideaInputCore";
+import { AMUX_INTAKE_SAFETY_MAX_BYTES, amuxIntakeLegacyLimits } from "@/lib/amux/intakeLimitsCore";
 import { amuxIdeaLaneEnabled, amuxIdeaLaneState } from "@/lib/amux/ideaLaneCore";
 import { inspectAmuxIdeaSubmission } from "@/lib/amux/ideaSubmissionCore";
 import { SystemIdeaRefused, submitSystemIdea } from "@/lib/amux/ideaTraceReportSubmissionService";
 import {
   DEVELOP_CI_REPAIR_IDEA_ACTION,
   DEVELOP_CI_REPAIR_IDEA_TARGET,
+  DEVELOP_CI_REPAIR_LOG_TAIL_CHARS,
   DEVELOP_CI_REPAIR_MAX_JOBS,
   DEVELOP_CI_REPAIR_MODE_SETTING_KEY,
   DEVELOP_CI_REPAIR_PER_DAY,
@@ -112,18 +115,31 @@ export const readDevelopJobLogTail = async (
       await response.body?.cancel().catch(() => undefined);
       return null;
     }
+    // Owner direction 2026-11-15: the whole log, up to the idea's 4 MiB safety
+    // ceiling, so the coding run reads all of it; the former 64 KiB read and
+    // 6,000-character tail hold only under TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS.
+    const legacy = amuxIntakeLegacyLimits();
+    const keepBytes = legacy ? LOG_KEEP_BYTES : AMUX_INTAKE_SAFETY_MAX_BYTES;
     const reader = response.body.getReader();
-    let kept = new Uint8Array(0);
+    const chunks: Uint8Array[] = [];
+    let total = 0;
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      const joined = new Uint8Array(kept.byteLength + value.byteLength);
-      joined.set(kept, 0);
-      joined.set(value, kept.byteLength);
-      kept = joined.byteLength > LOG_KEEP_BYTES ? joined.slice(joined.byteLength - LOG_KEEP_BYTES) : joined;
+      chunks.push(value);
+      total += value.byteLength;
+      // Drop whole chunks from the front while the rest still holds the tail.
+      while (chunks.length > 1 && total - chunks[0]!.byteLength >= keepBytes) {
+        total -= chunks.shift()!.byteLength;
+      }
     }
+    const joined = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) { joined.set(chunk, offset); offset += chunk.byteLength; }
+    const kept = joined.byteLength > keepBytes ? joined.slice(joined.byteLength - keepBytes) : joined;
     // A cut may split a character at the start; the decoder replaces only that one.
-    return developCiLogTail(new TextDecoder("utf-8").decode(kept));
+    const text = new TextDecoder("utf-8").decode(kept);
+    return developCiLogTail(text, legacy ? DEVELOP_CI_REPAIR_LOG_TAIL_CHARS : text.length);
   } catch {
     return null;
   }
@@ -183,6 +199,11 @@ export const readDevelopCiRepairFacts = async (headSha: string, now: Date, db: D
     submittedToday,
   };
 };
+
+/** The same input check the submission runs, so a refused whole-log idea falls
+ * back before anything is written. */
+const developCiRepairIdeaAdmitted = (idea: string) =>
+  inspectAmuxIdeaInput(JSON.stringify({ version: 1, idea, repositories: [], pullRequests: [] })).ok;
 
 const admissible = (facts: DevelopCiRepairFacts) =>
   !facts.submittedForHead && !facts.repairInFlight && facts.submittedToday < DEVELOP_CI_REPAIR_PER_DAY;
@@ -280,13 +301,21 @@ export const runDevelopCiRepairQuietly = async ({
     });
     if (JSON.stringify(decision.state) !== JSON.stringify(state)) await writeState(decision.state);
     if (decision.action === "none") return report({ outcome: "none", reason: decision.reason });
-    const jobs = decision.checks.slice(0, DEVELOP_CI_REPAIR_MAX_JOBS);
+    // Owner direction 2026-11-15: every failed job and its whole log. The
+    // former three jobs and 6,000-character tails come back under the legacy
+    // switch, and as the fallback when the whole logs trip the idea's
+    // secret or personal-data scan (a test fixture can look like a secret), so
+    // a repair is never lost to a log line.
+    const legacy = amuxIntakeLegacyLimits();
+    const jobs = legacy ? decision.checks.slice(0, DEVELOP_CI_REPAIR_MAX_JOBS) : decision.checks;
     const tails = await Promise.all(jobs.map((check) => readLogTail(check.id).catch(() => null)));
-    const idea = developCiRepairIdea({
-      headSha: decision.headSha,
-      checks: jobs.map((check, index) => ({ ...check, logTail: tails[index] ?? null })),
-      maxBytes: AMUX_IDEA_INPUT_MAX_BYTES,
-    });
+    const checks = jobs.map((check, index) => ({ ...check, logTail: tails[index] ?? null }));
+    const former = () => developCiRepairIdea({ headSha: decision.headSha,
+      checks: checks.slice(0, DEVELOP_CI_REPAIR_MAX_JOBS), maxBytes: AMUX_IDEA_INPUT_MAX_BYTES });
+    const whole = legacy ? null : developCiRepairIdea({ headSha: decision.headSha, checks,
+      maxBytes: amuxIdeaInputMaxBytes(false),
+      tailChars: Math.max(1, ...checks.map((check) => check.logTail?.length ?? 0)) });
+    const idea = whole !== null && developCiRepairIdeaAdmitted(whole) ? whole : former();
     try {
       const { ideaId } = await submit({ ownerUserId: owner.id, headSha: decision.headSha, idea, checks: decision.checks.length, now });
       return report({ outcome: "submitted", ideaId });
