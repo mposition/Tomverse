@@ -5,6 +5,7 @@ export const MAX_SHARE_SNAPSHOT_BYTES = 5 * 1024 * 1024;
 
 export const shareSnapshotSchema = z.object({
     version: z.literal(SHARE_SNAPSHOT_VERSION),
+    contentKind: z.enum(["conversation", "analysis"]).optional(),
     /**
      * Whether an answer in this snapshot could have been influenced by the
      * author's account memory (§13.3). Recorded at share time rather than read

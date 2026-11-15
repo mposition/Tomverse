@@ -12,6 +12,8 @@ export type QuickReview = {
     importantDifferences: Array<{ text: string; citations: Citation[]; verified: boolean }>;
     modelKeyClaims: Array<{ responseId: "A" | "B" | "C"; claims: Array<{ claim: string; quote: string; verified: boolean }> }>;
     verificationNeeded: string[];
+    confidence?: "low" | "medium" | "high";
+    groundingStats?: { totalCitations: number; verifiedCitations: number };
   };
 };
 export type ReviewChatSource = {
