@@ -56,7 +56,7 @@ const view = (props: Partial<Parameters<typeof AmuxOwnerQueueView>[0]> = {}) =>
   renderToStaticMarkup(
     <AmuxOwnerQueueView status="ready" read={read()} selectedId="task-1" onSelect={() => {}} navLocked={false}
       query="" onQuery={() => {}} groupFilter={null} onGroupFilter={() => {}} focusMode={false}
-      onToggleFocus={() => {}} onRetry={() => {}} detail={<p>decision pane</p>} {...props} />);
+      onToggleFocus={() => {}} onRetry={() => {}} onShowMore={() => {}} detail={<p>decision pane</p>} {...props} />);
 
 test("the list groups every card by why it waits and shows one count per group", () => {
   const html = view();
@@ -93,6 +93,8 @@ test("a list that holds only part of the queue says so and counts the whole of i
   const html = view({ read: read({ total: 14 }) });
   assert.match(html, /data-testid="amux-owner-queue-partial"/);
   assert.match(html, /Showing the newest 4 of 14 cards/);
+  // The rest is one press away, not only after these are finished.
+  assert.match(html, /data-testid="amux-owner-queue-show-more"[^>]*>Show 10 more</);
   assert.match(html, /data-testid="amux-owner-queue-remaining">14</);
   assert.doesNotMatch(view(), /amux-owner-queue-partial/);
 });

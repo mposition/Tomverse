@@ -69,18 +69,21 @@ async function readProcessedToday(now: Date): Promise<number | null> {
 }
 
 /**
- * The owner queue, read only: the newest cards that wait on the owner (at most
- * `AMUX_OWNER_QUEUE_LIMIT`), with the total of the set so a partial list says
- * so. It reads what the Execution board and the routing report already read,
+ * The owner queue, read only: the newest cards that wait on the owner (one
+ * page, `AMUX_OWNER_QUEUE_LIMIT`, unless the caller asks for more), with the
+ * total of the set so a partial list says so. It reads what the Execution board and the routing report already read,
  * and writes nothing; the decision on a card is made through the existing owner
  * review routes.
  */
-export async function readAmuxOwnerQueue(now: Date = new Date()): Promise<AmuxOwnerQueueRead> {
+export async function readAmuxOwnerQueue(
+  now: Date = new Date(),
+  limit: number = AMUX_OWNER_QUEUE_LIMIT,
+): Promise<AmuxOwnerQueueRead> {
   const where = amuxOwnerQueueWhere();
   const [total, rows, channels, processedToday] = await Promise.all([
     prisma.amuxWorkItem.count({ where }),
     prisma.amuxWorkItem.findMany({
-      where, orderBy: [{ updatedAt: "desc" }, { id: "desc" }], take: AMUX_OWNER_QUEUE_LIMIT, select: rowSelect,
+      where, orderBy: [{ updatedAt: "desc" }, { id: "desc" }], take: limit, select: rowSelect,
     }),
     readBoardWorkerChannels(),
     readProcessedToday(now),

@@ -23,15 +23,27 @@ import {
   type AmuxOrchestratorReceipt,
 } from "@/lib/amux/orchestratorHaltStore";
 
+/**
+ * What PostgreSQL enforces for one statement of a boundary. Kept at 200 ms on
+ * purpose (owner review 2026-11-15): it is the bound the database shares with
+ * Chat traffic, and it is coupled to three other figures that the Rust client
+ * deadlines are sized on -- a statement must time out (a known rollback, 57014)
+ * before Prisma's interactive-transaction timeout (budget plus the slack
+ * below, which stays under the one-second transport reserve), or the answer
+ * becomes an unknown outcome. A failure of this kind loses nothing: it is
+ * answered 503 "nothing committed" and the caller asks again.
+ */
 export const AMUX_DB_STATEMENT_TIMEOUT_MS = 200;
 /**
  * What PostgreSQL enforces between two statements of a boundary. 100 ms (until
  * 2026-11-05) ended sessions about 13 times an hour in production, which halted
- * bridges and lost worker leases. A longer gap does not lengthen a transaction:
+ * bridges and lost worker leases; 300 ms (until 2026-11-15) still ended a
+ * session on one slow round trip. A longer gap does not lengthen a transaction:
  * it spends the transaction's budget, and Prisma still closes the transaction at
- * that budget plus the slack below.
+ * that budget plus the slack below. A session ended for idling is a rollback,
+ * answered as "nothing committed" (see `amuxRolledBackWriteCode`).
  */
-export const AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS = 300;
+export const AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS = 1_000;
 /** The per-call gap a transaction's budget plans for. Not a database setting. */
 export const AMUX_DB_IDLE_GAP_PLANNING_MS = 100;
 export const AMUX_DB_COMMIT_RESERVE_MS = 200;

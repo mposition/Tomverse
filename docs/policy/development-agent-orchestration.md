@@ -289,8 +289,11 @@ DB timeout은 실제 PostgreSQL 버전과 세션에서 읽은 설정값으로만
 true)`로 다음만 설정한다.
 
 - `statement_timeout`: 200 milliseconds
-- `idle_in_transaction_session_timeout`: 300 milliseconds (운영자 결정 2026-11-05. 100 ms는 운영에서 시간당
-  약 13건의 세션을 끊어 bridge를 멈췄다. 예산 계산의 호출당 간격은 100 ms 그대로다)
+- `idle_in_transaction_session_timeout`: 1,000 milliseconds (운영자 결정 2026-11-05. 100 ms는 운영에서 시간당
+  약 13건의 세션을 끊어 bridge를 멈췄다. 2026-11-15 운영자 지시로 300 ms에서 1,000 ms로 올렸다. 예산 계산의 호출당 간격은
+  100 ms 그대로다. `statement_timeout` 200 ms는 Prisma 트랜잭션 timeout 여유(300 ms)와 Rust client의 1초 전송 여유에 묶여
+  있어 그대로 둔다. 교착(40P01)·직렬화 실패(40001)·유휴 세션 종료(25P03)는 롤백이 확정이므로 쓰기도 "아무것도 기록되지
+  않았다"는 503 `amux_database_deadline_exceeded`로 답하고 호출자가 다시 시도한다)
 - session-local deadline marker: `tomverse.amux_deadline`
 
 같은 코드는 `transaction_timeout`을 설정하지 않는다. 마지막 SQL은
