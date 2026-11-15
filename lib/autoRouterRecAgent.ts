@@ -24,6 +24,7 @@ import {
     type RecommendationResultInput,
 } from "@/lib/autoRouterRecommendationsCore";
 import { prisma } from "@/lib/prisma";
+import { automaticDailyRetry, dailyRetryInstruction } from "@/lib/dailyProductAgentRetryCore";
 
 /**
  * The app side of the coding agent on the Ubuntu runner (tools/auto-rec-agent).
@@ -91,7 +92,7 @@ export async function claimNextRecommendation(input: {
 
 /** Caller holds the audit and optimizer locks, also shared with the daily agent. */
 export async function claimRecommendationInTransaction(
-    tx: Prisma.TransactionClient, origin: string, now: Date
+    tx: Prisma.TransactionClient, origin: string, now: Date, options: { automaticRetries?: boolean } = {}
 ): Promise<ClaimedRecommendation | null> {
         if (!(await readRecAgentEnabled(tx))) return null;
         const cycles = await tx.autoRouterOptimizerCycle.findMany({
@@ -103,13 +104,20 @@ export async function claimRecommendationInTransaction(
         const next = nextClaimableRecommendation(
             cycles.map((cycle) => ({ ...cycle, createdAt: cycle.createdAt.toISOString() })),
             now.getTime()
-        );
+        ) ?? (options.automaticRetries ? [...cycles].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()).flatMap((cycle) => {
+            const entries = recommendationStatusEntries(cycle.summary);
+            return actionableRecommendations(cycle.summary, now.getTime()).filter((item) => item.kind === "code" &&
+                automaticDailyRetry(entries.get(item.index), now.getTime(), true))
+                .map((item) => ({ ...item, cycleId: cycle.id, createdAt: cycle.createdAt.toISOString() }));
+        })[0] : null);
         if (!next) return null;
         const cycle = cycles.find((item) => item.id === next.cycleId);
         if (!cycle) return null;
 
         const leaseUntil = new Date(now.getTime() + REC_AGENT_LEASE_MS).toISOString();
         const claimId = randomUUID();
+        const prior = recommendationStatusEntries(cycle.summary).get(next.index);
+        const attempts = (prior?.attempts ?? (prior?.claimId ? 1 : 0)) + 1;
         await tx.autoRouterOptimizerCycle.update({
             where: { id: next.cycleId },
             data: {
@@ -119,6 +127,7 @@ export async function claimRecommendationInTransaction(
                     by: AGENT_BY,
                     leaseUntil,
                     claimId,
+                    attempts,
                 }) as Prisma.InputJsonObject,
             },
         });
@@ -127,7 +136,8 @@ export async function claimRecommendationInTransaction(
             targetId: next.cycleId,
             summary: "The coding agent took an Auto router optimizer code recommendation.",
             // Its place identifies it in the cycle; its text stays out of the chain.
-            metadata: { index: next.index, leaseUntil, claimId },
+            metadata: { index: next.index, leaseUntil, claimId, attempts,
+                ...(prior?.claimId ? { priorClaimId: prior.claimId, priorReason: prior.reason ?? "owner_retry" } : {}) },
         });
         const findings = recommendationFindings(cycle.summary, next.index);
         return {
@@ -136,7 +146,7 @@ export async function claimRecommendationInTransaction(
             index: next.index,
             recommendation: next.text,
             findings,
-            instruction: buildRecommendationInstruction({
+            instruction: dailyRetryInstruction(attempts, prior?.reason) + buildRecommendationInstruction({
                 labels: adminAutoRouterOptimizerMessages.en.instruction,
                 recommendation: { kind: next.kind, text: next.text },
                 findings,
@@ -187,6 +197,7 @@ export async function recordRecommendationResult(input: {
                     at: now.toISOString(),
                     by: AGENT_BY,
                     claimId: input.result.claimId,
+                    attempts: recommendationStatusEntries(cycle.summary).get(input.index)?.attempts ?? 1,
                     ...(input.result.outcome === "pr_opened"
                         ? { prUrl: input.result.prUrl }
                         : { reason: input.result.reason }),
