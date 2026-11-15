@@ -34,6 +34,7 @@ import { IMAGE_GENERATION_FLAG_KEY } from "../lib/imageGenerationAccess.ts";
 import { VOICE_INPUT_FLAG_KEY } from "../lib/voiceInputAccess.ts";
 import { TASK_KINDS } from "../lib/taskProfileCore.ts";
 import { CONVERSATION_PRODUCT_KEYS } from "../lib/conversationProduct.ts";
+import { workspaceWelcomeCopy } from "../locales/workspaceWelcome.ts";
 
 // --- the flag ---------------------------------------------------------------
 
@@ -528,6 +529,30 @@ test("the real catalogue offers a guest something to do", () => {
     viewer({ signedIn: false, plan: null, enabledFlags: new Set() })
   );
   assert.ok(cards.some((card) => card.availability.state === "available"));
+});
+
+// --- the locked sign-in prompt ----------------------------------------------
+
+test("the sign-in prompt for a locked card names the starter in every language", () => {
+  // The gate reads seven locales through the app bundles; zh-Hant is wired
+  // from the same table, so it is held to the same shape here.
+  const languages = Object.keys(workspaceWelcomeCopy);
+  assert.deepEqual(
+    [...languages].sort(),
+    ["de", "en", "es", "fr", "ko", "pt", "zh", "zh-Hant"]
+  );
+  for (const language of languages) {
+    const starter = workspaceWelcomeCopy[language].starter;
+    assert.equal(typeof starter.lockedSignInTitle, "string", language);
+    assert.ok(starter.lockedSignInTitle.trim().length > 0, language);
+    assert.equal(typeof starter.lockedSignInReason, "string", language);
+    // The reason is the one place the prompt says which outcome the person
+    // chose; without the placeholder it would be the generic pitch again.
+    assert.ok(starter.lockedSignInReason.includes("{starter}"), language);
+    for (const value of [starter.lockedSignInTitle, starter.lockedSignInReason]) {
+      for (const dash of ["—", "–"]) assert.ok(!value.includes(dash), language);
+    }
+  }
 });
 
 // --- capability resolution --------------------------------------------------

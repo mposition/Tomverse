@@ -19,6 +19,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 
 import { ApiSecurityError } from "@/lib/apiSecurity";
 import {
+  ENGINEERING_AGENT_PATCH_BODY_MAX_BYTES,
   EngineeringAgentStoreRefusedError,
   acceptEngineeringAgentRequest,
   moveEngineeringAgentRequest,
@@ -64,7 +65,8 @@ export const isEngineeringAgentRouteAuthorized = (
  * size. The idempotent runners also measure their result inside the work
  * transaction, so an answer that cannot be sent is rolled back, not committed.
  */
-export const ENGINEERING_AGENT_RESPONSE_MAX_BYTES = 512 * 1024;
+export const ENGINEERING_AGENT_RESPONSE_MAX_BYTES =
+  6 * ENGINEERING_AGENT_PATCH_BODY_MAX_BYTES + 64 * 1024;
 
 const serializedBytes = (body: unknown) =>
   Buffer.byteLength(
