@@ -21,9 +21,11 @@ import { SCOUT_SYSTEM_PROMPT } from "../lib/productResearchScoutCore.ts";
  * answered as text, the caption an internal id -- so the model gets both.
  */
 
-const PIXEL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAEBgIApD5fRAAAAABJRU5ErkJggg==";
+const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAEBgIApD5fRAAAAABJRU5ErkJggg==", "base64");
 
-const chatPage = `<!doctype html><html lang="ko"><body>
+// The picture lives on another origin, as the product's signed storage URLs do,
+// so the walker's browser (which loads only the app's origin) cannot draw it.
+const chatPage = (assets) => `<!doctype html><html lang="ko"><body>
 <div id="out"></div>
 <textarea data-testid="chat-textarea"></textarea>
 <button data-testid="chat-send-button">send</button>
@@ -39,12 +41,15 @@ document.querySelector('[data-testid="chat-send-button"]').onclick = async () =>
   if (turn.text) return answer('<p>' + turn.text + '</p><button data-testid="memory-answer-feedback">report</button>');
   await fetch("/api/conversations/c1/image-turn", { method: "POST", body: prompt });
   if (prompt.includes("STRAYS")) await fetch("/api/images/targets/t1/retry", { method: "POST" }).catch(() => {});
-  answer('<div data-testid="chat-image-turn"><figure><img src="${PIXEL}" alt="x"><figcaption>qwen-image-3.0</figcaption></figure></div>');
+  answer('<div data-testid="chat-image-turn"><figure><img src="${assets}/fox.png" alt="x"><figcaption>qwen-image-3.0</figcaption></figure></div>');
 };
 </script></body></html>`;
 
 let server;
 let origin;
+let assets;
+let assetsOrigin;
+const assetReads = [];
 let browser;
 let rules;
 const seen = [];
@@ -69,7 +74,7 @@ before(async () => {
       };
       if (pathname === "/chat") {
         response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-        return response.end(chatPage);
+        return response.end(chatPage(assetsOrigin));
       }
       if (pathname === "/api/chat") {
         if (body.includes("HANGS")) return json({ hang: true });
@@ -83,6 +88,13 @@ before(async () => {
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   origin = `http://127.0.0.1:${server.address().port}`;
+  assets = createServer((request, response) => {
+    assetReads.push({ pathname: request.url, cookie: request.headers.cookie ?? "" });
+    response.writeHead(200, { "content-type": "image/png" });
+    response.end(PNG);
+  });
+  await new Promise((resolve) => assets.listen(0, "127.0.0.1", resolve));
+  assetsOrigin = `http://127.0.0.1:${assets.address().port}`;
   browser = await launch([]).catch(() => null);
   if (browser) rules = await installCdpRules(browser, [origin]);
 });
@@ -90,6 +102,7 @@ before(async () => {
 after(async () => {
   await browser?.close();
   await new Promise((resolve) => server.close(resolve));
+  await new Promise((resolve) => assets.close(resolve));
 });
 
 const needsBrowser = (name, body) =>
@@ -100,6 +113,7 @@ const needsBrowser = (name, body) =>
 
 needsBrowser("an image, then a follow-up answered in text: both turns, both screens and the caption reach the model", async () => {
   seen.length = 0;
+  assetReads.length = 0;
   const subject = await generateImageFollowUp(
     browser,
     rules,
@@ -107,7 +121,11 @@ needsBrowser("an image, then a follow-up answered in text: both turns, both scre
     place(),
   );
   assert.equal(subject.subject, SCOUT_IMAGE_FOLLOW_UP_GENERATION);
-  assert.deepEqual(subject.images.map((image) => image.label), ["chat-turn-1", "chat-turn-2"]);
+  assert.deepEqual(subject.images.map((image) => image.label), ["chat-turn-2", "turn-1-image", "chat-turn-1"]);
+  // The browser could not draw the stored picture; the walker read it itself, without the session.
+  assert.match(subject.signals, /Its picture, read separately: attached as turn-1-image. Drawn in the walker's browser: 0 of 1./);
+  assert.match(subject.signals, /can look broken or blank in the chat screens: that alone is the walker's/);
+  assert.deepEqual(assetReads, [{ pathname: "/fox.png", cookie: "" }]);
   assert.match(subject.signals, /Turn 1 answer: 1 image\(s\)/);
   assert.match(subject.signals, /Captions under the images, exactly as shown: "qwen-image-3\.0"/);
   assert.match(subject.signals, /Turn 2 answer: 0 image\(s\)/);
