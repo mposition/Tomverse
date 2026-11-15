@@ -370,6 +370,15 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // constraints only; no commit-deadline marker, classifier or deferred
   // trigger changes.
   "20261114160000_amux_process_audit_report",
+  // Owner direction 2026-11-15: the rolling score baseline relaxes one CHECK
+  // and replaces the score guard body on the score table only; no
+  // commit-deadline marker, classifier or deferred trigger changes.
+  "20261115210000_amux_portfolio_score_rolling_baseline_check",
+  "20261115210100_amux_portfolio_score_rolling_baseline_guard",
+  // Owner direction 2026-11-15: the idea title CHECK loses its 80-character
+  // cap; one CHECK on the submission table, no commit-deadline marker,
+  // classifier or deferred trigger changes.
+  "20261115220000_amux_idea_title_no_length_cap",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {

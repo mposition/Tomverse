@@ -14,14 +14,17 @@ import { callCostMicroUsd } from "@/lib/autoRouterOptimizerCore";
 import { AMUX_ANALYSIS_TRANSLATION_ENV, AMUX_ANALYSIS_TRANSLATION_MAX_OUTPUT_TOKENS,
   AMUX_ANALYSIS_TRANSLATION_SYSTEM, AMUX_ANALYSIS_TRANSLATION_TIMEOUT_MS,
   amuxAnalysisTranslationEnabled, amuxTranslationOutputSchema, amuxTranslationPrompt,
-  checkAmuxTranslationSource, parseAmuxTranslationOutput,
+  mergeAmuxTranslation, parseAmuxTranslationOutput, planAmuxTranslation,
   type AmuxTranslationItem } from "@/lib/amux/ideaAnalysisTranslationCore";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { resolveModelPricing } from "@/lib/modelPricing";
 
 export type AmuxTranslationOutcome =
-  | { state: "translated"; translations: Record<string, string>; cached: boolean }
-  | { state: "disabled" | "empty" | "too_large" | "unavailable" };
+  | { state: "translated"; translations: Record<string, string>; cached: boolean;
+      /** Provider requests this translation sent; a cached call sends none. */
+      calls: number }
+  | { state: "unavailable"; calls: number }
+  | { state: "disabled" | "empty" | "too_large" };
 
 // The same text translated by the same model is answered from memory: a
 // reload, a second tab or the owner toggling the view makes no second call.
@@ -51,12 +54,54 @@ const remember = (key: string, now: number, translations: Record<string, string>
 /** For tests: a fresh process. */
 export const clearAmuxTranslationCache = () => cache.clear();
 
+type RouterModel = NonNullable<ReturnType<typeof resolveAutoLlmRouterModel>>;
+
+/** One call of the plan: its own worst-case hold, request and settlement.
+ * `made.calls` counts every request sent to the provider, failed ones too. */
+async function translateOneCall(model: RouterModel, items: AmuxTranslationItem[],
+  made: { calls: number }):
+  Promise<{ translations: Record<string, string>; cached: boolean } | null> {
+  const key = cacheKey(model.id, items);
+  const now = Date.now();
+  const hit = cached(key, now);
+  if (hit) return { translations: hit, cached: true };
+  const pricing = resolveModelPricing(model);
+  const prices = { inputUsdPerMillionTokens: pricing.inputUsdPerMillionTokens,
+    outputUsdPerMillionTokens: pricing.outputUsdPerMillionTokens };
+  const prompt = amuxTranslationPrompt(items);
+  const maxOutputTokens = AMUX_ANALYSIS_TRANSLATION_MAX_OUTPUT_TOKENS;
+  const worst = autoLlmRouterWorstCaseMicroUsd({ system: AMUX_ANALYSIS_TRANSLATION_SYSTEM,
+    prompt, maxOutputTokens, ...prices });
+  const at = new Date();
+  if (worst === null || !(await reserveRouterCost(model.provider, worst, at))) return null;
+  made.calls += 1;
+  const result = await generateText({ model: getActiveAiModel(model),
+    system: AMUX_ANALYSIS_TRANSLATION_SYSTEM, prompt, maxOutputTokens, maxRetries: 0,
+    abortSignal: AbortSignal.timeout(AMUX_ANALYSIS_TRANSLATION_TIMEOUT_MS),
+    output: Output.object({ schema: jsonSchema(amuxTranslationOutputSchema as unknown as JSONSchema7),
+      name: "korean_translation" }),
+    providerOptions: autoLlmRouterProviderOptions(model.provider) });
+  const usage = result.usage;
+  if (usage.inputTokens !== undefined && usage.outputTokens !== undefined) {
+    const actual = callCostMicroUsd({ inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens, ...prices });
+    await settleRouterCost(model.provider, actual - worst, at).catch(() => undefined);
+  }
+  const translations = parseAmuxTranslationOutput(result.output, items);
+  if (!translations) return null;
+  remember(key, now, translations);
+  return { translations, cached: false };
+}
+
 /**
  * Translates the given English texts into Korean with the Auto router's
  * configured model, under the provider's operational budget (the hold path
  * chat routing uses, docs/policy/credit-and-cost-limits.md). It reaches no
- * user credits. Never throws; every failure is "unavailable" and nothing
- * from the source is logged.
+ * user credits. A page larger than one call is translated in calls of one
+ * call's size, one after another (planAmuxTranslation); each call holds,
+ * requests and settles exactly as a single call does, and a call the budget
+ * refuses ends the request. Never throws; every failure is "unavailable" and
+ * nothing from the source is logged.
  */
 export async function translateAmuxItemsToKorean(
   items: AmuxTranslationItem[],
@@ -64,49 +109,30 @@ export async function translateAmuxItemsToKorean(
   if (!amuxAnalysisTranslationEnabled(process.env[AMUX_ANALYSIS_TRANSLATION_ENV])) {
     return { state: "disabled" };
   }
-  const source = checkAmuxTranslationSource(items);
-  if (!source.ok) return { state: source.code };
+  const planned = planAmuxTranslation(items);
+  if (!planned.ok) return { state: planned.code };
+  const made = { calls: 0 };
   try {
     const configured = await readAutoLlmRouterModelId();
-    if (!configured) return { state: "unavailable" };
+    if (!configured) return { state: "unavailable", calls: 0 };
     const models = await getRuntimeModels();
     const model = resolveAutoLlmRouterModel(
       models.filter((item) => item.enabled && !item.catalogDeleted), configured);
-    if (!model) return { state: "unavailable" };
-    const key = cacheKey(model.id, source.items);
-    const now = Date.now();
-    const hit = cached(key, now);
-    if (hit) return { state: "translated", translations: hit, cached: true };
-
-    const pricing = resolveModelPricing(model);
-    const prices = { inputUsdPerMillionTokens: pricing.inputUsdPerMillionTokens,
-      outputUsdPerMillionTokens: pricing.outputUsdPerMillionTokens };
-    const prompt = amuxTranslationPrompt(source.items);
-    const maxOutputTokens = AMUX_ANALYSIS_TRANSLATION_MAX_OUTPUT_TOKENS;
-    const worst = autoLlmRouterWorstCaseMicroUsd({ system: AMUX_ANALYSIS_TRANSLATION_SYSTEM,
-      prompt, maxOutputTokens, ...prices });
-    const at = new Date();
-    if (worst === null || !(await reserveRouterCost(model.provider, worst, at))) {
-      return { state: "unavailable" };
+    if (!model) return { state: "unavailable", calls: 0 };
+    const translated: Record<string, string> = {};
+    let allCached = true;
+    for (const batch of planned.plan.batches) {
+      // A finished call stays cached, so asking again pays only for the rest.
+      const outcome = await translateOneCall(model, batch, made);
+      if (!outcome) return { state: "unavailable", calls: made.calls };
+      allCached &&= outcome.cached;
+      Object.assign(translated, outcome.translations);
     }
-    const result = await generateText({ model: getActiveAiModel(model),
-      system: AMUX_ANALYSIS_TRANSLATION_SYSTEM, prompt, maxOutputTokens, maxRetries: 0,
-      abortSignal: AbortSignal.timeout(AMUX_ANALYSIS_TRANSLATION_TIMEOUT_MS),
-      output: Output.object({ schema: jsonSchema(amuxTranslationOutputSchema as unknown as JSONSchema7),
-        name: "korean_translation" }),
-      providerOptions: autoLlmRouterProviderOptions(model.provider) });
-    const usage = result.usage;
-    if (usage.inputTokens !== undefined && usage.outputTokens !== undefined) {
-      const actual = callCostMicroUsd({ inputTokens: usage.inputTokens,
-        outputTokens: usage.outputTokens, ...prices });
-      await settleRouterCost(model.provider, actual - worst, at).catch(() => undefined);
-    }
-    const translations = parseAmuxTranslationOutput(result.output, source.items);
-    if (!translations) return { state: "unavailable" };
-    remember(key, now, translations);
-    return { state: "translated", translations, cached: false };
+    const translations = mergeAmuxTranslation(planned.plan, translated);
+    if (!translations) return { state: "unavailable", calls: made.calls };
+    return { state: "translated", translations, cached: allCached, calls: made.calls };
   } catch {
     // An unknown provider outcome keeps its worst-case hold and is not retried here.
-    return { state: "unavailable" };
+    return { state: "unavailable", calls: made.calls };
   }
 }

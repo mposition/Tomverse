@@ -10,6 +10,7 @@ import { openAmuxContent, sealAmuxContent } from "@/lib/amux/ideaCrypto";
 import { AmuxIdeaAutoCancellationError,
   commitAmuxOverdueIdeaAnalysisCancellation } from
   "@/lib/amux/ideaAnalysisAutoCancellationService";
+import { AMUX_ANALYSIS_OPEN_MAX_AGE_MS } from "@/lib/amux/ideaRetentionCore";
 import { inspectAmuxIdeaSubmission, submissionFailureKind } from "@/lib/amux/ideaSubmissionCore";
 import {
   commitIdeaSubmission,
@@ -82,7 +83,9 @@ test("synthetic idea submission is encrypted, audited, request-idempotent, and c
   const stored = await prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: ideaId } });
   assert.equal(stored.requestId, requestId);
   assert.equal(stored.state, "submitted");
-  assert.equal(stored.analysisDeadlineAt.getTime() - stored.submittedAt.getTime(), 7 * 86_400_000);
+  // Owner direction 2026-11-15: a new idea is never stopped by its age.
+  assert.equal(stored.analysisDeadlineAt.getTime() - stored.submittedAt.getTime(),
+    AMUX_ANALYSIS_OPEN_MAX_AGE_MS);
   assert.equal(stored.rawPurgeAfter?.getTime(), stored.analysisDeadlineAt.getTime());
   assert.equal(stored.title, ideaText, "the first line is the plaintext list title");
   assert.equal(Buffer.from(stored.rawCiphertext ?? []).includes(Buffer.from(ideaText)), false);
@@ -188,6 +191,39 @@ test("submission row and canonical audit roll back together", async () => {
   assert.equal(await prisma.adminAuditLog.count({
     where: { action: "AMUX_V4_IDEA_SUBMITTED", targetId: rollbackIdeaId },
   }), 0);
+});
+
+test("a hundred-year deadline keeps an unfinished analysis past day seven; other deadlines are refused", async () => {
+  const openIdeaId = randomUUID();
+  const submittedAt = new Date(Date.now() - 30 * 86_400_000);
+  const deadline = new Date(submittedAt.getTime() + AMUX_ANALYSIS_OPEN_MAX_AGE_MS);
+  const sealed = sealAmuxContent(Buffer.from("SYNTHETIC_OPEN_DEADLINE_IDEA"),
+    "idea_raw", openIdeaId, keys);
+  const row = {
+    requestId: randomUUID(), actorUserId, state: "analyzing", submittedAt,
+    rawCiphertext: new Uint8Array(sealed.ciphertext), rawKeyId: sealed.keyId,
+    rawKeyVersion: sealed.keyVersion, rawDigest: sealed.digest,
+    rawDigestKeyId: sealed.digestKeyId,
+  };
+  await prisma.amuxIdeaSubmission.create({ data: { ...row, id: openIdeaId,
+    analysisDeadlineAt: deadline, rawPurgeAfter: deadline } });
+  // Thirty days in, the analysis is not due for an automatic stop.
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxOverdueIdeaAnalysisCancellation(tx, openIdeaId)),
+  (error: unknown) => error instanceof AmuxIdeaAutoCancellationError && error.code === "not_due");
+  const kept = await prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: openIdeaId } });
+  assert.equal(kept.state, "analyzing");
+  assert.equal(kept.cancelledAt, null);
+  assert.deepEqual(Buffer.from(kept.rawCiphertext ?? []), Buffer.from(sealed.ciphertext));
+  // Only the seven-day and the hundred-year deadline are rows the CHECK admits.
+  const eightDays = new Date(submittedAt.getTime() + 8 * 86_400_000);
+  await assert.rejects(prisma.amuxIdeaSubmission.create({ data: { ...row,
+    id: randomUUID(), requestId: randomUUID(), analysisDeadlineAt: eightDays,
+    rawPurgeAfter: eightDays } }), /analysis_deadline_check/);
+  // The deadline stays immutable: it cannot be moved later afterwards either.
+  await assert.rejects(prisma.amuxIdeaSubmission.update({ where: { id: openIdeaId },
+    data: { analysisDeadlineAt: new Date(deadline.getTime() + 86_400_000) } }),
+  /immutable/);
 });
 
 test("seven-day auto-cancel stops only unfinished analysis and keeps its raw purge deadline", async () => {

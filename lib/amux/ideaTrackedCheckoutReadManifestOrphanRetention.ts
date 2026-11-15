@@ -14,7 +14,8 @@ import { finishClaimedAmuxReadManifestKeyRetirement,
   retireClaimedAmuxReadManifestKey,
   verifyAmuxReadManifestKeyRetired } from "./ideaKeyStore.ts";
 import { amuxIdeaHasActiveRetentionHold } from "./ideaRetentionHoldRead.ts";
-import { amuxReadManifestDueAt,
+import { amuxSessionContentPurgeDue } from "./ideaRetentionCore.ts";
+import { amuxReadManifestRetentionDays,
   amuxTrackedCheckoutReadManifestKeyIdentity } from
   "./ideaTrackedCheckoutReadManifestStore.ts";
 
@@ -40,7 +41,8 @@ async function claimDueIntent(item: IntentIdentity): Promise<string | null> {
         where: { id: item.id },
       });
       const idea = await tx.amuxIdeaSubmission.findUnique({
-        where: { id: item.ideaId }, select: { submittedAt: true },
+        where: { id: item.ideaId }, select: { submittedAt: true,
+          analysisDeadlineAt: true, analysisCompletedAt: true, cancelledAt: true },
       });
       // An intent's own manifest shares its id; other pages of the same
       // reference have their own intents.
@@ -53,7 +55,8 @@ async function claimDueIntent(item: IntentIdentity): Promise<string | null> {
       if (!intent || !idea || !now || manifest || intent.keyDeletedAt ||
           intent.keyRetirementClaimedAt || intent.ideaId !== item.ideaId ||
           intent.referenceOrdinal !== item.referenceOrdinal ||
-          amuxReadManifestDueAt(idea.submittedAt) > now ||
+          // A running analysis may still record this intent's manifest.
+          !amuxSessionContentPurgeDue({ ...idea, dbNow: now }) ||
           await amuxIdeaHasActiveRetentionHold(tx, item.ideaId, now)) {
         return null;
       }
@@ -193,7 +196,10 @@ export async function purgeDueAmuxOrphanReadManifestKeys(
     FROM "AmuxIdeaReadManifestKeyIntent" k
     JOIN "AmuxIdeaSubmission" i ON i."id" = k."ideaId"
     WHERE k."keyRetirementClaimedAt" IS NULL AND k."keyDeletedAt" IS NULL
-      AND i."submittedAt" + INTERVAL '7 days' <= clock_timestamp()
+      AND i."submittedAt" + ${amuxReadManifestRetentionDays()}::integer * INTERVAL '1 day'
+        <= clock_timestamp()
+      AND (i."analysisCompletedAt" IS NOT NULL OR i."cancelledAt" IS NOT NULL OR
+        i."analysisDeadlineAt" <= (clock_timestamp() AT TIME ZONE 'UTC'))
       AND NOT EXISTS (SELECT 1 FROM "AmuxIdeaTrackedCheckoutReadManifest" m
         WHERE m."id" = k."id")
       AND NOT EXISTS (SELECT 1 FROM "AmuxIdeaRetentionHold" h

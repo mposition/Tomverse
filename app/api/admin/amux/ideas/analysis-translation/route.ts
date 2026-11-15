@@ -76,8 +76,10 @@ export async function POST(request: Request): Promise<Response> {
     }
     const items = amuxAnalysisTranslationItems(view);
     const outcome = await translateAmuxItemsToKorean(items);
-    // A translation can spend on the provider, so each request is in the chain.
-    // Ids and counts only: no source or translated text.
+    // A translation can spend on the provider, so each request is in the chain,
+    // with the provider calls it made (a large page takes more than one; each
+    // call holds and settles its own cost). Ids and counts only: no source or
+    // translated text.
     await writeAdminAuditLog({
       session, request,
       action: "amux.idea.analysis_translation",
@@ -85,7 +87,9 @@ export async function POST(request: Request): Promise<Response> {
       targetId: ideaId,
       summary: "Requested a Korean reading translation of an AMUX analysis page.",
       metadata: { chunkIndex, itemCount: items.length, outcome: outcome.state,
-        cached: outcome.state === "translated" && outcome.cached },
+        cached: outcome.state === "translated" && outcome.cached,
+        ...(outcome.state === "translated" || outcome.state === "unavailable" ?
+          { calls: outcome.calls } : {}) },
     });
     if (outcome.state === "translated") {
       return NextResponse.json({ viewKey: amuxAnalysisTranslationViewKey(view),

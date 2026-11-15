@@ -90,6 +90,41 @@ test("an idea is tried up to the attempt limit and then left alone", async () =>
   await removeIdeas();
 });
 
+test("different failures keep an idea in the lane; the same failure three times in a row stops it", async () => {
+  const owner = `${OWNER_PREFIX}${randomUUID()}`;
+  const idea = await seedIdea(owner, new Date(OLD));
+  const at = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000);
+  const seedRuns = async (ideaId: string) => {
+    for (const [minutesAgo, outcome] of [[30, "cli_failed"], [20, "no_change"], [10, "cli_failed"]] as const) {
+      await prisma.amuxIdeaLaneAttempt.create({ data: { id: randomUUID(), ideaId, claimedAt: at(minutesAgo),
+        leaseUntil: at(minutesAgo - 1), finishedAt: at(minutesAgo - 1), outcome } });
+    }
+  };
+  await seedRuns(idea);
+  // Three runs that failed three different ways: the claim still takes it. No
+  // key store here, so each claim records job_failed, and the third in a row stops it.
+  for (let index = 0; index < 5; index += 1) await claimAmuxIdeaLane({ actorUserId: owner });
+  const attempts = await attemptsOf(idea);
+  assert.equal(attempts.length, 6);
+  assert.deepEqual(attempts.slice(3).map((row) => row.outcome), ["job_failed", "job_failed", "job_failed"]);
+  const [row] = await readAmuxIdeaProgressForOwner(owner);
+  assert.equal(row.lane?.state, "failed");
+  await removeIdeas();
+
+  // With the legacy switch, the former rule: three runs of any outcome stop it.
+  process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS = "enabled";
+  try {
+    const legacyOwner = `${OWNER_PREFIX}${randomUUID()}`;
+    const legacyIdea = await seedIdea(legacyOwner, new Date(OLD));
+    await seedRuns(legacyIdea);
+    assert.equal(await claimAmuxIdeaLane({ actorUserId: legacyOwner }), null);
+    assert.equal((await attemptsOf(legacyIdea)).length, AMUX_IDEA_LANE_MAX_ATTEMPTS);
+  } finally {
+    delete process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS;
+    await removeIdeas();
+  }
+});
+
 test("ideas the lane is done with never crowd out a new one, and an idea already in analysis is not taken", async () => {
   const owner = `${OWNER_PREFIX}${randomUUID()}`;
   const base = OLD;
