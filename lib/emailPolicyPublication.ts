@@ -113,9 +113,11 @@ export const AMENDED_DOCUMENT_EVIDENCE: Readonly<
   // The semantic-search notice (flag false, so the page does not show it yet)
   // moved this digest on 2026-11-12: evidence only, not approval, and it is not
   // in APPROVED_AMENDED_DIGESTS.
+  // The fallback-provider disclosure in English and Korean changes the observed
+  // content on 2026-11-15. This records that content, not publication approval.
   "/privacy": {
     date: "2026-11-16",
-    contentSha256: "88ade436786085aaf6370b39fc10746082af45bc4d7b173e8192e503e1f5f177",
+    contentSha256: "60b8b98542cd6fb573e69a70f1790d317c21d2a58ff6715241162d13e45c0ff6",
   },
   "/terms": {
     date: "2026-11-16",
