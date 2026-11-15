@@ -48,10 +48,13 @@ export async function POST(request: Request) {
     await consumeApiRateLimit(request, userId, "research-preview-offer", { minute: 120, day: 5000 });
     const payload = await readLimitedJson(request, 20 * 1024, schema);
     const [conversation, models, plan, flags] = await Promise.all([
-      payload.conversationId ? prisma.conversation.findFirst({ where: { id: payload.conversationId, userId }, select: {
-        id: true, password: true, kind: true, productKey: true, selectionMode: true,
-        selectedModels: true, assistantProfileVersionId: true,
-      } }) : Promise.resolve(null),
+      payload.conversationId ? prisma.conversation.findFirst({
+        where: { id: payload.conversationId, userId },
+        select: {
+          id: true, password: true, kind: true, productKey: true, selectionMode: true,
+          selectedModels: true, assistantProfileVersionId: true,
+        },
+      }) : Promise.resolve(null),
       getRuntimeModels(), getUserBillingPlan(userId), getOperationalFeatureFlags(),
     ]);
     const model = models.find((candidate) => candidate.id === payload.modelId) ?? null;
