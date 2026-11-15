@@ -1,3 +1,4 @@
+import { reviewActionsCopy } from "./reviewActions";
 import { reviewHandoffCopy } from "./reviewHandoff";
 import { researchPreviewCopy } from "./researchPreview";
 import { workspaceWelcomeCopy } from "./workspaceWelcome";
@@ -13,6 +14,7 @@ import { en } from "./en";
  * in `lib/localeLaunchPolicy.ts`. A string fixed in `zh` needs fixing here.
  */
 export const zhHant = {
+    reviewActions: reviewActionsCopy.zhHant,
     reviewHandoff: reviewHandoffCopy.zhHant,
     journey: {
         receiptSent: "本次嘗試的輸入包含原文：已選 {selected} 個 + 最近 {recent} 個（去重後 {unique} 則訊息）",

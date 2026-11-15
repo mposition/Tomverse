@@ -1,3 +1,4 @@
+import { reviewActionsCopy } from "./reviewActions";
 import { reviewHandoffCopy } from "./reviewHandoff";
 import { researchPreviewCopy } from "./researchPreview";
 import { englishLocationBody } from "./privacyLocation";
@@ -5,6 +6,7 @@ import { workspaceWelcomeCopy } from "./workspaceWelcome";
 import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 
 export const en = {
+    reviewActions: reviewActionsCopy.en,
     reviewHandoff: reviewHandoffCopy.en,
     journey: {
         receiptSent: "Source included in this attempt: {selected} selected + {recent} recent ({unique} unique messages)",
