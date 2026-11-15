@@ -241,6 +241,16 @@ test("verdict parsing never guesses a verdict, reads what it can, and blocking f
   assert.equal(parseReviewerOutput(`${accept}\n{"verdict":"reject","findings":[`).verdict, "unknown");
   // A brace inside a JSON string is not an object start.
   assert.equal(parseReviewerOutput(`{"findings":[{"severity":"major","summary":"The parser fails on { in a string."}],"verdict":"reject"}`).verdict, "reject");
+  // Findings in another container are read; ones that cannot be read next to an accept are not trusted.
+  const single = parseReviewerOutput(block({ verdict: "accept", findings: { severity: "major", summary: "one object" } }));
+  assert.deepEqual([single.verdict, single.findings.length], ["reject", 1]);
+  const keyed = parseReviewerOutput(block({ verdict: "accept", findings: { a: { severity: "blocker", summary: "keyed" } } }));
+  assert.equal(keyed.verdict, "reject");
+  assert.equal(parseReviewerOutput(block({ verdict: "accept", findings: [null, 7] })).reason, "findings_unreadable");
+  assert.equal(parseReviewerOutput(block({ verdict: "accept", findings: 42 })).reason, "findings_unreadable");
+  assert.equal(parseReviewerOutput(block({ verdict: "accept", findings: null })).verdict, "accept");
+  assert.equal(parseReviewerOutput(block({ verdict: "accept" })).verdict, "accept");
+  assert.equal(parseReviewerOutput(block({ verdict: "reject", findings: [null, 7] })).verdict, "reject");
   // The reviewer's own flag that a finding repeats an earlier one is kept.
   const flagged = parseReviewerOutput(block({ verdict: "reject", findings: [
     { severity: "major", summary: "again", repeats_earlier: true }, { severity: "major", summary: "new" }] }));

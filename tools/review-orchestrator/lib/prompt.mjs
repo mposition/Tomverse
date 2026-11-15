@@ -48,11 +48,11 @@ export function buildPrompt({ job, files, instructions = { paths: [], text: "" }
     "behaviour the tests do not cover, and anything that cannot be undone if it is wrong.",
     "Severity: blocker (must not merge), major (must fix before merge), minor, nit.",
     "",
+    'If the scope note lists findings from earlier reviews of this change, add "repeats_earlier":true to each of your',
+    "blocker or major findings that says the same thing as one of them (it is still not fixed), and to no other.",
     "End your answer with exactly one fenced json block and nothing after it:",
     "```json",
     '{"verdict":"accept or reject","findings":[{"severity":"blocker|major|minor|nit","file":"path","line":1,"summary":"what is wrong and why"}]}',
-    'If the scope note lists findings from earlier reviews of this change, add "repeats_earlier":true to each of your',
-    "blocker or major findings that says the same thing as one of them (it is still not fixed), and to no other.",
     "```",
     "Any blocker or major finding means the verdict is reject.",
   ].join("\n");

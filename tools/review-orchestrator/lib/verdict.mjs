@@ -153,6 +153,20 @@ function verdictOf(value) {
   return null;
 }
 
+/**
+ * The findings the reviewer wrote, in whatever container it used: an array, one
+ * finding object, an object keyed by finding, or one string. Nothing listed
+ * (absent, null, empty) is an empty list.
+ */
+function findingList(value) {
+  if (value === undefined || value === null) return [];
+  if (Array.isArray(value)) return value;
+  if (typeof value === "string") return value.trim() === "" ? [] : [value];
+  if (typeof value !== "object") return [value];
+  if ("summary" in value || "message" in value || "description" in value || "text" in value) return [value];
+  return Object.values(value);
+}
+
 export function parseReviewerOutput(text) {
   if (typeof text !== "string" || text.length === 0) return unknown("empty_output");
   const last = finalVerdict(text);
@@ -161,8 +175,8 @@ export function parseReviewerOutput(text) {
   // read or says unknown: an earlier accept is not revived.
   if (last.parsed === null) return unknown("verdict_not_json");
   const parsed = last.parsed;
-  const findings = (Array.isArray(parsed.findings) ? parsed.findings : [])
-    .flatMap((raw) => { const finding = normaliseFinding(raw); return finding ? [finding] : []; });
+  const listed = findingList(parsed.findings);
+  const findings = listed.flatMap((raw) => { const finding = normaliseFinding(raw); return finding ? [finding] : []; });
   // A blocker or major finding rejects whatever the reviewer concluded.
   const blocking = findings.some((finding) => BLOCKING.has(finding.severity));
   const stated = verdictOf(parsed.verdict);
@@ -171,6 +185,10 @@ export function parseReviewerOutput(text) {
       : { verdict: "reject", reason: stated === "accept" ? "blocking_finding_overrides_accept" : "blocking_finding_without_verdict", findings };
   }
   if (stated === null) return { verdict: "unknown", reason: "verdict_value_invalid", findings };
+  // Findings were listed but none could be read: an accept next to them is not trusted.
+  if (stated === "accept" && listed.length > 0 && findings.length === 0) {
+    return { verdict: "unknown", reason: "findings_unreadable", findings };
+  }
   return { verdict: stated, findings };
 }
 
