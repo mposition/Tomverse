@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth/next";
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { z } from "zod";
 
 import {
@@ -12,7 +12,6 @@ import {
     assertExternalContinuationEnabled,
     ExternalContinuationDisabledError,
 } from "@/lib/appSettings";
-import { authOptions } from "@/lib/auth";
 import { lockErrorResponse } from "@/lib/conversationLock";
 import {
     createExternalContinuation,
@@ -55,7 +54,9 @@ export async function respondToContinuationCreate(
     resolveTarget: (userId: string) => Promise<ContinuationTarget>
 ) {
     try {
-        const session = await getServerSession(authOptions);
+        const authentication = await resolveChatRouteSession(req);
+        if (authentication.response) return authentication.response;
+        const session = authentication.session;
         if (!session?.user?.id) {
             return NextResponse.json(
                 { error: "Authentication required." },

@@ -163,6 +163,8 @@ export async function GET(req: Request) {
             apiModelId: model.apiModelId,
             sizes: model.sizes,
             qualities: model.qualities,
+            routingNote: model.routingNote ?? null,
+            useCase: model.useCase ?? null,
             source: seedIds.has(model.id) ? "code" : "catalog",
             enabled: row?.enabled ?? null,
             holdReason: row?.holdReason ?? null,

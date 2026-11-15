@@ -219,6 +219,18 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
      게이트 파일과 가격·크레딧·migration·schema·인증·비밀·감사 체인·삭제·보존 경로(`QA_RELEASE_DM_MERGE_BLOCK_PATTERNS`,
      대소문자 무시)는 제외). 하나라도 밖이면 `dm_outside_allowlist`로 사람에게 남깁니다. **대상은 develop뿐이고 main은 제외입니다** — main 병합과 배포는 1항대로
      사람이 합니다.
+     **예외 둘(운영자 결정 2026-11-15, "dependabot이 생성한 PR들 모두 자체 병합 가능하게 권한 주세요"):** head가
+     `dependabot/npm_and_yarn/develop/`로 시작하는 Dependabot npm 업데이트 PR도 후보가 됩니다. 레인이 GitHub에서 읽어
+     다음이 모두 맞을 때만입니다(`QA_RELEASE_DEPENDABOT_HEAD`, `lib/qaReleaseMergeLaneGithub.ts`):
+     - 작성자가 `dependabot[bot]`입니다.
+     - head 저장소가 base 저장소와 같습니다(fork가 아님).
+     - 판정한 head까지의 모든 커밋이 `dependabot[bot]`의 것이고, GitHub가 서명했습니다(committer `web-flow`, verified).
+     - 변경 파일이 모두 `package.json`·`package-lock.json`(어느 디렉터리든)입니다. 이때 루트 `package.json`의 게이트를 이
+       PR에 한해 풉니다.
+
+     사람이 그 브랜치에 커밋을 얹었거나, 다른 경로를 바꾸면 사람에게 남깁니다. 다른 경로의 사유는
+     `dependabot_outside_manifests`입니다. workflow를 바꾸는 `github_actions` 업데이트도 사람에게 남습니다. 나머지 3항의
+     제외와 2항의 CI 판정은 그대로 받습니다.
    - 변경 파일 목록(전체 페이지, rename은 이전·이후 경로 둘 다)을 끝까지 읽지 못한 PR.
    **migration을 포함한 PR도 무인 병합 대상입니다**(dev의 preDeploy가 적용합니다). git revert는 적용된 migration과 실패한
    migration 기록을 되돌리지 않습니다. 그래서 dev 배포가 실패하면 레인은 latch하고, 운영자가 dev DB를 복구한 뒤에만

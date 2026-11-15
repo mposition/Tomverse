@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { APP_DEFAULTS } from "../lib/appDefaults.ts";
-import { ENABLED_MODELS } from "../lib/models.ts";
+import { DEFAULT_MODEL_ID, ENABLED_MODELS } from "../lib/models.ts";
 import { getWebSearchCapability } from "../lib/webSearchCapability.ts";
 import {
   ARTIFACT_TOOL_CAPABILITIES,
@@ -16,8 +16,10 @@ import {
 
 const plan = (overrides = {}) =>
   planGeneratedArtifactTool({
-    modelId: "gpt-5-6-luna",
-    provider: "openai",
+    modelId: DEFAULT_MODEL_ID,
+    provider: defaultModel.provider,
+    usageClass: defaultModel.usageClass,
+    fileToolsOverride: defaultModel.fileToolsOverride,
     isAuthenticated: true,
     canPersist: true,
     nativeSearchEnabled: false,
@@ -25,6 +27,9 @@ const plan = (overrides = {}) =>
     conversationKind: "chat",
     ...overrides,
   });
+
+const defaultModel = ENABLED_MODELS.find((model) => model.id === DEFAULT_MODEL_ID);
+assert.ok(defaultModel, "the default model is enabled");
 
 /* -------------------------------------------------------------------------- */
 /* The decision                                                                 */
@@ -34,6 +39,13 @@ test("a signed-in account on a verified model gets the tool", () => {
   const result = plan();
   assert.equal(result.mode, "generate");
   assert.equal(result.registerTool, true);
+});
+
+test("the default model can create files", () => {
+  const result = plan();
+  assert.equal(result.mode, "generate");
+  assert.equal(result.registerTool, true);
+  assert.equal(getArtifactToolSupport(DEFAULT_MODEL_ID), "verified");
 });
 
 test("a guest gets the tool, and it refuses", () => {

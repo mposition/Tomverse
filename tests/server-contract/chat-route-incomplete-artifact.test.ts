@@ -3,6 +3,12 @@ import test, { mock } from "node:test";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
+import { createHash } from "node:crypto";
+import { renderDocumentDocx } from "../../lib/generatedArtifactDocx";
+import { renderPresentationPptx } from "../../lib/generatedArtifactPptx";
+import { renderWorkbook } from "../../lib/generatedArtifactXlsx";
+import { admitWorkbookSpecSafely } from "../../lib/generatedArtifactCore";
+import { canonicalWorkbookSpecFor } from "../../lib/generatedArtifactWorkbookRevision";
 
 /*
   The real `ai`, imported statically rather than through `createRequire`.
@@ -114,12 +120,17 @@ type ArtifactRow = {
   objectKey: string | null;
   failureCode?: string;
   modelId: string | null;
+  parentArtifactId?: string | null;
+  lineageId?: string | null;
 };
 
 const world = {
   artifactRows: [] as ArtifactRow[],
   messages: [] as Array<{ id: string; status: string; modelId: string }>,
   providerContexts: [] as Array<{ messageId: string }>,
+  uploads: [] as Array<{ id: string; name: string; mediaType: string; size: number; kind: string; objectKey: string;
+    sourceArtifactId?: string | null; sourceLineageId?: string; sourceConversationId?: string; sourceCanonicalSpec?: unknown }>,
+  inputObjects: new Map<string, Buffer>(),
 };
 
 mock.module("next-auth/next", {
@@ -252,6 +263,7 @@ const DEFAULTS: Record<string, () => unknown> = {
 };
 
 const OVERRIDES: Record<string, Record<string, (args: never) => unknown>> = {
+  messageAttachmentUpload: { findMany: () => world.uploads },
   conversation: {
     findUnique: () => ({
       id: CONVERSATION_ID,
@@ -298,6 +310,8 @@ const OVERRIDES: Record<string, Record<string, (args: never) => unknown>> = {
       world.artifactRows.map((row, index) => ({
         id: `row_${index + 1}`,
         ordinal: row.ordinal,
+        parentArtifactId: row.parentArtifactId ?? null,
+        lineageId: row.lineageId ?? null,
       })),
   },
 };
@@ -409,9 +423,11 @@ const { ROUTER_VERSIONS } = require(resolve(ROOT, "lib/routerDecision.ts")) as {
 };
 
 let forcedAutoRoute: string | null = null;
+let autoSelectionCalls = 0;
 let forcedRouterOutput: Record<string, unknown> | null = null;
 let forcedImageIntent = false;
 let imageIntentCalls = 0;
+let imageIntentText: string | null = null;
 let routerDecisionKept: boolean | null = null;
 const routerCore = require(resolve(ROOT, "lib/autoLlmRouterCore.ts")) as typeof import("../../lib/autoLlmRouterCore");
 const realLlmRouter = require(resolve(ROOT, "lib/autoLlmRouter.ts")) as typeof import("../../lib/autoLlmRouter");
@@ -429,8 +445,9 @@ mock.module(mod("lib/autoLlmRouter.ts"), { namedExports: {
 const realImageIntent = require(resolve(ROOT, "lib/chatImageIntent.ts")) as typeof import("../../lib/chatImageIntent");
 mock.module(mod("lib/chatImageIntent.ts"), { namedExports: {
   ...realImageIntent,
-  createChatTurnImageRouting: (input: unknown) => {
+  createChatTurnImageRouting: (input: { text?: string } | null) => {
     if (input) imageIntentCalls += 1;
+    imageIntentText = input?.text ?? null;
     return {
       context: undefined,
       accept: () => {},
@@ -440,6 +457,42 @@ mock.module(mod("lib/chatImageIntent.ts"), { namedExports: {
     };
   },
 } });
+
+/*
+  A Prompt Refiner decision the browser held before the send. In an existing
+  Auto Chat conversation the product Refiner prepares every send, so a
+  follow-up such as "make it night" arrives carrying one (G4 recording,
+  2026-11-15, trace 72eeb69c). Inert unless a test sends a decision.
+*/
+const refinerEvents: string[] = [];
+mock.module(mod("lib/promptRefinerChatExecutionRelease.ts"), { namedExports: {
+  promptRefinerChatExecutionRelease: async () => ({ explicitEnabled: false, autoEnabled: true }),
+} });
+mock.module(mod("lib/promptRefinerChatExecutionStore.ts"), { namedExports: {
+  previewPromptRefinerChatExecution: async (input: { messages: Array<{ role: string; content: string }> }) => {
+    refinerEvents.push("preview");
+    return { executionMessages: input.messages.map((message, index) => index === input.messages.length - 1
+      ? { ...message, content: "Refined execution prompt" } : message),
+      mode: "auto" as const, provenance: { decision: "accepted" as const } };
+  },
+  consumePreviewedPromptRefinerChatExecution: async (_input: unknown, preview: unknown) => {
+    refinerEvents.push("consume");
+    return preview;
+  },
+} });
+mock.module(mod("lib/chatDurableRecoveryAccess.ts"), { namedExports: {
+  authorizeChatRecoveryScope: async () => ({ ok: true, conversationId: CONVERSATION_ID }),
+} });
+const realApiSecurity = require(resolve(ROOT, "lib/apiSecurity.ts")) as Record<string, unknown>;
+mock.module(mod("lib/apiSecurity.ts"), { namedExports: {
+  ...realApiSecurity,
+  consumeApiRateLimit: async (...args: unknown[]) => args[2] === "chat-durable-attempt"
+    ? undefined
+    : (realApiSecurity.consumeApiRateLimit as (...rest: unknown[]) => Promise<unknown>)(...args),
+} });
+const SOURCE_USER_MESSAGE_ID = "22222222-3333-4444-8555-666666666666";
+const REFINER_DECISION = { suggestionId: "33333333-4444-4555-8666-777777777777",
+  scopeId: "44444444-5555-4666-8777-888888888888", epoch: 1, decision: "accepted" };
 
 const routedSelection = (modelId: string) => ({
   routed: true,
@@ -475,10 +528,12 @@ const routedSelection = (modelId: string) => ({
 mock.module(mod("lib/autoModelSelection.ts"), {
   namedExports: {
     ...realAutoSelection,
-    selectAutoModel: (input: unknown) =>
-      forcedAutoRoute
+    selectAutoModel: (input: unknown) => {
+      autoSelectionCalls += 1;
+      return forcedAutoRoute
         ? routedSelection(forcedAutoRoute)
-        : realAutoSelection.selectAutoModel(input),
+        : realAutoSelection.selectAutoModel(input);
+    },
   },
 });
 
@@ -522,6 +577,16 @@ mock.module(mod("lib/generatedArtifactStorage.ts"), {
     discardStoredArtifacts: async () => undefined,
   },
 });
+
+const realR2 = require(resolve(ROOT, "lib/r2.ts")) as Record<string, unknown>;
+mock.module(mod("lib/r2.ts"), { namedExports: {
+  ...realR2,
+  readR2Object: async (key: string) => {
+    const bytes = world.inputObjects.get(key);
+    assert.ok(bytes, "only local input fixture objects may be read");
+    return Buffer.from(bytes);
+  },
+} });
 
 // Nothing here may reach a provider or any other network endpoint.
 let networkCalls = 0;
@@ -585,13 +650,21 @@ const ask = async (
     autoRoutedTo = null,
     routerOutput = null,
     imageIntent = false,
-  }: { modelId?: string; autoRoutedTo?: string | null; routerOutput?: Record<string, unknown> | null; imageIntent?: boolean } = {}
+    refinerDecision = false,
+    prompt = null,
+    messages = [{ role: "user", content: prompt ?? "이 PPT를 웹페이지로 만들어줘" }],
+    expectedStatus = 200,
+  }: { modelId?: string; autoRoutedTo?: string | null; routerOutput?: Record<string, unknown> | null; imageIntent?: boolean;
+    refinerDecision?: boolean; prompt?: string | null;
+    messages?: Array<{ role: string; content: string; attachments?: Array<{ uploadId: string }> }>; expectedStatus?: number } = {}
 ) => {
+  refinerEvents.length = 0;
   forcedAutoRoute = autoRoutedTo;
   forcedRouterOutput = routerOutput;
   forcedImageIntent = imageIntent;
   imageIntentCalls = 0;
   routerDecisionKept = null;
+  autoSelectionCalls = 0;
   script = {
     begins: [],
     executes: [],
@@ -612,18 +685,24 @@ const ask = async (
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        messages: [{ role: "user", content: "이 PPT를 웹페이지로 만들어줘" }],
+        // A held Refiner decision names its source message, so the last
+        // user turn carries that id.
+        messages: refinerDecision
+          ? messages.map((m, i) => (i === messages.length - 1 ? { ...m, id: SOURCE_USER_MESSAGE_ID } : m))
+          : messages,
         modelId,
         conversationId: CONVERSATION_ID,
         assistantMessageId: ASSISTANT_MESSAGE_ID,
+        ...(refinerDecision ? { sourceUserMessageId: SOURCE_USER_MESSAGE_ID, promptRefinerDecision: REFINER_DECISION } : {}),
       }),
     })
   );
-  if (response.status !== 200) {
+  if (response.status !== expectedStatus) {
     throw new Error(`status ${response.status}: ${await response.text()}`);
   }
+  const mode = response.headers.get("X-Chat-Response-Mode");
   const body = await response.text();
-  return { body, trailer: readTrailer(body) };
+  return { body, mode, trailer: response.status === 200 ? readTrailer(body) : null };
 };
 
 /**
@@ -1046,6 +1125,32 @@ test("a file request the router also reads as an image stays a Chat file turn", 
     "the file-capable model's tools were not registered");
 });
 
+/*
+  G4 recording, 2026-11-15 (trace 72eeb69c): in an existing Auto Chat the
+  product Refiner holds a decision on every send, and the route then skipped
+  the image classification entirely -- "Make it night, with snow falling."
+  after an image answer was answered as text.
+*/
+test("a follow-up that carries a held Refiner decision still gets the image classification", async () => {
+  const { mode } = await ask({}, { autoRoutedTo: MODEL_ID, imageIntent: true, refinerDecision: true,
+    prompt: "Make it night, with snow falling." });
+  assert.equal(imageIntentCalls, 1, "the Refiner decision must not switch the image classification off");
+  assert.equal(imageIntentText, "Make it night, with snow falling.",
+    "the image classification reads the authored message, not the Refiner's execution text");
+  assert.equal(mode, "image-turn");
+  assert.equal(lastStreamTextOptions, null, "an image turn calls no chat model");
+  assert.deepEqual(refinerEvents, ["preview"], "an image turn ends before the Refiner decision is consumed");
+});
+
+test("an ordinary follow-up with a held Refiner decision stays a text turn and consumes it once", async () => {
+  const { mode } = await ask({}, { autoRoutedTo: MODEL_ID, refinerDecision: true, prompt: "Why is snow white?" });
+  assert.equal(imageIntentCalls, 1);
+  assert.notEqual(mode, "image-turn");
+  assert.ok(lastStreamTextOptions, "the text turn reaches the chat model");
+  assert.match(promptText(), /Refined execution prompt/, "the text turn still runs the Refiner's execution view");
+  assert.deepEqual(refinerEvents, ["preview", "consume"]);
+});
+
 test("a manual turn on an unverified model keeps the plain remedy, with no mention of Auto", async () => {
   await ask({}, { modelId: UNVERIFIED_MODEL_ID });
 
@@ -1280,3 +1385,167 @@ test(
     );
   }
 );
+
+/* GF-13: latest-turn inputs reach the final answer provider whole or are refused. */
+const officeRevisionMime = {
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+};
+const addInputFixture = (id: string, extension: string, bytes: Buffer) => {
+  const prefix = `attachments/${createHash("sha256").update("artifact-qa@tomverse.app").digest("hex").slice(0, 20)}/`;
+  const row = { id, name: `${id}.${extension}`, mediaType: extension === "csv" ? "text/csv"
+    : extension === "txt" ? "text/plain" : officeRevisionMime[extension as keyof typeof officeRevisionMime],
+    size: bytes.length, kind: extension === "txt" || extension === "csv" ? "text" : "file", objectKey: `${prefix}${id}` };
+  world.uploads.push(row);
+  world.inputObjects.set(row.objectKey, bytes);
+  return { uploadId: id };
+};
+const clearInputFixtures = () => { world.uploads = []; world.inputObjects.clear(); };
+const revisionDocx = (text: string) => Buffer.from(renderDocumentDocx({ filename: "source.docx", format: "docx",
+  blocks: [{ type: "paragraph", text }] }));
+const revisionPptx = (text: string) => Buffer.from(renderPresentationPptx({ filename: "source.pptx", format: "pptx",
+  slides: [{ layout: "titleAndContent", title: "Plan", bullets: [text] }] }));
+
+for (const [extension, render] of [["docx", revisionDocx], ["pptx", revisionPptx]] as const) {
+  test(`GF-13 latest ${extension} overflow uses the actual shared budget and stops before final answer dispatch`, async () => {
+    try {
+      const historical = addInputFixture("previous-text", "txt", Buffer.from("x".repeat(299_990)));
+      const current = addInputFixture("current-office", extension, render("Keep blue. Budget is 200."));
+      const result = await ask({}, { autoRoutedTo: MODEL_ID, expectedStatus: 413, messages: [
+        { role: "user", content: "Earlier input", attachments: [historical] },
+        { role: "assistant", content: "Understood" },
+        { role: "user", content: "Create a revised file from the attachment", attachments: [current] },
+      ] });
+      assert.equal(JSON.parse(result.body).code, "ATTACHMENT_TEXT_TOO_LARGE");
+      assert.equal(lastStreamTextOptions, null, "final answer provider must not run on partial text");
+      assert.ok(autoSelectionCalls > 0, "Auto selection already occurred; this test does not claim zero Auto cost");
+      assert.equal(world.artifactRows.length, 0);
+    } finally { clearInputFixtures(); }
+  });
+
+  test(`GF-13 latest ${extension} text fits the remaining budget without losing the tail`, async () => {
+    try {
+      const historical = addInputFixture("previous-small", "txt", Buffer.from("x".repeat(299_936)));
+      const current = addInputFixture("current-fitting", extension, render("Keep blue. Budget is 200. Tail confirmed."));
+      await ask({}, { messages: [
+        { role: "user", content: "Earlier input", attachments: [historical] },
+        { role: "assistant", content: "Understood" },
+        { role: "user", content: "Create a revised file from the attachment", attachments: [current] },
+      ] });
+      assert.ok(lastStreamTextOptions, "final answer provider was not dispatched");
+      assert.match(JSON.stringify(lastStreamTextOptions!.messages), /Tail confirmed/);
+      assert.equal(world.artifactRows.length, 0, "text-only answer is not a successful file and gets no fake failed card");
+    } finally { clearInputFixtures(); }
+  });
+}
+
+for (const extension of ["txt", "csv"]) {
+  test(`GF-13 latest ${extension} is refused rather than truncated at Send`, async () => {
+    try {
+      const historical = addInputFixture("past-plain", "txt", Buffer.from("x".repeat(299_990)));
+      const current = addInputFixture("latest-plain", extension, Buffer.from("keep,200\nlast,300\n"));
+      const result = await ask({}, { expectedStatus: 413, messages: [
+        { role: "user", content: "Earlier input", attachments: [historical] },
+        { role: "assistant", content: "Understood" },
+        { role: "user", content: "Create a revised file", attachments: [current] },
+      ] });
+      assert.equal(JSON.parse(result.body).code, "ATTACHMENT_TEXT_TOO_LARGE");
+      assert.equal(lastStreamTextOptions, null);
+    } finally { clearInputFixtures(); }
+  });
+}
+
+test("GF-13 empty latest Office text stops final answer dispatch with a safe error code", async () => {
+  try {
+    const current = addInputFixture("empty-office", "docx", revisionDocx(""));
+    const result = await ask({}, { expectedStatus: 400, messages: [
+      { role: "user", content: "Create a revised file", attachments: [current] },
+    ] });
+    assert.equal(JSON.parse(result.body).code, "ATTACHMENT_NO_TEXT");
+    assert.equal(lastStreamTextOptions, null);
+    assert.doesNotMatch(result.body, /attachments\//);
+  } finally { clearInputFixtures(); }
+});
+
+const workbookRevisionFixture = () => {
+  const admitted = admitWorkbookSpecSafely({ filename: "source.xlsx", worksheets: [
+    { name: "Revenue", title: "Annual revenue", columns: [{ header: "Name", width: 26 },
+      { header: "Amount", type: "number", width: 14, format: "currency_usd" }], rows: [["Blue", 200], ["TAIL_MARKER", 300]] },
+    { name: "Notes", columns: [{ header: "Active" }], rows: [[false], [null], [""]] },
+  ] });
+  assert.ok(admitted.ok);
+  const canonical = canonicalWorkbookSpecFor(admitted.spec);
+  assert.ok(canonical);
+  const reference = addInputFixture("private-input-copy", "xlsx", Buffer.from(renderWorkbook(admitted.spec, "xlsx").bytes));
+  Object.assign(world.uploads.at(-1)!, { name: "source.xlsx", sourceArtifactId: "private-source-artifact", sourceLineageId: "private-source-lineage",
+    sourceConversationId: CONVERSATION_ID, sourceCanonicalSpec: canonical });
+  return { reference, canonical };
+};
+
+test("XLSX revision Send provides the complete canonical workbook through a request-scoped attachment", async () => {
+  const previous = process.env.GENERATED_ARTIFACT_REVISION_ENABLED;
+  process.env.GENERATED_ARTIFACT_REVISION_ENABLED = "true";
+  try {
+    const { reference, canonical } = workbookRevisionFixture();
+    await ask({}, { messages: [{ role: "user", content: "Create a new workbook with the changed amount", attachments: [reference] }] });
+    assert.ok(lastStreamTextOptions);
+    const prompt = JSON.stringify(lastStreamTextOptions!.messages);
+    assert.match(prompt, /TAIL_MARKER/);
+    assert.match(prompt, /currency_usd/);
+    assert.match(JSON.stringify(lastStreamTextOptions!.instructions), /att_1/);
+    assert.doesNotMatch(prompt, /private-source-artifact|private-source-lineage|private-input-copy|attachments\//);
+    const expected = JSON.stringify(canonical.spec);
+    assert.ok(prompt.includes(JSON.stringify(expected).slice(1, -1)), "the full structured workbook must reach the existing attachment fence");
+    assert.equal(world.artifactRows.length, 0, "a text-only answer must not create a fake file card");
+  } finally {
+    clearInputFixtures();
+    if (previous === undefined) delete process.env.GENERATED_ARTIFACT_REVISION_ENABLED;
+    else process.env.GENERATED_ARTIFACT_REVISION_ENABLED = previous;
+  }
+});
+
+test("XLSX revision Send uses the real remaining extraction budget before final provider dispatch", async () => {
+  const previous = process.env.GENERATED_ARTIFACT_REVISION_ENABLED;
+  process.env.GENERATED_ARTIFACT_REVISION_ENABLED = "true";
+  try {
+    const historical = addInputFixture("historical-budget", "txt", Buffer.from("x".repeat(299_990)));
+    const { reference } = workbookRevisionFixture();
+    const result = await ask({}, { autoRoutedTo: MODEL_ID, expectedStatus: 413, messages: [
+      { role: "user", content: "Earlier input", attachments: [historical] },
+      { role: "assistant", content: "Understood" },
+      { role: "user", content: "Create the revised workbook", attachments: [reference] },
+    ] });
+    assert.equal(JSON.parse(result.body).code, "ATTACHMENT_TEXT_TOO_LARGE");
+    assert.equal(lastStreamTextOptions, null);
+    assert.ok(autoSelectionCalls > 0, "the existing Auto call precedes extraction; it is not zero-cost validation");
+    assert.equal(world.artifactRows.length, 0);
+  } finally {
+    clearInputFixtures();
+    if (previous === undefined) delete process.env.GENERATED_ARTIFACT_REVISION_ENABLED;
+    else process.env.GENERATED_ARTIFACT_REVISION_ENABLED = previous;
+  }
+});
+
+test("XLSX revision Send refuses missing canonical data and copies from another conversation", async () => {
+  const previous = process.env.GENERATED_ARTIFACT_REVISION_ENABLED;
+  process.env.GENERATED_ARTIFACT_REVISION_ENABLED = "true";
+  try {
+    for (const invalid of ["snapshot", "conversation"]) {
+      clearInputFixtures();
+      const { reference } = workbookRevisionFixture();
+      if (invalid === "snapshot") world.uploads.at(-1)!.sourceCanonicalSpec = null;
+      else world.uploads.at(-1)!.sourceConversationId = "another-conversation";
+      const result = await ask({}, { expectedStatus: 400, messages: [
+        { role: "user", content: "Create the revised workbook", attachments: [reference] },
+      ] });
+      assert.equal(JSON.parse(result.body).code, invalid === "snapshot" ? "ATTACHMENT_UNREADABLE" : "ATTACHMENT_NOT_FOUND");
+      assert.equal(lastStreamTextOptions, null);
+      assert.doesNotMatch(result.body, /private-source|attachments\//);
+    }
+  } finally {
+    clearInputFixtures();
+    if (previous === undefined) delete process.env.GENERATED_ARTIFACT_REVISION_ENABLED;
+    else process.env.GENERATED_ARTIFACT_REVISION_ENABLED = previous;
+  }
+});

@@ -389,3 +389,88 @@ test("a new model route within the approved ceiling passes only behind its switc
   assert.deepEqual(checkV4TaskApprovedCeiling(old.receipt, old, on), {
     decision: "allow", reason: "within_approved_ceiling" });
 });
+
+test("a new model route the approval cannot run on is left out for the Task, not a reason to stop it", async () => {
+  const { v4TaskCeilingDecision, v4TaskReceiptForApprovedRoutes } =
+    await import("../lib/amux/v4TaskCostCeilingCore.ts");
+  const on = { newModelRouteWithinCeiling: true };
+  const approved = calculateV4TaskCostCeiling(input()).receipt;
+  // 2026-11-14: antigravity-impl joined on a new, dearer model; the approved
+  // route is unchanged and idle.
+  const dear = route({ routeId: "gemini-standard", workerName: "antigravity-impl",
+    provider: "google", modelId: "gemini-4-argon-medium", routePolicyDigest: "e".repeat(64),
+    outputMicroUsdPerMillion: 9_000_000 });
+  const cheap = route({ routeId: "grok-standard", workerName: "cursor-impl",
+    provider: "cursor", modelId: "grok-4.7-high", routePolicyDigest: "f".repeat(64),
+    outputMicroUsdPerMillion: 1_000_000 });
+  const sibling = route({ routeId: "codex-standard-2", workerName: "worker-codex-2" });
+  const current = calculateV4TaskCostCeiling(input({ routes: [route(), dear, cheap, sibling] })).receipt;
+  assert.ok(BigInt(current.ceilingMicroUsd) > BigInt(approved.ceilingMicroUsd));
+  assert.deepEqual(checkV4TaskApprovedCeiling(approved, { ok: true, receipt: current }, on), {
+    decision: "reconfirm", reason: "task_route_changed" }, "the whole receipt still asks");
+
+  // Switch on: the dear new model is left out, the cheap one and the sibling stay.
+  const runnable = v4TaskReceiptForApprovedRoutes(approved, current, on);
+  assert.deepEqual(runnable.routes.map((r) => r.routeId).sort(),
+    ["codex-standard", "codex-standard-2", "grok-standard"]);
+  assert.equal(BigInt(runnable.ceilingMicroUsd) <= BigInt(approved.ceilingMicroUsd), true);
+  assert.deepEqual(checkV4TaskApprovedCeiling(approved, { ok: true, receipt: runnable }, on), {
+    decision: "allow", reason: "new_model_route_within_ceiling" });
+  assert.equal(v4TaskCeilingDecision(checkV4TaskApprovedCeiling(approved,
+    { ok: true, receipt: runnable }, on), false), "allow");
+
+  // Switch off: every new model is left out; the approved model's routes run.
+  const off = v4TaskReceiptForApprovedRoutes(approved, current, {});
+  assert.deepEqual(off.routes.map((r) => r.routeId).sort(), ["codex-standard", "codex-standard-2"]);
+  assert.deepEqual(checkV4TaskApprovedCeiling(approved, { ok: true, receipt: off }), {
+    decision: "allow", reason: "within_approved_ceiling" });
+
+  // Nothing to leave out: the same object comes back.
+  const same = calculateV4TaskCostCeiling(input({ routes: [route(), sibling] })).receipt;
+  assert.equal(v4TaskReceiptForApprovedRoutes(approved, same, on), same);
+});
+
+test("leaving routes out never hides a changed approved route or an invalid approval", async () => {
+  const { v4TaskReceiptForApprovedRoutes } = await import("../lib/amux/v4TaskCostCeilingCore.ts");
+  const on = { newModelRouteWithinCeiling: true };
+  const approved = calculateV4TaskCostCeiling(input()).receipt;
+  const dear = route({ routeId: "gemini-standard", workerName: "antigravity-impl",
+    provider: "google", modelId: "gemini-4-argon-medium", routePolicyDigest: "e".repeat(64),
+    outputMicroUsdPerMillion: 9_000_000 });
+  for (const changed of [{ modelId: "different-model" }, { routePolicyDigest: "c".repeat(64) },
+    { workerName: "renamed-worker" }]) {
+    const current = calculateV4TaskCostCeiling(input({ routes: [route(changed), dear] })).receipt;
+    const runnable = v4TaskReceiptForApprovedRoutes(approved, current, on);
+    assert.ok(runnable.routes.some((r) => r.routeId === "codex-standard"), "the named route stays");
+    assert.deepEqual(checkV4TaskApprovedCeiling(approved, { ok: true, receipt: runnable }, on), {
+      decision: "reconfirm", reason: "task_route_changed" }, JSON.stringify(changed));
+  }
+  // Grown bounds: a new model is left out even under the switch; the bound
+  // itself is still reported by the check.
+  const grown = calculateV4TaskCostCeiling(input({ caps: { ...input().caps, outputTokens: 1_001 },
+    routes: [route(), route({ routeId: "grok-standard", workerName: "cursor-impl", provider: "cursor",
+      modelId: "grok-4.7-high", routePolicyDigest: "f".repeat(64), outputMicroUsdPerMillion: 100_000 })] })).receipt;
+  assert.deepEqual(v4TaskReceiptForApprovedRoutes(approved, grown, on).routes.map((r) => r.routeId),
+    ["codex-standard"]);
+  // Another role or grade, or an approval that does not verify: unchanged.
+  const current = calculateV4TaskCostCeiling(input({ routes: [route(), dear] })).receipt;
+  assert.equal(v4TaskReceiptForApprovedRoutes({ ...approved, receiptDigest: "0".repeat(64) }, current, on), current);
+  assert.equal(v4TaskReceiptForApprovedRoutes(null, current, on), current);
+  assert.equal(v4TaskReceiptForApprovedRoutes(approved, { ...current, grade: "advanced" }, on).routes.length, 2);
+});
+
+test("readiness, claim and execution start judge and offer only the narrowed routes", async () => {
+  const { readFileSync } = await import("node:fs");
+  const ready = readFileSync("lib/amux/v4TaskReadyService.ts", "utf8");
+  assert.match(ready, /v4TaskReceiptForApprovedRoutes\(approvedCost, current\.receipt, routeOptions\)/);
+  assert.match(ready, /\{ ok: true, receipt: runnable \}/);
+  assert.match(ready, /workerNames = gradeCatalogValid \? runnable\.routes\.filter/);
+  const claim = readFileSync("lib/amux/v22WorkerClaimService.ts", "utf8");
+  assert.match(claim, /const runnable = recovery \? approved\.receipt :/);
+  assert.match(claim, /const matchingRoutes = runnable\.routes\.filter/);
+  // The resume pick reads its routes from the narrowed candidates.
+  assert.match(claim, /const quotaRoutes = matchingRoutes\.filter/);
+  const start = readFileSync("lib/amux/execution.ts", "utf8");
+  assert.match(start, /const runnable = assignment\.recoveryApprovalId \? cost\.receipt :/);
+  assert.match(start, /const route = runnable\.routes\.find/);
+});

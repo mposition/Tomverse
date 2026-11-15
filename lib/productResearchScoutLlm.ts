@@ -36,6 +36,15 @@ import {
   type TriageIssue,
 } from "@/lib/productResearchScoutIssuesCore";
 import {
+  JOURNEY_MAX_OUTPUT_TOKENS,
+  JOURNEY_OUTPUT_SCHEMA,
+  JOURNEY_SUBJECT,
+  JOURNEY_SYSTEM_PROMPT,
+  journeyPromptText,
+  parseJourneyAnswer,
+  type ScoutJourney,
+} from "@/lib/productResearchScoutJourneyCore";
+import {
   SCENARIO_MAX_OUTPUT_TOKENS,
   SCENARIO_OUTPUT_SCHEMA,
   SCENARIO_SUBJECT,
@@ -78,6 +87,15 @@ export type ScoutLlm = {
   readonly triageIssues: (issues: readonly TriageIssue[], observedAt: Date) => Promise<IssueTriageJudgement>;
   /** The model-written task (docs/policy/product-research-agent.md §14): one text-only call for today's request. */
   readonly planScenario: (recentTitles: readonly string[], today: Date) => Promise<ScenarioPlan>;
+  /** The journey planner (§14): one text-only call for today's steps across Chat. */
+  readonly planJourney: (recentTitles: readonly string[], today: Date) => Promise<JourneyPlan>;
+};
+
+export type JourneyPlan = {
+  /** Null when the call failed or its answer is not a journey the walker can follow. */
+  readonly journey: ScoutJourney | null;
+  readonly inputTokens: number | null;
+  readonly outputTokens: number | null;
 };
 
 export type ScenarioPlan = {
@@ -95,6 +113,48 @@ export async function scoutLlmFor(modelId: string | null): Promise<ScoutLlm | nu
     console.warn(JSON.stringify({ event: "product_research_scout_llm_model_unavailable" }));
     return null;
   }
+  /** One text-only planning call: the planner prompt, its schema, and the one check on its answer. */
+  const plan = async <T>(
+    subject: string,
+    request: { system: string; prompt: string; schema: unknown; name: string; maxOutputTokens: number; parse: (value: unknown) => T | null },
+  ): Promise<{ value: T | null; inputTokens: number | null; outputTokens: number | null }> => {
+    try {
+      const generated = await generateText({
+        model: getActiveAiModel(model),
+        system: request.system,
+        prompt: request.prompt,
+        maxOutputTokens: request.maxOutputTokens,
+        maxRetries: 0,
+        abortSignal: AbortSignal.timeout(SCOUT_LLM_TIMEOUT_MS),
+        output: Output.object({ schema: jsonSchema(request.schema as JSONSchema7), name: request.name }),
+        providerOptions: { openai: { strictJsonSchema: true } },
+      });
+      const usage = generated.usage as { inputTokens?: number; outputTokens?: number } | undefined;
+      const value = request.parse(generated.output);
+      const result = { value, inputTokens: usage?.inputTokens ?? null, outputTokens: usage?.outputTokens ?? null };
+      console.info(
+        JSON.stringify({
+          event: "product_research_scout_llm_call",
+          modelId: model.id,
+          subject,
+          inputTokens: result.inputTokens,
+          outputTokens: result.outputTokens,
+          kept: value ? 1 : 0,
+        }),
+      );
+      return result;
+    } catch (error) {
+      console.warn(
+        JSON.stringify({
+          event: "product_research_scout_llm_call_failed",
+          modelId: model.id,
+          subject,
+          error: error instanceof Error ? error.name : "unknown",
+        }),
+      );
+      return { value: null, inputTokens: null, outputTokens: null };
+    }
+  };
   return {
     modelId: model.id,
     judge: async (submission, existingTitles) => {
@@ -197,48 +257,26 @@ export async function scoutLlmFor(modelId: string | null): Promise<ScoutLlm | nu
       }
     },
     planScenario: async (recentTitles, today) => {
-      try {
-        const generated = await generateText({
-          model: getActiveAiModel(model),
-          system: SCENARIO_SYSTEM_PROMPT,
-          prompt: scenarioPromptText(recentTitles, today),
-          maxOutputTokens: SCENARIO_MAX_OUTPUT_TOKENS,
-          maxRetries: 0,
-          abortSignal: AbortSignal.timeout(SCOUT_LLM_TIMEOUT_MS),
-          output: Output.object({
-            schema: jsonSchema(SCENARIO_OUTPUT_SCHEMA as unknown as JSONSchema7),
-            name: "product_research_scout_scenario",
-          }),
-          providerOptions: { openai: { strictJsonSchema: true } },
-        });
-        const usage = generated.usage as { inputTokens?: number; outputTokens?: number } | undefined;
-        const plan = {
-          scenario: parseScenarioAnswer(generated.output),
-          inputTokens: usage?.inputTokens ?? null,
-          outputTokens: usage?.outputTokens ?? null,
-        };
-        console.info(
-          JSON.stringify({
-            event: "product_research_scout_llm_call",
-            modelId: model.id,
-            subject: SCENARIO_SUBJECT,
-            inputTokens: plan.inputTokens,
-            outputTokens: plan.outputTokens,
-            kept: plan.scenario ? 1 : 0,
-          }),
-        );
-        return plan;
-      } catch (error) {
-        console.warn(
-          JSON.stringify({
-            event: "product_research_scout_llm_call_failed",
-            modelId: model.id,
-            subject: SCENARIO_SUBJECT,
-            error: error instanceof Error ? error.name : "unknown",
-          }),
-        );
-        return { scenario: null, inputTokens: null, outputTokens: null };
-      }
+      const { value, inputTokens, outputTokens } = await plan(SCENARIO_SUBJECT, {
+        system: SCENARIO_SYSTEM_PROMPT,
+        prompt: scenarioPromptText(recentTitles, today),
+        schema: SCENARIO_OUTPUT_SCHEMA,
+        name: "product_research_scout_scenario",
+        maxOutputTokens: SCENARIO_MAX_OUTPUT_TOKENS,
+        parse: parseScenarioAnswer,
+      });
+      return { scenario: value, inputTokens, outputTokens };
+    },
+    planJourney: async (recentTitles, today) => {
+      const { value, inputTokens, outputTokens } = await plan(JOURNEY_SUBJECT, {
+        system: JOURNEY_SYSTEM_PROMPT,
+        prompt: journeyPromptText(recentTitles, today),
+        schema: JOURNEY_OUTPUT_SCHEMA,
+        name: "product_research_scout_journey",
+        maxOutputTokens: JOURNEY_MAX_OUTPUT_TOKENS,
+        parse: parseJourneyAnswer,
+      });
+      return { journey: value, inputTokens, outputTokens };
     },
   };
 }

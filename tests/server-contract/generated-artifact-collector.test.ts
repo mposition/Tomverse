@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test, { mock } from "node:test";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
+import { createHash } from "node:crypto";
 
 /**
  * The per-turn collector's contract, with object storage replaced and nothing
@@ -29,6 +30,7 @@ type StoredCall = {
   filename: string;
   byteSize: number;
   modelId: string | null;
+  bytes: Uint8Array;
 };
 
 const world = {
@@ -79,6 +81,7 @@ const loadTool = () => {
             filename: input.filename,
             byteSize: input.bytes.byteLength,
             modelId: input.modelId,
+            bytes: Uint8Array.from(input.bytes),
           });
           return {
             id,
@@ -223,6 +226,81 @@ test("a changed specification is a new file, not an overwrite", async () => {
     subject.stored.map((artifact) => artifact.ordinal),
     [0, 1]
   );
+});
+
+// Deterministic tool fixtures exercise the real writers and extracted input.
+// They are not a claim about a live model choosing or rewriting the tools.
+for (const format of ["txt", "md", "json", "py", "csv", "docx", "pptx"] as const) {
+  test(`${format} bytes can feed two new same-name results without changing their sources`, async () => {
+    resetWorld();
+    const { parseOfficeSafely } = await import("../../lib/officeSecurity");
+    const filename = `revision.${format}`;
+    const initial = format === "json"
+      ? '{"target":"ORIGINAL","keep":"UNCHANGED"}'
+      : format === "py"
+        ? 'target = "ORIGINAL"\nkeep = "UNCHANGED"\n'
+        : format === "csv"
+          ? "target,keep\nORIGINAL,UNCHANGED\n"
+          : "Target ORIGINAL\nKeep UNCHANGED";
+    const digest = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
+    const outputIds: string[] = [];
+    const hashes: string[] = [];
+    let input = initial;
+    for (let revision = 0; revision < 3; revision += 1) {
+      if (revision > 0) {
+        const source = world.puts[revision - 1];
+        input = format === "docx" || format === "pptx"
+          ? await parseOfficeSafely(Buffer.from(source.bytes), source.format === "docx"
+            ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            : "application/vnd.openxmlformats-officedocument.presentationml.presentation", 300_000,
+            { strictOverflow: true })
+          : new TextDecoder("utf-8", { fatal: true }).decode(source.bytes);
+        input = input.replace(revision === 1 ? "ORIGINAL" : "FIRST_EDIT", revision === 1 ? "FIRST_EDIT" : "SECOND_EDIT");
+      }
+      const subject = await collector();
+      const kind = format === "docx" || format === "txt" || format === "md"
+        ? "document"
+        : format === "pptx" ? "presentation" : format === "csv" ? "spreadsheet" : "text";
+      const spec = kind === "document"
+        ? { filename, format, blocks: [{ type: "paragraph", text: input }] }
+        : kind === "presentation"
+          ? { filename, format, slides: [{ title: "Release", bullets: [input] }] }
+          : kind === "spreadsheet"
+            ? { filename, format, worksheets: [{ name: "Data", columns: [{ header: "target" }, { header: "keep" }], rows: input.trim().split(/\r?\n/).slice(1).map((row) => row.split(",")) }] }
+            : { filename, format, content: input };
+      const report = await subject.run(kind, spec);
+      assert.equal(report.status, "created", JSON.stringify(report));
+      const [card] = subject.toStreamArtifacts();
+      assert.equal(card.status, "ready");
+      assert.equal(card.filename, filename);
+      outputIds.push(card.id);
+      hashes.push(digest(world.puts[revision].bytes));
+      assert.equal(subject.failed.length, 0);
+      if (format === "json") assert.equal(JSON.parse(input).keep, "UNCHANGED");
+    }
+    assert.equal(new Set(outputIds).size, 3);
+    assert.equal(new Set(hashes).size, 3);
+    assert.deepEqual(world.puts.map((entry) => digest(entry.bytes)), hashes);
+    const last = world.puts[2];
+    const finalText = format === "docx" || format === "pptx"
+      ? await parseOfficeSafely(Buffer.from(last.bytes), format === "docx"
+        ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        : "application/vnd.openxmlformats-officedocument.presentationml.presentation", 300_000,
+        { strictOverflow: true })
+      : new TextDecoder().decode(last.bytes);
+    assert.match(finalText, /SECOND_EDIT/);
+    assert.match(finalText, /UNCHANGED/);
+    assert.doesNotMatch(finalText, /ORIGINAL|FIRST_EDIT/);
+    assert.deepEqual(world.discarded, []);
+  });
+}
+
+test("a text-only revision response has no artifact and no fabricated failed card", async () => {
+  resetWorld();
+  const subject = await collector();
+  assert.deepEqual(subject.toStreamArtifacts(), []);
+  assert.deepEqual(subject.failed, []);
+  assert.deepEqual(world.puts, []);
 });
 
 test("a rejected specification produces a failure card, never a file", async () => {

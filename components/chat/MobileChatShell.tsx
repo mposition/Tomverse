@@ -172,6 +172,7 @@ type MobileChatShellProps = {
   onProductSwitch?: (nextProduct: ChatWorkspaceProduct) => boolean;
   transcriptScope?: "model" | "conversation";
   onRestorePrompt?: (prompt: { text: string; attachments: ChatAttachment[]; targetChatId: string }) => void;
+  onRetryPrompt?: (prompt: { text: string; attachments: ChatAttachment[]; targetChatId: string }) => void;
   onCompareInReview?: (seed: string) => void;
   conversations: Conversation[];
   currentChatId: string | null;
@@ -481,6 +482,7 @@ export function MobileChatShell({
   onProductSwitch,
   transcriptScope = "model",
   onRestorePrompt,
+  onRetryPrompt,
   onCompareInReview,
   conversations,
   currentChatId,
@@ -1748,6 +1750,7 @@ export function MobileChatShell({
                   transcriptScope={transcriptScope}
                   otherPanelModelIds={selectedModels}
                   onRestorePrompt={onRestorePrompt}
+                  onRetryPrompt={onRetryPrompt}
                   onCompareInReview={onCompareInReview}
                   hasImportedTranscript={hasImportedTranscript}
                   importedMessages={importedMessages}

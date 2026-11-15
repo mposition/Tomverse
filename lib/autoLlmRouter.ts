@@ -554,7 +554,7 @@ export async function pickAutoModelWithLlm(input: {
         routingCycleId: active.cycleId,
         rewrite,
         rewriteCycleId: rewriteGuidance?.cycleId ?? null,
-    }) + (imageIntent ? "+image-intent-v2" : "") + (input.searchPlan ? "+search-plan-v2" : "") +
+    }) + (imageIntent ? "+image-intent-v3" : "") + (input.searchPlan ? "+search-plan-v2" : "") +
         (input.locationFusion ? "+location-v1" : "") + (compactSearchMenu ? "+compact-menu-v1" : "");
     const call: AutoLlmRouterCallInput = {
         source: "live",

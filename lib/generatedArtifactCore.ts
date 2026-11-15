@@ -400,6 +400,22 @@ export const workbookSpecSchema = z
 
 export type WorkbookSpec = z.infer<typeof workbookSpecSchema>;
 
+/** A model names only this request's already-authorised input handle. */
+export const artifactRevisionOfSchema = z.string().regex(/^att_[1-9][0-9]{0,2}$/)
+  .describe("The attached source being revised, by its att_1, att_2, ... handle. Omit for an unrelated new file.");
+
+/** Reuses the spreadsheet tool with a narrow existing-cell edit operation. */
+export const workbookRevisionToolSchema = workbookSpecSchema.partial({ worksheets: true }).extend({
+  revisionOf: artifactRevisionOfSchema.optional(),
+  cellUpdates: z.array(z.object({
+    sheet: z.string().min(1).max(120),
+    row: z.number().int().min(1).max(ARTIFACT_LIMITS.maxRowsPerSheet),
+    column: z.number().int().min(1).max(ARTIFACT_LIMITS.maxColumnsPerSheet),
+    value: cellValueSchema,
+  }).strict()).min(1).max(ARTIFACT_LIMITS.maxCells).optional()
+    .describe("For an attached XLSX revision, supply revisionOf and changed data cells only; omit worksheets. Exact sheet name; row and column are 1-based DATA row/column indices (exclude title/header). All other cells and structure are retained."),
+}).strict();
+
 /* ------------------------------------------------------------------------ */
 /* Document specification (docx, pdf, md, txt)                                */
 /* ------------------------------------------------------------------------ */
@@ -790,7 +806,11 @@ const schemaFailure = (error: z.ZodError): ArtifactAdmission<never> => ({
  * was paid for and downloaded first.
  */
 const normalizeSheetName = (name: string, index: number): string => {
-  const cleaned = name
+  // Match the XML writer's text representation before comparing identities.
+  const xmlName = new TextDecoder("utf-8", { ignoreBOM: true }).decode(new TextEncoder().encode(
+    name.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\uffff]/g, "")
+  ));
+  const cleaned = xmlName
     .replace(/[\\/?*[\]:]/g, " ")
     .replace(/\s+/g, " ")
     .trim()
@@ -1171,6 +1191,9 @@ export type ChatStreamArtifact = {
   failureCode?: ArtifactFailureCode;
   /** Which model's answer produced it, for multi-model attribution. */
   modelId?: string;
+  /** Explicit persisted revision metadata. It never contains source content. */
+  parentArtifactId?: string | null;
+  lineageId?: string;
 };
 
 /**
@@ -1224,6 +1247,12 @@ export const parseChatStreamArtifact = (
     ...(failureCode ? { failureCode } : {}),
     ...(typeof record.modelId === "string" && record.modelId
       ? { modelId: record.modelId }
+      : {}),
+    ...(typeof record.lineageId === "string" && record.lineageId.length > 0 && record.lineageId.length <= 64
+      ? { lineageId: record.lineageId,
+          ...(record.parentArtifactId === null ? { parentArtifactId: null }
+            : typeof record.parentArtifactId === "string" && record.parentArtifactId.length > 0 && record.parentArtifactId.length <= 64
+              ? { parentArtifactId: record.parentArtifactId } : {}) }
       : {}),
   };
 };

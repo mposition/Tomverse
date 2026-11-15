@@ -12,7 +12,7 @@
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { z } from "zod";
 import {
     apiSecurityResponse,
@@ -30,7 +30,6 @@ import {
 } from "@/lib/assistantProfileService";
 import { assistantProfileErrorResponse } from "@/lib/assistantProfileErrorResponse";
 import { ASSISTANT_PROFILE_LIMITS } from "@/lib/assistantProfileVersioning";
-import { authOptions } from "@/lib/auth";
 
 const patchSchema = z
     .object({
@@ -48,8 +47,10 @@ const patchSchema = z
     })
     .strict();
 
-const requireOwner = async () => {
-    const session = await getServerSession(authOptions);
+const requireOwner = async (req: Request) => {
+    const authentication = await resolveChatRouteSession(req);
+    if (authentication.response) return authentication.response;
+    const session = authentication.session;
     const userId = session?.user?.id;
     if (!userId) return null;
     if (!(await isAssistantProfilesEnabled())) {
@@ -63,7 +64,8 @@ export async function GET(
     { params }: { params: Promise<{ profileId: string }> }
 ) {
     try {
-        const userId = await requireOwner();
+        const userId = await requireOwner(req);
+        if (userId instanceof Response) return userId;
         if (!userId) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }
@@ -94,7 +96,8 @@ export async function PATCH(
     { params }: { params: Promise<{ profileId: string }> }
 ) {
     try {
-        const userId = await requireOwner();
+        const userId = await requireOwner(req);
+        if (userId instanceof Response) return userId;
         if (!userId) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }
@@ -135,7 +138,9 @@ export async function DELETE(
     { params }: { params: Promise<{ profileId: string }> }
 ) {
     try {
-        const session = await getServerSession(authOptions);
+        const authentication = await resolveChatRouteSession(req);
+        if (authentication.response) return authentication.response;
+        const session = authentication.session;
         const userId = session?.user?.id;
         if (!userId) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

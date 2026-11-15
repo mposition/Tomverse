@@ -39,6 +39,26 @@ const preflight = (origin, host = "tomverse.app") =>
     })
   );
 
+test("the real proxy enrolls revision paths with an unset switch while retaining Native gates and token verification", (t) => {
+  const keys = ["TOMVERSE_NATIVE_CHAT_ENABLED", "TOMVERSE_NATIVE_PARITY_ENABLED", "GENERATED_ARTIFACT_REVISION_ENABLED", "REQUIRE_CLOUDFLARE_ORIGIN_SECRET"];
+  const previous = Object.fromEntries(keys.map(key => [key, process.env[key]]));
+  t.after(() => { for (const key of keys) { if (previous[key] === undefined) delete process.env[key]; else process.env[key] = previous[key]; } });
+  process.env.TOMVERSE_NATIVE_CHAT_ENABLED = "true";
+  process.env.TOMVERSE_NATIVE_PARITY_ENABLED = "true";
+  process.env.REQUIRE_CLOUDFLARE_ORIGIN_SECRET = "false";
+  delete process.env.GENERATED_ARTIFACT_REVISION_ENABLED;
+  for (const [path, method] of [["/api/chat", "DELETE"], ["/api/artifacts/file-1/versions", "GET"]]) {
+    const attempt = () => proxy(request({ method, headers: { origin: "capacitor://localhost", host: "tomverse.app",
+      authorization: "Bearer forged-token-value" } }, `https://tomverse.app${path}`));
+    assert.equal(attempt().status, 401, "the enrolled route must verify and reject the forged token");
+    for (const key of keys.slice(0, 3)) {
+      process.env[key] = "false";
+      assert.notEqual(attempt().status, 401, `${key} must remove revision enrollment`);
+      if (key === "GENERATED_ARTIFACT_REVISION_ENABLED") delete process.env[key]; else process.env[key] = "true";
+    }
+  }
+});
+
 // --- 1. the preflight is answered ----------------------------------------
 
 test("an allowed preflight is answered 204 with the origin, methods and headers", () => {

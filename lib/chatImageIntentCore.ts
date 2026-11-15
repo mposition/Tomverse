@@ -59,8 +59,16 @@ export type ChatImageModelCandidate = {
     id: string;
     name: string;
     latency: ImageModelProfile["latencyClass"];
+    /**
+     * How long this model's recent generations here actually took, in whole
+     * seconds (the median). Absent until there are enough of them; the band
+     * above is the profile's rough guess and is all the call has then.
+     */
+    seconds?: number;
     /** Credits for one 1024x1024 image, per preset the model offers. */
     credits: Partial<Record<ImagePreset, number>>;
+    /** What the model is good and bad at (the profile's routingNote), when it has one. */
+    note?: string;
 };
 
 /**
@@ -103,12 +111,43 @@ export type ChatImageIntentContext = {
  */
 export const CHAT_IMAGE_INTENT_MAX_REWRITE_CHARS = 1_500;
 
+/** Fewer finished generations than this say too little about a model's speed. */
+export const IMAGE_SPEED_MIN_SAMPLES = 3;
+
+/**
+ * The median seconds a model's finished generations took, per model id, for
+ * models with at least IMAGE_SPEED_MIN_SAMPLES of them. The median, so one
+ * stuck request does not make a model look slow.
+ */
+export const typicalImageSeconds = (
+    runs: readonly { modelId: string; startedAt: Date | null; completedAt: Date | null }[]
+): Record<string, number> => {
+    const byModel = new Map<string, number[]>();
+    for (const run of runs) {
+        if (!run.startedAt || !run.completedAt) continue;
+        const seconds = (run.completedAt.getTime() - run.startedAt.getTime()) / 1000;
+        if (!Number.isFinite(seconds) || seconds <= 0) continue;
+        byModel.set(run.modelId, [...(byModel.get(run.modelId) ?? []), seconds]);
+    }
+    const typical: Record<string, number> = {};
+    for (const [modelId, seconds] of byModel) {
+        if (seconds.length < IMAGE_SPEED_MIN_SAMPLES) continue;
+        const sorted = [...seconds].sort((a, b) => a - b);
+        const middle = Math.floor(sorted.length / 2);
+        typical[modelId] =
+            sorted.length % 2 === 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+    }
+    return typical;
+};
+
 /** Enabled models with at least one square price, in catalogue order. */
 export const chatImageModelCandidates = (
     models: readonly Pick<
         ImageModelProfile,
-        "id" | "name" | "latencyClass" | "prices" | "disabledReason"
-    >[]
+        "id" | "name" | "latencyClass" | "prices" | "disabledReason" | "routingNote"
+    >[],
+    /** Measured typical seconds per model id (typicalImageSeconds); absent models show their band alone. */
+    typicalSeconds: Readonly<Record<string, number>> = {}
 ): ChatImageModelCandidate[] =>
     models.flatMap((model) => {
         if (model.disabledReason !== null) return [];
@@ -122,7 +161,20 @@ export const chatImageModelCandidates = (
             if (price) credits[preset] = price.credits;
         }
         if (Object.keys(credits).length === 0) return [];
-        return [{ id: model.id, name: model.name, latency: model.latencyClass, credits }];
+        const note = model.routingNote?.trim();
+        const seconds = Object.hasOwn(typicalSeconds, model.id) ? typicalSeconds[model.id] : undefined;
+        return [
+            {
+                id: model.id,
+                name: model.name,
+                latency: model.latencyClass,
+                ...(typeof seconds === "number" && Number.isFinite(seconds) && seconds > 0
+                    ? { seconds: Math.round(seconds) || 1 }
+                    : {}),
+                credits,
+                ...(note ? { note } : {}),
+            },
+        ];
     });
 
 export const CHAT_IMAGE_ROUTING_CRITERIA = [
@@ -136,11 +188,18 @@ export const CHAT_IMAGE_ROUTING_CRITERIA = [
     "- messages that only mention a picture in passing.",
     "When unsure, answer image=false.",
     "",
-    "When image=true, choose the cheapest model and preset that will do the request well:",
+    "When image=true, choose the model by fit first, speed second and price third:",
+    "- read what the request needs (legible text and its language, photorealism or people, an illustration or anime style, a logo or icon, a dense layout, editing a photo) and compare it with each model's note;",
+    "- pick the model whose note fits the request best, and avoid a model whose note names the request's main need as a weakness;",
+    "- between models that fit about equally, pick the clearly faster one: compare the typical seconds where a model lists them, otherwise its speed band (fast, balanced, slow). The user is waiting in a chat, so a much slower model is worth its wait only when its note fits the request's main need clearly better;",
+    "- when the user asks for a quick result, speed is the request's main need;",
+    "- only between models that fit about equally and take about as long, pick the one with fewer credits; a model without a note is known by its name alone and is never preferred for being faster or cheaper;",
+    "- when the request states no particular need, every model fits equally: the faster wins, then the cheaper.",
+    "Then choose the preset:",
     "- standard: the default for ordinary image requests, including posters, legible text, several subjects and photorealistic scenes; complexity or the image's intended use alone does not upgrade the preset;",
     "- draft: only when the user requests a rough sketch, draft, faster generation or lower cost;",
     "- final: only when the user explicitly requests high quality, best quality or a higher-quality regeneration of a previous image.",
-    "Give simple requests a cheaper or faster model and complex ones a stronger, pricier model. Use only a preset the chosen model lists.",
+    "Use only a preset the chosen model lists.",
 ].join("\n");
 
 export const buildChatImageIntentSystem = (options: {
@@ -179,12 +238,17 @@ export const chatImageIntentUserMessage = (
     sharedMessage = false
 ): string =>
     [
-        "Image models (credits per 1024x1024 image, by preset):",
+        "Image models (credits per 1024x1024 image, by preset; then the model's note):",
         ...candidates.map((candidate) => {
             const prices = PRESETS.filter((preset) => candidate.credits[preset] !== undefined)
                 .map((preset) => `${preset} ${candidate.credits[preset]}`)
                 .join(", ");
-            return `- ${candidate.id} (${candidate.name}; ${candidate.latency}): ${prices}`;
+            const speed =
+                candidate.seconds === undefined
+                    ? candidate.latency
+                    : `${candidate.latency}, typically ${candidate.seconds}s`;
+            const line = `- ${candidate.id} (${candidate.name}; ${speed}): ${prices}`;
+            return candidate.note ? `${line} -- ${candidate.note}` : line;
         }),
         "",
         ...(previousImagePrompt

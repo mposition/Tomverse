@@ -94,6 +94,27 @@ export function ChatWelcomeScreen({
         >
           {welcomeGreeting}
         </p>
+        {/*
+          The recent-chats row sits above the import card. Below it, a 320px
+          phone put the area's bottom edge across this 44px row, cutting off
+          the icon and label; above it, the edge crosses a card instead, which
+          reads as "more below" (the same rule as the starter preview line,
+          docs/ui-contracts/chat-starter-catalog.md section 6).
+        */}
+        {recentCount > 0 && onOpenRecentConversations && (
+          <button
+            ref={recentDisclosureRef}
+            type="button"
+            data-testid="recent-conversations-disclosure"
+            data-recent-count={recentCount}
+            onClick={() => onOpenRecentConversations()}
+            aria-label={disclosureLabel}
+            className="mt-2 flex min-h-11 max-w-full shrink-0 items-center justify-center gap-2 rounded-xl px-3 text-sm font-medium text-zinc-600 transition hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-zinc-300 dark:hover:bg-zinc-900"
+          >
+            <History className="h-4 w-4 shrink-0 text-zinc-500 dark:text-zinc-400" aria-hidden="true" />
+            <span className="min-w-0 truncate">{disclosureLabel}</span>
+          </button>
+        )}
         {session?.user && canImport && product === "chat" && (
           <Link
             onClick={() => rememberSettingsReturnProduct(product)}
@@ -108,20 +129,6 @@ export function ChatWelcomeScreen({
             </span>
             <ArrowRight size={17} className="shrink-0" aria-hidden="true" />
           </Link>
-        )}
-        {recentCount > 0 && onOpenRecentConversations && (
-          <button
-            ref={recentDisclosureRef}
-            type="button"
-            data-testid="recent-conversations-disclosure"
-            data-recent-count={recentCount}
-            onClick={() => onOpenRecentConversations()}
-            aria-label={disclosureLabel}
-            className="mt-2 flex min-h-11 max-w-full items-center justify-center gap-2 rounded-xl px-3 text-sm font-medium text-zinc-600 transition hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-zinc-300 dark:hover:bg-zinc-900"
-          >
-            <History className="h-4 w-4 shrink-0 text-zinc-500 dark:text-zinc-400" aria-hidden="true" />
-            <span className="min-w-0 truncate">{disclosureLabel}</span>
-          </button>
         )}
         {starterGallery}
       </div>

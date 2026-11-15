@@ -751,6 +751,10 @@ export const planGeneratedArtifactTool = (
  */
 export const ARTIFACT_TOOL_DEFINITION_TOKENS = 3100;
 
+/** Enabled revision fields add 1,587 rendered JSON-schema characters (397
+   * estimated tokens), rounded up. Separate so an explicitly disabled turn is unchanged. */
+export const ARTIFACT_REVISION_TOOL_DEFINITION_TOKENS = 500;
+
 /**
  * The extra allowance for `create_document_batch`'s own schema.
  *

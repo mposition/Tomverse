@@ -31,6 +31,7 @@ import {
   measurementApplies,
 } from "@/lib/adminModelCatalogFlow";
 import type { AdminTone } from "@/lib/adminUiCore";
+import { IMAGE_ROUTING_NOTE_MAX_CHARS, IMAGE_USE_CASES } from "@/lib/runtimeImageProviders";
 
 // The image catalogue's screens. Presentational only: the panel
 // (AdminModelCatalogPanel) owns the requests and passes the handlers in.
@@ -444,6 +445,8 @@ export function ImageModelDetail({
   onAction,
   onHold,
   onRename,
+  onRoutingNote,
+  onUseCase,
   onMeasure,
 }: {
   m: CatalogMessages;
@@ -461,8 +464,23 @@ export function ImageModelDetail({
   onHold: () => void;
   /** Resolves true once saved; the field closes then. */
   onRename: (name: string) => Promise<boolean>;
+  /** Saves the router note (null clears it); resolves true once saved. */
+  onRoutingNote?: (note: string | null) => Promise<boolean>;
+  /** Saves what users are told the model is for (null clears it). */
+  onUseCase?: (useCase: string | null) => Promise<boolean>;
 }) {
+  const [useCaseBusy, setUseCaseBusy] = useState(false);
   const stage = imageStage(item);
+  const [note, setNote] = useState(item.routingNote ?? "");
+  const [noteBusy, setNoteBusy] = useState(false);
+  // One line: the router reads the note inside a list.
+  const noteValue = note.replace(/\s+/g, " ").trim();
+  const noteChanged = noteValue !== (item.routingNote ?? "");
+  const saveNote = async () => {
+    setNoteBusy(true);
+    await onRoutingNote?.(noteValue || null);
+    setNoteBusy(false);
+  };
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameBusy, setRenameBusy] = useState(false);
   const renameValue = renaming?.trim() ?? "";
@@ -552,6 +570,64 @@ export function ImageModelDetail({
       <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
         <ImageFlowStepper m={m} stage={drafting ? "needs_draft" : stage} />
       </div>
+
+      {/* Only a resolved model: an unpriced runtime row may have no profile to write the note into. */}
+      {item.served && onRoutingNote ? (
+        <AdminTile title={m.routingNoteTitle} description={m.routingNoteHelp}>
+          <form
+            className="flex flex-col gap-2"
+            data-testid="model-catalog-routing-note-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void saveNote();
+            }}
+          >
+            <textarea
+              aria-label={m.routingNoteTitle}
+              rows={3}
+              maxLength={IMAGE_ROUTING_NOTE_MAX_CHARS}
+              value={note}
+              placeholder={m.routingNotePlaceholder}
+              onChange={(event) => setNote(event.target.value)}
+              data-testid="model-catalog-routing-note"
+              className="rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-blue-400 focus:outline-none"
+            />
+            <div className="flex items-center gap-3">
+              <AdminWriteButton size="sm" type="submit" disabled={noteBusy || !noteChanged}>
+                {noteBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
+                {m.routingNoteSave}
+              </AdminWriteButton>
+              <span className="text-xs text-zinc-500">
+                {noteValue.length}/{IMAGE_ROUTING_NOTE_MAX_CHARS}
+              </span>
+            </div>
+          </form>
+          {onUseCase ? (
+            <label className="mt-4 flex flex-col gap-1 text-xs font-bold text-zinc-300">
+              {m.useCaseLabel}
+              <select
+                value={item.useCase ?? ""}
+                disabled={useCaseBusy}
+                data-testid="model-catalog-use-case"
+                onChange={async (event) => {
+                  setUseCaseBusy(true);
+                  await onUseCase(event.target.value || null);
+                  setUseCaseBusy(false);
+                }}
+                className="min-h-10 rounded-xl border border-zinc-700 bg-zinc-950 px-3 text-sm font-normal text-zinc-100 focus:border-blue-400 focus:outline-none"
+              >
+                <option value="">{m.useCaseNone}</option>
+                {IMAGE_USE_CASES.map((useCase) => (
+                  <option key={useCase} value={useCase}>
+                    {m.useCaseOption[useCase]}
+                  </option>
+                ))}
+              </select>
+              <span className="font-normal text-zinc-500">{m.useCaseHelp}</span>
+            </label>
+          ) : null}
+        </AdminTile>
+      ) : null}
 
       {drafting ? (
         <AdminTile title={m.draftingTitle} description={m.draftingBody} action={<Loader2 className="h-5 w-5 animate-spin text-blue-300" aria-hidden />}>

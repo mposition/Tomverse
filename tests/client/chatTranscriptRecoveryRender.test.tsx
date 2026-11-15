@@ -41,6 +41,31 @@ test("cancelled and trailing pre-saved questions offer explicit restoration, not
   assert.doesNotMatch(render([question], true, true), /restore-chat-question/);
   assert.doesNotMatch(render([question], false), /restore-chat-question/);
 });
+test("Chat error cards offer a direct retry and a model picker beside restore", () => {
+  const renderChat = (messages: Message[]) => renderToStaticMarkup(
+    <SessionProvider session={null}>
+      <LanguageProvider initialLang="en">
+        <ChatMessageList messages={messages} currentChatId="c" onRestoreQuestion={() => {}}
+          onRetryQuestion={() => {}} onChooseAnotherModel={() => {}} />
+      </LanguageProvider>
+    </SessionProvider>
+  );
+  const failed: Message = { id: "a", role: "assistant", status: "error", content: "",
+    recoveryNotice: "Connection interrupted" };
+  const html = renderChat([question, failed]);
+  assert.match(html, /data-testid="retry-chat-question"/);
+  assert.match(html, /data-testid="chat-error-choose-model"[^>]*>.*Choose another model/);
+  assert.match(html, /restore-chat-question/);
+  assert.doesNotMatch(html, /Send separately to request a new answer/);
+  assert.ok(html.indexOf("retry-chat-question") < html.indexOf("restore-chat-question"));
+  // A resend carries no files: that question is only restored.
+  const withFile = renderChat([{ ...question, attachments: [{ id: "f", name: "f.pdf", mediaType: "application/pdf", size: 1, kind: "file" }] }, failed]);
+  assert.doesNotMatch(withFile, /retry-chat-question/);
+  assert.match(withFile, /restore-chat-question/);
+  // A trailing unanswered question and the legacy surface are unchanged.
+  assert.doesNotMatch(renderChat([question]), /retry-chat-question/);
+  assert.doesNotMatch(render([question, failed]), /retry-chat-question|chat-error-choose-model/);
+});
 test("legacy Review errors still split their existing title and auxiliary details", () => {
   const html = render([question, { id: "a", role: "assistant", status: "error",
     content: "Existing error\nTrace ID: review" }], false);
@@ -62,4 +87,23 @@ test("Chat attachment errors classify the recovery notice, not an empty or unrel
   const review = render([question, { id: "a", role: "assistant", status: "error",
     content: "Invalid PDF document", errorHadAttachments: true }], false);
   assert.match(review, /Attachment troubleshooting/);
+});
+
+test("Chat error cards offer the model picker beside question restoration; Review does not", () => {
+  const failed: Message = { id: "a", role: "assistant", status: "error", content: "",
+    recoveryNotice: "Connection interrupted" };
+  const withPicker = (recovering: boolean, retry?: () => void) => renderToStaticMarkup(
+    <SessionProvider session={null}>
+      <LanguageProvider initialLang="en">
+        <ChatMessageList messages={[question, failed]} currentChatId="c"
+          onRestoreQuestion={recovering ? () => {} : undefined}
+          onRetryLast={retry} onRequestCloseModel={() => {}} />
+      </LanguageProvider>
+    </SessionProvider>
+  );
+  const chat = withPicker(true);
+  assert.equal((chat.match(/data-testid="chat-error-choose-model"/g) ?? []).length, 1);
+  assert.match(chat, /restore-chat-question/);
+  assert.doesNotMatch(withPicker(false, () => {}), /chat-error-choose-model/);
+  assert.doesNotMatch(render([question, failed]), /chat-error-choose-model/);
 });

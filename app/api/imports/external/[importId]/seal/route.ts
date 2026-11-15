@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { z } from "zod";
 import {
     apiSecurityResponse,
@@ -10,7 +10,6 @@ import {
     assertExternalImportEnabled,
     ExternalImportDisabledError,
 } from "@/lib/appSettings";
-import { authOptions } from "@/lib/auth";
 import { EXTERNAL_IMPORT_MAX_CONTROL_REQUEST_BYTES } from "@/lib/externalImportLimits";
 import { sealExternalImport } from "@/lib/externalImportService";
 
@@ -44,7 +43,9 @@ export async function POST(
     context: RouteContext<"/api/imports/external/[importId]/seal">
 ) {
     try {
-        const session = await getServerSession(authOptions);
+        const authentication = await resolveChatRouteSession(req);
+        if (authentication.response) return authentication.response;
+        const session = authentication.session;
         if (!session?.user) {
             return NextResponse.json({ error: "권한 없음" }, { status: 401 });
         }
