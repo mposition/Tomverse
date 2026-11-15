@@ -261,7 +261,7 @@ function completedDurableModel(onGenerate?: () => Promise<unknown>) {
   });
 }
 
-async function createServiceFixture(label: string) {
+async function createServiceFixture(label: string, password: string | null = null) {
   const user = await prisma.user.create({
     data: {
       email: `${label}-${randomUUID()}@example.test`,
@@ -276,6 +276,7 @@ async function createServiceFixture(label: string) {
     data: {
       userId: user.id,
       title: label,
+      password,
       kind: "chat",
       productKey: "chat",
       selectionMode: "manual",
@@ -293,7 +294,12 @@ async function createServiceFixture(label: string) {
   const assistantMessageId = randomUUID();
   const request = new Request("http://127.0.0.1/api/chat/research-preview/runs", {
     method: "POST",
-    headers: { "Accept-Language": "en" },
+    headers: {
+      "Accept-Language": "en",
+      ...(password == null ? {} : {
+        Cookie: createConversationUnlockCookie(user.id, conversation.id, conversation.passwordVersion).split(";", 1)[0]!,
+      }),
+    },
   });
   activeModel = completedDurableModel();
   const service = await import(mod("lib/researchPreviewRunService.ts"));
@@ -363,11 +369,25 @@ test("a late cancellation cannot be returned to the queue and stale recovery fin
   assert.equal((run.settlementUsage as { inputTokens: number }).inputTokens, 0);
 });
 
+test("locked Research starts and resumes with the current grant without reserving twice", async () => {
+  const { user, conversation, request, service, created } = await createServiceFixture("locked-research-resume", "protected");
+  await service.processOneResearchPreviewRun("locked-resume-worker", { maxStepsPerClaim: 1 });
+  const changed = await prisma.conversation.update({ where: { id: conversation.id }, data: { password: "changed" } });
+  await assert.rejects(service.resumeDurableResearchPreviewRun({ request, userId: user.id, runId: created.run.id }), /RESEARCH_CONVERSATION_LOCKED/);
+  const cookie = createConversationUnlockCookie(user.id, conversation.id, changed.passwordVersion).split(";", 1)[0]!;
+  const resumed = await service.resumeDurableResearchPreviewRun({
+    request: new Request(request.url, { headers: { Cookie: cookie } }), userId: user.id, runId: created.run.id,
+  });
+  assert.equal(resumed?.status, "queued");
+  assert.equal(await prisma.chatCreditReservation.count({ where: { userId: user.id } }), 1);
+  await service.cancelDurableResearchPreviewRun({ request: new Request(request.url, { headers: { Cookie: cookie } }), userId: user.id, runId: created.run.id });
+});
+
 test("password-locked Research reads and lists require the current conversation unlock grant", async () => {
   const { user, conversation, service, created } = await createServiceFixture("locked-research");
   await service.processOneResearchPreviewRun("locked-research-worker");
   const password = "stored-password-fingerprint-fixture";
-  await prisma.conversation.update({ where: { id: conversation.id }, data: { password } });
+  const lockedConversation = await prisma.conversation.update({ where: { id: conversation.id }, data: { password } });
   await assert.rejects(readResearchPreviewRunDto(user.id, created.run.id), { code: "RESEARCH_CONVERSATION_LOCKED" });
   await assert.rejects(listResearchPreviewRunDtos({ userId: user.id, conversationId: conversation.id }), { code: "RESEARCH_CONVERSATION_LOCKED" });
   assert.deepEqual(await listResearchPreviewRunDtos({ userId: user.id }), []);
@@ -376,7 +396,7 @@ test("password-locked Research reads and lists require the current conversation 
   const locked = await GET(new Request(url), { params: Promise.resolve({ id: created.run.id }) });
   assert.equal(locked.status, 423);
   assert.equal(JSON.stringify(await locked.json()).includes("bounded answer"), false);
-  const cookie = createConversationUnlockCookie(user.id, conversation.id, password).split(";", 1)[0]!;
+  const cookie = createConversationUnlockCookie(user.id, conversation.id, lockedConversation.passwordVersion).split(";", 1)[0]!;
   const request = new Request(url, { headers: { Cookie: cookie } });
   const unlocked = await GET(request, { params: Promise.resolve({ id: created.run.id }) });
   assert.equal(unlocked.status, 200);
@@ -384,6 +404,12 @@ test("password-locked Research reads and lists require the current conversation 
   assert.equal((await listResearchPreviewRunDtos({ userId: user.id, conversationId: conversation.id, request })).length, 1);
   await prisma.conversation.update({ where: { id: conversation.id }, data: { password: "changed-password" } });
   await assert.rejects(readResearchPreviewRunDto(user.id, created.run.id, request), { code: "RESEARCH_CONVERSATION_LOCKED" });
+  const restored = await prisma.conversation.update({ where: { id: conversation.id }, data: { password } });
+  await assert.rejects(readResearchPreviewRunDto(user.id, created.run.id, request), { code: "RESEARCH_CONVERSATION_LOCKED" });
+  const freshCookie = createConversationUnlockCookie(user.id, conversation.id, restored.passwordVersion).split(";", 1)[0]!;
+  assert.ok(await readResearchPreviewRunDto(user.id, created.run.id, new Request(url, { headers: { Cookie: freshCookie } })));
+  await prisma.conversation.update({ where: { id: conversation.id }, data: { password: null } });
+  assert.ok(await readResearchPreviewRunDto(user.id, created.run.id));
   assert.equal(activeModel.doGenerateCalls.length, 3, "locked/unlocked reads never dispatch");
 });
 

@@ -164,6 +164,7 @@ export async function createDurableResearchPreviewRun(input: {
         select: {
           id: true,
           password: true,
+          passwordVersion: true,
           kind: true,
           productKey: true,
           selectionMode: true,
@@ -200,7 +201,7 @@ export async function createDurableResearchPreviewRun(input: {
       input.request,
       input.userId,
       conversation.id,
-      conversation.password
+      conversation.password == null ? null : conversation.passwordVersion
     ),
     productKey: conversation.productKey,
     kind: conversation.kind,
@@ -770,7 +771,7 @@ export async function resumeDurableResearchPreviewRun(input: {
   if (!run || run.userId !== input.userId) return null;
   const conversation = await prisma.conversation.findFirst({
     where: { id: run.conversationId, userId: input.userId },
-    select: { id: true, password: true },
+    select: { id: true, password: true, passwordVersion: true },
   });
   if (
     !conversation ||
@@ -778,7 +779,7 @@ export async function resumeDurableResearchPreviewRun(input: {
       input.request,
       input.userId,
       conversation.id,
-      conversation.password
+      conversation.password == null ? null : conversation.passwordVersion
     )
   ) {
     throw new Error("RESEARCH_CONVERSATION_LOCKED");

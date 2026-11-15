@@ -3,6 +3,7 @@ import { before, beforeEach, mock, test } from "node:test";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { AVAILABLE_MODELS } from "@/lib/models";
+import { createConversationUnlockCookie } from "@/lib/conversationLock";
 
 process.env.E2E_DISABLE_DATABASE = "true";
 process.env.DATABASE_URL = "postgresql://fixture@127.0.0.1:1/research_test";
@@ -11,6 +12,9 @@ const mod = (path: string) => pathToFileURL(resolve(import.meta.dirname, "../.."
 let userId: string | null = "owner";
 let owned = true;
 let unlocked = true;
+let password: string | null = "protected";
+let passwordVersion = 3;
+let grantVersion = 3;
 let active = true;
 let accountActive = true;
 let tier = "Pro";
@@ -25,10 +29,10 @@ let budgetCalls = 0;
 mock.module(mod("lib/chatRouteSession.ts"), { namedExports: { resolveChatRouteSession: async () => ({ session: userId ? { user: { id: userId } } : null }) } });
 mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {
   user: { findUnique: async () => ({ accountStatus: accountActive ? "active" : "suspended" }) },
-  conversation: { findFirst: async (input: { where: { userId: string } }) => {
+  conversation: { findFirst: async (input: { where: { userId: string }; select: { passwordVersion?: boolean } }) => {
     reads++;
     assert.equal(input.where.userId, "owner");
-    return owned ? { id: "conversation", password: "protected", kind: "chat", productKey, selectionMode, selectedModels: JSON.stringify([modelId]), assistantProfileVersionId: profileId } : null;
+    return owned ? { id: "conversation", password, passwordVersion: input.select.passwordVersion ? passwordVersion : undefined, kind: "chat", productKey, selectionMode, selectedModels: JSON.stringify([modelId]), assistantProfileVersionId: profileId } : null;
   } },
   assistantProfileVersion: { findFirst: async () => ({ toolPolicy: policy }) },
   assistantProfile: { findFirst: async ({ where, select }: { where: { userId: string }; select: unknown }) => {
@@ -42,7 +46,6 @@ mock.module(mod("lib/apiSecurity.ts"), { namedExports: {
   readLimitedJson: async (request: Request, _limit: number, schema: { parse: (value: unknown) => unknown }) => schema.parse(await request.json()),
 } });
 mock.module(mod("lib/billingEntitlements.ts"), { namedExports: { getUserBillingPlan: async () => ({ tier }) } });
-mock.module(mod("lib/conversationLock.ts"), { namedExports: { hasConversationUnlockGrant: () => unlocked } });
 mock.module(mod("lib/modelRegistry.ts"), { namedExports: { getRuntimeModels: async () => AVAILABLE_MODELS } });
 mock.module(mod("lib/appSettings.ts"), { namedExports: { getOperationalFeatureFlags: async () => ({ aiChatEnabled: active }) } });
 mock.module(mod("lib/webSearchBackendRuntime.ts"), { namedExports: { resolveWebSearchBackendReadiness: () => ({ brave: true }) } });
@@ -51,12 +54,13 @@ mock.module(mod("lib/researchPreviewBudget.ts"), { namedExports: { createResearc
 
 let POST: (request: Request) => Promise<Response>;
 before(async () => { ({ POST } = await import(mod("app/api/chat/research-preview/offer/route.ts"))); });
-const offer = (body?: Record<string, unknown>) => POST(new Request("http://localhost/api/chat/research-preview/offer", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body ?? { conversationId: "conversation", modelId, question: "Compare public documentation" }) }));
+const offer = (body?: Record<string, unknown>) => POST(new Request("http://localhost/api/chat/research-preview/offer", { method: "POST", headers: { "Content-Type": "application/json", ...(unlocked ? { Cookie: createConversationUnlockCookie("owner", "conversation", grantVersion).split(";", 1)[0]! } : {}) }, body: JSON.stringify(body ?? { conversationId: "conversation", modelId, question: "Compare public documentation" }) }));
 
 beforeEach(() => {
   process.env.RESEARCH_PREVIEW_ENABLED = "true";
   process.env.RESEARCH_PREVIEW_MODEL_IDS = "gemini-3-1-pro";
   userId = "owner"; owned = unlocked = active = accountActive = true; tier = "Pro";
+  password = "protected"; passwordVersion = grantVersion = 3;
   selectionMode = "manual"; productKey = "chat"; profileId = null;
   policy = { webSearch: true, deepResearch: true }; modelId = "gemini-3-1-pro";
   reads = budgetCalls = 0;
@@ -89,6 +93,16 @@ test("owner, lock, manual Chat, entitlement and the operational switch narrow th
     assert.equal((await (await offer()).json()).offered, false);
   }
   assert.equal(budgetCalls, 0);
+});
+
+test("offers require the current lock version and unlocked conversations need no cookie", async () => {
+  passwordVersion++;
+  assert.equal((await (await offer()).json()).offered, false);
+  assert.equal(budgetCalls, 0);
+  grantVersion = passwordVersion;
+  assert.equal((await (await offer()).json()).offered, true);
+  password = null; unlocked = false;
+  assert.equal((await (await offer()).json()).offered, true);
 });
 
 test("profile search and Research prohibitions are honored without loading profile text", async () => {

@@ -1827,6 +1827,7 @@ async function handleChatPost(
                     select: {
                         id: true,
                         password: true,
+                        passwordVersion: true,
                         kind: true,
                         productKey: true,
                         selectionMode: true,
@@ -1869,7 +1870,7 @@ async function handleChatPost(
                             req,
                             session.user.id,
                             researchConversation.id,
-                            researchConversation.password
+                            researchConversation.password == null ? null : researchConversation.passwordVersion
                         )
                 ),
                 productKey: researchConversation?.productKey ?? null,
