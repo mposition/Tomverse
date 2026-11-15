@@ -319,6 +319,17 @@ export async function readDecisionMakerInstanceLoad(
  * carries the request's one `cleanup_unknown` report (§5), with its database
  * clock; that report closes nothing.
  */
+/**
+ * A request's local card id, for its workspace evidence
+ * (lib/amux/decisionMakerWorkspaceService.ts). Null for a request that does
+ * not exist. One statement.
+ */
+export async function readDecisionMakerRequestCardId(tx: Prisma.TransactionClient, requestId: string):
+  Promise<string | null> {
+  const row = await tx.amuxDecisionMakerRequest.findUnique({ where: { id: requestId }, select: { cardId: true } });
+  return row?.cardId ?? null;
+}
+
 export async function readDecisionMakerRequestState(
   client: LedgerReader,
   requestId: string,

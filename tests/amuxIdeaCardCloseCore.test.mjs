@@ -3,15 +3,13 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
 
-import { DM_ANSWER_MAX_BYTES, irreversibleTermCategories, isDmOptionId } from "../lib/amux/decisionMakerCore.ts";
+import { DM_ANSWER_MAX_BYTES, DM_CARD_TEXT_MAX_BYTES, irreversibleTermCategories, isDmOptionId } from "../lib/amux/decisionMakerCore.ts";
 import {
   AMUX_IDEA_CARD_CLOSE_BLOCK_REASON_TEXT,
   AMUX_IDEA_CARD_CLOSE_DEFAULT_DAILY,
   AMUX_IDEA_CARD_CLOSE_DEFAULT_STALE_DAYS,
   AMUX_IDEA_CARD_CLOSE_DM_PROVIDER,
   AMUX_IDEA_CARD_CLOSE_DM_WORKER,
-  AMUX_IDEA_CARD_CLOSE_QUESTION_MAX,
-  AMUX_IDEA_CARD_CLOSE_TITLE_MAX,
   amuxIdeaCardCloseAskedCards,
   amuxIdeaCardCloseAskedFrom,
   amuxIdeaCardCloseCandidate,
@@ -36,10 +34,13 @@ const card = (over = {}) => ({
 });
 const candidate = (cards, staleDays = 7) => amuxIdeaCardCloseCandidate(cards, { nowMs: NOW, staleDays });
 
-test("the switch is off unless exactly enabled, and the limits fall back to their defaults", () => {
-  assert.equal(amuxIdeaCardCloseEnabled({}), false);
-  assert.equal(amuxIdeaCardCloseEnabled({ TOMVERSE_AMUX_CARD_CLOSE_DM: "true" }), false);
+test("the switch is on unless exactly disabled, and the limits fall back to their defaults", () => {
+  // Owner decision 2026-11-15: the switches that make the Decision Maker work default on.
+  assert.equal(amuxIdeaCardCloseEnabled({}), true);
+  assert.equal(amuxIdeaCardCloseEnabled({ TOMVERSE_AMUX_CARD_CLOSE_DM: undefined }), true);
+  assert.equal(amuxIdeaCardCloseEnabled({ TOMVERSE_AMUX_CARD_CLOSE_DM: "true" }), true);
   assert.equal(amuxIdeaCardCloseEnabled({ TOMVERSE_AMUX_CARD_CLOSE_DM: "enabled" }), true);
+  assert.equal(amuxIdeaCardCloseEnabled({ TOMVERSE_AMUX_CARD_CLOSE_DM: "disabled" }), false);
   assert.equal(amuxIdeaCardCloseDailyLimit({}), AMUX_IDEA_CARD_CLOSE_DEFAULT_DAILY);
   assert.equal(AMUX_IDEA_CARD_CLOSE_DEFAULT_DAILY, 5);
   assert.equal(amuxIdeaCardCloseDailyLimit({ AMUX_IDEA_CARD_CLOSE_MAX_PER_DAY: "0" }), 5);
@@ -125,19 +126,23 @@ test("the row's cards are read back only in the shape it writes", () => {
   }
 });
 
-// The local AMUX's own bounds on a filed question, read from its source so the
-// two cannot part (vendor/amux/crates/amux-server/src/api/dm_relay_v22.rs), and
-// the session name's from the relay and the ledger.
+// The local AMUX's one cap on a filed card, read from its source so the two
+// cannot part (vendor/amux/crates/amux-server/src/api/dm_relay_v22.rs): no field
+// has a length cap of its own, and the session name's is from the relay and the ledger.
 test("the relay card is what the local AMUX files without a redeploy", () => {
   const source = readFileSync(resolve(ROOT, "vendor/amux/crates/amux-server/src/api/dm_relay_v22.rs"), "utf8");
-  const bound = (name) => Number(new RegExp(`const ${name}: usize = ([\\d_]+);`).exec(source)[1].replaceAll("_", ""));
-  assert.equal(AMUX_IDEA_CARD_CLOSE_QUESTION_MAX, bound("QUESTION_MAX"));
-  assert.equal(AMUX_IDEA_CARD_CLOSE_TITLE_MAX, bound("TITLE_MAX"));
+  const rust = (name) => new RegExp(`const ${name}: usize = (\\d+(?: \\* \\d+)*);`).exec(source)[1]
+    .split("*").reduce((product, factor) => product * Number(factor), 1);
+  assert.equal(rust("CARD_MAX_BYTES"), DM_CARD_TEXT_MAX_BYTES, "the filed card's one cap is the app's card cap");
+  assert.equal(rust("OPTIONS_MAX"), 6);
+  for (const gone of ["QUESTION_MAX", "UNBLOCKS_MAX", "TITLE_MAX", "LABEL_MAX", "CONTEXT_MAX"]) {
+    assert.doesNotMatch(source, new RegExp(`const ${gone}: usize`), `${gone} is no cap any more`);
+  }
   assert.ok(new RegExp(`V22_PROVIDERS: \\[&str; 5\\] = \\[[^\\]]*"${AMUX_IDEA_CARD_CLOSE_DM_PROVIDER}"`).test(source));
   assert.match(AMUX_IDEA_CARD_CLOSE_DM_WORKER, /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/);
 
   const id = "00000000-0000-4000-8000-00000000000a";
-  // A long list of long ids: the local AMUX refuses a question over its bound.
+  // A long list of long ids: every card is named, and the card is far inside the one cap.
   const cards = Array.from({ length: 300 }, (_, index) => ({ id: `${"x".repeat(60)}-${index}`, displayKey: null,
     cardType: "task", status: "backlog" }));
   for (const list of [cards, cards.slice(0, 1)]) {
@@ -145,18 +150,19 @@ test("the relay card is what the local AMUX files without a redeploy", () => {
     assert.deepEqual(Object.keys(relay).sort(),
       ["options", "provider", "question", "question_id", "title", "unblocks", "worker"]);
     assert.equal(relay.question_id, id);
-    assert.ok(relay.question.length <= bound("QUESTION_MAX"), `${relay.question.length}`);
-    assert.ok(relay.title.length <= bound("TITLE_MAX"));
-    assert.ok(relay.unblocks.length <= bound("UNBLOCKS_MAX"));
-    assert.ok(relay.options.length <= bound("OPTIONS_MAX"));
-    for (const option of relay.options) {
-      assert.ok(isDmOptionId(option.id));
-      assert.ok(option.label.length <= bound("LABEL_MAX"));
-    }
+    const bytes = [relay.title, relay.question, relay.unblocks, ...relay.options.map((option) => option.label)]
+      .reduce((sum, text) => sum + Buffer.byteLength(text, "utf8"), 0);
+    assert.ok(bytes <= rust("CARD_MAX_BYTES"), `${bytes}`);
+    assert.ok(relay.options.length <= rust("OPTIONS_MAX"));
+    for (const option of relay.options) assert.ok(isDmOptionId(option.id));
     assert.deepEqual(relay.options.map((option) => option.id), ["close", "keep"]);
   }
+  // The whole list, no "and N more": the last card is named and the question still ends with its ask.
   const long = amuxIdeaCardCloseRelayCard({ questionId: id, reasonCode: "stale_cards", cards });
-  assert.match(long.question, /and \d+ more\n/);
+  assert.doesNotMatch(long.question, /and \d+ more/);
+  assert.equal(long.question.split("\n").filter((line) => line.startsWith("xxxxxxxx")).length, 300);
+  assert.ok(long.question.includes(`${"x".repeat(60)}-299 (task, backlog)\n`));
+  assert.ok(long.question.endsWith("\nShould the remaining cards be closed?"));
 });
 
 test("the question says only numbers, statuses and the reason, and hits no routing term by itself", () => {
@@ -243,13 +249,16 @@ test("the question says why each blocked card is blocked and how long the cards 
   assert.match(mixed.question, /AMUX-X-002 \(task, backlog\)\nAMUX-X-003 \(task, todo; unchanged for 9 days\)/);
 });
 
-test("a long list with reasons and dates still fits the local AMUX's bound", () => {
+test("a long list with reasons and dates is carried whole", () => {
   const cards = Array.from({ length: 300 }, (_, index) => ({ id: `${"x".repeat(60)}-${index}`, displayKey: null,
     cardType: "task", status: "blocked", blockReason: "canonical_deadline_review_required", updatedAtMs: NOW - 400 * DAY }));
   const relay = amuxIdeaCardCloseRelayCard({ questionId: "00000000-0000-4000-8000-00000000000a",
     reasonCode: "blocked_task", nowMs: NOW, cards });
-  assert.ok(relay.question.length <= AMUX_IDEA_CARD_CLOSE_QUESTION_MAX, `${relay.question.length}`);
-  assert.match(relay.question, /and \d+ more\nShould the remaining cards be closed\?$/);
+  assert.doesNotMatch(relay.question, /and \d+ more/);
+  assert.match(relay.question, /\nx{60}-299 \(task, blocked: a person must review its deadline; unchanged for 400 days\)\nShould the remaining cards be closed\?$/);
+  assert.ok(Buffer.byteLength(relay.question, "utf8") < DM_CARD_TEXT_MAX_BYTES);
+  // The title names the first card whole.
+  assert.equal(relay.title, `Idea cards stalled: ${cards[0].id}`);
 });
 
 test("only the fixed words of a confirmed answer count, by the delivery candidate's precedence", () => {

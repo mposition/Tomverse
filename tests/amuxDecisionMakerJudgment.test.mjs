@@ -585,7 +585,9 @@ test("stage S2-2b4's migration pins each of its six functions to the body it rep
   for (const [name, from] of GAPS_REPLACED) {
     const writer = from.split("/")[2];
     const redefining = readdirSync(join(root, MIGRATIONS))
-      .filter((migration) => migration > writer && migration !== GAPS_MIGRATION_NAME)
+      // The card text cap migration replaces the body guard once more, against its own pinned body.
+      .filter((migration) => migration > writer && migration !== GAPS_MIGRATION_NAME &&
+        !(name === "amux_decision_maker_body_guard" && migration === "20261115140000_amux_dm_card_text_cap"))
       .filter((migration) => {
         try {
           return new RegExp(`FUNCTION "${name}"\\(`).test(read(`${MIGRATIONS}/${migration}/migration.sql`));
@@ -1682,7 +1684,7 @@ test("a refusal writes nothing, in the statements up to the read that refused it
     ["an edit under a key the registry does not hold", { proposal: proposalRow({ keyCheck: dmDigestKeyCheck(OTHER_KEY) }) }, judge(edit), { recorded: false, reason: "digest_key_unavailable" }, 4],
     ["an edit with a secret", {}, judge({ ...edit, operatorAnswer: secret }), { recorded: false, reason: "operator_answer_refused", bodyRefusal: "secret_detected" }, 0],
     ["an edit with no text", {}, judge({ ...edit, operatorAnswer: "" }), { recorded: false, reason: "operator_answer_refused", bodyRefusal: "empty" }, 0],
-    ["an edit over 8 KiB", {}, judge({ ...edit, operatorAnswer: "x".repeat(8 * 1024 + 1) }), { recorded: false, reason: "operator_answer_refused", bodyRefusal: "too_long" }, 0],
+    ["an edit over 256 KiB", {}, judge({ ...edit, operatorAnswer: "x".repeat(256 * 1024 + 1) }), { recorded: false, reason: "operator_answer_refused", bodyRefusal: "too_long" }, 0],
     ["a decision before a confirmation", { delivery: deliveryRow({ judgmentKind: null }) }, (tx) => recordDecisionMakerDelivery(tx, { requestId: REQUEST_ID }), { recorded: false, reason: "not_confirmed" }, 2],
     ["a decision after a rejection", { delivery: deliveryRow({ judgmentKind: "reject" }) }, (tx) => recordDecisionMakerDelivery(tx, { requestId: REQUEST_ID }), { recorded: false, reason: "not_confirmed" }, 2],
     ["a second decision", { delivery: deliveryRow({ delivered: true }) }, (tx) => recordDecisionMakerDelivery(tx, { requestId: REQUEST_ID }), { recorded: false, reason: "already_delivered" }, 2],

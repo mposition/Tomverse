@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { irreversibleTermCategories } from "../lib/amux/decisionMakerCore.ts";
+import { dmWorkspaceCardPointer } from "../lib/amux/decisionMakerWorkspaceCore.ts";
 import {
   AMUX_V22_RESULT_REVIEW_KINDS,
   AMUX_V22_RESULT_REVIEW_KIND_TEXT,
@@ -17,12 +18,18 @@ import {
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 
-test("both switches are off unless set to enabled", () => {
-  assert.equal(amuxV22ResultReviewDmEnabled({}), false);
-  assert.equal(amuxV22ResultReviewDmEnabled({ TOMVERSE_AMUX_V22_RESULT_REVIEW_DM: "true" }), false);
+test("both switches are on unless set to disabled", () => {
+  // Owner decision 2026-11-15: the switches that make the Decision Maker work default on, and are kill switches.
+  assert.equal(amuxV22ResultReviewDmEnabled({}), true);
+  assert.equal(amuxV22ResultReviewDmEnabled({ TOMVERSE_AMUX_V22_RESULT_REVIEW_DM: undefined }), true);
+  assert.equal(amuxV22ResultReviewDmEnabled({ TOMVERSE_AMUX_V22_RESULT_REVIEW_DM: "true" }), true);
   assert.equal(amuxV22ResultReviewDmEnabled({ TOMVERSE_AMUX_V22_RESULT_REVIEW_DM: "enabled" }), true);
-  assert.equal(amuxDmApproverEnabled({}), false);
+  assert.equal(amuxV22ResultReviewDmEnabled({ TOMVERSE_AMUX_V22_RESULT_REVIEW_DM: "disabled" }), false);
+  assert.equal(amuxDmApproverEnabled({}), true);
+  assert.equal(amuxDmApproverEnabled({ TOMVERSE_AMUX_DM_APPROVER: undefined }), true);
   assert.equal(amuxDmApproverEnabled({ TOMVERSE_AMUX_DM_APPROVER: "enabled" }), true);
+  assert.equal(amuxDmApproverEnabled({ TOMVERSE_AMUX_DM_APPROVER: "disabled" }), false);
+  assert.equal(amuxDmApproverEnabled({ TOMVERSE_AMUX_DM_APPROVER: "false" }), true);
 });
 
 test("only a result with no patch is put to review, and its kind says why", () => {
@@ -53,13 +60,26 @@ test("the card's fixed words hit no routing term, so it reaches a DM", () => {
     assert.equal(card.worker, "amux-result-review");
     assert.equal(card.provider, "claude");
   }
-  const whole = amuxV22ResultReviewRelayCard({ reviewId: "00000000-0000-4000-8000-00000000000a",
-    taskLabel: "T", role: null, kind: "needs_owner", criteria: ["A", "B"], findings: "done" });
-  assert.match(whole.question, /Its completion criteria:\n- A\n- B\nIts findings: done/);
-  for (const [criteria, findings] of [[["A"], "x".repeat(2_000)], [[], "done"], [["A"], " "]])
-    assert.equal(amuxV22ResultReviewRelayCard({ reviewId: "00000000-0000-4000-8000-00000000000a",
-      taskLabel: "T", role: null, kind: "needs_owner", criteria, findings }), null,
-      "evidence that does not fit whole, or is missing, is left to the person");
+  const input = { reviewId: "00000000-0000-4000-8000-00000000000a",
+    taskLabel: "T", role: null, kind: "needs_owner", criteria: ["A", "B"], findings: "done" };
+  // A workspace: the findings are evidence/FINDINGS.md, and the card only points at it.
+  const whole = amuxV22ResultReviewRelayCard({ ...input, workspace: true });
+  assert.match(whole.question, /Its completion criteria:\n- A\n- B\nIts run's report is in the evidence named below\./);
+  assert.doesNotMatch(whole.question, /done\n|Its findings/, "the report is not in the question");
+  assert.equal(whole.context, dmWorkspaceCardPointer(["FINDINGS.md"]));
+  // The kill switch: the findings ride in the context, whole, in an evidence block.
+  assert.equal(amuxV22ResultReviewRelayCard({ ...input, workspace: false }).context,
+    "[evidence]\nIts run's report:\ndone\n[/evidence]");
+  // No size is too long for it (the old 1,700-character findings left the card unfiled): the whole report is in.
+  const long = `${"x".repeat(100_000)}END`;
+  assert.equal(amuxV22ResultReviewRelayCard({ ...input, findings: long, workspace: false }).context,
+    `[evidence]\nIts run's report:\n${long}\n[/evidence]`);
+  assert.equal(amuxV22ResultReviewRelayCard({ ...input, findings: "x".repeat(2_000), workspace: true }).context,
+    dmWorkspaceCardPointer(["FINDINGS.md"]));
+  // Only missing evidence is left to the person.
+  for (const [criteria, findings] of [[[], "done"], [["A"], " "]])
+    assert.equal(amuxV22ResultReviewRelayCard({ ...input, criteria, findings }), null,
+      "evidence that is missing is left to the person");
 });
 
 test("an answer decides only by its fixed words, with the delivery's precedence", () => {
