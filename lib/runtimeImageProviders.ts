@@ -99,6 +99,20 @@ export const runtimeImageProfileTemplate = (
     : {}),
 });
 
+/**
+ * The longest image router note (a profile's routingNote). Capped so every
+ * listed model's note fits the router call's prompt budget.
+ */
+export const IMAGE_ROUTING_NOTE_MAX_CHARS = 400;
+
+/**
+ * What an image model is for, in the user's words: the line under its name in
+ * the image model list, the way a chat model shows "Fast everyday questions".
+ * A key, not text, so the eight locales carry the copy (chat.imageModelUse*).
+ */
+export const IMAGE_USE_CASES = ["text", "detail", "fast", "edit", "layout", "reference", "value", "general"] as const;
+export type ImageUseCase = (typeof IMAGE_USE_CASES)[number];
+
 /** The sizes and qualities a runtime image profile may list (the profile schema's enums). */
 export const RUNTIME_IMAGE_SIZES = ["1024x1024", "1536x1024", "1024x1536"] as const;
 export const RUNTIME_IMAGE_QUALITIES = ["low", "medium", "high"] as const;

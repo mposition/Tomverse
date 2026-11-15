@@ -38,6 +38,7 @@ import type { BillingPlanConfig } from "@/lib/billingPlanDefaults";
 import { assertUserOperationalAccess } from "@/lib/chatSecurity";
 import { CHAT_IMAGE_TURN_CONTENT_PREFIX, chatImageTurnGroupKey } from "@/lib/chatImageTurnCore";
 import { hasConversationUnlockGrant } from "@/lib/conversationLock";
+import { readImageModelTypicalSeconds } from "@/lib/imageModelSpeed";
 import { refreshImageModelCatalog } from "@/lib/modelCatalog";
 import { prisma } from "@/lib/prisma";
 import { getRuntimeModels } from "@/lib/modelRegistry";
@@ -157,15 +158,16 @@ async function prepareChatImageRequest(input: ChatImageRequestInput): Promise<Pr
     let model;
     let candidates;
     try {
-        const [runtimeModels, imageModels] = await Promise.all([
+        const [runtimeModels, imageModels, typicalSeconds] = await Promise.all([
             getRuntimeModels(),
             refreshImageModelCatalog(),
+            readImageModelTypicalSeconds(),
         ]);
         model = resolveAutoLlmRouterModel(
             runtimeModels.filter((entry) => entry.enabled && !entry.catalogDeleted),
             configured
         );
-        candidates = chatImageModelCandidates(imageModels);
+        candidates = chatImageModelCandidates(imageModels, typicalSeconds);
         if (attachedPhoto) {
             // Only models that can edit, at the square price an edit charges --
             // the check the reservation makes, applied to the 1024x1024 option
