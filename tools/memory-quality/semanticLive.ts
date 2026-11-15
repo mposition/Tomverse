@@ -1,5 +1,5 @@
 import { access, open, rename, unlink } from "node:fs/promises";
-import { SEMANTIC_RETRIEVAL_ENV, SEMANTIC_RETRIEVAL_LIMITS } from "../../lib/semanticRetrievalCore";
+import { SEMANTIC_RETRIEVAL_ENV, SEMANTIC_RETRIEVAL_LIMITS, type RerankQueryPolicy } from "../../lib/semanticRetrievalCore";
 import { QualityStop } from "./runner";
 
 /**
@@ -160,6 +160,8 @@ export class CallMeter {
   searchUnits = 0;
   /** Rerank calls whose response did not say what it billed. */
   searchUnitsUnreported = 0;
+  rerankInputTokens = 0;
+  rerankInputTokensUnreported = 0;
   embedInputTokens = 0;
   constructor(readonly maxCalls: number) {}
   /** Counted before the request leaves: a call that fails may still have been billed. */
@@ -170,7 +172,9 @@ export class CallMeter {
   summary() {
     return {
       calls: this.calls, maxCalls: this.maxCalls, searchUnits: this.searchUnits,
-      searchUnitsUnreported: this.searchUnitsUnreported, embedInputTokens: this.embedInputTokens,
+      searchUnitsUnreported: this.searchUnitsUnreported,
+      rerankInputTokens: this.rerankInputTokens, rerankInputTokensUnreported: this.rerankInputTokensUnreported,
+      embedInputTokens: this.embedInputTokens,
     };
   }
 }
@@ -180,7 +184,7 @@ export const embedBatchCount = (inputs: number) =>
 
 export type LiveClient = {
   meter: CallMeter;
-  rerank(query: string, documents: readonly string[]): Promise<number[]>;
+  rerank(query: string, documents: readonly string[], queryPolicy?: RerankQueryPolicy): Promise<number[]>;
   /**
    * Embeds in batches of the provider's request size. `afterBatch` runs after
    * every paid batch with the vectors so far, so the caller can record them
@@ -211,12 +215,14 @@ export async function openLiveClient(config: LiveConfig, context: LiveContext): 
   const options = { env: context.env ?? process.env, ...(context.fetchImpl ? { fetchImpl: context.fetchImpl } : {}) };
   return {
     meter,
-    async rerank(query, documents) {
+    async rerank(query, documents, queryPolicy) {
       meter.take();
-      const result = await client.callRerank({ model: config.rerankModel, query, documents }, options);
+      const result = await client.callRerank({ model: config.rerankModel, query, documents, queryPolicy }, options);
       if (!result.ok) throw new LiveStop("live_call_failed", result.failure);
       if (result.value.searchUnits === null) meter.searchUnitsUnreported += 1;
       else meter.searchUnits += result.value.searchUnits;
+      if (result.value.inputTokens === null) meter.rerankInputTokensUnreported += 1;
+      else meter.rerankInputTokens += result.value.inputTokens;
       return result.value.scores;
     },
     async embed(inputType, texts, afterBatch) {

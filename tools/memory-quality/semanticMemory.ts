@@ -2,8 +2,9 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { z } from "zod";
 import { digest } from "./schema";
-import { roundSemanticScore } from "../../lib/semanticRetrievalCore";
-import { buildMemoryQueryPlan, MEMORY_QUERY_VERSION } from "../../lib/memoryQueryPlan";
+import { roundSemanticScore, resolveSemanticRetrievalConfig } from "../../lib/semanticRetrievalCore";
+import { prepareMemorySemanticInput } from "../../lib/memorySemanticInput";
+import { buildMemoryQueryPlan, MEMORY_QUERY_VERSION, MEMORY_FULL_QUERY_VERSION } from "../../lib/memoryQueryPlan";
 import { MEMORY_SEMANTIC_DEFAULTS, MEMORY_SEMANTIC_RETRIEVAL_ALGORITHM_VERSION } from "../../lib/memoryRetrievalScoring";
 import {
   measureProductRetrievalDetailed, rerankDocuments, type RetrievalCase,
@@ -26,6 +27,8 @@ export const MEMORY_SCORES_FORMAT = "memory-rerank-scores-v1";
 const caseScores = z.record(z.string(), z.record(z.string(), z.number().finite().min(0).max(1)));
 const requestIdentity = z.object({
   queryHash: z.string(), candidateIds: z.array(z.string()), candidatesHash: z.string(),
+  currentQueryHash: z.string().optional(), historyHash: z.string().optional(),
+  queryMode: z.enum(["current-query", "full-query", "full-query+history"]).optional(),
 }).strict();
 const scoreProvenance = z.object({
   kind: z.enum(["provider", "mock", "oracle"]),
@@ -42,15 +45,46 @@ export type MemoryScores = Map<string, Map<string, number>> & {
   corpus?: string; provenance?: z.infer<typeof scoreProvenance>;
 };
 
-const inputIdentity = (testCase: RetrievalCase) => {
-  const documents = rerankDocuments(testCase.retrieval);
-  return { queryHash: digest(buildMemoryQueryPlan(testCase.retrieval.query).semanticQuery),
-    candidateIds: documents.map((doc) => doc.id), candidatesHash: digest(documents) };
+export type MemoryEvaluationQueryMode = "current-query" | "full-query" | "full-query+history";
+type EvaluationPreparation = { model: string; billing: { unit: "token" } | { unit: "search_unit" } };
+const queryVersion = (mode: MemoryEvaluationQueryMode) => mode === "current-query"
+  ? MEMORY_QUERY_VERSION : MEMORY_FULL_QUERY_VERSION;
+const evaluationInput = (testCase: RetrievalCase, mode: MemoryEvaluationQueryMode,
+  preparation?: EvaluationPreparation) => {
+  let history = mode === "full-query+history" ? testCase.retrieval.history ?? [] : [];
+  const plan = buildMemoryQueryPlan(testCase.retrieval.query, {
+    queryPolicy: mode === "current-query" ? "legacy" : "full",
+    history,
+  });
+  if (preparation && mode !== "current-query") {
+    const prepared = prepareMemorySemanticInput({ ...preparation, currentQuery: testCase.retrieval.query, history });
+    if (!prepared.ok) throw new QualityStop(`evaluation_${prepared.reason}`);
+    history = prepared.value.historyCount > 0 ? history.slice(-prepared.value.historyCount) : [];
+    return { plan: { ...plan, semanticQuery: prepared.value.effectiveQuery }, history };
+  }
+  return { plan, history };
 };
-const corpusIdentity = (cases: readonly RetrievalCase[]) => digest(cases.map((row) => ({
-  id: row.id, queryVersion: MEMORY_QUERY_VERSION,
+export const memoryEvaluationQueryPlan = (testCase: RetrievalCase, mode: MemoryEvaluationQueryMode = "current-query",
+  preparation?: EvaluationPreparation) => evaluationInput(testCase, mode, preparation).plan;
+
+export const memoryEvaluationInputIdentity = (testCase: RetrievalCase, mode: MemoryEvaluationQueryMode = "current-query",
+  preparation?: EvaluationPreparation) => {
+  const documents = rerankDocuments(testCase.retrieval);
+  const input = evaluationInput(testCase, mode, preparation);
+  return { queryHash: digest(input.plan.semanticQuery),
+    candidateIds: documents.map((doc) => doc.id), candidatesHash: digest(documents),
+    ...(mode === "current-query" ? {} : {
+      currentQueryHash: digest(testCase.retrieval.query.normalize("NFC")),
+      historyHash: digest(input.history.map(text => text.normalize("NFC"))),
+      queryMode: mode,
+    }),
+  };
+};
+export const memoryEvaluationCorpusDigest = (cases: readonly RetrievalCase[], mode: MemoryEvaluationQueryMode = "current-query",
+  preparation?: EvaluationPreparation) => digest(cases.map((row) => ({
+  id: row.id, queryVersion: queryVersion(mode),
   queryHash: digest(row.retrieval.query.normalize("NFC")), pool: row.retrieval.pool,
-  input: inputIdentity(row),
+  input: memoryEvaluationInputIdentity(row, mode, preparation),
 })));
 
 /** Case id to `{ memoryId: score }`, bare or wrapped in the file `--save-scores` writes. */
@@ -94,18 +128,27 @@ const brief = ({ result }: Measured) => ({
   top5: result.top5, fullSelectedSet: result.fullSelectedSet,
 });
 
-export function compareMemory(corpus: string, cases: readonly RetrievalCase[], scores: MemoryScores) {
+export function compareMemory(corpus: string, cases: readonly RetrievalCase[], scores: MemoryScores,
+  mode: MemoryEvaluationQueryMode = "current-query") {
+  const unit = scores.provenance?.settings.billingUnit;
+  const preparation: EvaluationPreparation | undefined = mode !== "current-query" &&
+    (unit === "token" || unit === "search_unit") && scores.provenance
+    ? { model: scores.provenance.model, billing: { unit } } : undefined;
+  if (mode !== "current-query" && scores.provenance?.kind === "provider" && !preparation) {
+    throw new QualityStop("scores_input_contract_missing");
+  }
   if (scores.corpus !== undefined && scores.corpus !== corpus) throw new QualityStop("scores_corpus_mismatch");
   if (scores.provenance) {
-    if (scores.provenance.corpusDigest !== corpusIdentity(cases)) throw new QualityStop("scores_corpus_mismatch");
-    if (scores.provenance.settings.queryVersion !== MEMORY_QUERY_VERSION) throw new QualityStop("scores_input_mismatch");
+    if (scores.provenance.corpusDigest !== memoryEvaluationCorpusDigest(cases, mode, preparation)) throw new QualityStop("scores_corpus_mismatch");
+    if (scores.provenance.settings.queryVersion !== queryVersion(mode) ||
+      (mode !== "current-query" && scores.provenance.settings.queryMode !== mode)) throw new QualityStop("scores_input_mismatch");
     if (scores.provenance.settings.retrievalVersion !== MEMORY_SEMANTIC_RETRIEVAL_ALGORITHM_VERSION ||
       Object.entries(MEMORY_SEMANTIC_DEFAULTS).some(([key, value]) => scores.provenance!.settings[key] !== value)) {
       throw new QualityStop("scores_input_mismatch");
     }
     for (const [caseId, identity] of Object.entries(scores.provenance.requests)) {
       const testCase = cases.find((row) => row.id === caseId);
-      if (!testCase || digest(identity) !== digest(inputIdentity(testCase))) {
+      if (!testCase || digest(identity) !== digest(memoryEvaluationInputIdentity(testCase, mode, preparation))) {
         throw new QualityStop("scores_input_mismatch");
       }
     }
@@ -148,6 +191,13 @@ export function compareMemory(corpus: string, cases: readonly RetrievalCase[], s
   const requested = cases.filter(hasRerankRequest);
   return {
     path: "product:selectMemoryContext+externalRelevance" as const, corpus, k: lexical.result.k, cases: cases.length,
+    queryMode: mode, queryVersion: queryVersion(mode),
+    requests: Object.fromEntries(cases.map(row => [row.id, {
+      ...memoryEvaluationInputIdentity(row, mode, preparation),
+      queryBytes: Buffer.byteLength(memoryEvaluationQueryPlan(row, mode, preparation).semanticQuery, "utf8"),
+      historyCount: evaluationInput(row, mode, preparation).history.length,
+      candidateProvenance: "same_product_lexical_and_extra_pool" as const,
+    }])),
     lexical: brief(lexical), semantic: brief(semantic),
     scoreEvidence: {
       kind: scores.provenance?.kind ?? "unverified",
@@ -187,12 +237,21 @@ export async function measureSemanticMemory(input: {
   context: LiveContext;
 }) {
   const { corpus, cases, options, context } = input;
+  const mode = (options["query-mode"] ?? "current-query") as MemoryEvaluationQueryMode;
   if (!input.live) {
-    const comparison = compareMemory(corpus, cases, await loadMemoryScores(options["rerank-scores"]));
+    const comparison = compareMemory(corpus, cases, await loadMemoryScores(options["rerank-scores"]), mode);
     return { ...comparison, source: "scores_file" as const, live: null, paidCalls: 0, decisionGrade: false as const };
   }
 
   const config = await resolveLive(options, context, { embed: false });
+  let preparation: EvaluationPreparation | undefined;
+  if (mode !== "current-query") {
+    const rerank = resolveSemanticRetrievalConfig(context.env ?? process.env).rerank;
+    if (!rerank) throw new QualityStop("evaluation_rerank_billing_not_configured");
+    preparation = { model: config.rerankModel, billing: rerank.billing };
+    // Check the full corpus before a save file or the first paid request.
+    for (const row of cases) evaluationInput(row, mode, preparation);
+  }
   const planned = plannedMemoryCalls(cases);
   if (planned === 0) throw new QualityStop("nothing_to_rerank");
   if (planned > config.maxCalls) throw new QualityStop("max_calls_below_planned");
@@ -201,9 +260,10 @@ export async function measureSemanticMemory(input: {
   const collected: Record<string, Record<string, number>> = {};
   const provenance: z.infer<typeof scoreProvenance> = {
     kind: context.fetchImpl ? "mock" : "provider", provider: "cohere", model: config.rerankModel,
-    collectedAt: new Date().toISOString(), corpusDigest: corpusIdentity(cases),
-    requests: Object.fromEntries(cases.filter(hasRerankRequest).map((row) => [row.id, inputIdentity(row)])),
-    settings: { maxCalls: config.maxCalls, queryVersion: MEMORY_QUERY_VERSION,
+    collectedAt: new Date().toISOString(), corpusDigest: memoryEvaluationCorpusDigest(cases, mode, preparation),
+    requests: Object.fromEntries(cases.filter(hasRerankRequest).map((row) => [row.id, memoryEvaluationInputIdentity(row, mode, preparation)])),
+    settings: { maxCalls: config.maxCalls, queryVersion: queryVersion(mode), queryMode: mode,
+      ...(preparation ? { billingUnit: preparation.billing.unit } : {}),
       retrievalVersion: MEMORY_SEMANTIC_RETRIEVAL_ALGORITHM_VERSION, ...MEMORY_SEMANTIC_DEFAULTS },
   };
   const snapshot = (complete: boolean) => ({
@@ -216,8 +276,8 @@ export async function measureSemanticMemory(input: {
   try {
     for (const testCase of cases.filter(hasRerankRequest)) {
       const documents = rerankDocuments(testCase.retrieval);
-      const scores = await client.rerank(buildMemoryQueryPlan(testCase.retrieval.query).semanticQuery,
-        documents.map((doc) => doc.text));
+      const scores = await client.rerank(memoryEvaluationQueryPlan(testCase, mode, preparation).semanticQuery,
+        documents.map((doc) => doc.text), mode === "current-query" ? undefined : "memory-v3");
       collected[testCase.id] = Object.fromEntries(documents.map((doc, index) => [doc.id, scores[index]]));
       await target.write(snapshot(false));
     }
@@ -241,5 +301,5 @@ export async function measureSemanticMemory(input: {
   }
   const scored: MemoryScores = Object.assign(new Map(Object.entries(collected).map(([caseId, scores]) =>
     [caseId, new Map(Object.entries(scores))])), { corpus, provenance });
-  return { ...compareMemory(corpus, cases, scored), source: "live" as const, live, paidCalls: usage.calls, decisionGrade: false as const };
+  return { ...compareMemory(corpus, cases, scored, mode), source: "live" as const, live, paidCalls: usage.calls, decisionGrade: false as const };
 }

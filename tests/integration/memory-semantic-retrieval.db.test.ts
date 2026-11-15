@@ -12,6 +12,7 @@ import { buildChatMemoryContext } from "@/lib/chatMemoryContext";
 import { estimatePromptTokens } from "@/lib/chatTokenEstimate";
 import { pricedMemoryRetrievalHash } from "@/lib/chatContextBundleCore";
 import { buildMemoryQueryPlan } from "@/lib/memoryQueryPlan";
+import { prepareMemoryHistoryContext, replayMemoryHistoryContext } from "@/lib/memoryHistorySnapshot";
 import { putMemorySettings } from "@/lib/memoryService";
 import { MEMORY_INJECTION_FLAG_KEY } from "@/lib/memoryAccess";
 import { externalContentDigest } from "@/lib/externalImportDigest";
@@ -980,3 +981,160 @@ test("the signed query plan changes even when lexical terms and selected memorie
     assert.deepEqual(await verifyTurn(user.id, `${COFFEE_QUESTION}!!!`, issued.token), { ok: false, reason: "stale" });
     assert.equal(provider.state.calls.length, 0);
 });
+
+/* ---------------- full-query history: real cache, signing and source reads */
+
+// Token pricing and scores are local operator/provider fixtures, never live settings.
+const withFullMemoryQuery = async <T>(run: () => Promise<T>): Promise<T> => {
+    const previousFlag = process.env.MEMORY_RELEVANCE_CONTEXT_ENABLED;
+    provider.setEnv("MEMORY_RELEVANCE_CONTEXT_ENABLED", "true");
+    provider.setEnv("COHERE_RERANK_MODEL", "rerank-v5.0-fast");
+    provider.setEnv("COHERE_RERANK_MICROUSD_PER_SEARCH_UNIT", "");
+    provider.setEnv("COHERE_RERANK_MICROUSD_PER_MILLION_TOKENS", "1000000");
+    provider.state.rerankBilled = { input_tokens: 100 };
+    provider.state.rerankScore = (_query, document) => document.includes("아틀라스") ? 0.95 : 0;
+    try {
+        return await run();
+    } finally {
+        if (previousFlag === undefined) delete process.env.MEMORY_RELEVANCE_CONTEXT_ENABLED;
+        else process.env.MEMORY_RELEVANCE_CONTEXT_ENABLED = previousFlag;
+    }
+};
+
+const fullQueryFixture = async () => {
+    const user = await createUser();
+    const conversation = await prisma.conversation.create({ data: {
+        userId: user.id, title: "Memory snapshot fixture", selectedModels: JSON.stringify([MODEL]),
+        memoryMode: "on",
+    } });
+    const contents = ["Older unrelated user context", "아틀라스 프로젝트 출시 일정을 정리하자.", "내가 맡은 작업은 문서 검수다."];
+    const sources = [];
+    for (const [index, content] of contents.entries()) {
+        sources.push(await prisma.message.create({ data: {
+            conversationId: conversation.id, role: "user", content,
+            createdAt: new Date(NOW.getTime() + index * 1_000),
+        } }));
+    }
+    await prisma.message.create({ data: {
+        conversationId: conversation.id, role: "assistant", content: "Assistant context must not be a source.",
+        createdAt: new Date(NOW.getTime() + 3_000),
+    } });
+    await createMemory(user.id, "identity", ENGINEER);
+    await createMemory(user.id, "project", "아틀라스 프로젝트 문서 검수 마감은 다음 화요일이다.");
+    await createMemory(user.id, "project", "다른 프로젝트 마감은 금요일이다.");
+    await prisma.appSetting.create({ data: { key: MEMORY_INJECTION_FLAG_KEY, value: "true" } });
+    await turnOn("memoryRerank");
+    const query = `${"앞선 조건을 확인하고 ".repeat(16)}중간 핵심 조건: 금요일이 아닌 다음 화요일을 기준으로 그 프로젝트에서 내가 맡은 마감만 알려줘.${" 추가 조건도 유지해줘.".repeat(16)}`;
+    assert.ok(Buffer.byteLength(query, "utf8") > 400);
+    const request = new Request("http://localhost/api/chat/context");
+    const access = { request, userId: user.id, conversationId: conversation.id };
+    const buildInput = { userId: user.id, query, conversationMode: conversation.memoryMode, profileVersionId: null, now: NOW };
+    const prepare = () => buildChatTurnContext({
+        ...buildInput,
+        memorySemanticContext: prepareMemoryHistoryContext({ ...access, query, modelIds: [MODEL] }),
+    });
+    const sign = (context: Awaited<ReturnType<typeof buildChatTurnContext>>) => issueChatContextBundle({
+        subjectKey: user.id, conversationId: conversation.id, modelIds: [MODEL, "comparison-sibling"], context,
+    }).token;
+    const append = async () => {
+        await prisma.message.createMany({ data: [
+            { conversationId: conversation.id, role: "user", content: query, createdAt: new Date(NOW.getTime() + 4_000) },
+            { conversationId: conversation.id, role: "user", content: "Another tab appended a different project.", createdAt: new Date(NOW.getTime() + 5_000) },
+            { conversationId: conversation.id, role: "assistant", modelId: "comparison-sibling", content: "Sibling completed.", createdAt: new Date(NOW.getTime() + 6_000) },
+        ] });
+        await prisma.conversation.update({ where: { id: conversation.id }, data: { updatedAt: new Date(NOW.getTime() + 6_000) } });
+    };
+    const rebuild = async (token: string) => {
+        // Match send ordering: verify the subject/conversation/model envelope before source lookup.
+        const envelope = verifyChatContextBundle(token, { subjectKey: user.id, conversationId: conversation.id, modelId: MODEL });
+        assert.ok(envelope.ok);
+        const replayed = await replayMemoryHistoryContext({ ...access, query, payload: envelope.payload });
+        assert.ok(replayed);
+        const context = await buildChatTurnContext({
+            ...buildInput, memorySemanticContext: replayed, semantic: verifyingSemanticModes(envelope.payload.semanticSteps),
+        });
+        return { context, replayed, payload: envelope.payload, verification: verifyChatContextBundle(token, {
+            subjectKey: user.id, conversationId: conversation.id, modelId: MODEL, currentFingerprint: context.fingerprint,
+        }) };
+    };
+    return { ...access, query, sources: sources.slice(-2), buildInput, prepare, sign, append, rebuild };
+};
+
+test("full Memory query preserves Korean middle conditions and the signed history across save, append and sibling answers", () => withFullMemoryQuery(async () => {
+    const fixture = await fullQueryFixture();
+    const context = await fixture.prepare();
+    assert.equal(context.semanticSteps.memoryRerank, true);
+    assert.deepEqual(context.memory.memoryHistorySources?.map(source => source.id), fixture.sources.map(source => source.id));
+    const token = fixture.sign(context);
+    assert.equal(provider.state.calls.length, 1);
+    const wireQuery = provider.state.calls[0].body.query as string;
+    assert.ok(Buffer.byteLength(wireQuery, "utf8") > 400);
+    assert.ok(wireQuery.includes("중간 핵심 조건: 금요일이 아닌 다음 화요일"));
+    assert.deepEqual(JSON.parse(wireQuery), {
+        current_query: fixture.query.normalize("NFC"), previous_user_messages: fixture.sources.map(source => source.content.normalize("NFC")),
+    });
+    const signedBody = Buffer.from(token.split(".")[0], "base64url").toString("utf8");
+    assert.ok(!signedBody.includes(fixture.query));
+    assert.ok(!signedBody.includes(fixture.sources[0].content));
+    await fixture.append();
+    const replay = await fixture.rebuild(token);
+    assert.deepEqual(replay.replayed.history.map(source => source.id), fixture.sources.map(source => source.id));
+    assert.equal(replay.verification.ok, true);
+    assert.equal(replay.context.fingerprint, context.fingerprint);
+    assert.equal(provider.state.calls.length, 1, "send must use the stored ranking without another provider call");
+    assert.equal(verifyChatContextBundle(token, {
+        subjectKey: fixture.userId, conversationId: fixture.conversationId,
+        modelId: "comparison-sibling", currentFingerprint: replay.context.fingerprint,
+    }).ok, true);
+    const reprepared = await buildChatTurnContext({
+        ...fixture.buildInput,
+        memorySemanticContext: prepareMemoryHistoryContext({
+            request: fixture.request, userId: fixture.userId, conversationId: fixture.conversationId,
+            query: fixture.query, modelIds: [MODEL, "comparison-sibling"], previousContextBundle: token,
+        }),
+    });
+    assert.equal(reprepared.fingerprint, context.fingerprint);
+    assert.deepEqual(reprepared.memory.memoryHistorySources, context.memory.memoryHistorySources);
+    const refreshedToken = fixture.sign(reprepared);
+    assert.notEqual(refreshedToken, token, "re-preparation issues a fresh nonce while preserving sources");
+    assert.equal((await fixture.rebuild(refreshedToken)).verification.ok, true);
+    assert.equal(provider.state.calls.length, 1, "same-subset re-preparation also reuses the cached ranking");
+}));
+
+test("a full-query contextual success becomes stale after cache loss without another paid dispatch", () => withFullMemoryQuery(async () => {
+    const fixture = await fullQueryFixture();
+    const context = await fixture.prepare();
+    assert.equal(context.semanticSteps.memoryRerank, true);
+    const token = fixture.sign(context);
+    await fixture.append();
+    await prisma.semanticRetrievalCache.deleteMany();
+    const replay = await fixture.rebuild(token);
+    assert.deepEqual(replay.verification, { ok: false, reason: "stale" });
+    assert.equal(replay.context.semanticSteps.memoryRerank, false);
+    assert.equal(replay.context.memory.memoryHistorySources, undefined);
+    assert.equal(provider.state.calls.length, 1);
+}));
+
+for (const failure of ["provider", "budget", "cache_write"] as const) test(`a full-query ${failure} failure signs and reproduces lexical context without an unused history anchor`, () => withFullMemoryQuery(async () => {
+    const fixture = await fullQueryFixture();
+    const baseline = await buildChatTurnContext({ ...fixture.buildInput, semantic: "off" });
+    if (failure === "provider") provider.state.failing = true;
+    if (failure === "budget") provider.setEnv("RETRIEVAL_PROVIDER_COHERE_COST_MICROUSD_PER_DAY", "1");
+    const context = failure === "cache_write"
+        ? await withCacheUnavailable(fixture.prepare) : await fixture.prepare();
+    assert.equal(context.semanticSteps.memoryRerank, false);
+    assert.equal(context.fingerprint, baseline.fingerprint);
+    assert.equal(context.memory.memoryHistorySources, undefined);
+    const token = fixture.sign(context);
+    const calls = provider.state.calls.length;
+    assert.equal(calls, failure === "budget" ? 0 : 1);
+    provider.state.failing = false;
+    provider.setEnv("RETRIEVAL_PROVIDER_COHERE_COST_MICROUSD_PER_DAY", "5000000");
+    await fixture.append();
+    const replay = await fixture.rebuild(token);
+    assert.equal(replay.payload.memoryHistory, undefined, "attempted history is not an adopted signed anchor");
+    assert.deepEqual(replay.replayed.history, []);
+    assert.equal(replay.verification.ok, true);
+    assert.equal(replay.context.fingerprint, baseline.fingerprint);
+    assert.equal(provider.state.calls.length, calls, "fallback replay cannot call the recovered provider");
+}));

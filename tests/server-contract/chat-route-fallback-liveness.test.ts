@@ -610,11 +610,17 @@ mock.module(mod("lib/chatTurnContext.ts"), {
 });
 mock.module(mod("lib/chatContextBundleService.ts"), {
   namedExports: {
-    verifyChatContextBundle: () => {
-      const verification = contextSequence.shift() ?? contextVerification;
+    verifyChatContextBundle: (token: string, options: { currentFingerprint?: string }) => {
+      assert.ok(token);
+      // Envelope checks reject invalid/expired tokens before loading context;
+      // source/fingerprint drift is decided only after the context is rebuilt.
+      const verification = options.currentFingerprint === undefined
+        ? (contextVerification === "invalid_signature" || contextVerification === "expired" ? contextVerification : "ok")
+        : contextSequence.shift() ?? contextVerification;
       if (verification !== "ok") return { ok: false, reason: verification };
       return { ok: true, payload: { bundleId: "context-bundle-one", expiresAtMs: Date.now() + 60_000,
-        memoryTokens: 0, profileTokens: 0 } };
+        memoryTokens: 0, profileTokens: 0,
+        semanticSteps: { memoryRerank: false, knowledgeNeighbours: false, knowledgeRerank: false } } };
     },
     consumeContextBundle: async () =>
       contextConsumeSucceeds
@@ -4575,4 +4581,20 @@ for (const configured of ["false", "", "invalid"]) test(`history search explicit
   assert.match(JSON.stringify(attempts[0].messages), /AUD70/);
   assert.equal(parseChatStreamTrailer(splitSearchMetadataTrailer(body).searchMetadataJson)?.continuationReceipt?.plannerVersion,
     "ext-seed-v3-selected-recent");
+});
+
+
+test("an invalid context envelope is rejected before context reads or paid Auto routing", async () => {
+  contextVerification = "invalid_signature";
+  contextReads.length = 0;
+  llmRouterRewrite = "Candidate.";
+  paidRouterCalls = 0;
+  try {
+    const result = await ask("answers", "claimed", 400, true);
+    assert.equal(JSON.parse(result.body).code, "INVALID_CONTEXT_BUNDLE");
+    assert.equal(contextReads.length, 0);
+    assert.equal(paidRouterCalls, 0);
+    assert.equal(attempts.length, 0);
+    assert.equal(ledger.accessAcquisitions, 0);
+  } finally { contextVerification = "ok"; llmRouterRewrite = null; }
 });

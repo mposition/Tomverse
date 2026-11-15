@@ -8,7 +8,7 @@ import { evaluateRetrieval, retrievalTargetFailures, summarizeRetrieval } from "
 import { corpusSchema, retrievalCorpusSchema, type QualityCase } from "./schema";
 
 export const RECALL_K = 5;
-export const PRODUCT_RETRIEVAL_CORPORA = ["development", "validation", "retrieval-ko"] as const;
+export const PRODUCT_RETRIEVAL_CORPORA = ["development", "validation", "retrieval-ko", "relevance"] as const;
 export type ProductRetrievalCorpus = (typeof PRODUCT_RETRIEVAL_CORPORA)[number];
 
 // One clock and uniform confidence/importance, so only the query and the
@@ -156,6 +156,9 @@ const fixture = async (name: string) =>
   JSON.parse(await readFile(new URL(`./fixtures/${name}.json`, import.meta.url), "utf8"));
 
 export async function loadRetrievalCases(name: ProductRetrievalCorpus): Promise<RetrievalCase[]> {
+  if (name === "relevance") {
+    return (await import("./fixtures/relevance-inputs")).MEMORY_RELEVANCE_FIXTURES;
+  }
   if (name === "retrieval-ko") {
     const corpus = retrievalCorpusSchema.parse(await fixture(name));
     return corpus.cases.map((row) => {
@@ -165,7 +168,8 @@ export async function loadRetrievalCases(name: ProductRetrievalCorpus): Promise<
         throw new Error("invalid_relevance_gold");
       }
       return { id: row.id, language: row.language, tag: row.tag,
-        retrieval: { query: row.query, pool, relevantIds: row.relevantIds } };
+        retrieval: { query: row.query, pool, relevantIds: row.relevantIds,
+          ...(row.history ? { history: row.history } : {}) } };
     });
   }
   return corpusSchema.parse(await fixture(name)).cases

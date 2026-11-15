@@ -1,4 +1,5 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { isMemoryHistoryAnchor, type MemoryHistoryAnchor } from "@/lib/memoryHistorySnapshotCore";
 
 /**
  * Policy: docs/policy/external-conversation-import-and-memory.md.
@@ -114,6 +115,9 @@ const decodeSemanticSteps = (value: unknown): SemanticStepsUsed | null => {
 
 export type ContextBundlePayload = ContextBundleFingerprintInput & {
     version: 1;
+    /** Absent means the legacy query policy, never a fresh history lookup. */
+    memoryQueryPolicy?: "full" | "legacy";
+    memoryHistory?: MemoryHistoryAnchor;
     /** Shared lineage identity. A comparison's panels all carry the same one. */
     bundleId: string;
     subjectKey: string;
@@ -229,6 +233,8 @@ const encode = (payload: ContextBundlePayload) =>
             pt: payload.profileTokens,
             e: payload.expiresAtMs,
             ss: encodeSemanticSteps(payload.semanticSteps),
+            mq: payload.memoryQueryPolicy,
+            mh: payload.memoryHistory,
         }),
         "utf8"
     ).toString("base64url");
@@ -305,8 +311,11 @@ const decode = (body: string): ContextBundlePayload | null => {
     ) {
         return null;
     }
+    if (record.mq !== undefined && record.mq !== "full" && record.mq !== "legacy") return null;
+    if (record.mh !== undefined && (!isMemoryHistoryAnchor(record.mh) || record.mq !== "full")) return null;
     const semanticSteps = decodeSemanticSteps(record.ss);
     if (!semanticSteps) return null;
+    if (record.mh !== undefined && !semanticSteps.memoryRerank) return null;
     return {
         version: 1,
         bundleId: record.b,
@@ -325,6 +334,8 @@ const decode = (body: string): ContextBundlePayload | null => {
         profileTokens: typeof record.pt === "number" ? record.pt : 0,
         expiresAtMs: record.e,
         semanticSteps,
+        ...(record.mq !== undefined ? { memoryQueryPolicy: record.mq as "full" | "legacy" } : {}),
+        ...(record.mh !== undefined ? { memoryHistory: record.mh as MemoryHistoryAnchor } : {}),
     };
 };
 

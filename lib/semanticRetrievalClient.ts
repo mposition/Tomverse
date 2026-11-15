@@ -12,6 +12,7 @@ import {
     type EmbedInputType,
     type ParsedEmbed,
     type ParsedRerank,
+    type RerankQueryPolicy,
 } from "@/lib/semanticRetrievalCore";
 
 /**
@@ -103,7 +104,12 @@ const postJson = async <T>(
 };
 
 export const callRerank = (
-    input: { model: string; query: string; documents: readonly string[] },
+    input: {
+        model: string;
+        query: string;
+        documents: readonly string[];
+        queryPolicy?: RerankQueryPolicy;
+    },
     options: { fetchImpl?: FetchImpl; env?: Record<string, string | undefined> } = {}
 ): Promise<SemanticCallResult<ParsedRerank>> =>
     postJson(

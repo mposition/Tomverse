@@ -2204,6 +2204,7 @@ function ChatAppComponent({
                   conversationId: isGuestMode ? null : targetChatId,
                   modelIds: [modelId],
                   prompt: text,
+                  ...(activeContextBundle ? { previousContextBundle: activeContextBundle } : {}),
                 })
               : null;
           // Nothing to retry with. Re-sending the bundle that was just
@@ -2239,6 +2240,7 @@ function ChatAppComponent({
                   conversationId: targetChatId,
                   modelIds: [modelId],
                   prompt: text,
+                  ...(activeContextBundle ? { previousContextBundle: activeContextBundle } : {}),
                 })
               : null;
           if (!refreshed) throw error;

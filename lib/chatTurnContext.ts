@@ -21,6 +21,7 @@ import {
     type ChatProfileContext,
 } from "@/lib/chatProfileContext";
 import type { ModelTier } from "@/lib/models";
+import type { MemorySemanticContextInput } from "@/lib/memoryQueryPlan";
 import type { SemanticStepsUsed } from "@/lib/chatContextBundleCore";
 import type { SemanticCallMode, SemanticStepModes } from "@/lib/semanticRetrievalCore";
 
@@ -95,6 +96,8 @@ export async function buildChatTurnContext(input: {
      * and the send path never waits on or pays the retrieval provider.
      */
     semantic?: SemanticCallMode | SemanticStepModes;
+    /** Memory-only server context; profile knowledge continues to use `query`. */
+    memorySemanticContext?: MemorySemanticContextInput;
 }): Promise<ChatTurnContext> {
     const semantic: SemanticStepModes =
         typeof input.semantic === "object"
@@ -129,6 +132,7 @@ export async function buildChatTurnContext(input: {
         profileMemoryPolicy: profile.memoryPolicy,
         now: input.now,
         semantic: semantic.memoryRerank,
+        memorySemanticContext: input.memorySemanticContext,
     });
 
     const systemPrompt = buildProfileSystemPrompt({
