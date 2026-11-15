@@ -383,7 +383,7 @@ export async function retrieveMemoryContext(input: {
             : memories,
         ...(externalRelevance ? { externalRelevance } : {}),
     });
-    let semanticFallbackReason = fullRanking?.fallbackReason;
+    let semanticFallbackReason: MemoryRetrievalResult["semanticFallbackReason"] = fullRanking?.fallbackReason;
     if (externalRelevance && fullRanking?.adopted && fullRanking.adopted.historyCount > 0) {
         const lexical = selectMemoryContext({ ...selectionInput, memories });
         if (contextualRankingDisplacesCurrentQuery(lexical, selection)) {

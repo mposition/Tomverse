@@ -210,12 +210,19 @@ copied-user-material의 Atlas 회수는 유지했다. 프로젝트 혼입·assis
 | source snapshot·retrieval server contract | 11 통과 |
 | 전용 PostgreSQL 17 DB | 기존 bundle/semantic 회귀 44 + 신규 재현 1 통과 |
 | quality 도구 자체 typecheck | 통과 |
+| 변경 서버·평가 코드·DB 테스트의 root 옵션 typecheck (기존 ambient 타입 포함) | 통과 |
 | 변경 파일 scoped lint | 통과 |
+| 후속 통합 head 전체 root typecheck | 미완료: 로컬 메모리 압박. 파일 로딩 진단에서 heap allocation failure가 발생해 전체 실행을 중지했다. Next route typegen은 통과했다. |
 
 신규 DB 회귀는 실제 cache·서명·source 조회를 사용하고 provider만 로컬 stand-in으로
 대체한다. 커피 선택, lexical fingerprint 일치, 거절한 history anchor 부재, 현재 질문
 저장·사용되지 않은 source 변경 후 전송 검증, 준비·동일 snapshot 반복 조회·전송에서 provider 호출이
 1회인 것을 확인했다. 전용 DB는 loopback `tomverse_memory_precedence_test`이고 운영 DB를
 사용하지 않았다. 실행 후 전용 PostgreSQL을 정상 중지했다.
+
+작업 중 원격에 추가된 CI admission의 develop 동기화 머지 `d9bc5b2cf`를 보존해 수정 커밋을
+통합했다. Memory 구현·테스트 파일은 동기화로 달라지지 않았다. 원격에서 draft·`ci:hold`가
+다시 해제된 것을 확인해 복구했다. 당시 시작된 CI 3건은 중지를 요청하는 사이 이미
+완료되어 중지 대상이 남지 않았다. 이 세션에서 CI를 시작·재실행하지 않았다.
 
 운영 스위치·예산·고지 gate, 독립 검토 unknown, draft·`ci:hold`, 병합·배포 상태는 유지한다.
