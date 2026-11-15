@@ -218,7 +218,7 @@ export const ko = {
         messageReceiptRecoveryReload: "대화 새로고침",
         restoreQuestion: "질문 복원",
         restoreQuestionHint: "질문을 입력창에 복원합니다. 새 답변을 요청하려면 별도로 전송하세요.",
-        compareInReview: "Review로 비교",
+        compareInReview: "여러 모델로 비교",
         compareInReviewLabel: "이 질문을 새 Review에서 여러 모델로 비교",
         compareInReviewContext: "이전 질문:",
         compareInReviewBlocked: "보내는 중이거나 저장되지 않은 초안이 있어 Review를 열 수 없습니다. 잠시 후 다시 시도하세요.",
