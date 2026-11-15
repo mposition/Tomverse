@@ -89,7 +89,7 @@ test("evidence near its 16 MiB cap is read as base64 without overflowing a regex
   }
 });
 
-test("§10: the manifest digest binds the checkout and every evidence file under the request key", () => {
+test("docs/policy/amux-decision-maker.md §10: the manifest digest binds the checkout and every evidence file under the request key", () => {
   const key = Buffer.alloc(32, 7);
   const workspace = { state: "worker_head", targetSha: SHA, files: [{ name: "PATCH.diff", text: PATCH }] };
   assert.equal(dmWorkspaceManifestDigest(key, workspace),

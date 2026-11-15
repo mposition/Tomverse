@@ -396,8 +396,10 @@ const stageOf = async (ideaId: string, actor = OWNER_ID) =>
 
 test("the switch off leaves no question and files none, whatever the ideas look like", async () => {
   const { ideaId } = await seedIdea([{ status: "blocked" }]);
-  assert.deepEqual(await openAmuxIdeaCardCloseQuestionIfDue({}), { opened: false });
-  assert.deepEqual(await openAmuxIdeaCardCloseQuestionIfDue({ TOMVERSE_AMUX_CARD_CLOSE_DM: "true" }),
+  // On unless exactly "disabled" (owner decision 2026-11-15): the kill switch.
+  const OFF = { TOMVERSE_AMUX_CARD_CLOSE_DM: "disabled" };
+  assert.deepEqual(await openAmuxIdeaCardCloseQuestionIfDue(OFF), { opened: false });
+  assert.deepEqual(await openAmuxIdeaCardCloseQuestionIfDue({ TOMVERSE_AMUX_CARD_CLOSE_DM: " disabled " }),
     { opened: false });
   assert.equal(await questionCount(), 0);
 
@@ -405,7 +407,7 @@ test("the switch off leaves no question and files none, whatever the ideas look 
   const open = (await questionOf(ideaId))!;
   assert.equal(open.state, "open");
   // Turned off with a question not yet filed: filing it is what starts a paid turn.
-  const off = await readAmuxIdeaCardCloseSyncForRelay({});
+  const off = await readAmuxIdeaCardCloseSyncForRelay(OFF);
   assert.deepEqual(off.pending, []);
   const on = await readAmuxIdeaCardCloseSyncForRelay(ON);
   assert.ok(on.pending.some((entry) => entry.question_id === open.id));
@@ -1284,7 +1286,8 @@ test("the DM approver applies an open proposal without a person, as dm, after cl
   const { ideaId } = await seedIdea([{ status: "blocked" }, { status: "backlog" }]);
   await drain();
   const proposal = await proposed(ideaId, select("close"));
-  assert.equal(await runAmuxDmAutoApplyStep({}), null, "off by default");
+  assert.equal(await runAmuxDmAutoApplyStep({ TOMVERSE_AMUX_DM_APPROVER: "disabled" }), null,
+    "on unless exactly disabled (owner decision 2026-11-15)");
   assert.equal((await questionOf(ideaId))!.state, "open");
   assert.deepEqual(await runAmuxDmAutoApplyStep(APPROVER),
     { requestId: proposal.requestId, kind: "card_close", applied: true });
@@ -1375,7 +1378,7 @@ async function proposedWorkerQuestion(output: Output) {
   return { task, question, requestId: routed.requestId };
 }
 
-test("the DM approver answers a worker question only with an option it offered; a free-text answer waits for a person", async () => {
+test("the DM approver answers a worker question with an option it offered or its own free text, whole", async () => {
   const chosen = await proposedWorkerQuestion({ kind: "select", optionId: "a",
     rationale: "Shorter reads better.", irreversible: false });
   assert.deepEqual(await runAmuxDmAutoApplyStep(APPROVER),
@@ -1388,12 +1391,17 @@ test("the DM approver answers a worker question only with an option it offered; 
     "the Task goes back to its worker with the answer");
   assert.equal((await readDecisionMakerRequestState(prisma, chosen.requestId))!.closing, "direct_answer_close");
 
+  // Owner decision 2026-11-15: the DM's own free-text answer is applied too, whole, as the owner's answer.
   const free = await proposedWorkerQuestion({ kind: "free_text", answer: "Use whichever reads better.",
     rationale: "Either works.", irreversible: false });
-  assert.equal(await runAmuxDmAutoApplyStep(APPROVER), null);
-  assert.equal((await prisma.amuxV22TaskQuestion.findUniqueOrThrow({ where: { id: free.question.id } })).state, "open");
-  assert.equal((await readDecisionMakerRequestState(prisma, free.requestId))!.closing, null,
-    "still open for the operator's confirmation");
+  assert.deepEqual(await runAmuxDmAutoApplyStep(APPROVER),
+    { requestId: free.requestId, kind: "question", applied: true });
+  const freeAnswered = await prisma.amuxV22TaskQuestion.findUniqueOrThrow({ where: { id: free.question.id } });
+  assert.equal(freeAnswered.state, "answered");
+  assert.equal(freeAnswered.answerSource, "dm");
+  assert.match(freeAnswered.answerText ?? "", /\nUse whichever reads better\.$/);
+  assert.doesNotMatch(freeAnswered.answerText ?? "", /Chosen option:/);
+  assert.equal((await readDecisionMakerRequestState(prisma, free.requestId))!.closing, "direct_answer_close");
 });
 
 test("the approver's claim and answer are one transaction: a refused answer rolls the claim back", async () => {
