@@ -315,3 +315,48 @@ test("a containing or cancelled lookup that is not read in full is an error, nev
   await assert.rejects(paged.github.cancelledCommits([TIP]), /github_check_runs_unread/);
   await assert.rejects(paged.github.commitsContaining(MERGE, [TIP]), /github_shape/);
 });
+
+test("exclusion inputs vouch for Dependabot only for its own signed commits on its own pull request (owner 2026-11-15)", async () => {
+  const head = "dependabot/npm_and_yarn/develop/ws-8.22.2";
+  const repoOf = (fullName) => ({ repo: { full_name: fullName } });
+  const restPull = (overrides = {}) => ({
+    changed_files: 2,
+    user: { login: "dependabot[bot]" },
+    head: { sha: HEAD, ...repoOf("mposition/Tomverse") },
+    base: repoOf("mposition/Tomverse"),
+    ...overrides,
+  });
+  const signed = (sha, overrides = {}) => ({
+    sha,
+    author: { login: "dependabot[bot]" },
+    committer: { login: "web-flow" },
+    commit: { verification: { verified: true, reason: "valid" } },
+    ...overrides,
+  });
+  const files = [{ filename: "package.json", status: "modified" }, { filename: "package-lock.json", status: "modified" }];
+  const read = async (rest, commits, pull = { number: 12, headRefName: head, headRefOid: HEAD }) => {
+    const { github } = ports([
+      [is("GET", `${REPO}/git/ref/heads/develop`), json(200, { object: { sha: TIP } })],
+      [is("GET", `${REPO}/git/trees/${TIP}?recursive=1`), json(200, { truncated: false, tree: [] })],
+      [is("GET", `${REPO}/pulls/12`), json(200, rest)],
+      [is("GET", `${REPO}/pulls/12/files?per_page=100&page=1`), json(200, files)],
+      [is("GET", `${REPO}/pulls/12/commits?per_page=100`), commits],
+    ]);
+    return (await github.exclusionInputs(pull)).dependabot === true;
+  };
+  assert.equal(await read(restPull(), json(200, [signed(MERGE), signed(HEAD)])), true);
+  // A person's commit, an unsigned one, or one committed outside GitHub's signing.
+  assert.equal(await read(restPull(), json(200, [signed(MERGE), signed(HEAD, { author: { login: "tommy" } })])), false);
+  assert.equal(await read(restPull(), json(200, [signed(HEAD, { commit: { verification: { verified: false } } })])), false);
+  assert.equal(await read(restPull(), json(200, [signed(HEAD, { committer: { login: "tommy" } })])), false);
+  // Opened by someone else, from a fork, or the head moved past the commits read.
+  assert.equal(await read(restPull({ user: { login: "tommy" } }), json(200, [signed(HEAD)])), false);
+  assert.equal(await read(restPull({ head: { sha: HEAD, ...repoOf("someone/Tomverse") } }), json(200, [signed(HEAD)])), false);
+  assert.equal(await read(restPull(), json(200, [signed(MERGE)])), false);
+  // Unread, empty or possibly truncated commit lists are not Dependabot's.
+  assert.equal(await read(restPull(), json(500, {})), false);
+  assert.equal(await read(restPull(), json(200, [])), false);
+  assert.equal(await read(restPull(), json(200, Array.from({ length: 100 }, () => signed(HEAD)))), false);
+  // Another head prefix is never asked about.
+  assert.equal(await read(restPull(), json(200, [signed(HEAD)]), { number: 12, headRefName: "claude/to-develop/x", headRefOid: HEAD }), false);
+});
