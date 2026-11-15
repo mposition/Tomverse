@@ -16,6 +16,8 @@ import {
 } from "../lib/chatImageIntentCore.ts";
 import { askChatImageIntent, askChatImageTurn } from "../lib/chatImageIntentClient.ts";
 import { IMAGE_MODEL_REGISTRY } from "../lib/imageModelRegistry.ts";
+import { imageRoutingNoteSchema } from "../lib/modelCatalogCore.ts";
+import { IMAGE_ROUTING_NOTE_MAX_CHARS } from "../lib/runtimeImageProviders.ts";
 
 const price = (quality, size, credits) => ({
   quality,
@@ -104,11 +106,41 @@ test("the schema requires the decision, a listed model and a preset", () => {
   });
 });
 
-test("the instructions triage by complexity and keep code graphics in chat", () => {
+test("the instructions pick by fit first and price second, and keep code graphics in chat", () => {
   assert.match(CHAT_IMAGE_INTENT_SYSTEM, /SVG/);
   assert.match(CHAT_IMAGE_INTENT_SYSTEM, /When unsure, answer image=false/);
-  assert.match(CHAT_IMAGE_INTENT_SYSTEM, /cheaper or faster model/);
-  assert.match(CHAT_IMAGE_INTENT_SYSTEM, /stronger, pricier model/);
+  assert.match(CHAT_IMAGE_INTENT_SYSTEM, /by fit first and price second/);
+  assert.match(CHAT_IMAGE_INTENT_SYSTEM, /only between models that fit about equally, pick the one with fewer credits/);
+  // Price alone must not decide: that sent every request to one provider.
+  assert.doesNotMatch(CHAT_IMAGE_INTENT_SYSTEM, /choose the cheapest model/);
+  const fit = CHAT_IMAGE_INTENT_SYSTEM.indexOf("whose note fits the request best");
+  const price = CHAT_IMAGE_INTENT_SYSTEM.indexOf("fewer credits");
+  assert.ok(fit > 0 && fit < price);
+});
+
+test("a model's routing note reaches the call on its line; a model without one is listed as before", () => {
+  const noted = chatImageModelCandidates([
+    { ...models[0], routingNote: "  Best for: posters with text; weaker at: speed.  " },
+    models[1],
+    { ...models[1], id: "blank", routingNote: "   " },
+  ]);
+  assert.equal(noted.length, 3);
+  assert.equal(noted[0].note, "Best for: posters with text; weaker at: speed.");
+  assert.ok(noted.slice(1).every((candidate) => !("note" in candidate)));
+  const message = chatImageIntentUserMessage("draw a poster", noted);
+  assert.match(
+    message,
+    /- strong \(Strong Image; slow\): draft 15, standard 70, final 250 -- Best for: posters with text; weaker at: speed\.\n/
+  );
+  assert.match(message, /- quick \(Quick Image; fast\): standard 30\n/);
+});
+
+test("every seed routing note is one line within the router's limit", () => {
+  const notes = IMAGE_MODEL_REGISTRY.flatMap((model) => (model.routingNote ? [model.routingNote] : []));
+  assert.ok(notes.length >= 1);
+  for (const note of notes) assert.equal(imageRoutingNoteSchema.safeParse(note).success, true, note);
+  assert.equal(imageRoutingNoteSchema.safeParse("two\nlines").success, false);
+  assert.equal(imageRoutingNoteSchema.safeParse("x".repeat(IMAGE_ROUTING_NOTE_MAX_CHARS + 1)).success, false);
 });
 
 test("a valid image answer keeps the triaged model and preset", () => {

@@ -137,6 +137,12 @@ export const adminModelCatalogMessages = defineAdminMessages({
     renameSave: "Save name",
     renameCancel: "Cancel",
     toastRenamed: (name: string) => `Renamed to ${name}.`,
+    routingNoteTitle: "Routing note",
+    routingNoteHelp:
+      "One line telling the image router what this model is good and bad at. The router picks the best fit for a request first and compares price only between models that fit equally. Not shown to users.",
+    routingNotePlaceholder: "Best for: ...; weaker at: ...",
+    routingNoteSave: "Save note",
+    toastRoutingNoteSaved: "Routing note saved.",
     inheritAction: "Back to the code default",
 
     // Image: add / fix
@@ -560,6 +566,12 @@ export const adminModelCatalogMessages = defineAdminMessages({
     renameSave: "이름 저장",
     renameCancel: "취소",
     toastRenamed: (name: string) => `이름을 ${name}(으)로 바꿨습니다.`,
+    routingNoteTitle: "라우팅 노트",
+    routingNoteHelp:
+      "이미지 라우터에게 이 모델이 잘하는 것과 약한 것을 알려 주는 한 줄입니다. 라우터는 요청에 가장 맞는 모델을 먼저 고르고, 적합도가 비슷한 모델 사이에서만 가격을 비교합니다. 사용자에게는 보이지 않습니다.",
+    routingNotePlaceholder: "Best for: ...; weaker at: ...",
+    routingNoteSave: "노트 저장",
+    toastRoutingNoteSaved: "라우팅 노트를 저장했습니다.",
     inheritAction: "코드 기본값으로 되돌리기",
 
     addTitle: "이미지 모델 추가",

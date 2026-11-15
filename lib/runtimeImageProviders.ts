@@ -82,6 +82,12 @@ export const runtimeImageProfileTemplate = (
     : {}),
 });
 
+/**
+ * The longest image router note (a profile's routingNote). Capped so every
+ * listed model's note fits the router call's prompt budget.
+ */
+export const IMAGE_ROUTING_NOTE_MAX_CHARS = 400;
+
 /** The sizes and qualities a runtime image profile may list (the profile schema's enums). */
 export const RUNTIME_IMAGE_SIZES = ["1024x1024", "1536x1024", "1024x1536"] as const;
 export const RUNTIME_IMAGE_QUALITIES = ["low", "medium", "high"] as const;

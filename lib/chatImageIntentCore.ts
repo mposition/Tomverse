@@ -61,6 +61,8 @@ export type ChatImageModelCandidate = {
     latency: ImageModelProfile["latencyClass"];
     /** Credits for one 1024x1024 image, per preset the model offers. */
     credits: Partial<Record<ImagePreset, number>>;
+    /** What the model is good and bad at (the profile's routingNote), when it has one. */
+    note?: string;
 };
 
 /**
@@ -107,7 +109,7 @@ export const CHAT_IMAGE_INTENT_MAX_REWRITE_CHARS = 1_500;
 export const chatImageModelCandidates = (
     models: readonly Pick<
         ImageModelProfile,
-        "id" | "name" | "latencyClass" | "prices" | "disabledReason"
+        "id" | "name" | "latencyClass" | "prices" | "disabledReason" | "routingNote"
     >[]
 ): ChatImageModelCandidate[] =>
     models.flatMap((model) => {
@@ -122,7 +124,16 @@ export const chatImageModelCandidates = (
             if (price) credits[preset] = price.credits;
         }
         if (Object.keys(credits).length === 0) return [];
-        return [{ id: model.id, name: model.name, latency: model.latencyClass, credits }];
+        const note = model.routingNote?.trim();
+        return [
+            {
+                id: model.id,
+                name: model.name,
+                latency: model.latencyClass,
+                credits,
+                ...(note ? { note } : {}),
+            },
+        ];
     });
 
 export const CHAT_IMAGE_ROUTING_CRITERIA = [
@@ -136,11 +147,16 @@ export const CHAT_IMAGE_ROUTING_CRITERIA = [
     "- messages that only mention a picture in passing.",
     "When unsure, answer image=false.",
     "",
-    "When image=true, choose the cheapest model and preset that will do the request well:",
+    "When image=true, choose the model by fit first and price second:",
+    "- read what the request needs (legible text and its language, photorealism or people, an illustration or anime style, a logo or icon, a dense layout, editing a photo, speed) and compare it with each model's note;",
+    "- pick the model whose note fits the request best, and avoid a model whose note names the request's main need as a weakness;",
+    "- only between models that fit about equally, pick the one with fewer credits; a model without a note is known by its name alone and is never preferred for being cheaper;",
+    "- when the request states no particular need, every model fits equally and the cheapest wins.",
+    "Then choose the preset:",
     "- standard: the default for ordinary image requests, including posters, legible text, several subjects and photorealistic scenes; complexity or the image's intended use alone does not upgrade the preset;",
     "- draft: only when the user requests a rough sketch, draft, faster generation or lower cost;",
     "- final: only when the user explicitly requests high quality, best quality or a higher-quality regeneration of a previous image.",
-    "Give simple requests a cheaper or faster model and complex ones a stronger, pricier model. Use only a preset the chosen model lists.",
+    "Use only a preset the chosen model lists.",
 ].join("\n");
 
 export const buildChatImageIntentSystem = (options: {
@@ -179,12 +195,13 @@ export const chatImageIntentUserMessage = (
     sharedMessage = false
 ): string =>
     [
-        "Image models (credits per 1024x1024 image, by preset):",
+        "Image models (credits per 1024x1024 image, by preset; then the model's note):",
         ...candidates.map((candidate) => {
             const prices = PRESETS.filter((preset) => candidate.credits[preset] !== undefined)
                 .map((preset) => `${preset} ${candidate.credits[preset]}`)
                 .join(", ");
-            return `- ${candidate.id} (${candidate.name}; ${candidate.latency}): ${prices}`;
+            const line = `- ${candidate.id} (${candidate.name}; ${candidate.latency}): ${prices}`;
+            return candidate.note ? `${line} -- ${candidate.note}` : line;
         }),
         "",
         ...(previousImagePrompt
