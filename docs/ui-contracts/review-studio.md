@@ -89,6 +89,36 @@ native analysis entries and Deep Research execution are outside this slice.
 Coverage: `tests/reviewToChat.test.mjs` and
 `tests/e2e/review-to-chat.spec.ts` (real route navigation and draft hydration).
 
+## Analysis progress and report actions (2026-11-15)
+
+Studio consumes the existing review progress stream and displays the first
+validated review while the additional reviewer and durable save finish. This
+does not add model calls or change execution budgets. An interrupted stream
+recovers through the saved-result GET; only a terminal server failure permits
+an explicit retry after another cache lookup.
+
+Studio, Classic, mobile web and Quick Summary put Continue in Chat immediately
+before Close in their result footer, alongside Share and Export. Transfer
+actions require a completed saved result. The report preview preserves the
+selected reviewer's full analysis, question, model mapping, quoted excerpts,
+quote-match status, source-grounding counts and unresolved matters. Export
+uses the existing deterministic PDF, DOCX, TXT and Markdown writers, with no
+model call or generated-artifact persistence. Unsupported PDF glyphs offer
+the other formats instead of silently dropping text.
+
+Sharing requires explicit publication after a public-content preview and
+explains replacement of the conversation's existing share link. It reuses the
+existing owner/unlock, plan, operational, expiry, revocation and atomic snapshot
+checks, adding an exact saved-review version check. The snapshot contains only
+the selected report, including its quotes; full model answers, attachments and
+separate web checks stay out. Unknown publication outcomes require revocation
+before another attempt. Existing transcript sharing is unchanged.
+
+Coverage: `tests/reviewAnalysisReport.test.mjs`,
+`tests/server-contract/review-analysis-actions.test.mjs`,
+`tests/e2e/review-analysis-actions.spec.ts` and the existing Studio/handoff
+regressions. These local checks use no paid provider execution.
+
 ## In-conversation image answers (owner direction, 2026-10-23)
 
 Image prompts stay in the current Review conversation, as in Chat. Easy routes
