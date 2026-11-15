@@ -5,6 +5,8 @@ import {
   PRODUCT_ANALYTICS_EVENT_NAMES,
   analyticsClientEventSchema,
   analyticsPropertiesSchema,
+  analyticsPropertiesForGa4,
+  validProductEventProperties,
   ga4DebugEventParams,
   ga4EcommerceEventForProductEvent,
   shouldSendCustomProductEventToGa4,
@@ -12,6 +14,8 @@ import {
   type ProductAnalyticsEventName,
   type ProductAnalyticsProperties,
 } from "@/lib/productAnalyticsShared";
+import { journeyIdentity, journeyOwnerDisposition, onJourneyIdentityInvalidated, syncJourneyIdentity } from "./connectedJourneyIdentity";
+import type { ConnectedJourneyProperties } from "./connectedJourneyShared";
 import { localeMarketingAnalyticsProperties } from "@/lib/localeLaunchPolicy";
 import { EXPERIMENT_COOKIE_NAME, EXPERIMENT_HOLD_COOKIE_NAME } from "@/lib/marketingRoutes";
 import { isAnalyticsUserId } from "@/lib/ga4UserIdPolicy";
@@ -62,6 +66,8 @@ type EventIntent = {
   modelCount: number;
   properties: ProductAnalyticsProperties;
   onceKey?: string;
+  // Local queue ownership only: never serialized into the API envelope.
+  journeyOwner?: string;
   // The UTM values this event itself observed, sent in place of the
   // session's. Only a marketing touch carries one: it reports the landing URL
   // it saw, which a later landing in the same session must not overwrite.
@@ -262,6 +268,7 @@ const readPendingEvents = (): EventIntent[] => {
             typeof attribution.utmMedium === "string" &&
             typeof attribution.utmCampaign === "string");
         if (
+          (event.eventName === "connected_journey_step" && (typeof event.journeyOwner !== "string" || journeyOwnerDisposition(event.journeyOwner) === "drop")) ||
           !attributionValid ||
           !isUuid(event.eventId) ||
           typeof event.eventName !== "string" ||
@@ -282,6 +289,7 @@ const readPendingEvents = (): EventIntent[] => {
           occurredAt: event.occurredAt,
           modelCount: event.modelCount,
           properties: properties.data,
+          ...(event.eventName === "connected_journey_step" ? { journeyOwner: event.journeyOwner } : {}),
           ...(event.onceKey ? { onceKey: event.onceKey.slice(0, 100) } : {}),
           ...(attribution
             ? {
@@ -303,7 +311,10 @@ const readPendingEvents = (): EventIntent[] => {
 
 const mergePendingEvents = (...eventLists: EventIntent[][]) => {
   const merged = new Map<string, EventIntent>();
-  for (const event of eventLists.flat()) merged.set(event.eventId, event);
+  for (const event of eventLists.flat()) {
+    if (event.eventName === "connected_journey_step" && journeyOwnerDisposition(event.journeyOwner) === "drop") continue;
+    merged.set(event.eventId, event);
+  }
   return Array.from(merged.values())
     .sort((left, right) => left.occurredAt.localeCompare(right.occurredAt))
     .slice(-MAX_PENDING_EVENTS);
@@ -360,10 +371,13 @@ let deliveryGeneration = 0;
 const deliverInternalAnalyticsEvent = (
   payload: ReturnType<typeof analyticsClientEventSchema.parse>,
   attempt = 0,
-  generation = deliveryGeneration
+  generation = deliveryGeneration,
+  journeyIntent?: EventIntent,
+  journeyEpoch = journeyIdentity().epoch
 ): Promise<void> => {
   const withdrawn = () =>
-    generation !== deliveryGeneration || analyticsConsent() === "declined";
+    generation !== deliveryGeneration || analyticsConsent() === "declined" ||
+    Boolean(journeyIntent && (journeyEpoch !== journeyIdentity().epoch || journeyOwnerDisposition(journeyIntent.journeyOwner) === "drop"));
   const retry = () =>
     attempt < INTERNAL_DELIVERY_RETRY_DELAYS_MS.length && !withdrawn()
       ? new Promise<void>((resolve) =>
@@ -371,9 +385,14 @@ const deliverInternalAnalyticsEvent = (
         ).then(() =>
           withdrawn()
             ? undefined
-            : deliverInternalAnalyticsEvent(payload, attempt + 1, generation)
+            : deliverInternalAnalyticsEvent(payload, attempt + 1, generation, journeyIntent, journeyEpoch)
         )
       : undefined;
+  if (withdrawn()) return Promise.resolve();
+  if (journeyIntent && journeyOwnerDisposition(journeyIntent.journeyOwner) === "hold") {
+    try { queuePendingIntent(journeyIntent); } catch { /* Optional analytics storage. */ }
+    return Promise.resolve();
+  }
   return fetch("/api/analytics/events", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -399,6 +418,12 @@ const deliverInternalAnalyticsEvent = (
 
 const sendIntent = (intent: EventIntent) => {
   if (!runtime) return;
+  if (intent.eventName === "connected_journey_step") {
+    const disposition = journeyOwnerDisposition(intent.journeyOwner);
+    if (disposition === "drop") return;
+    if (disposition === "hold") { queuePendingIntent(intent); return; }
+  }
+  if (!validProductEventProperties(intent.eventName, intent.properties)) return;
   const storedVariant = window.localStorage.getItem(
     MODEL_FINDER_VARIANT_STORAGE_KEY
   );
@@ -409,7 +434,7 @@ const sendIntent = (intent: EventIntent) => {
     model_count: Math.max(0, Math.min(3, Math.trunc(intent.modelCount))),
     properties: {
       ...intent.properties,
-      ...(storedVariant === "control" || storedVariant === "finder"
+      ...(intent.eventName !== "connected_journey_step" && (storedVariant === "control" || storedVariant === "finder")
         ? { experiment_variant: storedVariant }
         : {}),
       ...localeMarketingAnalyticsProperties(runtime.attribution.language),
@@ -435,7 +460,7 @@ const sendIntent = (intent: EventIntent) => {
       plan: runtime.plan,
       session_id: Number(payload.session_id),
       ...GA4_DEBUG_PARAMS,
-      ...payload.properties,
+      ...analyticsPropertiesForGa4(payload.properties),
     });
   }
 
@@ -457,8 +482,27 @@ const sendIntent = (intent: EventIntent) => {
     });
   }
 
-  void deliverInternalAnalyticsEvent(payload);
+  void deliverInternalAnalyticsEvent(payload, 0, deliveryGeneration, intent.eventName === "connected_journey_step" ? intent : undefined);
 };
+
+onJourneyIdentityInvalidated(() => {
+  try {
+    const general = [...readPendingEvents(), ...pendingEvents].filter(event => event.eventName !== "connected_journey_step");
+    persistPendingEvents(mergePendingEvents(general));
+  } catch { pendingEvents = pendingEvents.filter(event => event.eventName !== "connected_journey_step"); }
+});
+
+export const syncAnalyticsJourneyIdentity = syncJourneyIdentity;
+
+export function trackConnectedJourneyEvent(properties: ConnectedJourneyProperties, binding: { owner: string; epoch: number }) {
+  try {
+    if (journeyIdentity().epoch !== binding.epoch || journeyOwnerDisposition(binding.owner) !== "send" || analyticsConsent() === "declined") return;
+    if (!validProductEventProperties("connected_journey_step", properties)) return;
+    const intent: EventIntent = { eventId: crypto.randomUUID(), eventName: "connected_journey_step", occurredAt: new Date().toISOString(), modelCount: 0, properties, journeyOwner: binding.owner };
+    if (runtime) sendIntent(intent);
+    else queuePendingIntent(intent);
+  } catch { /* Analytics must not interrupt a product action. */ }
+}
 
 export const analyticsConsent = () =>
   typeof window !== "undefined"
@@ -467,6 +511,7 @@ export const analyticsConsent = () =>
 
 export const setAnalyticsConsent = (value: "accepted" | "declined") => {
   window.localStorage.setItem(CONSENT_STORAGE_KEY, value);
+  if (value === "declined") syncJourneyIdentity(journeyIdentity().owner, false);
 };
 
 export const configureAnalyticsClient = ({
@@ -666,6 +711,7 @@ export const withdrawGa4UserId = () => {
 };
 
 export const disableAnalyticsClient = () => {
+  syncJourneyIdentity(journeyIdentity().owner, false);
   clearGa4UserId();
   applyGa4ConsentMode("denied");
   runtime = null;
@@ -700,6 +746,7 @@ export function trackProductEvent(
   modelCount = 0,
   properties: ProductAnalyticsProperties = {}
 ) {
+  if (eventName === "connected_journey_step" || !validProductEventProperties(eventName, properties)) return;
   const parsedProperties = analyticsPropertiesSchema.safeParse(properties);
   if (!parsedProperties.success) return;
   const intent: EventIntent = {
@@ -733,6 +780,7 @@ export function trackProductEventOnce(
   ) {
     return;
   }
+  if (eventName === "connected_journey_step" || !validProductEventProperties(eventName, properties)) return;
   const parsedProperties = analyticsPropertiesSchema.safeParse(properties);
   if (!parsedProperties.success) return;
   const intent: EventIntent = {

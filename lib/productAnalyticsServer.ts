@@ -7,6 +7,7 @@ import { normalizeAnalyticsCountry } from "@/lib/analyticsConsentPolicy";
 import {
   analyticsAttributionSchema,
   analyticsPropertiesSchema,
+  analyticsPropertiesForGa4,
   ga4DebugEventParams,
   ga4EcommerceEventForProductEvent,
   normalizeAnalyticsPlan,
@@ -110,7 +111,7 @@ const sendGa4ServerEvent = async (
             name: input.eventName,
             params: {
               ...commonParams,
-              ...properties,
+              ...analyticsPropertiesForGa4(properties),
             },
           },
         ]

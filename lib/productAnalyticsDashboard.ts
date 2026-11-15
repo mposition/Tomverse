@@ -1,5 +1,6 @@
 import "server-only";
 
+import { summarizeConnectedJourneys, type ConnectedJourneySummary } from "./connectedJourneyAggregation";
 import { prisma } from "@/lib/prisma";
 import {
   isGa4DebugModeEnabled,
@@ -33,6 +34,7 @@ const actorKey = (row: ActorRow, identityLinks?: Map<string, string>) =>
       `anonymous:${row.anonymousIdHash}`;
 
 export type ProductAnalyticsDashboard = {
+  connectedJourneys: ConnectedJourneySummary | null;
   available: boolean;
   generatedAt: string;
   configured: {
@@ -80,6 +82,7 @@ const emptyTouchAttribution = (): ProductAnalyticsDashboard["touchAttribution30d
 });
 
 const emptyDashboard = (): ProductAnalyticsDashboard => ({
+  connectedJourneys: null,
   available: false,
   generatedAt: new Date().toISOString(),
   configured: {
@@ -134,6 +137,7 @@ export async function getProductAnalyticsDashboard(): Promise<ProductAnalyticsDa
       signupConversionRows,
       guestLeadRows,
       unobservedSignups,
+      journeyRows,
     ] = await Promise.all([
       prisma.productAnalyticsEvent.groupBy({
         by: ["eventName"],
@@ -233,6 +237,11 @@ export async function getProductAnalyticsDashboard(): Promise<ProductAnalyticsDa
           createdAt: { gte: thirtyDaysAgo },
           productAnalyticsEvents: { none: { eventName: "signup_completed" } },
         },
+      }),
+      // Read the complete event/time-bounded cohort, never a truncated take.
+      prisma.productAnalyticsEvent.findMany({
+        where: { eventName: "connected_journey_step", occurredAt: { gte: thirtyDaysAgo, lte: now } },
+        select: { userId: true, occurredAt: true, properties: true },
       }),
     ]);
 
@@ -342,6 +351,7 @@ export async function getProductAnalyticsDashboard(): Promise<ProductAnalyticsDa
       reviewCompletedUsers > 0 ? (count / reviewCompletedUsers) * 100 : 0;
 
     return {
+      connectedJourneys: summarizeConnectedJourneys(journeyRows, now),
       available: true,
       generatedAt: now.toISOString(),
       configured: {

@@ -69,3 +69,21 @@ test("the union rebuild allows every name either earlier rebuild allows", () => 
     assert.deepEqual([...constraintNamesIn(directory)].filter((name) => !union.has(name)), [], directory);
   }
 });
+
+test("the connected journey rebuild is additive", () => {
+  const previous = constraintNamesIn(
+    "20261101100000_marketing_touch_analytics_event"
+  );
+  const connectedJourney = constraintNamesIn(
+    "20261115160000_connected_journey_analytics_event"
+  );
+
+  assert.deepEqual(
+    [...previous].filter((name) => !connectedJourney.has(name)),
+    []
+  );
+  assert.deepEqual(
+    [...connectedJourney].filter((name) => !previous.has(name)),
+    ["connected_journey_step"]
+  );
+});

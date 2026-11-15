@@ -1,3 +1,4 @@
+import { observeConnectedJourneyEvents } from "./support/connected-journey-fixtures";
 import { test, expect, type Locator, type Page } from "@playwright/test";
 
 import {
@@ -2711,3 +2712,63 @@ test.describe("a continuation opens in its product's workspace", () => {
         expect(storedMode).toBe("manual");
     });
 });
+
+test("connected viewer disclosure cancellation and replay stay separate from first response observation", async ({ page, baseURL }) => {
+  await prepareGuestPage(page, "en");
+  await mockAuthenticatedApi(page, { productKey: "chat", selectedModels: [PRIMARY_MODEL] });
+  const api = await mockContinuationApi(page, { product: "chat", abortFirstCreate: true });
+  const journeys = await observeConnectedJourneyEvents(page, baseURL!);
+  await page.goto(`/settings/imports/conversations/${EXTERNAL_ID}`);
+  await page.getByTestId("continuation-cta").click();
+  await expect.poll(() => journeys.map(e => e.journey_stage)).toEqual(["started"]);
+  await page.getByTestId("continuation-cancel").click();
+  await page.getByTestId("continuation-cta").click();
+  await page.getByTestId("continuation-confirm").click();
+  await expect(page.getByTestId("continuation-cta-error")).toBeVisible();
+  await page.getByTestId("continuation-cta").click();
+  await page.getByTestId("continuation-confirm").click();
+  await expect(page).toHaveURL(`/continuations/${CONVERSATION_ID}`);
+  const input = page.locator('[data-testid="chat-input"]:visible textarea');
+  await expect(input).toBeVisible();
+  await expect.poll(() => journeys.some(e => e.journey_stage === "ready")).toBe(true);
+  await input.fill("Continue this imported discussion");
+  await page.getByTestId("chat-send-button").click();
+  await expect.poll(() => journeys.some(e => e.journey_stage === "reply_observed")).toBe(true);
+  const starts = journeys.filter(e => e.journey_stage === "started");
+  expect(starts).toHaveLength(2);
+  expect(starts[0].journey_key).not.toBe(starts[1].journey_key);
+  expect(journeys.filter(e => e.journey_key === starts[1].journey_key).map(e => e.journey_stage)).toEqual(["started", "issue", "ready", "send_dispatched", "reply_observed"]);
+  expect(journeys.every(e => e.continuation_kind === "new" && e.journey_entry === "import_viewer")).toBe(true);
+  expect(api.createBodies[0].idempotencyKey).toBe(api.createBodies[1].idempotencyKey);
+});
+
+for (const [product, action] of [["chat", "new"], ["chat", "existing"], ["review", "existing"], ["review", "chooser"]] as const) {
+  test(`connected completed list observes ${action} ${product} continuation`, async ({ page, baseURL }) => {
+    await prepareGuestPage(page, "en");
+    await mockAuthenticatedApi(page, { productKey: product, selectedModels: [PRIMARY_MODEL] });
+    const api = await mockContinuationApi(page, { product });
+    const journeys = await observeConnectedJourneyEvents(page, baseURL!);
+    await page.route(url => url.pathname === "/api/external-conversations" && url.searchParams.get("importId") === "journey-batch", route => route.fulfill(json({ total: 1, continuationEnabled: true, conversations: [{ id: EXTERNAL_ID, importId: "journey-batch", provider: "chatgpt", title: "Saved discussion", messageCount: 2, locked: false, continuationCount: action === "new" ? 0 : action === "chooser" ? 2 : 1, latestContinuationId: action === "new" ? null : CONVERSATION_ID, continuations: action === "chooser" ? [{ conversationId: CONVERSATION_ID, title: "Selected continuation", createdAt: new Date().toISOString() }, { conversationId: "other-target", title: "Other continuation", createdAt: new Date().toISOString() }] : [] }] })));
+    await page.goto("/settings/imports/new?saved=journey-batch");
+    if (action === "new") await page.getByTestId("continuation-quick-action-create").click();
+    else if (action === "chooser") {
+      await page.getByTestId("continuation-quick-action-menu-trigger").click();
+      await expect.poll(() => journeys.map(e => e.journey_stage)).toEqual(["started"]);
+      await page.getByTestId("continuation-quick-action-menu-item").first().click();
+    } else {
+      const popupPromise = page.waitForEvent("popup");
+      await page.getByTestId("continuation-quick-action-open").click({ modifiers: ["Control"] });
+      await (await popupPromise).close();
+      expect(journeys).toHaveLength(0);
+      await page.getByTestId("continuation-quick-action-open").click();
+    }
+    await expect(page).toHaveURL(`/continuations/${CONVERSATION_ID}`);
+    await expect.poll(() => journeys.some(e => e.journey_stage === "ready")).toBe(true);
+    await page.locator('[data-testid="chat-input"]:visible textarea').fill("Continue the original discussion");
+    await page.getByTestId("chat-send-button").click();
+    await expect.poll(() => journeys.some(e => e.journey_stage === "reply_observed")).toBe(true);
+    expect(api.createBodies).toHaveLength(action === "new" ? 1 : 0);
+    expect(journeys.map(e => e.journey_stage)).toEqual(["started", "ready", "send_dispatched", "reply_observed"]);
+    expect(journeys.every(e => e.continuation_kind === (action === "new" ? "new" : "existing") && e.journey_entry === "import_complete")).toBe(true);
+  });
+}

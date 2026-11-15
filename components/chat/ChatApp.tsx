@@ -1,5 +1,7 @@
 "use client";
 
+import { hasJourneySource, journeyObservationEpoch, observeJourneyDispatch, observeJourneyReply } from "@/lib/connectedJourneyAnalytics";
+
 import { CONTINUATION_RECEIPT_HEADER, receiptForAttempt, type ContinuationReceipt } from "@/lib/continuationReceipt";
 
 import { PASSAGE_HEADER } from "@/lib/continuationPassages";
@@ -1041,6 +1043,7 @@ function ChatAppComponent({
           const modelQuery = transcriptScope === "conversation" || reviewProvider
             ? "answers=all"
             : `modelId=${encodeURIComponent(modelId)}&answers=all`;
+          const hydrationJourneyEpoch = journeyObservationEpoch();
           const response = await fetch(`/api/conversations/${initialConversationId}?${modelQuery}`, {
             cache: "no-store",
             headers: { 'Cache-Control': 'no-cache' }
@@ -1121,6 +1124,16 @@ function ChatAppComponent({
                   .map(parsePublicChatResponseAttempt)
                   .filter((attempt: PublicChatResponseAttempt | null): attempt is PublicChatResponseAttempt => Boolean(attempt))
               : [];
+            // Only a canonical completed Message for this exact first source.
+            // No nearest-turn inference and no additional history scan.
+            for (const attempt of parsedAttempts) {
+              if (attempt.conversationId !== initialConversationId || !hasJourneySource(panelIdentityKey, initialConversationId, attempt.sourceUserMessageId) ||
+                !data.messages.some((message: Message) => message.role === "user" && message.id === attempt.sourceUserMessageId)) continue;
+              const completed = parseCompletedChatResponseMessage(data.messages.find((message: Message) => message.id === attempt.assistantMessageId), attempt);
+              if (completed) observeJourneyReply({ owner: panelIdentityKey, epoch: hydrationJourneyEpoch,
+                conversationId: initialConversationId, sourceUserMessageId: attempt.sourceUserMessageId,
+                status: completed.status === "incomplete" ? "incomplete" : "normal", nonempty: Boolean(completed.content.trim()) });
+            }
             const merged = mergeChatResponseAttempts(
               filteredMessages,
               parsedAttempts,
@@ -1219,6 +1232,7 @@ function ChatAppComponent({
     runtimeKey,
     transcriptScope,
     historyLoadRetry,
+    panelIdentityKey,
     reviewProvider,
     getModel,
   ]);
@@ -1296,6 +1310,7 @@ function ChatAppComponent({
         return;
       }
       try {
+        const pollingJourneyEpoch = journeyObservationEpoch();
         const response = await fetch(
           `/api/products/chat/attempts/${encodeURIComponent(assistantMessageId)}`,
           { cache: "no-store", signal: controller.signal }
@@ -1373,6 +1388,9 @@ function ChatAppComponent({
               message.id === assistantMessageId ? completedMessage : message
             );
           });
+          if (!controller.signal.aborted) observeJourneyReply({ owner: panelIdentityKey, epoch: pollingJourneyEpoch,
+            conversationId: attempt.conversationId, sourceUserMessageId: attempt.sourceUserMessageId,
+            status: completedMessage.status === "incomplete" ? "incomplete" : "normal", nonempty: Boolean(completedMessage.content.trim()) });
           onResponseCompleteRef.current?.(
             expectedIdentity.analyticsPromptId,
             attempt.actualModelId ?? attempt.requestedModelId,
@@ -1434,7 +1452,7 @@ function ChatAppComponent({
     };
     void loop();
     return () => controller.abort();
-  }, [durableAttemptIds, isGuestMode, runtimeKey, t, transcriptScope]);
+  }, [durableAttemptIds, isGuestMode, runtimeKey, t, transcriptScope, panelIdentityKey]);
   
   /**
    * Writes a guest's transcript back to localStorage.
@@ -1541,6 +1559,7 @@ function ChatAppComponent({
     // conversation the send was made in, and every write below names this key
     // rather than the panel's current view: the user may open another
     // conversation a chunk later, and the answer still belongs here.
+    const observedJourneyEpoch = journeyObservationEpoch();
     const runKey = chatRuntimeKey({
       identityKey: chatRuntimeIdentityKey(
         isGuestMode ? { kind: "guest" } : { kind: "account", userId: sessionUserId }
@@ -2044,11 +2063,16 @@ function ChatAppComponent({
             ? { guestAutoCapability, guestClientTurnId: sourceUserMessageId }
             : {}),
         };
-        const post = (path: string, fields: Record<string, unknown>) => fetch(path, {
+        const post = (path: string, fields: Record<string, unknown>) => {
+          const body = JSON.stringify({ ...requestBody, ...fields });
+          controller.signal.throwIfAborted();
+          if (!isGuestMode && !researchMode) observeJourneyDispatch(panelIdentityKey, targetChatId, sourceUserMessageId);
+          return fetch(path, {
           method: "POST", headers: { "Content-Type": "application/json", ...(researchMode ? { "Accept-Language": lang } : {}), ...(turnPassages ? {[PASSAGE_HEADER]:turnPassages} : {}) },
-          body: JSON.stringify({ ...requestBody, ...fields }),
+          body,
           signal: controller.signal,
         });
+        };
         const fusionFields = { routerLocationFusion: true, ...(routerLocationTurn?.scope === "existing" ? { routerLocationScope: "existing" } : {}) };
         let res = fuseLocation
           ? await post(ROUTER_LOCATION_ROUTE, fusionFields)
@@ -2359,6 +2383,8 @@ function ChatAppComponent({
           );
         }
         if (completedMessage) {
+          observeJourneyReply({ owner: panelIdentityKey, epoch: observedJourneyEpoch, conversationId: attempt.conversationId,
+            sourceUserMessageId: attempt.sourceUserMessageId, status: completedMessage.status === "incomplete" ? "incomplete" : "normal", nonempty: Boolean(completedMessage.content.trim()) });
           onResponseComplete?.(
             analyticsPromptId,
             attempt.actualModelId ?? attempt.requestedModelId,
@@ -2452,12 +2478,16 @@ function ChatAppComponent({
       // two are different events with different copy, different codes and
       // different counters.
       if (serverStallCode) {
+        if (targetChatId) observeJourneyReply({ owner: panelIdentityKey, epoch: observedJourneyEpoch,
+          conversationId: targetChatId, sourceUserMessageId, status: "timeout", nonempty: false });
         endAsTimeout(
           serverStallCode,
           ERROR_CLASSIFICATION_SOURCE.server,
           assistantText
         );
       } else if (!assistantText.trim()) {
+        if (targetChatId) observeJourneyReply({ owner: panelIdentityKey, epoch: observedJourneyEpoch,
+          conversationId: targetChatId, sourceUserMessageId, status: "normal", nonempty: false });
         if (requestTraceId && typeof window !== "undefined") {
           window.localStorage.setItem(
             "tomverse_last_error_trace_id",
@@ -2515,6 +2545,8 @@ function ChatAppComponent({
             modelId: answeringModelId({ requestedModelId: modelId, routedModelId, retryingWithModelId }),
           }
         );
+        if (targetChatId) observeJourneyReply({ owner: panelIdentityKey, epoch: observedJourneyEpoch,
+          conversationId: targetChatId, sourceUserMessageId, status: completionStatus, nonempty: Boolean(assistantText.trim()) });
         onResponseComplete?.(
           analyticsPromptId,
           answeringModelId({ requestedModelId: modelId, routedModelId, retryingWithModelId }),
@@ -2533,6 +2565,9 @@ function ChatAppComponent({
               details?: unknown;
             })
           : {};
+      if (targetChatId) observeJourneyReply({ owner: panelIdentityKey, epoch: observedJourneyEpoch,
+        conversationId: targetChatId, sourceUserMessageId,
+        status: requestError.name === "AbortError" ? "cancelled" : "error", nonempty: false });
       const reportedErrorCode =
         typeof requestError.code === "string" ? requestError.code : "";
       const guestAutoTransportOutcomeUnknown =
