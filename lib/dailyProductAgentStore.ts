@@ -18,6 +18,7 @@ import {
 import { prisma } from "@/lib/prisma";
 import { DAILY_PRODUCT_AGENT_ALERT_SWITCH, DAILY_PRODUCT_AGENT_NOTICE_TARGET, dailyProductHaltNotice, dailyProductHaltSchema, type DailyProductHalt } from "@/lib/dailyProductAgentAlertCore";
 import { suggestionWorkBrief } from "@/lib/productResearchScoutIdeaText";
+import { automaticDailyRetry, DAILY_PRODUCT_AGENT_RETRY_SWITCH, dailyRetryInstruction } from "@/lib/dailyProductAgentRetryCore";
 
 type DailyProductClaim = Omit<ClaimedRecommendation, "cycleId" | "index">;
 
@@ -86,7 +87,7 @@ export async function claimDailyProductTask(input: { origin: string; now?: Date 
     const cursor = await tx.appSetting.findUnique({ where: { key: DAILY_PRODUCT_AGENT_CURSOR }, select: { value: true } });
     for (const source of sourceOrder(cursor?.value)) {
       const task = source === "routing"
-        ? await claimRecommendationInTransaction(tx, input.origin, now)
+        ? await claimRecommendationInTransaction(tx, input.origin, now, { automaticRetries: process.env[DAILY_PRODUCT_AGENT_RETRY_SWITCH] === "true" })
         : await claimScout(tx, source, input.origin, now);
       if (!task) continue;
       await saveSetting(tx, DAILY_PRODUCT_AGENT_CURSOR, followingSource(source));
@@ -98,10 +99,14 @@ export async function claimDailyProductTask(input: { origin: string; now?: Date 
 }
 
 async function claimScout(tx: Prisma.TransactionClient, source: Exclude<DailyProductSource, "routing">, origin: string, now: Date): Promise<DailyProductClaim | null> {
-  // Any existing row fences the source forever, including expired/invalid
-  // leases and unknown publish outcomes. No daily automatic retries.
+  // Unknown publication outcomes, corrupt records and active/expired claims remain fenced.
   const records = await tx.appSetting.findMany({ where: { key: { startsWith: `${DAILY_PRODUCT_AGENT_PREFIX}scout.` } }, select: { key: true, value: true } });
-  const held = records.filter((row) => parseDailyProductState(row.value)?.status !== "retry_ready");
+  const entries = new Map(records.map((row) => [row.key, parseDailyProductState(row.value)]));
+  const retryEnabled = process.env[DAILY_PRODUCT_AGENT_RETRY_SWITCH] === "true";
+  const held = records.filter((row) => {
+    const entry = entries.get(row.key);
+    return entry?.status !== "retry_ready" && !automaticDailyRetry(entry, now.getTime(), retryEnabled);
+  });
   const sent = await tx.appSetting.findMany({ where: { key: { startsWith: `${DAILY_PRODUCT_AGENT_PREFIX}amux.` } }, select: { key: true } });
   const heldIds = [...held, ...sent].flatMap(({ key }) => {
     if (key.startsWith(`${DAILY_PRODUCT_AGENT_PREFIX}amux.`)) return [key.slice(`${DAILY_PRODUCT_AGENT_PREFIX}amux.`.length)];
@@ -115,19 +120,22 @@ async function claimScout(tx: Prisma.TransactionClient, source: Exclude<DailyPro
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
   });
   if (!row) return null;
-  const instruction = suggestionWorkBrief({ ...row, url: `${origin}/admin/product-research` }, {
-    url: "Admin source", done: "Verify the current develop code first. If already solved, report the evidence without a duplicate change. Otherwise implement, run relevant tests, and commit the smallest fix. Never mark this suggestion completed or send it to AMUX.",
-  }).slice(0, DAILY_PRODUCT_INSTRUCTION_CHARS);
   const id = scoutAgentId(row.id);
+  const prior = entries.get(dailyProductAgentKey(id));
+  const attempts = prior ? (prior.attempts ?? 1) + 1 : 1;
+  const instruction = (dailyRetryInstruction(attempts, prior && "reason" in prior ? prior.reason : undefined) + suggestionWorkBrief({ ...row, url: `${origin}/admin/product-research` }, {
+    url: "Admin source", done: "Verify the current develop code first. If already solved, report the evidence without a duplicate change. Otherwise implement, run relevant tests, and commit the smallest fix. Never mark this suggestion completed or send it to AMUX.",
+  })).slice(0, DAILY_PRODUCT_INSTRUCTION_CHARS);
   const claimId = randomUUID();
   const leaseUntil = new Date(now.getTime() + REC_AGENT_LEASE_MS).toISOString();
-  const entry: DailyProductAgentState = { source, claimId, at: now.toISOString(), leaseUntil, status: "claimed" };
+  const entry: DailyProductAgentState = { source, claimId, at: now.toISOString(), leaseUntil, status: "claimed", attempts };
   await saveSetting(tx, dailyProductAgentKey(id), JSON.stringify(entry));
-  await audit(tx, row.id, "claimed", { source, claimId, leaseUntil });
+  await audit(tx, row.id, "claimed", { source, claimId, leaseUntil, attempts,
+    ...(prior ? { priorClaimId: prior.claimId, priorReason: "reason" in prior ? prior.reason : "owner_retry" } : {}) });
   return { id, recommendation: row.title.slice(0, 1_000), findings: [row.evidence.slice(0, 8_000)], claimId, leaseUntil, instruction };
 }
 
-export async function recordDailyProductResult(input: DailyProductResult) {
+export async function recordDailyProductResult(input: DailyProductResult, now = new Date()) {
   const id = scoutIdFromAgentId(input.id);
   if (!id) return { refused: "not_found" as const };
   return prisma.$transaction(async (tx) => {
@@ -141,8 +149,8 @@ export async function recordDailyProductResult(input: DailyProductResult) {
     // A factual result belongs to its claim even if a person has since closed
     // the source. Never overwrite that person's suggestion status.
     const next: DailyProductAgentState = input.outcome === "pr_opened"
-      ? { ...current, status: "pr_opened", prUrl: input.prUrl }
-      : { ...current, status: "failed", reason: input.reason };
+      ? { ...current, status: "pr_opened", prUrl: input.prUrl, finishedAt: now.toISOString() }
+      : { ...current, status: "failed", reason: input.reason, finishedAt: now.toISOString() };
     await saveSetting(tx, key, JSON.stringify(next));
     await audit(tx, id, "result_recorded", { claimId: input.claimId, outcome: input.outcome,
       ...(input.outcome === "pr_opened" ? { prUrl: input.prUrl } : { reason: input.reason }) });

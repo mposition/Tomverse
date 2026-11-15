@@ -412,7 +412,7 @@ test("the worker checks the switch before it asks the app for anything", () => {
 
 test("a worker started by hand with the switch off reserves nothing and calls nothing", async () => {
   const worker = fileURLToPath(new URL("../scripts/marketing-ai-visibility-worker.mjs", import.meta.url));
-  const result = spawnSync(process.execPath, ["--experimental-strip-types", "--no-warnings", worker], {
+  const result = spawnSync(process.execPath, [...(process.features.typescript ? ["--experimental-strip-types"] : ["--import=tsx"]), "--no-warnings", worker], {
     encoding: "utf8",
     // An app URL nothing listens on: a request would fail loudly, and nothing may be sent.
     env: { ...process.env, MARKETING_AI_VISIBILITY_ENABLED: "", MARKETING_APP_URL: "http://127.0.0.1:9", MARKETING_GENERATOR_SUBMIT_SECRET: "x".repeat(48), MARKETING_LLM_API_KEY: "k" },
