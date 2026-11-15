@@ -46,6 +46,9 @@ const { sendScoutSuggestion } = await import(mod("lib/productResearchScoutSend.t
 const { DAILY_PRODUCT_AGENT_CURSOR, DAILY_PRODUCT_AGENT_DAY, dailyProductAgentKey } = await import(mod("lib/dailyProductAgentCore.ts"));
 const oldSwitch = process.env.DAILY_PRODUCT_AGENT_ENABLED;
 const oldAlerts = process.env.DAILY_PRODUCT_AGENT_ALERTS_ENABLED;
+const oldRetries = process.env.DAILY_PRODUCT_AGENT_RETRIES_ENABLED;
+test.beforeEach(() => { delete process.env.DAILY_PRODUCT_AGENT_RETRIES_ENABLED; });
+test.after(() => { if (oldRetries === undefined) delete process.env.DAILY_PRODUCT_AGENT_RETRIES_ENABLED; else process.env.DAILY_PRODUCT_AGENT_RETRIES_ENABLED = oldRetries; });
 test.beforeEach(() => { settings.clear(); suggestions = []; router = []; audits = []; notices = []; rejectAudit = false; process.env.DAILY_PRODUCT_AGENT_ENABLED = "true"; process.env.DAILY_PRODUCT_AGENT_ALERTS_ENABLED = "true"; });
 test.after(() => { if (oldSwitch === undefined) delete process.env.DAILY_PRODUCT_AGENT_ENABLED; else process.env.DAILY_PRODUCT_AGENT_ENABLED = oldSwitch; });
 test.after(() => { if (oldAlerts === undefined) delete process.env.DAILY_PRODUCT_AGENT_ALERTS_ENABLED; else process.env.DAILY_PRODUCT_AGENT_ALERTS_ENABLED = oldAlerts; });
@@ -83,6 +86,47 @@ test("the operator alert cap and corrupt budget state fail closed", async () => 
 const row = (id, subject = "home.en", age = 0) => ({ id, subject, status: "open", amuxIdeaId: null,
   createdAt: new Date(NOW.getTime() + age), title: `Improve ${id}`, evidence: "Synthetic evidence", suggestion: "Fix and verify", area: "copy", severity: "low" });
 const claim = () => claimDailyProductTask({ origin: "https://app.example.test", now: NOW });
+
+test("bounded automatic retries consume the shared daily cap and fence old results", async () => {
+  suggestions = [row("one")];
+  const first = await claim();
+  await recordDailyProductResult({ id: first.id, claimId: first.claimId, outcome: "failed", reason: "tests" }, NOW);
+  const later = new Date(NOW.getTime() + 24 * 60 * 60_000);
+  const retry = (now = later) => claimDailyProductTask({ origin: "https://app.example.test", now });
+  assert.equal(await retry(), null);
+  process.env.DAILY_PRODUCT_AGENT_RETRIES_ENABLED = "true";
+  assert.equal(await retry(new Date(later.getTime() - 1)), null);
+  settings.set(DAILY_PRODUCT_AGENT_DAY, JSON.stringify({ day: "2026-11-14", count: 23 }));
+  const second = await retry();
+  assert.notEqual(second.claimId, first.claimId);
+  assert.match(second.instruction, /Retry attempt 2\/3/);
+  assert.equal(JSON.parse(settings.get(DAILY_PRODUCT_AGENT_DAY)).count, 24);
+  assert.equal(await retry(), null);
+  assert.equal((await recordDailyProductResult({ id: first.id, claimId: first.claimId, outcome: "failed", reason: "no_change" }, later)).refused, "not_claimed");
+  await recordDailyProductResult({ id: second.id, claimId: second.claimId, outcome: "failed", reason: "no_change" }, later);
+  const thirdAt = new Date(later.getTime() + 24 * 60 * 60_000);
+  const third = await retry(thirdAt);
+  assert.match(third.instruction, /Retry attempt 3\/3/);
+  await recordDailyProductResult({ id: third.id, claimId: third.claimId, outcome: "failed", reason: "tests" }, thirdAt);
+  assert.equal(await retry(new Date(thirdAt.getTime() + 24 * 60 * 60_000)), null);
+  assert.equal(suggestions[0].status, "open");
+});
+
+test("automatic retries respect human closure and AMUX reservations under concurrent claims", async () => {
+  process.env.DAILY_PRODUCT_AGENT_RETRIES_ENABLED = "true";
+  suggestions = [row("one"), row("closed"), row("amux")];
+  for (const item of suggestions) {
+    settings.set(dailyProductAgentKey(`scout.${item.id}`), JSON.stringify({ status: "failed", source: "research",
+      at: "2026-11-10T00:00:00.000Z", leaseUntil: "2026-11-10T02:00:00.000Z", reason: "tests",
+      claimId: "11111111-2222-4333-8444-555555555555" }));
+  }
+  suggestions[1].status = "completed";
+  settings.set("auto.dailyProductAgent.amux.amux", "reserved");
+  const results = await Promise.all([claim(), claim()]);
+  assert.equal(results.filter(Boolean).length, 1);
+  assert.equal(results.find(Boolean).id, "scout.one");
+  assert.equal(JSON.parse(settings.get(DAILY_PRODUCT_AGENT_DAY)).count, 1);
+});
 
 test("disabled daily mode performs no claim or audit", async () => {
   delete process.env.DAILY_PRODUCT_AGENT_ENABLED; suggestions = [row("one")];

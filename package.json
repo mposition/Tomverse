@@ -12,6 +12,8 @@
   "scripts": {
     "test:continuation-fidelity": "node --import tsx --test tests/continuationFidelity.test.mjs tests/externalContinuationSeed.test.mjs tests/continuationPassages.test.mjs tests/continuationHistorySearch.test.mjs && node --conditions=react-server --experimental-test-module-mocks --no-warnings=ExperimentalWarning --import tsx --test --test-concurrency=1 tests/server-contract/continuation-source-loader.test.ts tests/server-contract/continuation-history-router.test.ts tests/server-contract/auto-llm-router-record-gate.test.ts tests/server-contract/chat-route-fallback-liveness.test.ts",
     "report:continuation-fidelity": "node --import tsx scripts/report-continuation-fidelity.mjs",
+    "worker:research-preview": "node --conditions=react-server --import tsx scripts/research-preview-worker.ts",
+    "research:preview:evaluate": "node --conditions=react-server --import tsx scripts/research-preview-evaluate.mjs",
     "mcp:providers": "node --conditions=react-server --import tsx scripts/list-mcp-providers.ts",
     "setup:mcp-github": "node --conditions=react-server --import tsx scripts/mcp-github-app-setup.ts",
     "dev:mcp-github": "node --conditions=react-server --import tsx scripts/mcp-github-app-setup.ts --dev",
@@ -408,6 +410,7 @@
     "@ai-sdk/mistral": "4.0.84",
     "@ai-sdk/moonshotai": "^3.0.90",
     "@ai-sdk/openai": "^4.0.114",
+    "@ai-sdk/cohere": "4.0.75",
     "@auth/prisma-adapter": "^2.11.3",
     "@aws-sdk/client-s3": "^3.1167.0",
     "@aws-sdk/s3-request-presigner": "^3.1167.0",

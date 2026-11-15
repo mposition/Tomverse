@@ -22,10 +22,10 @@ export async function readGeneratedArtifactVersions(input: {
   const source = await prisma.messageArtifact.findFirst({
     where: { id: input.artifactId, userId: input.userId, status: "ready" },
     select: { id: true, conversationId: true, lineageId: true,
-      conversation: { select: { userId: true, password: true } } },
+      conversation: { select: { userId: true, password: true, passwordVersion: true } } },
   });
   if (!source || source.conversation.userId !== input.userId) throw unavailable();
-  if (!hasConversationUnlockGrant(input.request, input.userId, source.conversationId, source.conversation.password)) {
+  if (!hasConversationUnlockGrant(input.request, input.userId, source.conversationId, source.conversation.password == null ? null : source.conversation.passwordVersion)) {
     throw new GeneratedArtifactLineageError("CONVERSATION_LOCKED", 423);
   }
   const root = source.lineageId ?? source.id;

@@ -35,7 +35,7 @@ export async function authorizeChatRecoveryScope(input: {
 
   const conversation = await prisma.conversation.findFirst({
     where: { id: input.scopeKey, userId: input.userId },
-    select: { password: true, productKey: true, kind: true },
+    select: { password: true, passwordVersion: true, productKey: true, kind: true },
   });
   if (!conversation) {
     return {
@@ -61,7 +61,7 @@ export async function authorizeChatRecoveryScope(input: {
       input.request,
       input.userId,
       input.scopeKey,
-      conversation.password
+      conversation.password == null ? null : conversation.passwordVersion
     )
   ) {
     return { ok: false, response: conversationLockedResponse() };

@@ -159,7 +159,7 @@ export async function POST(
       });
       const existingConv = await prisma.conversation.findUnique({
           where: { id: conversationId },
-          select: { userId: true, password: true, kind: true, productKey: true }
+          select: { userId: true, password: true, passwordVersion: true, kind: true, productKey: true }
       });
 
       if (!existingConv || existingConv.userId !== userId) {
@@ -170,7 +170,7 @@ export async function POST(
           req,
           userId,
           conversationId,
-          existingConv.password
+          existingConv.password == null ? null : existingConv.passwordVersion
         )
       ) {
         return conversationLockedResponse();
@@ -425,7 +425,7 @@ export async function DELETE(
         });
         const existingConv = await prisma.conversation.findUnique({
             where: { id: conversationId },
-            select: { userId: true, password: true }
+            select: { userId: true, password: true, passwordVersion: true }
         });
 
         if (!existingConv || existingConv.userId !== userId) {
@@ -436,7 +436,7 @@ export async function DELETE(
             req,
             userId,
             conversationId,
-            existingConv.password
+            existingConv.password == null ? null : existingConv.passwordVersion
           )
         ) {
           return conversationLockedResponse();

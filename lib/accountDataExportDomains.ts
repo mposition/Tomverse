@@ -445,6 +445,14 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
       "The visible partial response, model and provider attribution, status, revision and terminal metadata are the user's recovery record. Held back: the request fingerprint and the worker owner and lease fields, which are concurrency and execution internals rather than user content.",
   },
   {
+    domain: "researchPreviewRun",
+    publicName: "research_preview_runs",
+    prismaModel: "ResearchPreviewRun",
+    state: "included_filtered",
+    withheldReason:
+      "The conversation and answer identities, selected model, lifecycle status, bounded step/search/read counts and timestamps are included. The private restart checkpoint, raw page content, provider/API binding, reservation, lease, digest, settlement usage and internal error fields are withheld.",
+  },
+  {
     domain: "promptRefinerChatScope", publicName: "prompt_refiner_scopes",
     prismaModel: "PromptRefinerChatScope", state: "included_filtered",
     withheldReason: "The mounted surface and epoch are exported. Internal scope, mount and owner identifiers are withheld execution protocol keys.",

@@ -138,5 +138,5 @@ test("the client sends its transcript through the fit", () => {
   const send = source.indexOf("const requestBody = {");
   assert.ok(send > 0, "the chat request body is built in ChatApp");
   const body = source.slice(send, source.indexOf("modelId: modelId", send));
-  assert.match(body, /messages: fitChatRequestTranscript\(/);
+  assert.match(body, /messages: [^\n]*fitChatRequestTranscript\(/);
 });

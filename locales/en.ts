@@ -1,4 +1,5 @@
 import { reviewHandoffCopy } from "./reviewHandoff";
+import { researchPreviewCopy } from "./researchPreview";
 import { englishLocationBody } from "./privacyLocation";
 import { workspaceWelcomeCopy } from "./workspaceWelcome";
 import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
@@ -199,6 +200,7 @@ export const en = {
         projectDeleteFailed: "Project could not be deleted.",
     },
    chat: {
+        ...researchPreviewCopy["en"],
         sendPreparationChanged: "The conversation or model changed while preparing the answer. Check your question and send again.",
         savedQuestionNotSent: "Your question was saved, but no answer request was sent. Reload this conversation to check it before trying again.",
         conversationOpenFailed: "This conversation could not be opened. Your current conversation has not changed.",
@@ -2336,10 +2338,10 @@ export const en = {
         providerTransferTitle: "What is sent to the chat provider",
         providerTransfer1: "What is transferred: your question, the earlier conversation needed to answer it, and files you attach. If account memory or an assistant is on, the reference material described in those sections is included. Tomverse does not attach your account identifier, email address, or client IP address to this request. If Current location is on, your approximate device location is also included for that turn, including when a fallback provider answers.",
         providerTransfer2: "When and how: when generating the response, in an encrypted HTTPS API request.",
-        providerTransfer3: "Who receives it: the provider of the model that generates the answer. Choosing a model chooses that recipient. If you compare several models, each chosen model's provider receives the turn.",
+        providerTransfer3: "Who receives it: when you choose a specific model, its provider receives the turn. If you compare several models, each chosen model's provider receives it. When automatic fallback is enabled, Auto may send a text-only turn to another eligible model's provider if the initial attempt fails or stalls. Both providers may receive the question, needed conversation context and enabled memory, assistant or location context. Fallback is excluded for turns with attachments, tools, web search or deep research.",
         providerTransfer4: "Purpose: to generate that response. Tomverse does not send the turn to the provider for any other purpose.",
         providerTransfer5: "How to refuse: do not choose that model.",
-        providerTransfer6: "If you refuse: you do not receive that model's answer. Choosing another model sends the turn only to that model's provider. The rest of Tomverse stays available.",
+        providerTransfer6: "If you refuse: you do not receive that model's answer. To avoid automatic transfer to a fallback provider, choose a specific model instead of Auto; Tomverse will not automatically replace that chosen model with another provider's model. The rest of Tomverse stays available.",
         providerTransfer7: "Web search: on a turn where Tomverse itself runs the search, the search text is sent to Brave Search over encrypted HTTPS. That request does not include your account identifier, email address, or client IP address. Turning web search off stops that transfer. When the model provider runs the search, that text is part of the provider request described above. If Current location is on, search text may include your approximate coordinates or a nearby place derived from them.",
         voiceInputTitle: "Voice input",
         voiceInput: "If you use the microphone in the message box, the recording is sent to a speech-to-text provider — OpenAI today — for the sole purpose of converting it into text, and it is transferred to OpenAI OpCo, LLC, a company established in the United States. The provider's global API is used, so the infrastructure that does the processing is not limited to the United States: the recording may be processed wherever OpenAI and its sub-processors operate. Tomverse does not store the audio: it is held in memory for the length of that one request and is never written to a database, to file storage, to a log or to error tracking, and a recording you cancel is never sent anywhere at all. The text that comes back is placed in the message box for you to read, edit or delete before you send anything; until you send it, it is a draft on your device and Tomverse stores nothing. Once you send it, it is an ordinary message and the rest of this policy applies to it. Voice input is available whether or not you are signed in. When you are not, the request is attributed to the same anonymous identifier your other guest activity uses, and nothing about the recording is stored either way.",
@@ -2407,6 +2409,7 @@ export const en = {
         changes: "We may update this policy when the service or legal requirements change and will display the revised effective date.",
         providerTableTitle: "Where each provider receives chat content",
         providerTableIntro: "This table names the company that receives chat content, where that content is stored and processed, whether it is used to train models, how long the content is kept, and whether sale or advertising is prohibited. When a contract does not name a place or a period, the table says so.",
+        providerUnverifiedNotice: "We have not verified the account-specific processing locations, model-training settings or retention terms for this provider. These details must not be assumed from the settings of other providers.",
         providerTableScrollHint: "This table is wider than a narrow screen: scroll it sideways to read the remaining columns.",
         colProvider: "Provider",
         colRecipient: "Recipient",

@@ -533,7 +533,7 @@ test("the owner's unlock grant opens their own locked snapshot", async () => {
         "external_conversation",
         user.id,
         conversation.id,
-        passwordHash
+        1
     ).split(";")[0];
     const view = await getExternalConversation(user.id, conversation.id, {
         request: new Request("https://tomverse.test/", {
@@ -557,7 +557,7 @@ test("a grant for the native conversation namespace does not open a snapshot", a
     const cookie = createConversationUnlockCookie(
         user.id,
         conversation.id,
-        passwordHash
+        1
     ).split(";")[0];
     await assert.rejects(
         getExternalConversation(user.id, conversation.id, {

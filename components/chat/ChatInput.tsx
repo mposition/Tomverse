@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import type { ReviewWorkspaceControls } from "./useReviewWorkspace";
+import type { ResearchPreviewControls } from "./useResearchPreview";
 import { McpChatPicker } from "@/components/plugins/McpChatPicker";
 import { ChatLocationControl } from "./ChatLocationControl";
 import { composerModelCountLabel } from "./composerModelCountLabel";
@@ -864,6 +865,7 @@ type ChatInputProps = {
   onMemorySettingsRefresh?: () => void;
   onWebSearchModeChange?: (mode: WebSearchMode) => void;
   onOpenDeepResearchSetup?: () => void;
+  researchPreview?: ResearchPreviewControls;
   /**
    * Switches to the image draft, carrying the composer's current text as the
    * starting prompt. Absent when the image feature flag is off. `modelId` is
@@ -1068,6 +1070,7 @@ export function ChatInput({
   onMemorySettingsRefresh,
   onWebSearchModeChange,
   onOpenDeepResearchSetup,
+  researchPreview,
   onStartImageDraft,
   voiceInputEnabled = false,
   voiceConversationControl,
@@ -1490,6 +1493,10 @@ export function ChatInput({
     isUsageLimitReached ||
     (isSending && !allowEditingWhileSending);
   const isDraftMutationDisabled = isDisabled || draftLocked;
+  const hasResearchPreviewAttachments = attachments.length > 0 ||
+    scopedPendingAttachments.length > 0 || scopedFailedAttachments.length > 0;
+  const isResearchPreviewBlocked = Boolean(researchPreview?.selected &&
+    (!researchPreview?.offered || hasResearchPreviewAttachments || !value.trim() || value.trim().length > 4000));
 
   const handlePromptRefinerDecision = useCallback(
     (
@@ -2372,7 +2379,7 @@ export function ChatInput({
     // The successor draft remains editable in durable Chat, but Enter cannot
     // consume it while either a live response or a read-only recovery poll is
     // still active. The visible branch below presents Stop instead of Send.
-    if (!isDraftMutationDisabled && !isVoiceSubmissionBlocked && !isSending) {
+    if (!isDraftMutationDisabled && !isVoiceSubmissionBlocked && !isSending && !isResearchPreviewBlocked) {
       dismissGuestQuickStart();
       onSubmit();
     }
@@ -3419,7 +3426,28 @@ export function ChatInput({
             row below them. Only the label length is shell-specific, which
             `data-label-variant` states so tests read it from the DOM.
           */}
-          <ChatLocationControl identityKey={identityKey} compact />
+          {!researchPreview?.selected && <ChatLocationControl identityKey={identityKey} compact />}
+          {researchPreview?.selected && (
+            <div
+              data-testid="research-preview-notice"
+              role="status"
+              className="mb-2 rounded-xl border border-accent-deep-research-200 bg-accent-deep-research-50 px-3 py-2 text-xs leading-5 text-zinc-700 dark:border-accent-deep-research-900/60 dark:bg-accent-deep-research-950/30 dark:text-zinc-200"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-semibold">{t("chat.researchPreviewTitle")} · {activeModelNames[0]}</span>
+                <button type="button" onClick={() => researchPreview.onSelectedChange(false)}
+                  data-testid="research-preview-clear" aria-label={t("chat.researchPreviewClear")}
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg hover:bg-zinc-200/60 dark:hover:bg-zinc-800">
+                  <X className="h-4 w-4" aria-hidden="true" />
+                </button>
+              </div>
+              <p className="line-clamp-2 break-words whitespace-pre-wrap" data-testid="research-preview-question">{value.trim() || t("chat.researchPreviewQuestion")}</p>
+              <details><summary className="min-h-11 cursor-pointer py-2">{t("chat.researchPreviewDescription")}</summary><p>{t(researchPreview.features?.pageReading ? "chat.researchPreviewScopeWithPages" : "chat.researchPreviewScope")}</p>{researchPreview.features?.pageReading && <p>{t("chat.researchPreviewPageLimits")}</p>}{researchPreview.features?.durableRuns && <p>{t("chat.researchPreviewRunLimits")}</p>}</details>
+              {researchPreview.features?.durableRuns && <p>{t("chat.researchPreviewDurableHint")}</p>}
+              {researchPreview.estimatedCredits !== undefined && <p data-testid="research-preview-estimate">{t("chat.researchPreviewEstimate").replace("{credits}", String(researchPreview.estimatedCredits))}</p>}
+              {isResearchPreviewBlocked && <p className="font-semibold" data-testid="research-preview-blocked">{t(hasResearchPreviewAttachments ? "chat.researchPreviewAttachments" : !value.trim() || value.trim().length > 4000 ? "chat.researchPreviewQuestionLimit" : researchPreview.pending ? "chat.researchPreviewChecking" : "chat.researchPreviewUnavailable")}</p>}
+            </div>
+          )}
           {hasToolStatusChips && (
             <div
               data-testid="tool-status-chip-row"
@@ -3696,7 +3724,7 @@ export function ChatInput({
             </button>
           </div>
         )}
-        {promptRefinerOffered &&
+        {promptRefinerOffered && !researchPreview?.selected &&
         promptRefinerState &&
         onPromptRefinerRequest &&
         onPromptRefinerDecision &&
@@ -3810,7 +3838,7 @@ export function ChatInput({
             useCompactMobileReviewSpacing ? "gap-x-1.5 gap-y-1" : "gap-1.5"
           } max-[360px]:gap-x-0.5 max-[240px]:contents`}
         >
-          {currentProduct === "chat" && !isGuestMode && <McpChatPicker conversationId={currentChatId} disabled={draftLocked || isSending} />}
+          {currentProduct === "chat" && !isGuestMode && !researchPreview?.selected && <McpChatPicker conversationId={currentChatId} disabled={draftLocked || isSending} />}
           <button
             ref={actionMenuButtonRef}
             type="button"
@@ -3922,7 +3950,7 @@ export function ChatInput({
               type="button"
               data-testid="chat-send-button"
               onClick={() => {
-                if (isVoiceSubmissionBlocked) return;
+                if (isVoiceSubmissionBlocked || isResearchPreviewBlocked) return;
                 dismissGuestQuickStart();
                 onSubmit();
               }}
@@ -3932,6 +3960,7 @@ export function ChatInput({
                 Boolean(review?.mode === "easy" && !review.easyAvailable) ||
                 Boolean(noReviewProviders) ||
                 isVoiceSubmissionBlocked ||
+                isResearchPreviewBlocked ||
                 (singleModelSelection && selectedModels.length !== 1) ||
                 activeSelectedModels.length === 0 ||
                 (!value.trim() && attachments.length === 0)
@@ -4239,6 +4268,24 @@ export function ChatInput({
                     </button>
                   )}
                   <div className="my-1 border-t border-zinc-200 dark:border-zinc-700" />
+                  {researchPreview?.offered && (
+                    <button
+                      type="button" data-testid="tools-research-preview-row"
+                      aria-pressed={researchPreview.selected}
+                      disabled={hasResearchPreviewAttachments || isDraftMutationDisabled || isSending}
+                      onClick={() => {
+                        researchPreview.onSelectedChange(!researchPreview.selected);
+                        closeMenu(false);
+                      }}
+                      className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60 dark:hover:bg-zinc-800"
+                    >
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-deep-research-500/10 text-accent-deep-research-500"><Microscope className="h-5 w-5" aria-hidden="true" /></span>
+                      <span className="flex min-w-0 flex-col">
+                        <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{t("chat.researchPreviewTitle")}</span>
+                        <span className="text-xs text-zinc-500">{t(hasResearchPreviewAttachments ? "chat.researchPreviewAttachments" : "chat.researchPreviewDescription")}</span>
+                      </span>
+                    </button>
+                  )}
                   {review?.mode !== "easy" && (
                       <button
                         type="button"

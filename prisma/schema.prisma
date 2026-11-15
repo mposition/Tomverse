@@ -88,6 +88,7 @@ model User {
   mobileStoreTransactions              MobileStoreTransaction[]
   mobileStorePurchaseAuthorizations    MobileStorePurchaseAuthorization[]
   chatCreditReservations               ChatCreditReservation[]
+  researchPreviewRuns                  ResearchPreviewRun[]
   imageGenerations                     ImageGeneration[]
   messageArtifacts                     MessageArtifact[]
   messageAttachments                   MessageAttachment[]
@@ -495,6 +496,7 @@ model Conversation {
   imageGenerationGroups ImageGenerationGroup[]
   cacheAffinities       DeploymentCacheAffinity[]
   continuationBridge    ConversationContinuationBridge?
+  researchPreviewRuns   ResearchPreviewRun[]
   user                  User?                           @relation(fields: [userId], references: [id], onDelete: Cascade)
   project               ConversationProject?            @relation(fields: [projectId], references: [id], onDelete: SetNull)
   createdAt             DateTime                        @default(now())
@@ -548,6 +550,7 @@ model Conversation {
   /// no more than that column does.
   pinSeq           Float     @default(0)
   password         String?
+  passwordVersion  Int     @default(0)
   importedGuestKey String?
 
   @@unique([userId, importedGuestKey])
@@ -576,8 +579,11 @@ model Message {
   status          String                  @default("normal")
   modelId         String?
   pendingJobId    String?
+  researchRunId   String?                 @unique
   searchMetadata  Json?
   providerContext MessageProviderContext?
+  researchRun     ResearchPreviewRun?     @relation(fields: [researchRunId], references: [id], onDelete: SetNull)
+  researchSourceRuns ResearchPreviewRun[] @relation("ResearchPreviewSourceMessage")
 
   /// How much account memory this answer's prompt carried. §8.1 invariant 4
   /// forbids storing the injected context as a Message row and explicitly
@@ -2012,6 +2018,7 @@ model ChatCreditReservation {
   settlementAttemptIndex Int?
   settlementAttempt      ChatAttemptUsage?  @relation("ReservationSettlementAttempt", fields: [id, settlementAttemptIndex], references: [reservationId, attemptIndex], onDelete: NoAction, onUpdate: NoAction, map: "ChatCreditReservation_settlementAttempt_fkey")
   attemptUsage           ChatAttemptUsage[]
+  researchPreviewRun     ResearchPreviewRun?
 
   @@index([status, expiresAt])
   @@index([userId, createdAt])
@@ -2019,6 +2026,90 @@ model ChatCreditReservation {
   @@unique([subjectKey, clientTurnId])
   @@index([providerRequestId])
   @@index([providerResponseId])
+}
+
+/// A default-off, owner-scoped Research Preview execution that can survive a
+/// request or worker restart without repeating a model dispatch. The prompt is
+/// not copied here: sourceUserMessage is the owned canonical input. Checkpoint
+/// content is private, bounded and erased at every terminal transition.
+model ResearchPreviewRun {
+  id                     String    @id @default(cuid())
+  userId                 String
+  conversationId         String
+  sourceUserMessageId    String
+  assistantMessageId     String    @unique
+  modelId                String
+  provider               String
+  apiModel               String
+  locale                 String
+  currentDate            String
+  questionDigest         String
+  pageReadingEnabled     Boolean   @default(false)
+  totalOutputTokens      Int
+  inputTokenCeiling      Int
+  searchSurchargeCredits Int
+  status                 String    @default("preparing")
+  stopReason             String?
+  reservationId          String?   @unique
+  checkpoint             Json?
+  checkpointVersion      Int       @default(0)
+  checkpointExpiresAt    DateTime?
+  stepCount              Int       @default(0)
+  searchCount            Int       @default(0)
+  readCount              Int       @default(0)
+  settlementUsage        Json?
+  cancelRequestedAt      DateTime?
+  leaseOwner             String?
+  leaseEpoch             Int       @default(0)
+  leaseExpiresAt         DateTime?
+  activeDeadlineAt       DateTime?
+  startedAt              DateTime?
+  completedAt            DateTime?
+  lastErrorCode          String?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  user              User                         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation      Conversation                 @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sourceUserMessage Message                      @relation("ResearchPreviewSourceMessage", fields: [sourceUserMessageId], references: [id], onDelete: Cascade)
+  message           Message?
+  reservation       ChatCreditReservation?       @relation(fields: [reservationId], references: [id], onDelete: SetNull)
+  generations       ResearchPreviewGeneration[]
+
+  @@index([userId, createdAt])
+  @@index([conversationId, createdAt])
+  @@index([status, leaseExpiresAt, createdAt])
+  @@index([checkpointExpiresAt])
+}
+
+/// One immutable dispatch boundary within a durable Research Preview run.
+/// `intent` is persisted before the SDK is entered; `dispatch_started` is set
+/// by the model middleware immediately before the provider call. A stale
+/// dispatch_started row is therefore unknown and is never retried.
+model ResearchPreviewGeneration {
+  id                      String    @id @default(cuid())
+  runId                   String
+  generationIndex         Int
+  status                  String    @default("intent")
+  leaseEpoch              Int
+  checkpointVersionBefore Int
+  inputTokens             Int?
+  cachedInputTokens       Int?
+  cacheWriteInputTokens   Int?
+  outputTokens            Int?
+  reasoningTokens         Int?
+  searchCount             Int?
+  readCount               Int?
+  stopReason              String?
+  dispatchStartedAt       DateTime?
+  completedAt             DateTime?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  run ResearchPreviewRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, generationIndex])
+  @@index([status, dispatchStartedAt])
 }
 
 // What one dispatched attempt cost, at its own provider's rates.
@@ -3663,6 +3754,7 @@ model ExternalConversation {
   /// the same `lib/conversationLock.ts` helpers. Locking a snapshot suspends
   /// the memories it is the last reachable evidence for (§7.1).
   password String?
+  passwordVersion Int @default(0)
 
   messages            ExternalMessage[]
   continuationBridges ConversationContinuationBridge[]

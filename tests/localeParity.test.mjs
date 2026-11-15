@@ -181,11 +181,16 @@ const ENGLISH_STRING_CEILING = {
   // "China" and "Asia", Portuguese "China". The sentences around them are
   // translated. They are shorter than the translation check's minimum, so
   // the ceiling here is what records them.
-  zh: 10,
-  fr: 42,
-  de: 31,
-  es: 22,
-  pt: 18,
+  // Research Preview adds its unchanged feature name in two headings. French
+  // also uses "Sources" for the report's source list. The surrounding Research
+  // copy is translated; the headings are allowlisted with their brand reason.
+  // These ceilings reflect the measured totals after localized Research copy
+  // overrides the English fallback, rather than counting the fallback itself.
+  zh: 11,
+  fr: 44,
+  de: 32,
+  es: 23,
+  pt: 20,
 };
 
 test("every supported language is in the dictionary map", () => {

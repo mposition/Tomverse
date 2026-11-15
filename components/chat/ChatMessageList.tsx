@@ -11,6 +11,8 @@ import {
   useState,
 } from "react";
 import Link from "next/link";
+import { ResearchPreviewRunCard } from "@/components/chat/ResearchPreviewRunCard";
+import { webResearchPreviewRuns, researchRunMessage } from "@/lib/researchPreviewRunClient";
 import { McpProgressNotice } from "@/components/plugins/McpProgressNotice";
 import ReactMarkdown from "react-markdown";
 import type { ExtraProps } from "react-markdown";
@@ -71,6 +73,7 @@ import {
 } from "@/lib/chatProductUiCopy";
 
 type ChatMessageListProps = {
+  onResearchMessage?: (message: Message) => void;
   transcriptFooter?: ReactNode;
   messages: Message[];
   onRetryLast?: () => void;
@@ -472,6 +475,7 @@ export function SendEchoTurn({ echo }: { echo: SendEcho }) {
 }
 
 export function ChatMessageList({
+  onResearchMessage,
   transcriptFooter,
   messages,
   onRetryLast,
@@ -544,6 +548,7 @@ export function ChatMessageList({
   const liveStatusMessage = (() => {
     if (!lastMessage || lastMessage.role !== "assistant") return "";
     if (lastMessage.id === "welcome") return "";
+    if (lastMessage.researchRunId) return "";
     if (lastMessage.status === "error") return t("chat.responseFailed");
     if (lastMessage.status === "cancelled") return t("chat.responseCancelled");
     if (lastMessage.status === "incomplete") return t("chat.responseIncomplete");
@@ -933,7 +938,7 @@ export function ChatMessageList({
             // msg.status alone can't tell "still streaming" apart from
             // "finished normally", both are "normal".
             const isActivelyGenerating =
-              !isUser && isSending && idx === messages.length - 1 && msg.role === "assistant";
+              !isUser && !msg.researchRunId && isSending && idx === messages.length - 1 && msg.role === "assistant";
 
             // Only shown before the first token arrives (msg.content is
             // still empty) -- once real text starts streaming in, the
@@ -1337,7 +1342,11 @@ export function ChatMessageList({
                       ))}
                     </div>
                   )}
-                  {msg.role === "assistant" && msg.imageTurn && msg.status !== "error" ? (
+                  {!isUser && msg.researchRunId && currentChatId && <ResearchPreviewRunCard
+                    runId={msg.researchRunId} conversationId={currentChatId} assistantMessageId={msg.id}
+                    language={lang} transport={webResearchPreviewRuns}
+                    onMessage={run => onResearchMessage?.(researchRunMessage(run))} />}
+                  {msg.role === "assistant" && msg.researchRunId && !msg.content ? null : msg.role === "assistant" && msg.imageTurn && msg.status !== "error" ? (
                     // An image turn's answer is the picture; its text is only
                     // the record kept for later turns and exports.
                     <ChatImageTurnCard groupId={msg.imageTurn.groupId} modelIds={msg.imageTurn.modelIds} />
@@ -1561,6 +1570,19 @@ export function ChatMessageList({
                           format={msg.generatingArtifactFormat}
                         />
                       )}
+                    {!isUser && msg.searchMetadata?.research && (
+                      <div data-testid="research-preview-result" data-outcome={msg.searchMetadata.research.outcome}
+                        className="mt-3 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+                        <p className="font-semibold">{t({
+                          complete: "chat.researchPreviewOutcomeComplete",
+                          partial: "chat.researchPreviewOutcomePartial",
+                          insufficient_evidence: "chat.researchPreviewOutcomeInsufficient",
+                          failed: "chat.researchPreviewOutcomeFailed",
+                          cancelled: "chat.researchPreviewOutcomeCancelled",
+                        }[msg.searchMetadata.research.outcome])}</p>
+                        <p>{t(msg.searchMetadata.research.evidenceLevel === "search_snippets_and_pages" ? "chat.researchPreviewPageEvidence" : "chat.researchPreviewEvidence")}</p>
+                      </div>
+                    )}
                     {msg.searchMetadata && msg.searchMetadata.citations.length > 0 && (
                       <div
                         data-testid="search-citation-list"

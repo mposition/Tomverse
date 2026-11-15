@@ -368,6 +368,7 @@ test("each provider's catalogue URL is the one that provider actually serves", (
     {
       openai: "https://api.openai.com/v1/models",
       anthropic: "https://api.anthropic.com/v1/models?limit=1000",
+      cohere: "https://api.cohere.com/v2/models",
       google:
         "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000",
       groq: "https://api.groq.com/openai/v1/models",

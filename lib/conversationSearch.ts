@@ -124,7 +124,7 @@ const TARGET_SELECT = {
         select: {
             ...CONTINUATION_NAMING_BRIDGE_SELECT,
             userId: true,
-            externalConversation: { select: { title: true, password: true, userId: true } },
+            externalConversation: { select: { title: true, password: true, passwordVersion: true, userId: true } },
         },
     },
 } satisfies Prisma.ConversationSelect;
@@ -174,7 +174,7 @@ export async function searchConversationMessages(input: {
             /* ---- 1. authorisation ------------------------------------ */
             const lockedConversations = await tx.conversation.findMany({
                 where: { userId, password: { not: null } },
-                select: { id: true, password: true },
+                select: { id: true, password: true, passwordVersion: true },
             });
             /*
               Every grant this answer rests on, and the earliest of their
@@ -198,7 +198,7 @@ export async function searchConversationMessages(input: {
             const deniedConversationIds = lockedConversations
                 .filter(
                     (row) =>
-                        !noteGrant(resourceUnlockAccess("conversation", request, userId, row.id, row.password))
+                        !noteGrant(resourceUnlockAccess("conversation", request, userId, row.id, row.password == null ? null : row.passwordVersion))
                 )
                 .map((row) => row.id);
             const denied = new Set(deniedConversationIds);
@@ -214,7 +214,7 @@ export async function searchConversationMessages(input: {
                     conversationId: true,
                     externalConversationId: true,
                     conversation: { select: { updatedAt: true } },
-                    externalConversation: { select: { password: true } },
+                    externalConversation: { select: { password: true, passwordVersion: true } },
                 },
             });
             const branchesBySnapshot = new Map<string, Array<{ conversationId: string; updatedAt: Date }>>();
@@ -232,7 +232,7 @@ export async function searchConversationMessages(input: {
                                 request,
                                 userId,
                                 snapshotId,
-                                bridge.externalConversation.password
+                                bridge.externalConversation.password == null ? null : bridge.externalConversation.passwordVersion
                             )
                         )
                     );

@@ -8,6 +8,7 @@ import { imageModelOwner } from "@/lib/imageModelRegistry";
 import { imageGroupMaxModels } from "@/lib/imageGroupLimits";
 import { imageEditEnabled } from "@/lib/imageEditSource";
 import { chatImageTriageModelId } from "@/lib/chatImageIntent";
+import { researchPreviewFeatures } from "@/lib/researchPreviewFeatures";
 import { reviewEasyEnabled } from "@/lib/reviewRouting";
 import { consumeApiRateLimit, apiSecurityResponse } from "@/lib/apiSecurity";
 
@@ -26,6 +27,8 @@ export async function GET(request: Request) {
     id: model.id, name: model.name, provider: imageModelOwner(model), pricingVersion: model.pricingVersion,
     prices: model.prices.map(price => ({ quality: price.quality, size: price.size, credits: price.credits })),
   })) };
-  return Response.json({ generatedFileRevisions: generatedArtifactRevisionEnabled() && flags.attachmentsEnabled && plan.allowAttachments, historyFeatures: { sharing: plan.allowSharing, downloads: plan.allowDownloads }, historyActions: true, conversationTitles: true, accountUsage: true, chatImageTurns: true, chatImageEdits,reviewEasy: reviewEasyEnabled(), maxModels: effectivePlanModelLimit(plan), assistants, workspace, plan: plan.tier, images }, { headers: { "Cache-Control": "private, no-store" } });
+  const researchFeatures = researchPreviewFeatures();
+  const researchPreview = { enabled: researchFeatures.nativeStart, pageReading: researchFeatures.pageReading, durableRuns: researchFeatures.durableRuns };
+  return Response.json({ researchPreview, generatedFileRevisions: generatedArtifactRevisionEnabled() && flags.attachmentsEnabled && plan.allowAttachments, historyFeatures: { sharing: plan.allowSharing, downloads: plan.allowDownloads }, historyActions: true, conversationTitles: true, accountUsage: true, chatImageTurns: true, chatImageEdits,reviewEasy: reviewEasyEnabled(), maxModels: effectivePlanModelLimit(plan), assistants, workspace, plan: plan.tier, images }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) { return apiSecurityResponse(error) ?? Response.json({ code: "NATIVE_PARITY_UNAVAILABLE" }, { status: 503, headers: { "Cache-Control": "no-store" } }); }
 }

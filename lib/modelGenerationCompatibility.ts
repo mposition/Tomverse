@@ -155,6 +155,10 @@ export const getModelGenerationSettings = (
       : undefined
   );
   return {
+    // The native Cohere SDK maps universal reasoning to its thinking setting.
+    ...(model.provider === "cohere" && model.reasoning !== undefined
+      ? { reasoning: model.reasoning }
+      : {}),
     ...(options?.temperature !== undefined &&
     !GEMINI_STRICT_GENERATION_MODEL_IDS.has(model.id) &&
     model.reasoning === undefined

@@ -9,7 +9,7 @@ mock.module(mod('lib/auth.ts'),{namedExports:{authOptions:{}}});
 mock.module(mod('lib/mobileAuthRoute.ts'),{namedExports:{mobileAuthRefusal:()=>Response.json({code:'INVALID'},{status:401}),requireMobileBearer:async req=>req.headers.get('authorization')==='Bearer valid'?{ok:true,identity:{userId:'bearer-owner'}}:{ok:false,response:Response.json({code:'INVALID'},{status:401})}}});
 mock.module(mod('lib/prisma.ts'),{namedExports:{prisma:{
   user:{findUnique:async({where})=>({id:where.id,accountStatus:'active'})},
-  conversation:{findUnique:async()=>{reads++;return{id:'c1',userId:owner,password:'stored',kind:'chat',continuationBridge:null};},findFirst:async({where})=>{reads++;assert.equal(where.userId,'bearer-owner');return null;}},
+  conversation:{findUnique:async()=>{reads++;return{id:'c1',userId:owner,password:'stored',passwordVersion:0,kind:'chat',continuationBridge:null};},findFirst:async({where})=>{reads++;assert.equal(where.userId,'bearer-owner');return null;}},
   conversationProject:{findUnique:async()=>({id:'p1',userId:'another-owner'}),findFirst:async()=>null,updateMany:async({where})=>{assert.equal(where.userId,'bearer-owner');return{count:0};},deleteMany:async({where})=>{assert.equal(where.userId,'bearer-owner');return{count:0};}},
   $queryRaw:async(_strings,...values)=>{reads++;assert.ok(values.includes('bearer-owner'));assert.ok(!values.includes('cookie-owner'));return[];},
 }}});
@@ -47,5 +47,5 @@ test('history resources enforce bearer ownership even beside a different web coo
 test('successful native password verification issues an in-memory grant and no browser cookie',async()=>{
   owner='bearer-owner';const response=await verify.POST(request('/api/conversations/c1/verify','POST','valid','https://localhost',{password:'password'}),context);
   assert.equal(response.status,200);assert.equal(response.headers.get('set-cookie'),null);assert.equal(response.headers.get('cache-control'),'no-store');const body=await response.json();assert.equal(typeof body.unlockToken,'string');
-  const proof=new Request('https://tomverse.app',{headers:{authorization:'Bearer valid','X-Tomverse-Conversation-Unlocks':`c1=${body.unlockToken}`}});assert.equal(locks.hasConversationUnlockGrant(proof,'bearer-owner','c1','stored'),true);assert.equal(locks.hasConversationUnlockGrant(proof,'cookie-owner','c1','stored'),false);assert.equal(cookies,0);
+  const proof=new Request('https://tomverse.app',{headers:{authorization:'Bearer valid','X-Tomverse-Conversation-Unlocks':`c1=${body.unlockToken}`}});assert.equal(locks.hasConversationUnlockGrant(proof,'bearer-owner','c1',0),true);assert.equal(locks.hasConversationUnlockGrant(proof,'cookie-owner','c1',0),false);assert.equal(locks.hasConversationUnlockGrant(proof,'bearer-owner','c1',1),false);assert.equal(cookies,0);
 });
