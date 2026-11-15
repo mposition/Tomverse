@@ -224,7 +224,8 @@ test("a body outside the strict shape never reaches the store", async () => {
     { binding: BINDING, card: CARD, route: "dm_proposal" },
     { binding: BINDING, card: CARD, keyRing: "0:abc" },
     "not json",
-    JSON.stringify({ binding: BINDING, card: { ...CARD, context: "x".repeat(70 * 1_024) } }),
+    // Past the body cap: twice the card's one cap (2 x 256 KiB, 2026-11-15).
+    JSON.stringify({ binding: BINDING, card: { ...CARD, context: "x".repeat(2 * 256 * 1_024 + 1) } }),
   ]) {
     reset();
     const answer = await POST(post(body));
@@ -232,6 +233,11 @@ test("a body outside the strict shape never reaches the store", async () => {
     assert.equal(world.calls.length, 0);
     assert.deepEqual(world.boundaries, []);
   }
+  // A card far past the old 16 KiB reaches the routing, which judges its one cap.
+  reset();
+  const long = await POST(post(JSON.stringify({ binding: BINDING, card: { ...CARD, context: "x".repeat(70 * 1_024) } })));
+  assert.equal(long.status, 200);
+  assert.equal(world.calls.length, 1);
 });
 
 test("a missing or malformed key ring refuses before the database, and logs its code only", async () => {

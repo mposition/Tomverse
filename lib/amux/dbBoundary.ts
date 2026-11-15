@@ -598,6 +598,15 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 4,
     isolation: "read",
   },
+  // A Decision Maker request's workspace evidence
+  // (lib/amux/decisionMakerWorkspaceService.ts): setup + the request's card +
+  // the one source row of that card + a pull request's patch + (with the
+  // workspace switched off) the card text + fence.
+  decisionMakerWorkspaceRead: {
+    operation: "decision_maker_workspace_read",
+    prismaCallCeiling: 6,
+    isolation: "read",
+  },
   // Drafts no card could be written for, recorded once: setup + insert + fence.
   engineeringAgentT2DmReviewUnfilable: {
     operation: "engineering_agent_t2_dm_review_unfilable",

@@ -4,6 +4,7 @@ import {
   DM_ANSWER_MAX_BYTES,
   DM_CARD_TEXT_MAX_BYTES,
   DM_ESCALATION_MAX_BYTES,
+  DM_OUTPUT_TEXT_MAX_BYTES,
   DM_RATIONALE_MAX_BYTES,
   isDmOptionId,
   type DmOutput,
@@ -52,8 +53,8 @@ export const DM_BODY_FIELDS = [
 ] as const;
 export type DmBodyField = (typeof DM_BODY_FIELDS)[number];
 
-/** §10: "운영자가 고친 답(8 KiB)". */
-export const DM_OPERATOR_ANSWER_MAX_BYTES = 8 * 1024;
+/** §10: the operator's edited answer, held to the DM output's own cap (it was 8 KiB until 2026-11-15). */
+export const DM_OPERATOR_ANSWER_MAX_BYTES = DM_OUTPUT_TEXT_MAX_BYTES;
 
 /**
  * §10's caps, in UTF-8 bytes. The DM output caps are S1a's, which the output
@@ -67,8 +68,11 @@ export const DM_BODY_FIELD_MAX_BYTES: Readonly<Record<DmBodyField, number>> = Ob
   operator_answer: DM_OPERATOR_ANSWER_MAX_BYTES,
 });
 
-/** §10: "요청당 합계는 40 KiB 이하다". */
-export const DM_BODY_REQUEST_MAX_BYTES = 40 * 1024;
+/**
+ * §10: a request's bodies together: the five field caps. Before 2026-11-15 the
+ * policy wrote it as 40 KiB, with a 16 KiB card; it follows the card's cap now.
+ */
+export const DM_BODY_REQUEST_MAX_BYTES = Object.values(DM_BODY_FIELD_MAX_BYTES).reduce((sum, max) => sum + max, 0);
 
 /** §10: "사건 종류는 retention_set·hold_set·hold_release 셋뿐이다". */
 export const DM_RETENTION_EVENT_KINDS = ["retention_set", "hold_set", "hold_release"] as const;
