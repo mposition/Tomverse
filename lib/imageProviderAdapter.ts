@@ -1029,12 +1029,13 @@ const generateWithFal = async (
  */
 const generateWithXai = async (
   model: ImageModelProfile,
-  input: { prompt: string; size: ImageSize; editImage?: ImageEditInput }
+  input: { prompt: string; size: ImageSize; quality: ImageQuality; editImage?: ImageEditInput }
 ): Promise<ImageProviderResult> => {
   const request = {
     apiModelId: model.apiModelId,
     prompt: input.prompt,
     size: input.size,
+    quality: input.quality,
   };
   const generationBody = buildXaiImageRequest(request);
   const body = input.editImage
@@ -1043,7 +1044,7 @@ const generateWithXai = async (
   if (!body || !generationBody) {
     throw new ImageProviderError(
       "provider_failed",
-      `Image size ${input.size} has no xAI resolution mapping.`
+      `Image size ${input.size} at quality ${input.quality} has no xAI resolution mapping.`
     );
   }
   // From the body without the photo: its data URL is the user's bytes.

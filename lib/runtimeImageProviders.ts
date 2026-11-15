@@ -49,6 +49,15 @@ const GOOGLE_RUNTIME_PROFILE = {
 const QWEN_RUNTIME_SIZES = ["1024x1024"] as const;
 
 /**
+ * xAI's request maps 1K square only, and a Grok Imagine Image 2.x model takes
+ * `low` or `medium` (lib/xaiImageRequest.ts). Anything else builds no request,
+ * so the starting profile never offers it. Literals because this module is
+ * dependency-free; tests/xaiImageRequest.test.mjs holds them to the adapter's.
+ */
+const XAI_RUNTIME_SIZES = ["1024x1024"] as const;
+const XAI_RUNTIME_QUALITIES = ["low", "medium"] as const;
+
+/**
  * The starting profile for a runtime image model handed over from the
  * discovery queue. Every field is the operator's to correct; the schema and
  * the judge decide whether it can serve.
@@ -70,6 +79,14 @@ export const runtimeImageProfileTemplate = (
   provenance: [] as string[],
   outputMimeTypes: ["image/png"] as string[],
   ...(provider === "qwen" ? { sizes: [...QWEN_RUNTIME_SIZES] } : {}),
+  ...(provider === "xai"
+    ? {
+        sizes: [...XAI_RUNTIME_SIZES],
+        qualities: (choices.qualities?.length ? choices.qualities : XAI_RUNTIME_QUALITIES).filter((quality) =>
+          (XAI_RUNTIME_QUALITIES as readonly string[]).includes(quality)
+        ),
+      }
+    : {}),
   // A Google request has one shape whatever the form chose.
   ...(provider === "google"
     ? {
