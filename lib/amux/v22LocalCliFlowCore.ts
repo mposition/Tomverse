@@ -54,6 +54,9 @@ export type AmuxV22RunStopReason = (typeof AMUX_V22_RUN_STOP_REASONS)[number];
  * bridge and the sidecar socket, far above any useful run. Not a work limit.
  */
 export const AMUX_V22_TRANSPORT_MAX_BYTES = 32 * 1024 * 1024;
+/** A delivered prompt with its context-file block (the files' own backstop
+ * plus the prompt around them). The bridge checks the same bound. */
+export const AMUX_V22_PROMPT_MAX_BYTES = 2 * AMUX_V22_TRANSPORT_MAX_BYTES;
 
 /** An execution lease long enough that a slow bridge round never ends a
  * live, heartbeating run (the read-back lease). */
@@ -149,23 +152,25 @@ export function amuxV22EmbedContextFiles(files: readonly AmuxV22ContextFile[],
 
 /**
  * The sidecar's half: the prompt without its context block, and the files.
- * Only a block that ends the prompt, opens with the same boundary and holds
- * known names only is read; anything else leaves the prompt as it is.
+ * The block is the prompt's first `AMUX_CONTEXT_FILES_BEGIN` line, which the
+ * app writes after its own fixed text, up to the matching end line; it must
+ * hold known names only, or the prompt is left as it is. Text after the
+ * block (the bridge appends review findings there) stays in the prompt.
  */
 export function amuxV22ExtractContextFiles(prompt: string):
   { prompt: string; files: AmuxV22ContextFile[] } {
   const unchanged = { prompt, files: [] };
-  const trimmed = prompt.replace(/\s+$/, "");
-  const lastLine = trimmed.slice(trimmed.lastIndexOf("\n") + 1);
-  const endMatch = /^AMUX_CONTEXT_FILES_END ([0-9a-f]{32})$/.exec(lastLine);
-  if (!endMatch) return unchanged;
-  const token = endMatch[1]!;
-  const begin = trimmed.lastIndexOf(`\n${filesBegin(token)}\n`);
-  const start = begin >= 0 ? begin + 1 :
-    trimmed.startsWith(`${filesBegin(token)}\n`) ? 0 : -1;
-  if (start < 0) return unchanged;
-  let rest = trimmed.slice(start + filesBegin(token).length + 1,
-    trimmed.length - lastLine.length);
+  const beginMatch = /(?:^|\n)AMUX_CONTEXT_FILES_BEGIN ([0-9a-f]{32})\n/.exec(prompt);
+  if (!beginMatch) return unchanged;
+  const token = beginMatch[1]!;
+  const start = beginMatch.index + (beginMatch[0].startsWith("\n") ? 1 : 0);
+  const bodyStart = start + filesBegin(token).length + 1;
+  const endLine = `\n${filesEnd(token)}`;
+  const endAt = prompt.indexOf(endLine, bodyStart - 1);
+  if (endAt < 0) return unchanged;
+  const afterEnd = endAt + endLine.length;
+  if (afterEnd < prompt.length && prompt[afterEnd] !== "\n") return unchanged;
+  let rest = prompt.slice(bodyStart, endAt + 1);
   const files: AmuxV22ContextFile[] = [];
   while (rest.length > 0) {
     const open = /^<<<AMUX_CONTEXT_FILE ([A-Za-z0-9._-]{1,64}) ([0-9a-f]{32})>>>\n/.exec(rest);
@@ -178,7 +183,9 @@ export function amuxV22ExtractContextFiles(prompt: string):
     rest = body.slice(closeAt + close.length);
   }
   try { parseAmuxV22ContextFiles(files); } catch { return unchanged; }
-  return { prompt: trimmed.slice(0, start).replace(/\s+$/, ""), files };
+  const before = prompt.slice(0, start).replace(/\s+$/, "");
+  const after = prompt.slice(afterEnd).trim();
+  return { prompt: after ? `${before}\n\n${after}` : before, files };
 }
 
 /** The prompt lines that point the worker at its context files. */

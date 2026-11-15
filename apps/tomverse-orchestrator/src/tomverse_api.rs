@@ -246,10 +246,18 @@ pub fn v22_result_max_bytes() -> usize {
     if v22_local_cli_flow() { V22_TRANSPORT_MAX_BYTES } else { 65_536 }
 }
 
+/// A delivered prompt: the earlier 96 KiB, or (local CLI flow) the prompt with
+/// its context-file block, which may hold the brief, the previous patch and
+/// prior conclusions whole.
+pub fn v22_delivery_prompt_max_bytes() -> usize {
+    if v22_local_cli_flow() { 2 * V22_TRANSPORT_MAX_BYTES } else { 96 * 1024 }
+}
+
 /// A delivery pull answer carries the prompt and, in the local CLI flow, its
 /// context files (the brief, the previous patch, prior conclusions).
 fn v22_delivery_response_max_bytes() -> usize {
-    if v22_local_cli_flow() { 2 * V22_TRANSPORT_MAX_BYTES + MAX_LIFECYCLE_RESPONSE_BYTES }
+    // JSON escaping can at most double the prompt.
+    if v22_local_cli_flow() { 2 * v22_delivery_prompt_max_bytes() + MAX_LIFECYCLE_RESPONSE_BYTES }
     else { MAX_LIFECYCLE_RESPONSE_BYTES }
 }
 
@@ -3858,7 +3866,7 @@ impl TomverseApi {
                 || !is_canonical_machine_id(&delivery.task_id)
                 || !is_canonical_machine_id(&delivery.worker)
                 || !(0..=PRISMA_INT_MAX).contains(&delivery.task_revision)
-                || delivery.prompt.len() > 96 * 1024
+                || delivery.prompt.len() > v22_delivery_prompt_max_bytes()
             {
                 bail!("invalid Tomverse AMUX delivery response fields");
             }
