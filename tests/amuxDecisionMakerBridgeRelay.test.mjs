@@ -88,14 +88,16 @@ test("every route the relay calls exists and answers under the envelope the rela
   // (requests/direct-answer).
   const routes = [...flow.matchAll(/AppRoute::(\w+) => \{?\s*"\/api\/internal\/amux\/decision-maker\/([a-z/-]+)"/g)];
   // Nine for a question (stage S2-2b2), three for a confirmed answer's delivery (S2-2b3), and the
-  // unsettled read and the direct answer's report (S2-2b4).
-  assert.equal(routes.length, 14);
+  // unsettled read and the direct answer's report (S2-2b4), and the workspace read that replaced the
+  // snapshot (owner decision 2026-11-15): the card's whole evidence, read before the intent.
+  assert.equal(routes.length, 15);
   const envelopes = {
     Requests: "routed",
     Results: "submitted",
     ResultLookup: "found",
     DeliveriesNext: "found",
     DeliveriesUnsettled: "found",
+    Workspace: "found",
   };
   for (const [, name, path] of routes) {
     const file = `app/api/internal/amux/decision-maker/${path}/route.ts`;

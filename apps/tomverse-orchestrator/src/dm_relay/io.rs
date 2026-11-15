@@ -36,9 +36,10 @@ pub const DM_RELAY_LOCAL_TOKEN_HEADER: &str = "x-amux-dm-relay-token";
 pub const DM_BROKER_SOCKET_PATH: &str = "/run/amux-dm-broker/broker.sock";
 
 /// `DM_BROKER_RESPONSE_DEADLINE_MS`: the hard timeout (30 minutes), the
-/// launcher unit's two minutes, and a minute each for the broker and the
-/// bridge. A broker silent past it is a lost answer.
-pub const DM_BROKER_RESPONSE_DEADLINE: Duration = Duration::from_millis(34 * 60 * 1000);
+/// launcher unit's two minutes, the workspace build before the launcher (five
+/// minutes, `DM_WORKSPACE_BUILD_MAX_MS`), and a minute each for the broker and
+/// the bridge. A broker silent past it is a lost answer.
+pub const DM_BROKER_RESPONSE_DEADLINE: Duration = Duration::from_millis(39 * 60 * 1000);
 
 /// Connecting to a local socket is immediate; a broker that does not accept
 /// within this has received nothing.
@@ -108,7 +109,7 @@ impl DmApp for HttpApp {
                 route.path(),
                 &body,
                 DM_ROUTE_CLIENT_TIMEOUT,
-                DM_ROUTE_ANSWER_MAX_BYTES,
+                route.answer_max_bytes(),
             )
             .await
         {
@@ -792,6 +793,8 @@ mod tests {
                     json!({"found": true, "status": "not_recorded",
                     "result_kind": null, "event_id": null, "reason": null}),
                 ),
+                // The workspace switched off, unless a test says so: the card alone.
+                "workspace" => Reply::Json(200, json!({"found": true, "workspace": null})),
                 // Stage S2-2b4: no decision is left without an outcome, unless a test says so.
                 "deliveries/unsettled" => Reply::Json(
                     200,
@@ -952,6 +955,7 @@ mod tests {
             vec![
                 "requests",
                 "assignments",
+                "workspace",
                 "transmissions",
                 "results",
                 "transmissions/outcome"
@@ -1022,7 +1026,7 @@ mod tests {
         );
         // A settled question is not routed again.
         assert_eq!(relay.tick().await, Tick::Idle);
-        assert_eq!(question_paths(&app_seen).len(), 5);
+        assert_eq!(question_paths(&app_seen).len(), 6);
     }
 
     #[tokio::test]
@@ -1037,7 +1041,7 @@ mod tests {
         assert!(lines.lock().unwrap().is_empty());
         assert_eq!(
             question_paths(&app_seen),
-            vec!["requests", "assignments", "transmissions"]
+            vec!["requests", "assignments", "workspace", "transmissions"]
         );
         assert_eq!(
             local_writes(&local_seen),
@@ -1062,6 +1066,7 @@ mod tests {
             vec![
                 "requests",
                 "assignments",
+                "workspace",
                 "transmissions",
                 "results",
                 "results/lookup",
@@ -1095,6 +1100,7 @@ mod tests {
             vec![
                 "requests",
                 "assignments",
+                "workspace",
                 "transmissions",
                 "results",
                 "cleanup/unknown",

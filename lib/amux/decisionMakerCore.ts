@@ -63,15 +63,21 @@ export const DM_INSTANCE_FOR_PROVIDER: Readonly<Record<string, string>> = Object
 export const dmInstanceForProvider = (provider: string): string | null =>
   Object.hasOwn(DM_INSTANCE_FOR_PROVIDER, provider) ? DM_INSTANCE_FOR_PROVIDER[provider] : null;
 
-/** Section 3-6. */
-export const DM_THROUGHPUT_PER_HOUR = 20;
-export const DM_THROUGHPUT_PER_DAY = 100;
 
-/** Section 5. */
-export const DM_CARD_TEXT_MAX_BYTES = 16 * 1024;
-export const DM_CONTEXT_PATHS_MAX = 64;
-export const DM_SNAPSHOT_FILE_MAX_BYTES = 256 * 1024;
-export const DM_SNAPSHOT_TOTAL_MAX_BYTES = 2 * 1024 * 1024;
+/**
+ * Section 5: a card's one size cap, on its whole card text (`dmCardText`), in
+ * UTF-8 bytes. Owner decision 2026-11-15 ("4000자 제한도 없애주세요"): no card
+ * field has a length cap of its own any more -- the question, the context, the
+ * labels, the number of context paths -- and the evidence a card is about goes
+ * to the DM's workspace whole (lib/amux/decisionMakerWorkspaceCore.ts), not
+ * into the card. What remains is the real limit behind it: the card is the
+ * vendor CLI's prompt, read whole on stdin, and 256 KiB (64-90k tokens) leaves
+ * most of the smaller vendor context window for what the DM reads in its
+ * workspace. The body store's `card_text` row has the same cap (migration
+ * 20261115120000_amux_dm_card_text_cap). It replaces 16 KiB, which §5 set when
+ * the card was all a DM could read.
+ */
+export const DM_CARD_TEXT_MAX_BYTES = 256 * 1024;
 export const DM_REPOSITORY_PATH_MAX_BYTES = 200;
 
 /**
@@ -142,10 +148,18 @@ export const dmOptionEffectWellFormed = (option: { effect: string; paths: readon
   );
 };
 
-/** Section 10: body field caps, which also bound the DM output (section 6). */
-export const DM_ANSWER_MAX_BYTES = 8 * 1024;
-export const DM_RATIONALE_MAX_BYTES = 4 * 1024;
-export const DM_ESCALATION_MAX_BYTES = 1024;
+/**
+ * Section 10: body field caps, which also bound the DM output (section 6).
+ * Owner decision 2026-11-15: a DM's answer is never refused for its length.
+ * Each text field's cap is the whole output's (DM_LAUNCH_OUTPUT_MAX_BYTES in
+ * lib/amux/decisionMakerLauncherCore.ts, the results route's body), so an
+ * output the launcher returns can never fail validation on a field's size.
+ * They were 8 KiB, 4 KiB and 1 KiB.
+ */
+export const DM_OUTPUT_TEXT_MAX_BYTES = 256 * 1024;
+export const DM_ANSWER_MAX_BYTES = DM_OUTPUT_TEXT_MAX_BYTES;
+export const DM_RATIONALE_MAX_BYTES = DM_OUTPUT_TEXT_MAX_BYTES;
+export const DM_ESCALATION_MAX_BYTES = DM_OUTPUT_TEXT_MAX_BYTES;
 
 /**
  * Section 3-3, the v1 term list. A hit sends the question to the operator
@@ -296,7 +310,7 @@ const utf8Bytes = (value: string) => Buffer.byteLength(value, "utf8");
 /**
  * The card text: the one serialization of a card that the body store keeps
  * as its `card_text` (docs/policy/amux-decision-maker.md §10: "질문 카드
- * 텍스트(16 KiB)"), so Admin can show the operator the question and the
+ * 텍스트"), so Admin can show the operator the question and the
  * option wording the request was routed with. Added 2026-10-09; before it no
  * writer stored the card at all.
  *
@@ -312,7 +326,7 @@ const utf8Bytes = (value: string) => Buffer.byteLength(value, "utf8");
  * lone surrogates leaves well-formed text without NUL, which PostgreSQL TEXT
  * can hold. Changing the layout is a new `format` value.
  *
- * §5's 16 KiB is measured on these bytes (`dmCardTextBytes`), never on the
+ * §5's cap (`DM_CARD_TEXT_MAX_BYTES`) is measured on these bytes (`dmCardTextBytes`), never on the
  * sum of the fields: the stored text is what the cap is about, and a card the
  * body store could not hold is never routed to a DM. The effect classes and
  * paths count towards it, as section 5 lists them among the card's fields.
@@ -360,7 +374,7 @@ export const dmCardText = (card: DmCard): string =>
     contextPaths: [...card.contextPaths],
   });
 
-/** The UTF-8 bytes of the card text, which §5's 16 KiB caps. */
+/** The UTF-8 bytes of the card text, which §5's one cap holds. */
 export const dmCardTextBytes = (card: DmCard): number => utf8Bytes(dmCardText(card));
 
 const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
@@ -557,11 +571,11 @@ export const routeDmQuestion = (input: DmRoutingInput): DmRoutingDecision => {
 
   if (instance === null) refusals.push("provider_unverified");
 
-  if (input.throughput.lastHour >= DM_THROUGHPUT_PER_HOUR || input.throughput.lastDay >= DM_THROUGHPUT_PER_DAY) {
-    refusals.push("throughput_exceeded");
-  }
+  // §3-6's throughput cap (20 an hour, 100 a day) is gone (owner decision
+  // 2026-11-15: "내부 개발용 Flow입니다. 제한을 줄 이유가 없습니다"). The counts
+  // stay in the input for the record; `throughput_exceeded` is no longer made.
 
-  // §5's 16 KiB on the card text the body store keeps (`dmCardText()`), so a
+  // §5's one cap on the card text the body store keeps (`dmCardText()`), so a
   // card routed to a DM always fits its `card_text` row (§10).
   // `resolution` is a closed list for every ask type, so a free-form value can
   // never ride into the stored card text on a type that skips the §3-4 check.
@@ -572,7 +586,6 @@ export const routeDmQuestion = (input: DmRoutingInput): DmRoutingDecision => {
   if (
     (card.resolution !== null && !(DM_RESOLUTIONS as readonly string[]).includes(card.resolution)) ||
     utf8Bytes(cardText) > DM_CARD_TEXT_MAX_BYTES ||
-    card.contextPaths.length > DM_CONTEXT_PATHS_MAX ||
     card.contextPaths.some((path) => repositoryPathRefusal(path) !== null) ||
     !dmCardOptionsWellFormed(card.options) ||
     !card.options.every(dmOptionEffectWellFormed)

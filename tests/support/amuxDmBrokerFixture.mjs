@@ -64,7 +64,7 @@ export const bridgeCall = (path, message) =>
  */
 export const startBroker = async (
   instance,
-  { launcher = "real", executable, launchTimeoutMs = 20_000, timeouts = {}, fixtureOptions = {}, snapshotHttp } = {},
+  { launcher = "real", executable, launchTimeoutMs = 20_000, timeouts = {}, fixtureOptions = {}, workspaceHttp, workspaceGit } = {},
 ) => {
   const fixture = makeLauncherFixture(instance, { executable, ...fixtureOptions, requestDirectory: false });
   const launcherPath = socketPath(fixture.root, "launcher");
@@ -93,7 +93,8 @@ export const startBroker = async (
     connectLauncher: () => createConnection({ path: launcherPath, allowHalfOpen: true }),
     timeouts: { requestRead: 2_000, launcherReady: 2_000, launcherResponse: 30_000, ...timeouts },
     log: (entry) => logs.push(entry),
-    snapshotHttp,
+    workspaceHttp,
+    workspaceGit,
   });
   const brokerServer = await listen(brokerPath, (socket) => void broker.handleConnection(socket));
   return {

@@ -60,7 +60,7 @@ use super::wire::{
 pub const DM_DELIVERY_MESSAGE_ID_PREFIX: &str = "dm-answer:";
 
 /// `DM_DELIVERY_MESSAGE_MAX_BYTES` of lib/amux/decisionMakerDeliveryCore.ts.
-pub const DM_DELIVERY_MESSAGE_MAX_BYTES: usize = 16 * 1024;
+pub const DM_DELIVERY_MESSAGE_MAX_BYTES: usize = 272 * 1024;
 
 /// §7's labels, `DM_DELIVERY_JUDGMENT_LABELS` of the same module.
 pub const DM_DELIVERY_CONFIRMED_LABEL: &str = "operator-confirmed";

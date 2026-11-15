@@ -126,13 +126,15 @@ export async function readAmuxDmAutoApplyCandidate(tx: Prisma.TransactionClient,
   const words = { judgmentKind: "confirm", outputKind: detail.outputKind,
     optionId: detail.optionId, dmAnswer };
   if (card.kind === "question") {
-    // Only one of the options the worker offered: the routing has already
-    // checked those words; a free-text answer goes into the next prompt
-    // unchecked, so it stays for the operator's confirmation.
-    const body = detail.outputKind === "select" ? answerText(detail, dmAnswer) : null;
+    // One of the options the worker offered, or (owner decision 2026-11-15)
+    // the DM's own free-text answer: both go into the next prompt as the
+    // owner's answer. The resume still refuses an answer its prompt cannot
+    // hold whole (normalizeAmuxV22OwnerAnswer), and an irreversible proposal
+    // stays for a person (amuxDmProposalAutoApplicable).
+    const body = answerText(detail, dmAnswer);
     if (!body || !body.trim()) return null;
     const message = `[Decision Maker answer, applied for the owner without a person's confirmation, re ${card.cardId}]\n` +
-      `Chosen option: ${body}`;
+      (detail.outputKind === "select" ? `Chosen option: ${body}` : body);
     return { kind: "question", ...base, questionId: card.id, message };
   }
   if (card.kind === "refusal") {
