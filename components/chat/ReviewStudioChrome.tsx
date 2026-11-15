@@ -91,6 +91,16 @@ export function ChatCommandBar({ workspace, locked = false }: { workspace: Works
   </header>;
 }
 
+// The history drawer's sidebar opens a conversation from a row (role="button") or a message
+// search hit. Keyboard: only the row, since Enter on a real button also fires a click.
+function opensConversation(target: EventTarget, keyboard = false) {
+  if (!(target instanceof Element)) return false;
+  const action = target.closest("button, a, input, [role='button'], [role='menuitem']");
+  if (!action || (keyboard && action !== target)) return false;
+  const row = "[data-testid='sidebar-conversation-item']";
+  return action.matches(keyboard ? row : `${row}, [data-testid='message-search-result']`);
+}
+
 export function ReviewNavigation({ sidebar, onNewChat, onChat, onReview, product = "review", locked = false }: { sidebar: ReactNode; onNewChat: () => void; onChat?: () => boolean; onReview?: () => boolean; product?: ChatWorkspaceProduct | "plugins"; locked?: boolean }) {
   const { lang } = useLanguage(); const c = reviewWorkspaceCopy[lang];
   const productLabel = (key: ChatWorkspaceProduct) => {
@@ -142,7 +152,11 @@ export function ReviewNavigation({ sidebar, onNewChat, onChat, onReview, product
       <button type="button" className="review-avatar" onClick={() => settings("account")} aria-label={c.settings}>T</button>
     </nav>
     {open && <div className="review-drawer-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setOpen(false); }}>
-      <div ref={drawer} className="review-history-drawer" style={{ bottom: 16 + keyboardInset }} role="dialog" aria-modal="true" aria-label={c.history}>
+      {/* Opening a conversation closes the drawer, as the mobile drawer does, so the loaded
+          conversation is visible. Row actions (the "..." menu) are their own buttons and keep it open. */}
+      <div ref={drawer} className="review-history-drawer" style={{ bottom: 16 + keyboardInset }} role="dialog" aria-modal="true" aria-label={c.history}
+        onClick={event => { if (opensConversation(event.target)) setOpen(false); }}
+        onKeyDown={event => { if ((event.key === "Enter" || event.key === " ") && opensConversation(event.target, true)) setOpen(false); }}>
         <button type="button" className="review-drawer-close" aria-label={c.close} onClick={() => setOpen(false)}><X size={20} /></button>
         {sidebar}
       </div>
