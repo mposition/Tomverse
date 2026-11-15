@@ -38,10 +38,14 @@ const validFiles = (files: readonly V22PublishFile[]) =>
  * gives no permission to publish.
  *
  * A stored patch whose evidence carries no file bytes (more files or bytes
- * than the sidecar keeps) names its files by `patchText` instead: each one's
- * new bytes are rebuilt from its pinned base blob by an exact in-memory
- * application, and must hash to the blob id the patch itself names. Only
- * modified `100644` text files qualify, as with stored file bytes. */
+ * than the sidecar keeps) names its files by `patchText` instead: each
+ * modified file's new bytes are rebuilt from its pinned base blob by an exact
+ * in-memory application, each new file's from its hunk alone, and both must
+ * hash to the blob id the patch itself names. Only modified and new `100644`
+ * text files qualify, as with stored file bytes. A stored file list has no
+ * headers, so there a path the base lacks is a new file; a patch's new file
+ * whose path the base has is a `path_conflict`, as `git apply` would refuse
+ * it. A new file reads no base blob. */
 export async function loadEngineeringAgentV22Candidate(input: {
   baseSha: string; onDevelop?: boolean } & (
     { files: readonly V22PublishFile[]; patchText?: undefined } |
@@ -57,17 +61,31 @@ ports: Ports = livePorts): Promise<LoadedCandidate> {
     return { ok: false, reason: "patch_unsupported" };
   if (input.files && !validFiles(input.files))
     return { ok: false, reason: "files_invalid" };
+  // A stored file list may name new files too, so its paths face the same
+  // execution-path check as a patch's.
+  if (input.files?.some((file) =>
+    classifyAmuxExecutionPath(file.path) === "invalid"))
+    return { ok: false, reason: "patch_unsupported" };
   const pinned = await ports.readBase(input.baseSha,
     input.onDevelop === true);
   const paths = new Map(pinned.base.map((entry) => [entry.path, entry]));
   const bytes = new Map<string, Uint8Array>();
   const rebuilt: Uint8Array[] = [];
+  const addedPaths = new Set<string>();
   try {
     const named = input.files ?? (diff?.ok ? diff.files : []);
     for (const file of named) {
       const previous = paths.get(file.path);
+      const declared = "added" in file ? file.added : null;
+      if (declared === true && previous !== undefined)
+        return { ok: false, reason: "path_conflict" };
+      if (declared === true || (declared === null && previous === undefined)) {
+        addedPaths.add(file.path);
+        continue;
+      }
       if (previous?.type !== "blob" || previous.mode !== "100644" ||
-          ("oldOid" in file && !previous.oid.startsWith(file.oldOid)))
+          ("oldOid" in file && (file.oldOid === null ||
+            !previous.oid.startsWith(file.oldOid))))
         return { ok: false, reason: "base_blob_missing" };
       if (!bytes.has(previous.oid))
         bytes.set(previous.oid, await ports.readBlob(previous.oid));
@@ -76,8 +94,8 @@ ports: Ports = livePorts): Promise<LoadedCandidate> {
     if (!files && diff?.ok) {
       const built: V22PublishFile[] = [];
       for (const file of diff.files) {
-        const next = applyV22FileDiff(bytes.get(paths.get(file.path)!.oid)!,
-          file);
+        const next = applyV22FileDiff(file.added ? null :
+          bytes.get(paths.get(file.path)!.oid)!, file);
         if (!next) return { ok: false, reason: "patch_does_not_apply" };
         rebuilt.push(next);
         built.push({ path: file.path, mode: "100644",
@@ -89,7 +107,7 @@ ports: Ports = livePorts): Promise<LoadedCandidate> {
     const verified = verifyEngineeringAgentV22SparseCandidate({
       base: pinned.base, baseRootTreeId: pinned.rootTreeId,
       baseGitattributes: pinned.baseGitattributes,
-      files, baseBlobs: bytes,
+      files, addedPaths, baseBlobs: bytes,
     });
     return verified.ok ? { ...verified,
       baseRootTreeId: pinned.rootTreeId, baseTree: pinned.base,
