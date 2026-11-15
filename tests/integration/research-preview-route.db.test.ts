@@ -8,6 +8,7 @@ import type { LanguageModelV4StreamPart } from "@ai-sdk/provider";
 import { ASSISTANT_PROMPT_FORMAT_VERSION } from "@/lib/assistantProfileVersioning";
 import { parseChatStreamTrailer, splitSearchMetadataTrailer } from "@/lib/webSearchStreamTrailer";
 import { splitStreamKeepaliveSignal } from "@/lib/chatStreamKeepalive";
+import { createConversationUnlockCookie } from "@/lib/conversationLock";
 
 // Only authentication and the paid model transport are replaced. Admission,
 // fake Brave, the AI SDK loop, reservations, settlement and persistence are real.
@@ -170,6 +171,25 @@ test("real Chat route stores a tool-only report, isolates private context and se
   assert.equal(conversation.selectedModels, JSON.stringify([modelId]));
   assert.equal(conversation.productKey, "chat");
   assert.deepEqual(unexpectedNetwork, []);
+});
+
+test("Research admission rejects a stale unlock grant before dispatch and accepts the current version", async () => {
+  const input = await fixture();
+  const locked = await prisma.conversation.update({ where: { id: input.conversation.id }, data: { password: "protected" } });
+  activeModel = scriptedModel();
+  const stale = request(input);
+  stale.headers.set("Cookie", createConversationUnlockCookie(input.user.id, locked.id, input.conversation.passwordVersion).split(";", 1)[0]!);
+  const denied = await POST(stale);
+  assert.equal(denied.status, 409);
+  assert.equal((await denied.json()).code, "RESEARCH_PREVIEW_UNAVAILABLE");
+  assert.equal(activeModel.doStreamCalls.length, 0);
+  assert.equal(await prisma.chatCreditReservation.count({ where: { userId: input.user.id } }), 0);
+  const current = request(input);
+  current.headers.set("Cookie", createConversationUnlockCookie(input.user.id, locked.id, locked.passwordVersion).split(";", 1)[0]!);
+  const accepted = await POST(current);
+  assert.equal(accepted.status, 200);
+  await accepted.text();
+  assert.equal(activeModel.doStreamCalls.length, 3);
 });
 
 test("Research rejects attached/history payloads and profile prohibitions before any dispatch", async () => {
