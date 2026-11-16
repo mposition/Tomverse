@@ -303,11 +303,13 @@ for (const [name, rules, reason, files] of FAILURES) {
 }
 
 test("a refused review submit preserves a redacted private diagnostic and exact range without retrying", async () => {
+  const syntheticAccessKey = ["AK", "IA", "1234567890123456"].join("");
   const stderr = JSON.stringify({ error: "client", message: "git bundle failed: retained-error-detail" }) +
     "\nBearer confidential-bearer-value\npassword=confidential-password-value\n" +
     "https://fixture:confidential-url-value@example.test/repo\nghp_confidentialTokenValue123" +
     '\n{"token": "confidential quoted multi word value"}\n' +
-    "-----BEGIN PRIVATE KEY-----\nconfidential-private-key\n-----END PRIVATE KEY-----\nAKIA1234567890123456\npassword=confidential-value;punctuation-secret,tail";
+    "-----BEGIN PRIVATE KEY-----\nconfidential-private-key\n-----END PRIVATE KEY-----\n" +
+    syntheticAccessKey + "\npassword=confidential-value;punctuation-secret,tail";
   const { deps, calls, gatewayCalls, events, runLogs } = fakeRunner({ rules: [
     [/review\.mjs submit/, { ...exit(64), stderr }],
   ] });
@@ -319,7 +321,8 @@ test("a refused review submit preserves a redacted private diagnostic and exact 
   const diagnostic = runLogs.find(({ section }) => section === "review_submit")?.text;
   assert.match(diagnostic, /retained-error-detail/);
   assert.doesNotMatch(diagnostic, /confidential/);
-  assert.doesNotMatch(diagnostic, /quoted multi word|AKIA1234567890123456|punctuation-secret/);
+  assert.doesNotMatch(diagnostic, /quoted multi word|punctuation-secret/);
+  assert.equal(diagnostic.includes(syntheticAccessKey), false);
   assert.doesNotMatch(JSON.stringify({ gatewayCalls, events }), /retained-error-detail|confidential/);
 });
 
