@@ -189,7 +189,7 @@ approvedBy: mposition · approvedAt: 2026-10-17 · 정책 버전: 2
    hard timeout은 2시간(30분이었다; relay가 질문 하나를 기다리는 동안 다른 일을 하지 않으므로 멈춘 CLI가 붙잡는 시간을
    이만큼으로 둔다), launcher unit은 2시간 2분, 작업 공간 시간 한도는 하나로 1시간(build 5분·git
    2분·조회 15초였다), relay의 작업 공간 대기도 1시간(90초였다), broker 응답 기한은 3시간 4분으로 결과 창 안이다. 앱의 relay 침묵 감시는
-   요청 뒤 190분까지를 질문 중으로 본다.
+   요청 뒤 250분까지를 질문 중으로 본다(launch 전 작업 공간 대기 1시간과 broker 응답 기한 3시간 4분).
    생성 30일 뒤의 `stale` 종료는 §10 보존 규칙(본문이 길어야 120일, 열린 요청은 키 기간 파기를 막는다)이라
    그대로 둔다.
 4. **latch는 system이 푼다.** 검증 latch와 cleanup latch는 한 시간 뒤 유지 sweep이 그 인스턴스의 system actor

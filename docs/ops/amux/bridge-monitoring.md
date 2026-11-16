@@ -400,7 +400,7 @@ journalctl -u tomverse-amux-dm-relay.service -n 50 --no-pager -o short-iso
 ```
 
   `amux dm relay: <code> for request <id> is owed` 줄은 다시 보내는 중인 기록이다. 같은 요청의 `… recorded` 줄이 뒤에
-  나오면 끝난 것이다. 이전 바이너리의 `amux dm relay halt: <cause>` 줄은 6.2절이 설치돼 있으면 원인과 무관하게 재시작된다.
+  나오면 끝난 것이다. 이전 바이너리의 `amux dm relay halt: <cause>` 줄은 자동으로 재시작되지 않는다(6.2절). Admin에서 그 요청을 정리한 뒤 사람이 재시작한다.
   종료 코드 2로 `failed`면 relay token 설정 오류다(`dm-relay.env`). 그 밖의 종료는 unit의 `Restart=on-failure`가 60초 뒤
   다시 시작한다.
 - box watchdog은 relay unit 파일이 설치된 호스트에서만 relay를 본다(`systemctl show -p LoadState`가 `not-found`면
@@ -420,10 +420,10 @@ journalctl -u tomverse-amux-dm-relay.service -n 50 --no-pager -o short-iso
 바이너리로 바뀌고, 그 뒤로는 이런 halt가 생기지 않는다. 이 스크립트가 시작하는 것은 부팅 뒤 한 번도 켜지지 않은 relay뿐이다.
 
 자율 장치에 relay 재시작 권한을 주는 일이라 **설치가 곧 켜는 것**이고, 운영자가 병합 뒤 직접 설치한다. 설치하지 않으면
-아무것도 하지 않는다. 2026-11-16 이후의 relay는 halt하지 않으므로(쓰기는 owed로 다시 보낸다), 이 스크립트가 재시작하는
-halt는 그 전의 바이너리가 남긴 것뿐이다. 테스트가 relay 코드에 halt 줄이 다시 생기지 않았는지 확인한다.
+아무것도 하지 않는다. 2026-11-16 이후의 relay는 halt하지 않으므로(쓰기는 owed로 다시 보낸다), 이 스크립트가 보는
+halt는 그 전의 바이너리가 남긴 것뿐이고 그것은 재시작하지 않는다. 테스트가 relay 코드에 halt 줄이 다시 생기지 않았는지 확인한다.
 
-재시작해도 남는 것이 없는 이유: relay가 들고 있던 것은 새 프로세스가 시작할 때 모두 다시 만든다. 남은 marker는 목록으로
+새 relay를 재시작해도 남는 것이 없는 이유: 의무는 owed 기록 파일에 있고, 나머지는 새 프로세스가 시작할 때 다시 만든다. 남은 marker는 목록으로
 다시 읽어 풀고, 정리 안 된 delivery는 local 기록으로 정리하고(다시 보내지 않음), cursor는 처음부터 다시 걷는다. 다시 하는
 쓰기는 모두 요청 키로 묶여 있어 원장이 한 번만 받는다.
 
