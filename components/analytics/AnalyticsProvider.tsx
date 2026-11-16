@@ -1012,7 +1012,7 @@ export function AnalyticsProvider({
                 the policy link.
               */}
               <div className="flex flex-col gap-1 @md/notice:flex-row @md/notice:items-center @md/notice:gap-3 @2xl/notice:gap-4">
-                <p className="min-w-0 pr-2 pt-1 text-xs leading-4 text-zinc-600 dark:text-zinc-300 @md/notice:flex-1 @md/notice:pr-0 @md/notice:pt-0 @2xl/notice:text-[13px] @2xl/notice:leading-5">
+                <p className="min-w-0 pr-2 pt-1 text-sm leading-5 text-zinc-600 dark:text-zinc-300 @md/notice:flex-1 @md/notice:pr-0 @md/notice:pt-0">
                   <span className="hidden font-bold text-zinc-900 dark:text-zinc-50 @2xl/notice:inline">
                     {promptCopy.title}.{" "}
                   </span>
@@ -1023,7 +1023,7 @@ export function AnalyticsProvider({
                   </Link>
                 </p>
                 <div className="flex shrink-0 items-center justify-between gap-1.5 @2xl/notice:gap-2">
-                  <Link href="/privacy" className="text-xs @md/notice:hidden whitespace-nowrap font-bold text-blue-700 underline underline-offset-2 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200">
+                  <Link href="/privacy" className="text-sm @md/notice:hidden whitespace-nowrap font-bold text-blue-700 underline underline-offset-2 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200">
                     {copy.privacy}
                   </Link>
                   <div className="flex items-center gap-1.5 @2xl/notice:gap-2">
