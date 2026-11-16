@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { calculateV4TaskCostCeiling } from "../lib/amux/v4TaskCostCeilingCore.ts";
-import { AMUX_GRADE_ESCALATED_ACTION, readAmuxV52TaskReceipt } from
+import { AMUX_GRADE_ESCALATED_ACTION, amuxV52ApprovedCeilingInForce, readAmuxV52TaskReceipt } from
   "../lib/amux/v52GradeReceipt.ts";
 import { AMUX_V4_TASK_CEILING_REAPPROVED_ACTION } from
   "../lib/amux/v4TaskCeilingReapprovalCore.ts";
@@ -116,4 +116,27 @@ test("a frontier escalation after a re-approval binds to the re-approved receipt
   assert.deepEqual(await readAmuxV52TaskReceipt(transaction([audit()], [reapproval({
     newReceipt: frontier, newReceiptDigest: frontier.receiptDigest })]),
   "task-one", original, "frontier"), frontier);
+});
+
+test("the Admin feedback ceiling is the receipt in force, unknown when it does not resolve", () => {
+  const snapshot = (costReceipt) => ({ card: { task: { costReceipt } } });
+  const ceiling = (input) => amuxV52ApprovedCeilingInForce({ confirmationSnapshot: snapshot(original),
+    currentGrade: "routine", latestReapproval: null, escalations: [], ...input });
+  // No replacing entry: read exactly as before.
+  assert.equal(ceiling({}), BigInt(original.ceilingMicroUsd));
+  assert.equal(ceiling({ confirmationSnapshot: null }), null);
+  // The owner's re-approval is in force.
+  assert.equal(ceiling({ latestReapproval: reapproval() }), BigInt(raised.ceilingMicroUsd));
+  // A latest entry that does not read never shows the lower amount it replaced.
+  assert.equal(ceiling({ latestReapproval: { ...reapproval(), actorUserId: null } }), null);
+  // After a frontier escalation the frontier receipt is in force, also over a re-approval.
+  assert.equal(ceiling({ currentGrade: "frontier", escalations: [audit()] }),
+    BigInt(escalated.ceilingMicroUsd));
+  assert.equal(ceiling({ currentGrade: "frontier", latestReapproval: reapproval(),
+    escalations: [audit({ originalReceiptDigest: raised.receiptDigest })] }),
+  BigInt(escalated.ceilingMicroUsd));
+  // A re-approved routine ceiling is not shown once the Task runs at frontier
+  // without an escalation bound to it.
+  assert.equal(ceiling({ currentGrade: "frontier", latestReapproval: reapproval(),
+    escalations: [audit()] }), null);
 });

@@ -8,9 +8,11 @@ import { loadAmuxContentUnitKeys } from "./ideaKeyStore.ts";
 import { readAmuxV22TaskResultForOwner } from "./v22TaskResultStore.ts";
 import { readAmuxLegacyCardView } from "./legacyCardOwnerService.ts";
 import { readAmuxV4TaskCeilingReapprovalView } from "./v4TaskCeilingReapprovalService.ts";
-import { AMUX_V4_TASK_CEILING_REAPPROVED_ACTION,
-  amuxV4TaskApprovedCeilingInForce } from "./v4TaskCeilingReapprovalCore.ts";
-import { amuxFeedbackTaskWhere, projectAmuxTaskFeedback, readAmuxV4ApprovedCeiling,
+import { AMUX_V4_TASK_CEILING_REAPPROVED_ACTION } from "./v4TaskCeilingReapprovalCore.ts";
+import { AMUX_GRADE_ESCALATED_ACTION, AMUX_V52_ESCALATION_SELECT, AMUX_V52_REAPPROVAL_SELECT,
+  amuxV52ApprovedCeilingInForce, type AmuxV52EscalationRow,
+  type AmuxV52ReapprovalRow } from "./v52GradeReceipt.ts";
+import { amuxFeedbackTaskWhere, projectAmuxTaskFeedback,
   rollupAmuxTaskFeedback } from
   "./v22TaskFeedbackCore.ts";
 import { AMUX_V22_OUTCOME_ACTION, AMUX_V22_OUTCOME_TARGET,
@@ -552,8 +554,11 @@ export async function readAmuxExecutionTaskDetail(taskId: string) {
     decision.proposal.taskRevision + 1 === card.revision);
   // The owner re-approves a waiting Task's ceiling at the current price
   // (v4TaskCeilingReapprovalCore.ts); a failed read shows no offer.
-  const ceilingReapproval = card.sourceSystem === "admin-idea-v4" && card.cardType === "task" ?
-    await readAmuxV4TaskCeilingReapprovalView(taskId) : null;
+  const v4Task = card.sourceSystem === "admin-idea-v4" && card.cardType === "task";
+  const [ceilingReapproval, ceilingEntries] = await Promise.all([
+    v4Task ? readAmuxV4TaskCeilingReapprovalView(taskId) : null,
+    readCeilingEntries(v4Task ? [taskId] : []),
+  ]);
   return { ...summary, revision: card.revision, body, brief,
     legacyCard, ceilingReapproval,
     outcomeWriteEnabled: amuxV22OutcomeWriteEnabled(
@@ -567,12 +572,12 @@ export async function readAmuxExecutionTaskDetail(taskId: string) {
       createdAt: card.createdAt,
       effortPoints: card.effortPoints,
       estimatedCostMicrousd: card.estimatedCostMicrousd,
-      // The ceiling in force: an owner re-approval replaces the registration's.
+      // The ceiling in force, by the rule execution reads (v52GradeReceipt.ts).
       approvedCeilingMicrousd: sourceApproval?.state === "consumed" &&
         sourceApproval.action === "register_card" &&
         sourceApproval.registeredWorkItemId === card.id ?
-        (ceilingReapproval?.approvedCeilingMicroUsd ? BigInt(ceilingReapproval.approvedCeilingMicroUsd) :
-          readAmuxV4ApprovedCeiling(sourceApproval.confirmationSnapshot)) : null,
+        ceilingInForce(sourceApproval.confirmationSnapshot, card.executionGrade,
+          ceilingEntries, card.id) : null,
       attempts: feedbackAttempts, usage: feedbackUsage,
       decisions: feedbackDecisions.map((decision) => ({ id: decision.id,
         outcome: decision.outcome, decidedAt: decision.decidedAt })),
@@ -686,11 +691,11 @@ export async function readAmuxExecutionFeedback(parent: {
     take: 501, orderBy: { id: "asc" }, select: { id: true, revision: true,
       status: true,
       createdAt: true, effortPoints: true, estimatedCostMicrousd: true,
-      v4SourceApprovalId: true } });
+      executionGrade: true, v4SourceApprovalId: true } });
   if (cards.length > 500) return { parent, complete: false,
     reason: "task_limit", rollup: null };
   const ids = cards.map((card) => card.id);
-  const [attempts, usage, decisions, observations, approvals, reapprovals] = ids.length ? await Promise.all([
+  const [attempts, usage, decisions, observations, approvals, ceilingEntries] = ids.length ? await Promise.all([
     prisma.amuxExecutionAttempt.findMany({ where: { taskId: { in: ids } },
       select: { taskId: true, id: true, startedAt: true, endedAt: true,
         outcome: true, settledCostMicrousd: true, costConfirmed: true } }),
@@ -712,18 +717,13 @@ export async function readAmuxExecutionFeedback(parent: {
       action: "register_card",
     }, select: { id: true, registeredWorkItemId: true,
       confirmationSnapshot: true } }),
-    // Owner ceiling re-approvals, newest first: the first per Task is in force.
-    prisma.adminAuditLog.findMany({ where: {
-      action: AMUX_V4_TASK_CEILING_REAPPROVED_ACTION, targetType: "AmuxWorkItem",
-      targetId: { in: ids },
-    }, orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      select: { targetId: true, entryHash: true, actorUserId: true, metadata: true } }),
-  ]) : [[], [], [], [], [], []];
-  const feedback = cards.map((card) => projectAmuxTaskFeedback({
-    ...card, approvedCeilingMicrousd: approvedCeilingInForce(
+    readCeilingEntries(ids),
+  ]) : [[], [], [], [], [], await readCeilingEntries([])];
+  const feedback = cards.map(({ executionGrade, ...card }) => projectAmuxTaskFeedback({
+    ...card, approvedCeilingMicrousd: ceilingInForce(
       approvals.find((row) => row.id === card.v4SourceApprovalId &&
         row.registeredWorkItemId === card.id)?.confirmationSnapshot,
-      reapprovals.find((row) => row.targetId === card.id)),
+      executionGrade, ceilingEntries, card.id),
     attempts: attempts.filter((row) => row.taskId === card.id),
     usage: usage.filter((row) => row.taskId === card.id),
     decisions: decisions.filter((row) => row.proposal.taskId === card.id),
@@ -737,22 +737,39 @@ export async function readAmuxExecutionFeedback(parent: {
     rollup: rollupAmuxTaskFeedback(feedback) };
 }
 
-/** The registration receipt of a confirmation snapshot, or undefined. */
-function confirmationReceipt(snapshot: unknown): unknown {
-  const card = snapshot && typeof snapshot === "object" ?
-    (snapshot as { card?: unknown }).card : undefined;
-  const task = card && typeof card === "object" ? (card as { task?: unknown }).task : undefined;
-  return task && typeof task === "object" ? (task as { costReceipt?: unknown }).costReceipt : undefined;
+type CeilingEntries = {
+  reapproval: Map<string, AmuxV52ReapprovalRow>;
+  escalations: Map<string, AmuxV52EscalationRow[]>;
+};
+
+/** The audit entries that replace a Task's registration receipt, per Task. */
+async function readCeilingEntries(ids: string[]): Promise<CeilingEntries> {
+  const entries: CeilingEntries = { reapproval: new Map(), escalations: new Map() };
+  if (!ids.length) return entries;
+  const [reapprovals, escalations] = await Promise.all([
+    // Newest first: the first per Task is in force.
+    prisma.adminAuditLog.findMany({ where: {
+      action: AMUX_V4_TASK_CEILING_REAPPROVED_ACTION, targetType: "AmuxWorkItem",
+      targetId: { in: ids },
+    }, orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      select: { targetId: true, ...AMUX_V52_REAPPROVAL_SELECT } }),
+    prisma.adminAuditLog.findMany({ where: {
+      action: AMUX_GRADE_ESCALATED_ACTION, targetType: "AmuxWorkItem",
+      targetId: { in: ids },
+    }, select: { targetId: true, ...AMUX_V52_ESCALATION_SELECT } }),
+  ]);
+  for (const { targetId, ...row } of reapprovals)
+    if (targetId && !entries.reapproval.has(targetId)) entries.reapproval.set(targetId, row);
+  for (const { targetId, ...row } of escalations)
+    if (targetId) entries.escalations.set(targetId, [...entries.escalations.get(targetId) ?? [], row]);
+  return entries;
 }
 
-/**
- * The approved ceiling of a Task with no owner re-approval reads as before
- * (readAmuxV4ApprovedCeiling); with one, the re-approval core decides.
- */
-function approvedCeilingInForce(snapshot: unknown,
-  latest: { entryHash: string | null; actorUserId: string | null; metadata: unknown } | undefined) {
-  return latest ? amuxV4TaskApprovedCeilingInForce(confirmationReceipt(snapshot), latest) :
-    readAmuxV4ApprovedCeiling(snapshot);
+function ceilingInForce(snapshot: unknown, grade: string | null,
+  entries: CeilingEntries, taskId: string) {
+  return amuxV52ApprovedCeilingInForce({ confirmationSnapshot: snapshot, currentGrade: grade,
+    latestReapproval: entries.reapproval.get(taskId) ?? null,
+    escalations: entries.escalations.get(taskId) ?? [] });
 }
 
 /** The digest-verified title reader the card number backfill shares (docs/policy/amux-card-display-key.md §5). */

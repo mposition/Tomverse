@@ -3,8 +3,7 @@ import test from "node:test";
 
 import { calculateV4TaskCostCeiling, checkV4TaskApprovedCeiling } from "../lib/amux/v4TaskCostCeilingCore.ts";
 import {
-  AMUX_V4_TASK_CEILING_REAPPROVED_ACTION, amuxV4TaskApprovedCeilingInForce,
-  amuxV4TaskCeilingReapprovalOffer,
+  AMUX_V4_TASK_CEILING_REAPPROVED_ACTION, amuxV4TaskCeilingReapprovalOffer,
   readAmuxV4TaskCeilingReapproval,
 } from "../lib/amux/v4TaskCeilingReapprovalCore.ts";
 
@@ -101,12 +100,4 @@ test("an entry that is not the owner's binding never reads", () => {
   assert.equal(review.ok, true);
   assert.equal(readAmuxV4TaskCeilingReapproval(row({}, { newReceipt: review.receipt,
     newReceiptDigest: review.receipt.receiptDigest }), approved), null);
-});
-
-test("the feedback ceiling is the one in force, never the lower one under a bad entry", () => {
-  assert.equal(amuxV4TaskApprovedCeilingInForce(approved, null), BigInt(approved.ceilingMicroUsd));
-  assert.equal(amuxV4TaskApprovedCeilingInForce(approved, row()), BigInt(current.ceilingMicroUsd));
-  // A latest entry that does not read leaves the ceiling unknown.
-  assert.equal(amuxV4TaskApprovedCeilingInForce(approved, row({ actorUserId: null })), null);
-  assert.equal(amuxV4TaskApprovedCeilingInForce(null, row()), null);
 });
