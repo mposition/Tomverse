@@ -737,25 +737,25 @@ test("the parallel precheck switch overlaps the guidance read and still refuses 
   const verify = (ok: boolean) => async () => { order.push("precheck"); return ok; };
 
   delete process.env.CHAT_ROUTER_PARALLEL_CONTEXT_PRECHECK_ENABLED;
-  await pick(undefined, false, { verifyPreparedContext: verify(true) });
+  await pick(undefined, { verifyPreparedContext: verify(true) });
   assert.deepEqual(order, ["guidance:start", "guidance:end", "precheck"], "off: the check waits for the reads");
 
   process.env.CHAT_ROUTER_PARALLEL_CONTEXT_PRECHECK_ENABLED = "true";
   order.length = 0;
   const holdsBefore = holds.length;
   const callsBefore = routerRequests.length;
-  assert.equal(await pick(undefined, false, { verifyPreparedContext: verify(false) }), null);
+  assert.equal(await pick(undefined, { verifyPreparedContext: verify(false) }), null);
   assert.deepEqual(order, ["precheck", "guidance:start", "guidance:end"], "on: the check starts beside the reads");
   assert.equal(holds.length, holdsBefore);
   assert.equal(routerRequests.length, callsBefore);
 
   order.length = 0;
-  assert.ok(await pick(undefined, false, { verifyPreparedContext: verify(true) }));
+  assert.ok(await pick(undefined, { verifyPreparedContext: verify(true) }));
   assert.equal(order.filter(step => step === "precheck").length, 1, "one check per call");
   assert.equal(routerRequests.length, callsBefore + 1);
 
   let readCount = 0;
-  await pick(undefined, false, { eligibleModelIds: ["deepseek-v4-flash"], verifyPreparedContext: async () => { readCount++; return false; } });
+  await pick(undefined, { eligibleModelIds: ["deepseek-v4-flash"], verifyPreparedContext: async () => { readCount++; return false; } });
   assert.equal(readCount, 0, "no eligible choice still skips the check");
 });
 
@@ -775,11 +775,11 @@ test("parallel precheck rejections stay handled when guidance fails and still pr
   const verifyPreparedContext = async () => { throw contextError; };
 
   readGuidance = async () => { throw guidanceError; };
-  await assert.rejects(pick(undefined, false, { verifyPreparedContext }), error => error === guidanceError);
+  await assert.rejects(pick(undefined, { verifyPreparedContext }), error => error === guidanceError);
   await new Promise(resolve => setImmediate(resolve));
 
   readGuidance = async () => ({ guidance: "", cycleId: null });
-  await assert.rejects(pick(undefined, false, { verifyPreparedContext }), error => error === contextError);
+  await assert.rejects(pick(undefined, { verifyPreparedContext }), error => error === contextError);
   assert.equal(holds.length, holdsBefore);
   assert.equal(routerRequests.length, callsBefore);
 });
