@@ -62,8 +62,7 @@ export function amuxTrackedCheckoutReadManifestKeyIdentity(
     subjectId: manifestId };
 }
 
-/** The read-manifest retention after intake: seven days under the legacy
- * switch, ninety now (ideaRetentionCore.ts). A manifest is purged only once
+/** The read-manifest retention after intake: ninety days (ideaRetentionCore.ts). A manifest is purged only once
  * its idea's analysis has also ended. */
 export const amuxReadManifestRetentionMs = (): number => amuxSessionContentRetentionMs();
 export const amuxReadManifestRetentionDays = (): number => amuxSessionContentRetentionDays();

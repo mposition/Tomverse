@@ -10,8 +10,6 @@ import {
   resolveAdminPageMeta,
 } from "../lib/adminNavigation.ts";
 import {
-  BOARD_PROMOTION_APPLY_CODE_LATCH,
-  boardPromotionApplyPermitted,
   boardPromotionCardWrite,
   boardPromotionRequestDigest,
   classifyBoardPromotion,
@@ -61,19 +59,14 @@ const fact = (overrides = {}) => ({
   ...overrides,
 });
 
-test("the promotion latch is on and apply still needs the environment", () => {
-  assert.equal(BOARD_PROMOTION_APPLY_CODE_LATCH, true);
-  assert.equal(
-    boardPromotionApplyPermitted({ envValue: "enabled", codeLatch: false }),
-    false,
-  );
-  assert.equal(
-    boardPromotionApplyPermitted({ envValue: "enabled", codeLatch: BOARD_PROMOTION_APPLY_CODE_LATCH }),
-    true,
-  );
-  assert.equal(boardPromotionApplyPermitted({ envValue: "true", codeLatch: true }), false);
-  assert.equal(boardPromotionApplyPermitted({ envValue: undefined, codeLatch: true }), false);
-  assert.equal(boardPromotionApplyPermitted({ envValue: "enabled", codeLatch: true }), true);
+test("owner direction 2026-11-16: promotion apply has no environment switch or code latch", () => {
+  const core = read("lib/amux/boardPromotionCore.ts");
+  const service = read("lib/amux/boardPromotionService.ts");
+  for (const source of [core, service]) {
+    assert.equal(source.includes("TOMVERSE_AMUX_BOARD_PROMOTE"), false);
+    assert.equal(source.includes("BOARD_PROMOTION_APPLY"), false);
+    assert.equal(source.includes("boardPromotionApplyPermitted"), false);
+  }
 });
 
 test("a one-card request is canonical and a larger batch is refused", () => {
@@ -152,32 +145,28 @@ test("only an unowned backlog card with a matching source and no execution is pr
   );
 });
 
-test("the route cannot turn the latch on and the page stays unlisted", () => {
+test("the route has no latch and the page stays unlisted", () => {
   const core = read("lib/amux/boardPromotionCore.ts");
   const service = read("lib/amux/boardPromotionService.ts");
   const route = read("app/api/admin/amux/board-promotion/route.ts");
-  assert.equal(core.includes("BOARD_PROMOTION_APPLY_CODE_LATCH = true"), true);
   assert.equal(core.includes("codeLatch: true"), false);
   const panel = read("components/admin/AmuxBoardPromotionPanel.tsx");
-  assert.match(service, /codeLatch: BOARD_PROMOTION_APPLY_CODE_LATCH/);
   assert.equal(service.includes('codeLatch: true'), false);
   const applyStart = service.indexOf("export async function applyBoardPromotion");
   const applyEnd = service.indexOf("export async function markBoardPromotionOutcomeUnknown");
   const apply = service.slice(applyStart, applyEnd);
-  const marker = 'throw new BoardImportError("apply_disabled", 409, input.approvalId)';
-  const refused = apply.indexOf(marker);
   const transaction = apply.indexOf("return withPromotionTransaction");
   assert.ok(applyStart >= 0 && applyEnd > applyStart);
-  assert.equal(refused, apply.lastIndexOf(marker));
-  assert.ok(refused > 0 && transaction > refused);
+  assert.ok(transaction > 0);
+  assert.equal(apply.includes("apply_disabled"), false);
   assert.equal(service.includes("TOMVERSE_AMUX_EXECUTE"), false);
   assert.equal(service.includes("lib/amux/execution"), false);
   assert.equal(route.includes("codeLatch"), false);
   assert.equal(route.includes("BOARD_PROMOTION_APPLY_CODE_LATCH"), false);
   assert.match(route, /adminApprovalErrorResponse/);
-  // Apply needs the server switch from preview and an approve for this exact id.
-  assert.match(panel, /applySwitch === true && approvedId !== null && approvedId === approvalId\.trim\(\)/);
-  assert.match(panel, /typeof payload\.applyPermitted === "boolean"\) setApplySwitch\(payload\.applyPermitted\)/);
+  // Apply needs an approve for this exact id.
+  assert.match(panel, /applyReady = approvedId !== null && approvedId === approvalId\.trim\(\)/);
+  assert.equal(panel.includes("applySwitch"), false);
   assert.match(panel, /response\.ok && action === "approve" && payload\.status === "approved" && payload\.approvalId/);
   // Any other non-preview response, failed or not, closes Apply again.
   assert.match(panel, /\} else if \(action !== "preview"\) \{\s*setApprovedId\(null\);/);

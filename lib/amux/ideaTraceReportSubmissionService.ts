@@ -10,11 +10,7 @@ import type { AmuxContentKeys } from "./ideaCrypto.ts";
 import { loadCurrentAmuxContentKeys } from "./ideaKeyConfig.ts";
 import { amuxContentKeyRing, createAmuxContentUnitKeys } from "./ideaKeyStore.ts";
 import { AMUX_IDEA_STANDARD_TRANSACTION } from "./ideaRequestTimeoutsCore.ts";
-import {
-  AMUX_V4_IDEA_SUBMISSION_ENV,
-  ideaSubmissionWritePermitted,
-  type IdeaSubmissionInspection,
-} from "./ideaSubmissionCore.ts";
+import type { IdeaSubmissionInspection } from "./ideaSubmissionCore.ts";
 import {
   IDEA_SUBMISSION_STATEMENT_TIMEOUT,
   IdeaSubmissionError,
@@ -102,9 +98,6 @@ export async function submitSystemIdea(input: SystemIdea): Promise<{ ideaId: str
   const seen = () => prisma.amuxIdeaSubmission.findUnique({ where: { requestId }, select: { id: true } });
   const existing = await seen();
   if (existing) return { ideaId: existing.id };
-  if (!ideaSubmissionWritePermitted(process.env[AMUX_V4_IDEA_SUBMISSION_ENV])) {
-    throw new IdeaSubmissionError("submission_disabled", 503);
-  }
   if (adminAuditIntegrityKeys(process.env).length === 0) {
     throw new IdeaSubmissionError("audit_unavailable", 503);
   }

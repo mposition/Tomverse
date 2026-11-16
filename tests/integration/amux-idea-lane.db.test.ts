@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 
-import { AMUX_IDEA_LANE_MAX_ATTEMPTS, AMUX_IDEA_LANE_PUBLISH_FENCE_MS } from "@/lib/amux/ideaLaneCore";
+import { AMUX_IDEA_LANE_PUBLISH_FENCE_MS } from "@/lib/amux/ideaLaneCore";
 import { createInitialIdeaOnlySourcePlan } from "@/lib/amux/ideaInitialSourcePlanService";
 import { amuxIdeaLaneTook, claimAmuxIdeaLane, fenceAmuxIdeaLanePublish, observeAmuxIdeaLaneMerges,
   recordAmuxIdeaLaneResult } from "@/lib/amux/ideaLaneService";
@@ -109,17 +109,14 @@ test("a failed idea is asked again only after its backoff (5 minutes, doubling) 
   await removeIdeas();
 });
 
-test("failures only lengthen the wait; the legacy switch keeps the former three-run stop", async () => {
+test("failures only lengthen the wait", async () => {
   const owner = `${OWNER_PREFIX}${randomUUID()}`;
   const idea = await seedIdea(owner, new Date(OLD));
   const at = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000);
-  const seedRuns = async (ideaId: string) => {
-    for (const [minutesAgo, outcome] of [[30, "cli_failed"], [20, "no_change"], [10, "cli_failed"]] as const) {
-      await prisma.amuxIdeaLaneAttempt.create({ data: { id: randomUUID(), ideaId, claimedAt: at(minutesAgo),
-        leaseUntil: at(minutesAgo - 1), finishedAt: at(minutesAgo - 1), outcome } });
-    }
-  };
-  await seedRuns(idea);
+  for (const [minutesAgo, outcome] of [[30, "cli_failed"], [20, "no_change"], [10, "cli_failed"]] as const) {
+    await prisma.amuxIdeaLaneAttempt.create({ data: { id: randomUUID(), ideaId: idea, claimedAt: at(minutesAgo),
+      leaseUntil: at(minutesAgo - 1), finishedAt: at(minutesAgo - 1), outcome } });
+  }
   // Three failed runs (the newest ended 9 minutes ago): the third failure waits
   // 20 minutes, so the claim leaves the idea alone for now.
   for (let index = 0; index < 3; index += 1) await claimAmuxIdeaLane({ actorUserId: owner });
@@ -135,19 +132,6 @@ test("failures only lengthen the wait; the legacy switch keeps the former three-
   assert.equal(attempts.length, 4);
   assert.equal(attempts[3]!.outcome, "job_failed");
   await removeIdeas();
-
-  // With the legacy switch, the former rule: three runs of any outcome stop it.
-  process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS = "enabled";
-  try {
-    const legacyOwner = `${OWNER_PREFIX}${randomUUID()}`;
-    const legacyIdea = await seedIdea(legacyOwner, new Date(OLD));
-    await seedRuns(legacyIdea);
-    assert.equal(await claimAmuxIdeaLane({ actorUserId: legacyOwner }), null);
-    assert.equal((await attemptsOf(legacyIdea)).length, AMUX_IDEA_LANE_MAX_ATTEMPTS);
-  } finally {
-    delete process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS;
-    await removeIdeas();
-  }
 });
 
 test("ideas the lane is done with never crowd out a new one, and an idea already in analysis is not taken", async () => {

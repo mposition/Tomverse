@@ -17,7 +17,6 @@ type IntakeBody = {
   code?: string | null;
   error?: string;
   unitCount?: number;
-  inactive?: boolean;
   applyPermitted?: boolean;
   writes?: number;
   retry?: boolean;
@@ -169,7 +168,6 @@ export function AmuxIntakePanel() {
           ) : null}
           {result.error && result.error !== "outcome_unknown" ? <p>{messages.error(result.error)}</p> : null}
           {result.code ? <p>{messages.error(result.code)}</p> : null}
-          {result.inactive ? <p>{messages.inactive}</p> : null}
           {result.reconfirmRequired ? <p>{messages.reconfirm}</p> : null}
           {result.unitCount === 1 && result.title ? <p>{messages.unit(result.title)}</p> : null}
           {result.unitCount === 1 && result.scope ? <p>{messages.scope(result.scope)}</p> : null}

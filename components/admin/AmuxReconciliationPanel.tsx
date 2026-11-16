@@ -13,7 +13,6 @@ type ReconciliationBody = {
   outcome?: string;
   code?: string | null;
   error?: string;
-  inactive?: boolean;
   applyPermitted?: boolean;
   writes?: number;
   itemDriftCount?: number;
@@ -93,7 +92,6 @@ export function AmuxReconciliationPanel() {
         <div className="rounded-md border p-3 text-sm border-zinc-700 text-zinc-100" role="status">
           {result.error ? <p>{messages.error(result.error)}</p> : null}
           {result.code ? <p>{messages.error(result.code)}</p> : null}
-          {result.inactive ? <p>{messages.inactive}</p> : null}
           {result.outcome === "preview" ? (
             <p>{messages.counts(result.itemDriftCount ?? 0, result.acceptCount ?? 0, result.rejectCount ?? 0)}</p>
           ) : null}

@@ -17,7 +17,6 @@ import {
 } from "@/lib/amux/boardImportCore";
 import { applyAmuxReconciliation } from "@/lib/amux/boardReconciliation";
 import {
-  AMUX_RECONCILIATION_APPLY_ENV,
   AMUX_RECONCILIATION_RAW_BODY_MAX_BYTES,
   planAmuxReconciliation,
   previewAmuxReconciliation,
@@ -75,7 +74,7 @@ export async function POST(request: Request) {
     }
     const raw = await readLimitedText(request, AMUX_RECONCILIATION_RAW_BODY_MAX_BYTES);
     if (action === "preview") {
-      return NextResponse.json(previewAmuxReconciliation(raw, process.env[AMUX_RECONCILIATION_APPLY_ENV]), {
+      return NextResponse.json(previewAmuxReconciliation(raw), {
         headers: noStoreHeaders,
       });
     }

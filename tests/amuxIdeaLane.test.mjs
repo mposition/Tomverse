@@ -4,7 +4,6 @@ import test from "node:test";
 
 import {
   AMUX_IDEA_LANE_FAILURES,
-  AMUX_IDEA_LANE_MAX_ATTEMPTS,
   AMUX_IDEA_LANE_BACKOFF_BASE_MS,
   AMUX_IDEA_LANE_BACKOFF_MAX_MS,
   amuxIdeaLaneBackoffMs,
@@ -12,7 +11,6 @@ import {
   amuxIdeaLaneClaimable,
   amuxIdeaLaneDailyAttempts,
   amuxIdeaLaneEnabled,
-  amuxIdeaLaneGivesUp,
   amuxIdeaLaneState,
   amuxIdeaLaneView,
   inspectAmuxIdeaLaneFence,
@@ -63,35 +61,19 @@ test("a failed part is never dropped: it waits 5 minutes, doubling to 24 hours (
   const expired = (minutesAgo) => run({ claimedAtMs: NOW - minutesAgo * 60_000, leaseUntilMs: NOW - 1 });
   // However many runs failed, and however they failed, the part stays queued.
   const many = Array.from({ length: 40 }, (_, i) => failed(1000 + i, i % 2 ? "no_change" : "cli_failed"));
-  const waiting = amuxIdeaLaneState(many, NOW, false);
+  const waiting = amuxIdeaLaneState(many, NOW);
   assert.equal(waiting.state, "queued");
   assert.equal(waiting.retryAtMs, NOW - 1 + AMUX_IDEA_LANE_BACKOFF_MAX_MS);
   assert.equal(amuxIdeaLaneClaimable(waiting), false);
   // Once the backoff has passed, it is claimable again.
-  const later = amuxIdeaLaneState(many, NOW + AMUX_IDEA_LANE_BACKOFF_MAX_MS, false);
+  const later = amuxIdeaLaneState(many, NOW + AMUX_IDEA_LANE_BACKOFF_MAX_MS);
   assert.equal(later.retryAtMs, null);
   assert.equal(amuxIdeaLaneClaimable(later), true);
   // A run that never reported counts like any failure; order is by claim time.
-  assert.equal(amuxIdeaLaneState([expired(3), expired(2), expired(1)], NOW, false).state, "queued");
-  assert.equal(amuxIdeaLaneGivesUp(many, false), false);
-  // With the legacy switch, the former rule: three runs of any outcome.
-  assert.equal(AMUX_IDEA_LANE_MAX_ATTEMPTS, 3);
-  const varied = [failed(9), failed(8, "no_change"), failed(7)];
-  assert.equal(amuxIdeaLaneState(varied.slice(0, 3), NOW, true).state, "failed");
-  assert.equal(amuxIdeaLaneState(varied.slice(0, 2), NOW, true).state, "queued");
-  const previous = process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS;
-  try {
-    process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS = "enabled";
-    assert.equal(amuxIdeaLaneState(varied.slice(0, 3), NOW).state, "failed", "the switch is read from the environment");
-    delete process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS;
-    assert.equal(amuxIdeaLaneState(varied.slice(0, 3), NOW).state, "queued", "the new rule is the default");
-  } finally {
-    if (previous === undefined) delete process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS;
-    else process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS = previous;
-  }
-  // The claim query repeats the backoff in SQL, under the same switch.
+  assert.equal(amuxIdeaLaneState([expired(3), expired(2), expired(1)], NOW).state, "queued");
+  // The claim query repeats the backoff in SQL.
   const service = readFileSync("lib/amux/ideaLaneService.ts", "utf8");
-  assert.match(service, /CASE WHEN \$\{legacy\}::boolean THEN/);
+  assert.doesNotMatch(service, /legacy/);
   assert.match(service, /power\(2, LEAST\(f\."failures", 30\) - 1\)/);
   assert.match(service, /\$\{AMUX_IDEA_LANE_BACKOFF_BASE_MS\}::double precision/);
   assert.match(service, /\$\{AMUX_IDEA_LANE_BACKOFF_MAX_MS\}::double precision/);
@@ -210,8 +192,6 @@ test("a lane idea skips analysis and approvals on the Ideas list", () => {
   assert.deepEqual(view(amuxIdeaLaneState([run({ outcome: "pr_open", prNumber: 7 })], NOW)), ["review", null, false]);
   assert.deepEqual(view(amuxIdeaLaneState([failed(3), failed(2), failed(1)], NOW)), ["execution", null, false],
     "failed runs are retried after a backoff, not flagged for the owner");
-  assert.deepEqual(view(amuxIdeaLaneState([failed(3), failed(2), failed(1)], NOW, true)), ["execution", null, true],
-    "only the legacy limits switch runs out of attempts");
 });
 
 test("an owner idea the lane will take next waits for the lane's turn, not an execution approval", () => {

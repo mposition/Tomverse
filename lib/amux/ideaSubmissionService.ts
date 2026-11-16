@@ -15,8 +15,6 @@ import { amuxContentKeyRing, createAmuxContentUnitKeys } from "./ideaKeyStore.ts
 import { analysisDeadlineAt } from "./ideaRetentionCore.ts";
 import { amuxIdeaTitleFromText } from "./ideaTitleCore.ts";
 import {
-  AMUX_V4_IDEA_SUBMISSION_ENV,
-  ideaSubmissionWritePermitted,
   submissionFailureKind,
   type IdeaSubmissionInspection,
 } from "./ideaSubmissionCore.ts";
@@ -27,7 +25,7 @@ export const IDEA_SUBMISSION_STATEMENT_TIMEOUT = "5000";
 
 export class IdeaSubmissionError extends Error {
   constructor(
-    readonly code: "submission_disabled" | "forbidden" | "audit_unavailable" |
+    readonly code: "forbidden" | "audit_unavailable" |
       "key_store_unavailable" | "request_already_seen" | "outcome_unknown",
     readonly status: number,
     readonly readBack?: "committed" | "partial" | "unavailable",
@@ -217,16 +215,13 @@ export async function readIdeaSubmissionByDerivedRequestId(
   return submissionReadBack(row, requestId);
 }
 
-/** New v4 submission path. The hard code latch ships false. */
+/** The owner idea writer (v4 path), still used by the idea lane's test entry. */
 export async function submitIdea(input: {
   session: Session;
   request: Request;
   inspected: Extract<IdeaSubmissionInspection, { ok: true }>;
 }): Promise<CommittedIdeaSubmission> {
   actorId(input.session);
-  if (!ideaSubmissionWritePermitted(process.env[AMUX_V4_IDEA_SUBMISSION_ENV])) {
-    throw new IdeaSubmissionError("submission_disabled", 503);
-  }
   if (adminAuditIntegrityKeys(process.env).length === 0) {
     throw new IdeaSubmissionError("audit_unavailable", 503);
   }

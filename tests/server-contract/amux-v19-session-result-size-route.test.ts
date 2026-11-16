@@ -5,8 +5,7 @@ import { mock, test } from "node:test";
 
 // Owner direction 2026-11-15: a session analysis answer is not refused for its
 // size below the 4 MiB safety ceiling. The route must read such an answer and
-// hand it to the result preflight; TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS restores
-// the former 64 KiB refusal at the request boundary.
+// hand it to the result preflight.
 const mod = (path: string) => pathToFileURL(resolve(import.meta.dirname, "../..", path)).href;
 const preflights: Array<{ bytes: number }> = [];
 mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {
@@ -28,8 +27,6 @@ let AMUX_V19_MAX_LAUNCHER_ID = "";
 const secret = "syntheticMaxLauncherSecret_0123456789abcdefgh";
 const switches = {
   TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET: secret,
-  TOMVERSE_AMUX_V19_SESSION_ANALYSIS_RESULT_WRITE: "enabled",
-  TOMVERSE_AMUX_V19_SESSION_ANALYSIS_RESULT_READ: "enabled",
   TOMVERSE_AMUX_V19_SESSION_ANALYSIS_RESULT_RETENTION: "enabled",
   TOMVERSE_AMUX_V19_READ_MANIFEST_RETENTION: "enabled",
 };
@@ -52,7 +49,7 @@ const request = (value: unknown) => new Request("https://test.invalid/api/intern
 });
 
 async function withEnv(values: Record<string, string>, run: () => Promise<void>) {
-  const keys = [...Object.keys(switches), "TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS"];
+  const keys = Object.keys(switches);
   const old = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
   try {
     for (const key of keys) delete process.env[key];
@@ -79,10 +76,6 @@ test("an answer past the former 64 KiB reaches the result preflight", async () =
   });
   await withEnv(switches, async () => {
     const response = await POST(request(body("x".repeat(4 * 1024 * 1024 + 1))));
-    assert.equal(response.status, 400);
-  });
-  await withEnv({ ...switches, TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS: "enabled" }, async () => {
-    const response = await POST(request(body(answer)));
     assert.equal(response.status, 400);
   });
 });

@@ -1,14 +1,9 @@
 /** Pure AMUX v4 retention clocks. Callers must pass a DB-observed time and
  * immutable DB timestamps; this module does not read a host clock or write. */
-import { amuxIntakeLegacyLimits } from "./intakeLimitsCore.ts";
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 
-/** The analysis deadline every idea submitted before 2026-11-15 carries, and
- * every new one under TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS. */
-export const AMUX_ANALYSIS_MAX_AGE_DAYS = 7;
-export const AMUX_ANALYSIS_MAX_AGE_MS = AMUX_ANALYSIS_MAX_AGE_DAYS * DAY_MS;
 /** Owner direction 2026-11-15: an internal development idea is never stopped
  * by its age. The deadline column stays (NOT NULL, immutable, set from the
  * submission time, CHECK AmuxIdeaSubmission_analysis_deadline_check) so every
@@ -16,8 +11,6 @@ export const AMUX_ANALYSIS_MAX_AGE_MS = AMUX_ANALYSIS_MAX_AGE_DAYS * DAY_MS;
  * ends only when the analysis completes or is cancelled. */
 export const AMUX_ANALYSIS_OPEN_MAX_AGE_DAYS = 36_500;
 export const AMUX_ANALYSIS_OPEN_MAX_AGE_MS = AMUX_ANALYSIS_OPEN_MAX_AGE_DAYS * DAY_MS;
-export const amuxAnalysisMaxAgeMs = (legacy: boolean = amuxIntakeLegacyLimits()): number =>
-  legacy ? AMUX_ANALYSIS_MAX_AGE_MS : AMUX_ANALYSIS_OPEN_MAX_AGE_MS;
 export const AMUX_RAW_PURGE_WINDOW_MS = 24 * HOUR_MS;
 /** Operator, 2026-11-16: an undecided draft is never expired by its age. The
  * column stays (the draft unit guards set it from the first completed chunk),
@@ -49,11 +42,10 @@ const after = (base: Date, intervalMs: number): Date => {
 const reached = (dbNow: Date, dueAt: Date) => timestamp(dbNow) >= timestamp(dueAt);
 
 /** The deadline a new submission stores. Every later check reads the stored
- * value, never this function: a row keeps the deadline it was written with,
- * whatever the switch says now. */
-export const analysisDeadlineAt = (submittedAt: Date,
-  legacy: boolean = amuxIntakeLegacyLimits()) =>
-  after(submittedAt, amuxAnalysisMaxAgeMs(legacy));
+ * value, never this function: a row keeps the deadline it was written with
+ * (an idea submitted before 2026-11-15 carries seven days). */
+export const analysisDeadlineAt = (submittedAt: Date) =>
+  after(submittedAt, AMUX_ANALYSIS_OPEN_MAX_AGE_MS);
 
 type AnalysisClock = {
   submittedAt: Date;
@@ -123,25 +115,19 @@ export const amuxAnalysisEndedWhere = (dbNow: Date) => ({
 
 /** How long a v19 session analysis keeps the content it wrote after intake:
  * each page's CLI answer, its read manifests and an orphan content key of
- * either. Seven days before 2026-11-15 and under the legacy switch; ninety
- * days now, the longest content retention AMUX already had
- * (AMUX_BRIEF_RETENTION_MS). The database refuses a purge before day seven in
- * either case; nothing here ever purges sooner than that. */
-export const AMUX_SESSION_CONTENT_RETENTION_DAYS = 7;
+ * either. Ninety days (before 2026-11-15 it was seven), the longest content
+ * retention AMUX already had (AMUX_BRIEF_RETENTION_MS). The database refuses a
+ * purge before day seven; nothing here ever purges sooner than that. */
 export const AMUX_SESSION_CONTENT_OPEN_RETENTION_DAYS = 90;
-export const amuxSessionContentRetentionDays = (legacy: boolean = amuxIntakeLegacyLimits()): number =>
-  legacy ? AMUX_SESSION_CONTENT_RETENTION_DAYS : AMUX_SESSION_CONTENT_OPEN_RETENTION_DAYS;
-export const amuxSessionContentRetentionMs = (legacy: boolean = amuxIntakeLegacyLimits()): number =>
-  amuxSessionContentRetentionDays(legacy) * DAY_MS;
+export const amuxSessionContentRetentionDays = (): number => AMUX_SESSION_CONTENT_OPEN_RETENTION_DAYS;
+export const amuxSessionContentRetentionMs = (): number => amuxSessionContentRetentionDays() * DAY_MS;
 
 /** Session content is due only once its retention has passed AND the
  * analysis has ended. An idea analysed past its retention keeps every page's
  * content until it ends: a later page still reads it (owner direction
- * 2026-11-15). Under the legacy switch a row carrying the seven-day deadline
- * has ended by day seven, so it purges on day seven as before. */
-export function amuxSessionContentPurgeDue(input: AnalysisClock & { dbNow: Date;
-  legacy?: boolean }): boolean {
-  return reached(input.dbNow, after(input.submittedAt, amuxSessionContentRetentionMs(input.legacy))) &&
+ * 2026-11-15). */
+export function amuxSessionContentPurgeDue(input: AnalysisClock & { dbNow: Date }): boolean {
+  return reached(input.dbNow, after(input.submittedAt, amuxSessionContentRetentionMs())) &&
     amuxAnalysisEnded(input);
 }
 

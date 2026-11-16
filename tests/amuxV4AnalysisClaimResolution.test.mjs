@@ -46,7 +46,7 @@ test("only the deterministic integrity 503 skips read-only recovery", () => {
     { error: "conflict" }), false);
 });
 
-test("owner resolution stays dark, exact, Agent-only, and distinct from cancellation", async () => {
+test("owner resolution stays exact, Agent-only, and distinct from cancellation", async () => {
   const [route, service, panel, budgetPanel, migration, cancellation] = await Promise.all([
     read("app/api/admin/amux/ideas/analysis-claim-resolution/route.ts"),
     read("lib/amux/ideaAnalysisClaimResolutionService.ts"),
@@ -55,10 +55,7 @@ test("owner resolution stays dark, exact, Agent-only, and distinct from cancella
     read("prisma/migrations/20261008130000_amux_v4_claim_owner_resolution/migration.sql"),
     read("lib/amux/ideaAnalysisBudgetCancellationService.ts"),
   ]);
-  assert.match(route, /TOMVERSE_AMUX_V4_ANALYSIS_CLAIM_RESOLUTION_READ/);
-  assert.match(route, /TOMVERSE_AMUX_V4_ANALYSIS_CLAIM_RESOLUTION_WRITE/);
-  assert.match(route, /process\.env\[READ_ENV\] !== "enabled"/);
-  assert.match(route, /process\.env\[WRITE_ENV\] !== "enabled"/);
+  assert.doesNotMatch(route, /TOMVERSE_AMUX_V4_ANALYSIS_CLAIM_RESOLUTION_(READ|WRITE)|CODE_LATCH/);
   assert.match(route, /ADMIN_REAUTHENTICATION_REQUIRED/);
   assert.match(service, /getAdminRole\(session\) !== "owner"/);
   assert.match(service, /takeAuditChainLock\(tx\)/);

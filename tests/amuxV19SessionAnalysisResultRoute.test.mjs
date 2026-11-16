@@ -7,13 +7,8 @@ import { POST as POST_USAGE_ONLY } from
   "../app/api/internal/amux/v19/analysis-budget/max-result/route.ts";
 
 const names = ["TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET",
-  "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_RESULT_WRITE",
-  "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_RESULT_READ",
-  "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_RESULT_RETENTION"];
-names.push("TOMVERSE_AMUX_V19_READ_MANIFEST_RETENTION",
-  "TOMVERSE_AMUX_V19_SESSION_BUDGET_MAX_RESULT_WRITE",
-  "TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_READ",
-  "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_STOP_POLL_READ");
+  "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_RESULT_RETENTION",
+  "TOMVERSE_AMUX_V19_READ_MANIFEST_RETENTION"];
 const prior = Object.fromEntries(names.map((name) => [name, process.env[name]]));
 after(() => {
   for (const name of names) {
@@ -28,17 +23,13 @@ const headers = { authorization: `Bearer ${secret}`,
   "x-amux-agent-id": "amux-intake-max",
   "content-type": "application/json" };
 
-test("Max result route stays closed until all write, read, and retention switches are enabled", async () => {
+test("Max result route stays closed until both retention switches are enabled", async () => {
   process.env.TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET = secret;
-  delete process.env.TOMVERSE_AMUX_V19_SESSION_ANALYSIS_RESULT_WRITE;
-  delete process.env.TOMVERSE_AMUX_V19_SESSION_ANALYSIS_RESULT_READ;
   delete process.env.TOMVERSE_AMUX_V19_SESSION_ANALYSIS_RESULT_RETENTION;
+  delete process.env.TOMVERSE_AMUX_V19_READ_MANIFEST_RETENTION;
   assert.equal((await POST(new Request(endpoint, { method: "POST",
     headers, body: "{}" }))).status, 409);
-  assert.equal((await GET(new Request(endpoint,
-    { headers }))).status, 409);
-  process.env.TOMVERSE_AMUX_V19_SESSION_ANALYSIS_RESULT_WRITE = "enabled";
-  process.env.TOMVERSE_AMUX_V19_SESSION_ANALYSIS_RESULT_READ = "enabled";
+  process.env.TOMVERSE_AMUX_V19_SESSION_ANALYSIS_RESULT_RETENTION = "enabled";
   assert.equal((await POST(new Request(endpoint, { method: "POST",
     headers, body: "{}" }))).status, 409,
   "a disabled retention worker blocks result writes");
@@ -49,13 +40,8 @@ test("Max result route stays closed until all write, read, and retention switche
 
 test("usage-only settlement refuses a Max success when result persistence is enabled", async () => {
   process.env.TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET = secret;
-  process.env.TOMVERSE_AMUX_V19_SESSION_ANALYSIS_RESULT_WRITE = "enabled";
-  process.env.TOMVERSE_AMUX_V19_SESSION_ANALYSIS_RESULT_READ = "enabled";
   process.env.TOMVERSE_AMUX_V19_SESSION_ANALYSIS_RESULT_RETENTION = "enabled";
   process.env.TOMVERSE_AMUX_V19_READ_MANIFEST_RETENTION = "enabled";
-  process.env.TOMVERSE_AMUX_V19_SESSION_BUDGET_MAX_RESULT_WRITE = "enabled";
-  process.env.TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_READ = "enabled";
-  process.env.TOMVERSE_AMUX_V19_SESSION_ANALYSIS_STOP_POLL_READ = "enabled";
   const response = await POST_USAGE_ONLY(new Request(
     "https://test.invalid/api/internal/amux/v19/analysis-budget/max-result",
     { method: "POST", headers, body: JSON.stringify({
@@ -72,8 +58,6 @@ test("usage-only settlement refuses a Max success when result persistence is ena
 
 test("a result without an exact CLI channel attestation is refused before database access", async () => {
   process.env.TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET = secret;
-  process.env.TOMVERSE_AMUX_V19_SESSION_ANALYSIS_RESULT_WRITE = "enabled";
-  process.env.TOMVERSE_AMUX_V19_SESSION_ANALYSIS_RESULT_READ = "enabled";
   process.env.TOMVERSE_AMUX_V19_SESSION_ANALYSIS_RESULT_RETENTION = "enabled";
   process.env.TOMVERSE_AMUX_V19_READ_MANIFEST_RETENTION = "enabled";
   const body = { claimId: "d57eac94-9808-4688-a9f8-940aa3c22188",
@@ -99,7 +83,6 @@ test("a result without an exact CLI channel attestation is refused before databa
 
 test("result receipt refuses noncanonical invocation ordinals before database access", async () => {
   process.env.TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET = secret;
-  process.env.TOMVERSE_AMUX_V19_SESSION_ANALYSIS_RESULT_READ = "enabled";
   for (const ordinal of ["", " 0", "1e2", "01", "-1"]) {
     const query = new URLSearchParams({
       claimId: "d57eac94-9808-4688-a9f8-940aa3c22188",

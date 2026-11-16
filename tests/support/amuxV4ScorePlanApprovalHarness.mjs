@@ -29,10 +29,8 @@ mock.module(mod("lib/adminReauthentication.ts"), { namedExports: { assertRecentA
 mock.module(mod("lib/amux/ideaKeyConfig.ts"), { namedExports: { loadCurrentAmuxContentKeys: () => "digest-keys" } });
 mock.module(mod("lib/amux/portfolioAssessmentService.ts"), {
   namedExports: {
-    AMUX_V4_PORTFOLIO_WRITE_ENV: "TOMVERSE_AMUX_V4_PORTFOLIO_WRITE",
     AmuxPortfolioError: PortfolioError,
     amuxPortfolioOwnerId: (session) => { if (session.role !== "owner") throw new PortfolioError("forbidden"); return "owner-1"; },
-    amuxV4PortfolioWriteEnabled: (value) => value === "enabled",
     writeAmuxPortfolioAssessmentInTx: async (tx, input) => {
       calls.push(["assess", tx, input.payload.subject.id, input.payload.reasonCode, input.confirmationDigest,
         input.payload.evidenceAsOf, input.payload.requestId]);
@@ -64,7 +62,6 @@ const input = {
 };
 const reset = () => {
   calls = []; failOn = null; commitFails = false; priors = [{ nodeId: "node-init-01", cardId: null }];
-  process.env.TOMVERSE_AMUX_V4_PORTFOLIO_WRITE = "enabled";
 };
 
 // Every assessment, then every Task score, in one serializable transaction; each subject once.
@@ -97,11 +94,9 @@ await assert.rejects(approveAmuxV4ScorePlan(session, request, input), (error) =>
 reset(); commitFails = true;
 await assert.rejects(approveAmuxV4ScorePlan(session, request, input), (error) => error.code === "outcome_unknown");
 
-// Gates: owner, switch, a subject twice, nothing at all.
+// Gates: owner, a subject twice, nothing at all.
 reset();
 await assert.rejects(approveAmuxV4ScorePlan({ ...session, role: "ops" }, request, input), (error) => error.code === "forbidden");
-reset(); process.env.TOMVERSE_AMUX_V4_PORTFOLIO_WRITE = "disabled";
-await assert.rejects(approveAmuxV4ScorePlan(session, request, input), (error) => error.code === "write_disabled");
 reset();
 await assert.rejects(approveAmuxV4ScorePlan(session, request, { ...input,
   assessments: [assessment("epic", "node-epic-01"), assessment("epic", "node-epic-01")] }),

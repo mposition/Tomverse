@@ -39,14 +39,11 @@ import {
 import { commitAmuxSessionAnalysisReservation } from
   "./ideaSessionAnalysisReservationStore.ts";
 import {
-  AMUX_SESSION_INTAKE_ENV,
-  amuxSessionIntakeWritePermitted,
   sameAmuxOperatingScopeAuthority,
   type AmuxIdeaSessionSubmissionInspection,
 } from "./ideaSessionSubmissionCore.ts";
 import { prepareIdeaSubmissionStorage } from "./ideaSubmissionService.ts";
-import { AMUX_V4_IDEA_SUBMISSION_ENV,
-  submissionFailureKind } from "./ideaSubmissionCore.ts";
+import { submissionFailureKind } from "./ideaSubmissionCore.ts";
 
 const STATEMENT_TIMEOUT = "5000";
 const POLICY_VERSION = 19;
@@ -54,7 +51,6 @@ const POLICY_VERSION = 19;
 export class AmuxIdeaSessionSubmissionError extends Error {
   constructor(
     readonly code:
-      | "submission_disabled"
       | "audit_unavailable"
       | "scope_unavailable"
       | "outside_scope"
@@ -385,7 +381,7 @@ export async function commitAmuxIdeaSessionIntake(tx: Prisma.TransactionClient, 
     reservationAuditId: reservation.reservationAuditId };
 }
 
-/** Default-off write service. It atomically stores the encrypted submission
+/** Write service. It atomically stores the encrypted submission
  * and its append-only queue identity. The intake route may call only this
  * complete boundary; this queue receipt reserves no money. */
 export async function submitAmuxIdeaFromSession(input: {
@@ -395,10 +391,6 @@ export async function submitAmuxIdeaFromSession(input: {
   /** A condition checked inside the commit transaction (AmuxIdeaSessionSubmissionGuard). */
   guard?: AmuxIdeaSessionSubmissionGuard;
 }): Promise<CommittedAmuxIdeaSessionIntake> {
-  if (!amuxSessionIntakeWritePermitted(
-    process.env[AMUX_SESSION_INTAKE_ENV],
-    process.env[AMUX_V4_IDEA_SUBMISSION_ENV],
-  )) throw new AmuxIdeaSessionSubmissionError("submission_disabled");
   if (adminAuditIntegrityKeys(process.env).length === 0) {
     throw new AmuxIdeaSessionSubmissionError("audit_unavailable");
   }

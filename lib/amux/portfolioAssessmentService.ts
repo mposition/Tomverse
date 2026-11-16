@@ -19,11 +19,6 @@ import { amuxPortfolioAssessmentPayloadSchema,
   parseAmuxPortfolioMetrics, type AmuxPortfolioAssessmentPayload } from
   "./portfolioScoreSchemas.ts";
 
-export const AMUX_V4_PORTFOLIO_WRITE_CODE_ENABLED = true;
-export const AMUX_V4_PORTFOLIO_WRITE_ENV = "TOMVERSE_AMUX_V4_PORTFOLIO_WRITE";
-export const amuxV4PortfolioWriteEnabled = (value: string | undefined) =>
-  AMUX_V4_PORTFOLIO_WRITE_CODE_ENABLED && value === "enabled";
-
 export class AmuxPortfolioError extends Error {
   constructor(readonly code: "forbidden" | "invalid_input" | "not_found" |
     "not_ready" | "reconfirm" | "write_disabled" | "integrity_unavailable") {
@@ -248,9 +243,6 @@ export async function commitAmuxPortfolioAssessment(input: {
 
 export async function approveAmuxPortfolioAssessment(
   input: Parameters<typeof commitAmuxPortfolioAssessment>[0]) {
-  if (!amuxV4PortfolioWriteEnabled(process.env[AMUX_V4_PORTFOLIO_WRITE_ENV])) {
-    throw new AmuxPortfolioError("write_disabled");
-  }
   return commitAmuxPortfolioAssessment(input);
 }
 

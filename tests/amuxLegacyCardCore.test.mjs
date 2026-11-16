@@ -140,8 +140,7 @@ test("a card whose only readable work is its approved brief is remade from the b
 });
 
 test("a long card is remade whole and still passes the gate", () => {
-  // Owner direction 2026-11-15: nothing is cut; the legacy switch restores
-  // the former 8 KiB cut with an ellipsis.
+  // Owner direction 2026-11-15: nothing is cut.
   const long = "가".repeat(5_000);
   const built = amuxLegacyCardIdeaText(card(JSON.stringify({ problem: `Long work. ${long}` })));
   assert.equal(built.ok, true);
@@ -150,14 +149,6 @@ test("a long card is remade whole and still passes the gate", () => {
   assert.ok(built.text.includes(long));
   assert.match(built.text, /\n\n원래 카드: AMUX-WORKBOARD-061/);
   assert.equal(inspect(built.text).ok, true);
-  process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS = "enabled";
-  try {
-    const cut = amuxLegacyCardIdeaText(card(JSON.stringify({ problem: `Long work. ${long}` })));
-    assert.equal(cut.truncated, true);
-    assert.ok(Buffer.byteLength(cut.text, "utf8") <= AMUX_IDEA_INPUT_MAX_BYTES);
-    assert.match(cut.text, /…\n\n원래 카드: AMUX-WORKBOARD-061/);
-    assert.equal(inspect(cut.text).ok, true);
-  } finally { delete process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS; }
 });
 
 test("content the idea gate refuses stays refused", () => {

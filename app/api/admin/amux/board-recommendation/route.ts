@@ -16,7 +16,6 @@ import {
   boardImportContentTypeAccepted,
 } from "@/lib/amux/boardImportCore";
 import { BOARD_PROMOTION_RAW_BODY_MAX_BYTES } from "@/lib/amux/boardPromotionCore";
-import { RECOMMENDATION_CODE_LATCH } from "@/lib/amux/recommendationPoolCore";
 import {
   configureRecommendationCapacity,
   decideRecommendation,
@@ -90,9 +89,6 @@ export async function POST(request: Request) {
     const raw = await readLimitedText(request, BOARD_PROMOTION_RAW_BODY_MAX_BYTES);
     if (action === "preview") {
       return NextResponse.json(await previewRecommendation(raw), { headers: noStoreHeaders });
-    }
-    if (!RECOMMENDATION_CODE_LATCH) {
-      return NextResponse.json({ error: "apply_disabled" }, { status: 409, headers: noStoreHeaders });
     }
     if (action === "prepare") {
       const prepared = await prepareRecommendation({ session: auth.session, request, raw });

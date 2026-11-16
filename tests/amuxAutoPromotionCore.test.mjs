@@ -11,7 +11,6 @@ import {
 } from "../lib/adminNavigation.ts";
 import { SYSTEM_AUDIT_ACTORS } from "../lib/adminAuditSystemActors.ts";
 import { boardPromotionItemBindingsDigest } from "../lib/amux/boardPromotionCore.ts";
-import { RECOMMENDATION_CODE_LATCH } from "../lib/amux/recommendationPoolCore.ts";
 import {
   AUTO_COST_24H_CENTS,
   AUTO_COST_30D_CENTS,
@@ -53,9 +52,8 @@ const day = 24 * 60 * 60 * 1000;
 const now = new Date("2026-09-25T00:00:00.000Z");
 const at = (ms) => new Date(now.getTime() + ms);
 
-test("version 10 keeps the auto latch open and ships the recommendation latch open", () => {
+test("version 10 keeps the auto latch open", () => {
   assert.equal(AUTO_LATCH, true);
-  assert.equal(RECOMMENDATION_CODE_LATCH, true);
   assert.equal(autoPromotionApplyPermitted({ envValue: "enabled", codeLatch: true }), true);
   assert.equal(autoPromotionApplyPermitted({ envValue: "enabled", codeLatch: false }), false);
   assert.equal(autoPromotionApplyPermitted({ envValue: "true", codeLatch: true }), false);

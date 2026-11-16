@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
-  AMUX_IDEA_TITLE_MAX,
   amuxIdeaName,
   amuxIdeaNameText,
   amuxIdeaTitleFromText,
@@ -30,29 +29,8 @@ test("a blank first line gives way to the first line with text; no text gives no
 
 test("a long first line is kept whole (owner direction 2026-11-15)", () => {
   const long = `${"y".repeat(500)} ${"한".repeat(300)} ${"😀".repeat(100)}`;
-  assert.equal(amuxIdeaTitleFromText(`${long}\nrest`, false), long);
-  assert.equal(amuxIdeaTitleFromText(`${long}\nrest`), long, "the new behaviour is the default");
-  assert.ok(!amuxIdeaTitleFromText(`${"z".repeat(78)}  tail tail`, false).includes("…"));
-});
-
-test("with the legacy switch a long first line is cut to 80 characters with an ellipsis, counting code points", () => {
-  assert.equal(AMUX_IDEA_TITLE_MAX, 80);
-  const exact = "x".repeat(80);
-  assert.equal(amuxIdeaTitleFromText(exact, true), exact);
-  const cut = amuxIdeaTitleFromText(`${"y".repeat(81)}\nrest`, true);
-  assert.equal(cut, `${"y".repeat(79)}…`);
-  const emoji = amuxIdeaTitleFromText("😀".repeat(100), true);
-  assert.equal(Array.from(emoji).length, 80);
-  assert.equal(emoji, `${"😀".repeat(79)}…`);
-  assert.equal(amuxIdeaTitleFromText(`${"z".repeat(78)}  tail tail`, true), `${"z".repeat(78)}…`);
-  const previous = process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS;
-  process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS = "enabled";
-  try {
-    assert.equal(amuxIdeaTitleFromText(`${"y".repeat(81)}`), `${"y".repeat(79)}…`, "the switch is read from the environment");
-  } finally {
-    if (previous === undefined) delete process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS;
-    else process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS = previous;
-  }
+  assert.equal(amuxIdeaTitleFromText(`${long}\nrest`), long);
+  assert.ok(!amuxIdeaTitleFromText(`${"z".repeat(78)}  tail tail`).includes("…"));
 });
 
 test("an idea is named by its card key, then its title with the short id, then the short id", () => {

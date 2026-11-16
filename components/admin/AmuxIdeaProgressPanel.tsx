@@ -238,8 +238,7 @@ export function AmuxIdeaList({ rows, activeRequestId, children }: {
                       ) : (
                         <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${stopped
                           ? "bg-red-500/15 text-red-300" : "bg-blue-500/15 text-blue-300"}`}>
-                          {row.attention ? (row.lane ? (row.lane.state === "pr_closed" ? m.lane.badgePrClosed : m.lane.badgeFailed)
-                            : m.attention) : m.stages[row.stage]}
+                          {row.attention ? (row.lane ? m.lane.badgePrClosed : m.attention) : m.stages[row.stage]}
                         </span>
                       )}
                     </span>

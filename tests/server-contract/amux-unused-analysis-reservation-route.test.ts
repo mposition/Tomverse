@@ -52,7 +52,6 @@ mock.module(mod("lib/amux/ideaKeyStore.ts"), { namedExports: { loadAmuxContentKe
 } } });
 mock.module(mod("lib/amux/ideaAnalysisBudgetReservationService.ts"), { namedExports: {
   AmuxIdeaAnalysisReservationError: class extends Error {},
-  AMUX_V4_ANALYSIS_BUDGET_RESERVE_CODE_LATCH: true,
   commitAmuxIdeaAnalysisBudgetReservation: async () => { throw new Error("No new reservation"); },
 } });
 // The canonical writer: it re-checks the hold under its locks and refuses a claimed or released one.
@@ -98,7 +97,6 @@ test.beforeEach(() => {
   authenticated = true; role = "owner"; recent = true; ideaOwner = "synthetic-owner";
   writes = []; writerFailure = null; holdReads = [];
   holds = [newHold("hold-a")];
-  process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_READ = "enabled";
   process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_RESERVE = "enabled";
 });
 

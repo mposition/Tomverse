@@ -49,8 +49,7 @@ let loaded: ReturnType<typeof load> | undefined;
 const modules = () => (loaded ??= load());
 
 const ENV = ["TOMVERSE_AMUX_V22_AUTO_PROMOTE", "TOMVERSE_AMUX_V22_WORKER_CLAIM",
-  "TOMVERSE_AMUX_V4_SCORE_AUTO_REFRESH", "TOMVERSE_AMUX_BOARD_AUTO_PROMOTE",
-  "TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS"] as const;
+  "TOMVERSE_AMUX_BOARD_AUTO_PROMOTE"] as const;
 const previous = Object.fromEntries(ENV.map((key) => [key, process.env[key]]));
 after(() => {
   for (const key of ENV) {
@@ -59,13 +58,11 @@ after(() => {
   }
 });
 
-const tick = async (refreshSwitch: string | undefined) => {
+const tick = async () => {
   calls.length = 0;
   process.env.TOMVERSE_AMUX_V22_AUTO_PROMOTE = "enabled";
   process.env.TOMVERSE_AMUX_V22_WORKER_CLAIM = "enabled";
   delete process.env.TOMVERSE_AMUX_BOARD_AUTO_PROMOTE;
-  if (refreshSwitch === undefined) delete process.env.TOMVERSE_AMUX_V4_SCORE_AUTO_REFRESH;
-  else process.env.TOMVERSE_AMUX_V4_SCORE_AUTO_REFRESH = refreshSwitch;
   return (await modules()).POST(new Request("http://localhost/api/internal/amux/auto-promotion/tick", {
     method: "POST", body: "{}", headers: { "content-type": "application/json",
       // The orchestrator's write identity: the tick is admitted.
@@ -73,33 +70,17 @@ const tick = async (refreshSwitch: string | undefined) => {
       "x-amux-instance-id": "00000000-0000-4000-8000-000000000002" } }));
 };
 
-test("the refresh is on by default, runs before claim and promotion, and only \"disabled\" turns it off", async () => {
-  // Owner direction 2026-11-15: on unless exactly "disabled".
+test("the refresh is always on and runs before claim and promotion", async () => {
+  // Owner direction 2026-11-16: no switch turns the refresh off.
   refresh = async () => ({ refreshed: 2, skipped: 1, failed: 0, outcomes: [], orphaned: [] });
-  const byDefault = await tick(undefined);
-  assert.equal(byDefault.status, 200);
+  const response = await tick();
+  assert.equal(response.status, 200);
   assert.deepEqual(calls, ["refresh", "claim", "promote"]);
-  assert.equal((await tick("enabled")).status, 200);
-  assert.deepEqual(calls, ["refresh", "claim", "promote"]);
-  const off = await tick("disabled");
-  assert.equal(off.status, 200);
-  assert.deepEqual(calls, ["claim", "promote"]);
-
-  // The intake legacy-limits switch restores the 2026-11-14 default-off rule.
-  process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS = "enabled";
-  try {
-    assert.equal((await tick(undefined)).status, 200);
-    assert.deepEqual(calls, ["claim", "promote"]);
-    assert.equal((await tick("enabled")).status, 200);
-    assert.deepEqual(calls, ["refresh", "claim", "promote"]);
-  } finally {
-    delete process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS;
-  }
 });
 
 test("a refused refresh never fails the tick", async () => {
   refresh = async () => { throw new Error("database unavailable"); };
-  const response = await tick("enabled");
+  const response = await tick();
   assert.equal(response.status, 200);
   assert.deepEqual(calls, ["refresh", "claim", "promote"]);
 });
@@ -107,7 +88,7 @@ test("a refused refresh never fails the tick", async () => {
 test("a refresh whose commit outcome is lost stops the tick before claim and promotion", async () => {
   const { BoardImportError } = await modules();
   refresh = async () => { throw new BoardImportError("outcome_unknown", 409, "task-1"); };
-  const response = await tick("enabled");
+  const response = await tick();
   assert.equal(response.status, 409);
   assert.deepEqual(await response.json(), { promoted: false, policy_version: 22,
     reason: "outcome_unknown" });

@@ -9,8 +9,7 @@ import { assertRecentAdminAuthentication,
   isAdminReauthenticationError } from "@/lib/adminReauthentication";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedText } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
-import { AMUX_V4_PORTFOLIO_WRITE_ENV, AmuxPortfolioError,
-  amuxV4PortfolioWriteEnabled } from "@/lib/amux/portfolioAssessmentService";
+import { AmuxPortfolioError } from "@/lib/amux/portfolioAssessmentService";
 import { AMUX_V4_SCORE_PLAN_MAX_ASSESSMENTS, AMUX_V4_SCORE_PLAN_MAX_TASKS,
   AmuxV4ScorePlanError, approveAmuxV4ScorePlan,
   readAmuxV4ScorePlan } from "@/lib/amux/portfolioPlanApprovalService";
@@ -50,10 +49,6 @@ export async function POST(request: Request) {
         { status: 403, headers: noStore });
     }
     await assertRecentAdminAuthentication(session);
-    if (!amuxV4PortfolioWriteEnabled(process.env[AMUX_V4_PORTFOLIO_WRITE_ENV])) {
-      return NextResponse.json({ error: "portfolio_write_disabled", retryWrite: false },
-        { status: 503, headers: noStore });
-    }
     if (request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !==
         "application/json") {
       return NextResponse.json({ error: "content_type_refused", retryWrite: false },

@@ -3,15 +3,6 @@ import { z } from "zod";
 import { AMUX_IDEA_ANALYSIS_PROVIDERS } from "./ideaAnalysisChannelCore.ts";
 
 /** Owner decisions are stored in the app; this contract cannot open a CLI. */
-export const AMUX_V4_FRONTIER_CATALOG_WRITE_CODE_LATCH = true;
-export const AMUX_V4_FRONTIER_CATALOG_WRITE_ENV = "TOMVERSE_AMUX_V4_FRONTIER_CATALOG_WRITE";
-export const frontierCatalogWritePermitted = (value: string | undefined): boolean =>
-  AMUX_V4_FRONTIER_CATALOG_WRITE_CODE_LATCH && value === "enabled";
-export const AMUX_V4_FRONTIER_CATALOG_READ_CODE_LATCH = true;
-export const AMUX_V4_FRONTIER_CATALOG_READ_ENV = "TOMVERSE_AMUX_V4_FRONTIER_CATALOG_READ";
-export const frontierCatalogReadPermitted = (value: string | undefined): boolean =>
-  AMUX_V4_FRONTIER_CATALOG_READ_CODE_LATCH && value === "enabled";
-
 export const AMUX_V4_FRONTIER_CATALOG_BODY_MAX_BYTES = 2_048;
 const effortOrder = ["low", "medium", "high", "xhigh", "max", "ultra"] as const;
 const effort = z.enum(effortOrder);

@@ -15,7 +15,7 @@ import {
   BoardImportError,
   boardImportContentTypeAccepted,
 } from "@/lib/amux/boardImportCore";
-import { AMUX_INTAKE_APPLY_ENV, AMUX_INTAKE_RAW_BODY_MAX_BYTES } from "@/lib/amux/intakeCore";
+import { AMUX_INTAKE_RAW_BODY_MAX_BYTES } from "@/lib/amux/intakeCore";
 import {
   AMUX_INTAKE_SOURCE_KEY_SECRET_ENV,
   planAmuxIntakeRegistration,
@@ -174,7 +174,7 @@ export async function POST(request: Request) {
     }
     const secret = process.env[AMUX_INTAKE_SOURCE_KEY_SECRET_ENV] ?? null;
     if (action === "preview") {
-      return NextResponse.json(previewAmuxIntake(raw, secret, process.env[AMUX_INTAKE_APPLY_ENV]), {
+      return NextResponse.json(previewAmuxIntake(raw, secret), {
         headers: noStoreHeaders,
       });
     }

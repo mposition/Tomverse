@@ -1,7 +1,7 @@
 import { createHash, createHmac } from "node:crypto";
 
 import { amuxCanonicalJson } from "./boardImportCore.ts";
-import { AMUX_INTAKE_SAFETY_MAX_BYTES, amuxIntakeLegacyLimits } from "./intakeLimitsCore.ts";
+import { AMUX_INTAKE_SAFETY_MAX_BYTES } from "./intakeLimitsCore.ts";
 
 /**
  * Local Frontier analysis packages for AMUX intake.
@@ -24,8 +24,8 @@ export const LOCAL_INTAKE_AGENT_ID = "amux-intake";
  * board digest already ties it to the board). The one ceiling left is the
  * request-body safety value shared with the rest of the idea flow
  * (AMUX_INTAKE_SAFETY_MAX_BYTES), which only keeps one body from holding
- * unbounded memory. The former 8 KiB input size holds only under
- * TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS (scanAmuxV4Input).
+ * unbounded memory. The GitHub excerpt page still holds its own 8 KiB
+ * (LOCAL_INTAKE_INPUT_MAX_BYTES).
  */
 export const LOCAL_INTAKE_PACKAGE_MAX_BYTES = AMUX_INTAKE_SAFETY_MAX_BYTES;
 export const LOCAL_INTAKE_INPUT_MAX_BYTES = 8_192;
@@ -273,11 +273,9 @@ export const scanLocalIntakeInput = (value: string,
 
 /** Separate v4 input gate; this does not change the already enabled v3 path.
  * Owner direction 2026-11-15: the AMUX idea flow refuses text for its content
- * (secrets, personal data, paths, private hosts), not its length; the former
- * 8 KiB holds only under TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS. */
+ * (secrets, personal data, paths, private hosts), not its length. */
 export const scanAmuxV4Input = (value: string): { ok: true } | { ok: false; code: string } =>
-  scanIntakeInputWithSecret(value, v4SecretPattern,
-    amuxIntakeLegacyLimits() ? LOCAL_INTAKE_INPUT_MAX_BYTES : AMUX_INTAKE_SAFETY_MAX_BYTES);
+  scanIntakeInputWithSecret(value, v4SecretPattern, AMUX_INTAKE_SAFETY_MAX_BYTES);
 
 const proseRefused = (value: string): string | null => {
   if (controlChar(value)) return "control_character";

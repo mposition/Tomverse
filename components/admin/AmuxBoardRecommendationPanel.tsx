@@ -14,7 +14,6 @@ type RecommendationBody = {
   decisionId?: string;
   status?: string;
   refusal?: string | null;
-  applyPermitted?: boolean;
   includedCount?: number;
   included?: Array<{ cardId: string; scoreTotal: number; expectedRevision: number; sourceDigest: string | null }>;
   excluded?: Array<{ cardId: string; scoreTotal: number; exclusionCode: string | null }>;
@@ -107,9 +106,6 @@ export function AmuxBoardRecommendationPanel() {
           {result.status ? <p>{messages.status(result.status)}</p> : null}
           {result.refusal ? <p>{messages.refusal(result.refusal)}</p> : null}
           {typeof result.includedCount === "number" ? <p>{messages.included(result.includedCount)}</p> : null}
-          {typeof result.applyPermitted === "boolean" ? (
-            <p>{messages.applyPermitted(result.applyPermitted ? "true" : "false")}</p>
-          ) : null}
           {result.snapshotId ? <p className="font-mono text-xs">{messages.snapshot(result.snapshotId)}</p> : null}
         </div>
       ) : null}

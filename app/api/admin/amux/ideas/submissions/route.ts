@@ -10,10 +10,6 @@ import { assertRecentAdminAuthentication, isAdminReauthenticationError } from "@
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedText } from "@/lib/apiSecurity";
 import {
   amuxIdeaSubmissionEnvelopeMaxBytes,
-  AMUX_V4_IDEA_READBACK_ENV,
-  AMUX_V4_IDEA_SUBMISSION_ENV,
-  ideaSubmissionReadBackPermitted,
-  ideaSubmissionWritePermitted,
   inspectAmuxIdeaSubmission,
   isAmuxIdeaRequestId,
 } from "@/lib/amux/ideaSubmissionCore";
@@ -21,13 +17,7 @@ import { amuxIdeaLaneTook } from "@/lib/amux/ideaLaneService";
 import { IdeaSubmissionError, readIdeaSubmissionRequest, submitIdea } from "@/lib/amux/ideaSubmissionService";
 import { amuxIdeaLaneEnabled } from "@/lib/amux/ideaLaneCore";
 import {
-  AMUX_SESSION_INTAKE_READBACK_ENV,
-  amuxSessionIntakeReadbackEnabled,
-} from "@/lib/amux/ideaSessionIntakeReadbackCore";
-import {
-  AMUX_SESSION_INTAKE_ENV,
   amuxIdeaSessionPrewriteStatus,
-  amuxSessionIntakeWritePermitted,
   inspectAmuxIdeaSessionSubmission,
   inspectAmuxSessionModelChoice,
 } from "@/lib/amux/ideaSessionSubmissionCore";
@@ -59,23 +49,10 @@ const owner = async (): Promise<Session | NextResponse> => {
   return session;
 };
 
-/** amux-intake v19 item 1: the Admin idea input and coding sessions enter the
- * same intake writer. While session intake is on, an Admin idea is stored as
- * a session idea under the owner's operating scope and queued for automatic
- * analysis; otherwise the v4 path below is unchanged. */
-const sessionIntakeOn = () =>
-  amuxSessionIntakeWritePermitted(process.env[AMUX_SESSION_INTAKE_ENV],
-    process.env[AMUX_V4_IDEA_SUBMISSION_ENV]) &&
-  amuxSessionIntakeReadbackEnabled(process.env[AMUX_SESSION_INTAKE_READBACK_ENV],
-    process.env[AMUX_V4_IDEA_READBACK_ENV]);
-
-/** Reading back a stored session idea needs only the read-back switches: an
- * owner who turns session writes off after a lost answer must still recover
- * it, or the v4 read would report a committed session idea as partial. */
-const sessionReadbackOn = () =>
-  amuxSessionIntakeReadbackEnabled(process.env[AMUX_SESSION_INTAKE_READBACK_ENV],
-    process.env[AMUX_V4_IDEA_READBACK_ENV]);
-
+/** The Admin idea input and coding sessions enter the same intake writer: an
+ * Admin idea is stored as a session idea under the owner's operating scope and
+ * queued for automatic analysis. Only the idea lane's test entry
+ * (`?target=lane`) still saves an owner idea through the plain idea writer. */
 const ADMIN_SOURCE = Object.freeze({ toolName: "tomverse-admin",
   modelProvider: "operator", sessionDisplay: "Admin idea input" });
 
@@ -108,17 +85,10 @@ const failure = (error: unknown): Response => {
   return NextResponse.json({ error: "submission_failed" }, { status: 500, headers: noStore });
 };
 
-/** Dark v4 route. It cannot be enabled by the v1-v3 intake switches. */
 export async function POST(request: Request) {
   try {
     const session = await owner();
     if (session instanceof NextResponse) return session;
-    // A write without its independent read-back gate could strand an
-    // ambiguous COMMIT with no safe operator recovery path.
-    if (!ideaSubmissionWritePermitted(process.env[AMUX_V4_IDEA_SUBMISSION_ENV]) ||
-        !ideaSubmissionReadBackPermitted(process.env[AMUX_V4_IDEA_READBACK_ENV])) {
-      return NextResponse.json({ error: "submission_disabled" }, { status: 503, headers: noStore });
-    }
     if (request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !== "application/json") {
       return NextResponse.json({ error: "content_type_refused" }, { status: 415, headers: noStore });
     }
@@ -133,7 +103,7 @@ export async function POST(request: Request) {
     if (toLane && !amuxIdeaLaneEnabled()) {
       return NextResponse.json({ error: "lane_disabled" }, { status: 503, headers: noStore });
     }
-    if (!toLane && sessionIntakeOn()) {
+    if (!toLane) {
       let envelope: unknown;
       try { envelope = JSON.parse(raw); } catch { envelope = null; }
       const body = envelope && typeof envelope === "object" && !Array.isArray(envelope)
@@ -186,9 +156,6 @@ export async function GET(request: Request) {
   try {
     const session = await owner();
     if (session instanceof NextResponse) return session;
-    if (!ideaSubmissionReadBackPermitted(process.env[AMUX_V4_IDEA_READBACK_ENV])) {
-      return NextResponse.json({ error: "submission_disabled" }, { status: 503, headers: noStore });
-    }
     await consumeApiRateLimit(request, session.user!.id!, "admin-amux-v4-idea-readback", {
       minute: 10,
       day: 100,
@@ -200,15 +167,13 @@ export async function GET(request: Request) {
     // A session idea saved from Admin has the operator as its actor, so the v4 owner
     // read finds the row and, with no v4-shaped audit, calls it partial. The session
     // read answers first (it is absent for any row that is not a session idea).
-    if (sessionReadbackOn()) {
-      const seen = await readAmuxIdeaSessionSubmissionRequest(requestId);
-      if (seen.status !== "absent") {
-        return NextResponse.json(seen.status === "committed"
-          ? { requestId, status: "committed", ideaId: seen.ideaId, origin: "session",
-            hasExternalSources: seen.hasExternalSources }
-          : { requestId, status: "partial", ideaId: seen.ideaId, origin: "session" },
-        { headers: noStore });
-      }
+    const seen = await readAmuxIdeaSessionSubmissionRequest(requestId);
+    if (seen.status !== "absent") {
+      return NextResponse.json(seen.status === "committed"
+        ? { requestId, status: "committed", ideaId: seen.ideaId, origin: "session",
+          hasExternalSources: seen.hasExternalSources }
+        : { requestId, status: "partial", ideaId: seen.ideaId, origin: "session" },
+      { headers: noStore });
     }
     const owned = await readIdeaSubmissionRequest(session, requestId);
     // An idea the lane took has no v4 steps; the input hides them however it was opened.

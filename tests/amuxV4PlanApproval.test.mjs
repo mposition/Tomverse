@@ -24,7 +24,6 @@ test("each part's own route and the whole plan run the same in-transaction part"
   const route = readFileSync("app/api/admin/amux/ideas/plan/route.ts", "utf8");
   assert.match(route, /getAdminRole\(session\) !== "owner" \|\| !hasValidMutationOrigin\(request\)/);
   assert.match(route, /assertRecentAdminAuthentication\(session\)/);
-  assert.match(route, /amuxV4UnitWriteEnabled\(process\.env\[AMUX_V4_UNIT_WRITE_ENV\]\)/);
   assert.match(route, /consumeApiRateLimit\(/);
   assert.match(route, /planRequestId: z\.uuid\(\)/);
 });

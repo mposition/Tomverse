@@ -18,15 +18,7 @@ import {
   amuxTabChips,
 } from "../lib/adminAmuxTabStatus.ts";
 import { AUTO_PROMOTION_APPLY_ENV, AUTO_PROMOTION_CODE_LATCH } from "../lib/amux/autoPromotionCore.ts";
-import { BACKLOG_METADATA_APPLY_ENV, BACKLOG_METADATA_CODE_LATCH } from "../lib/amux/backlogMetadataCore.ts";
 import { BOARD_IMPORT_APPLY_CODE_LATCH, BOARD_IMPORT_APPLY_ENV } from "../lib/amux/boardImportCore.ts";
-import { BOARD_PROMOTION_APPLY_CODE_LATCH, BOARD_PROMOTION_APPLY_ENV } from "../lib/amux/boardPromotionCore.ts";
-import {
-  AMUX_RECONCILIATION_APPLY_CODE_LATCH,
-  AMUX_RECONCILIATION_APPLY_ENV,
-} from "../lib/amux/boardReconciliationCore.ts";
-import { AMUX_INTAKE_APPLY_CODE_LATCH, AMUX_INTAKE_APPLY_ENV } from "../lib/amux/intakeCore.ts";
-import { RECOMMENDATION_APPLY_ENV, RECOMMENDATION_CODE_LATCH } from "../lib/amux/recommendationPoolCore.ts";
 import {
   AMUX_V22_AUTO_PROMOTION_CODE_LATCH,
   AMUX_V22_AUTO_PROMOTION_ENV,
@@ -69,45 +61,12 @@ test("legacy auto-promotion and v22 automatic admission have independent chips",
  * test only asks that the chip follow it.
  */
 const SWITCHES = {
-  intake: {
-    env: AMUX_INTAKE_APPLY_ENV,
-    envName: "AMUX_INTAKE_APPLY_ENV",
-    latch: AMUX_INTAKE_APPLY_CODE_LATCH,
-    reader: "app/api/admin/amux/intake/route.ts",
-  },
   import: {
     env: BOARD_IMPORT_APPLY_ENV,
     envName: "BOARD_IMPORT_APPLY_ENV",
     latch: BOARD_IMPORT_APPLY_CODE_LATCH,
     latchName: "BOARD_IMPORT_APPLY_CODE_LATCH",
     reader: "lib/amux/boardImportService.ts",
-  },
-  reconciliation: {
-    env: AMUX_RECONCILIATION_APPLY_ENV,
-    envName: "AMUX_RECONCILIATION_APPLY_ENV",
-    latch: AMUX_RECONCILIATION_APPLY_CODE_LATCH,
-    reader: "app/api/admin/amux/reconciliation/route.ts",
-  },
-  metadata: {
-    env: BACKLOG_METADATA_APPLY_ENV,
-    envName: "BACKLOG_METADATA_APPLY_ENV",
-    latch: BACKLOG_METADATA_CODE_LATCH,
-    latchName: "BACKLOG_METADATA_CODE_LATCH",
-    reader: "lib/amux/backlogMetadataService.ts",
-  },
-  recommendation: {
-    env: RECOMMENDATION_APPLY_ENV,
-    envName: "RECOMMENDATION_APPLY_ENV",
-    latch: RECOMMENDATION_CODE_LATCH,
-    latchName: "RECOMMENDATION_CODE_LATCH",
-    reader: "lib/amux/recommendationPoolService.ts",
-  },
-  promotion: {
-    env: BOARD_PROMOTION_APPLY_ENV,
-    envName: "BOARD_PROMOTION_APPLY_ENV",
-    latch: BOARD_PROMOTION_APPLY_CODE_LATCH,
-    latchName: "BOARD_PROMOTION_APPLY_CODE_LATCH",
-    reader: "lib/amux/boardPromotionService.ts",
   },
   "auto-promotion": {
     env: AUTO_PROMOTION_APPLY_ENV,
@@ -199,12 +158,12 @@ test("an open switch is drawn for attention and a closed one is not", () => {
   };
   assert.deepEqual(
     amuxTabChips(
-      { intake: "apply_on", import: "preview_apply_off", cards: "read_only", assignment: undefined },
+      { import: "preview_apply_off", "auto-promotion": "apply_on", cards: "read_only", assignment: undefined },
       labels
     ),
     {
-      intake: { label: "on", attention: true },
       import: { label: "off", attention: false },
+      "auto-promotion": { label: "on", attention: true },
       cards: { label: "read", attention: false },
     }
   );
@@ -218,11 +177,11 @@ test("an open switch is drawn for attention and a closed one is not", () => {
 
 test("the pages ask the switches rather than writing the state", () => {
   // The six retired tools are the Legacy tools of Safety & recovery; the page
-  // reads each one's switch rather than writing the state.
+  // reads the switch of each one that still has one rather than writing the state.
   const recovery = read("app/(site)/(application)/admin/amux-recovery/page.tsx");
   assert.ok(
-    recovery.includes("amuxSwitchedTabStatuses(LEGACY_SECTIONS)"),
-    "amux-recovery does not read every legacy section's switch"
+    recovery.includes("amuxSwitchedTabStatuses(SWITCHED_LEGACY_SECTIONS)"),
+    "amux-recovery does not read every switched legacy section's switch"
   );
   for (const section of ["import", "reconciliation", "metadata", "recommendation", "promotion", "auto-promotion"]) {
     assert.ok(recovery.includes(`"${section}",`), `${section} is not a legacy section`);

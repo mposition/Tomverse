@@ -351,15 +351,10 @@ test("a launcher that signed another channel cannot claim this reservation", asy
   assert.ok(authority);
   const queued = await queueIdea(authority);
   const secret = "syntheticMaxLauncherSecret_0123456789abcdefgh";
-  const names = ["TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET",
-    "TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_WRITE", "TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_READ",
-    "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_STOP_POLL_READ"] as const;
+  const names = ["TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET"] as const;
   const old = Object.fromEntries(names.map((name) => [name, process.env[name]]));
   try {
     process.env.TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET = secret;
-    process.env.TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_WRITE = "enabled";
-    process.env.TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_READ = "enabled";
-    process.env.TOMVERSE_AMUX_V19_SESSION_ANALYSIS_STOP_POLL_READ = "enabled";
     const identity = { claimId: randomUUID(), requestId: randomUUID(),
       reservationId: queued.reservationId, ideaId: queued.ideaId, invocationOrdinal: 0,
       priceVersionId: copilot.priceVersionId, provider: "anthropic",

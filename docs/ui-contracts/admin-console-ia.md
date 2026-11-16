@@ -421,11 +421,13 @@ switch state. It carries no badge: a switch is a setting, not work waiting for
 a person. Operations settings carries the halt
 count; a failed halt read is shown as unknown, never as zero. Legacy Execution
 `?tab=halts` and `?tab=decision-maker` links redirect to their corresponding
-settings sections and preserve the remaining query fields. Each gated section's tab carries a chip
+settings sections and preserve the remaining query fields. Each section that still has an environment switch (the catalog import, which
+also keeps its shipped code latch, and auto-promotion) carries a chip
 -- "Preview · apply off" or "Apply on", and "Behind server switch" or "Server
 switch on" for auto-promotion -- computed by `lib/adminAmuxTabStatus.ts` from
 the environment variable and shipped code latch that section's own route
-reads (rule 8). Cards reads "Read only" because the card list issues no
+reads (rule 8). Intake, reconciliation, backlog metadata, recommendation and
+promotion lost their switches on 2026-11-16 and carry no chip. Cards reads "Read only" because the card list issues no
 request and writes nothing; Assignment reads "Read only" to a role without
 `ops:write`, the permission every decision route checks.
 

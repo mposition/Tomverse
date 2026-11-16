@@ -12,11 +12,7 @@ const reservationId = "bb3c01fe-8f75-4e14-8a0a-bc63536240f2";
 const ideaId = "7542f64d-a8c1-4da7-8292-d953095f217e";
 const evidenceId = "9b7e4b8e-2d34-48b2-95a5-333360b10816";
 const envNames = ["TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET",
-  "TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET", "TOMVERSE_AMUX_SYNC_SECRET",
-  "TOMVERSE_AMUX_V19_MAX_CHECKOUT_EVIDENCE_WRITE",
-  "TOMVERSE_AMUX_V19_MAX_CHECKOUT_EVIDENCE_READ",
-  "TOMVERSE_AMUX_V19_CHECKOUT_EVIDENCE_WRITE",
-  "TOMVERSE_AMUX_V19_CHECKOUT_EVIDENCE_READ"] as const;
+  "TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET", "TOMVERSE_AMUX_SYNC_SECRET"] as const;
 const oldEnv = Object.fromEntries(envNames.map((name) => [name, process.env[name]]));
 let writes = 0;
 let reads = 0;
@@ -69,8 +65,6 @@ const reset = () => {
   process.env.TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET = secret;
   delete process.env.TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET;
   delete process.env.TOMVERSE_AMUX_SYNC_SECRET;
-  for (const name of envNames.filter((name) => name.endsWith("EVIDENCE_WRITE") ||
-      name.endsWith("EVIDENCE_READ"))) process.env[name] = "enabled";
 };
 const body = { claimId, requestId, reservationId, ideaId,
   invocationOrdinal: 0, referenceOrdinal: 0,
@@ -96,7 +90,7 @@ const get = (query?: string, extra: Record<string, string> = {}) => {
   { headers: { ...headers, ...extra } });
 };
 
-test("Max proof route requires separate credential and both readback gates", async () => {
+test("Max proof route requires its separate credential", async () => {
   reset();
   assert.equal((await route.POST(post(body, {
     "x-amux-agent-id": "amux-intake" }))).status, 401);
@@ -104,13 +98,7 @@ test("Max proof route requires separate credential and both readback gates", asy
     { authorization: "Bearer wrong" }))).status, 401);
   process.env.TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET = secret;
   assert.equal((await route.POST(post())).status, 401);
-  reset();
-  delete process.env.TOMVERSE_AMUX_V19_MAX_CHECKOUT_EVIDENCE_WRITE;
-  assert.equal((await route.POST(post())).status, 409);
   assert.equal(writes, 0);
-  assert.equal((await route.GET(get())).status, 404);
-  delete process.env.TOMVERSE_AMUX_V19_MAX_CHECKOUT_EVIDENCE_READ;
-  assert.equal((await route.GET(get())).status, 409);
 });
 
 test("Max proof route rejects malformed identity and does not write", async () => {

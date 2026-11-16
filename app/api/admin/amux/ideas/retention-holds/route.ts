@@ -16,10 +16,6 @@ import { AmuxIdeaRetentionHoldError,
   "@/lib/amux/ideaRetentionHoldService";
 import { prisma } from "@/lib/prisma";
 
-const READ_ENV = "TOMVERSE_AMUX_V4_RETENTION_HOLD_READ";
-const WRITE_ENV = "TOMVERSE_AMUX_V4_RETENTION_HOLD_WRITE";
-const READ_CODE_LATCH = true;
-const WRITE_CODE_LATCH = true;
 const noStore = { "Cache-Control": "private, no-store, max-age=0" };
 const uuid = z.string().uuid();
 const createSchema = z.object({ id: uuid, ideaId: uuid,
@@ -69,10 +65,6 @@ export async function GET(request: Request): Promise<Response> {
       { status: 404, headers: noStore });
     if (session === "forbidden") return NextResponse.json({ error: "Forbidden." },
       { status: 403, headers: noStore });
-    if (!READ_CODE_LATCH || process.env[READ_ENV] !== "enabled") {
-      return NextResponse.json({ error: "retention_hold_read_disabled" },
-        { status: 409, headers: noStore });
-    }
     const url = new URL(request.url);
     const ideaId = url.searchParams.get("ideaId");
     if (!ideaId || !uuid.safeParse(ideaId).success ||
@@ -105,12 +97,6 @@ export async function POST(request: Request): Promise<Response> {
       { status: 404, headers: noStore });
     if (session === "forbidden") return NextResponse.json({ error: "Forbidden." },
       { status: 403, headers: noStore });
-    if (!READ_CODE_LATCH || !WRITE_CODE_LATCH ||
-        process.env[READ_ENV] !== "enabled" ||
-        process.env[WRITE_ENV] !== "enabled") {
-      return NextResponse.json({ error: "retention_hold_write_disabled" },
-        { status: 409, headers: noStore });
-    }
     if (request.headers.get("content-type")?.split(";")[0]?.trim()
       .toLowerCase() !== "application/json") {
       return NextResponse.json({ error: "Invalid content type." },
@@ -133,12 +119,6 @@ export async function DELETE(request: Request): Promise<Response> {
       { status: 404, headers: noStore });
     if (session === "forbidden") return NextResponse.json({ error: "Forbidden." },
       { status: 403, headers: noStore });
-    if (!READ_CODE_LATCH || !WRITE_CODE_LATCH ||
-        process.env[READ_ENV] !== "enabled" ||
-        process.env[WRITE_ENV] !== "enabled") {
-      return NextResponse.json({ error: "retention_hold_write_disabled" },
-        { status: 409, headers: noStore });
-    }
     if (request.headers.get("content-type")?.split(";")[0]?.trim()
       .toLowerCase() !== "application/json") {
       return NextResponse.json({ error: "Invalid content type." },

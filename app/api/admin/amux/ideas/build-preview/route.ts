@@ -9,7 +9,6 @@ import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { assertRecentAdminAuthentication, isAdminReauthenticationError } from "@/lib/adminReauthentication";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedText } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
-import { buildPreviewPermitted } from "@/lib/amux/ideaBuildPreviewCore";
 import { InitialPlanAccessError, prepareInitialIdeaSourcePlan } from "@/lib/amux/ideaInitialSourcePlanAccess";
 import { InitialSourcePlanError } from "@/lib/amux/ideaInitialSourcePlanService";
 import { inspectAmuxIdeaSubmission } from "@/lib/amux/ideaSubmissionCore";
@@ -65,10 +64,6 @@ export async function POST(request: Request) {
   try {
     const session = await owner();
     if (session instanceof NextResponse) return session;
-    if (!buildPreviewPermitted(process.env)) {
-      return NextResponse.json({ error: "build_preview_disabled", transferAuthorized: false },
-        { status: 503, headers: noStore });
-    }
     if (request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !== "application/json") {
       return NextResponse.json({ error: "content_type_refused", transferAuthorized: false },
         { status: 415, headers: noStore });

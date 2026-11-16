@@ -7,8 +7,8 @@ import type { Session } from "next-auth";
 import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import { prisma } from "@/lib/prisma";
 import { loadCurrentAmuxContentKeys } from "./ideaKeyConfig.ts";
-import { AMUX_V4_PORTFOLIO_WRITE_ENV, AmuxPortfolioError, amuxPortfolioOwnerId,
-  amuxV4PortfolioWriteEnabled, writeAmuxPortfolioAssessmentInTx } from
+import { AmuxPortfolioError, amuxPortfolioOwnerId,
+  writeAmuxPortfolioAssessmentInTx } from
   "./portfolioAssessmentService.ts";
 import { writeAmuxPortfolioScoreInTx } from "./portfolioScoreService.ts";
 import { amuxV4ScorePlanRowRequestId, isAmuxV4PlanRequestId } from "./portfolioPlanCore.ts";
@@ -74,12 +74,6 @@ export async function prepareAmuxV4ScorePlan(session: Session, request: Request,
   amuxPortfolioOwnerId(session);
   await assertRecentAdminAuthentication(session);
   const empty = input.assessments.length + input.taskIds.length === 0;
-  // An empty part writes nothing, so it needs no portfolio switch: a plan of
-  // nodes and cards alone still goes through with portfolio writes off.
-  if (!(empty && options.allowEmpty) &&
-      !amuxV4PortfolioWriteEnabled(process.env[AMUX_V4_PORTFOLIO_WRITE_ENV])) {
-    throw new AmuxPortfolioError("write_disabled");
-  }
   const subjects = input.assessments.map((entry) => entry.subject.id);
   if ((empty && !options.allowEmpty) ||
       input.assessments.length > AMUX_V4_SCORE_PLAN_MAX_ASSESSMENTS ||

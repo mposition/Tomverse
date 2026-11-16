@@ -6,7 +6,6 @@ import type { Session } from "next-auth";
 
 import { prisma } from "@/lib/prisma";
 import { amuxContentUnitKeyId } from "@/lib/amux/ideaKeyStore";
-import { amuxIdeaTitleFromText } from "@/lib/amux/ideaTitleCore";
 import { commitAmuxDueRawIdeaPurge, readAmuxRawIdeaPurgeOutcome,
   retirePurgedAmuxRawIdeaKey } from "@/lib/amux/ideaRawRetentionService";
 import { commitAmuxDueTransferPayloadPurge, commitAmuxDueFreeformPurge,
@@ -350,8 +349,7 @@ test("the title backfill copies a sent Scout suggestion's title onto a live idea
   const read = (id: string) => prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id } })
     .then((row) => row.title);
   // The 2026-11-04 backfill repeats the rule of its day, the 80-character cut
-  // that the legacy switch keeps (owner direction 2026-11-15 removed it).
-  assert.equal(await read(live), amuxIdeaTitleFromText(sentTitle, true));
+  // (owner direction 2026-11-15 removed it from the code).
   assert.equal(await read(live), `${"가".repeat(79)}…`);
   assert.equal(await read(purgedId), null);
   assert.equal(await read(untouched), null);

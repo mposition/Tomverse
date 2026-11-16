@@ -44,6 +44,9 @@ const LEGACY_SECTIONS = [
   "auto-promotion",
 ] as const;
 
+/** The retired tools that still have an environment switch (and so carry a chip). */
+const SWITCHED_LEGACY_SECTIONS = ["import", "auto-promotion"] as const;
+
 /**
  * Safety & recovery: execution halts, unused reservations and claims, and the
  * AMUX tools the idea flow retired.
@@ -78,7 +81,7 @@ export default async function AdminAmuxRecoveryPage({
     countOpenAmuxOrchestratorHalts().catch(() => null),
   ]);
   const isOwner = role === "owner";
-  const legacyStatuses = amuxSwitchedTabStatuses(LEGACY_SECTIONS);
+  const legacyStatuses = amuxSwitchedTabStatuses(SWITCHED_LEGACY_SECTIONS);
   const tabs = (
     <AdminPageTabs
       basePath="/admin/amux-recovery"
@@ -134,10 +137,7 @@ export default async function AdminAmuxRecoveryPage({
     // Expiration of a transfer preview must not hide recovery of its paid
     // claim: the exact-ID GET/owner decision panel mounts on its own link. It
     // does not reconstruct a preview, reserve a budget or dispatch an analysis.
-    const holdId = amuxAnalysisClaimRecoveryHoldId(
-      query.analysisHoldId,
-      process.env.TOMVERSE_AMUX_V4_ANALYSIS_CLAIM_RESOLUTION_READ
-    );
+    const holdId = amuxAnalysisClaimRecoveryHoldId(query.analysisHoldId);
     return (
       <div className="flex min-w-0 flex-col gap-5">
         {tabs}

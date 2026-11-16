@@ -1,5 +1,36 @@
 # AMUX intake
 
+## 운영자 결정 2026-11-16 (대화) — 아이디어 분석·등록의 스위치 정리
+
+운영자 결정(2026-11-16, 대화): "v19, v22 같은 불명확한 용어가 혼동을 주고, 쓸데없는 플래그 variable이
+너무 많다. AMUX 내부 흐름은 로컬 CLI처럼 돌아야 한다." production에서 이 영역의 스위치는 모두 켜져 있었으므로
+아래 정리는 배포만으로 동작을 바꾸지 않는다. 버전 번호는 올리지 않고(AGENTS.md Frontier 절), 새 스위치는
+만들지 않으며, 파일·환경 변수 이름은 바꾸지 않는다. 사용자에게 보이는 문구는 "v4"·"v19" 대신 기능 이름
+(아이디어 분석, 구독 분석, 아이디어 등록)으로 쓴다.
+
+1. **없앤 것.** 켜져 있으면 길을 열고 꺼지면 닫기만 하던 route별 읽기·쓰기 스위치와 true 고정 코드 래치,
+   기본 켜짐인 끄는 스위치(`TOMVERSE_AMUX_V4_SCORE_AUTO_REFRESH`), 옛 한도로 되돌리던
+   `TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS`. route는 항상 열려 있고 인증·owner 승인·최근 step-up·입력 검증·
+   hash-chained 감사는 그대로다. 대상은 아이디어 저장·읽기·계획·transfer 미리보기와 확인·단위 결정·포트폴리오,
+   세션 접수와 read-back, 유료 분석 사슬의 queue·result·claim read·claim resolution·price read·budget read,
+   구독 분석의 queue·가격·claim·결과·중지 확인·checkout·manifest route, backlog 등록·추천 풀·승격·
+   backlog metadata·reconciliation의 apply 스위치다.
+2. **남긴 것(되돌릴 수 없는 경계).** 유료 분석의 월 예산 쓰기(`TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_RESERVE`),
+   지출 시작(`TOMVERSE_AMUX_V4_ANALYSIS_CLAIM_WRITE`), 비용 기준(`TOMVERSE_AMUX_V4_ANALYSIS_PRICE_WRITE`),
+   새 모델 route 상한 두 값, 유료 번역(`TOMVERSE_AMUX_ADMIN_KO_TRANSLATION`), 아이디어 레인
+   (`AMUX_IDEA_LANE_*`), 자동 삭제 세 스위치(`TOMVERSE_AMUX_V4_CONTENT_RETENTION`,
+   `TOMVERSE_AMUX_V19_READ_MANIFEST_RETENTION`, `TOMVERSE_AMUX_V19_SESSION_ANALYSIS_RESULT_RETENTION`)와 그
+   false 래치, box 서비스 시작 스위치(`TOMVERSE_AMUX_V4_LIVE_ANALYSIS_CLI`, `TOMVERSE_AMUX_V4_LOCAL_RETENTION`,
+   `TOMVERSE_AMUX_V19_MAX_SESSION_CYCLE`, `TOMVERSE_AMUX_V19_TRACKED_CHECKOUT_CLI`), 자동 승격
+   (`TOMVERSE_AMUX_BOARD_AUTO_PROMOTE`), 운영자 PC의 직접 DB 쓰기(`TOMVERSE_AMUX_INTAKE_LOCAL_APPLY`),
+   일회성 catalog import(`TOMVERSE_AMUX_BOARD_IMPORT_APPLY`와 false 래치), 구독 분석 자동 등록
+   (`TOMVERSE_AMUX_V19_SYSTEM_REGISTRATION`), 진단 상세(`TOMVERSE_AMUX_V19_DIAGNOSTIC_DETAIL`), 모든 비밀값·
+   토큰·origin·경로 값.
+3. **값 표기.** 남은 스위치의 값은 `enabled` 또는 `disabled`로 적는다. 파서는 production에 이미 들어 있는 값을
+   같은 뜻으로 계속 읽으며 이 결정은 파서를 바꾸지 않았다.
+4. **옛 절의 읽는 법.** 아래 옛 절이 "default-off 스위치", "route별 운영 스위치", "코드 래치"로 적은 것 중 위
+   1항에 든 것은 이 결정이 대신한다. 그 밖의 규칙(비용 상한, 승인, 보존 기간, 감사)은 그대로다.
+
 ## 운영자 지시 2026-11-16 — 아이디어 분석은 사람을 기다리지 않는다
 
 운영자 지시(2026-11-16, 대화): 아이디어 분석 영역의 인위적 정지, 상한, 결과를 버리는 경로를 없앤다.
@@ -75,8 +106,8 @@ Frontier 절).
 5. **기한.** 새 아이디어의 분석 기한은 제출 뒤 36,500일이다(완료·취소로만 끝난다). 세션 결과·읽은 파일
    manifest는 입력 뒤 90일이 지나고 분석이 끝난 뒤에만 지운다. 삭제는 이전보다 늦어질 뿐 앞당겨지지
    않는다. 2026-11-15 전에 제출된 행은 저장된 7일 기한 그대로다.
-6. **점수.** 입력이 그대로인 점수의 자동 연장은 기본 켜짐(`TOMVERSE_AMUX_V4_SCORE_AUTO_REFRESH=disabled`로
-   끔)이고, tick당 개수 제한 없이 tick 시간 예산 안에서 처리하며, 활성 창(7일)과 기준선(28일)을 함께
+6. **점수.** 입력이 그대로인 점수의 자동 연장은 항상 켜짐(2026-11-16 대화 결정: 끄는 스위치
+   `TOMVERSE_AMUX_V4_SCORE_AUTO_REFRESH`를 없앴다)이고, tick당 개수 제한 없이 tick 시간 예산 안에서 처리하며, 활성 창(7일)과 기준선(28일)을 함께
    지금부터 옮긴다. 입력이 바뀌면 이전처럼 운영자가 확인한다.
 7. **레인·표시.** 레인은 실패한 part를 멈추지 않고 간격을 늘려 다시 시도한다(2026-11-16 절 5항). PR body는
    GitHub 한계 65,536자에서만 자른다. 아이디어 제목은 첫 줄 전체다. 분석 번역은 한 호출의 한도 안의
@@ -85,8 +116,10 @@ Frontier 절).
    비밀값·개인정보·경로·사설 host 검사, 유료 호출의 비용 상한과 원장(레인 하루 실행 상한
    `AMUX_IDEA_LANE_MAX_ATTEMPTS_PER_DAY`, 번역 호출별 예약), hash-chained 감사, 삭제 범위는 그대로다.
    Admin 아이디어 제출 route의 rate limit(분당 3, 하루 20)도 보안 경계로 그대로다.
-9. **kill switch.** `TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS=enabled`가 위 코드 제한을 모두 이전 값으로
-   되돌린다. 완화한 DB 제약은 그대로 두며, 되돌린 코드 제한이 그보다 엄격하다.
+9. **되돌리는 스위치 없음.** 위 코드 제한을 이전 값으로 되돌리던 `TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS`는
+   없앴다(2026-11-16 대화 결정: 되돌리기만 하는 옛 스위치와 그 옛 한도 분기·상수·테스트를 함께 지웠다).
+   완화한 DB 제약은 그대로이고, 2026-11-15 전에 제출된 행의 저장된 7일 기한도 그대로다. 레인의 "시도 소진"
+   상태(`failed`)와 번역의 "한 번에 너무 김" 응답도 이 스위치에서만 나오던 것이라 함께 없앴다.
 
 ## v22 — v19 읽은 파일 manifest의 출처: 고정 seccomp 아래의 파일 열기 관측 [결정, 운영자 mposition 2026-10-18]
 
@@ -351,8 +384,8 @@ approvedBy: mposition · approvedAt: 2026-10-16 · 정책 버전: 19
      않으면 운영자가 중지하거나 아래 보존 기한이 올 때까지 그 분석 자리와 예약 비용이 묶인다는 점을
      운영자가 받아들였다.
    - **보존 기한.** 2026-11-15 운영자 지시로 새 아이디어의 분석 기한은 제출 뒤 36,500일이며, 완료·취소로만
-     끝난다. 그 전 아이디어와 `TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS=enabled`의 새 제출은 v6 1항의 "입력 후
-     절대 7일"이다(운영자 결정 2026-10-16). 저장된 기한까지 끝나지 않은 분석은 운영자 중지와 똑같이
+     끝난다. 그 전 아이디어는 v6 1항의 "입력 후
+     절대 7일"이다(운영자 결정 2026-10-16; 2026-11-16에 이 기한을 새 제출에 되돌리던 스위치를 없앴다). 저장된 기한까지 끝나지 않은 분석은 운영자 중지와 똑같이
      처리한다: 결과 불명으로 기록하고, 다시 보내지 않고, 늦은 결과를 DB가 거부하고, 예약 비용은 v13의
      결과 불명 정산 기준을 따른다. 그 뒤 v6대로 24시간 안에 원문·전송 payload·응답 본문을 삭제한다.
    - 분석 checkout은 분석이 끝나거나 중지·취소되면 지운다. checkout은 원문 보존 대상이 아니다.
@@ -406,8 +439,11 @@ approvedBy: mposition · approvedAt: 2026-10-16 · 정책 버전: 19
    수 있다. 알림은 링크만 담는다.
 8. **결과 불명.** 접수는 접수 요청 ID로, 분석은 예약 ID로, 등록은 아이디어 ID로 다시 읽는다. 결과를
    모르면 다시 보내지 않는다. 접수 클라이언트도 응답이 끊기면 같은 요청 ID로 읽기만 한다.
-9. **스위치.** 세션 접수, 저장소 직접 읽기, 자동 등록은 각각 기본 꺼진 운영 스위치를 갖는다. 기존
-   intake·분석·예산 스위치와 kill switch가 모두 우선한다. 사람이 끈 스위치는 사람이 켠다.
+9. **스위치.** 자동 등록은 기본 꺼진 운영 스위치(`TOMVERSE_AMUX_V19_SYSTEM_REGISTRATION`)를 갖는다.
+   사람이 끈 스위치는 사람이 켠다. (2026-11-16 대화 결정: 구독 분석의 route별 읽기·쓰기·중지 확인
+   스위치와 세션 접수·저장소 직접 읽기 스위치는 없앴다. 그 route는 항상 열려 있고 인증, 소유자 승인,
+   입력 검증, 감사가 그대로 지킨다. 남은 스위치는 자동 삭제(보존) 두 개와 box 서비스 시작 스위치,
+   자격증명·origin 값뿐이다. 결과 쓰기 route는 두 보존 스위치가 켜져 있어야 열린다.)
 10. **함께 개정한 것.** 같은 날 같은 운영자 결정으로 다음을 개정한다.
     - 공통 기반: 원칙 2와 외부 원문 원칙의 AMUX v4 예외에 AMUX intake의 좁은 예외를 더한다. 운영자가
       한 번 승인한 운영 범위 안에서는 아이디어별 확인 없이 허용 저장소를 분석 CLI가 읽기 전용으로
@@ -422,8 +458,8 @@ approvedBy: mposition · approvedAt: 2026-10-16 · 정책 버전: 19
     무인 등록 Guard, 계획 검토 화면을 만드는 코드를 승인한다. 병합, 배포, 자격증명 발급, 스위치
     켜기는 각각 별개다.
     - 2026-10-21 운영자 mposition: staging의 첫 무인 분석이 계획을 만든 뒤 무인 등록을 승인했다.
-      코드 래치 `AMUX_V19_SYSTEM_REGISTRATION_CODE_ENABLED`를 연다. 환경마다
-      `TOMVERSE_AMUX_V19_SYSTEM_REGISTRATION`과 기존 분석 스위치가 그대로 결정하며, production은 그
+      코드 래치를 연다(2026-11-16에 래치 상수는 없앴다). 환경마다
+      `TOMVERSE_AMUX_V19_SYSTEM_REGISTRATION` 하나가 결정하며, production은 그
       스위치를 켜기 전까지 꺼져 있다.
 
 **공통 기반 설계 체크리스트 중 이 개정이 바꾸는 항목.** 나머지 항목은 v4~v18의 답이 그대로다.
@@ -447,9 +483,10 @@ approvedBy: mposition · approvedAt: 2026-10-16 · 정책 버전: 19
 - 13(호주 법규): 국외로 나가는 것은 Tomverse 개발 저장소의 코드와 문서다. 비공개 문서에는 전략·사업
   내용이 있을 수 있고, 운영자는 그 전송을 승인했다. 개인정보가 들어갈 수 있는 경로(사용자
   Chat/Memory, 운영 DB)는 범위 밖이다.
-- 14(구현 단계): 운영 범위 설정 → 접수 route와 클라이언트(스위치 꺼짐) → checkout과 CLI 읽기 도구 →
-  무인 등록 Guard → 독립 검토 → staging에서 세션 접수 한 건으로 끝까지 확인 → 운영 스위치. 되돌릴
-  수 없는 것은 전송이므로, staging 확인 전에는 운영에서 세션 접수와 저장소 직접 읽기를 켜지 않는다.
+- 14(구현 단계): 운영 범위 설정 → 접수 route와 클라이언트 → checkout과 CLI 읽기 도구 →
+  무인 등록 Guard → 독립 검토 → staging에서 세션 접수 한 건으로 끝까지 확인 → 운영. 되돌릴
+  수 없는 것은 전송이므로, staging 확인 전에는 운영에서 세션 접수와 저장소 직접 읽기를 쓰지 않는다
+  (2026-11-16: 이 단계의 route별 운영 스위치는 없앴다).
 - 15(실행 위치·timeout): 실행 위치는 v12의 로컬 Ubuntu 그대로다. 분석 CLI 호출에는 hard timeout이
   없고, 운영자 중지가 그 자리를 맡는다(공통 기반 원칙 11의 예외, 10항). v6의 7일 기한은 2026-11-15 전
   아이디어와 legacy 스위치에만 남는다.
@@ -641,7 +678,7 @@ v1에서 하지 않는 것은 다음이다. 에이전트 등록 원천에 적용
 - `AmuxBoardImportApproval` 행을 intake 승인으로 재사용
 - 자율 졸업
 
-backlog 등록은 실행이 아니지만 canonical write다. 그 write는 owner의 최근 step-up과 이 문서의 코드 래치, 환경 래치가 함께 있어야 한다. 환경 값은 `TOMVERSE_AMUX_INTAKE_APPLY=enabled`뿐이다. 이 문단의 owner step-up, `AMUX_INTAKE_APPLY_CODE_LATCH`, `TOMVERSE_AMUX_INTAKE_APPLY`는 사람이 확인하는 원천의 backlog 등록에만 적용한다. 에이전트 등록 원천의 write는 그 절의 래치·환경 값·운영 mode로만 열리고, 사람 step-up을 요구하지 않는다.
+backlog 등록은 실행이 아니지만 canonical write다. 그 write는 owner의 최근 step-up과 미리보기 확인·승인 기록이 있어야 한다. 2026-11-16 대화 결정으로 코드 래치 `AMUX_INTAKE_APPLY_CODE_LATCH`와 환경 값 `TOMVERSE_AMUX_INTAKE_APPLY`는 없앴다(production 값은 enabled였으므로 동작은 같다). 이 문단의 owner step-up은 사람이 확인하는 원천의 backlog 등록에만 적용한다. 에이전트 등록 원천의 write는 그 절의 래치·환경 값·운영 mode로만 열리고, 사람 step-up을 요구하지 않는다.
 
 ## Guard
 
@@ -696,7 +733,7 @@ production backlog write는 2026-09-24에 mposition이 단계 8로 승인했다.
 5. staging에서 preview만.
 6. staging backlog write.
 7. production에서 preview만.
-8. production backlog write. 2026-09-24에 mposition이 승인했다. 코드 래치와 `TOMVERSE_AMUX_INTAKE_APPLY=enabled`가 함께 있어야 writer가 열린다.
+8. production backlog write. 2026-09-24에 mposition이 승인했다. 2026-11-16 대화 결정으로 이 writer의 코드 래치와 환경 스위치는 없앴고, owner step-up과 승인 기록만 남는다.
 
 ## 책임
 
@@ -833,7 +870,7 @@ canonical JSON은 기존 AMUX canonicalizer의 정렬 규칙을 쓴다. package 
 
 ### 전략 평가와 화면 계약
 
-- 모델은 Initiative/Epic의 전략적 가치와 하위 카드의 기여·긴급성·의존성·예상 노력·가용 worker를 **근거와 불확실성**과 함께 평가한다. 점수 계산과 자격·용량 Guard는 버전 있는 결정적 코드가 맡고, 모델 출력만으로 SEV1 선언·승격·worker claim을 결정하지 않는다. 운영자의 수정·거절도 근거를 남긴다. 활성 포트폴리오는 7일, 전체 기준선은 28일마다 재평가하고 중대 사건에서는 조건부 조기 검토한다. 저장된 근거의 결정적 재계산은 예약 실행할 수 있지만 **근거 수집 시각은 갱신하지 않으며**, 해당 범위의 마지막 확인 근거가 28일을 넘으면 stale이다. 7일 활성 기한은 운영자 결정(2026-11-14)으로 입력 평가·Task revision·source 승인·계산이 그대로인 backlog Task에 한해 시스템(`amux-portfolio-scorer`)이 감사 체인에 기록하며 연장한다. 2026-11-15 운영자 지시로 이 연장은 활성 창(지금부터 7일)과 기준선(지금부터 28일)을 함께 옮겨, 입력이 그대로인 점수는 기준선 때문에 사람 재확인을 기다리지 않는다. 기본 켜짐(`TOMVERSE_AMUX_V4_SCORE_AUTO_REFRESH=disabled`로 끔)이고 tick당 개수 제한 없이 tick 시간 예산 안에서 처리한다. 평가가 바뀌면 지금처럼 운영자가 점수를 확인한다. **새 외부 자료를 모델에 보내는 재평가**는 이번 회차 전송 preview·모델 선택과 `agent/amux-intake` 예산 검사를 다시 거친다. 입력이 바뀌어 운영자 확인이 필요한데 받지 못하면 자동 승격을 보류한다. 승인된 `backlog` 카드의 점수와 실행 후보 선정은 별개다.
+- 모델은 Initiative/Epic의 전략적 가치와 하위 카드의 기여·긴급성·의존성·예상 노력·가용 worker를 **근거와 불확실성**과 함께 평가한다. 점수 계산과 자격·용량 Guard는 버전 있는 결정적 코드가 맡고, 모델 출력만으로 SEV1 선언·승격·worker claim을 결정하지 않는다. 운영자의 수정·거절도 근거를 남긴다. 활성 포트폴리오는 7일, 전체 기준선은 28일마다 재평가하고 중대 사건에서는 조건부 조기 검토한다. 저장된 근거의 결정적 재계산은 예약 실행할 수 있지만 **근거 수집 시각은 갱신하지 않으며**, 해당 범위의 마지막 확인 근거가 28일을 넘으면 stale이다. 7일 활성 기한은 운영자 결정(2026-11-14)으로 입력 평가·Task revision·source 승인·계산이 그대로인 backlog Task에 한해 시스템(`amux-portfolio-scorer`)이 감사 체인에 기록하며 연장한다. 2026-11-15 운영자 지시로 이 연장은 활성 창(지금부터 7일)과 기준선(지금부터 28일)을 함께 옮겨, 입력이 그대로인 점수는 기준선 때문에 사람 재확인을 기다리지 않는다. 항상 켜짐(2026-11-16 대화 결정: 끄는 스위치를 없앴다)이고 tick당 개수 제한 없이 tick 시간 예산 안에서 처리한다. 평가가 바뀌면 지금처럼 운영자가 점수를 확인한다. **새 외부 자료를 모델에 보내는 재평가**는 이번 회차 전송 preview·모델 선택과 `agent/amux-intake` 예산 검사를 다시 거친다. 입력이 바뀌어 운영자 확인이 필요한데 받지 못하면 자동 승격을 보류한다. 승인된 `backlog` 카드의 점수와 실행 후보 선정은 별개다.
 - 포트폴리오 점수 v1의 승인 기록: `mposition`, 2026-10-05. 각 0~5 평가에 Initiative 최대 20, Epic 15, Feature 10, Story 영향 10, Task 기여 20, 긴급성 10, 의존성 해소 5, worker 적합도 5를 배분한다. Story 없는 Feature 직속 Task에는 Story 10점을 Task 기여 가중치로 옮긴다. 예상 노력·실행 위험·불확실성은 감점한다. 모델의 수치는 출처가 제한된 제안일 뿐이며, 운영자 근거 확인과 결정적 재계산 없이는 저장 점수로 쓰지 않는다. 이 승인만으로 라이브 쓰기·승격·SEV1·worker claim을 열지 않는다.
 - Admin은 아이디어 입력, 분석 진행·입력 범위·토큰, 계층/중복 제안, **노드별 승인**, **카드별 승인**, 포트폴리오 점수 근거, Kanban, DevOps형 계층 목록, 카드 상세/실행/PR 근거, 운영자 주의, 완료 판정, 결과 환류를 하나의 연결 흐름으로 제공한다. 미확인·미분석·`outcome_unknown`을 완료처럼 표시하지 않는다. 목록과 Kanban은 같은 앱 DB의 두 projection이며, 큰 계층을 위해 서버 페이지네이션과 지연 로딩을 사용한다.
 
@@ -887,7 +924,7 @@ legal hold는 이 정책의 **owner Admin 역할**(현재 운영자 `mposition`;
 
 이 절은 v5의 live 차단·별도 운영 승인 요구를 면제하지 않고, v5에서 미정으로 남긴 **기간 수치**만 추가한다. 승인된 자동 정리는 카드·완료 판정의 자동 승인이나 임의 삭제 권한이 아니다. 정리 실행은 닫힌 system actor, 조건부 상태 전이, 같은 트랜잭션의 canonical 감사, 결과 불명 read-back을 요구한다.
 
-1. 운영자 아이디어 입력 시점부터 **절대 7일** 안에 분석이 끝나지 않으면 새 모델 호출을 막고 해당 분석을 자동 취소한다. 중간 활동·worker 재시작으로 7일을 연장하지 않는다. 이 취소는 노드·카드를 등록하지 않으며, 원문·전송 payload·자유형 응답 본문을 **취소 뒤 24시간 안에** 삭제한다. 정상 완료·사람의 취소·거절에도 같은 v5의 24시간 삭제 규칙을 적용한다. 실패는 자유형 오류 문자열을 7년 metadata에 복제하지 않고, 비본문 오류 코드를 v5의 결정 metadata로 분류해 digest·canonical 감사와 함께 기존 7년 기준으로 남긴다. 취소된 분석을 이어 쓰지 않고 새 요청·새 preview로 다시 시작한다. 2026-11-15 운영자 지시: 새 아이디어에는 7일을 적용하지 않는다(기한 36,500일). 그 전 행과 `TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS=enabled`의 새 제출에만 적용한다.
+1. 운영자 아이디어 입력 시점부터 **절대 7일** 안에 분석이 끝나지 않으면 새 모델 호출을 막고 해당 분석을 자동 취소한다. 중간 활동·worker 재시작으로 7일을 연장하지 않는다. 이 취소는 노드·카드를 등록하지 않으며, 원문·전송 payload·자유형 응답 본문을 **취소 뒤 24시간 안에** 삭제한다. 정상 완료·사람의 취소·거절에도 같은 v5의 24시간 삭제 규칙을 적용한다. 실패는 자유형 오류 문자열을 7년 metadata에 복제하지 않고, 비본문 오류 코드를 v5의 결정 metadata로 분류해 digest·canonical 감사와 함께 기존 7년 기준으로 남긴다. 취소된 분석을 이어 쓰지 않고 새 요청·새 preview로 다시 시작한다. 2026-11-15 운영자 지시: 새 아이디어에는 7일을 적용하지 않는다(기한 36,500일). 그 전 행에만 적용한다(2026-11-16: 새 제출에 7일을 되돌리던 스위치를 없앴다).
 2. 분석이 끝난 뒤 **30일** 동안 운영자가 승인·거절·취소하지 않은 초안은 자동 만료한다. 만료는 승인이 아니며 그 초안에서 신규 노드·카드를 등록하지 않는다. 이미 별도 승인·등록된 부분은 기존 카드·등록 규칙에 따르고, 결정 이력은 v5의 7년 감사 기준을 따른다. **자동 만료 뒤 미승인 초안 본문을 언제 삭제할지는 별도 운영자 결정 대기**다. v5의 명시적 사람 최종 결정 뒤 30일 규칙을 자동 만료에 조용히 확장하지 않으며, 그 기간이 확정되기 전에는 비합성 초안의 staging/live 저장을 열지 않는다.
 3. 승인돼 저장된 Task 실행 brief 본문은 작업 진행 중 유지하고, 운영자가 **완료 또는 취소**로 판정한 뒤 **90일**에 삭제한다. brief digest·결정 metadata·canonical 감사는 v5의 7년 기준을 따른다. `blocked` 상태의 장기 체류와 노드/카드 제목·설명 보존은 별도 검증·정책 전에 live 입력을 열지 않는다. brief 본문을 감사나 사용량 원장에 복제하지 않는다.
 4. legal hold는 **한 승인 건당 최대 90일**이다. 만료 **7일 전** owner Admin에게 알린다. 7일보다 짧은 건은 생성 직후 알림으로 대체하는 구현 해석을 검증한다. 연장은 기존 건이 만료되기 전에 owner가 다시 인증하고 새 사유·범위·만료일을 확인해 canonical human 감사와 함께 **수동 승인**할 때만 가능하며, 새 건도 90일을 넘지 않는다. 자동·무기한 연장은 없다. 해제·만료 때는 원래 삭제 만료 시각으로 되돌아가고 이미 지났으면 즉시 삭제 대기열에 넣는다. 알림 전달 실패나 hold 설정 결과 불명은 성공으로 추정하지 않는다.

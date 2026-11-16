@@ -31,7 +31,7 @@ export type AmuxIdeaLaneBoardCard = {
 
 const COLUMN: Record<AmuxIdeaLaneState["state"], AmuxIdeaLaneBoardColumn> = {
   queued: "amux_backlog", running: "in_progress", pr_open: "in_review", merged: "done",
-  failed: "attention", pr_closed: "attention",
+  pr_closed: "attention",
 };
 
 export const amuxIdeaLaneBoardColumn = (state: AmuxIdeaLaneState["state"]) => COLUMN[state];

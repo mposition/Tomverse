@@ -81,7 +81,7 @@ test("explicit preview confirmation enables only the same U21 draft", () => {
       scope: "One isolated public candidate author test card",
       completion: "A public candidate receipt is recorded",
       priority: "p3" } });
-  const first = previewAmuxIntake(raw, secret, "enabled");
+  const first = previewAmuxIntake(raw, secret);
   assert.equal(first.outcome, "approval_required");
   assert.equal(first.applyPermitted, false);
   const confirmed = confirmAmuxIntakePreview(raw, raw, first);
@@ -91,7 +91,7 @@ test("explicit preview confirmation enables only the same U21 draft", () => {
   if (!parsed.ok) return;
   assert.equal(JSON.parse(confirmed).confirmationDigest,
     amuxIntakeDraftDigest(parsed.draft));
-  const second = previewAmuxIntake(confirmed, secret, "enabled");
+  const second = previewAmuxIntake(confirmed, secret);
   assert.equal(second.outcome, "allow");
   assert.equal(second.applyPermitted, true);
   assert.equal(confirmAmuxIntakePreview(raw + " ", raw, first), null);
@@ -109,7 +109,7 @@ test("prepared U21 test draft is one valid disposable registration", () => {
   assert.equal(parsed.draft.proposal.priority, "p3");
   assert.equal(parsed.draft.confirmationDigest, undefined);
   const preview = previewAmuxIntake(first,
-    "u21-test-intake-secret-000000000000", "enabled");
+    "u21-test-intake-secret-000000000000");
   assert.equal(preview.outcome, "approval_required");
   assert.equal(preview.applyPermitted, false);
 });

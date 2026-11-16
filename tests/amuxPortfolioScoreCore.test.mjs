@@ -50,59 +50,18 @@ test("invalid or future evidence fails closed", () => {
     new Date("2026-09-30T00:00:00.000Z")), /invalid_portfolio_score_input/);
 });
 
-test("an unchanged score's active window is extended a day before it closes, never past its baseline", async () => {
-  const { amuxRefreshedActiveStaleAt, amuxScoreAutoRefreshEnabled,
-    amuxScoreAuditActionBinds } = await import("../lib/amux/portfolioScoreCore.ts");
-  const day = 86_400_000;
-  const now = new Date("2026-11-14T02:00:00.000Z");
-  const at = (days) => new Date(now.getTime() + days * day);
-  // Due within the lead, or already lapsed: seven days past now.
-  assert.deepEqual(amuxRefreshedActiveStaleAt({ now, activeStaleAt: at(0.5),
-    baselineStaleAt: at(20) }), at(7));
-  assert.deepEqual(amuxRefreshedActiveStaleAt({ now, activeStaleAt: at(-3),
-    baselineStaleAt: at(20) }), at(7));
-  // Capped at the evidence's 28-day baseline.
-  assert.deepEqual(amuxRefreshedActiveStaleAt({ now, activeStaleAt: at(-1),
-    baselineStaleAt: at(2) }), at(2));
-  // Not yet due, at the cap already, or past the baseline: nothing to write.
-  assert.equal(amuxRefreshedActiveStaleAt({ now, activeStaleAt: at(1.5),
-    baselineStaleAt: at(20) }), null);
-  assert.equal(amuxRefreshedActiveStaleAt({ now, activeStaleAt: at(0.5),
-    baselineStaleAt: at(0.5) }), null);
-  assert.equal(amuxRefreshedActiveStaleAt({ now, activeStaleAt: at(-9),
-    baselineStaleAt: at(-1) }), null);
-  assert.equal(amuxRefreshedActiveStaleAt({ now: new Date(Number.NaN),
-    activeStaleAt: at(0), baselineStaleAt: at(5) }), null);
-  // The legacy-limits switch keeps the 2026-11-14 rule: off unless exactly
-  // "enabled".
-  assert.equal(amuxScoreAutoRefreshEnabled(undefined, true), false);
-  assert.equal(amuxScoreAutoRefreshEnabled("true", true), false);
-  assert.equal(amuxScoreAutoRefreshEnabled("enabled", true), true);
-  // A refresh binds a snapshot like a confirmation; nothing else does.
+test("a refresh binds a snapshot like a confirmation; nothing else does", async () => {
+  const { amuxScoreAuditActionBinds } = await import("../lib/amux/portfolioScoreCore.ts");
   assert.equal(amuxScoreAuditActionBinds("amux.v4.portfolio.score.confirm"), true);
   assert.equal(amuxScoreAuditActionBinds("amux.v4.portfolio.score.refresh"), true);
   assert.equal(amuxScoreAuditActionBinds("amux.v4.portfolio.assessment.approve"), false);
   assert.equal(amuxScoreAuditActionBinds(null), false);
 });
 
-test("owner direction 2026-11-15: the refresh is on by default and only exactly \"disabled\" turns it off", async () => {
-  const { amuxScoreAutoRefreshEnabled } = await import("../lib/amux/portfolioScoreCore.ts");
-  assert.equal(amuxScoreAutoRefreshEnabled(undefined, false), true);
-  assert.equal(amuxScoreAutoRefreshEnabled("", false), true);
-  assert.equal(amuxScoreAutoRefreshEnabled("enabled", false), true);
-  assert.equal(amuxScoreAutoRefreshEnabled("off", false), true);
-  assert.equal(amuxScoreAutoRefreshEnabled("disabled", false), false);
-  // Without an explicit mode the intake switch decides: unset is the new rule.
-  const previous = process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS;
-  try {
-    delete process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS;
-    assert.equal(amuxScoreAutoRefreshEnabled(undefined), true);
-    process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS = "enabled";
-    assert.equal(amuxScoreAutoRefreshEnabled(undefined), false);
-  } finally {
-    if (previous === undefined) delete process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS;
-    else process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS = previous;
-  }
+test("owner direction 2026-11-16: the refresh has no off switch", async () => {
+  const core = await import("../lib/amux/portfolioScoreCore.ts");
+  assert.equal("amuxScoreAutoRefreshEnabled" in core, false);
+  assert.equal("AMUX_SCORE_REFRESH_ENV" in core, false);
 });
 
 test("owner direction 2026-11-15: an unchanged score's windows both move forward, so seven and 28 days never stop it", async () => {
@@ -114,21 +73,21 @@ test("owner direction 2026-11-15: an unchanged score's windows both move forward
   const moved = { activeStaleAt: at(7), baselineStaleAt: at(28) };
   // Due within the lead, before its baseline: both windows move.
   assert.deepEqual(amuxRefreshedScoreWindows({ now, activeStaleAt: at(0.5),
-    baselineStaleAt: at(20), legacy: false }), moved);
+    baselineStaleAt: at(20) }), moved);
   // Near the baseline: no longer capped there.
   assert.deepEqual(amuxRefreshedScoreWindows({ now, activeStaleAt: at(-1),
-    baselineStaleAt: at(2), legacy: false }), moved);
+    baselineStaleAt: at(2) }), moved);
   // Both windows lapsed long ago (evidence 40 days old): due, and reopened.
   assert.deepEqual(amuxRefreshedScoreWindows({ now, activeStaleAt: at(-33),
-    baselineStaleAt: at(-12), legacy: false }), moved);
+    baselineStaleAt: at(-12) }), moved);
   // A legacy capped score (active at its baseline) is due again.
   assert.deepEqual(amuxRefreshedScoreWindows({ now, activeStaleAt: at(0.5),
-    baselineStaleAt: at(0.5), legacy: false }), moved);
+    baselineStaleAt: at(0.5) }), moved);
   // Repeated over months of ticks, an unchanged score always comes back fresh.
   let windows = { activeStaleAt: at(0.5), baselineStaleAt: at(20) };
   for (let tick = 0; tick < 20; tick += 1) {
     const clock = new Date(windows.activeStaleAt.getTime() - 0.25 * day);
-    const next = amuxRefreshedScoreWindows({ now: clock, ...windows, legacy: false });
+    const next = amuxRefreshedScoreWindows({ now: clock, ...windows });
     assert.ok(next, `tick ${tick} refreshed`);
     assert.ok(next.activeStaleAt.getTime() > clock.getTime());
     assert.ok(next.baselineStaleAt.getTime() > clock.getTime());
@@ -139,24 +98,11 @@ test("owner direction 2026-11-15: an unchanged score's windows both move forward
     AMUX_BASELINE_SCORE_MAX_AGE_MS + 100 * day);
   // Not yet due, or unreadable clocks: nothing to write.
   assert.equal(amuxRefreshedScoreWindows({ now, activeStaleAt: at(1.5),
-    baselineStaleAt: at(20), legacy: false }), null);
+    baselineStaleAt: at(20) }), null);
   assert.equal(amuxRefreshedScoreWindows({ now: new Date(Number.NaN),
-    activeStaleAt: at(0), baselineStaleAt: at(5), legacy: false }), null);
+    activeStaleAt: at(0), baselineStaleAt: at(5) }), null);
   // The new windows fit the database's shape: active seven days past now,
   // at most the baseline; baseline at most 28 days past now.
   assert.equal(moved.activeStaleAt.getTime() - now.getTime(), AMUX_ACTIVE_SCORE_MAX_AGE_MS);
   assert.equal(moved.baselineStaleAt.getTime() - now.getTime(), AMUX_BASELINE_SCORE_MAX_AGE_MS);
-});
-
-test("with the legacy-limits switch the refresh keeps the 2026-11-14 baseline cap", async () => {
-  const { amuxRefreshedScoreWindows } = await import("../lib/amux/portfolioScoreCore.ts");
-  const day = 86_400_000;
-  const now = new Date("2026-11-15T02:00:00.000Z");
-  const at = (days) => new Date(now.getTime() + days * day);
-  assert.deepEqual(amuxRefreshedScoreWindows({ now, activeStaleAt: at(0.5),
-    baselineStaleAt: at(20), legacy: true }), { activeStaleAt: at(7), baselineStaleAt: at(20) });
-  assert.deepEqual(amuxRefreshedScoreWindows({ now, activeStaleAt: at(-1),
-    baselineStaleAt: at(2), legacy: true }), { activeStaleAt: at(2), baselineStaleAt: at(2) });
-  assert.equal(amuxRefreshedScoreWindows({ now, activeStaleAt: at(-9),
-    baselineStaleAt: at(-1), legacy: true }), null);
 });

@@ -32,8 +32,7 @@ import { calculateCurrentApprovedAmuxV4TaskCost,
   AmuxV4TaskCatalogApprovalError } from
   "./v4TaskCostCatalogApprovalService.ts";
 import { AmuxV4DuplicateReasonRequired, AmuxV4UnitDecisionError,
-  AMUX_V4_UNIT_WRITE_ENV,
-  amuxV4UnitWriteEnabled, commitAmuxV4CardRegistration,
+  commitAmuxV4CardRegistration,
   commitAmuxV4UnitPrepare, markAmuxV4UnitConsumeOutcomeUnknown } from
   "./ideaUnitDecisionStore.ts";
 import { deriveAmuxIdeaUnitConfirmation,
@@ -272,9 +271,6 @@ export async function prepareAmuxV4CardRegistration(input: {
     throw new AmuxV4UnitDecisionError("forbidden");
   }
   await assertRecentAdminAuthentication(input.session);
-  if (!amuxV4UnitWriteEnabled(process.env[AMUX_V4_UNIT_WRITE_ENV])) {
-    throw new AmuxV4UnitDecisionError("write_disabled");
-  }
   const choice = input.choice;
   if (!ID.test(choice.ideaId) || !ID.test(choice.draftUnitId) ||
       !ID.test(choice.featureNodeId) || !UUID.test(choice.prepareRequestId) ||
@@ -343,9 +339,6 @@ export async function consumeAmuxV4CardRegistration(input: {
     throw new AmuxV4UnitDecisionError("forbidden");
   }
   await assertRecentAdminAuthentication(input.session);
-  if (!amuxV4UnitWriteEnabled(process.env[AMUX_V4_UNIT_WRITE_ENV])) {
-    throw new AmuxV4UnitDecisionError("write_disabled");
-  }
   if (!ID.test(input.decisionId) || !UUID.test(input.consumeRequestId) ||
       !/^[a-f0-9]{64}$/.test(input.confirmationDigest)) {
     throw new AmuxV4UnitDecisionError("not_ready");

@@ -7,23 +7,10 @@
  * the input, cost caps and ledgers of paid calls, the audit chain, and data
  * deletion, which only ever happens later than before, never sooner.
  *
- * One switch puts every limit this direction removed back, for a problem the
- * new behaviour causes. It only restores code checks: a database constraint
- * the direction relaxed stays relaxed, and the restored checks are stricter
- * than it. Exactly "enabled" restores; anything else, unset included, keeps
- * the new behaviour.
+ * Owner direction 2026-11-16: the switch that restored the former limits is
+ * gone, with every former limit it restored. A database constraint the
+ * direction relaxed stays relaxed.
  */
-export const AMUX_INTAKE_LEGACY_LIMITS_ENV = "TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS";
-
-const readSwitch = (): string | undefined =>
-  typeof process === "undefined" ? undefined : process.env[AMUX_INTAKE_LEGACY_LIMITS_ENV];
-
-export const amuxIntakeLegacyLimits = (value: string | undefined = readSwitch()): boolean =>
-  value === "enabled";
-
-/** A former length or count limit: itself under the switch, otherwise none. */
-export const amuxIntakeCap = (former: number, legacy: boolean = amuxIntakeLegacyLimits()): number =>
-  legacy ? former : Number.POSITIVE_INFINITY;
 
 /**
  * The one ceiling left on a single model answer or request body in this flow.

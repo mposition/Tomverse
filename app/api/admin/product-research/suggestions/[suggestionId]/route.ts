@@ -11,13 +11,7 @@ import { apiSecurityResponse, consumeApiRateLimit, readLimitedText } from "@/lib
 import { ideaSendPath } from "@/lib/amux/ideaSendPath";
 import { amuxIdeaSessionPrewriteStatus } from "@/lib/amux/ideaSessionSubmissionCore";
 import { AmuxIdeaSessionSubmissionError } from "@/lib/amux/ideaSessionSubmissionService";
-import {
-  AMUX_V4_IDEA_READBACK_ENV,
-  AMUX_V4_IDEA_SUBMISSION_ENV,
-  ideaSubmissionReadBackPermitted,
-  ideaSubmissionWritePermitted,
-  isAmuxIdeaRequestId,
-} from "@/lib/amux/ideaSubmissionCore";
+import { isAmuxIdeaRequestId } from "@/lib/amux/ideaSubmissionCore";
 import { IdeaSubmissionError } from "@/lib/amux/ideaSubmissionService";
 import { authOptions } from "@/lib/auth";
 import { retryDailyProductTask } from "@/lib/dailyProductAgentStore";
@@ -115,10 +109,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ sug
 
     const requestId = suggestionSendRequestId(suggestion.id);
     if (!isAmuxIdeaRequestId(requestId)) return json({ error: "invalid_request_id" }, 500);
-    if (!ideaSubmissionWritePermitted(process.env[AMUX_V4_IDEA_SUBMISSION_ENV]) ||
-        !ideaSubmissionReadBackPermitted(process.env[AMUX_V4_IDEA_READBACK_ENV])) {
-      return json({ error: "amux_submission_disabled" }, 503);
-    }
     await consumeApiRateLimit(request, session.user!.id!, "admin-product-research-suggestion-send", { minute: 5, day: 50 });
 
     const path = await ideaSendPath({
