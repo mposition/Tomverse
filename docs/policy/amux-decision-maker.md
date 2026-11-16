@@ -177,7 +177,7 @@ approvedBy: mposition · approvedAt: 2026-10-17 · 정책 버전: 2
    `transmit_unknown`·`unavailable` 결과·배정 폐기를 owed로 둔다. owed cleanup 보고는 그 인스턴스로의 새 전송을,
    owed pause는 그 세션으로의 새 전달을 막는다. 이전 바이너리의 halt는 자동 재시작이 원인과 무관하게, 1시간
    제한 없이 재시작한다. owed 기록(과 그것이 만드는 인스턴스·세션 차단)은 재시작을 넘어 남는다. relay는 기록이
-   바뀔 때마다 상태 디렉터리(unit의 `StateDirectory=`, `STATE_DIRECTORY`)의 `owed-records.json` 하나를 원자적으로
+   생기는 즉시(그 기록을 위한 첫 네트워크 호출보다 먼저, 결과·cleanup 보고·영수증은 결과 제출 호출 전에 셋 다) 그리고 바뀔 때마다 상태 디렉터리(unit의 `StateDirectory=`, `STATE_DIRECTORY`)의 `owed-records.json` 하나를 원자적으로
    바꿔 쓰고(0600, 디렉터리 0700, symlink·다른 소유자는 거절) 시작할 때 되읽는다. 읽을 수 없는 파일이거나 쓰기가
    실패하면 새 전송·전달은 시작하지 않고(차단 상태를 모르거나 파일이 뒤처졌으므로) 이미 있는 기록의 재전송만 하면서
    매 tick 다시 시도한다. halt는 아니다. 파일 크기 상한은 없고 비밀값은 기록에 없다.

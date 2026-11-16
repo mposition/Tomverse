@@ -47,7 +47,7 @@ use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use tokio::time::Instant;
 
-use super::owed::{self, refused_for_now, OwedRecord};
+use super::owed::{refused_for_now, OwedBook, OwedRecord};
 use super::wire::{
     dm_card, dm_option_set_digest, dm_payload_digest, dm_payload_with_workspace, dm_result_digest,
     is_option_id, launch_line, lookup_settled, parse_assignment, parse_card_detail,
@@ -436,8 +436,10 @@ pub enum RelayEnd {
 #[derive(Debug, Clone, PartialEq)]
 pub struct RelayRun {
     pub end: RelayEnd,
-    /// Records the app did not answer for yet: the relay sends each again on
-    /// every tick (`owed`) and goes on with other questions.
+    /// The records this run kept (`OwedBook::keep`, before the call that could
+    /// be lost) and the app has not answered for yet: the relay sends each
+    /// again on every tick and goes on with other questions. A copy for the
+    /// log and the tests; the book holds them.
     pub owed: Vec<OwedRecord>,
     /// A marker the relay set and could not confirm it released.
     pub release_owed: Option<MarkerKey>,
@@ -451,18 +453,6 @@ impl RelayRun {
             release_owed: None,
         }
     }
-
-    /// Sends a keyed record once now; one the app did not answer for is owed.
-    async fn record<A, L>(mut self, app: &A, local: &L, mut record: OwedRecord) -> Self
-    where
-        A: DmApp + ?Sized,
-        L: DmLocal + ?Sized,
-    {
-        if !owed::settle(app, local, &mut record).await {
-            self.owed.push(record);
-        }
-        self
-    }
 }
 
 async fn app_write<A: DmApp + ?Sized>(app: &A, route: AppRoute, body: Value) -> AppAnswer {
@@ -475,20 +465,26 @@ async fn app_write<A: DmApp + ?Sized>(app: &A, route: AppRoute, body: Value) -> 
 /// about the request -- a busy database, the routes closed -- wrote nothing,
 /// so the discard is owed and sent again on every tick. A request the ledger
 /// already closed, or can no longer discard, is the ledger's answer.
-async fn discard<A, L>(app: &A, local: &L, request_id: &str, code: &'static str) -> RelayRun
+async fn discard<A, L>(
+    app: &A,
+    local: &L,
+    book: &OwedBook,
+    request_id: &str,
+    code: &'static str,
+) -> RelayRun
 where
     A: DmApp + ?Sized,
     L: DmLocal + ?Sized,
 {
+    book.send(
+        app,
+        local,
+        OwedRecord::Discard {
+            request_id: request_id.to_owned(),
+        },
+    )
+    .await;
     RelayRun::end(RelayEnd::Settled(code))
-        .record(
-            app,
-            local,
-            OwedRecord::Discard {
-                request_id: request_id.to_owned(),
-            },
-        )
-        .await
 }
 
 /// True when the local AMUX confirmed the marker is not this request's any
@@ -569,19 +565,39 @@ where
     L: DmLocal + ?Sized,
     B: DmBroker + ?Sized,
 {
-    relay_candidate_holding(app, local, broker, candidate, &BTreeSet::new()).await
+    relay_candidate_holding(app, local, broker, candidate, &OwedBook::new()).await
 }
 
-/// `relay_candidate`, with the instances an owed cleanup report holds back
-/// (`owed`): a question routed to one of them is asked again later, before
-/// anything is assigned, so nothing more is sent to an instance whose §5
-/// latch the app may not know it owes.
+/// `relay_candidate`, with the records `book` holds: the instances an owed
+/// cleanup report holds back (a question routed to one of them is asked again
+/// later, before anything is assigned, so nothing more is sent to an instance
+/// whose §5 latch the app may not know it owes), and every record this run
+/// makes is kept in `book` -- and its file -- before the call that could be
+/// lost.
 pub async fn relay_candidate_holding<A, L, B>(
     app: &A,
     local: &L,
     broker: &B,
     candidate: &Candidate,
-    held_instances: &BTreeSet<String>,
+    book: &OwedBook,
+) -> RelayRun
+where
+    A: DmApp + ?Sized,
+    L: DmLocal + ?Sized,
+    B: DmBroker + ?Sized,
+{
+    let mark = book.mark();
+    let mut run = relay_candidate_kept(app, local, broker, candidate, book).await;
+    run.owed = book.since(mark);
+    run
+}
+
+async fn relay_candidate_kept<A, L, B>(
+    app: &A,
+    local: &L,
+    broker: &B,
+    candidate: &Candidate,
+    book: &OwedBook,
 ) -> RelayRun
 where
     A: DmApp + ?Sized,
@@ -619,7 +635,7 @@ where
     let Some(instance) = routed.instance.clone() else {
         return RelayRun::end(RelayEnd::Settled("routed_without_instance"));
     };
-    if held_instances.contains(&instance) {
+    if book.held_instances().contains(&instance) {
         return RelayRun::end(RelayEnd::RetryLater("cleanup_report_owed"));
     }
     let request_id = routed.request_id.clone();
@@ -640,10 +656,19 @@ where
     {
         AppAnswer::Done(value) => match parse_assignment(&value) {
             Some(assignment) => assignment,
-            None => return discard(app, local, &request_id, "assignment_answer_unreadable").await,
+            None => {
+                return discard(
+                    app,
+                    local,
+                    book,
+                    &request_id,
+                    "assignment_answer_unreadable",
+                )
+                .await
+            }
         },
         AppAnswer::Refused(reason) if reason == "already_assigned" => {
-            return discard(app, local, &request_id, "assignment_refused").await
+            return discard(app, local, book, &request_id, "assignment_refused").await
         }
         AppAnswer::Refused(reason) if refused_for_now(&reason) => {
             return RelayRun::end(RelayEnd::RetryLater("assignment_refused_for_now"))
@@ -663,9 +688,11 @@ where
     };
     match set_marker(local, &marker, &instance).await {
         MarkerSet::Held => {}
-        MarkerSet::Discarded => return discard(app, local, &request_id, "marker_discarded").await,
+        MarkerSet::Discarded => {
+            return discard(app, local, book, &request_id, "marker_discarded").await
+        }
         MarkerSet::Unknown => {
-            let mut run = discard(app, local, &request_id, "marker_unknown").await;
+            let mut run = discard(app, local, book, &request_id, "marker_unknown").await;
             if !release_marker(local, &marker).await {
                 run.release_owed = Some(marker);
             }
@@ -677,6 +704,7 @@ where
         app,
         local,
         broker,
+        book,
         candidate,
         &request_id,
         &instance,
@@ -697,6 +725,7 @@ async fn after_marker<A, L, B>(
     app: &A,
     local: &L,
     broker: &B,
+    book: &OwedBook,
     candidate: &Candidate,
     request_id: &str,
     instance: &str,
@@ -726,10 +755,12 @@ where
         AppAnswer::Done(value) if value.get("workspace") == Some(&Value::Null) => None,
         AppAnswer::Done(value) => match read_app_workspace(&value) {
             Some(evidence) if evidence.complete => Some(evidence),
-            Some(_) => return discard(app, local, request_id, "workspace_evidence_refused").await,
-            None => return discard(app, local, request_id, "workspace_unreadable").await,
+            Some(_) => {
+                return discard(app, local, book, request_id, "workspace_evidence_refused").await
+            }
+            None => return discard(app, local, book, request_id, "workspace_unreadable").await,
         },
-        _ => return discard(app, local, request_id, "workspace_unreadable").await,
+        _ => return discard(app, local, book, request_id, "workspace_unreadable").await,
     };
     let workspace = match &evidence {
         None => None,
@@ -755,9 +786,12 @@ where
                     Some(workspace)
                 }
                 Some(_) => {
-                    return discard(app, local, request_id, "workspace_evidence_refused").await
+                    return discard(app, local, book, request_id, "workspace_evidence_refused")
+                        .await
                 }
-                None => return discard(app, local, request_id, "workspace_unavailable").await,
+                None => {
+                    return discard(app, local, book, request_id, "workspace_unavailable").await
+                }
             }
         }
     };
@@ -774,7 +808,7 @@ where
             .map_or(&[][..], |workspace| workspace.lines.as_slice()),
     );
     if Instant::now() >= deadline {
-        return discard(app, local, request_id, "deadline_passed").await;
+        return discard(app, local, book, request_id, "deadline_passed").await;
     }
     let payload_digest = dm_payload_digest(key, &payload);
     let transmission = match &workspace {
@@ -821,6 +855,7 @@ where
                 return unsent_after_intent(
                     app,
                     local,
+                    book,
                     request_id,
                     instance,
                     submission_of(&DmResult::Unavailable),
@@ -838,6 +873,7 @@ where
             return unsent_after_intent(
                 app,
                 local,
+                book,
                 request_id,
                 instance,
                 submission_of(&DmResult::Unavailable),
@@ -847,12 +883,13 @@ where
             .await
         }
         AppAnswer::Refused(_) => {
-            return discard(app, local, request_id, "transmit_intent_refused").await
+            return discard(app, local, book, request_id, "transmit_intent_refused").await
         }
         AppAnswer::Unknown => {
             return unsent_after_intent(
                 app,
                 local,
+                book,
                 request_id,
                 instance,
                 submission_of(&DmResult::Unavailable),
@@ -892,46 +929,50 @@ where
     };
     let outcome = read_broker_exchange(&exchange, request_id, instance, key);
 
-    // 7. The result first: it is the one write with a deadline.
+    // 7-9. What the broker's answer leaves to record -- the result, the
+    // cleanup report, §10's receipt -- is kept, and the file written, before
+    // the first call for any of them (review r-20261116-191958-8b665b): the
+    // result is the one write with a deadline and may take several calls, and a
+    // restart during them must still find the DM's output, its digest and the
+    // instance the cleanup report holds back. The app answers each again by
+    // its key, so a record kept for a write that went through is read back and
+    // settles.
     let result_digest = dm_result_digest(key, &outcome.result);
-    let mut run = submit_result(
-        app,
-        submission_of(&outcome.result),
-        request_id,
-        instance,
-        &result_digest,
-    )
-    .await;
-
-    // 8. §5: a cleanup nobody confirmed latches the instance off. Until the
-    // app has the report it is owed, and nothing more is sent to the
-    // instance (`relay_candidate_holding`).
-    if outcome.cleanup_unknown {
-        run = run
-            .record(
-                app,
-                local,
-                OwedRecord::CleanupUnknown {
-                    request_id: request_id.to_owned(),
-                    instance: instance.to_owned(),
-                },
-            )
-            .await;
-    }
-
-    // 9. §10's receipt. Only the app's recorded answer is a record (stage
-    // S2-2b4); an outcome the ledger already holds is one. Anything short of
-    // it is owed.
-    run.record(
-        app,
-        local,
-        OwedRecord::TransmitOutcome {
+    let submission = submission_of(&outcome.result);
+    let result_id = book.keep(OwedRecord::Result {
+        request_id: request_id.to_owned(),
+        instance: instance.to_owned(),
+        submission: submission.clone(),
+        result_digest: result_digest.clone(),
+        unknown_settled: false,
+    });
+    // §5: a cleanup nobody confirmed latches the instance off. Until the app
+    // has the report it is owed, and nothing more is sent to the instance
+    // (`relay_candidate_holding`).
+    let cleanup_id = outcome.cleanup_unknown.then(|| {
+        book.keep(OwedRecord::CleanupUnknown {
             request_id: request_id.to_owned(),
             instance: instance.to_owned(),
-            outcome: transmit_outcome(outcome.transmission).to_owned(),
-        },
-    )
-    .await
+        })
+    });
+    // §10's receipt. Only the app's recorded answer is a record (stage
+    // S2-2b4); an outcome the ledger already holds is one. Anything short of
+    // it is owed.
+    let outcome_id = book.keep(OwedRecord::TransmitOutcome {
+        request_id: request_id.to_owned(),
+        instance: instance.to_owned(),
+        outcome: transmit_outcome(outcome.transmission).to_owned(),
+    });
+
+    // 7. The result first.
+    let run = submit_result(app, book, result_id, submission, request_id, &result_digest).await;
+    // 8. The cleanup report.
+    if let Some(id) = cleanup_id {
+        book.settle_new(app, local, id).await;
+    }
+    // 9. The receipt.
+    book.settle_new(app, local, outcome_id).await;
+    run
 }
 
 /// A transmission intent that may be recorded, after which nothing was sent.
@@ -944,6 +985,7 @@ where
 async fn unsent_after_intent<A, L>(
     app: &A,
     local: &L,
+    book: &OwedBook,
     request_id: &str,
     instance: &str,
     submission: Value,
@@ -954,8 +996,8 @@ where
     A: DmApp + ?Sized,
     L: DmLocal + ?Sized,
 {
-    let mut run = RelayRun::end(RelayEnd::Settled(code));
-    for record in [
+    // All three are kept, and the file written, before any is sent.
+    let ids: Vec<u64> = [
         OwedRecord::TransmitOutcome {
             request_id: request_id.to_owned(),
             instance: instance.to_owned(),
@@ -971,25 +1013,36 @@ where
         OwedRecord::Discard {
             request_id: request_id.to_owned(),
         },
-    ] {
-        run = run.record(app, local, record).await;
+    ]
+    .into_iter()
+    .map(|record| book.keep(record))
+    .collect();
+    for id in ids {
+        book.settle_new(app, local, id).await;
     }
-    run
+    RelayRun::end(RelayEnd::Settled(code))
 }
 
 /// §9: submitted; a lost answer is read back by the (request, digest) pair,
-/// and what the lookup cannot settle is recorded as unknown and owed: read
-/// back and submitted again on every tick (`owed`), which the app accepts for
-/// the digest its unknown names.
-async fn submit_result<A: DmApp + ?Sized>(
+/// and what the lookup cannot settle is recorded as unknown. The result is
+/// already kept (`result_id`, before this call), so it is read back and
+/// submitted again on every tick until the app answers for it (`owed`), which
+/// the app accepts for the digest its unknown names; what settles it here
+/// removes it.
+async fn submit_result<A>(
     app: &A,
+    book: &OwedBook,
+    result_id: u64,
     submission: Value,
     request_id: &str,
-    instance: &str,
     result_digest: &str,
-) -> RelayRun {
-    if let AppAnswer::Done(value) = app_write(app, AppRoute::Results, submission.clone()).await {
+) -> RelayRun
+where
+    A: DmApp + ?Sized,
+{
+    if let AppAnswer::Done(value) = app_write(app, AppRoute::Results, submission).await {
         if submission_settled(&value) {
+            book.update(result_id, None);
             return RelayRun::end(RelayEnd::Settled("result_recorded"));
         }
     }
@@ -1001,44 +1054,44 @@ async fn submit_result<A: DmApp + ?Sized>(
     .await
     {
         if lookup_settled(&value) == Some(true) {
+            book.update(result_id, None);
             return RelayRun::end(RelayEnd::Settled("result_found_by_lookup"));
         }
     }
-    let owed = |unknown_settled: bool| OwedRecord::Result {
-        request_id: request_id.to_owned(),
-        instance: instance.to_owned(),
-        submission: submission.clone(),
-        result_digest: result_digest.to_owned(),
-        unknown_settled,
+    let instance = match book.get(result_id) {
+        Some(OwedRecord::Result { instance, .. }) => instance,
+        _ => return RelayRun::end(RelayEnd::Settled("result_found_by_lookup")),
     };
-    let (code, record) = match app_write(
+    let (code, unknown_settled) = match app_write(
         app,
         AppRoute::ResultUnknown,
         json!({"request_id": request_id, "instance": instance, "result_digest": result_digest}),
     )
     .await
     {
-        AppAnswer::Done(_) => ("result_unknown_recorded", Some(owed(true))),
+        AppAnswer::Done(_) => ("result_unknown_recorded", true),
         AppAnswer::Refused(reason)
             if reason == "already_accepted" || reason == "already_rejected" =>
         {
-            ("result_found_by_lookup", None)
+            book.update(result_id, None);
+            return RelayRun::end(RelayEnd::Settled("result_found_by_lookup"));
         }
         AppAnswer::Refused(reason) if refused_for_now(&reason) => {
-            ("result_unknown_record_refused", Some(owed(false)))
+            ("result_unknown_record_refused", false)
         }
         // The ledger's own answer: nothing more to record as unknown, and the
         // result is still read back and submitted again.
-        AppAnswer::Refused(_) => ("result_unknown_record_refused", Some(owed(true))),
-        AppAnswer::Unknown => ("result_unknown_outcome_unknown", Some(owed(false))),
+        AppAnswer::Refused(_) => ("result_unknown_record_refused", true),
+        AppAnswer::Unknown => ("result_unknown_outcome_unknown", false),
     };
-    let mut run = RelayRun::end(RelayEnd::Settled(code));
-    run.owed.extend(record);
-    run
+    book.set_unknown_settled(result_id, unknown_settled);
+    println!("amux dm relay: result for request {request_id} is owed; it is sent again every tick");
+    RelayRun::end(RelayEnd::Settled(code))
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use super::super::owed::OwedStore;
     use super::*;
     use crate::dm_relay::wire::{
         dm_result_digest, hex_lower, DmResult, RequestKey, DM_INSTRUCTION,
@@ -1057,6 +1110,49 @@ pub(crate) mod tests {
         HttpAnswer::Answered {
             status,
             body: serde_json::to_vec(&body).unwrap(),
+        }
+    }
+
+    /// An app that, before every call, reads the owed-record file as a
+    /// restarted relay would (a new book from the same store) -- what a
+    /// process that died in that call would leave behind.
+    pub(crate) struct ProbeApp {
+        pub inner: FakeApp,
+        pub store: OwedStore,
+        pub files: Mutex<Vec<(AppRoute, Vec<OwedRecord>)>>,
+    }
+
+    impl ProbeApp {
+        pub(crate) fn over(inner: FakeApp, store: &OwedStore) -> Self {
+            Self {
+                inner,
+                store: store.clone(),
+                files: Mutex::new(Vec::new()),
+            }
+        }
+
+        /// The file's records at the first call of `route`.
+        pub(crate) fn file_at(&self, route: AppRoute) -> Vec<OwedRecord> {
+            self.files
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|(called, _)| *called == route)
+                .map(|(_, records)| records.clone())
+                .unwrap_or_else(|| panic!("{route:?} was never called"))
+        }
+    }
+
+    #[async_trait]
+    impl DmApp for ProbeApp {
+        async fn post(&self, route: AppRoute, body: Value) -> HttpAnswer {
+            let restarted = OwedBook::with_store(self.store.clone());
+            assert!(restarted.load(), "the file is readable at every call");
+            self.files
+                .lock()
+                .unwrap()
+                .push((route, restarted.records()));
+            self.inner.post(route, body).await
         }
     }
 
@@ -1837,8 +1933,12 @@ pub(crate) mod tests {
         let app = FakeApp::with(vec![(AppRoute::Requests, routed("dm_proposal"))]);
         let local = FakeLocal::marking();
         let broker = FakeBroker::answering(|_| BrokerExchange::Lost);
-        let held: BTreeSet<String> = [INSTANCE.to_owned()].into_iter().collect();
-        let run = relay_candidate_holding(&app, &local, &broker, &candidate(), &held).await;
+        let book = OwedBook::new();
+        book.keep(OwedRecord::CleanupUnknown {
+            request_id: REQUEST_ID.into(),
+            instance: INSTANCE.into(),
+        });
+        let run = relay_candidate_holding(&app, &local, &broker, &candidate(), &book).await;
         assert_eq!(
             run,
             RelayRun::end(RelayEnd::RetryLater("cleanup_report_owed"))
@@ -2598,5 +2698,157 @@ pub(crate) mod tests {
         let few: BTreeSet<String> = ["A", "B", "C"].iter().map(|id| id.to_string()).collect();
         assert_eq!(scan_window(&few, Some("B"), 100), vec!["C", "A", "B"]);
         assert!(scan_window(&BTreeSet::new(), Some("B"), 100).is_empty());
+    }
+
+    /// Review r-20261116-191958-8b665b: the DM's result, the cleanup report
+    /// and the receipt were kept only when the whole run ended, so a process
+    /// that died during the result's calls forgot all three.
+    #[tokio::test]
+    async fn a_result_the_cleanup_report_and_the_receipt_are_in_the_file_before_the_first_call_for_any_of_them(
+    ) {
+        let dir = tempfile::tempdir().unwrap();
+        let store = OwedStore::new(dir.path().join("state"));
+        let book = OwedBook::with_store(store.clone());
+        assert!(book.load());
+        let app = ProbeApp::over(
+            FakeApp::with(vec![
+                (AppRoute::Requests, routed("dm_proposal")),
+                (AppRoute::Assignments, assigned(Duration::from_secs(1800))),
+                (AppRoute::Transmissions, recorded()),
+                // The result's answer is lost, its lookup finds nothing, and
+                // its unknown is recorded: the result stays owed.
+                (AppRoute::Results, HttpAnswer::Lost),
+                (AppRoute::ResultLookup, HttpAnswer::Lost),
+                (AppRoute::ResultUnknown, recorded()),
+                (AppRoute::CleanupUnknown, HttpAnswer::Lost),
+                (AppRoute::TransmissionOutcome, HttpAnswer::Lost),
+            ]),
+            &store,
+        );
+        let local = FakeLocal::marking();
+        let broker = FakeBroker::answering(|_| {
+            broker_says(
+                DmResult::Timeout,
+                "process_ended",
+                json!({"status": "cleanup_unknown", "residue": [{"scope": "request_directory", "kind": "remaining"}]}),
+            )
+        });
+        let run = relay_candidate_holding(&app, &local, &broker, &candidate(), &book).await;
+        assert_eq!(run.end, RelayEnd::Settled("result_unknown_recorded"));
+
+        let codes =
+            |records: &[OwedRecord]| records.iter().map(OwedRecord::code).collect::<Vec<_>>();
+        // Before the result's first call a restart finds all three, the
+        // result with its submission and digest, and the instance held back.
+        let at_result = app.file_at(AppRoute::Results);
+        assert_eq!(
+            codes(&at_result),
+            vec!["result", "cleanup_unknown", "transmit_outcome"]
+        );
+        let OwedRecord::Result {
+            submission,
+            result_digest,
+            unknown_settled,
+            ..
+        } = &at_result[0]
+        else {
+            panic!("the first record is the result");
+        };
+        assert_eq!(submission["output"], json!({"kind": "timeout"}));
+        assert_eq!(result_digest.len(), 64);
+        assert!(!unknown_settled);
+        assert!(crate::dm_relay::owed::held_instances(&at_result).contains(INSTANCE));
+        // At the next calls: the unknown's record is in the file too, and the
+        // calls for the cleanup report and the receipt find them there.
+        for route in [AppRoute::CleanupUnknown, AppRoute::TransmissionOutcome] {
+            let file = app.file_at(route);
+            assert_eq!(
+                codes(&file),
+                vec!["result", "cleanup_unknown", "transmit_outcome"],
+                "{route:?}"
+            );
+            assert!(matches!(
+                &file[0],
+                OwedRecord::Result {
+                    unknown_settled: true,
+                    ..
+                }
+            ));
+        }
+        // None answered: all three stay in the file, and the run's copy is
+        // the book's.
+        let restarted = OwedBook::with_store(store.clone());
+        assert!(restarted.load());
+        assert_eq!(restarted.records(), book.records());
+        assert_eq!(restarted.records(), run.owed);
+        assert_eq!(restarted.records().len(), 3);
+    }
+
+    /// A record the app answered for leaves the file at once, so a restart
+    /// does not send it again.
+    #[tokio::test]
+    async fn a_record_the_app_answered_for_leaves_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = OwedStore::new(dir.path().join("state"));
+        let book = OwedBook::with_store(store.clone());
+        assert!(book.load());
+        let app = ProbeApp::over(
+            FakeApp::with(vec![
+                (AppRoute::Requests, routed("dm_proposal")),
+                (AppRoute::Assignments, assigned(Duration::from_secs(1800))),
+                (AppRoute::Transmissions, recorded()),
+                (AppRoute::Results, submitted("accepted")),
+                (AppRoute::TransmissionOutcome, recorded()),
+            ]),
+            &store,
+        );
+        let local = FakeLocal::marking();
+        let broker = FakeBroker::answering(|_| {
+            broker_says(proposal(), "process_ended", json!({"status": "verified"}))
+        });
+        let run = relay_candidate_holding(&app, &local, &broker, &candidate(), &book).await;
+        assert_eq!(run, RelayRun::end(RelayEnd::Settled("result_recorded")));
+        // Kept before its call, gone after it.
+        assert_eq!(app.file_at(AppRoute::Results).len(), 2);
+        assert_eq!(app.file_at(AppRoute::TransmissionOutcome).len(), 1);
+        assert_eq!(store.load(), Ok(Vec::new()));
+    }
+
+    /// A save that fails does not stop the calls the run has begun -- they
+    /// are idempotent keyed writes that shrink what is owed -- but the relay
+    /// starts nothing new, and the records stay in memory to be sent again.
+    #[tokio::test]
+    async fn a_file_that_cannot_be_written_leaves_the_run_its_calls_and_the_records_in_memory() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        let store = OwedStore::new(&state);
+        let book = OwedBook::with_store(store);
+        assert!(book.load());
+        book.save();
+        assert!(book.may_start_new());
+        // The state directory's place is taken by a file: nothing can be saved.
+        std::fs::remove_dir_all(&state).unwrap();
+        std::fs::write(&state, b"in the way").unwrap();
+        let app = FakeApp::with(vec![
+            (AppRoute::Requests, routed("dm_proposal")),
+            (AppRoute::Assignments, assigned(Duration::from_secs(1800))),
+            (AppRoute::Transmissions, recorded()),
+            (AppRoute::Results, HttpAnswer::Lost),
+            (AppRoute::ResultLookup, HttpAnswer::Lost),
+            (AppRoute::ResultUnknown, recorded()),
+            (AppRoute::TransmissionOutcome, recorded()),
+        ]);
+        let local = FakeLocal::marking();
+        let broker = FakeBroker::answering(|_| {
+            broker_says(proposal(), "process_ended", json!({"status": "verified"}))
+        });
+        let run = relay_candidate_holding(&app, &local, &broker, &candidate(), &book).await;
+        assert_eq!(run.end, RelayEnd::Settled("result_unknown_recorded"));
+        // Every call the run had begun went on.
+        assert!(app.routes().contains(&AppRoute::ResultUnknown));
+        assert!(app.routes().contains(&AppRoute::TransmissionOutcome));
+        // The result is still owed, in memory; nothing new may start.
+        assert_eq!(book.records().len(), 1);
+        assert!(!book.may_start_new());
     }
 }

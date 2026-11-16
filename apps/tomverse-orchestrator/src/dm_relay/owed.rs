@@ -26,13 +26,15 @@
 //! reboot -- and a result whose answer was lost, a cleanup report, or a
 //! session's pause held only in memory would be forgotten with the process,
 //! with the instance and session blocks they carry. Every change to the
-//! records is written to one local file before the relay goes on, and the
-//! first tick reads it back.
+//! records is written to one local file the moment it is made (`OwedBook`:
+//! before the first call that could be lost), and the first tick reads it back.
 
 use std::collections::BTreeSet;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -273,31 +275,6 @@ pub fn pause_confirmed(answer: &HttpAnswer) -> bool {
         if serde_json::from_slice::<Value>(body).ok().and_then(|value| value.get("paused").and_then(Value::as_bool)) == Some(true))
 }
 
-/// Sends every owed record once, in order, and keeps the ones still owed.
-/// Returns how many were settled.
-pub async fn settle_all<A, L>(app: &A, local: &L, owed: &mut Vec<OwedRecord>) -> usize
-where
-    A: DmApp + ?Sized,
-    L: DmLocal + ?Sized,
-{
-    let mut still = Vec::new();
-    let mut settled = 0;
-    for mut record in std::mem::take(owed) {
-        if settle(app, local, &mut record).await {
-            settled += 1;
-            println!(
-                "amux dm relay: owed {} for request {} recorded",
-                record.code(),
-                record.request_id()
-            );
-        } else {
-            still.push(record);
-        }
-    }
-    *owed = still;
-    settled
-}
-
 /// The instances held back by the owed records.
 pub fn held_instances(owed: &[OwedRecord]) -> BTreeSet<String> {
     owed.iter()
@@ -312,6 +289,368 @@ pub fn held_sessions(owed: &[OwedRecord]) -> BTreeSet<String> {
         .filter_map(OwedRecord::held_session)
         .map(str::to_owned)
         .collect()
+}
+
+/// How often the owed records are written even when unchanged, and how old the
+/// last good write may be before the relay starts nothing new.
+const STATE_REWRITE: Duration = Duration::from_secs(60);
+
+#[derive(Debug)]
+struct Entry {
+    id: u64,
+    record: OwedRecord,
+}
+
+#[derive(Debug)]
+struct BookState {
+    entries: Vec<Entry>,
+    next_id: u64,
+    store: Option<OwedStore>,
+    /// Whether `entries` hold what the file held. Until they do the relay does
+    /// not know what it owes, so it starts nothing new.
+    loaded: bool,
+    /// What the file holds now: the records of the last load or save.
+    persisted: Vec<OwedRecord>,
+    /// The last save failed: the file is behind `entries`.
+    save_failed: bool,
+    /// When the file was last written successfully.
+    last_written: Option<Instant>,
+}
+
+impl BookState {
+    fn records(&self) -> Vec<OwedRecord> {
+        self.entries
+            .iter()
+            .map(|entry| entry.record.clone())
+            .collect()
+    }
+
+    /// Writes the records when they differ from the file or the file is old.
+    /// A write that fails is tried again at every call, and nothing new starts
+    /// while it does: a record the file does not hold would be forgotten by a
+    /// restart.
+    fn save(&mut self) {
+        let Some(store) = &self.store else {
+            return;
+        };
+        if !self.loaded {
+            return;
+        }
+        let records = self.records();
+        let fresh = self
+            .last_written
+            .is_some_and(|at| at.elapsed() < STATE_REWRITE);
+        if records == self.persisted && !self.save_failed && fresh {
+            return;
+        }
+        match store.save(&records) {
+            Ok(()) => {
+                self.persisted = records;
+                self.save_failed = false;
+                self.last_written = Some(Instant::now());
+            }
+            Err(reason) => {
+                self.save_failed = true;
+                println!(
+                    "amux dm relay: the owed records cannot be written to {} ({reason}); \
+                     nothing new is sent or delivered until they can, and the write is tried again every tick",
+                    store.path().display()
+                );
+            }
+        }
+    }
+}
+
+/// Every record the relay owes, in memory and in the file, in one place that
+/// the question and delivery flows write to the moment an obligation exists
+/// (review r-20261116-191958-8b665b): a record is kept -- and the file
+/// replaced -- before the first network call that could be lost, so a restart
+/// during that call still finds it. A run is never handed its records to keep
+/// at its end.
+///
+/// A save that fails does not stop the calls a run has begun: they are keyed
+/// writes the app answers from its ledger and a record that shrinks what is
+/// owed, stopping them would only leave the obligation open longer, and the
+/// record stays in memory and is sent again every tick. What a failed save
+/// stops is anything new -- the next question, delivery or v22 sync starts
+/// nothing while `may_start_new` is false -- and no flow starts a new external
+/// action after it kept a record (a record is made after the broker's answer,
+/// the local send, or a failed step that ends the run).
+///
+/// Interior mutability: the flows hold `&OwedBook` beside `&app` and `&local`,
+/// and the guard is never held across an await.
+#[derive(Debug)]
+pub struct OwedBook {
+    state: Mutex<BookState>,
+}
+
+impl Default for OwedBook {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl OwedBook {
+    /// Records kept in memory only.
+    pub fn new() -> Self {
+        Self {
+            state: Mutex::new(BookState {
+                entries: Vec::new(),
+                next_id: 0,
+                store: None,
+                loaded: true,
+                persisted: Vec::new(),
+                save_failed: false,
+                last_written: None,
+            }),
+        }
+    }
+
+    /// Records kept in `store`, read back by the first `load`.
+    pub fn with_store(store: OwedStore) -> Self {
+        let book = Self::new();
+        {
+            let mut state = book.lock();
+            state.store = Some(store);
+            state.loaded = false;
+        }
+        book
+    }
+
+    fn lock(&self) -> MutexGuard<'_, BookState> {
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Reads the file the first time (and again every call until it could be
+    /// read). A file the relay cannot read or trust is never taken for an
+    /// empty one: what it owes, and the instances and sessions that holds
+    /// back, are not known, so nothing new is started until it reads (a
+    /// person fixes or removes the file). Only the code and the reason are
+    /// logged, never a record.
+    pub fn load(&self) -> bool {
+        let mut state = self.lock();
+        if state.loaded {
+            return true;
+        }
+        let Some(store) = state.store.clone() else {
+            state.loaded = true;
+            return true;
+        };
+        match store.load() {
+            Ok(loaded) => {
+                if !loaded.is_empty() {
+                    println!(
+                        "amux dm relay: {} owed record(s) restored from {}",
+                        loaded.len(),
+                        store.path().display()
+                    );
+                }
+                state.persisted = loaded.clone();
+                let mut entries: Vec<Entry> = loaded
+                    .into_iter()
+                    .enumerate()
+                    .map(|(id, record)| Entry {
+                        id: id as u64,
+                        record,
+                    })
+                    .collect();
+                let base = entries.len() as u64;
+                // What was kept before the file was read follows what it held.
+                for (offset, entry) in state.entries.drain(..).enumerate() {
+                    entries.push(Entry {
+                        id: base + offset as u64,
+                        record: entry.record,
+                    });
+                }
+                state.next_id = entries.len() as u64;
+                state.entries = entries;
+                state.loaded = true;
+                true
+            }
+            Err(reason) => {
+                println!(
+                    "amux dm relay: the owed records in {} cannot be read ({reason}); \
+                     nothing new is sent or delivered until they can, and the read is tried again every tick",
+                    store.path().display()
+                );
+                false
+            }
+        }
+    }
+
+    pub fn save(&self) {
+        self.lock().save();
+    }
+
+    /// Whether the relay may start something new: it knows what it owes, the
+    /// file holds it, and the file was written lately.
+    pub fn may_start_new(&self) -> bool {
+        let state = self.lock();
+        state.loaded
+            && !state.save_failed
+            && (state.store.is_none()
+                || state
+                    .last_written
+                    .is_some_and(|at| at.elapsed() < STATE_REWRITE))
+    }
+
+    /// Whether the records were read (always, with no file).
+    pub fn is_loaded(&self) -> bool {
+        self.lock().loaded
+    }
+
+    /// Keeps `record` and writes the file now, before anything is sent for it.
+    /// A write that fails leaves the record in memory (`may_start_new` says
+    /// so). Returns the record's handle for `settle_new`, `settle_one` and
+    /// `update`.
+    pub fn keep(&self, record: OwedRecord) -> u64 {
+        let mut state = self.lock();
+        let id = state.next_id;
+        state.next_id += 1;
+        state.entries.push(Entry { id, record });
+        state.save();
+        id
+    }
+
+    /// Replaces a kept record, or removes it (`None`: the app has it), and
+    /// writes the file.
+    pub fn update(&self, id: u64, record: Option<OwedRecord>) {
+        let mut state = self.lock();
+        match record {
+            Some(record) => {
+                if let Some(entry) = state.entries.iter_mut().find(|entry| entry.id == id) {
+                    entry.record = record;
+                }
+            }
+            None => state.entries.retain(|entry| entry.id != id),
+        }
+        state.save();
+    }
+
+    /// A kept result whose `results/unknown` has its answer (or has nothing to
+    /// record); written when it changes.
+    pub fn set_unknown_settled(&self, id: u64, settled: bool) {
+        let mut state = self.lock();
+        let mut changed = false;
+        if let Some(Entry {
+            record: OwedRecord::Result {
+                unknown_settled, ..
+            },
+            ..
+        }) = state.entries.iter_mut().find(|entry| entry.id == id)
+        {
+            changed = *unknown_settled != settled;
+            *unknown_settled = settled;
+        }
+        if changed {
+            state.save();
+        }
+    }
+
+    pub fn get(&self, id: u64) -> Option<OwedRecord> {
+        self.lock()
+            .entries
+            .iter()
+            .find(|entry| entry.id == id)
+            .map(|entry| entry.record.clone())
+    }
+
+    /// A point to ask `since` from: the records kept after it were kept by the
+    /// run that took it.
+    pub fn mark(&self) -> u64 {
+        self.lock().next_id
+    }
+
+    /// The records kept since `mark` that are still owed.
+    pub fn since(&self, mark: u64) -> Vec<OwedRecord> {
+        self.lock()
+            .entries
+            .iter()
+            .filter(|entry| entry.id >= mark)
+            .map(|entry| entry.record.clone())
+            .collect()
+    }
+
+    pub fn records(&self) -> Vec<OwedRecord> {
+        self.lock().records()
+    }
+
+    /// The instances held back by the owed records.
+    pub fn held_instances(&self) -> BTreeSet<String> {
+        held_instances(&self.records())
+    }
+
+    /// The sessions held back by the owed records.
+    pub fn held_sessions(&self) -> BTreeSet<String> {
+        held_sessions(&self.records())
+    }
+
+    /// Sends a kept record once. True when it is settled and gone; a record
+    /// still owed may have changed (a result whose `results/unknown` was
+    /// answered), and the change is written.
+    pub async fn settle_one<A, L>(&self, app: &A, local: &L, id: u64) -> bool
+    where
+        A: DmApp + ?Sized,
+        L: DmLocal + ?Sized,
+    {
+        let Some(mut record) = self.get(id) else {
+            return true;
+        };
+        let settled = settle(app, local, &mut record).await;
+        self.update(id, if settled { None } else { Some(record) });
+        settled
+    }
+
+    /// `settle_one` for a record just kept: one still owed is logged as such.
+    pub async fn settle_new<A, L>(&self, app: &A, local: &L, id: u64) -> bool
+    where
+        A: DmApp + ?Sized,
+        L: DmLocal + ?Sized,
+    {
+        let settled = self.settle_one(app, local, id).await;
+        if !settled {
+            if let Some(record) = self.get(id) {
+                println!(
+                    "amux dm relay: {} for request {} is owed; it is sent again every tick",
+                    record.code(),
+                    record.request_id()
+                );
+            }
+        }
+        settled
+    }
+
+    /// Keeps `record`, then sends it once: persisted before the send.
+    pub async fn send<A, L>(&self, app: &A, local: &L, record: OwedRecord) -> bool
+    where
+        A: DmApp + ?Sized,
+        L: DmLocal + ?Sized,
+    {
+        let id = self.keep(record);
+        self.settle_new(app, local, id).await
+    }
+
+    /// Sends every kept record once, in order, and keeps the ones still owed.
+    /// Returns how many were settled.
+    pub async fn settle_all<A, L>(&self, app: &A, local: &L) -> usize
+    where
+        A: DmApp + ?Sized,
+        L: DmLocal + ?Sized,
+    {
+        let ids: Vec<u64> = self.lock().entries.iter().map(|entry| entry.id).collect();
+        let mut settled = 0;
+        for id in ids {
+            let Some(record) = self.get(id) else {
+                continue;
+            };
+            let (code, request_id) = (record.code(), record.request_id().to_owned());
+            if self.settle_one(app, local, id).await {
+                settled += 1;
+                println!("amux dm relay: owed {code} for request {request_id} recorded");
+            }
+        }
+        settled
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -653,16 +992,17 @@ mod tests {
     #[tokio::test]
     async fn an_owed_pause_holds_its_session_until_the_local_amux_confirms_it() {
         let local = FakeLocal::default();
-        let mut owed = vec![OwedRecord::Pause {
+        let book = OwedBook::new();
+        book.keep(OwedRecord::Pause {
             card_id: "AMUX-1".into(),
             question_revision: 1,
             request_id: REQUEST_ID.into(),
             session: "claude-impl".into(),
-        }];
+        });
         let app = FakeApp::default();
-        assert_eq!(settle_all(&app, &local, &mut owed).await, 0);
+        assert_eq!(book.settle_all(&app, &local).await, 0);
         assert_eq!(
-            held_sessions(&owed).into_iter().collect::<Vec<_>>(),
+            book.held_sessions().into_iter().collect::<Vec<_>>(),
             vec!["claude-impl"]
         );
         local
@@ -672,8 +1012,8 @@ mod tests {
             .entry(LocalRoute::AnswerUnknown.path())
             .or_default()
             .push_back(answered(200, json!({"paused": true})));
-        assert_eq!(settle_all(&app, &local, &mut owed).await, 1);
-        assert!(owed.is_empty());
+        assert_eq!(book.settle_all(&app, &local).await, 1);
+        assert!(book.records().is_empty());
     }
 
     /// One record of every kind, the result as large as a DM's whole output.

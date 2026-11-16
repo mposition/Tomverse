@@ -211,7 +211,7 @@ test("the relay prints no halt line any more: what it could not record is owed",
     .join("\n");
   assert.doesNotMatch(source, /amux dm relay halt:/);
   assert.doesNotMatch(source, /\.halted\(/);
-  assert.match(relayIo, /settle_all\(&self\.app, &self\.local, &mut self\.records\)/);
+  assert.match(relayIo, /self\.book\.settle_all\(&self\.app, &self\.local\)/);
 });
 
 test("whatever follows the halt line, and however many there are, the run is restarted", { skip: noBash }, () => {

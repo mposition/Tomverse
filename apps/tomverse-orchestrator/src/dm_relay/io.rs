@@ -8,10 +8,6 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::time::Duration;
 
-/// How often the owed records are written even when unchanged, and how old
-/// the last good write may be before the relay starts nothing new.
-const STATE_REWRITE: Duration = Duration::from_secs(60);
-
 use async_trait::async_trait;
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -22,7 +18,7 @@ use super::flow::{
     listed_markers, relay_candidate_holding, release_marker, scan, AppRoute, DmApp, DmBroker,
     DmLocal, LocalRead, LocalRoute, MarkerKey, RelayEnd, LOCAL_MARKER_LIST_PATH,
 };
-use super::owed::{held_instances, held_sessions, settle_all, OwedRecord, OwedStore};
+use super::owed::{OwedBook, OwedStore};
 use super::wire::{BrokerExchange, HttpAnswer, DM_RESULT_LINE_MAX_BYTES};
 
 /// Off unless exactly `enabled`.
@@ -317,23 +313,10 @@ pub struct Relay<A, L, B> {
     /// Markers whose release was not confirmed, retried before every scan.
     owed: BTreeSet<MarkerKey>,
     /// App records (and session pauses) not answered for yet, sent again by
-    /// their keys on every tick (`owed`). Nothing stops the relay.
-    records: Vec<OwedRecord>,
-    /// The file the records are kept in between processes (`owed::OwedStore`);
-    /// None keeps them in memory only.
-    store: Option<OwedStore>,
-    /// Whether `records` hold what the file held. Until they do the relay does
-    /// not know what it owes, so it starts nothing new.
-    records_loaded: bool,
-    /// What the file holds now: the records of the last load or save.
-    persisted: Vec<OwedRecord>,
-    /// The last save failed: the file is behind `records`.
-    save_failed: bool,
-    /// When the file was last written successfully. Nothing new starts
-    /// until a write has succeeded, and the file is written again every
-    /// `STATE_REWRITE` even when nothing changed, so a directory that turned
-    /// read-only or a full disk is seen before the next new send.
-    last_written: Option<std::time::Instant>,
+    /// their keys on every tick, and the file they are kept in between
+    /// processes (`owed::OwedBook`). The flows write to it themselves, the
+    /// moment a record exists. Nothing stops the relay.
+    book: OwedBook,
     /// Where the next scan's window starts (`flow::scan_window`).
     cursor: Option<String>,
     /// Where the walk over the operator-confirmed answers stands (stage S2-2b3).
@@ -365,12 +348,7 @@ impl<A: DmApp, L: DmLocal, B: DmBroker> Relay<A, L, B> {
             with_option_effects,
             settled: BTreeSet::new(),
             owed: BTreeSet::new(),
-            records: Vec::new(),
-            store: None,
-            records_loaded: true,
-            persisted: Vec::new(),
-            save_failed: false,
-            last_written: None,
+            book: OwedBook::new(),
             cursor: None,
             delivery_cursor: None,
             settled_start: false,
@@ -381,110 +359,27 @@ impl<A: DmApp, L: DmLocal, B: DmBroker> Relay<A, L, B> {
 
     /// Keeps the owed records in `store` and reads them back on the first tick.
     pub fn with_store(mut self, store: OwedStore) -> Self {
-        self.store = Some(store);
-        self.records_loaded = false;
+        self.book = OwedBook::with_store(store);
         self
     }
 
     /// The records the relay still owes.
-    pub fn records(&self) -> &[OwedRecord] {
-        &self.records
+    pub fn records(&self) -> Vec<crate::dm_relay::owed::OwedRecord> {
+        self.book.records()
     }
 
-    fn owe(&mut self, records: Vec<OwedRecord>) {
+    /// Keeps records as the flows do, for the tests.
+    #[cfg(test)]
+    fn owe(&mut self, records: Vec<crate::dm_relay::owed::OwedRecord>) {
         for record in records {
-            println!(
-                "amux dm relay: {} for request {} is owed; it is sent again every tick",
-                record.code(),
-                record.request_id()
-            );
-            self.records.push(record);
-        }
-        self.save_state();
-    }
-
-    /// Reads the file the first time (and again every tick it could not be
-    /// read). A file the relay cannot read or trust is never taken for an
-    /// empty one: what it owes, and the instances and sessions that holds
-    /// back, are not known, so nothing new is started until it reads (a
-    /// person fixes or removes the file). Only the code and the reason are
-    /// logged, never a record.
-    fn load_state(&mut self) -> bool {
-        if self.records_loaded {
-            return true;
-        }
-        let Some(store) = &self.store else {
-            self.records_loaded = true;
-            return true;
-        };
-        match store.load() {
-            Ok(mut loaded) => {
-                if !loaded.is_empty() {
-                    println!(
-                        "amux dm relay: {} owed record(s) restored from {}",
-                        loaded.len(),
-                        store.path().display()
-                    );
-                }
-                self.persisted = loaded.clone();
-                loaded.append(&mut self.records);
-                self.records = loaded;
-                self.records_loaded = true;
-                true
-            }
-            Err(reason) => {
-                println!(
-                    "amux dm relay: the owed records in {} cannot be read ({reason}); \
-                     nothing new is sent or delivered until they can, and the read is tried again every tick",
-                    store.path().display()
-                );
-                false
-            }
-        }
-    }
-
-    /// Writes the records when they differ from the file. A write that fails
-    /// is tried again every tick, and nothing new starts while it does: a
-    /// record the file does not hold would be forgotten by a restart.
-    fn save_state(&mut self) {
-        let Some(store) = &self.store else {
-            return;
-        };
-        if !self.records_loaded {
-            return;
-        }
-        let fresh = self
-            .last_written
-            .is_some_and(|at| at.elapsed() < STATE_REWRITE);
-        if self.records == self.persisted && !self.save_failed && fresh {
-            return;
-        }
-        match store.save(&self.records) {
-            Ok(()) => {
-                self.persisted = self.records.clone();
-                self.save_failed = false;
-                self.last_written = Some(std::time::Instant::now());
-            }
-            Err(reason) => {
-                self.save_failed = true;
-                println!(
-                    "amux dm relay: the owed records cannot be written to {} ({reason}); \
-                     nothing new is sent or delivered until they can, and the write is tried again every tick",
-                    store.path().display()
-                );
-            }
+            self.book.keep(record);
         }
     }
 
     /// Whether the relay may start something new: it knows what it owes and
-    /// the file holds it.
+    /// the file holds it (`OwedBook::may_start_new`).
     fn may_start_new(&self) -> bool {
-        self.records_loaded
-            && !self.save_failed
-            && (self.store.is_none()
-                || self
-                    .last_written
-                    .is_some_and(|at| at.elapsed() < STATE_REWRITE))
+        self.book.may_start_new()
     }
 
     pub fn owed(&self) -> &BTreeSet<MarkerKey> {
@@ -510,10 +405,12 @@ impl<A: DmApp, L: DmLocal, B: DmBroker> Relay<A, L, B> {
         // The owed records first, from the file at the start (a process that
         // ended left them there), and again after they were sent: a settled
         // record leaves the file, a result whose unknown was recorded changes.
-        let loaded = self.load_state();
-        let settled_records =
-            loaded && settle_all(&self.app, &self.local, &mut self.records).await > 0;
-        self.save_state();
+        let loaded = self.book.load();
+        let settled_records = loaded && self.book.settle_all(&self.app, &self.local).await > 0;
+        // The records are written as they change; this also rewrites an
+        // unchanged file when it is old, so a directory that stopped taking
+        // writes is seen before the next new send.
+        self.book.save();
         // Nothing is in flight between questions, so every marker the local
         // AMUX holds now was left by a request this process no longer runs: a
         // release that failed, or a bridge that stopped mid-request. The list
@@ -583,7 +480,7 @@ impl<A: DmApp, L: DmLocal, B: DmBroker> Relay<A, L, B> {
     /// One decision a stopped bridge left without an outcome (stage S2-2b4,
     /// `delivery::settle_unsettled`).
     async fn settle(&mut self) -> Settle {
-        let run = settle_unsettled(&self.app, &self.local).await;
+        let run = settle_unsettled(&self.app, &self.local, &self.book).await;
         // Card id, revision and a code: no answer, message or key.
         if let Some((card, revision)) = &run.question {
             println!(
@@ -591,7 +488,6 @@ impl<A: DmApp, L: DmLocal, B: DmBroker> Relay<A, L, B> {
                 run.code
             );
         }
-        self.owe(run.owed);
         run.settle
     }
 
@@ -612,8 +508,13 @@ impl<A: DmApp, L: DmLocal, B: DmBroker> Relay<A, L, B> {
     /// One step of the confirmed-answer walk (`delivery::deliver_next`); true
     /// when an answer was delivered.
     async fn deliver(&mut self) -> bool {
-        let held = held_sessions(&self.records);
-        let run = deliver_next(&self.app, &self.local, self.delivery_cursor.as_ref(), &held).await;
+        let run = deliver_next(
+            &self.app,
+            &self.local,
+            &self.book,
+            self.delivery_cursor.as_ref(),
+        )
+        .await;
         match run.cursor {
             CursorMove::Keep => {}
             CursorMove::Reset => self.delivery_cursor = None,
@@ -632,7 +533,6 @@ impl<A: DmApp, L: DmLocal, B: DmBroker> Relay<A, L, B> {
             // delivered, as at the start (`settle_unsettled`).
             self.settled_start = false;
         }
-        self.owe(run.owed);
         run.delivered
     }
 
@@ -663,9 +563,9 @@ impl<A: DmApp, L: DmLocal, B: DmBroker> Relay<A, L, B> {
         let Some(candidate) = scan.candidate else {
             return Tick::Idle;
         };
-        let held = held_instances(&self.records);
         let run =
-            relay_candidate_holding(&self.app, &self.local, &self.broker, &candidate, &held).await;
+            relay_candidate_holding(&self.app, &self.local, &self.broker, &candidate, &self.book)
+                .await;
         let (card, revision) = candidate.question_key();
         let code = match run.end {
             RelayEnd::RetryLater(code) | RelayEnd::Settled(code) => code,
@@ -680,7 +580,6 @@ impl<A: DmApp, L: DmLocal, B: DmBroker> Relay<A, L, B> {
         if settled {
             self.settled.insert((card, revision));
         }
-        self.owe(run.owed);
         // Nothing recorded for the DM (`RetryLater`, `AppClosed`): routing is
         // asked again on the next scan, after the idle wait, so an app that is
         // down or busy gets one question per scan, not one per card.
@@ -716,6 +615,7 @@ pub async fn run<A: DmApp, L: DmLocal, B: DmBroker>(mut relay: Relay<A, L, B>) {
 mod tests {
     use super::*;
     use crate::dm_relay::flow::tests::{EVENT_ID, INSTANCE, KEY, REQUEST_ID};
+    use crate::dm_relay::owed::{held_instances, held_sessions, OwedRecord};
     use crate::dm_relay::wire::{
         dm_payload_digest, dm_result_digest, DmResult, RequestKey, DM_INSTRUCTION,
     };
@@ -1016,7 +916,19 @@ mod tests {
         Arc<Mutex<Vec<Seen>>>,
         Arc<Mutex<Vec<Value>>>,
     ) {
-        let (app_base, app_seen) = serve(app_handler(app_overrides)).await;
+        relay_with_handler(app_handler(app_overrides), cleanup).await
+    }
+
+    async fn relay_with_handler(
+        app_handler: Handler,
+        cleanup: Value,
+    ) -> (
+        Relay<HttpApp, HttpLocalAmux, PairBroker>,
+        Arc<Mutex<Vec<Seen>>>,
+        Arc<Mutex<Vec<Seen>>>,
+        Arc<Mutex<Vec<Value>>>,
+    ) {
+        let (app_base, app_seen) = serve(app_handler).await;
         let (local_base, local_seen) = serve(local_handler()).await;
         let api = crate::tomverse_api::TomverseApi::for_test_with_timeouts(
             app_base,
@@ -1904,15 +1816,15 @@ mod tests {
         let mut second = relay_keeping(&store);
         assert!(second.records().is_empty());
         second.tick().await;
-        assert_eq!(second.records(), records.as_slice());
+        assert_eq!(second.records(), records);
         assert_eq!(
-            held_instances(second.records())
+            held_instances(&second.records())
                 .into_iter()
                 .collect::<Vec<_>>(),
             vec![INSTANCE]
         );
         assert_eq!(
-            held_sessions(second.records())
+            held_sessions(&second.records())
                 .into_iter()
                 .collect::<Vec<_>>(),
             vec!["claude-impl"]
@@ -1979,7 +1891,7 @@ mod tests {
         // Fixed by a person: the next tick reads it and the relay goes on.
         std::fs::write(store.path(), &good).unwrap();
         relay.tick().await;
-        assert_eq!(relay.records(), records.as_slice());
+        assert_eq!(relay.records(), records);
         assert!(relay.app.all_routes().contains(&AppRoute::DeliveriesNext));
     }
 
@@ -2029,5 +1941,71 @@ mod tests {
         assert!(relay.may_start_new());
         assert_eq!(store.load().unwrap(), relay.records());
         assert!(relay.app.all_routes().contains(&AppRoute::DeliveriesNext));
+    }
+
+    /// Review r-20261116-191958-8b665b: a result whose answer was lost was in
+    /// memory only while the calls after it went on; a process that died in
+    /// them forgot its output and digest. The file the first call after it
+    /// finds is copied here, and a new relay started on that copy restores it.
+    #[tokio::test]
+    async fn a_restart_during_the_calls_after_a_lost_result_restores_it_and_the_holds() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = OwedStore::new(dir.path().join("state"));
+        let crashed = dir.path().join("crashed");
+        let inner = app_handler(vec![("results", Reply::Drop)]);
+        let (file, copy, copy_dir) = (
+            store.path(),
+            crashed.join(crate::dm_relay::owed::OWED_STATE_FILE),
+            crashed.clone(),
+        );
+        let handler: Handler = Arc::new(move |seen: &Seen| {
+            if seen.path.ends_with("/results/lookup") && !copy.exists() {
+                std::fs::create_dir_all(&copy_dir).unwrap();
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    std::fs::set_permissions(&copy_dir, std::fs::Permissions::from_mode(0o700))
+                        .unwrap();
+                }
+                std::fs::copy(&file, &copy).expect("the result is in the file before its lookup");
+            }
+            inner(seen)
+        });
+        let (relay, app_seen, _local_seen, _lines) = relay_with_handler(
+            handler,
+            json!({"status": "cleanup_unknown", "residue": [{"scope": "vendor", "kind": "remaining"}]}),
+        )
+        .await;
+        let mut relay = relay.with_store(store);
+        relay.settled_start = true;
+        relay.tick().await;
+        let digest = app_seen
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|seen| seen.path.ends_with("/results/lookup"))
+            .map(|seen| seen.body["result_digest"].clone())
+            .expect("the result was looked up");
+
+        // The process that died then: a new relay on what it left.
+        let mut restarted = relay_keeping(&OwedStore::new(&crashed));
+        restarted.tick().await;
+        let records = restarted.records();
+        assert!(
+            records.iter().any(|record| matches!(record,
+                OwedRecord::Result { result_digest, request_id, .. }
+                    if json!(result_digest) == digest && request_id == REQUEST_ID)),
+            "{records:?}"
+        );
+        assert_eq!(
+            held_instances(&records).into_iter().collect::<Vec<_>>(),
+            vec![INSTANCE],
+            "the cleanup report's hold is restored with it"
+        );
+        assert!(records
+            .iter()
+            .any(|record| matches!(record, OwedRecord::TransmitOutcome { .. })));
+        // And it is sent again by its key: the lookup first.
+        assert!(restarted.app.all_routes().contains(&AppRoute::ResultLookup));
     }
 }

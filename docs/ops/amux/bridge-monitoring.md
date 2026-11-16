@@ -334,7 +334,7 @@ marker만 풀었다. 그래서 systemd 상태만으로는 멈춤을 알 수 없�
 
 owed 기록(재전송할 결과·cleanup 보고·세션 pause와 그 차단)은 재시작 뒤에도 남는다. relay unit의
 `StateDirectory=tomverse-amux-dm-relay`(`/var/lib/tomverse-amux-dm-relay/owed-records.json`, 파일 0600, 디렉터리 0700)에
-바뀔 때마다 원자적으로 쓰고 시작할 때 읽는다. journal의 `owed records ... cannot be read`/`cannot be written` 줄은 그 파일을
+기록이 생기는 즉시(그 기록의 첫 호출 전에) 그리고 바뀔 때마다 원자적으로 쓰고 시작할 때 읽는다. journal의 `owed records ... cannot be read`/`cannot be written` 줄은 그 파일을
 읽거나 쓰지 못해 새 전송·전달을 시작하지 않고 매 tick 다시 시도하는 중이라는 뜻이다(halt가 아니다). 깨진 파일은 지우지
 않고 두므로, 내용을 확인한 뒤 고치거나(소유자 `tomverse-bridge`, 0600) 옮겨 두면 다음 tick에 이어 간다. 이 unit이
 설치되기 전의 박스에서는 `no state directory` 줄이 나오고 기록은 메모리에만 있다. 6.0절로 unit을 다시 설치한다.

@@ -57,10 +57,8 @@
 
 use serde_json::{json, Value};
 
-use std::collections::BTreeSet;
-
 use super::flow::{AppRoute, DmApp, DmLocal, LocalRoute};
-use super::owed::{self, refused_for_now, OwedRecord};
+use super::owed::{refused_for_now, OwedBook, OwedRecord};
 use super::wire::{
     is_instance, is_ledger_identifier, is_request_id, read_app_answer, AppAnswer, HttpAnswer,
 };
@@ -214,7 +212,9 @@ pub struct DeliveryRun {
     /// The card and question revision the run was about, for the log line.
     pub question: Option<(String, i64)>,
     pub delivered: bool,
-    /// Records the app or the local AMUX did not answer for yet (`owed`).
+    /// The records this run kept (`OwedBook::keep`, before the call that could
+    /// be lost) and the app or the local AMUX has not answered for yet. A copy
+    /// for the log and the tests; the book holds them.
     pub owed: Vec<OwedRecord>,
     /// A decision that may be recorded with nothing sent: the relay settles it
     /// from the local records before it delivers anything else.
@@ -244,11 +244,10 @@ impl DeliveryRun {
         }
     }
 
-    /// An outcome the app did not record: the run's log line names it, and
-    /// it is owed.
-    fn missing(mut self, cause: &'static str, record: OwedRecord) -> Self {
+    /// An outcome the app did not record: the run's log line names it (the
+    /// record is kept and owed).
+    fn missing(mut self, cause: &'static str) -> Self {
         self.code = cause;
-        self.owed.push(record);
         self
     }
 }
@@ -366,11 +365,31 @@ pub fn local_delivery(answer: &HttpAnswer) -> LocalDelivery {
 
 /// One step of the walk: at most one confirmed answer carried to a recorded
 /// receipt, a recorded unknown, a recorded not-sent outcome, or owed records.
+///
+/// Every record the step makes is kept in `book` -- and its file -- before the
+/// call that could be lost, and the sessions its owed pauses hold back are
+/// the book's.
 pub async fn deliver_next<A, L>(
     app: &A,
     local: &L,
+    book: &OwedBook,
     cursor: Option<&DeliveryCursor>,
-    held_sessions: &BTreeSet<String>,
+) -> DeliveryRun
+where
+    A: DmApp + ?Sized,
+    L: DmLocal + ?Sized,
+{
+    let mark = book.mark();
+    let mut run = deliver_next_kept(app, local, book, cursor).await;
+    run.owed = book.since(mark);
+    run
+}
+
+async fn deliver_next_kept<A, L>(
+    app: &A,
+    local: &L,
+    book: &OwedBook,
+    cursor: Option<&DeliveryCursor>,
 ) -> DeliveryRun
 where
     A: DmApp + ?Sized,
@@ -403,7 +422,7 @@ where
         NextDelivery::Ready(delivery) => delivery,
     };
     // §9: no answer goes to a session whose pause is still owed.
-    if held_sessions.contains(&delivery.session) {
+    if book.held_sessions().contains(&delivery.session) {
         return DeliveryRun::about(&delivery, "delivery_session_pause_owed");
     }
 
@@ -484,6 +503,7 @@ where
             return record_outcome(
                 app,
                 local,
+                book,
                 run,
                 &delivery,
                 "not_sent",
@@ -493,7 +513,7 @@ where
             .await;
         }
         // Unclear (§9): never sent again.
-        LocalDelivery::Unclear => return record_unknown(app, local, &delivery).await,
+        LocalDelivery::Unclear => return record_unknown(app, local, book, &delivery).await,
     };
 
     // 5. The receipt. Only a recorded answer is a receipt.
@@ -509,6 +529,7 @@ where
     record_outcome(
         app,
         local,
+        book,
         run,
         &delivery,
         "receipt",
@@ -527,6 +548,7 @@ where
 async fn record_outcome<A, L>(
     app: &A,
     local: &L,
+    book: &OwedBook,
     run: DeliveryRun,
     delivery: &Delivery,
     outcome: &'static str,
@@ -537,15 +559,15 @@ where
     A: DmApp + ?Sized,
     L: DmLocal + ?Sized,
 {
-    let mut record = OwedRecord::DeliveryOutcome {
+    let id = book.keep(OwedRecord::DeliveryOutcome {
         request_id: delivery.request_id().to_owned(),
         outcome: outcome.to_owned(),
         reason: reason.map(str::to_owned),
-    };
-    if owed::settle(app, local, &mut record).await {
+    });
+    if book.settle_new(app, local, id).await {
         run
     } else {
-        run.missing(owed_code, record)
+        run.missing(owed_code)
     }
 }
 
@@ -554,30 +576,35 @@ where
 /// first, then the pause and the receipt in one local call. An unknown the app
 /// did not record, and a session whose pause was not confirmed, are owed; no
 /// other answer goes to that session until its pause is confirmed.
-async fn record_unknown<A, L>(app: &A, local: &L, delivery: &Delivery) -> DeliveryRun
+async fn record_unknown<A, L>(
+    app: &A,
+    local: &L,
+    book: &OwedBook,
+    delivery: &Delivery,
+) -> DeliveryRun
 where
     A: DmApp + ?Sized,
     L: DmLocal + ?Sized,
 {
-    let run = DeliveryRun::about(delivery, "delivery_unknown");
-    let mut run = record_outcome(
-        app,
-        local,
-        run,
-        delivery,
-        "unknown",
-        None,
-        "delivery_unknown_record_owed",
-    )
-    .await;
-    let mut pause = OwedRecord::Pause {
+    // The outcome and the pause are both kept, and the file written, before
+    // either is sent: a restart in between must still hold the session back.
+    let outcome = book.keep(OwedRecord::DeliveryOutcome {
+        request_id: delivery.request_id().to_owned(),
+        outcome: "unknown".to_owned(),
+        reason: None,
+    });
+    let pause = book.keep(OwedRecord::Pause {
         card_id: delivery.card_id.clone(),
         question_revision: delivery.question_revision,
         request_id: delivery.request_id().to_owned(),
         session: delivery.session.clone(),
-    };
-    if !owed::settle(app, local, &mut pause).await {
-        run = run.missing("delivery_unknown_pause_owed", pause);
+    });
+    let mut run = DeliveryRun::about(delivery, "delivery_unknown");
+    if !book.settle_new(app, local, outcome).await {
+        run = run.missing("delivery_unknown_record_owed");
+    }
+    if !book.settle_new(app, local, pause).await {
+        run = run.missing("delivery_unknown_pause_owed");
     }
     run
 }
@@ -616,7 +643,8 @@ pub struct SettleRun {
     pub settle: Settle,
     pub code: &'static str,
     pub question: Option<(String, i64)>,
-    /// Records the app or the local AMUX did not answer for yet (`owed`).
+    /// The records this run kept and has not had answered for yet; a copy,
+    /// the book holds them.
     pub owed: Vec<OwedRecord>,
 }
 
@@ -744,7 +772,18 @@ pub fn recovered_outcome(value: &Value) -> Option<Recovered> {
 /// line says so, and nothing waits on it. An outcome the app did not record is
 /// owed, as in the walk. Nothing readable -- the app's routes closed or lost,
 /// the local records unreadable -- writes nothing and is asked again.
-pub async fn settle_unsettled<A, L>(app: &A, local: &L) -> SettleRun
+pub async fn settle_unsettled<A, L>(app: &A, local: &L, book: &OwedBook) -> SettleRun
+where
+    A: DmApp + ?Sized,
+    L: DmLocal + ?Sized,
+{
+    let mark = book.mark();
+    let mut run = settle_unsettled_kept(app, local, book).await;
+    run.owed = book.since(mark);
+    run
+}
+
+async fn settle_unsettled_kept<A, L>(app: &A, local: &L, book: &OwedBook) -> SettleRun
 where
     A: DmApp + ?Sized,
     L: DmLocal + ?Sized,
@@ -796,6 +835,7 @@ where
                 record_outcome(
                     app,
                     local,
+                    book,
                     run,
                     &delivery,
                     "receipt",
@@ -811,6 +851,7 @@ where
                 record_outcome(
                     app,
                     local,
+                    book,
                     run,
                     &delivery,
                     "not_sent",
@@ -820,7 +861,9 @@ where
                 .await,
             )
         }
-        Recovered::Unknown => SettleRun::from_delivery(record_unknown(app, local, &delivery).await),
+        Recovered::Unknown => {
+            SettleRun::from_delivery(record_unknown(app, local, book, &delivery).await)
+        }
     }
 }
 
@@ -918,7 +961,7 @@ mod tests {
                     answered(200, json!({"paused": true, "receipt": "not_accepted"})),
                 ),
             ]);
-            let run = settle_unsettled(&app, &local).await;
+            let run = settle_unsettled(&app, &local, &OwedBook::new()).await;
             let label = format!("{local_record:?}");
             assert_eq!(run.settle, Settle::Settled, "{label}");
             assert!(run.owed.is_empty(), "{label}");
@@ -963,7 +1006,7 @@ mod tests {
             ),
         )]);
         let local = FakeLocal::default();
-        let run = settle_unsettled(&app, &local).await;
+        let run = settle_unsettled(&app, &local, &OwedBook::new()).await;
         assert_eq!((run.settle, run.owed.len()), (Settle::Nothing, 0));
         assert!(local_routes(&local).is_empty());
         // The app closed or lost, or the local records unreadable: asked again, nothing written.
@@ -986,7 +1029,7 @@ mod tests {
                 Some(answer) => local_with(vec![(LocalRoute::AnswerReceipt, answer)]),
                 None => FakeLocal::default(),
             };
-            let run = settle_unsettled(&app, &local).await;
+            let run = settle_unsettled(&app, &local, &OwedBook::new()).await;
             assert_eq!((run.settle, run.owed.len()), (Settle::Retry, 0));
             assert_eq!(app.routes(), vec![AppRoute::DeliveriesUnsettled]);
             assert!(!local_routes(&local).contains(&LocalRoute::AnswerUnknown));
@@ -999,7 +1042,7 @@ mod tests {
                 json!({"found": true, "status": "unsettled", "delivery": {"request_id": "x"}}),
             ),
         )]);
-        let run = settle_unsettled(&app, &FakeLocal::default()).await;
+        let run = settle_unsettled(&app, &FakeLocal::default(), &OwedBook::new()).await;
         assert_eq!(
             (run.settle, run.code),
             (Settle::Retry, "unsettled_read_unreadable")
@@ -1036,7 +1079,7 @@ mod tests {
                     answered(200, json!({"paused": true, "receipt": "not_accepted"})),
                 ),
             ]);
-            let run = settle_unsettled(&app, &local).await;
+            let run = settle_unsettled(&app, &local, &OwedBook::new()).await;
             assert_eq!(run.code, code);
             assert_eq!(
                 run.owed.iter().map(OwedRecord::code).collect::<Vec<_>>(),
@@ -1118,7 +1161,7 @@ mod tests {
                 answered(200, json!({"outcome": "delivered", "card_recorded": true})),
             ),
         ]);
-        let run = deliver_next(&app, &local, None, &BTreeSet::new()).await;
+        let run = deliver_next(&app, &local, &OwedBook::new(), None).await;
         assert_eq!(run.code, "delivered");
         assert!(run.delivered && run.owed.is_empty());
         assert_eq!(run.cursor, CursorMove::Advance(cursor()));
@@ -1180,7 +1223,7 @@ mod tests {
                 (LocalRoute::AnswerCheck, deliverable(true)),
                 (LocalRoute::Answers, answered(200, answer.clone())),
             ]);
-            let run = deliver_next(&app, &local, None, &BTreeSet::new()).await;
+            let run = deliver_next(&app, &local, &OwedBook::new(), None).await;
             assert!(run.delivered, "{answer}");
             assert_eq!(
                 app.body(AppRoute::DeliveryOutcome),
@@ -1237,7 +1280,7 @@ mod tests {
                 (AppRoute::Deliveries, decision),
             ]);
             let local = local_with(vec![(LocalRoute::AnswerCheck, deliverable(true))]);
-            let run = deliver_next(&app, &local, None, &BTreeSet::new()).await;
+            let run = deliver_next(&app, &local, &OwedBook::new(), None).await;
             assert_eq!((run.code, run.decision_unsettled), (code, unsettled));
             assert_eq!(
                 local_routes(&local),
@@ -1251,7 +1294,7 @@ mod tests {
             refused(409, "found", "kill_switch_on"),
         )]);
         let local = FakeLocal::default();
-        let run = deliver_next(&app, &local, Some(&cursor()), &BTreeSet::new()).await;
+        let run = deliver_next(&app, &local, &OwedBook::new(), Some(&cursor())).await;
         assert_eq!(
             (run.code, run.cursor),
             ("delivery_read_refused", CursorMove::Keep)
@@ -1265,7 +1308,7 @@ mod tests {
         ] {
             let app = FakeApp::with(vec![(AppRoute::DeliveriesNext, answer)]);
             let local = FakeLocal::default();
-            let run = deliver_next(&app, &local, None, &BTreeSet::new()).await;
+            let run = deliver_next(&app, &local, &OwedBook::new(), None).await;
             assert_eq!(
                 (run.code, run.cursor.clone()),
                 ("delivery_read_unreadable", CursorMove::Keep)
@@ -1280,7 +1323,7 @@ mod tests {
         for check in [deliverable(false), HttpAnswer::Lost] {
             let app = FakeApp::with(vec![(AppRoute::DeliveriesNext, ready())]);
             let local = local_with(vec![(LocalRoute::AnswerCheck, check)]);
-            let run = deliver_next(&app, &local, None, &BTreeSet::new()).await;
+            let run = deliver_next(&app, &local, &OwedBook::new(), None).await;
             assert_eq!(run.cursor, CursorMove::Advance(cursor()));
             assert!(run.owed.is_empty());
             assert_eq!(app.routes(), vec![AppRoute::DeliveriesNext], "no decision");
@@ -1296,7 +1339,7 @@ mod tests {
             ),
         )]);
         let local = FakeLocal::default();
-        let run = deliver_next(&app, &local, None, &BTreeSet::new()).await;
+        let run = deliver_next(&app, &local, &OwedBook::new(), None).await;
         assert_eq!(run.cursor, CursorMove::Advance(cursor()));
         let app = FakeApp::with(vec![(
             AppRoute::DeliveriesNext,
@@ -1305,7 +1348,7 @@ mod tests {
                 json!({"found": true, "status": "none", "delivery": null}),
             ),
         )]);
-        let run = deliver_next(&app, &local, Some(&cursor()), &BTreeSet::new()).await;
+        let run = deliver_next(&app, &local, &OwedBook::new(), Some(&cursor())).await;
         assert_eq!((run.code, run.cursor), ("no_delivery", CursorMove::Reset));
         assert_eq!(
             app.body(AppRoute::DeliveriesNext),
@@ -1339,7 +1382,7 @@ mod tests {
                     ),
                 ),
             ]);
-            let run = deliver_next(&app, &local, None, &BTreeSet::new()).await;
+            let run = deliver_next(&app, &local, &OwedBook::new(), None).await;
             assert_eq!(run.code, "delivery_unknown");
             assert!(
                 run.owed.is_empty(),
@@ -1395,7 +1438,7 @@ mod tests {
                 (LocalRoute::Answers, HttpAnswer::Lost),
                 (LocalRoute::AnswerUnknown, pause),
             ]);
-            let run = deliver_next(&app, &local, None, &BTreeSet::new()).await;
+            let run = deliver_next(&app, &local, &OwedBook::new(), None).await;
             assert_eq!(run.code, code);
             assert_eq!(
                 run.owed.iter().map(OwedRecord::code).collect::<Vec<_>>(),
@@ -1412,8 +1455,14 @@ mod tests {
         // A session whose pause is owed takes no answer: nothing is decided.
         let app = FakeApp::with(vec![(AppRoute::DeliveriesNext, ready())]);
         let local = FakeLocal::default();
-        let held: BTreeSet<String> = [SESSION.to_owned()].into_iter().collect();
-        let run = deliver_next(&app, &local, None, &held).await;
+        let book = OwedBook::new();
+        book.keep(OwedRecord::Pause {
+            card_id: "AMUX-12".into(),
+            question_revision: 3,
+            request_id: REQUEST.into(),
+            session: SESSION.into(),
+        });
+        let run = deliver_next(&app, &local, &book, None).await;
         assert_eq!(run.code, "delivery_session_pause_owed");
         assert_eq!(app.routes(), vec![AppRoute::DeliveriesNext]);
         assert!(local_routes(&local).is_empty());
@@ -1500,7 +1549,7 @@ mod tests {
                 (LocalRoute::AnswerCheck, deliverable(true)),
                 (LocalRoute::Answers, answered(200, answer.clone())),
             ]);
-            let run = deliver_next(&app, &local, None, &BTreeSet::new()).await;
+            let run = deliver_next(&app, &local, &OwedBook::new(), None).await;
             assert!(run.owed.is_empty(), "{answer}");
             assert_eq!(run.code, "delivery_not_sent", "{answer}");
             assert!(!run.delivered);
@@ -1546,7 +1595,7 @@ mod tests {
                     answered(200, json!({"paused": true, "receipt": "not_accepted"})),
                 ),
             ]);
-            let run = deliver_next(&app, &local, None, &BTreeSet::new()).await;
+            let run = deliver_next(&app, &local, &OwedBook::new(), None).await;
             assert_eq!(run.code, "delivery_unknown", "{answer}");
             assert_eq!(
                 app.body(AppRoute::DeliveryOutcome),
@@ -1588,7 +1637,7 @@ mod tests {
                     answered(200, json!({"outcome": "not_deliverable", "reason": "busy"})),
                 ),
             ]);
-            let run = deliver_next(&app, &local, None, &BTreeSet::new()).await;
+            let run = deliver_next(&app, &local, &OwedBook::new(), None).await;
             assert_eq!(run.owed.len(), 1);
             assert_eq!(run.code, code);
             assert_eq!(
@@ -1612,7 +1661,7 @@ mod tests {
                 answered(200, json!({"outcome": "delivered"})),
             ),
         ]);
-        let run = deliver_next(&app, &local, None, &BTreeSet::new()).await;
+        let run = deliver_next(&app, &local, &OwedBook::new(), None).await;
         assert!(run.delivered);
         assert_eq!(run.code, "delivery_receipt_record_owed");
         assert_eq!(run.owed.len(), 1);
@@ -1711,7 +1760,7 @@ mod tests {
                     answered(200, json!({"paused": true, "receipt": "not_accepted"})),
                 ),
             ]);
-            let run = deliver_next(&app, &local, None, &BTreeSet::new()).await;
+            let run = deliver_next(&app, &local, &OwedBook::new(), None).await;
             assert_eq!(run.owed.len(), 1);
             assert_eq!(run.code, code, "the log line names the missing record");
             assert_eq!(
@@ -1747,10 +1796,51 @@ mod tests {
                     answered(200, json!({"outcome": "delivered"})),
                 ),
             ]);
-            let run = deliver_next(&app, &local, None, &BTreeSet::new()).await;
+            let run = deliver_next(&app, &local, &OwedBook::new(), None).await;
             assert!(run.delivered, "the answer reached the worker");
             assert_eq!(run.owed.len(), 1);
             assert_eq!(run.code, code, "the log line names the missing record");
         }
+    }
+
+    /// An unclear delivery's unknown outcome and its session's pause are in the
+    /// file before the first call for either: a process that died in the
+    /// outcome's call must still hold the session back.
+    #[tokio::test]
+    async fn an_unknown_delivery_and_its_pause_are_in_the_file_before_the_first_call_for_them() {
+        use crate::dm_relay::flow::tests::ProbeApp;
+        let dir = tempfile::tempdir().unwrap();
+        let store = crate::dm_relay::owed::OwedStore::new(dir.path().join("state"));
+        let book = OwedBook::with_store(store.clone());
+        assert!(book.load());
+        let app = ProbeApp::over(
+            FakeApp::with(vec![
+                (AppRoute::DeliveriesNext, ready()),
+                (AppRoute::Deliveries, recorded()),
+                (AppRoute::DeliveryOutcome, HttpAnswer::Lost),
+            ]),
+            &store,
+        );
+        let local = local_with(vec![
+            (LocalRoute::AnswerCheck, deliverable(true)),
+            (LocalRoute::Answers, HttpAnswer::Lost),
+            (LocalRoute::AnswerUnknown, HttpAnswer::Lost),
+        ]);
+        let run = deliver_next(&app, &local, &book, None).await;
+        assert_eq!(run.code, "delivery_unknown_pause_owed");
+        let at_outcome = app.file_at(AppRoute::DeliveryOutcome);
+        assert_eq!(
+            at_outcome.iter().map(OwedRecord::code).collect::<Vec<_>>(),
+            vec!["delivery_outcome", "session_pause"]
+        );
+        assert_eq!(
+            crate::dm_relay::owed::held_sessions(&at_outcome)
+                .into_iter()
+                .collect::<Vec<_>>(),
+            vec![SESSION]
+        );
+        // Neither was answered: both stay.
+        assert_eq!(store.load().unwrap(), book.records());
+        assert_eq!(book.records().len(), 2);
     }
 }
