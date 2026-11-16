@@ -28,11 +28,11 @@ import { SCOUT_SYSTEM_PROMPT } from "../lib/productResearchScoutCore.ts";
  * error code as data attributes, whether it carries a finished-answer marker, and
  * a report button only on an error card.
  */
-const pageWith = ({ status = "normal", code = null, modelId = "gpt-6-luna", finished = true, reportButton = false, none = false } = {}) => {
+const pageWith = ({ status = "normal", code = null, modelId = "gpt-6-luna", finished = true, reportButton = false, none = false, resultFailed = null } = {}) => {
   const clicks = [];
   return {
     clicks,
-    evaluate: async () => (none ? null : { status, code, modelId, finished }),
+    evaluate: async () => (none ? null : { status, code, modelId, finished, resultFailed }),
     locator: () => ({ last: () => ({ getByTestId: () => ({ isVisible: async () => reportButton, click: async () => clicks.push("report") }) }) }),
     getByTestId: () => ({ isVisible: async () => false }),
   };
@@ -51,6 +51,9 @@ test("the chat's own verdict decides whether a turn failed, and only a finished 
   // The walker's wait gave up: not answered, whatever text is on screen.
   assert.equal((await readTurnOutcome(pageWith(), { timedOut: true })).state, "unfinished");
   assert.equal((await readTurnOutcome(pageWith({ none: true }))).state, "unfinished");
+  // A finished answer whose file card or image turn failed is a failure, though the message stays "normal".
+  assert.deepEqual(await readTurnOutcome(pageWith({ resultFailed: "IMAGE_TURN_FAILED" })),
+    { state: "failed", errorCode: "IMAGE_TURN_FAILED", modelId: "gpt-6-luna", timedOut: false });
 });
 
 test("a failed turn leads the judge's signals as a product failure, never as a layout question", () => {
@@ -175,4 +178,30 @@ test("a deploy check's permit names the build, and there is none without a build
   // The finished-answer marker the verdict waits for is still rendered.
   const { readFileSync } = await import("node:fs");
   assert.ok(readFileSync(new URL("../components/chat/ChatMessageList.tsx", import.meta.url), "utf8").includes('triggerTestId="memory-answer-feedback"'));
+});
+
+test("in a real page, an error, a failed result card and a still-streaming answer are each told apart", async (t) => {
+  const { launch } = await import("../lib/productResearchScoutBrowser.mjs");
+  const browser = await launch([]).catch(() => null);
+  if (!browser) return t.skip("no browser can start here");
+  try {
+    const page = await browser.newPage();
+    const message = (attrs, inner = "") =>
+      `<div data-testid="chat-message" data-message-role="user"><p>q</p></div>` +
+      `<div data-testid="chat-message" data-message-role="assistant" data-model-id="gpt-6-luna" ${attrs}>${inner}</div>`;
+    const verdict = async (html, options) => {
+      await page.setContent(`<!doctype html><body>${html}</body>`);
+      return readTurnOutcome(page, options);
+    };
+    const finished = '<p>answer</p><button data-testid="memory-answer-feedback">report</button>';
+    assert.equal((await verdict(message('data-message-status="normal"', finished))).state, "answered");
+    assert.deepEqual(await verdict(message('data-message-status="error" data-error-code="EMPTY_RESPONSE"', '<span data-testid="chat-error-icon"></span>')),
+      { state: "failed", errorCode: "EMPTY_RESPONSE", modelId: "gpt-6-luna", timedOut: false });
+    assert.equal((await verdict(message('data-message-status="normal"', '<p>half an ans</p>'))).state, "unfinished", "streaming, no finished marker");
+    assert.equal((await verdict(message('data-message-status="normal"', '<div data-testid="chat-image-turn-failed">failed</div>'))).errorCode, "IMAGE_TURN_FAILED");
+    assert.equal((await verdict(message('data-message-status="normal"', `${finished}<div data-testid="generated-artifact-failure">x</div>`))).errorCode, "GENERATED_FILE_FAILED");
+    assert.equal((await verdict(message('data-message-status="normal"', finished), { timedOut: true })).state, "unfinished");
+  } finally {
+    await browser.close();
+  }
 });
