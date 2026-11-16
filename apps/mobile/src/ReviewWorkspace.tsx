@@ -19,6 +19,8 @@ import type { ImagePreset } from "../../../lib/imageGenerationPricing";
 import { ReviewModelPicker } from "./ReviewModelPicker";
 import { useDeviceDraft, preserveNativeDraft } from "./useDeviceDraft";
 import type { MobileProduct } from "./WorkspaceNavigation";
+import { useReviewHandoffDraft } from "./useReviewHandoffDraft";
+import { reviewContinuationHandoffCopy as handoffCopy } from "../../../locales/reviewContinuationHandoff";
 
 export function ReviewWorkspace({ transport, language, owner, historyOpen, onCloseHistory, onBusyChange, onLoadingChange, onProductChange, historyFooter, newConversationRequest = 0, conversationRequest, extraTools }: {
   transport: ChatTransport; language: MobileLanguage; owner: string | null; historyOpen: boolean;
@@ -45,7 +47,16 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
   const [streaming, setStreaming] = useState(false); const [loading, setLoading] = useState(true);
   const [uncertain, setUncertain] = useState(false); const [error, setError] = useState("");
   const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
-  const [draft, setDraft] = useDeviceDraft(owner, conversation?.id ?? "review:new");
+  const handoff = conversation?.reviewHandoff ?? conversation?.imported?.reviewHandoff;
+  const handoffSummary = typeof conversation?.reviewHandoff === "object" ? conversation.reviewHandoff : conversation?.imported?.reviewHandoff;
+  const effectiveMode = handoff ? "professional" : mode;
+  const [deviceDraft, setDeviceDraft] = useDeviceDraft(handoff ? null : owner, conversation?.id ?? "review:new");
+  const durableDraft = useReviewHandoffDraft(owner, handoff ? conversation!.id : null, transport);
+  const draft = handoff ? durableDraft.text : deviceDraft;
+  const setDraft = (text: string, target?: string | null) => {
+    if (handoff) durableDraft.setText(text);
+    else setDeviceDraft(text, target);
+  };
   const titleScope = useRef(0);
   useEffect(() => () => { titleScope.current++; }, [owner, transport]);
   const request = useRef(0); const abort = useRef<AbortController | null>(null);
@@ -62,7 +73,8 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
   const defaultsError = useRef(c.reviewDefaultsUnavailable);
   useEffect(() => { defaultsError.current = c.reviewDefaultsUnavailable; }, [c.reviewDefaultsUnavailable]);
   useEffect(() => { initializationError.current = c.reviewUnavailable; }, [c.reviewUnavailable]);
-  useEffect(() => { onBusyChange(loading || streaming || uncertain || actionBusy); return () => onBusyChange(false); }, [loading, streaming, uncertain, actionBusy, onBusyChange]);
+  const draftBlocked = Boolean(handoff && durableDraft.blocked);
+  useEffect(() => { onBusyChange(loading || streaming || uncertain || actionBusy || draftBlocked); return () => onBusyChange(false); }, [loading, streaming, uncertain, actionBusy, draftBlocked, onBusyChange]);
   useEffect(() => { onLoadingChange(loading); return () => onLoadingChange(false); }, [loading, onLoadingChange]);
   useEffect(() => {
     const current = ++request.current;
@@ -86,6 +98,7 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
   }, [transport, owner, setProviders]);
   const previousNewRequest = useRef(newConversationRequest);
   function newReview() {
+    if (streaming || uncertain || actionBusy || draftBlocked) return;
     request.current++; setConversation(null); setPartial({}); setError(""); setUncertain(false); clearProviders(); onCloseHistory();
   }
   useEffect(() => {
@@ -93,6 +106,7 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
     previousNewRequest.current = newConversationRequest; newReview();
   }, [newConversationRequest]); // eslint-disable-line react-hooks/exhaustive-deps -- Header action identity.
   async function open(id: string) {
+    if (streaming || actionBusy || draftBlocked) return;
     if (chats.find(row => row.id === id)?.kind === "image") { setImageHistory(id); setImage(null); setImageOpen(true); onCloseHistory(); return; }
     const current = ++request.current; setLoading(true); setError("");
     try {
@@ -126,22 +140,29 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
     if (!transport.configureTools) throw Error("NATIVE_TOOLS_UNAVAILABLE");
     const current = request.current;
     abort.current = null;
-    const item = await ensureConversation(selected, current);
-    if (current !== request.current) throw Error("REVIEW_SCOPE_CHANGED");
-    try { setConversation(await transport.configureTools(item.id, input)); }
-    catch (error) { setUncertain(true); throw error; }
+    setActionBusy(true);
+    try {
+      const item = await ensureConversation(selected, current);
+      if (current !== request.current) throw Error("REVIEW_SCOPE_CHANGED");
+      const configured = await transport.configureTools(item.id, input);
+      if (current === request.current) setConversation(configured);
+    } catch (error) { if (current === request.current) setUncertain(true); throw error; }
+    finally { if (current === request.current) setActionBusy(false); }
   }
   async function send(text: string, files: MobileAttachment[]) {
     if (streaming || uncertain || !capability) return false;
+    if (handoff && files.length) { setError(handoffCopy.attachmentsUnsupported); return false; }
+    if (handoff && !durableDraft.ready) return false;
     // A conversation bound to a saved assistant answers with that assistant's models;
     // Easy routing never replaces them (IOS_WORKSPACE_API.md).
-    const easy = mode === "easy" && !conversation?.assistantProfileId;
+    const easy = !handoff && mode === "easy" && !conversation?.assistantProfileId;
     if (!(easy ? providers : selected).length) { setError(c.noParticipants); return false; }
     const titleEpoch = titleScope.current;
     const current = ++request.current; const controller = new AbortController(); abort.current = controller;
-    setStreaming(true); setError(""); setPartial({}); setPendingQuestion(text); setDraft("");
+    setStreaming(true); setError(""); setPartial({}); setPendingQuestion(text); if (!handoff) setDraft("");
     let item = conversation; let dispatched = false;
     try {
+      const draftRevision = handoff ? await durableDraft.save() : undefined;
       if (!transport.configureReview || !transport.sendReview) throw Error("REVIEW_UNAVAILABLE");
       item = await ensureConversation(selected, current, false);
       if (current !== request.current || controller.signal.aborted) return false;
@@ -159,15 +180,16 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
       if (current !== request.current) return false;
       setSelected(item.selectedModels); setActiveModel(item.selectedModels[0] ?? "");
       setConversation({ ...item, messages: [...item.messages, { id: "pending-review-user", role: "user", content: text }] });
-      setPendingQuestion(null); setDraft("", item.id);
+      setPendingQuestion(null); if (!handoff) setDraft("", item.id);
       setPartial(Object.fromEntries(item.selectedModels.map(id => [id, ""])));
       dispatched = true;
       const outcome = await transport.sendReview(item, text, files, controller.signal, (modelId, value) => {
         if (current === request.current) setPartial(previous => ({ ...previous, [modelId]: value }));
-      });
+      }, draftRevision ? { revision: draftRevision } : undefined);
       const saved = await transport.load(item.id);
       if (current !== request.current) return;
       setConversation(saved); setPartial({}); setUncertain(saved.activeAttempt === true);
+      if (handoff) await durableDraft.reload();
       if (outcome.failedModelIds.length) setError(copy.disconnected);
       const history = await transport.listReview!();
       if (current === request.current) setChats(history);
@@ -178,17 +200,17 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
       }).catch(() => { /* Preserve the stored title on background generation failure. */ });
     } catch (error) {
       const beforePersistence = (error as { questionPersisted?: boolean }).questionPersisted === false;
-      if (current === request.current) { setError(mobileErrorText(error, language, copy.error)); setUncertain(dispatched && !beforePersistence); if (beforePersistence) setConversation(item); }
+      if (current === request.current) { setError(handoff && (error as { code?: string }).code === "REVIEW_HANDOFF_UNAVAILABLE" ? handoffCopy.unavailable : mobileErrorText(error, language, copy.error)); setUncertain(dispatched && !beforePersistence); if (beforePersistence) setConversation(item); }
       if (beforePersistence) dispatched = false;
       if (current === request.current) setPartial(previous => Object.fromEntries(Object.entries(previous).filter(([, text]) => text)));
       if (beforePersistence || !dispatched) return false;
-    } finally { if (current === request.current) { if (!dispatched) setDraft(text, item?.id ?? "review:new"); setStreaming(false); setPendingQuestion(null); } }
+    } finally { if (current === request.current) { if (!dispatched && !handoff) setDraft(text, item?.id ?? "review:new"); setStreaming(false); setPendingQuestion(null); } }
   }
   const visibleModels = conversation?.selectedModels.length ? conversation.selectedModels : selected;
   const name = (id: string) => models.find(model => model.id === id)?.name ?? id;
   const messages = conversation?.messages.filter(message => message.role === "user" || message.modelId === activeModel || (message.imageTurn?.modelIds.includes(activeModel)) || (!message.modelId && activeModel === visibleModels[0])) ?? [];
-  if (historyOpen) return <ConversationListScreen title={copy.chats} newLabel={c.newReview} disabled={loading || streaming || uncertain || actionBusy} onNew={newReview} footer={historyFooter}>
-    <ConversationHistory transport={transport} language={language} owner={owner} chats={chats} currentId={conversation?.id} disabled={loading || streaming || uncertain || actionBusy} onOpen={id => void open(id)} onRefresh={async () => {
+  if (historyOpen) return <ConversationListScreen title={copy.chats} newLabel={c.newReview} disabled={loading || streaming || uncertain || actionBusy || draftBlocked} onNew={newReview} footer={historyFooter}>
+    <ConversationHistory transport={transport} language={language} owner={owner} chats={chats} currentId={conversation?.id} disabled={loading || streaming || uncertain || actionBusy || draftBlocked} onOpen={id => void open(id)} onRefresh={async () => {
       const scope = request.current; const rows = await transport.listReview!();
       if (scope !== request.current) throw Error("REVIEW_SCOPE_CHANGED");
       setChats(rows); setConversation(previous => previous ? { ...previous, title: rows.find(row => row.id === previous.id)?.title ?? previous.title } : null); return rows;
@@ -196,16 +218,19 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
   </ConversationListScreen>;
   return <section className="review-workspace">
     {error && <p role="alert" className="notice error">{error}</p>}
+    {handoff && <div className="notice" data-testid="review-handoff-context">{handoffSummary ? <><p>{handoffCopy.scope(handoffSummary.sourceTurnCount, handoffSummary.nativeTurnCount)}</p>{handoffSummary.sourceOmittedCount > 0 && <p>{handoffCopy.sourceOmitted(handoffSummary.sourceOmittedCount)}</p>}{handoffSummary.nativeOmittedCount > 0 && <p>{handoffCopy.omitted(handoffSummary.nativeOmittedCount)}</p>}{handoffSummary.sourceMode === "legacy" && <p>{handoffCopy.legacy}</p>}</> : <p>{handoffCopy.unavailable}</p>}<p>{handoffCopy.multiModel}</p></div>}
+    {handoff && (durableDraft.status === "failed" || durableDraft.status === "conflict") && <p role="alert" className="notice error">{durableDraft.status === "conflict" ? handoffCopy.draftConflict : handoffCopy.draftFailed}<button type="button" onClick={() => void (durableDraft.status === "conflict" ? durableDraft.reload() : durableDraft.save()).catch(() => {})}>{durableDraft.status === "conflict" ? handoffCopy.reloadDraft : handoffCopy.retryDraft}</button></p>}
+    {handoff && durableDraft.status === "saving" && <p role="status">{handoffCopy.draftSaving}</p>}
     {isIosWorkspace && conversation?.assistantProfileId && <IosAssistantBadge id={conversation.assistantProfileId} transport={transport} />}
     {!conversation?.messages.length && !streaming && conversation?.surface !== "continuation" ? <div className="review-intro" data-testid="review-landing"><WorkspaceWelcome product="review" language={language} /></div> : <>
 
       <div className="transcript review-transcript" aria-live="off" aria-busy={streaming} onScroll={event => { const node = event.currentTarget; followOutput.current = node.scrollHeight - node.scrollTop - node.clientHeight < 120; }}><div className="review-context-bar"><select className="review-response-select" aria-label={c.models} value={activeModel} onChange={event => { followOutput.current = true; setActiveModel(event.target.value); }}>{visibleModels.map(id => <option value={id} key={id}>{name(id)}{streaming ? " ···" : ""}</option>)}</select></div>{conversation?.surface === "continuation" && <ImportedTranscript key={conversation.id} conversationId={conversation.id} imported={conversation.imported} transport={transport} language={language} />}{messages.map(message => <article className={`message ${message.role}`} id={`review-message-${message.id}`} key={message.id}>{message.role === "assistant" && <span className="message-label">{name(message.modelId ?? activeModel)}</span>}<AnswerContent copyable={message.role === "assistant"} content={message.content} imageTurn={message.imageTurn} artifacts={message.artifacts} citations={message.searchMetadata?.citations} transport={transport} language={language} /></article>)}{pendingQuestion !== null && <><article className="message user"><AnswerContent content={pendingQuestion} transport={transport} language={language} /></article><article className="message assistant"><AnswerContent content={copy.waiting} transport={transport} language={language} /></article></>}{partial[activeModel] !== undefined && <article className="message assistant"><span className="message-label">{name(activeModel)}</span><AnswerContent content={partial[activeModel] || copy.waiting} transport={transport} language={language} /></article>}<div ref={end} /></div>
     </>}
-    {uncertain && conversation && <button className="restore" onClick={() => void open(conversation.id)}>{copy.restore}</button>}
-    <Composer extraTools={extraTools} product="review" onProductChange={onProductChange} productBusy={loading || streaming || uncertain || actionBusy} productLoading={loading}
-      selectionControl={<button type="button" className="review-setup-trigger" aria-label={`${c.choose} · ${mode === "easy" ? "Easy" : "Professional"}`} disabled={streaming || uncertain || loading} onClick={() => setPicker(true)}><span>{mode === "easy" ? "Easy" : "Professional"}</span><span className="participant-count">{mode === "easy" ? providers.length : selected.length}</span><span aria-hidden="true">⌄</span></button>}
-      locationIdentity={owner} copy={copy} language={language} transport={transport} draft={draft} setDraft={setDraft} disabled={loading || !capability || uncertain} offline={!navigator.onLine} streaming={streaming} conversation={conversation} onConfigureTools={configureTools} onSend={send} onStop={() => abort.current?.abort()} />
-    {picker && <ReviewModelPicker language={language} mode={mode} onMode={setMode} easyOffered={capability?.reviewEasy ?? false} busy={streaming || uncertain} models={models} selected={selected} providers={providers} providerOptions={providerOptions} maxModels={capability?.maxModels ?? 1} onModels={setSelected} onProviders={setProviders} onClose={() => setPicker(false)} />}
+    {uncertain && conversation && <button className="restore" onClick={() => void (async () => { await open(conversation.id); if (handoff) await durableDraft.reload(); })()}>{copy.restore}</button>}
+    <Composer extraTools={extraTools} inputMaxLength={handoff ? 50000 : undefined} product="review" onProductChange={onProductChange} productBusy={loading || streaming || uncertain || actionBusy || draftBlocked} productLoading={loading}
+      selectionControl={<button type="button" className="review-setup-trigger" aria-label={`${c.choose} · ${effectiveMode === "easy" ? "Easy" : "Professional"}`} disabled={streaming || uncertain || loading} onClick={() => setPicker(true)}><span>{effectiveMode === "easy" ? "Easy" : "Professional"}</span><span className="participant-count">{effectiveMode === "easy" ? providers.length : selected.length}</span><span aria-hidden="true">⌄</span></button>}
+      locationIdentity={owner} copy={copy} language={language} transport={transport} draft={handoff && streaming ? "" : draft} setDraft={setDraft} disabled={loading || !capability || uncertain || Boolean(handoff && !durableDraft.ready && durableDraft.status !== "saving")} offline={!navigator.onLine} streaming={streaming} conversation={conversation} onConfigureTools={configureTools} onSend={send} onStop={() => abort.current?.abort()} />
+    {picker && <ReviewModelPicker language={language} mode={effectiveMode} onMode={setMode} easyOffered={!handoff && (capability?.reviewEasy ?? false)} busy={streaming || uncertain} models={models} selected={selected} providers={providers} providerOptions={providerOptions} maxModels={capability?.maxModels ?? 1} onModels={setSelected} onProviders={setProviders} onClose={() => setPicker(false)} />}
     {imageOpen && <NativeImageWorkspace owner={owner} transport={transport} language={language} initial={image ?? undefined} historyId={imageHistory ?? undefined} onBusy={setActionBusy} onClose={() => setImageOpen(false)} onCreated={id => { setImageHistory(id); void transport.listReview!().then(setChats).catch(() => setError(copy.unavailable)); }} />}
   </section>;
 }

@@ -33,6 +33,7 @@ let receiptConversation: {
   password: string | null;
   kind: string;
   productKey: string | null;
+  continuationBridge?: { reviewHandoff: unknown };
 } | null = { userId: "user_1", password: null, kind: "chat", productKey: "chat" };
 let receiptUnlockGranted = true;
 
@@ -47,6 +48,9 @@ class AttachmentResolve extends Error {}
 
 mock.module("next-auth/next", {
   namedExports: { getServerSession: async () => session },
+});
+mock.module(mod("lib/chatRouteSession.ts"), {
+  namedExports: { resolveChatRouteSession: async () => ({ session, response: null }) },
 });
 mock.module(mod("lib/auth.ts"), { namedExports: { authOptions: {} } });
 mock.module(mod("lib/prisma.ts"), {
@@ -298,6 +302,46 @@ test("message receipt enforces owner, Chat product and the conversation unlock g
   const wrongProduct = await send();
   assert.equal(wrongProduct.status, 409);
   assert.equal((await wrongProduct.json()).code, "CHAT_DRAFT_CONSUME_NOT_SUPPORTED");
+  assert.equal(receiptInput, null);
+});
+
+test("Review receipt is limited to a valid handoff target and its text-only draft scope", async () => {
+  const { receiptRoute } = await loadRoutes();
+  const descriptor = {
+    version: 1,
+    parentConversationId: "parent_1",
+    sourceUserMessageId: "source_question",
+    sourceUserContentDigest: "a".repeat(64),
+    assistantMessageId: "source_answer",
+    assistantContentDigest: "b".repeat(64),
+    sourceMode: "legacy",
+    sourceManifestDigest: null,
+    nativeReferences: [],
+    nativeOmittedCount: 0,
+  };
+  receiptConversation = {
+    userId: "user_1", password: null, kind: "chat", productKey: "review",
+    continuationBridge: { reviewHandoff: descriptor },
+  };
+  const body = {
+    draftConsume: { scopeKey: "conversation_1", expectedRevision: 1 },
+    message: {
+      clientRequestId: "11111111-1111-4111-8111-111111111111",
+      content: "Edited Review question",
+    },
+  };
+  const send = (value: unknown = body) => receiptRoute.POST(
+    request("/api/conversations/conversation_1/messages/receipt", "POST", value),
+    { params: Promise.resolve({ conversationId: "conversation_1" }) }
+  );
+  assert.equal((await send()).status, 200);
+  receiptInput = null;
+  assert.equal((await send({ ...body, draftConsume: { ...body.draftConsume, scopeKey: "new" } })).status, 409);
+  assert.equal((await send({ ...body, message: { ...body.message, attachmentUploadIds: ["upload_1"] } })).status, 409);
+  receiptConversation.continuationBridge = { reviewHandoff: {} };
+  assert.equal((await send()).status, 409);
+  receiptConversation.continuationBridge = undefined;
+  assert.equal((await send()).status, 409);
   assert.equal(receiptInput, null);
 });
 

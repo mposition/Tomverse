@@ -22,6 +22,7 @@ import {
   type ChatResponseAttemptTerminalStatus,
 } from "@/lib/chatResponseAttemptCore";
 import { prisma } from "@/lib/prisma";
+import { parseContinuationSourceManifest, type ContinuationSourceManifest } from "@/lib/continuationSourceManifest";
 
 const ATTEMPT_SELECT = {
   assistantMessageId: true,
@@ -425,6 +426,7 @@ export async function terminalChatResponseAttempt(input: {
   provider?: string | null;
   finishReason?: ChatResponseAttemptFinishReason | null;
   failureCode?: ChatResponseAttemptFailureCode | null;
+  continuationSourcePlan?: ContinuationSourceManifest;
   now?: Date;
 }, db: AttemptDb = prisma) {
   const now = input.now ?? new Date();
@@ -451,6 +453,14 @@ export async function terminalChatResponseAttempt(input: {
   }
   const current = await readChatResponseAttemptFrom(db, input.userId, input.assistantMessageId);
   if (!current) throw new ChatAttemptCasError("revision_conflict");
+  const sourcePlan = input.continuationSourcePlan === undefined
+    ? undefined : parseContinuationSourceManifest(input.continuationSourcePlan);
+  if (sourcePlan && (status.data !== "completed" || finishReason === "length" ||
+      sourcePlan.attempt.assistantMessageId !== input.assistantMessageId ||
+      sourcePlan.attempt.sourceUserMessageId !== current.sourceUserMessageId ||
+      sourcePlan.attempt.actualModelId !== input.actualModelId || sourcePlan.attempt.provider !== input.provider)) {
+    throw new ChatAttemptCasError("continuation_source_attempt_mismatch");
+  }
   const decision = decideAttemptTerminal({
     ...current,
     expectedRevision: input.expectedRevision,
@@ -469,6 +479,7 @@ export async function terminalChatResponseAttempt(input: {
     Prisma.sql`"terminalAt" = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')`,
     Prisma.sql`"finishReason" = ${finishReason}`,
     Prisma.sql`"failureCode" = ${failureCode}`,
+    Prisma.sql`"continuationSourcePlan" = ${sourcePlan ? JSON.stringify(sourcePlan) : null}::jsonb`,
   ];
   if (input.actualModelId !== undefined) {
     assignments.push(Prisma.sql`"actualModelId" = ${input.actualModelId}`);

@@ -225,3 +225,20 @@ test("Research Preview native enrollment is default-off and names exact methods 
     for (const [path, method] of [["/api/chat/research-preview/offer", "GET"], ["/api/chat/research-preview/runs/run_1", "POST"], ["/api/chat/research-preview/runs/run_1/resume", "GET"], ["/api/chat/research-preview/runs/run_1/admin", "POST"], ["/api/chat/research-preview/runs/run_1/cancel/extra", "POST"]]) assert.equal(nativeParityBearerRoute(path, method, true), false);
   } finally { if (previous === undefined) delete process.env.RESEARCH_PREVIEW_NATIVE_ENABLED; else process.env.RESEARCH_PREVIEW_NATIVE_ENABLED = previous; }
 });
+
+test("Review handoff enrollment refuses disabled flags and every unregistered method or suffix", () => {
+  const paths = [
+    ["/api/conversations/target/continuation/review-handoff", ["POST"]],
+    ["/api/conversations/target/continuation/review-handoff/draft", ["GET", "PUT", "DELETE"]],
+    ["/api/conversations/target/messages/receipt", ["POST"]],
+  ];
+  for (const [path, allowed] of paths) {
+    for (const method of ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"]) {
+      assert.equal(nativeParityBearerRoute(path, method), false);
+      assert.equal(nativeParityBearerRoute(path, method, false, true), false);
+      assert.equal(nativeParityBearerRoute(path, method, true), allowed.includes(method));
+      assert.equal(nativeParityBearerRoute(`${path}/extra`, method, true), false);
+      assert.equal(nativeParityBearerRoute(path.replace("target", "%2Fadmin"), method, true), false);
+    }
+  }
+});

@@ -1,6 +1,7 @@
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 ﻿import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { reviewHandoffDescriptorSchema } from "@/lib/reviewContinuationHandoffCore";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
@@ -159,7 +160,8 @@ export async function POST(
       });
       const existingConv = await prisma.conversation.findUnique({
           where: { id: conversationId },
-          select: { userId: true, password: true, passwordVersion: true, kind: true, productKey: true }
+          select: { userId: true, password: true, passwordVersion: true, kind: true, productKey: true,
+            continuationBridge: { select: { reviewHandoff: true } } }
       });
 
       if (!existingConv || existingConv.userId !== userId) {
@@ -195,8 +197,13 @@ export async function POST(
           messageId: internalIdByRequest.get(body.draftConsume.requestId)!,
         }
       : undefined;
+    const handoffDraft = existingConv.productKey === "review" &&
+      reviewHandoffDescriptorSchema.safeParse(existingConv.continuationBridge?.reviewHandoff).success &&
+      body.draftConsume?.scopeKey === conversationId &&
+      body.messages.every(message => (message.attachmentUploadIds?.length ?? 0) === 0 &&
+        (message.attachmentReferences?.length ?? 0) === 0);
     if (body.draftConsume &&
-        (existingConv.kind !== "chat" || existingConv.productKey !== "chat")) {
+        (existingConv.kind !== "chat" || (existingConv.productKey !== "chat" && !handoffDraft))) {
       return NextResponse.json(
         {
           error: "This draft cannot be consumed for this conversation.",

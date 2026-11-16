@@ -1,5 +1,6 @@
 /**
- * "Compare in Review" from a Chat answer: the prepared Review draft it opens.
+ * "Compare in Review" from an ordinary Chat answer: its prepared Review draft.
+ * Continuation answers use the server's reference handoff instead of this URL.
  *
  * Chat keeps one answer per question; Review lays several models' answers
  * side by side. Rewriting a Chat conversation into Review would re-attribute
