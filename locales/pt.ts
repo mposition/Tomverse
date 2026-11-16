@@ -405,6 +405,7 @@ export const pt = {
         responseIncompleteNotice: "A resposta foi interrompida pelo limite de comprimento de saída. Você pode continuar com uma pergunta de acompanhamento.",
         responseFailed: "A solicitação falhou.",
         traceId: "ID de rastreamento",
+        errorDiagnostics: "Detalhes de diagnóstico",
         retry: "Tentar novamente",
         reduceModelCount: "Reduzir o número de modelos",
         chooseAnotherModel: "Escolher outro modelo",
