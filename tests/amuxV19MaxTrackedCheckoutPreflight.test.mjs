@@ -10,8 +10,6 @@ import { prepareAmuxV19MaxTrackedCheckout,
   "../lib/amux/ideaLocalMaxTrackedCheckoutPreflight.mjs";
 import { runAmuxV19MaxClaimedTrackedCheckoutOnce } from
   "../lib/amux/ideaLocalMaxClaimedTrackedCheckoutOnce.mjs";
-import { AMUX_V19_STOP_UNREACHABLE_LIMIT_MS } from
-  "../lib/amux/ideaLocalAppRequest.mjs";
 import { installAmuxV19FakeAppTiming } from "./support/amuxV19FakeAppTiming.mjs";
 
 const timing = installAmuxV19FakeAppTiming();
@@ -150,30 +148,26 @@ test("a short stop-read drop waits for the app's answer instead of stopping",
       } });
     assert.equal(result.kind, "ready");
     assert.equal(stopReads, 5);
-    assert.ok(clock.now - start < AMUX_V19_STOP_UNREACHABLE_LIMIT_MS);
+    assert.ok(clock.now > start);
   }));
 
-test("a stop read unanswered for the contact limit stops before checkout",
+test("a stop read unanswered for a long time waits; there is no contact limit",
   async () => withEnvironment(async () => {
     const start = timing.now;
-    let references = 0;
+    const calls = [];
+    const answer = fetchFor({ calls });
+    let stopReads = 0;
     const result = await prepareAmuxV19MaxTrackedCheckout({ origin,
       identity, claim, referenceOrdinal: 0,
-      fetchImpl: async (url) => {
-        const path = new URL(url).pathname;
-        if (path.endsWith("/analysis-budget/claim")) return Response.json({
-          status: "committed", claimId: identity.claimId,
-          claimStatus: "in_flight" });
-        if (path.endsWith("/session-analysis-stop")) {
-          return new Response(null, { status: 503 });
-        }
-        references += 1;
-        throw new Error("no checkout reference after a lost stop answer");
+      fetchImpl: async (url, options) => {
+        if (new URL(url).pathname.endsWith("/session-analysis-stop") &&
+            ++stopReads <= 40) return new Response(null, { status: 503 });
+        return answer(url, options);
       } });
-    assert.deepEqual(result, { kind: "unavailable",
-      reason: "stop_unreachable" });
-    assert.equal(references, 0);
-    assert.ok(timing.now - start >= AMUX_V19_STOP_UNREACHABLE_LIMIT_MS);
+    // The old two-minute contact limit would have stopped the attempt here.
+    assert.equal(result.kind, "ready");
+    assert.ok(stopReads > 40);
+    assert.ok(timing.now - start > 120_000);
   }));
 
 test("settled claim cannot resolve a checkout even with a matching ID", async () =>
