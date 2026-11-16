@@ -70,18 +70,14 @@ pub const DM_INSTANCES: [&str; 2] = ["decision-maker-openai", "decision-maker-an
 // holds each to its source)
 // ---------------------------------------------------------------------------
 
-/// `DM_PAYLOAD_MAX_BYTES` of lib/amux/decisionMakerBrokerCore.ts: the card's
-/// one cap (`DM_CARD_TEXT_MAX_BYTES`, 256 KiB, the vendors' prompt) and 64 KiB
-/// for the instructions and the workspace's lines.
-pub const DM_PAYLOAD_MAX_BYTES: usize = 320 * 1024;
 /// `DM_LAUNCH_OUTPUT_MAX_BYTES` of lib/amux/decisionMakerLauncherCore.ts.
 pub const DM_LAUNCH_OUTPUT_MAX_BYTES: usize = 256 * 1024;
 /// `DM_RESULT_LINE_MAX_BYTES` of lib/amux/decisionMakerBrokerCore.ts.
 pub const DM_RESULT_LINE_MAX_BYTES: usize = 2 * 1024 * 1024;
-/// `MAX_BODY_BYTES` of app/api/internal/amux/decision-maker/results/route.ts.
-/// A larger body is refused before the store and records nothing, so the
-/// relay does not send one (it records the result as unknown instead).
-pub const DM_RESULT_BODY_MAX_BYTES: usize = 1152 * 1024;
+// The payload and the result body have no cap here (owner direction
+// 2026-11-16): the card was held to its one cap when it was routed, and the
+// results route takes the largest body an output under the launcher's cap
+// can make (its `MAX_BODY_BYTES`).
 
 // ---------------------------------------------------------------------------
 // Identifier grammars (lib/amux/decisionMakerRequestCore.ts, decisionMakerCore.ts)
@@ -1251,7 +1247,6 @@ mod tests {
         assert!(card_part.ends_with('\n'));
         let parsed: Value = serde_json::from_str(card_part.trim_end()).unwrap();
         assert_eq!(parsed, serde_json::to_value(&wire).unwrap());
-        assert!(payload.len() < DM_PAYLOAD_MAX_BYTES);
     }
 
     #[test]

@@ -56,14 +56,17 @@ import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 
 /**
  * The raw output is at most 256 KiB (DM_LAUNCH_OUTPUT_MAX_BYTES, the
- * launcher's); it is JSON text already, so carried here as a JSON string a
- * byte takes at most two (an escape's backslash doubles). The options are the
- * routed card's, whose card text is at most 256 KiB (§5), at most two again;
- * the binding is a few hundred bytes. 1,152 KiB holds all of it (2026-11-15:
- * the DM output's field caps were raised to the whole output's); a larger
- * body is refused before the store and records nothing.
+ * launcher's). Carried here as a JSON string a byte takes at most six (a
+ * control character's escape), 1.5 MiB; the options are the routed card's,
+ * whose card text is at most 256 KiB (§5), at most twice that here; the
+ * binding is a few hundred bytes. 4 MiB holds the worst case of all of it, so
+ * a body the relay can build is never refused unread: the relay submits every
+ * result and keeps one whose answer it lost owed (owner direction 2026-11-16),
+ * and a body this route always refused would stay owed. It was 1,152 KiB,
+ * under that worst case, and the relay recorded a larger output as unknown
+ * without submitting it.
  */
-const MAX_BODY_BYTES = 1152 * 1_024;
+const MAX_BODY_BYTES = 4 * 1_024 * 1_024;
 
 const requestSchema = z
   .object({

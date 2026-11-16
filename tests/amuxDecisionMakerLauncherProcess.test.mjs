@@ -197,7 +197,7 @@ test("an unknown instance or a request id that is not the app's starts nothing",
 });
 
 test("on the system host the hard timeout and the executable sha256 are §5a's, not the caller's", async () => {
-  assert.equal(DM_LAUNCH_HARD_TIMEOUT_MS, 30 * 60 * 1000);
+  assert.equal(DM_LAUNCH_HARD_TIMEOUT_MS, 6 * 60 * 60 * 1000);
   // Both are refused before the launcher reads or deletes anything on the real host.
   const input = { instance: OPENAI, requestId: REQUEST_ID, evidence: null, requestKey: null, payload: PAYLOAD };
   await assert.rejects(launchDecisionMaker(input, { timeoutMs: 1_000 }), /fixed on the system host/);

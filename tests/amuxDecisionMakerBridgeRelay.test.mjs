@@ -17,7 +17,6 @@ import { dmOptionSetDigest, dmPayloadDigest, dmResultDigest } from "../lib/amux/
 import {
   DM_BROKER_RESPONSE_DEADLINE_MS,
   DM_BROKER_SOCKET_PATH,
-  DM_PAYLOAD_MAX_BYTES,
   DM_RESULT_LINE_MAX_BYTES,
 } from "../lib/amux/decisionMakerBrokerCore.ts";
 import {
@@ -28,6 +27,7 @@ import {
 } from "../lib/amux/decisionMakerDeliveryCore.ts";
 import { DM_DELIVERY_NOT_SENT_REASONS } from "../lib/amux/decisionMakerJudgmentCore.ts";
 import { DM_LAUNCH_OUTPUT_MAX_BYTES } from "../lib/amux/decisionMakerLauncherCore.ts";
+import { DM_WORKSPACE_TIME_LIMIT_MS } from "../lib/amux/decisionMakerWorkspaceCore.ts";
 import { DM_STALE_CLOSE_AFTER_MS } from "../lib/amux/decisionMakerRequestCore.ts";
 import { parseDmCard } from "../lib/amux/decisionMakerRequestCore.ts";
 import { DM_INSTANCE_SCOPES } from "../lib/amux/decisionMakerSwitchCore.ts";
@@ -65,22 +65,33 @@ test("the result binding repeats the routing policy version and the classificati
 });
 
 test("the caps and the socket are the broker's and the launcher's", () => {
-  assert.equal(product(constant(wire, "DM_PAYLOAD_MAX_BYTES")), DM_PAYLOAD_MAX_BYTES);
+  // No payload cap of the relay's own (owner direction 2026-11-16): the card was held to its one
+  // cap when it was routed.
+  assert.doesNotMatch(wire, /DM_PAYLOAD_MAX_BYTES/);
   assert.equal(product(constant(wire, "DM_RESULT_LINE_MAX_BYTES")), DM_RESULT_LINE_MAX_BYTES);
   assert.equal(product(constant(wire, "DM_LAUNCH_OUTPUT_MAX_BYTES")), DM_LAUNCH_OUTPUT_MAX_BYTES);
   assert.equal(stringConstant(io, "DM_BROKER_SOCKET_PATH"), DM_BROKER_SOCKET_PATH);
   const deadline = constant(io, "DM_BROKER_RESPONSE_DEADLINE").match(/^Duration::from_millis\((.+)\)$/);
   assert.ok(deadline);
   assert.equal(product(deadline[1]), DM_BROKER_RESPONSE_DEADLINE_MS);
+  const workspaceWait = read("apps/tomverse-orchestrator/src/dm_relay/workspace.rs")
+    .match(/pub const DM_WORKSPACE_WAIT: std::time::Duration = std::time::Duration::from_millis\((.+)\);/);
+  assert.ok(workspaceWait);
+  assert.equal(product(workspaceWait[1]), DM_WORKSPACE_TIME_LIMIT_MS);
   const instances = [...constant(wire, "DM_INSTANCES").matchAll(/"([^"]+)"/g)].map((match) => match[1]);
   assert.deepEqual(instances, [...DM_INSTANCE_SCOPES]);
 });
 
-test("the relay never sends a result body the result route would refuse unread", () => {
+test("the result route takes every body the relay can build, so no result is refused unread", () => {
   const route = read("app/api/internal/amux/decision-maker/results/route.ts");
   const cap = route.match(/const MAX_BODY_BYTES = ([^;]+);/);
   assert.ok(cap);
-  assert.equal(product(constant(wire, "DM_RESULT_BODY_MAX_BYTES")), product(cap[1]));
+  // The output six bytes a byte as a JSON string, the routed card's options twice its one cap, and
+  // the binding. The relay has no body cap of its own: it submits every result (owner direction
+  // 2026-11-16) and keeps one whose answer it lost owed.
+  assert.ok(product(cap[1]) >= DM_LAUNCH_OUTPUT_MAX_BYTES * 6 + 2 * 256 * 1024 + 64 * 1024);
+  assert.doesNotMatch(wire, /DM_RESULT_BODY_MAX_BYTES/);
+  assert.doesNotMatch(flow, /DM_RESULT_BODY_MAX_BYTES|DM_PAYLOAD_MAX_BYTES/);
 });
 
 test("every route the relay calls exists and answers under the envelope the relay reads", () => {
