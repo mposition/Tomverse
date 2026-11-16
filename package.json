@@ -106,6 +106,7 @@
     "lint": "eslint",
     "check": "eslint . --max-warnings=0 && next build",
     "typecheck": "next typegen && tsc --noEmit --incremental false",
+    "typecheck:bounded": "next typegen && node scripts/typecheck-bounded.mjs",
     "check:package-json-duplicate-keys": "node scripts/check-package-json-duplicate-keys.mjs",
     "check:encoding": "node scripts/check-text-encoding.mjs",
     "check:encoding:strict": "node scripts/check-text-encoding.mjs --strict",

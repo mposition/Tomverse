@@ -101,6 +101,77 @@ for (const bundle of [null, "priced-context"]) test(`Review saves once and isola
   assert.ok(calls.findIndex(call=>call.path==="/api/chat/preflight")<calls.findIndex(call=>call.path.endsWith("/messages")));
 });
 
+for (const modelIds of [["a", "b"], ["a", "b", "c"]]) test(`native Review carries one prepared snapshot through persistence and ${modelIds.length} sibling sends`, async () => {
+  const calls = [];
+  const conversation = { id: "snapshot-review", selectedModels: modelIds, messages: [
+    { id: "first-source", role: "user", content: "아틀라스 출시" },
+    { id: "old-answer", role: "assistant", modelId: "a", content: "Prior answer" },
+    { id: "second-source", role: "user", content: "마감은 금요일로 변경" },
+  ] };
+  let snapshot;
+  const transport = createApiTransport(async (path, init = {}) => {
+    if (typeof init === "function") init = init();
+    calls.push(path);
+    if (path.includes("capabilities")) return Response.json(capability);
+    if (path === "/api/chat/preflight") {
+      assert.equal(conversation.messages.some(message => message.id === "current-source"), false);
+      snapshot = conversation.messages.filter(message => message.role === "user").slice(-2).map(message => message.id);
+      return Response.json({ ok: true, admissionToken: "aggregate", contextBundle: "snapshot-before-current-save" });
+    }
+    if (path.endsWith("/messages")) {
+      const message = JSON.parse(init.body).messages[0];
+      conversation.messages.push({ id: "current-source", role: "user", content: message.content });
+      conversation.messages.push({ id: "other-tab-source", role: "user", content: "Concurrent append" });
+      return Response.json({ messageMappings: [{ requestId: message.clientRequestId, messageId: "current-source" }] });
+    }
+    if (path === "/api/chat") {
+      const message = JSON.parse(init.body);
+      assert.deepEqual(snapshot, ["first-source", "second-source"]);
+      assert.equal(message.contextBundle, "snapshot-before-current-save");
+      assert.equal(message.admissionToken, "aggregate");
+      assert.equal(message.sourceUserMessageId, "current-source");
+      assert.equal(message.messages.filter(row => row.role === "user").at(-1).content, "그 프로젝트 마감은?");
+      assert.equal(message.messages.some(row => row.id === "other-tab-source"), false);
+      assert.equal(message.messages.some(row => row.role === "assistant" && row.content === "Done"), false);
+      conversation.messages.push({ id: message.assistantMessageId, role: "assistant", modelId: message.modelId, content: "Done", status: "normal" });
+      return new Response("Done");
+    }
+    return Response.json(conversation);
+  }, bridge);
+  assert.deepEqual((await transport.sendReview(conversation, "그 프로젝트 마감은?", [], new AbortController().signal, () => {})).failedModelIds, []);
+  assert.equal(calls.filter(path => path === "/api/chat/preflight").length, 1);
+  assert.equal(calls.filter(path => path.endsWith("/messages")).length, 1);
+  assert.equal(calls.filter(path => path === "/api/chat").length, modelIds.length);
+  assert.equal(calls.includes("/api/chat/context"), false);
+});
+
+for (const surface of ["Chat", "Review"]) test(`native single-model ${surface} retains its no-bundle path`, async () => {
+  const calls = [];
+  const conversation = { id: "single", selectedModels: ["a"], messages: [] };
+  const transport = createApiTransport(async (path, init = {}) => {
+    if (typeof init === "function") init = init();
+    calls.push(path);
+    if (path.endsWith("/messages")) {
+      const message = JSON.parse(init.body).messages[0];
+      conversation.messages.push({ id: "current", role: "user", content: message.content });
+      return Response.json({ messageMappings: [{ requestId: message.clientRequestId, messageId: "current" }] });
+    }
+    if (path === "/api/chat") {
+      const message = JSON.parse(init.body);
+      assert.equal("contextBundle" in message, false);
+      assert.equal("admissionToken" in message, false);
+      conversation.messages.push({ id: message.assistantMessageId, role: "assistant", modelId: "a", content: "Done", status: "normal" });
+      return new Response("Done");
+    }
+    return Response.json(conversation);
+  }, bridge);
+  if (surface === "Chat") await transport.send(conversation, "Question", [], new AbortController().signal, () => {});
+  else assert.deepEqual((await transport.sendReview(conversation, "Question", [], new AbortController().signal, () => {})).failedModelIds, []);
+  assert.equal(calls.includes("/api/chat/preflight"), false);
+  assert.equal(calls.includes("/api/chat/context"), false);
+  assert.equal(calls.filter(path => path === "/api/chat").length, 1);
+});
+
 for (const infrastructure of [500,503,"offline"]) test(`comparison preflight retries ${infrastructure} once then uses ordinary model admission`, async () => {
   let preflights=0;let requests=0;const conversation={id:"review",selectedModels:["a","b"],messages:[]};
   const transport=createApiTransport(async(path,init={})=>{if(typeof init==="function")init=init();

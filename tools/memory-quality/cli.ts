@@ -20,7 +20,8 @@ list    --out <directory>
 show    --out <directory> --run <id>
 stop    --out <directory> --run <id>
 export-replay --out <directory> --run <id> --file <new-json-file>
-retrieval [--corpus retrieval-ko|development|validation|all]
+retrieval [--corpus retrieval-ko|development|validation|relevance|all]
+        [--query-mode current-query|full-query|full-query+history]
         [--semantic (--rerank-scores <json> | --live --max-calls <n> --save-scores <new-json>)]
         Product retrieval (selectMemoryContext) Recall@5. Plain: no model call, no output files.
         --semantic also measures the rerank path (externalRelevance) next to it.
@@ -37,7 +38,7 @@ const commandOptions: Record<string, string[]> = {
   run: ["mode", "out", "responses", "iterations", "max-calls", "timeout-ms"],
   list: ["out"], show: ["out", "run"], stop: ["out", "run"],
   "export-replay": ["out", "run", "file"],
-  retrieval: ["corpus", "semantic", "rerank-scores", "live", "max-calls", "save-scores"],
+  retrieval: ["corpus", "semantic", "rerank-scores", "live", "max-calls", "save-scores", "query-mode"],
   "knowledge-retrieval": ["scores", "live", "max-calls", "save-scores"],
 };
 const booleanOptions = new Set(["semantic", "live"]);
@@ -73,6 +74,9 @@ export async function main(args: string[], context: LiveContext = {}) {
     return { knowledgeRetrieval: result, ...("stopReason" in result ? { stopReason: result.stopReason } : {}) };
   }
   if (command === "retrieval") {
+    if (options["query-mode"] && !["current-query", "full-query", "full-query+history"].includes(options["query-mode"])) {
+      throw new QualityStop("unknown_query_mode");
+    }
     const corpus = options.corpus ?? "retrieval-ko";
     const names = corpus === "all" ? PRODUCT_RETRIEVAL_CORPORA
       : PRODUCT_RETRIEVAL_CORPORA.filter((name) => name === corpus);

@@ -119,7 +119,7 @@ test("the retrieval command measures the product path with no model call", async
     assert.ok(result.byTag[tag], tag);
   }
   const all = await main(["retrieval", "--corpus", "all"]);
-  assert.deepEqual(Object.keys(all.retrieval), ["development", "validation", "retrieval-ko"]);
+  assert.deepEqual(Object.keys(all.retrieval), ["development", "validation", "retrieval-ko", "relevance"]);
   assert.equal(all.retrieval.development.poolKinds, "defaulted");
   await assert.rejects(main(["retrieval", "--corpus", "production"]), { code: "unknown_corpus" });
 });

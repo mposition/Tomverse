@@ -191,3 +191,82 @@ test("the claim records who made it, content-free", async () => {
         "userId",
     ]);
 });
+
+
+test("memory history snapshots survive saves and append, and refuse source or authority drift", async () => {
+    const { prepareMemoryHistoryContext, replayMemoryHistoryContext } = await import("@/lib/memoryHistorySnapshot");
+    const { memoryCurrentQueryDigest, memoryHistoryContentDigest } = await import("@/lib/memoryHistorySnapshotCore");
+    const { issueContextBundle, verifyContextBundle } = await import("@/lib/chatContextBundleCore");
+    const previousFlag = process.env.MEMORY_RELEVANCE_CONTEXT_ENABLED;
+    process.env.MEMORY_RELEVANCE_CONTEXT_ENABLED = "true";
+    const userId = `memory-history-${randomUUID()}`;
+    const request = new Request("http://localhost/api/chat/context");
+    const query = "그 프로젝트에서 내가 맡은 일과 마감만 알려줘.";
+    await prisma.user.create({ data: { id: userId, email: `${userId}@example.test` } });
+    const conversation = await prisma.conversation.create({ data: { userId, title: "Local history snapshot", kind: "chat", selectedModels: JSON.stringify(["model-a", "model-b"]) } });
+    const at = new Date("2026-11-01T00:00:00Z");
+    const add = (id: string, role: string, content: string, createdAt = at) => prisma.message.create({ data: {
+        id: `${userId}-${id}`, conversationId: conversation.id, role, content, createdAt,
+    } });
+    const inputs = { request, userId, conversationId: conversation.id, query, modelIds: ["model-a", "model-b"] };
+    try {
+        const empty = await prepareMemoryHistoryContext(inputs)!();
+        assert.deepEqual(empty.history, []);
+        await add("a", "user", "아틀라스 프로젝트의 출시 일정을 정리하자.");
+        await add("b", "user", "내 역할은 QA이고 마감은 금요일이야.");
+        await add("z", "assistant", "This must not enter semantic history.");
+        await add("y", "system", "Neither may this.");
+        const snapshot = await prepareMemoryHistoryContext(inputs)!();
+        assert.deepEqual(snapshot.history.map(source => source.id), [`${userId}-a`, `${userId}-b`]);
+        const anchor = { version: 1 as const, queryDigest: memoryCurrentQueryDigest(query),
+            sources: snapshot.history.map(({ id, digest }) => ({ id, digest })) };
+        const payload = {
+            version: 1 as const, bundleId: randomUUID(), subjectKey: userId, conversationId: conversation.id,
+            modelIds: inputs.modelIds, memoryTokens: 0, profileTokens: 0, expiresAtMs: Date.now() + 60000,
+            semanticSteps: { memoryRerank: true, knowledgeNeighbours: false, knowledgeRerank: false },
+            memoryMode: "on" as const, memoryVersion: "v", styleVersion: "s", profileVersion: null,
+            retrievalHash: "r", retrievalVersion: 1, promptVersion: "p", knowledgeHash: "none",
+            memoryQueryPolicy: "full" as const, memoryHistory: anchor,
+        };
+        const token = issueContextBundle(payload, process.env.NEXTAUTH_SECRET!);
+        await add("current", "user", query, new Date(at.getTime() + 1000));
+        await add("other-tab", "user", "다른 탭의 새 질문", new Date(at.getTime() + 2000));
+        await add("sibling", "assistant", "Comparison sibling", new Date(at.getTime() + 3000));
+        const replay = () => replayMemoryHistoryContext({ ...inputs, payload });
+        assert.deepEqual((await replay())?.history, snapshot.history);
+        const recovered = await prepareMemoryHistoryContext({ ...inputs, previousContextBundle: token })!();
+        assert.deepEqual(recovered.history, snapshot.history);
+        const noAnchor = { ...payload, memoryHistory: undefined };
+        assert.deepEqual((await replayMemoryHistoryContext({ ...inputs, payload: noAnchor }))?.history, []);
+        const legacy = { ...payload, memoryHistory: undefined, memoryQueryPolicy: undefined };
+        assert.deepEqual(await replayMemoryHistoryContext({ ...inputs, payload: legacy }), { history: [], queryPolicy: "legacy" });
+        const expired = issueContextBundle({ ...payload, expiresAtMs: 0 }, process.env.NEXTAUTH_SECRET!);
+        assert.deepEqual((await prepareMemoryHistoryContext({ ...inputs, previousContextBundle: expired })!()).history, []);
+        assert.throws(() => prepareMemoryHistoryContext({ ...inputs, userId: "another-owner", previousContextBundle: token }),
+            (error: unknown) => (error as { code: string }).code === "INVALID_CONTEXT_BUNDLE");
+        assert.throws(() => prepareMemoryHistoryContext({ ...inputs, modelIds: ["other-model"], previousContextBundle: expired }),
+            (error: unknown) => (error as { code: string }).code === "INVALID_CONTEXT_BUNDLE");
+        assert.throws(() => prepareMemoryHistoryContext({ ...inputs, previousContextBundle: `${token}x` }),
+            (error: unknown) => (error as { code: string }).code === "INVALID_CONTEXT_BUNDLE");
+        const verified = verifyContextBundle(token, { secret: process.env.NEXTAUTH_SECRET!, subjectKey: userId,
+            conversationId: conversation.id, modelId: "model-b" });
+        assert.equal(verified.ok, true);
+        assert.equal(token.includes(snapshot.history[0].content), false);
+        await prisma.message.update({ where: { id: snapshot.history[0].id }, data: { content: "Edited source" } });
+        assert.notEqual(memoryHistoryContentDigest("Edited source"), anchor.sources[0].digest);
+        assert.equal(await replay(), null);
+        assert.deepEqual((await prepareMemoryHistoryContext({ ...inputs, previousContextBundle: token })!()).history, []);
+        await prisma.message.delete({ where: { id: snapshot.history[1].id } });
+        assert.equal(await replay(), null);
+        await prisma.conversation.update({ where: { id: conversation.id }, data: { password: "test-locked", passwordVersion: 1 } });
+        await assert.rejects(replay, (error: unknown) => (error as { code: string }).code === "CONVERSATION_LOCKED");
+        await assert.rejects(prepareMemoryHistoryContext({ ...inputs, previousContextBundle: token })!,
+            (error: unknown) => (error as { code: string }).code === "CONVERSATION_LOCKED");
+        await assert.rejects(() => replayMemoryHistoryContext({ ...inputs, userId: "another-owner", payload }),
+            (error: unknown) => (error as { code: string }).code === "CONVERSATION_FORBIDDEN");
+    } finally {
+        await prisma.user.delete({ where: { id: userId } });
+        if (previousFlag === undefined) delete process.env.MEMORY_RELEVANCE_CONTEXT_ENABLED;
+        else process.env.MEMORY_RELEVANCE_CONTEXT_ENABLED = previousFlag;
+    }
+});
