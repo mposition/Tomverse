@@ -264,7 +264,7 @@ export const amuxV22SafeStopEvidenceSchema = z.object({
   targetHost: z.literal(AMUX_V22_RECOVERY_HOST_SCOPE),
   sourceEvidenceId: z.string().uuid(), sourceEvidenceDigest: digest,
   workerProfileAlias: profileAlias,
-  profileWorkerNames: z.array(profileAlias).min(1).max(16),
+  profileWorkerNames: z.array(profileAlias).min(1).max(256),
   targetUnit: z.string().min(1).max(128), profileConfigDigest: digest,
   hostInvocationId: z.null(), modelOutcome: z.literal("unknown"),
   stopProof: stopProofSchema,

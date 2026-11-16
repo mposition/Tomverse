@@ -426,7 +426,7 @@ test("one recorded intent issues only the fixed systemctl stop argv and proves t
     assert.equal(serialised.includes(forbidden), false, forbidden);
 });
 
-test("unknown or reused intent never reissues stop", async () => {
+test("an unknown intent never stops; a reused one stops again only while its captured run is alive", async () => {
   let stops = 0;
   const unknown = await executeAmuxV22SafeStop(request, baseOptions({
     inspectUnit: async () => inspected(unitState(true)), bindIntent: async () => { throw new Error("partial"); },
@@ -439,8 +439,10 @@ test("unknown or reused intent never reissues stop", async () => {
     bindIntent: async value => ({ entry: intentFor(value), disposition: "intent_reused", mayStop: false }),
     cgroupEmpty: async () => false, stopUnit: async () => { stops += 1; },
   }));
+  // The earlier stop's outcome is unknown and the unit still runs the captured
+  // invocation: it is stopped again, and the kernel proof still decides.
   assert.equal(reused.reason, "safe_stop_process_present");
-  assert.equal(reused.stopProof.stopAcknowledgement, "outcome_unknown"); assert.equal(stops, 0);
+  assert.equal(reused.stopProof.stopAcknowledgement, "acknowledged"); assert.equal(stops, 1);
 });
 
 test("a mismatched profile alias closes as non-unique after read-only unit verification and never stops", async () => {
