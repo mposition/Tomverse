@@ -26,6 +26,8 @@ test("transport error preserves the complete markdown body and separates its not
   assert.match(html, /data-testid="chat-recovery-notice"[^>]*>Connection interrupted/);
   assert.match(html, /data-testid="chat-error-auxiliary-info"/);
   assert.match(html, /Trace ID: local-trace/);
+  // The trace ID sits in a collapsed "Diagnostic details" disclosure, not on the card face.
+  assert.match(html, /<details(?![^>]*\bopen\b)[^>]*data-testid="chat-error-auxiliary-info"[^>]*><summary[^>]*>Diagnostic details<\/summary>/);
   assert.equal((html.match(/data-testid="restore-chat-question"/g) ?? []).length, 1);
 });
 test("error before text renders the notice without a phantom generating indicator", () => {
@@ -119,4 +121,24 @@ test("Chat error cards offer the model picker beside question restoration; Revie
   );
   assert.equal((both.match(/Choose another model/g) ?? []).length, 1);
   assert.match(both, /data-testid="retry-chat-question"/);
+});
+
+test("Chat error cards show one model picker, beside retry and before Report error", () => {
+  const failed: Message = { id: "a", role: "assistant", status: "error", content: "",
+    recoveryNotice: "Connection interrupted" };
+  const html = renderToStaticMarkup(
+    <SessionProvider session={null}>
+      <LanguageProvider initialLang="en">
+        <ChatMessageList messages={[question, failed]} currentChatId="c"
+          onRestoreQuestion={() => {}} onRetryQuestion={() => {}}
+          onRequestCloseModel={() => {}} onChooseAnotherModel={() => {}} />
+
+      </LanguageProvider>
+    </SessionProvider>
+  );
+  assert.equal((html.match(/data-testid="chat-error-choose-model"/g) ?? []).length, 1);
+  assert.ok(html.indexOf("chat-error-choose-model") < html.indexOf("report-error-button"));
+  assert.doesNotMatch(html, /You can also select another model/);
+  assert.equal((html.match(/Choose another model</g) ?? []).length, 1);
+  assert.match(html, /data-testid="retry-chat-question"/);
 });

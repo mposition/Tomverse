@@ -1665,6 +1665,11 @@ export function ChatMessageList({
                   )}
                   {!isUser && msg.status === "error" && (() => {
                     const errorCategory = classifyError(msg);
+                    // One "choose another model" action per card: Chat passes
+                    // its picker directly; a restore-only transcript falls
+                    // back to the close-model handler.
+                    const chooseModelOnError = onChooseAnotherModel ??
+                      (!onRetryLast && onRestoreQuestion ? onRequestCloseModel : undefined);
                     // UI-ERR-001. These actions move the conversation
                     // forward -- retry, pick another model, sign in and
                     // continue -- so they wear the app's ordinary primary,
@@ -1767,15 +1772,15 @@ export function ChatMessageList({
                             button after "Report error" is the only one.
                           */}
                           {(errorCategory === "generic" || errorCategory === "attachment") &&
-                            !onRetryLast && onRestoreQuestion && onRequestCloseModel &&
-                            !onChooseAnotherModel && (
+                            chooseModelOnError && (
                               <button
                                 type="button"
                                 data-testid="chat-error-choose-model"
-                                onClick={onRequestCloseModel}
+                                onClick={chooseModelOnError}
+                                disabled={isSending || isSendPreparing}
                                 className={secondaryButtonClass}
                               >
-                                <RotateCcw className="h-3.5 w-3.5" />
+                                <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
                                 {t("chat.chooseAnotherModel")}
                               </button>
                             )}
@@ -1852,22 +1857,11 @@ export function ChatMessageList({
                             nothing is sent, the next turn stays the user's.
                           */}
                           {(errorCategory === "generic" || errorCategory === "attachment") &&
-                            (onChooseAnotherModel ? (
-                              <button
-                                type="button"
-                                data-testid="chat-error-choose-model"
-                                onClick={onChooseAnotherModel}
-                                disabled={isSending || isSendPreparing}
-                                className={secondaryButtonClass}
-                              >
-                                <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
-                                {t("chat.chooseAnotherModel")}
-                              </button>
-                            ) : (
+                            !chooseModelOnError && (
                               <span className="flex items-center text-xs font-semibold text-zinc-600 dark:text-zinc-400">
                                 {t("chat.tryAnotherModelHint")}
                               </span>
-                            ))}
+                            )}
                           {errorCategory === "concurrency" && msg.id === concurrencyRetryMessageId && (
                             <span
                               data-testid="concurrency-retry-hint"
@@ -1888,7 +1882,16 @@ export function ChatMessageList({
                           </p>
                         )}
                         {errorAuxiliaryLines.length > 0 && (
-                          <div data-testid="chat-error-auxiliary-info" className="mt-2 space-y-0.5">
+                          // The trace ID already travels with "Report error"
+                          // (msg.errorReport), so it stays folded away until
+                          // someone asks for the diagnostic details.
+                          <details data-testid="chat-error-auxiliary-info" className="mt-2 space-y-0.5">
+                            <summary
+                              data-testid="chat-error-auxiliary-toggle"
+                              className="cursor-pointer text-[11px] leading-4 text-zinc-600 dark:text-zinc-400"
+                            >
+                              {t("chat.errorDiagnostics")}
+                            </summary>
                             {errorAuxiliaryLines.map((line, lineIndex) => (
                               <p
                                 key={lineIndex}
@@ -1905,7 +1908,7 @@ export function ChatMessageList({
                                 {line}
                               </p>
                             ))}
-                          </div>
+                          </details>
                         )}
                       </div>
                     );

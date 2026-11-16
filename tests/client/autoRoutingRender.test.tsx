@@ -13,6 +13,7 @@ import {
   ChatInputWebSearchChipView,
   ChatInputWebSearchSwitchDescription,
 } from "@/components/chat/ChatInput";
+import { autoRoutingCopy } from "@/lib/autoRoutingCopy";
 import type { WebSearchComposerState } from "@/lib/webSearchComposerState";
 
 /**
@@ -171,6 +172,26 @@ test("the composer Auto switch obeys the same offered boundary", () => {
   assert.equal(findProp(rendered, "role"), "switch");
   assert.equal(findProp(rendered, "aria-checked"), true);
   assert.match(textOf(rendered), /자동/);
+});
+
+test("both Auto switches explain that the model menu's Auto label is the same mode", () => {
+  const composer = AutoRoutingComposerToggle({
+    offered: true,
+    enabled: true,
+    language: "ko",
+    onChange: () => {},
+  });
+  assert.equal(findProp(composer, "title"), autoRoutingCopy.ko.modeHint);
+  assert.equal(findProp(composer, "aria-label"), autoRoutingCopy.ko.label);
+  assert.ok(autoRoutingCopy.ko.modeHint.includes(autoRoutingCopy.ko.compactLabel));
+
+  const picker = AutoRoutingToggle({
+    offered: true,
+    enabled: false,
+    language: "en",
+    onChange: () => {},
+  });
+  assert.ok(textOf(picker).includes(autoRoutingCopy.en.modeHint));
 });
 
 test("the pending composer switch cannot issue a second mode change", () => {

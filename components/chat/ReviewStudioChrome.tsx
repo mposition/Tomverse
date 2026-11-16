@@ -42,13 +42,23 @@ export function ReviewModeSwitcher({ review, locked = false, composer = false, c
   </div>;
 }
 
-export function ReviewCommandBar({ review, locked = false, view, setView, showModeSwitcher = true }: {
-  review: ReviewWorkspaceControls; locked?: boolean; view?: "write" | "results"; setView?: (view: "write" | "results") => void; showModeSwitcher?: boolean;
+// The breadcrumb after the product name. It used to read "New chat" / "New task" whatever was
+// open, so two conversations looked identical. An open conversation shows its own title, on
+// one line with the full text on hover; only an untitled (new) conversation keeps the label.
+function CommandBarConversationTitle({ title, fallback }: { title?: string | null; fallback: string }) {
+  const name = title?.trim();
+  return <span className="review-conversation-title" data-testid="command-bar-conversation-title" data-has-title={name ? "true" : "false"} title={name || undefined}>
+    <span aria-hidden="true">/ </span>{name ? <span className="review-conversation-name">{name}</span> : fallback}
+  </span>;
+}
+
+export function ReviewCommandBar({ review, locked = false, view, setView, showModeSwitcher = true, conversationTitle }: {
+  review: ReviewWorkspaceControls; locked?: boolean; view?: "write" | "results"; setView?: (view: "write" | "results") => void; showModeSwitcher?: boolean; conversationTitle?: string | null;
 }) {
   const { lang } = useLanguage();
   const c = reviewWorkspaceCopy[lang];
   return <header className="review-command-bar" data-testid="review-command-bar">
-    <div className="review-brand"><Image loading="eager" unoptimized src="/tomverse-logo.png" width={34} height={34} alt="Tomverse" /><strong title={chatProductUiCopy[lang].review.description}>Review{chatProductUiCopy[lang].review.shortDescription && <small className="review-product-caption" aria-hidden="true">{chatProductUiCopy[lang].review.shortDescription}</small>}</strong><span>/ {c.newTask}</span></div>
+    <div className="review-brand"><Image loading="eager" unoptimized src="/tomverse-logo.png" width={34} height={34} alt="Tomverse" /><strong title={chatProductUiCopy[lang].review.description}>Review{chatProductUiCopy[lang].review.shortDescription && <small className="review-product-caption" aria-hidden="true">{chatProductUiCopy[lang].review.shortDescription}</small>}</strong><CommandBarConversationTitle title={conversationTitle} fallback={c.newTask} /></div>
     {showModeSwitcher && <ReviewModeSwitcher review={review} locked={locked} />}
     {setView && <div className="review-view-switch" role="group" aria-label={c.results}>
       <button type="button" aria-pressed={view === "write"} onClick={() => setView("write")}>{c.write}</button>
@@ -82,11 +92,11 @@ function WorkspaceAppearanceActions({ workspace, disabled, testId }: { workspace
   </>;
 }
 
-export function ChatCommandBar({ workspace, locked = false }: { workspace: WorkspaceAppearanceControls; locked?: boolean }) {
+export function ChatCommandBar({ workspace, locked = false, conversationTitle }: { workspace: WorkspaceAppearanceControls; locked?: boolean; conversationTitle?: string | null }) {
   const { lang, t } = useLanguage();
   return <header className="review-command-bar chat-command-bar" data-testid="chat-command-bar">
-    <div className="review-brand"><Image loading="eager" unoptimized src="/tomverse-logo.png" width={34} height={34} alt="Tomverse" /><strong title={chatProductUiCopy[lang].chat.description}>Chat{chatProductUiCopy[lang].chat.shortDescription && <small className="review-product-caption" aria-hidden="true">{chatProductUiCopy[lang].chat.shortDescription}</small>}</strong><span>/ {t("sidebar.newChat")}</span></div>
-    <span className="chat-studio-description">{chatProductUiCopy[lang].chat.description}</span>
+    <div className="review-brand"><Image loading="eager" unoptimized src="/tomverse-logo.png" width={34} height={34} alt="Tomverse" /><strong title={chatProductUiCopy[lang].chat.description}>Chat{chatProductUiCopy[lang].chat.shortDescription && <small className="review-product-caption" aria-hidden="true">{chatProductUiCopy[lang].chat.shortDescription}</small>}</strong><CommandBarConversationTitle title={conversationTitle} fallback={t("sidebar.newChat")} /></div>
+    <span className="chat-studio-description" title={chatProductUiCopy[lang].chat.description}>{chatProductUiCopy[lang].chat.description}</span>
     <WorkspaceAppearanceActions workspace={workspace} disabled={locked} testId="chat-appearance" />
   </header>;
 }
