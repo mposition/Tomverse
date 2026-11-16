@@ -344,11 +344,6 @@ export function ModelsPageContent() {
                 </span>
                 <div className="min-w-0">
                   <h2 className="font-bold">{model.name}</h2>
-                  {/* The technical ID stays searchable but is folded away so the card leads with the product name. */}
-                  <details data-testid="model-id-details" className="text-xs leading-5 text-zinc-600 dark:text-zinc-400">
-                    <summary className="cursor-pointer font-semibold">{filters.modelId}</summary>
-                    <code className="break-all">{model.id}</code>
-                  </details>
                 </div>
               </div>
               <p data-testid={lang === "ko" || lang === "en" ? "model-selection-criteria" : undefined} className="mt-4 text-sm leading-6 text-zinc-600 dark:text-zinc-300">

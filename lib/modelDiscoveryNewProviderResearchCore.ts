@@ -149,6 +149,7 @@ const CONNECTED_PROVIDER_ALIASES: Readonly<Record<string, readonly string[]>> = 
   minimax: ["minimax", "hailuo"],
   groq: ["groqcloud"],
   fal: ["falai"],
+  bfl: ["blackforest"],
 };
 
 /** Whether a proposed provider name is one Tomverse is already connected to. */
