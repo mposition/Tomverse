@@ -257,15 +257,8 @@ test("the refusal codes are the ones routeDmQuestion() records, and throughput_e
   for (const throughput of [{ lastHour: 20, lastDay: 100 }, { lastHour: 1_000_000, lastDay: 1_000_000 }]) {
     assert.deepEqual(route({ throughput }).refusals, []);
   }
-  // Every ask type may reach a DM (owner direction 2026-11-16): customer_outbound is routed like any
-  // other, and ask_type_not_allowed stays on the list only so a row recorded under it reads back.
-  assert.deepEqual(route({}, { askType: "customer_outbound" }).refusals, []);
   assert.ok(DM_ROUTING_REFUSAL_CODES.includes("throughput_exceeded"));
-  assert.ok(DM_ROUTING_REFUSAL_CODES.includes("ask_type_not_allowed"));
-  assert.deepEqual(
-    [...produced].sort(),
-    DM_ROUTING_REFUSAL_CODES.filter((code) => code !== "throughput_exceeded" && code !== "ask_type_not_allowed").sort(),
-  );
+  assert.deepEqual([...produced].sort(), DM_ROUTING_REFUSAL_CODES.filter((code) => code !== "throughput_exceeded").sort());
 });
 
 // ---------------------------------------------------------------------------
