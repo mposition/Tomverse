@@ -43,7 +43,9 @@ test("the chat's own verdict decides whether a turn failed, and only a finished 
   assert.deepEqual(await readTurnOutcome(pageWith({ status: "error", code: "EMPTY_RESPONSE" })),
     { state: "failed", errorCode: "EMPTY_RESPONSE", modelId: "gpt-6-luna", timedOut: false });
   assert.equal((await readTurnOutcome(pageWith({ status: "error" }))).errorCode, "UNKNOWN");
-  assert.equal((await readTurnOutcome(pageWith({ status: "cancelled" }))).errorCode, "CANCELLED");
+  // A stopped answer is counted, never reported: a journey that moves away mid-answer stops it itself.
+  assert.equal((await readTurnOutcome(pageWith({ status: "cancelled" }))).state, "cancelled");
+  assert.match(turnOutcomeFact({ state: "cancelled", errorCode: null, modelId: null }), /^TURN STOPPED: /);
   // Still streaming: the status stays "normal", but no finished-answer marker is there yet.
   assert.equal((await readTurnOutcome(pageWith({ finished: false }))).state, "unfinished");
   // The walker's wait gave up: not answered, whatever text is on screen.
@@ -90,7 +92,16 @@ test("one failure class is one report a run, a walker-broken turn is never repor
   assert.deepEqual(walkerBroken.clicks, []);
   // An answered turn adds nothing.
   assert.equal(await reporter.check(pageWith(), rules, "generated.xlsx"), null);
-  assert.deepEqual(reporter.counts, { turnFailures: 4, reported: 0 });
+  // The request went out but no new answer appeared: the earlier turn's finished answer on screen is not read.
+  const earlier = pageWith({ reportButton: true });
+  assert.match(await reporter.check(earlier, rules, "generated.journey", { timedOut: true, noAnswer: true }), /^TURN FAILED: no finished answer when the walker stopped waiting/);
+  // A journey's earlier refused write does not silence a later turn's real failure.
+  const later = pageWith({ status: "error", code: "ATTACHMENT_TEXT_TOO_LARGE" });
+  assert.match(await reporter.check(later, { allowWrite: null, refusedWrites: ["POST /api/x"] }, "generated.journey", { walkerRefused: false }), /not sent: no_report_button/);
+  const cancelled = pageWith({ status: "cancelled", reportButton: true });
+  assert.match(await reporter.check(cancelled, rules, "generated.journey"), /^TURN STOPPED/);
+  assert.deepEqual(cancelled.clicks, []);
+  assert.deepEqual(reporter.counts, { turnFailures: 7, reported: 0 });
   assert.equal(rules.allowWrite, null, "the report's write rule is never left open");
   assert.ok(SCOUT_TURN_REPORTS_MAX >= 1);
 });

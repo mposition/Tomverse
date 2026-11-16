@@ -96,7 +96,7 @@ setTimeout(() => {
   process.exit(1);
 }, RUN_DEADLINE_MS).unref();
 
-const outcomes = { sent: 0, stored: 0, modelOff: 0, capped: 0, refused: 0, failed: 0, stopped: 0, skipped: 0, signedInPages: 0, generated: 0, deployChecked: 0 };
+const outcomes = { sent: 0, stored: 0, modelOff: 0, capped: 0, refused: 0, failed: 0, stopped: 0, skipped: 0, signedInPages: 0, generated: 0, deployChecked: 0, deployCheckFailed: 0 };
 /** The hourly walker's job this run: the full look once a day, otherwise only a new build's check. */
 const runMode = outDir ? "daily" : scoutRunMode();
 /** Turns the product did not answer, and how many the Scout reported (lib/productResearchScoutTurnHealth.mjs). */
@@ -343,8 +343,20 @@ async function walkSignedIn(browser, rules, { deployCheckOnly = false } = {}) {
       // judged, and the reporter has already filed it as a customer would.
       const failuresBefore = turnReporter.counts.turnFailures;
       const subject = await generateFile(browser, rules, generation, { walk, cookie: access.cookie, reporter: turnReporter });
+      if (!subject) {
+        // Signed out or stopped by a challenge: nothing was checked (the permit stays spent, as every permit does).
+        outcomes.skipped += 1;
+        console.warn(JSON.stringify({ event: "product_research_scout_deploy_check_skipped" }));
+        continue;
+      }
       outcomes.deployChecked += 1;
-      if (subject && turnReporter.counts.turnFailures > failuresBefore) await deliver(subject);
+      // A turn that failed, or a walk that stopped before the answer (the upload or the draft broke), goes to the judge.
+      const broken = turnReporter.counts.turnFailures > failuresBefore || subject.stoppedAt !== null;
+      if (broken) {
+        outcomes.deployCheckFailed += 1;
+        console.warn(JSON.stringify({ event: "product_research_scout_deploy_check_failed", stoppedAt: subject.stoppedAt }));
+        await deliver(subject);
+      }
       continue;
     }
     if (id === SCOUT_JOURNEY_GENERATION) {
