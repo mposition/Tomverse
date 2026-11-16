@@ -4,6 +4,7 @@ import { createApiTransport } from "../apps/mobile/src/apiTransport.ts";
 import { nativeParityBearerRoute } from "../lib/nativeBearerGate.ts";
 
 const bridge = { hasSession: async () => ({ signedIn: true }), signIn: async () => {}, signOut: async () => {} };
+const handoffKey = ["14ec0419", "cec3", "45e4", "af2c", "96f99845ea69"].join("-");
 const summary = { sourceMode: "recorded", sourceTurnCount: 3, nativeTurnCount: 2, nativeOmittedCount: 0, sourceOmittedCount: 0, attachmentsSupported: false };
 
 test("native answer preparation sends only the anchor and its key, never executes or overwrites review:new", async () => {
@@ -13,7 +14,7 @@ test("native answer preparation sends only the anchor and its key, never execute
     calls.push({ path, init });
     return Response.json({ conversationId: "target", route: "/continuations/target", idempotentReplay: false, reviewHandoff: summary });
   }, bridge);
-  const input = { assistantMessageId: "answer-a", idempotencyKey: "14ec0419-cec3-45e4-af2c-96f99845ea69" };
+  const input = { assistantMessageId: "answer-a", idempotencyKey: handoffKey };
   const result = await transport.prepareReviewHandoff("parent", input);
   assert.equal(result.conversationId, "target");
   assert.equal(calls.length, 1);
@@ -34,7 +35,7 @@ test("native handoff enrollment is exact-path, method-limited and default-off", 
 test("native late preparation cannot cross a signed-out session", async () => {
   let finish;
   const transport = createApiTransport(() => new Promise(resolve => { finish = resolve; }), bridge);
-  const pending = transport.prepareReviewHandoff("parent", { assistantMessageId: "answer-a", idempotencyKey: "14ec0419-cec3-45e4-af2c-96f99845ea69" });
+  const pending = transport.prepareReviewHandoff("parent", { assistantMessageId: "answer-a", idempotencyKey: handoffKey });
   await transport.signOut();
   finish(Response.json({ conversationId: "target", route: "/continuations/target", reviewHandoff: summary }));
   await assert.rejects(pending, { name: "AbortError" });
