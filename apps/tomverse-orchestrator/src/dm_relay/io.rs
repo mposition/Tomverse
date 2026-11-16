@@ -8,6 +8,10 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::time::Duration;
 
+/// How often the owed records are written even when unchanged, and how old
+/// the last good write may be before the relay starts nothing new.
+const STATE_REWRITE: Duration = Duration::from_secs(60);
+
 use async_trait::async_trait;
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -325,6 +329,11 @@ pub struct Relay<A, L, B> {
     persisted: Vec<OwedRecord>,
     /// The last save failed: the file is behind `records`.
     save_failed: bool,
+    /// When the file was last written successfully. Nothing new starts
+    /// until a write has succeeded, and the file is written again every
+    /// `STATE_REWRITE` even when nothing changed, so a directory that turned
+    /// read-only or a full disk is seen before the next new send.
+    last_written: Option<std::time::Instant>,
     /// Where the next scan's window starts (`flow::scan_window`).
     cursor: Option<String>,
     /// Where the walk over the operator-confirmed answers stands (stage S2-2b3).
@@ -361,6 +370,7 @@ impl<A: DmApp, L: DmLocal, B: DmBroker> Relay<A, L, B> {
             records_loaded: true,
             persisted: Vec::new(),
             save_failed: false,
+            last_written: None,
             cursor: None,
             delivery_cursor: None,
             settled_start: false,
@@ -443,14 +453,17 @@ impl<A: DmApp, L: DmLocal, B: DmBroker> Relay<A, L, B> {
         if !self.records_loaded {
             return;
         }
-        if self.records == self.persisted {
-            self.save_failed = false;
+        let fresh = self
+            .last_written
+            .is_some_and(|at| at.elapsed() < STATE_REWRITE);
+        if self.records == self.persisted && !self.save_failed && fresh {
             return;
         }
         match store.save(&self.records) {
             Ok(()) => {
                 self.persisted = self.records.clone();
                 self.save_failed = false;
+                self.last_written = Some(std::time::Instant::now());
             }
             Err(reason) => {
                 self.save_failed = true;
@@ -466,7 +479,12 @@ impl<A: DmApp, L: DmLocal, B: DmBroker> Relay<A, L, B> {
     /// Whether the relay may start something new: it knows what it owes and
     /// the file holds it.
     fn may_start_new(&self) -> bool {
-        self.records_loaded && !self.save_failed
+        self.records_loaded
+            && !self.save_failed
+            && (self.store.is_none()
+                || self
+                    .last_written
+                    .is_some_and(|at| at.elapsed() < STATE_REWRITE))
     }
 
     pub fn owed(&self) -> &BTreeSet<MarkerKey> {
@@ -1966,6 +1984,23 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_empty_start_on_an_unwritable_directory_starts_nothing_new() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        // The state directory's place is taken by a file before the first tick.
+        std::fs::write(&state, b"in the way").unwrap();
+        let store = OwedStore::new(&state);
+        let mut relay = relay_keeping(&store);
+        assert_eq!(relay.tick().await, Tick::Idle);
+        assert!(!relay.may_start_new());
+        assert!(!relay.app.all_routes().contains(&AppRoute::DeliveriesNext));
+        std::fs::remove_file(&state).unwrap();
+        relay.tick().await;
+        assert!(relay.may_start_new());
+        assert!(relay.app.all_routes().contains(&AppRoute::DeliveriesNext));
+    }
+
+    #[tokio::test]
     async fn a_file_that_cannot_be_written_starts_nothing_new_until_it_can() {
         let dir = tempfile::tempdir().unwrap();
         let state = dir.path().join("state");
@@ -1973,7 +2008,9 @@ mod tests {
         let mut relay = relay_keeping(&store);
         relay.tick().await;
         assert!(relay.may_start_new());
-        // The state directory's place is taken by a file: nothing can be saved.
+        // The first tick wrote the (empty) file; now the state directory's
+        // place is taken by a file: nothing can be saved.
+        std::fs::remove_dir_all(&state).unwrap();
         std::fs::write(&state, b"in the way").unwrap();
         relay.owe(vec![OwedRecord::Discard {
             request_id: REQUEST_ID.into(),
