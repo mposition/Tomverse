@@ -2751,7 +2751,7 @@ domains:
       Its expiry and key retirement do not by themselves decide account
       deletion or unified export; a public develop PR needs separate consent.
 
-  - domain: amuxV52ReviewFindings
+  - domain: amuxReviewFindings
     prismaModel: AmuxV52ReviewFindings
     userLinkageRole: actor
     owner: security-privacy

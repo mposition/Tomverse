@@ -973,7 +973,7 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "unverified",
   },
   {
-    domain: "amuxV52ReviewFindings",
+    domain: "amuxReviewFindings",
     publicName: "amux_v52_review_findings",
     prismaModel: "AmuxV52ReviewFindings",
     state: "unverified",

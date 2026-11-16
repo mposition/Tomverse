@@ -1601,7 +1601,7 @@ test("a verified first chunk remains eligible for a second budgeted invocation",
   }), (error: unknown) => error === rollback);
 });
 
-test("three session CLI failures stop the shared Agent-wide claim breaker", async () => {
+test("three session CLI failures do not stop the next session claim", async () => {
   const price = await prisma.amuxIdeaAnalysisPriceVersion.findFirstOrThrow({
     where: { modelId, mode: "subscription_cli", status: "approved" },
     select: { id: true },
@@ -1633,14 +1633,17 @@ test("three session CLI failures stop the shared Agent-wide claim breaker", asyn
       });
       assert.equal(outcome.status, "failed");
     }
-    assert.equal(await readAmuxIdeaAnalysisFailureStreak(tx), "stopped");
-    await assert.rejects(commitAmuxSessionBudgetClaim(tx, {
+    // Owner direction 2026-11-15: a failure streak stops only the paid path;
+    // the subscription session's next claim simply runs.
+    assert.equal(await readAmuxIdeaAnalysisFailureStreak(tx), "ready");
+    assert.equal(await readAmuxIdeaAnalysisFailureStreak(tx, "session"), "ready");
+    const next = await commitAmuxSessionBudgetClaim(tx, {
       claimId: randomUUID(), requestId: randomUUID(),
       reservationId: reservations[3]!, invocationOrdinal: 0,
       priceVersionId: price.id,
       runner: { tokenCapsEnforceable: true, billableToolsDisabled: true },
-    }), (error: unknown) => error instanceof AmuxSessionBudgetClaimError &&
-      error.code === "not_ready");
+    });
+    assert.ok(next.claimId);
     throw rollback;
   }), (error: unknown) => error === rollback);
 });
