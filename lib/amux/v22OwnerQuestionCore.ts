@@ -28,7 +28,6 @@ export const AMUX_V22_OWNER_QUESTION_MARKER = "AMUX_OWNER_QUESTION:";
  * its runs are bounded by its attempt budget, not by a question count.
  */
 export const AMUX_V22_OWNER_TEXT_MAX_CHARS = DM_CARD_TEXT_MAX_BYTES;
-export const AMUX_V22_OWNER_OPTIONS_MAX = 6;
 
 /** The earlier flow's sidecar refuses a prompt over 32 KiB; the resume
  * section keeps the whole prompt under this so a long previous patch is left
@@ -98,8 +97,7 @@ export function parseAmuxV22OwnerQuestion(resultText: string):
   const unblocks = boundedText(record.unblocks, AMUX_V22_OWNER_TEXT_MAX_CHARS);
   if (!question || !unblocks) return null;
   const rawOptions = record.options ?? [];
-  if (!Array.isArray(rawOptions) ||
-      rawOptions.length > AMUX_V22_OWNER_OPTIONS_MAX) return null;
+  if (!Array.isArray(rawOptions)) return null;
   const options: AmuxV22OwnerQuestion["options"] = [];
   for (const item of rawOptions) {
     if (!item || typeof item !== "object" || Array.isArray(item)) return null;

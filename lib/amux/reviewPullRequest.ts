@@ -11,7 +11,7 @@ import {
   type AmuxAttachment,
 } from "@/lib/amux/dbBoundary";
 import { amuxV22TaskWritesPatch } from "@/lib/amux/v22WorkerClaimCore";
-import { AMUX_V22_REVIEW_ATTEMPT_SCAN, amuxV22ReviewAttempt } from "@/lib/amux/v22KeptResultCore";
+import { amuxV22ReviewAttempt } from "@/lib/amux/v22KeptResultCore";
 import { ENGINEERING_AGENT_LEGACY_HALTS_ENV, engineeringAgentLegacyHalts } from "@/lib/engineeringAgentCore";
 
 /** What an attachment to the review pull request record sees. */
@@ -136,7 +136,6 @@ export async function recordAmuxReviewPullRequest(
         FROM "AmuxExecutionAttempt"
         WHERE "taskId" = ${input.taskId}
         ORDER BY "attemptNumber" DESC NULLS LAST, "startedAt" DESC, "id" DESC
-        LIMIT ${AMUX_V22_REVIEW_ATTEMPT_SCAN}
       `;
       const last = amuxV22ReviewAttempt(attempts, task.sourceSystem !== "admin-idea-v4" ||
         engineeringAgentLegacyHalts(process.env[ENGINEERING_AGENT_LEGACY_HALTS_ENV]));

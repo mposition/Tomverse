@@ -43,10 +43,13 @@ test("only a well-formed last line is an owner question", () => {
     line({ ...asked, question: "bell\u0007" }),
     line({ ...asked, options: [{ id: "A", label: "upper" }] }),
     line({ ...asked, options: [{ id: "a", label: "x" }, { id: "a", label: "y" }] }),
-    line({ ...asked, options: Array.from({ length: 7 }, (_, i) =>
-      ({ id: `o${i}`, label: "x" })) }),
     line({ ...asked, options: "a" }),
   ]) assert.equal(parseAmuxV22OwnerQuestion(bad), null, bad);
+});
+
+test("a question may carry any number of options", () => {
+  const many = Array.from({ length: 20 }, (_, i) => ({ id: `o${i}`, label: "x" }));
+  assert.equal(parseAmuxV22OwnerQuestion(line({ ...asked, options: many })).options.length, 20);
 });
 
 test("the bounds are on the raw text, the same the bridge reads", () => {

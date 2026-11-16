@@ -6,7 +6,7 @@ import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/amux/auditContract";
 import { AMUX_MAX_EXPECTED_REVISION } from "@/lib/amux/claimContract";
 import { isAmuxDmOwnerSettlementId } from "@/lib/amux/dmOwnerSettlementCore";
 import { decideAmuxV52ChangedPaths } from "@/lib/amux/executionGradeCore";
-import { AMUX_V22_REVIEW_ATTEMPT_SCAN, amuxV22ReviewAttempt } from "@/lib/amux/v22KeptResultCore";
+import { amuxV22ReviewAttempt } from "@/lib/amux/v22KeptResultCore";
 import { ENGINEERING_AGENT_LEGACY_HALTS_ENV, engineeringAgentLegacyHalts } from "@/lib/engineeringAgentCore";
 import {
   AMUX_DB_BOUNDARIES,
@@ -171,7 +171,6 @@ export async function completeAmuxV22ReviewOnObservedMerge(
         FROM "AmuxExecutionAttempt"
         WHERE "taskId" = ${input.taskId}
         ORDER BY "attemptNumber" DESC NULLS LAST, "startedAt" DESC, "id" DESC
-        LIMIT ${AMUX_V22_REVIEW_ATTEMPT_SCAN}
       `;
       const last = amuxV22ReviewAttempt(attempts,
         engineeringAgentLegacyHalts(process.env[ENGINEERING_AGENT_LEGACY_HALTS_ENV]));

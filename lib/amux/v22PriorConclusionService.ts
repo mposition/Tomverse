@@ -25,9 +25,8 @@ import { amuxV22TaskWritesPatch } from "@/lib/amux/v22WorkerClaimCore";
 export const AMUX_V22_PRIOR_CONCLUSION_ROWS_PRISMA_CALLS = 3;
 /** Prerequisites read per delivery in the earlier flow; the section bound
  * decides how many fit. The local CLI flow carries every finished one
- * (v22LocalCliFlowCore.ts), up to the dependency read below. */
+ * (v22LocalCliFlowCore.ts). */
 export const AMUX_V22_PRIOR_CONCLUSION_MAX_DEPENDENCIES = 8;
-const FLOW_DEPENDENCY_READ = 500;
 
 const SEALED = { ideaId: true, ciphertext: true, keyId: true, keyVersion: true,
   digest: true, digestKeyId: true, bodyPurgedAt: true } as const;
@@ -48,13 +47,13 @@ export async function readAmuxV22PriorConclusionRows(tx: Prisma.TransactionClien
   const self = { id: found.id, displayKey: found.displayKey,
     localRef: localRefOf(found) };
   const links = await tx.amuxWorkDependency.findMany({ where: { taskId },
-    orderBy: { dependencyId: "asc" }, take: flow ? FLOW_DEPENDENCY_READ : 32,
+    orderBy: { dependencyId: "asc" }, ...(flow ? {} : { take: 32 }),
     select: { dependency: { select: { id: true, displayKey: true, status: true,
       sourceSystem: true, v4TerminalAt: true, taskRole: true, ...LOCAL_REF } } } });
   const done = links.map((link) => link.dependency).filter((item) =>
     item.status === "done" && item.v4TerminalAt !== null &&
     item.sourceSystem === "admin-idea-v4")
-    .slice(0, flow ? FLOW_DEPENDENCY_READ : AMUX_V22_PRIOR_CONCLUSION_MAX_DEPENDENCIES);
+    .slice(0, flow ? undefined : AMUX_V22_PRIOR_CONCLUSION_MAX_DEPENDENCIES);
   if (done.length === 0) return null;
   // The newest result of each prerequisite first, whatever it holds: when
   // that run gave no conclusion, an earlier run's conclusion is not revived.
