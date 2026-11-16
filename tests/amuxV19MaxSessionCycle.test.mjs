@@ -60,8 +60,8 @@ function steps(overrides = {}) {
   const base = {
     reportUnknown: async (input) => { calls.push("reportUnknown");
       reports.push(input);
-      return { kind: "recorded", status: "outcome_unknown",
-        settledMicroUsd: null, recovered: false, retryWrite: false }; },
+      return { kind: "recorded", status: "owner_consumed",
+        settledMicroUsd: "0", recovered: false, retryWrite: false }; },
     claim: async () => { calls.push("claim");
       return { kind: "claimed", identity, claim, retryWrite: false }; },
     readIdea: async ({ selection }) => { calls.push("readIdea");
@@ -93,7 +93,7 @@ function steps(overrides = {}) {
         "ideaId", "invocationOrdinal", "requestId", "reservationId"]);
       return { kind: "recorded", recovered: false, retryWrite: false,
         planState: "plan_ready", registrationState: "write_disabled" }; },
-    haltFile: () => ({ release: async () => { released += 1; } }),
+    marker: () => ({ release: async () => { released += 1; } }),
   };
   return { steps: { ...base, ...overrides }, calls, reports,
     released: () => released };
@@ -150,12 +150,13 @@ test("a Cursor claim's prompt names that CLI's read tools", () =>
       stateDirectory: "/state" }, fake.steps), { kind: "outcome_unknown",
       stage: "analysis", claimId: identity.claimId,
       analysis: { ...blankAnalysis, reason: "outcome_unknown",
-        cliStarted: true }, unknownReport: "recorded" });
+        cliStarted: true }, unknownReport: "recorded", haltReleased: true });
     assert.ok(text.includes("Use your read-only file tools (read, glob, grep, list)"));
     assert.ok(!text.includes("Use the Read, Grep and Glob tools"));
   }));
 
-test("nothing after a claim is retried and only a recorded result releases the halt",
+// Operator, 2026-11-16: no stop waits for a person.
+test("every stop after a claim reports it unknown once and releases the marker once confirmed",
   () => withSwitches(async () => {
     const cases = [
       ["idea_read", { readIdea: async () => ({ kind: "unavailable" }) }],
@@ -172,10 +173,13 @@ test("nothing after a claim is retried and only a recorded result releases the h
       assert.deepEqual({ kind: result.kind, stage: result.stage,
         claimId: result.claimId }, { kind: "outcome_unknown", stage,
         claimId: identity.claimId });
-      assert.equal(fake.released(), 0, stage);
+      assert.equal(fake.released(), 1, stage);
       assert.equal(fake.calls.filter((call) => call === "claim").length, 1);
-      // Only an unverified analysis is held as unknown, and only once.
-      assert.equal(fake.reports.length, stage === "analysis" ? 1 : 0, stage);
+      // Every stop reports the exact claim once; nothing is sent again.
+      assert.deepEqual(fake.reports, [{ origin, fetchImpl: undefined,
+        input: unknownBody }], stage);
+      assert.equal(result.unknownReport, "recorded");
+      assert.equal(result.haltReleased, true);
     }
   }));
 
@@ -193,13 +197,14 @@ test("a page prompt for another claim stops before the CLI", () =>
     const result = await runAmuxV19MaxSessionCycleOnce({ origin,
       stateDirectory: "/state" }, fake.steps);
     assert.deepEqual(result, { kind: "outcome_unknown", stage: "prompt",
-      claimId: identity.claimId, reason: "prompt_hold" });
-    assert.equal(fake.released(), 0);
+      claimId: identity.claimId, reason: "prompt_hold",
+      unknownReport: "recorded", haltReleased: true });
+    assert.equal(fake.released(), 1);
   }));
 
 test("a queue answer without a claim is reported as is", () =>
   withSwitches(async () => {
-    for (const kind of ["idle", "halted", "outcome_unknown"]) {
+    for (const kind of ["idle", "halt_unavailable", "outcome_unknown"]) {
       const fake = steps({ claim: async () => ({ kind }) });
       assert.deepEqual(await runAmuxV19MaxSessionCycleOnce({ origin },
         fake.steps), { kind, stage: "claim" });
@@ -210,13 +215,13 @@ test("a queue answer without a claim is reported as is", () =>
 test("a claim the app refused before writing is reported with its reason, not as halted", () =>
   withSwitches(async () => {
     const fake = steps({ claim: async () => ({ kind: "budget_hold",
-      reason: "monthly_shadow_reached", retryWrite: false }) });
+      reason: "non_token_cost_unbounded", retryWrite: false }) });
     const result = await runAmuxV19MaxSessionCycleOnce({ origin }, fake.steps);
     assert.deepEqual(result, { kind: "budget_hold", stage: "claim",
-      reason: "monthly_shadow_reached" });
+      reason: "non_token_cost_unbounded" });
     assert.deepEqual(fake.calls, []);
     assert.deepEqual(amuxV19MaxSessionCycleStatus(result), { line:
-      "AMUX_V19_MAX_SESSION_CYCLE_budget_hold stage=claim reason=monthly_shadow_reached\n",
+      "AMUX_V19_MAX_SESSION_CYCLE_budget_hold stage=claim reason=non_token_cost_unbounded\n",
     exitCode: 0 });
     const noisy = await runAmuxV19MaxSessionCycleOnce({ origin }, steps({
       claim: async () => ({ kind: "budget_hold", reason: "Bearer x-1" }) }).steps);
@@ -236,8 +241,11 @@ test("pre-write refusals are quiet except the two that need the operator", () =>
   // fixed word.
   assert.equal(amuxV19MaxSessionCycleStatus({ kind: "not_ready", stage: "claim",
     reason: "Bearer x-1" }).line, "AMUX_V19_MAX_SESSION_CYCLE_not_ready stage=claim\n");
-  assert.equal(amuxV19MaxSessionCycleStatus({ kind: "halted",
-    reason: "monthly_shadow_reached" }).line, "AMUX_V19_MAX_SESSION_CYCLE_halted\n");
+  assert.equal(amuxV19MaxSessionCycleStatus({ kind: "refused",
+    reason: "non_token_cost_unbounded" }).line, "AMUX_V19_MAX_SESSION_CYCLE_refused\n");
+  // A marker the cycle no longer writes is not a kind it prints.
+  assert.equal(amuxV19MaxSessionCycleStatus({ kind: "halted" }).line,
+    "AMUX_V19_MAX_SESSION_CYCLE_unavailable\n");
 });
 
 test("the status line carries fixed words only", () => {
@@ -265,7 +273,7 @@ test("the status line carries fixed words only", () => {
     stage: "result", claimId: identity.claimId });
   assert.equal(unknown.exitCode, 1);
   assert.ok(!unknown.line.includes(identity.claimId));
-  assert.equal(amuxV19MaxSessionCycleStatus({ kind: "halted" }).exitCode, 1);
+  assert.equal(amuxV19MaxSessionCycleStatus({ kind: "halt_unavailable" }).exitCode, 1);
   assert.equal(amuxV19MaxSessionCycleStatus({ kind: "made-up" }).line,
     "AMUX_V19_MAX_SESSION_CYCLE_unavailable\n");
 });
@@ -286,7 +294,7 @@ test("an unverified analysis is held as outcome_unknown once with its exact clai
       input: unknownBody }]);
     // The overriding analyse does not log itself; no finalize follows.
     assert.deepEqual(fake.calls, ["claim", "readIdea", "reportUnknown"]);
-    assert.equal(fake.released(), 0, "the halt marker stays for the operator");
+    assert.equal(fake.released(), 1, "the confirmed report removes the marker");
     assert.deepEqual(result.analysis, { ...blankAnalysis,
       reason: "outcome_unknown", cliStarted: true, failure: "child_nonzero",
       stderr: "authentication", cliError: "authentication_failed",
@@ -297,7 +305,8 @@ test("an unverified analysis is held as outcome_unknown once with its exact clai
       "reason=outcome_unknown cliStarted=true beforeCli=false " +
       "failure=child_nonzero stderr=authentication " +
       "cliError=authentication_failed terminal=api_error apiStatus=401 " +
-      "exit=1 approved=3 denied=0 unknownReport=recorded\n", exitCode: 1 });
+      "exit=1 approved=3 denied=0 unknownReport=recorded haltReleased=true\n",
+    exitCode: 1 });
   }));
 
 test("a thrown analysis and a lost report stay unknown without a second write",
@@ -328,26 +337,31 @@ test("a thrown analysis and a lost report stay unknown without a second write",
       assert.equal(result.analysis.cliStarted, null);
       assert.equal(result.unknownReport, expected);
       assert.equal(result.receipt, receipt);
-      assert.equal(fake.released(), 0);
+      // Only a confirmed report removes the marker; the next tick reads the
+      // rest back.
+      assert.equal(fake.released(), expected === "read_back" ? 1 : 0);
+      assert.equal(result.haltReleased, expected === "read_back");
       assert.ok(!amuxV19MaxSessionCycleStatus(result).line.includes("Bearer"));
     }
   }));
 
-test("an analysis proven to stop before the CLI is not held as unknown", () =>
+// The claim of an analysis that stopped before its CLI is closed too, so
+// the idea is queued again instead of waiting (operator, 2026-11-16).
+test("an analysis that stopped before the CLI is reported too", () =>
   withSwitches(async () => {
     const fake = steps({ analyse: async () => ({ kind: "outcome_unknown",
       cliStarted: false, beforeCli: true,
       failureStage: "prepare_unavailable" }) });
     const result = await runAmuxV19MaxSessionCycleOnce({ origin,
       stateDirectory: "/state" }, fake.steps);
-    assert.deepEqual(fake.reports, []);
-    assert.equal(result.unknownReport, "not_sent_before_cli");
-    assert.equal(fake.released(), 0);
+    assert.deepEqual(fake.reports, [{ origin, fetchImpl: undefined,
+      input: unknownBody }]);
+    assert.equal(result.unknownReport, "recorded");
+    assert.equal(fake.released(), 1);
     assert.equal(amuxV19MaxSessionCycleStatus(result).line,
       "AMUX_V19_MAX_SESSION_CYCLE_outcome_unknown stage=analysis " +
       "reason=outcome_unknown cliStarted=false beforeCli=true " +
-      "failure=prepare_unavailable unknownReport=not_sent_before_cli\n");
-    // cliStarted=false alone is not proof: only beforeCli skips the report.
+      "failure=prepare_unavailable unknownReport=recorded haltReleased=true\n");
     const unproven = steps({ analyse: async () => ({ kind: "outcome_unknown",
       cliStarted: false, failureStage: "host_error" }) });
     await runAmuxV19MaxSessionCycleOnce({ origin, stateDirectory: "/state" },
@@ -502,7 +516,7 @@ test("with the detail switch on a rejected analysis writes one private file of n
     assert.equal(text.includes(identity.claimId), false);
     // The status line only says whether the file was written.
     const { line } = amuxV19MaxSessionCycleStatus(result);
-    assert.match(line, / unknownReport=recorded detail=written\n$/);
+    assert.match(line, / unknownReport=recorded detail=written haltReleased=true\n$/);
     assert.equal(line.includes("tengu"), false);
     assert.equal(line.includes("settings.json"), false);
     // The app request is the plain unknown body: no detail in it, nor in
@@ -511,7 +525,7 @@ test("with the detail switch on a rejected analysis writes one private file of n
       input: unknownBody }]);
     assert.equal(JSON.stringify(fake.reports).includes("tengu"), false);
     assert.equal(JSON.stringify(fake.reports).includes("settings.json"), false);
-    assert.equal(fake.released(), 0, "the halt marker still waits for the operator");
+    assert.equal(fake.released(), 1, "the confirmed report removes the marker");
   })));
 
 test("the real unknown report carries the claim identity only, never the detail", () =>
@@ -555,9 +569,9 @@ test("an unwritable state directory is only noted, and changes nothing else", ()
       assert.equal(result.detail, "unwritten");
       assert.equal(result.unknownReport, "recorded", "the report still goes out");
       assert.equal(fake.reports.length, 1);
-      assert.equal(fake.released(), 0);
+      assert.equal(fake.released(), 1);
       assert.match(amuxV19MaxSessionCycleStatus(result).line,
-        / unknownReport=recorded detail=unwritten\n$/);
+        / unknownReport=recorded detail=unwritten haltReleased=true\n$/);
     }
     // A regular file in place of the directory, and a directory that is a
     // symbolic link, are not state directories.
@@ -600,7 +614,8 @@ test("a verified analysis writes no detail file and sends none", () =>
     assert.deepEqual(await readdir(directory), []);
   })));
 
-test("only the newest ten detail files are kept and other files are left alone", () =>
+// Operator, 2026-11-16: no count caps; the operator prunes the directory.
+test("every detail file is kept and other files are left alone", () =>
   withDetail(async (directory) => {
     const old = [];
     for (let index = 0; index < 12; index += 1) {
@@ -614,9 +629,9 @@ test("only the newest ten detail files are kept and other files are left alone",
       rejectedDetail, new Date("2026-10-20T01:23:45.678Z")), "written");
     const names = (await readdir(directory)).sort();
     const kept = names.filter((name) => /^diagnostic-\d{8}T\d{6}\.\d{3}Z\.json$/.test(name));
-    assert.equal(kept.length, 10);
+    assert.equal(kept.length, 13);
     assert.equal(kept.at(-1), "diagnostic-20261020T012345.678Z.json");
-    assert.deepEqual(kept.slice(0, 9), old.slice(3));
+    assert.deepEqual(kept.slice(0, 12), old);
     assert.ok(names.includes("analysis-outcome-unknown.halt"));
     assert.ok(names.includes("diagnostic-notes.txt"));
     // A second file in the same millisecond is refused, not overwritten.
@@ -625,4 +640,39 @@ test("only the newest ten detail files are kept and other files are left alone",
     await mkdir(join(directory, "sub"));
     assert.equal(await writeAmuxV19DiagnosticDetail(join(directory, "sub"), null,
       { events: [], trace: [] }), null);
+  }));
+
+test("a marker an earlier tick left is reconciled before any new claim", () =>
+  withSwitches(async () => {
+    const named = { claimId: identity.claimId, requestId: identity.requestId,
+      reservationId: identity.reservationId, ideaId: identity.ideaId,
+      invocationOrdinal: identity.invocationOrdinal };
+    const fake = steps({ claim: async () => ({ kind: "recover", identity: named }) });
+    const result = await runAmuxV19MaxSessionCycleOnce({ origin,
+      stateDirectory: "/state" }, fake.steps);
+    assert.deepEqual(result, { kind: "recovered", stage: "recover",
+      claimId: identity.claimId, unknownReport: "recorded", haltReleased: true });
+    assert.deepEqual(fake.reports, [{ origin, fetchImpl: undefined,
+      input: unknownBody }]);
+    assert.deepEqual(fake.calls, ["reportUnknown"]);
+    assert.equal(fake.released(), 1);
+    assert.deepEqual(amuxV19MaxSessionCycleStatus(result), { line:
+      "AMUX_V19_MAX_SESSION_CYCLE_recovered stage=recover unknownReport=recorded haltReleased=true\n",
+    exitCode: 0 });
+    // An unconfirmed report keeps the marker for the next tick.
+    const lost = steps({ claim: async () => ({ kind: "recover", identity: named }),
+      reportUnknown: async () => ({ kind: "outcome_unknown", retryWrite: false,
+        reason: "readback_unreachable" }) });
+    const kept = await runAmuxV19MaxSessionCycleOnce({ origin,
+      stateDirectory: "/state" }, lost.steps);
+    assert.equal(kept.kind, "outcome_unknown");
+    assert.equal(kept.haltReleased, false);
+    assert.equal(lost.released(), 0);
+    // A marker naming no claim (from before 2026-11-16) is only removed.
+    const legacy = steps({ claim: async () => ({ kind: "recover", identity: null }) });
+    assert.deepEqual(await runAmuxV19MaxSessionCycleOnce({ origin,
+      stateDirectory: "/state" }, legacy.steps), { kind: "recovered",
+      stage: "recover", reason: "unnamed_marker", haltReleased: true });
+    assert.deepEqual(legacy.reports, []);
+    assert.equal(legacy.released(), 1);
   }));

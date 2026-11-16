@@ -395,9 +395,8 @@ Preview, prepare, approval, apply는 서로 다른 동작이다.
 - 무쓰기는 앱 DB에 상태 행이 없다는 뜻이다. reverse proxy, APM, access log,
   PostgreSQL error log, browser memory, backup에 본문 흔적이 없다는 뜻이 아니다.
   payload와 거절 원문이 그 경로에 남지 않는다는 증거 없이는 활성화하지 않는다.
-- Preview는 계정당 분당 10회를 넘지 않는다. 이 제한은 replay oracle을 줄이기
-  위한 제품 제한이며 DoS 방어의 완전한 증명은 아니다. 초과와 scan 거절은 서로
-  구별되는 오류 코드만 반환한다.
+- Preview의 계정당 분당 10회 제한은 2026-11-16 운영자 지시(AMUX intake 맨 위 절)로 없앴다.
+  Preview는 owner·step-up 세션만 부를 수 있다. scan 거절은 자기 오류 코드만 반환한다.
 - Prepare는 명시적 쓰기다. 같은 `owner`, authorized session, 최근 step-up을
   요구한다. prepared row와 canonical human audit는 같은 트랜잭션에 생성한다.
   전용 `amux:import:approve` permission이 role map에 추가되기 전에는 그 이름만

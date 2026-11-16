@@ -8,13 +8,13 @@ export function buildAmuxSessionAnalysisQueueWhere(now: Date,
   Prisma.AmuxIdeaSessionAnalysisReservationWhereInput {
   return {
     status: "queued",
-    // Only a verified prior chunk can progress automatically. A failed or
-    // owner-resolved unknown claim stays terminal; no automatic replay occurs.
-    AND: [{ OR: [
-      { budgetClaims: { none: {} }, idea: { state: "submitted" } },
-      { budgetClaims: { some: { status: "succeeded" },
-        every: { status: "succeeded" } }, idea: { state: "analyzing" } },
-    ] }],
+    // A running claim is still running. Every other idea is a candidate: the
+    // queue service keeps the ones whose next claim is due by
+    // amuxSessionNextClaimDue (ideaSessionAnalysisRetryCore.ts), which also
+    // queues a failed subscription analysis again after its wait (operator,
+    // 2026-11-16) and leaves a paid or owner-stopped one where it is.
+    AND: [{ budgetClaims: { none: {
+      status: { in: ["in_flight", "outcome_unknown"] } } } }],
     idea: { submissionOrigin: "session", state: { in: ["submitted", "analyzing"] },
       cancelledAt: null, analysisCompletedAt: null, analysisDeadlineAt: { gt: now },
       rawCiphertext: { not: null }, rawPurgedAt: null,

@@ -185,7 +185,7 @@ const parseClassification = (
   if (!integerIn(record.complexity, 1, 10) || !integerIn(record.risk, 1, 3)) {
     return { ok: false, code: "schema_rejected" };
   }
-  if (!integerIn(record.files_expected, 0, 1_000)) return { ok: false, code: "schema_rejected" };
+  if (!integerIn(record.files_expected, 0, Number.MAX_SAFE_INTEGER)) return { ok: false, code: "schema_rejected" };
   return {
     ok: true,
     classification: {

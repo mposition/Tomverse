@@ -23,9 +23,11 @@ const bodySchema = z.object({
   inputTokens: z.null(), outputTokens: z.null(),
 }).strict();
 
-/** A stopped or uncertain local invocation preserves its full monthly
- * reservation. This endpoint cannot record success, charge zero or retry a
- * claim. The exact claim receipt GET remains the response-loss readback. */
+/** A stopped or uncertain local invocation. A paid (bounded) claim keeps its
+ * full monthly reservation for the owner; a subscription (max_shadow) claim is
+ * closed by the system at zero in the same transaction (operator, 2026-11-16).
+ * This endpoint cannot record success or retry a claim. The exact claim
+ * receipt GET remains the response-loss readback. */
 export async function POST(request: Request): Promise<Response> {
   const v4Authorized = isAmuxV4AnalysisAgentAuthorized(request,
     process.env[AMUX_V4_ANALYSIS_AGENT_SECRET_ENV],

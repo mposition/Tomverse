@@ -18,34 +18,17 @@ const completed = {
     reason: "v19_session_result_retention_disabled" },
 };
 
-function marker() {
-  let marked = false;
-  return {
-    async claim() {
-      if (marked) return false;
-      marked = true;
-      return true;
-    },
-    async release() { marked = false; },
-    isMarked: () => marked,
-  };
-}
-
-test("retention refuses an invalid origin before acquiring a marker", async () => {
-  const state = marker();
+test("retention refuses an invalid origin before any request", async () => {
   const result = await runAmuxV4LocalRetentionOnce({ origin: "http://example.test/",
-    secret, ...state, fetchImpl: () => { throw new Error("network reached"); } });
+    secret, fetchImpl: () => { throw new Error("network reached"); } });
   assert.deepEqual(result, { kind: "refused" });
-  assert.equal(state.isMarked(), false);
 });
 
-test("one verified retention response clears the marker", async () => {
-  const state = marker();
+test("one verified retention response completes the tick", async () => {
   let calls = 0;
   const result = await runAmuxV4LocalRetentionOnce({ origin, secret,
-    ...state, fetchImpl: async (url, options) => {
+    fetchImpl: async (url, options) => {
       calls += 1;
-      assert.equal(state.isMarked(), true);
       assert.equal(url, `${origin}api/internal/amux/v4/content-retention`);
       assert.equal(options.method, "POST");
       assert.equal(options.redirect, "manual");
@@ -54,41 +37,40 @@ test("one verified retention response clears the marker", async () => {
     } });
   assert.deepEqual(result, { kind: "completed" });
   assert.equal(calls, 1);
-  assert.equal(state.isMarked(), false);
 });
 
-test("a known disabled response clears the marker without a cleanup claim", async () => {
-  const state = marker();
-  const result = await runAmuxV4LocalRetentionOnce({ origin, secret, ...state,
+test("a known disabled response is reported as disabled", async () => {
+  const result = await runAmuxV4LocalRetentionOnce({ origin, secret,
     fetchImpl: async () => Response.json({ available: false,
       reason: "content_retention_disabled" }, { status: 409 }) });
   assert.deepEqual(result, { kind: "disabled" });
-  assert.equal(state.isMarked(), false);
 });
 
-test("unknown response halts the next timer tick before another HTTP request", async () => {
-  const state = marker();
+// Operator, 2026-11-16: an unconfirmed tick fails only itself. The app
+// decides from its own rows what is due on every request, so the next tick
+// simply asks again; no local marker stops it.
+test("an unknown response fails this tick and the next tick asks again", async () => {
   let calls = 0;
-  const input = { origin, secret, ...state,
+  const input = { origin, secret,
     fetchImpl: async () => { calls += 1; return Response.json({ retry: false },
       { status: 503 }); } };
-  assert.deepEqual(await runAmuxV4LocalRetentionOnce(input), { kind: "halted" });
-  assert.equal(state.isMarked(), true);
-  assert.deepEqual(await runAmuxV4LocalRetentionOnce(input), { kind: "halted" });
-  assert.equal(calls, 1);
+  assert.deepEqual(await runAmuxV4LocalRetentionOnce(input), { kind: "unconfirmed" });
+  assert.deepEqual(await runAmuxV4LocalRetentionOnce(input), { kind: "unconfirmed" });
+  assert.equal(calls, 2);
+  const lost = await runAmuxV4LocalRetentionOnce({ origin, secret,
+    fetchImpl: async () => { throw new Error("connection reset"); } });
+  assert.deepEqual(lost, { kind: "unconfirmed" });
 });
 
-test("invalid success body and redirect both keep the halt marker", async () => {
+test("an invalid success body or a redirect is unconfirmed", async () => {
   for (const fetchImpl of [
     async () => Response.json({ ...completed, raw: { scanned: 0 } }),
     async () => ({ ...Response.json(completed),
       url: "https://other.example.test/", headers: new Headers({
         "content-type": "application/json" }) }),
   ]) {
-    const state = marker();
     assert.deepEqual(await runAmuxV4LocalRetentionOnce({ origin, secret,
-      ...state, fetchImpl }), { kind: "halted" });
-    assert.equal(state.isMarked(), true);
+      fetchImpl }), { kind: "unconfirmed" });
   }
 });
 
@@ -97,10 +79,8 @@ test("retention accepts the deployed route shape with separately gated v19 clean
     "../app/api/internal/amux/v4/content-retention/route.ts", import.meta.url), "utf8");
   assert.match(route, /available: false, reason: "v22_task_result_retention_disabled"/);
   assert.match(route, /amuxJsonNoStore\(\{ holdNotices, cancellation, raw, analysis,\s*taskResults, readManifests, sessionResults \}\)/);
-  const state = marker();
-  assert.deepEqual(await runAmuxV4LocalRetentionOnce({ origin, secret, ...state,
+  assert.deepEqual(await runAmuxV4LocalRetentionOnce({ origin, secret,
     fetchImpl: async () => Response.json(completed) }), { kind: "completed" });
-  assert.equal(state.isMarked(), false);
   const v19Only = { ...completed,
     holdNotices: { available: false, reason: "v4_content_retention_disabled" },
     cancellation: { available: false, reason: "v4_content_retention_disabled" },
@@ -109,14 +89,11 @@ test("retention accepts the deployed route shape with separately gated v19 clean
     readManifests: { manifests: { bodiesPurged: 0, keysDeleted: 0,
       scanned: 0, batchLimit: 8 },
       orphanKeys: { keysDeleted: 0, scanned: 0, batchLimit: 8 } } };
-  const secondState = marker();
   assert.deepEqual(await runAmuxV4LocalRetentionOnce({ origin, secret,
-    ...secondState, fetchImpl: async () => Response.json(v19Only) }),
-  { kind: "completed" });
-  assert.equal(secondState.isMarked(), false);
+    fetchImpl: async () => Response.json(v19Only) }), { kind: "completed" });
 });
 
-test("missing, active, or malformed task retention results halt without retry", async () => {
+test("missing, active, or malformed task retention results are unconfirmed", async () => {
   const legacy = { ...completed };
   delete legacy.taskResults;
   for (const body of [
@@ -128,17 +105,16 @@ test("missing, active, or malformed task retention results halt without retry", 
     { ...completed, taskResults: { ...completed.taskResults, extra: true } },
     { ...completed, extra: true },
   ]) {
-    const state = marker();
-    let calls = 0;
-    const input = { origin, secret, ...state, fetchImpl: async () => {
-      calls += 1;
-      return Response.json(body);
-    } };
-    assert.deepEqual(await runAmuxV4LocalRetentionOnce(input), { kind: "halted" });
-    assert.equal(state.isMarked(), true);
-    assert.deepEqual(await runAmuxV4LocalRetentionOnce(input), { kind: "halted" });
-    assert.equal(calls, 1);
+    assert.deepEqual(await runAmuxV4LocalRetentionOnce({ origin, secret,
+      fetchImpl: async () => Response.json(body) }), { kind: "unconfirmed" });
   }
+});
+
+test("the retention entry point keeps no marker and fails an unconfirmed tick", () => {
+  const entry = readFileSync(new URL("../scripts/amux-v4-content-retention-once.mjs",
+    import.meta.url), "utf8");
+  assert.doesNotMatch(entry, /HaltFile|claim|release/);
+  assert.match(entry, /result\.kind !== "completed" && result\.kind !== "disabled"/);
 });
 
 test("retention timer has no automatic retry after a failed tick", () => {

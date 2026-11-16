@@ -85,7 +85,7 @@ export async function POST(request: Request): Promise<Response> {
         previousUnits = await prisma.amuxIdeaDraftUnit.findMany({ where: {
           ideaId: body.ideaId, chunkIndex: preview.chunkIndex - 1,
           derivationGroupId: null,
-        }, select: { id: true }, take: 41 });
+        }, select: { id: true } });
       }
     } catch {
       return amuxJsonNoStore({ error: "key_preflight_unavailable" }, 503);
@@ -93,15 +93,14 @@ export async function POST(request: Request): Promise<Response> {
     if (preview.chunkIndex > 0 && !preceding?.currentPreviewId) {
       return amuxJsonNoStore({ error: "not_ready" }, 409);
     }
-    if (previousUnits.length > 40) {
-      return amuxJsonNoStore({ error: "integrity_unavailable" }, 409);
-    }
     let count = 0;
     try {
       const parsed: unknown = JSON.parse(body.rawModelOutput);
       const units = parsed && typeof parsed === "object" && !Array.isArray(parsed)
         ? (parsed as Record<string, unknown>).units : null;
-      if (Array.isArray(units) && units.length <= 40) count = units.length;
+      // No unit-count limit (owner direction 2026-11-16): every unit of the
+      // answer gets its id, however many there are.
+      if (Array.isArray(units)) count = units.length;
     } catch { /* Invalid model output is settled as a failed invocation. */ }
     unitIds = Array.from({ length: count }, () => randomUUID());
     const existing: AmuxContentKeyIdentity[] = [{ ideaId: body.ideaId,

@@ -382,8 +382,9 @@ test("Cursor probe sends the cut-down copy's access token and zeroes the sign-in
   assertObservation(result, "cursor", 2500, new Date(Number(end)).toISOString());
   assert.deepEqual(sent, [accessToken]);
   assert.equal(read.every((byte) => byte === 0), true);
-  // An access token expiring within six hours is refused before any request.
-  const soon = Buffer.from(JSON.stringify({ exp: Math.floor(now / 1000) + 3600 })).toString("base64url");
+  // An expired access token is refused before any request (operator,
+  // 2026-11-16: an unexpired one has no minimum remaining time).
+  const soon = Buffer.from(JSON.stringify({ exp: Math.floor(now / 1000) - 60 })).toString("base64url");
   assert.equal(await probeAmuxV22ChannelQuota("cursor", config, { now: () => now,
     readFile: async () => Buffer.from(JSON.stringify({ accessToken: `a.${soon}.b`, refreshToken: "r" })),
     request: async () => { sent.push("unexpected"); return {}; } }), null);

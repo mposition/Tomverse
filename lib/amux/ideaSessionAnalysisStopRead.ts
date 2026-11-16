@@ -32,17 +32,22 @@ export class AmuxSessionAnalysisStopReadError extends Error {
   }
 }
 
-/** Only a still-owned, unexpired claim permits the local CLI to continue. */
-export function shouldAmuxSessionAnalysisStop(row: StopSnapshot): boolean {
-  return !(row.namespace === AMUX_V4_ANALYSIS_NAMESPACE &&
-    row.claimStatus === "in_flight" && row.closedAt === null &&
-    row.resolutionAuditLogId === null && row.reservationStatus === "queued" &&
+/** The idea side of the stop rule: its analysis may still take a result. */
+export function amuxSessionAnalysisIdeaLive(row: StopSnapshot): boolean {
+  return row.namespace === AMUX_V4_ANALYSIS_NAMESPACE &&
+    row.reservationStatus === "queued" &&
     row.latestScopeId === row.operatingScopeSettingId &&
     row.submissionOrigin === "session" &&
     ["submitted", "analyzing"].includes(row.ideaState) &&
     row.cancelledAt === null && row.analysisCompletedAt === null &&
     row.analysisDeadlineAt > row.now && row.rawAvailable === true &&
-    row.provenanceAvailable === true && row.rawPurgedAt === null);
+    row.provenanceAvailable === true && row.rawPurgedAt === null;
+}
+
+/** Only a still-owned, unexpired claim permits the local CLI to continue. */
+export function shouldAmuxSessionAnalysisStop(row: StopSnapshot): boolean {
+  return !(row.claimStatus === "in_flight" && row.closedAt === null &&
+    row.resolutionAuditLogId === null && amuxSessionAnalysisIdeaLive(row));
 }
 
 /** Content-free, transaction-scoped stop poll for one exact v19 claim. */
@@ -50,6 +55,25 @@ export async function readAmuxSessionAnalysisStopState(
   tx: Prisma.TransactionClient, claimId: string, reservationId: string,
   ideaId: string, requiredBudgetMode?: "bounded" | "max_shadow",
 ): Promise<{ claimId: string; reservationId: string; stop: boolean }> {
+  const row = await readStopSnapshot(tx, claimId, reservationId, ideaId,
+    requiredBudgetMode);
+  return { claimId, reservationId, stop: shouldAmuxSessionAnalysisStop(row) };
+}
+
+/** Whether the claim's idea still takes a result, whatever the claim's own
+ * state: the idea side of a late subscription result (ideaSessionLateResult.ts). */
+export async function readAmuxSessionAnalysisIdeaLive(
+  tx: Prisma.TransactionClient, claimId: string, reservationId: string,
+  ideaId: string, requiredBudgetMode?: "bounded" | "max_shadow",
+): Promise<boolean> {
+  return amuxSessionAnalysisIdeaLive(await readStopSnapshot(tx, claimId,
+    reservationId, ideaId, requiredBudgetMode));
+}
+
+async function readStopSnapshot(
+  tx: Prisma.TransactionClient, claimId: string, reservationId: string,
+  ideaId: string, requiredBudgetMode?: "bounded" | "max_shadow",
+): Promise<StopSnapshot> {
   if (!UUID.test(claimId) || !UUID.test(reservationId) || !UUID.test(ideaId)) {
     throw new AmuxSessionAnalysisStopReadError("not_found");
   }
@@ -85,5 +109,5 @@ export async function readAmuxSessionAnalysisStopState(
       !(row.analysisDeadlineAt instanceof Date)) {
     throw new AmuxSessionAnalysisStopReadError("integrity_unavailable");
   }
-  return { claimId, reservationId, stop: shouldAmuxSessionAnalysisStop(row) };
+  return row;
 }

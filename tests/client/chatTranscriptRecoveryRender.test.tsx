@@ -24,10 +24,9 @@ test("transport error preserves the complete markdown body and separates its not
   assert.match(html, /First paragraph/);
   assert.match(html, /Second <strong>paragraph<\/strong>/);
   assert.match(html, /data-testid="chat-recovery-notice"[^>]*>Connection interrupted/);
-  assert.match(html, /data-testid="chat-error-auxiliary-info"/);
   assert.match(html, /Trace ID: local-trace/);
-  // The trace ID sits in a collapsed "Diagnostic details" disclosure, not on the card face.
-  assert.match(html, /<details(?![^>]*\bopen\b)[^>]*data-testid="chat-error-auxiliary-info"[^>]*><summary[^>]*>Diagnostic details<\/summary>/);
+  // The trace ID sits in a collapsed diagnostics disclosure, not on the card face.
+  assert.match(html, /<details(?![^>]*\bopen\b)[^>]*data-testid="chat-error-diagnostics"[^>]*><summary[^>]*>Show diagnostic info<\/summary>/);
   assert.equal((html.match(/data-testid="restore-chat-question"/g) ?? []).length, 1);
 });
 test("error before text renders the notice without a phantom generating indicator", () => {
@@ -76,6 +75,18 @@ test("legacy Review errors still split their existing title and auxiliary detail
   assert.doesNotMatch(html, /chat-recovery-notice|restore-chat-question/);
 });
 
+test("trace IDs sit behind a collapsed diagnostics disclosure; other details stay visible", () => {
+  const html = render([question, { id: "a", role: "assistant", status: "error",
+    content: "Request failed\nCost guard details\nTrace ID: 0000-trace" }], false);
+  const diagnostics = html.match(/<details data-testid="chat-error-diagnostics"[^>]*>.*?<\/details>/)?.[0];
+  assert.ok(diagnostics, "trace ID is wrapped in a diagnostics disclosure");
+  assert.doesNotMatch(diagnostics, /\sopen[\s=>]/);
+  assert.match(diagnostics, /<summary[^>]*>Show diagnostic info<\/summary>/);
+  assert.match(diagnostics, /Trace ID: 0000-trace/);
+  assert.doesNotMatch(diagnostics, /Cost guard details/);
+  assert.match(html, /Cost guard details/);
+});
+
 test("Chat attachment errors classify the recovery notice, not an empty or unrelated partial body", () => {
   for (const content of ["", "Kept partial answer"]) {
     const html = render([question, { id: "a", role: "assistant", status: "error", content,
@@ -109,4 +120,24 @@ test("Chat error cards offer the model picker beside question restoration; Revie
   assert.match(chat, /restore-chat-question/);
   assert.doesNotMatch(withPicker(false, () => {}), /chat-error-choose-model/);
   assert.doesNotMatch(render([question, failed]), /chat-error-choose-model/);
+});
+
+test("Chat error cards show one model picker, beside retry and before Report error", () => {
+  const failed: Message = { id: "a", role: "assistant", status: "error", content: "",
+    recoveryNotice: "Connection interrupted" };
+  const html = renderToStaticMarkup(
+    <SessionProvider session={null}>
+      <LanguageProvider initialLang="en">
+        <ChatMessageList messages={[question, failed]} currentChatId="c"
+          onRestoreQuestion={() => {}} onRetryQuestion={() => {}}
+          onRequestCloseModel={() => {}} onChooseAnotherModel={() => {}} />
+
+      </LanguageProvider>
+    </SessionProvider>
+  );
+  assert.equal((html.match(/data-testid="chat-error-choose-model"/g) ?? []).length, 1);
+  assert.ok(html.indexOf("chat-error-choose-model") < html.indexOf("report-error-button"));
+  assert.doesNotMatch(html, /You can also select another model/);
+  assert.equal((html.match(/Choose another model</g) ?? []).length, 1);
+  assert.match(html, /data-testid="retry-chat-question"/);
 });

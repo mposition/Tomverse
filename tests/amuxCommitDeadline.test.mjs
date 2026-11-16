@@ -436,6 +436,20 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // commit-deadline marker, classifier or deferred trigger changes.
   "20261116140000_amux_dm_request_windows",
   "20261116140100_amux_dm_latch_release",
+  // Operator, 2026-11-16: idea analysis has no artificial stops. Three CHECKs
+  // (session claim, session result, retention hold) and the bodies of the
+  // session claim, claim mode, shadow window, session result and two draft
+  // unit guards: the system closes an unknown subscription claim at zero,
+  // takes its late result and claims a failed analysis again; an undecided
+  // draft keeps the open clock. No commit-deadline marker, classifier or
+  // deferred trigger changes.
+  "20261116120000_amux_session_claim_record_only_checks",
+  "20261116120100_amux_v19_session_claim_mode_record_only",
+  "20261116120200_amux_v19_session_claim_system_close",
+  "20261116120300_amux_v19_shadow_usage_late_result",
+  "20261116120400_amux_v19_session_result_late_guard",
+  "20261116120500_amux_draft_first_open_expiry",
+  "20261116120600_amux_draft_unit_open_expiry",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {

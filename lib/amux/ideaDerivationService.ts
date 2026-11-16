@@ -10,6 +10,7 @@ import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import { prisma } from "@/lib/prisma";
 import { amuxCanonicalJson } from "./boardImportCore.ts";
 import { amuxIntakeCap } from "./intakeLimitsCore.ts";
+import { undecidedDraftExpiresAt } from "./ideaRetentionCore.ts";
 import { inspectAmuxStoredAnalysisUnit, amuxAnalysisTextSafe,
   type AmuxAnalysisCard } from "./ideaAnalysisChunkCore.ts";
 import { amuxContentDigest, openAmuxContent, sealAmuxContent,
@@ -108,7 +109,8 @@ async function buildPlan(tx: Prisma.TransactionClient,
     ideaId_chunkIndex: { ideaId: input.ideaId, chunkIndex: 0 },
   }, select: { analysisCompletedAt: true } });
   if (!first?.analysisCompletedAt) throw new AmuxIdeaDerivationError("not_ready");
-  const expiresAt = new Date(first.analysisCompletedAt.getTime() + 30 * 86_400_000);
+  // The draft unit guards store this same clock (operator, 2026-11-16).
+  const expiresAt = undecidedDraftExpiresAt(first.analysisCompletedAt);
   if (Date.now() >= expiresAt.getTime()) throw new AmuxIdeaDerivationError("not_ready");
   const sources = await tx.amuxIdeaDraftUnit.findMany({ where: {
     id: { in: input.sourceUnitIds }, ideaId: input.ideaId, actorUserId,

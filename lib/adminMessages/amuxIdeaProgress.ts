@@ -103,8 +103,8 @@ export const adminAmuxIdeaProgressMessages = defineAdminMessages({
     notice: {
       attention: { title: "Stopped: outcome unknown", body: "A step stopped with an unknown outcome. It is not retried on its own." },
       lane_running: { title: "Auto run in progress", body: "A run holds this idea. You have nothing to do until it opens a draft PR." },
-      lane_waiting: { title: "Waiting for the auto run lane", body: "Nothing is running yet; the lane starts it on its own. You can close the idea below while it waits." },
-      lane_failed: { title: "Auto run stopped", body: "Its runs kept failing the same way, so it will not run again on its own. You can close the idea below, or submit it again." },
+      lane_waiting: { title: "Waiting for its next auto run", body: "Nothing is running yet; the auto run starts on its own, and after a failed run it tries again by itself with a wait that grows from 5 minutes to 24 hours. You can close the idea below while it waits." },
+      lane_failed: { title: "Auto run stopped", body: "It used up the attempts the legacy limits switch allows, so it will not run again on its own. You can close the idea below, or submit it again." },
       lane_pr_closed: { title: "PR closed without a merge", body: "The run's draft PR was closed, so nothing merged. You can close the idea below, or submit it again." },
       analysis_running: { title: "Analysis running", body: "The analysis is running. The result appears below when it ends; a running analysis cannot be closed." },
       analysis_waiting: { title: "Waiting for the analysis worker", body: "The execution approval is recorded and no analysis is running yet: it starts when the analysis worker takes it. You have nothing to approve, and this idea cannot be closed at this step. If it stays here, you can release its unused reservation below." },
@@ -364,8 +364,8 @@ export const adminAmuxIdeaProgressMessages = defineAdminMessages({
     notice: {
       attention: { title: "멈춤 · 결과 불명", body: "한 단계가 결과 불명으로 멈췄습니다. 자동으로 다시 시도하지 않습니다." },
       lane_running: { title: "자동 실행 중", body: "실행이 이 아이디어를 잡고 있습니다. draft PR이 열릴 때까지 할 일은 없습니다." },
-      lane_waiting: { title: "자동 실행 차례 대기", body: "아직 돌고 있는 것은 없고, 레인이 알아서 시작합니다. 기다리는 동안 아래에서 아이디어를 닫을 수 있습니다." },
-      lane_failed: { title: "자동 실행 멈춤", body: "같은 실패가 반복돼 자동으로 다시 실행하지 않습니다. 아래에서 닫거나 다시 접수할 수 있습니다." },
+      lane_waiting: { title: "다음 자동 실행 대기", body: "아직 돌고 있는 것은 없고, 자동 실행이 알아서 시작합니다. 실행이 실패해도 5분에서 24시간까지 간격을 늘려 가며 스스로 다시 시도합니다. 기다리는 동안 아래에서 아이디어를 닫을 수 있습니다." },
+      lane_failed: { title: "자동 실행 멈춤", body: "예전 한도 스위치가 허용하는 시도를 모두 써서 자동으로 다시 실행하지 않습니다. 아래에서 닫거나 다시 접수할 수 있습니다." },
       lane_pr_closed: { title: "PR이 병합 없이 닫힘", body: "실행의 draft PR이 닫혀 병합된 것이 없습니다. 아래에서 닫거나 다시 접수할 수 있습니다." },
       analysis_running: { title: "분석 실행 중", body: "분석이 돌고 있습니다. 끝나면 결과가 아래에 나옵니다. 돌고 있는 분석은 닫을 수 없습니다." },
       analysis_waiting: { title: "분석 작업자 대기", body: "실행 승인은 기록됐고 아직 돌고 있는 분석은 없습니다. 분석 작업자가 가져가면 시작됩니다. 승인할 것은 없고, 이 단계에서는 아이디어를 닫을 수 없습니다. 오래 머물면 아래에서 미사용 예약을 해제할 수 있습니다." },

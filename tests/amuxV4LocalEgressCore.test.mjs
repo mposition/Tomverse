@@ -219,7 +219,7 @@ test("proxy caps simultaneous tunnels and releases a slot after disconnect", asy
   }
 });
 
-test("a v19 proxy holds the Cursor CLI's simultaneous tunnels but stays bounded", async () => {
+test("a v19 proxy holds as many simultaneous approved tunnels as its CLI opens", async () => {
   const echo = createTcpServer((socket) => socket.pipe(socket));
   const echoPort = await listen(echo);
   const proxy = createAmuxV19EgressProxy(["api2.cursor.sh"], {
@@ -244,8 +244,20 @@ test("a v19 proxy holds the Cursor CLI's simultaneous tunnels but stays bounded"
     assert.ok(answers.every((answer) => /200 Connection Established/.test(answer)));
     const more = await Promise.all(Array.from({ length: 7 }, openTunnel));
     assert.ok(more.every((answer) => /200 Connection Established/.test(answer)));
-    // Sixteen is the bound: the next tunnel is never established.
-    assert.doesNotMatch(await openTunnel(), /200 Connection Established/);
+    // No tunnel-count bound: past the old sixteen, approved tunnels still open.
+    const beyond = await Promise.all(Array.from({ length: 8 }, openTunnel));
+    assert.ok(beyond.every((answer) => /200 Connection Established/.test(answer)));
+    // The approved-host list is the bound: an unlisted host is still refused.
+    const refused = await new Promise((resolve) => {
+      const socket = connectTcp({ host: "127.0.0.1", port: proxyPort });
+      sockets.push(socket);
+      socket.once("error", () => resolve("closed"));
+      socket.once("close", () => resolve("closed"));
+      socket.once("connect", () => socket.write(
+        "CONNECT evil.example:443 HTTP/1.1\r\nHost: evil.example:443\r\n\r\n"));
+      socket.once("data", (bytes) => resolve(bytes.toString()));
+    });
+    assert.match(refused, /403 Forbidden/);
   } finally {
     for (const socket of sockets) socket.destroy();
     await close(proxy);

@@ -346,8 +346,10 @@ test("the diagnostic parser never throws and enforces its line limit on every li
 
 test("detail rides on the failed diagnostic observation only, and only when asked for", async () => {
   const secret = "sk-ant-oat01-SyntheticSecret_0123456789";
+  // A later system event that carries capabilities is still refused; one
+  // that does not is only recorded (see the ReadEvents tests).
   const unknownEvent = { type: "system", subtype: "tengu.private_event",
-    message: `prompt ${secret}` };
+    message: `prompt ${secret}`, agents: [] };
   const openTrace = { kind: "unverified", reason: "unlisted_open",
     detail: [{ code: "unlisted_open", path: "CLAUDE.md", flags: ["O_RDONLY"] }] };
   const run = async (options, sequence = [init, unknownEvent, ...events.slice(1)],
@@ -363,7 +365,7 @@ test("detail rides on the failed diagnostic observation only, and only when aske
   const detailed = await run({ diagnostic: true, detail: true });
   assert.equal(detailed.failureStage, "parser_rejected");
   assert.deepEqual(detailed.diagnosticDetail, {
-    events: [{ code: "system_event_other", keys: ["type", "subtype", "message"],
+    events: [{ code: "system_event_other", keys: ["type", "subtype", "message", "agents"],
       subtype: "tengu.private_event" }],
     trace: openTrace.detail });
   assert.equal(detailed.parserReason.code, "system_event_other");

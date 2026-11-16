@@ -71,8 +71,11 @@ test("the Cursor copy keeps the access token and its expiry but never the refres
   assert.equal(JSON.parse(text).accessToken, jwt(CURSOR_EXP));
   assert.equal(JSON.parse(text).refreshToken, AMUX_V19_CURSOR_REFRESH_PLACEHOLDER);
   assert.equal(text.includes(CURSOR_REFRESH), false);
-  // Within six hours of expiry the v19 rule refuses it, as the run would.
+  // An expired login is refused, as the run would; one still valid for an
+  // hour is copied (operator, 2026-11-16: no minimum remaining time).
   assert.throws(() => inspectAmuxV22WorkerAuth("cursor",
+    cursorLogin(Math.floor(NOW / 1000) - 60), NOW));
+  assert.doesNotThrow(() => inspectAmuxV22WorkerAuth("cursor",
     cursorLogin(Math.floor(NOW / 1000) + 60 * 60), NOW));
 });
 

@@ -72,25 +72,44 @@ const seedIdea = async (actorUserId: string, submittedAt: Date) => {
   });
   return id;
 };
+// Moves every run of an idea back in time, so a backoff can be waited out.
+const ageAttempts = async (ideaId: string, minutes: number) => {
+  const shift = (date: Date | null) => (date ? new Date(date.getTime() - minutes * 60_000) : null);
+  for (const row of await attemptsOf(ideaId)) {
+    await prisma.amuxIdeaLaneAttempt.update({ where: { id: row.id }, data: { claimedAt: shift(row.claimedAt)!,
+      leaseUntil: shift(row.leaseUntil)!, finishedAt: shift(row.finishedAt) } });
+  }
+};
 const attemptsOf = (ideaId: string) => prisma.amuxIdeaLaneAttempt.findMany({ where: { ideaId }, orderBy: { claimedAt: "asc" } });
 
-test("an idea is tried up to the attempt limit and then left alone", async () => {
+test("a failed idea is asked again only after its backoff (5 minutes, doubling) and is never dropped", async () => {
   const owner = `${OWNER_PREFIX}${randomUUID()}`;
   const idea = await seedIdea(owner, new Date(OLD));
-  for (let index = 0; index < AMUX_IDEA_LANE_MAX_ATTEMPTS + 1; index += 1) {
-    assert.equal(await claimAmuxIdeaLane({ actorUserId: owner }), null, "an idea that cannot be opened is never handed out");
-  }
-  const attempts = await attemptsOf(idea);
-  assert.equal(attempts.length, AMUX_IDEA_LANE_MAX_ATTEMPTS);
-  assert.ok(attempts.every((row) => row.outcome === "job_failed" && row.finishedAt !== null && row.prNumber === null));
-  const [row] = await readAmuxIdeaProgressForOwner(owner);
-  assert.equal(row.lane?.state, "failed");
-  assert.equal(row.attention, true);
-  assert.equal(row.closable, true);
+  assert.equal(await claimAmuxIdeaLane({ actorUserId: owner }), null, "an idea that cannot be opened is never handed out");
+  const first = await attemptsOf(idea);
+  assert.equal(first.length, 1);
+  assert.ok(first.every((row) => row.outcome === "job_failed" && row.finishedAt !== null && row.prNumber === null));
+  // Inside the 5-minute backoff the claim leaves it alone.
+  for (let index = 0; index < 3; index += 1) await claimAmuxIdeaLane({ actorUserId: owner });
+  assert.equal((await attemptsOf(idea)).length, 1);
+  const [waiting] = await readAmuxIdeaProgressForOwner(owner);
+  assert.equal(waiting.lane?.state, "queued");
+  assert.equal(waiting.attention, false);
+  assert.equal(waiting.closable, true);
+  // After 5 minutes it is tried again; the second failure waits 10.
+  await ageAttempts(idea, 6);
+  await claimAmuxIdeaLane({ actorUserId: owner });
+  assert.equal((await attemptsOf(idea)).length, 2);
+  await ageAttempts(idea, 6);
+  await claimAmuxIdeaLane({ actorUserId: owner });
+  assert.equal((await attemptsOf(idea)).length, 2, "6 of the 10 minutes is not enough");
+  await ageAttempts(idea, 5);
+  await claimAmuxIdeaLane({ actorUserId: owner });
+  assert.equal((await attemptsOf(idea)).length, 3);
   await removeIdeas();
 });
 
-test("different failures keep an idea in the lane; the same failure three times in a row stops it", async () => {
+test("failures only lengthen the wait; the legacy switch keeps the former three-run stop", async () => {
   const owner = `${OWNER_PREFIX}${randomUUID()}`;
   const idea = await seedIdea(owner, new Date(OLD));
   const at = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000);
@@ -101,14 +120,20 @@ test("different failures keep an idea in the lane; the same failure three times 
     }
   };
   await seedRuns(idea);
-  // Three runs that failed three different ways: the claim still takes it. No
-  // key store here, so each claim records job_failed, and the third in a row stops it.
-  for (let index = 0; index < 5; index += 1) await claimAmuxIdeaLane({ actorUserId: owner });
-  const attempts = await attemptsOf(idea);
-  assert.equal(attempts.length, 6);
-  assert.deepEqual(attempts.slice(3).map((row) => row.outcome), ["job_failed", "job_failed", "job_failed"]);
+  // Three failed runs (the newest ended 9 minutes ago): the third failure waits
+  // 20 minutes, so the claim leaves the idea alone for now.
+  for (let index = 0; index < 3; index += 1) await claimAmuxIdeaLane({ actorUserId: owner });
+  assert.equal((await attemptsOf(idea)).length, 3);
   const [row] = await readAmuxIdeaProgressForOwner(owner);
-  assert.equal(row.lane?.state, "failed");
+  assert.equal(row.lane?.state, "queued");
+  assert.equal(row.attention, false);
+  // Once the wait has passed it is claimed again; no key store here, so the
+  // claim records job_failed.
+  await ageAttempts(idea, 12);
+  await claimAmuxIdeaLane({ actorUserId: owner });
+  const attempts = await attemptsOf(idea);
+  assert.equal(attempts.length, 4);
+  assert.equal(attempts[3]!.outcome, "job_failed");
   await removeIdeas();
 
   // With the legacy switch, the former rule: three runs of any outcome stop it.
@@ -358,14 +383,15 @@ test("a part that names more work holds the idea until its PR merges, and the ne
   const [queued] = await readAmuxIdeaProgressForOwner(owner);
   assert.deepEqual([queued.lane?.state, queued.lane?.part, queued.lane?.previousPrNumber, queued.stage],
     ["queued", 2, 41, "execution"], "a merged part is not the idea done");
-  // Part 1's two failed tries do not count: part 2 gets the full attempt limit.
-  for (let index = 0; index < AMUX_IDEA_LANE_MAX_ATTEMPTS + 1; index += 1) {
+  // Part 1's two failed tries do not count toward part 2's backoff: its first
+  // run starts at once, and the failure then waits out its own 5 minutes.
+  for (let index = 0; index < 4; index += 1) {
     await claimAmuxIdeaLane({ actorUserId: owner });
   }
   const after = await attemptsOf(idea);
-  assert.equal(after.length, 3 + AMUX_IDEA_LANE_MAX_ATTEMPTS);
+  assert.equal(after.length, 3 + 1);
   const [spent] = await readAmuxIdeaProgressForOwner(owner);
-  assert.deepEqual([spent.lane?.state, spent.lane?.part], ["failed", 2]);
+  assert.deepEqual([spent.lane?.state, spent.lane?.part], ["queued", 2]);
   await removeIdeas();
 });
 

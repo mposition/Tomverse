@@ -6,8 +6,8 @@ import test from "node:test";
 
 import { claimAmuxV19MaxShadowBudgetWithHaltOnce } from
   "../lib/amux/ideaLocalMaxClaimWithHalt.mjs";
-import { localAmuxHaltFile } from
-  "../lib/amux/ideaLocalRetentionHaltFile.mjs";
+import { localAmuxSessionClaimMarker } from
+  "../lib/amux/ideaLocalSessionClaimMarker.mjs";
 
 const origin = "https://synthetic-amux.example.test/";
 const secret = "syntheticMaxLauncherSecret_0123456789abcdefgh";
@@ -39,18 +39,27 @@ async function withState(fn) {
   }
 }
 
-/** An in-memory marker with the real file's claim/release contract. */
-function fakeHalt({ releaseFails = false } = {}) {
-  const state = { held: false, claims: 0, releases: 0 };
-  return { state, haltFile: (stateDirectory, kind) => {
+const named = { claimId: identity.claimId, requestId: identity.requestId,
+  reservationId: identity.reservationId, ideaId: identity.ideaId,
+  invocationOrdinal: identity.invocationOrdinal };
+
+/** An in-memory marker with the real file's claim/read/release contract. */
+function fakeMarker({ releaseFails = false, pending = null } = {}) {
+  const state = { held: pending, claims: 0, releases: 0 };
+  return { state, markerFor: (stateDirectory) => {
     assert.equal(stateDirectory, "/state");
-    assert.equal(kind, "analysis");
     return {
-      async claim() { state.claims++; if (state.held) return false; state.held = true; return true; },
+      async claim(claim) {
+        state.claims++;
+        if (state.held) return false;
+        state.held = { identity: claim };
+        return true;
+      },
+      async read() { return state.held; },
       async release() {
         state.releases++;
         if (releaseFails) throw new Error("local_state_unavailable");
-        state.held = false;
+        state.held = null;
       },
     };
   } };
@@ -58,7 +67,6 @@ function fakeHalt({ releaseFails = false } = {}) {
 
 test("an app refusal confirmed absent clears the marker; claims and unknowns keep it", async () => {
   for (const [answer, kept] of [
-    [{ kind: "budget_hold", reason: "monthly_shadow_reached", retryWrite: false }, false],
     [{ kind: "not_ready", retryWrite: false }, false],
     [{ kind: "budget_unavailable", retryWrite: false }, false],
     [{ kind: "integrity_unavailable", retryWrite: false }, false],
@@ -69,34 +77,39 @@ test("an app refusal confirmed absent clears the marker; claims and unknowns kee
     [{ kind: "claimed", recovered: true, retryWrite: false }, true],
     [{ kind: "made_up" }, true],
   ]) {
-    const halt = fakeHalt();
+    const marker = fakeMarker();
     const result = await claimAmuxV19MaxShadowBudgetWithHaltOnce(
-      { stateDirectory: "/state" }, async () => answer, halt.haltFile);
+      { stateDirectory: "/state", identity }, async () => answer, marker.markerFor);
     assert.deepEqual(result, answer);
-    assert.equal(halt.state.held, kept, answer.kind);
+    assert.equal(marker.state.held !== null, kept, answer.kind);
+    if (kept) assert.equal(marker.state.held.identity, identity);
   }
 });
 
-test("a held marker stops the claim before any write, and a failed release is reported", async () => {
-  const halted = fakeHalt();
-  halted.state.held = true;
-  let claims = 0;
+// Operator, 2026-11-16: a marker an earlier tick left is reconciled, not a stop.
+test("a pending marker returns the claim it names before any write, and a failed release is reported", async () => {
+  for (const pending of [{ identity: named }, { identity: null }]) {
+    const marker = fakeMarker({ pending });
+    let claims = 0;
+    assert.deepEqual(await claimAmuxV19MaxShadowBudgetWithHaltOnce(
+      { stateDirectory: "/state", identity },
+      async () => { claims++; return { kind: "not_ready" }; },
+      marker.markerFor), { kind: "recover", identity: pending.identity });
+    assert.equal(claims, 0);
+    assert.equal(marker.state.claims, 0);
+  }
+  const stuck = fakeMarker({ releaseFails: true });
   assert.deepEqual(await claimAmuxV19MaxShadowBudgetWithHaltOnce(
-    { stateDirectory: "/state" }, async () => { claims++; return { kind: "not_ready" }; },
-    halted.haltFile), { kind: "halted" });
-  assert.equal(claims, 0);
-  const stuck = fakeHalt({ releaseFails: true });
-  assert.deepEqual(await claimAmuxV19MaxShadowBudgetWithHaltOnce(
-    { stateDirectory: "/state" }, async () => ({ kind: "budget_hold",
-      reason: "monthly_shadow_reached", retryWrite: false }), stuck.haltFile),
+    { stateDirectory: "/state", identity }, async () => ({ kind: "not_ready",
+      retryWrite: false }), stuck.markerFor),
   { kind: "halt_unavailable" });
-  assert.equal(stuck.state.held, true);
-  const thrown = fakeHalt();
+  assert.notEqual(stuck.state.held, null);
+  const thrown = fakeMarker();
   assert.deepEqual(await claimAmuxV19MaxShadowBudgetWithHaltOnce(
-    { stateDirectory: "/state" }, async () => { throw new Error("lost"); },
-    thrown.haltFile), { kind: "outcome_unknown", retryWrite: false,
+    { stateDirectory: "/state", identity }, async () => { throw new Error("lost"); },
+    thrown.markerFor), { kind: "outcome_unknown", retryWrite: false,
     reason: "claim_threw" });
-  assert.equal(thrown.state.held, true);
+  assert.notEqual(thrown.state.held, null);
 });
 
 test("pre-write refusal clears its marker and performs no network call",
@@ -108,12 +121,10 @@ test("pre-write refusal clears its marker and performs no network call",
     });
     assert.deepEqual(result, { kind: "refused" });
     assert.equal(calls, 0);
-    const halt = localAmuxHaltFile(stateDirectory, "analysis");
-    assert.equal(await halt.claim(), true);
-    await halt.release();
+    assert.equal(await localAmuxSessionClaimMarker(stateDirectory).read(), null);
   }));
 
-test("committed claim holds a durable marker and refuses a second write",
+test("committed claim holds a durable marker naming it and is reconciled before a second write",
   { skip: process.env.AMUX_V19_RUNNER_AUTH_METADATA_TEST !== "1" },
   async () => withState(async (stateDirectory) => {
     let writes = 0;
@@ -124,17 +135,17 @@ test("committed claim holds a durable marker and refuses a second write",
         return Response.json({ claimId: identity.claimId,
           requestId: identity.requestId,
           reservationId: identity.reservationId, invocationOrdinal: 0,
-          reservedMicroUsd: "1000000", auditId: "synthetic-audit" });
+          reservedMicroUsd: "0", auditId: "synthetic-audit" });
       } };
     try {
       const first = await claimAmuxV19MaxShadowBudgetWithHaltOnce(input);
       assert.equal(first.kind, "claimed");
       assert.equal(first.recovered, false);
       assert.deepEqual(await claimAmuxV19MaxShadowBudgetWithHaltOnce(input),
-        { kind: "halted" });
+        { kind: "recover", identity: named });
       assert.equal(writes, 1);
     } finally {
-      await localAmuxHaltFile(stateDirectory, "analysis").release();
+      await localAmuxSessionClaimMarker(stateDirectory).release();
     }
   }));
 
@@ -155,9 +166,9 @@ test("unknown claim response retains marker even when readback says absent",
       });
       assert.equal(result.kind, "outcome_unknown");
       assert.equal(writes, 1);
-      assert.equal(await localAmuxHaltFile(stateDirectory,
-        "analysis").claim(), false);
+      assert.deepEqual(await localAmuxSessionClaimMarker(stateDirectory).read(),
+        { identity: named });
     } finally {
-      await localAmuxHaltFile(stateDirectory, "analysis").release();
+      await localAmuxSessionClaimMarker(stateDirectory).release();
     }
   }));

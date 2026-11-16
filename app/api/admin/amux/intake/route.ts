@@ -12,11 +12,8 @@ import {
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedText } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
 import {
-  BOARD_IMPORT_PREVIEW_LIMIT,
   BoardImportError,
-  admitBoardImportPreview,
   boardImportContentTypeAccepted,
-  pruneBoardImportPreviewHits,
 } from "@/lib/amux/boardImportCore";
 import { AMUX_INTAKE_APPLY_ENV, AMUX_INTAKE_RAW_BODY_MAX_BYTES } from "@/lib/amux/intakeCore";
 import {
@@ -42,7 +39,6 @@ import {
 
 const noStoreHeaders = { "Cache-Control": "private, no-store, max-age=0" };
 const ACTIONS = new Set(["preview", "register", "local-preview", "local-register"]);
-const previewHits = new Map<string, number[]>();
 
 const withNoStore = (response: Response) => {
   response.headers.set("Cache-Control", noStoreHeaders["Cache-Control"]);
@@ -71,17 +67,6 @@ const requireOwner = async () => {
     throw error;
   }
   return { session } as const;
-};
-
-const admitPreview = (userId: string) => {
-  const now = Date.now();
-  const pruned = pruneBoardImportPreviewHits([...previewHits], now);
-  previewHits.clear();
-  for (const [accountId, retained] of pruned) previewHits.set(accountId, retained);
-  const decision = admitBoardImportPreview(previewHits.get(userId) ?? [], now);
-  if (decision.retained.length === 0) previewHits.delete(userId);
-  else previewHits.set(userId, decision.retained);
-  return decision.allowed && decision.retained.length <= BOARD_IMPORT_PREVIEW_LIMIT;
 };
 
 const failIntake = (error: unknown) => {
@@ -114,9 +99,6 @@ export async function GET(request: Request) {
     const userId = auth.session.user?.id;
     if (!userId) {
       return NextResponse.json({ error: "Not found." }, { status: 404, headers: noStoreHeaders });
-    }
-    if (!admitPreview(userId)) {
-      return NextResponse.json({ error: "preview_rate_limited" }, { status: 429, headers: noStoreHeaders });
     }
     const generatedAt = new Date().toISOString();
     const snapshot = await readLocalIntakeBoardSnapshot(generatedAt);
@@ -157,9 +139,6 @@ export async function POST(request: Request) {
     }
     const raw = await readLimitedText(request, local ? LOCAL_INTAKE_PACKAGE_MAX_BYTES : AMUX_INTAKE_RAW_BODY_MAX_BYTES);
     if (local) {
-      if (action === "local-preview" && !admitPreview(userId)) {
-        return NextResponse.json({ error: "preview_rate_limited" }, { status: 429, headers: noStoreHeaders });
-      }
       const generatedAt = new Date().toISOString();
       const snapshot = await readLocalIntakeBoardSnapshot(generatedAt);
       if (!snapshot.ok) {
@@ -195,9 +174,6 @@ export async function POST(request: Request) {
     }
     const secret = process.env[AMUX_INTAKE_SOURCE_KEY_SECRET_ENV] ?? null;
     if (action === "preview") {
-      if (!admitPreview(userId)) {
-        return NextResponse.json({ error: "preview_rate_limited" }, { status: 429, headers: noStoreHeaders });
-      }
       return NextResponse.json(previewAmuxIntake(raw, secret, process.env[AMUX_INTAKE_APPLY_ENV]), {
         headers: noStoreHeaders,
       });

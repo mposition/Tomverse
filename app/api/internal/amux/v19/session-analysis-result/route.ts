@@ -57,7 +57,8 @@ const bodySchema = identity.extend({
   outputTokens: z.number().int().safe().nonnegative(),
   cliAttestation,
 }).refine((body) => Buffer.byteLength(body.rawModelOutput, "utf8") <=
-    amuxAnalysisChunkMaxBytes() && body.inputTokens + body.outputTokens > 0 &&
+    // A CLI that reported no tokens still answered (operator, 2026-11-16).
+    amuxAnalysisChunkMaxBytes() &&
     Number.isSafeInteger(body.inputTokens + body.outputTokens));
 const receiptSchema = identity.pick({ claimId: true, requestId: true,
   reservationId: true, ideaId: true, invocationOrdinal: true });

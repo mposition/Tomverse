@@ -26,11 +26,10 @@ test("v19 session queue filters expired, cancelled, purged and owner ideas", () 
     reservationId: "00000000-0000-4000-8000-000000000001" };
   assert.deepEqual(buildAmuxSessionAnalysisQueueWhere(now, cursor), {
     status: "queued",
-    AND: [{ OR: [
-      { budgetClaims: { none: {} }, idea: { state: "submitted" } },
-      { budgetClaims: { some: { status: "succeeded" },
-        every: { status: "succeeded" } }, idea: { state: "analyzing" } },
-    ] }],
+    // A running claim excludes its idea; which other idea is due, after a
+    // result or after its retry wait, is amuxSessionNextClaimDue's call.
+    AND: [{ budgetClaims: { none: {
+      status: { in: ["in_flight", "outcome_unknown"] } } } }],
     idea: { submissionOrigin: "session", state: { in: ["submitted", "analyzing"] },
       cancelledAt: null, analysisCompletedAt: null, analysisDeadlineAt: { gt: now },
       rawCiphertext: { not: null }, rawPurgedAt: null,

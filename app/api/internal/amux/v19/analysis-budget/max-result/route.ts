@@ -23,7 +23,8 @@ const bodySchema = z.object({ claimId: uuid, requestId: uuid,
   outcome: z.enum(["verified_success", "invocation_failed"]),
   inputTokens: z.number().int().safe().nonnegative(),
   outputTokens: z.number().int().safe().nonnegative(),
-}).strict().refine((body) => body.inputTokens + body.outputTokens > 0 &&
+  // Zero tokens settles at zero instead of being refused (operator, 2026-11-16).
+}).strict().refine((body) =>
   Number.isSafeInteger(body.inputTokens + body.outputTokens));
 
 /** Only the fixed Max launcher records measured usage for its exact claim.
