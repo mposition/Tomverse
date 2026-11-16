@@ -102,6 +102,10 @@ Phase 1(A안)은 빈 응답을 `recordProviderFailure`로 기록만 하고 token
   runtime 오용(`ERR_INVALID_STATE` 등 Node `ERR_INVALID_*` 계열)이면 grant의
   오류 코드를 그 오류로 적고(`AI_EMPTY_RESPONSE.ERR_INVALID_STATE`) evidence의
   `failureLayer`를 `application`으로 기록한다. 그 밖에는 `provider_stream`이다.
+- **Sentry**: grant가 Sentry로 넘기는 오류는 원본 객체가 아니다. provider 오류의
+  message·cause·body에는 요청과 답변 내용이 들어 있을 수 있으므로, 이름·코드·HTTP
+  상태·재시도성과 stack frame(코드 위치)만 남긴 오류를 새로 만들어 넘긴다
+  (`contentFreeError`).
 - token이 없는 빈 응답 신고(옛 서버, 서명 미설정)는 계속 정상 접수되고
   unverified다. Admin은 "Client-classified EMPTY_RESPONSE — server token not
   issued"로 표시한다. Trace가 일치하는 provider event가 있어도 verified로 승격하지

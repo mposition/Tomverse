@@ -95,7 +95,11 @@ test("an empty answer this process caused is named after the cause and recorded 
   });
   assert.equal(grant.errorCode, "AI_EMPTY_RESPONSE.ERR_INVALID_STATE");
   assert.equal(grant.failureLayer, "application");
-  assert.equal(grant.error, cause);
+  // The cause is what Sentry gets, as code and frames -- never the object.
+  assert.ok(grant.error instanceof Error);
+  assert.notEqual(grant.error, cause);
+  assert.equal((grant.error as Error).name, "TypeError");
+  assert.equal((grant.error as Error).message, "ERR_INVALID_STATE");
   assert.equal(grant.httpStatus, 200);
   assert.equal(grant.phase, "stream");
 });
@@ -119,6 +123,40 @@ test("a provider's own stream error keeps the provider layer, its code and its r
   assert.equal(grant.failureLayer, "provider_stream");
   assert.equal(grant.retryable, true);
   assert.deepEqual(traceEvidenceRecordability(grant.errorCode, grant.httpStatus), { record: true });
+});
+
+test("what the grant hands to Sentry carries no provider text, only codes and code locations", () => {
+  const CONTENT = "SYNTHETIC-USER-PROMPT-MARKER";
+  const providerError = Object.assign(new Error(`Bad request: ${CONTENT}`), {
+    name: "AI_APICallError",
+    statusCode: 400,
+    isRetryable: false,
+    requestBodyValues: { messages: [{ role: "user", content: CONTENT }] },
+    responseBody: `{"error":"${CONTENT}"}`,
+    cause: new Error(CONTENT),
+  });
+  const grant = streamFailureGrantInput({
+    traceId: TRACE,
+    root: "AI_STREAM_FAILED",
+    diagnosticCode: "AI_STREAM_FAILED.AI_APICallError.HTTP_400",
+    provider: "openai",
+    modelId: "gpt-6-luna",
+    error: providerError,
+    observedStreamError: providerError,
+  });
+  const captured = grant.error as Error & Record<string, unknown>;
+  assert.ok(captured instanceof Error);
+  assert.notEqual(captured, providerError);
+  assert.equal(captured.name, "AI_APICallError");
+  assert.equal(captured.message, "HTTP_400");
+  assert.equal(captured.cause, undefined);
+  assert.equal(captured.requestBodyValues, undefined);
+  assert.equal(captured.responseBody, undefined);
+  // Everything Sentry could serialise off it, stack included.
+  const serialised = JSON.stringify({ ...captured, message: captured.message, stack: captured.stack });
+  assert.equal(serialised.includes(CONTENT), false);
+  // The frames survive: they are where the failure was raised.
+  assert.match(captured.stack ?? "", /\n\s+at /);
 });
 
 test("a layer the route already knows is kept, and the code can never hold prose", () => {

@@ -1,4 +1,5 @@
 import {
+  contentFreeErrorMetadata,
   providerDiagnosticCode,
   safeErrorMetadata,
 } from "@/lib/providerErrorClassification";
@@ -36,6 +37,41 @@ export const isLocalRuntimeError = (error: unknown): boolean => {
   if (metadata.statusCode !== undefined) return false;
   if (metadata.code && LOCAL_RUNTIME_ERROR_CODE.test(metadata.code)) return true;
   return metadata.name === "ReferenceError" || metadata.name === "RangeError";
+};
+
+/**
+ * The caught error, reduced to what may leave this process.
+ *
+ * The grant hands its `error` to Sentry. A provider error's message and
+ * `cause` can quote the request or the answer -- `AI_APICallError` carries
+ * both bodies -- and Sentry's sanitizer only masks credentials, so the
+ * original object must never be the one captured. What survives is the
+ * content-free metadata every stream-error log line already uses, plus the
+ * stack frames: `at` lines are code locations, and for a failure this
+ * process caused they are the part worth reading.
+ */
+const STACK_FRAME = /^\s+at [^\n]{1,300}$/;
+
+export const contentFreeError = (error: unknown): Error | undefined => {
+  if (!error || typeof error !== "object") return undefined;
+  const metadata = contentFreeErrorMetadata(error);
+  const safe = new Error(
+    [
+      metadata.code,
+      metadata.statusCode ? `HTTP_${metadata.statusCode}` : null,
+      metadata.isRetryable === true ? "RETRYABLE" : null,
+    ]
+      .filter(Boolean)
+      .join(" ") || "stream failure"
+  );
+  safe.name = metadata.name;
+  const original = (error as { stack?: unknown }).stack;
+  const frames =
+    typeof original === "string"
+      ? original.split("\n").filter((line) => STACK_FRAME.test(line))
+      : [];
+  safe.stack = [`${safe.name}: ${safe.message}`, ...frames].join("\n");
+  return safe;
 };
 
 const CODE_MAX_LENGTH = 160;
@@ -94,6 +130,7 @@ export const streamFailureGrantInput = (
     provider: context.provider,
     modelId: context.modelId,
     retryable: safeErrorMetadata(subject).isRetryable ?? null,
-    ...(subject instanceof Error ? { error: subject } : {}),
+    // Never the original object: see `contentFreeError`.
+    ...(contentFreeError(subject) ? { error: contentFreeError(subject) } : {}),
   };
 };
