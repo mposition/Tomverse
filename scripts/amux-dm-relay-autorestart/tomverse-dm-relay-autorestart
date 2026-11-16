@@ -1,6 +1,6 @@
 #!/bin/bash
-# Restarts the AMUX Decision Maker relay when it halted (but for the three
-# causes in hold_causes below), and starts it when a reboot left it stopped.
+# Starts the AMUX Decision Maker relay when a reboot left it stopped. A relay
+# that halted (only one built before 2026-11-16 can) is left for Admin.
 #
 # docs/ops/amux/bridge-monitoring.md §6 is the runbook. Off until the operator
 # installs it (install.sh beside this file); a systemd timer then runs it every
@@ -15,21 +15,15 @@
 #   amux dm relay halt: <cause>; ... until the bridge restarts. Read the request in Admin first.
 #
 # and stays active doing nothing but releasing local markers, so systemd's own
-# Restart=on-failure never sees it. Such a run is restarted whatever its cause
-# (owner direction 2026-11-16: no stop waits for a person). A new process
-# rebuilds what it needs at its start -- leftover markers are listed and
-# released, unsettled decisions settled from the local records, cursors
-# started again -- and every write it repeats is keyed by its request, so the
-# app records each at most once.
+# Restart=on-failure never sees it. Such a run is left halted and logged once
+# per check: that relay kept its duties (a session to pause, an instance whose
+# cleanup is unknown, a result to record) in its process alone, and its halt
+# line names only the first cause, so a restart could lose a duty and let the
+# next answer reach that session or instance (review r-20261116-195913-289714).
+# A person settles it in Admin and restarts the relay, which is then the new
+# binary that never halts.
 #
-# A run restarts when
-#
-#   - the unit is active and its current run printed a halt line;
-#   - the local AMUX server and the Tomverse app answer (a restart into an app
-#     that is down would only wait again);
-#   - the unit's run is still the one judged, right before the restart.
-#
-# One more case is started: a relay that is inactive and has not been active
+# The one case started is a relay that is inactive and has not been active
 # once since this boot (ActiveEnterTimestampMonotonic=0), the state a reboot
 # left the static unit in on 2026-11-09. The unit now has an [Install] section,
 # so an enabled relay starts at boot and this covers a host where it is not
@@ -53,26 +47,19 @@ log() { echo "tomverse-dm-relay-autorestart: $*"; }
 # As a relay built before 2026-11-16 printed it (dm_relay/io.rs).
 halt_line='^amux dm relay halt: ([a-z0-9_]+); .* until the bridge restarts\. Read the request in Admin first\.$'
 
-# The halts of a relay built before 2026-11-16 whose duty lived only in that
-# process: a session still to be paused after an unknown delivery, an
-# instance whose cleanup is unknown. The new relay keeps such duties in its
-# owed-record file, but it cannot read the old process's back, so a restart
-# would let the next answer reach that session or instance. These stay halted
-# for a person to settle in Admin; the new relay never prints a halt line, so
-# this only ever meets a run of the old binary.
-hold_causes=' delivery_unknown_pause_unconfirmed cleanup_unknown cleanup_unknown_report_unconfirmed '
-
-# Prints "restart <cause>" for a run that halted, "hold <cause>" for one whose
-# halt is one of hold_causes, "running" for one that did not halt.
+# Prints "hold <cause>" for a run that halted, "running" for one that did not.
+# A halt line comes only from a relay built before 2026-11-16, and that relay
+# kept its duties in its process alone: a session still to pause, an instance
+# whose cleanup is unknown, a result still to record -- and its halt line names
+# only the first cause, not the duties a later step added (review
+# r-20261116-195913-289714). A restart would lose them, so such a run is left
+# halted for a person to settle in Admin. The new relay never halts: it keeps
+# every duty in its owed-record file across a restart.
 decide() {
   local lines=$1 line
   while IFS= read -r line; do
     if [[ "$line" =~ $halt_line ]]; then
-      if [[ "$hold_causes" == *" ${BASH_REMATCH[1]} "* ]]; then
-        echo "hold ${BASH_REMATCH[1]}"
-      else
-        echo "restart ${BASH_REMATCH[1]}"
-      fi
+      echo "hold ${BASH_REMATCH[1]}"
       return
     fi
   done <<<"$lines"
@@ -125,12 +112,9 @@ elif [[ "$state" == active && "$sub" == running ]]; then
   fi
   read -r verdict reason <<<"$(decide "$lines")"
   if [[ "$verdict" == hold ]]; then
-    log "$unit halted with cause=$reason, a duty the restarted relay cannot read back; left halted for Admin"
-    exit 0
+    log "$unit halted with cause=$reason; a relay from before 2026-11-16 holds duties a restart would lose; left halted for Admin"
   fi
-  [[ "$verdict" == restart ]] || exit 0
-  what=halted
-  cause=$reason
+  exit 0
 else
   # Stopped by a person, off, failed (left to systemd and, for exit 2, to a
   # person) or on its way somewhere.

@@ -343,7 +343,7 @@ owed 기록(재전송할 결과·cleanup 보고·세션 pause와 그 차단)은 
 |---|---|---|---|---|
 | 앱의 호출 기록 | 앱의 15분 인프라 감시 | relay의 마지막 sync 호출 시각(`AppSetting` `amuxDmRelayLastSyncAt`) | halt, 프로세스 정지, 호스트·네트워크 끊김 | `AMUX_DM_RELAY_SILENT` → Slack·운영자 이메일·Sentry |
 | box watchdog(1절) | Ubuntu 호스트, 5분마다 | relay unit의 `systemctl is-active` | `failed`·`inactive` | Healthchecks.io → Slack·이메일 |
-| 자동 재시작(6.2절) | Ubuntu 호스트, 2분마다 | relay 현재 실행의 halt 줄, 이번 부팅의 시작 여부 | halt 줄을 남긴 실행(이전 바이너리, 세 원인 제외)과 부팅 뒤 한 번도 안 켜진 relay를 시작 | 알림이 아니라 journal 한 줄 |
+| 자동 재시작(6.2절) | Ubuntu 호스트, 2분마다 | relay 현재 실행의 halt 줄, 이번 부팅의 시작 여부 | 부팅 뒤 한 번도 안 켜진 relay를 시작(이전 바이너리의 halt는 Admin에 남김) | 알림이 아니라 journal 한 줄 |
 
 ### 6.0 relay unit 갱신과 부팅 시 시작 (운영자)
 
@@ -413,10 +413,11 @@ journalctl -u tomverse-amux-dm-relay.service -n 50 --no-pager -o short-iso
 코드: `scripts/amux-dm-relay-autorestart/`. 테스트: `tests/amuxDmRelayAutorestart.test.mjs`.
 
 **승인:** 운영자, 2026-11-14(대화에서 "승인, 병합 후 설치"). 범위는 운영자 지시 2026-11-16(AMUX 전수 점검, "자동
-재시작 제한도 없앱니다")으로 넓어졌다: halt 줄을 남긴 실행은 한 시간 제한 없이 재시작한다. 예외는 그 프로세스만 들고 있던
-의무가 남은 세 원인(`delivery_unknown_pause_unconfirmed`, `cleanup_unknown`, `cleanup_unknown_report_unconfirmed`)이다.
-멈춰야 할 세션이나 정리 결과를 모르는 인스턴스는 새 relay가 되읽을 수 없으므로, 재시작하면 다음 답이 그곳으로 갈 수 있다.
-이 셋은 halt로 남겨 Admin에서 정리한다(독립 검토 r-20261116-183911-9eb3db).
+재시작 제한도 없앱니다")으로 바뀌었다. 새 relay는 halt하지 않으므로(쓰기는 owed 기록 파일에 남겨 다시 보낸다) 재시작할 halt가
+없다. 2026-11-16 전 바이너리가 남긴 halt는 재시작하지 않는다. 그 relay는 멈춰야 할 세션, 정리 결과를 모르는 인스턴스, 기록할
+결과 같은 의무를 프로세스 안에만 들고 있었고 halt 줄은 첫 원인만 적어서, 재시작하면 의무를 잃고 다음 답이 그곳으로 갈 수
+있다(독립 검토 r-20261116-183911-9eb3db, r-20261116-195913-289714). Admin에서 정리한 뒤 사람이 relay를 재시작하면 새
+바이너리로 바뀌고, 그 뒤로는 이런 halt가 생기지 않는다. 이 스크립트가 시작하는 것은 부팅 뒤 한 번도 켜지지 않은 relay뿐이다.
 
 자율 장치에 relay 재시작 권한을 주는 일이라 **설치가 곧 켜는 것**이고, 운영자가 병합 뒤 직접 설치한다. 설치하지 않으면
 아무것도 하지 않는다. 2026-11-16 이후의 relay는 halt하지 않으므로(쓰기는 owed로 다시 보낸다), 이 스크립트가 재시작하는
@@ -428,8 +429,8 @@ halt는 그 전의 바이너리가 남긴 것뿐이다. 테스트가 relay 코�
 
 동작:
 
-- timer가 2분마다 돈다. relay가 `active`/`running`이고 **현재 실행**(invocation)의 journal에 halt 줄이 있으면 재시작한다.
-  줄 수와 뒤에 오는 줄은 보지 않고 시간 제한도 없다. 위의 세 원인만은 재시작하지 않고 journal에 `left halted for Admin`을 남긴다.
+- timer가 2분마다 돈다. relay가 `active`/`running`이고 **현재 실행**(invocation)의 journal에 halt 줄이 있으면 재시작하지
+  않고 journal에 `left halted for Admin`을 남긴다.
 - 로컬 AMUX `/health`와 Tomverse `/api/health`가 답해야 하고, 재시작 직전에 unit의 실행이 판정한 그 실행인지 다시 읽는다.
 - **이번 부팅에서 한 번도 켜진 적 없는** relay(`inactive`/`dead`, `ActiveEnterTimestampMonotonic=0`, unit 파일 있음, 그리고
   이번 부팅의 relay journal `journalctl -u tomverse-amux-dm-relay.service -b 0`에 줄이 하나도 없음)는

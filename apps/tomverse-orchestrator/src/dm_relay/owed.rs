@@ -139,6 +139,10 @@ pub fn refused_for_now(reason: &str) -> bool {
                 | "dm_digest_key_unavailable"
                 | "settings_unreadable"
                 | "state_unreadable"
+                // The wire codes of those two (lib/amux/decisionMakerInternalRoute.ts,
+                // a 503 that recorded nothing; review r-20261116-195913-289714).
+                | "dm_settings_unreadable"
+                | "dm_state_unreadable"
                 | "dm_key_period_changed"
         )
 }
@@ -898,6 +902,10 @@ mod tests {
             "unauthorized",
             "dm_routing_disabled",
             "settings_unreadable",
+            "dm_settings_unreadable",
+            "dm_state_unreadable",
+            "dm_digest_key_unavailable",
+            "dm_digest_keys_unavailable",
         ] {
             assert!(refused_for_now(reason), "{reason}");
         }

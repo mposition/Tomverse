@@ -152,9 +152,8 @@ test("a running relay that never halted: no health check, no restart, no output"
   assert.equal(result.output, "");
 });
 
-// Every cause a relay built before 2026-11-16 printed: each is restarted
-// (owner direction 2026-11-16: no stop waits for a person). A relay built
-// since never halts; its writes are owed and sent again (dm_relay/owed.rs).
+// Every cause a relay built before 2026-11-16 printed. A relay built since
+// never halts; its writes are owed and sent again (dm_relay/owed.rs).
 const FORMER_CAUSES = [
   "unsettled_read_unreadable",
   "delivery_read_unreadable",
@@ -175,27 +174,19 @@ const FORMER_CAUSES = [
   "delivery_recovered_card_record_unconfirmed",
 ];
 
-for (const cause of FORMER_CAUSES) {
-  test(`a relay halted with ${cause} is restarted`, { skip: noBash }, () => {
-    for (const halt of [deliveryHalt(cause), questionHalt(cause)]) {
-      const result = run({ lines: [...BEFORE, halt, V22] });
-      assert.equal(result.status, 0, result.output);
-      assert.deepEqual(result.restarts, [`restart --no-block ${RELAY}`]);
-      assert.match(result.output, new RegExp(`halted with cause=${cause}; restarted$`, "m"));
-    }
-  });
-}
-
-// A duty the old process held in memory: the session still to be paused, the
-// instance whose cleanup is unknown. A restart would lose it.
-for (const cause of ["delivery_unknown_pause_unconfirmed", "cleanup_unknown",
-  "cleanup_unknown_report_unconfirmed"]) {
+// A relay from before 2026-11-16 kept its duties in its process alone, and its
+// halt line names only the first cause (review r-20261116-195913-289714): a
+// restart could lose a session to pause, an instance's unknown cleanup, a result
+// to record. Every such halt is left for a person to settle in Admin.
+for (const cause of [...FORMER_CAUSES, "cleanup_unknown", "cleanup_unknown_report_unconfirmed",
+  "delivery_unknown_pause_unconfirmed"]) {
   test(`a relay halted with ${cause} is left halted for Admin`, { skip: noBash }, () => {
     for (const halt of [deliveryHalt(cause), questionHalt(cause)]) {
       const result = run({ lines: [...BEFORE, halt, V22] });
       assert.equal(result.status, 0, result.output);
       assert.deepEqual(result.restarts, []);
-      assert.ok(result.output.includes(`halted with cause=${cause}, a duty the restarted relay cannot read back; left halted for Admin`), result.output);
+      assert.deepEqual(result.curls, [], "no health check for a run it leaves alone");
+      assert.ok(result.output.includes(`halted with cause=${cause}; a relay from before 2026-11-16 holds duties a restart would lose; left halted for Admin`), result.output);
     }
   });
 }
@@ -214,28 +205,15 @@ test("the relay prints no halt line any more: what it could not record is owed",
   assert.match(relayIo, /self\.book\.settle_all\(&self\.app, &self\.local\)/);
 });
 
-test("whatever follows the halt line, and however many there are, the run is restarted", { skip: noBash }, () => {
+test("whatever follows the halt line, and however many there are, the run is left halted", { skip: noBash }, () => {
   for (const lines of [
     [deliveryHalt("delivery_read_unreadable"), "amux dm relay: card AMUX-3 revision 1: dm_result_recorded"],
     [deliveryHalt("delivery_read_unreadable"), deliveryHalt("transmit_outcome_unknown")],
   ]) {
     const result = run({ lines });
-    assert.deepEqual(result.restarts, [`restart --no-block ${RELAY}`], lines.join("\n"));
+    assert.deepEqual(result.restarts, [], lines.join(" | "));
+    assert.match(result.output, /left halted for Admin/);
   }
-});
-
-test("there is no hourly bound: a halt after a restart is restarted again", { skip: noBash }, () => {
-  const result = run({
-    lines: [deliveryHalt("delivery_read_unreadable")],
-    selfLines: [
-      `tomverse-dm-relay-autorestart: ${RELAY} halted with cause=delivery_read_unreadable; restarted`,
-    ],
-  });
-  assert.deepEqual(result.restarts, [`restart --no-block ${RELAY}`]);
-  assert.ok(
-    !result.journalArgs.some((args) => args.includes("tomverse-dm-relay-autorestart.service")),
-    "this unit's own journal is never read"
-  );
 });
 
 test("an unreadable journal restarts nothing", { skip: noBash }, () => {
@@ -263,23 +241,23 @@ test("a run whose invocation id cannot be read is left alone", { skip: noBash },
   assert.match(result.output, /no invocation id/);
 });
 
-test("no restart while the local AMUX server or the app does not answer", { skip: noBash }, () => {
-  const amuxDown = run({ lines: [deliveryHalt("delivery_read_unreadable")], amuxUp: false });
+test("no start while the local AMUX server or the app does not answer", { skip: noBash }, () => {
+  const amuxDown = run({ lines: [], state: "inactive", sub: "dead", entered: "0", amuxUp: false });
   assert.deepEqual(amuxDown.restarts, []);
   assert.match(amuxDown.output, /the local AMUX server does not answer/);
-  const appDown = run({ lines: [deliveryHalt("delivery_read_unreadable")], appUp: false });
+  const appDown = run({ lines: [], state: "inactive", sub: "dead", entered: "0", appUp: false });
   assert.deepEqual(appDown.restarts, []);
   assert.match(appDown.output, /the Tomverse app does not answer/);
 });
 
 test("a unit that changed while it was being checked is left alone", { skip: noBash }, () => {
-  const result = run({ lines: [deliveryHalt("delivery_read_unreadable")], flipAfter: 4 });
+  const result = run({ lines: [], state: "inactive", sub: "dead", entered: "0", flipAfter: 4 });
   assert.deepEqual(result.restarts, []);
   assert.match(result.output, /changed while it was being checked; left alone/);
 });
 
-test("a refused restart is reported", { skip: noBash }, () => {
-  const result = run({ lines: [deliveryHalt("delivery_read_unreadable")], restartStatus: 1 });
+test("a refused start is reported", { skip: noBash }, () => {
+  const result = run({ lines: [], state: "inactive", sub: "dead", entered: "0", restartStatus: 1 });
   assert.match(result.output, /the restart was refused/);
 });
 
