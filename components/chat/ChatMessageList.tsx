@@ -1665,6 +1665,11 @@ export function ChatMessageList({
                   )}
                   {!isUser && msg.status === "error" && (() => {
                     const errorCategory = classifyError(msg);
+                    // One "choose another model" action per card: Chat passes
+                    // its picker directly; a restore-only transcript falls
+                    // back to the close-model handler.
+                    const chooseModelOnError = onChooseAnotherModel ??
+                      (!onRetryLast && onRestoreQuestion ? onRequestCloseModel : undefined);
                     // UI-ERR-001. These actions move the conversation
                     // forward -- retry, pick another model, sign in and
                     // continue -- so they wear the app's ordinary primary,
@@ -1765,14 +1770,15 @@ export function ChatMessageList({
                             sent: the next turn stays the user's submission.
                           */}
                           {(errorCategory === "generic" || errorCategory === "attachment") &&
-                            !onRetryLast && onRestoreQuestion && onRequestCloseModel && (
+                            chooseModelOnError && (
                               <button
                                 type="button"
                                 data-testid="chat-error-choose-model"
-                                onClick={onRequestCloseModel}
+                                onClick={chooseModelOnError}
+                                disabled={isSending || isSendPreparing}
                                 className={secondaryButtonClass}
                               >
-                                <RotateCcw className="h-3.5 w-3.5" />
+                                <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
                                 {t("chat.chooseAnotherModel")}
                               </button>
                             )}
@@ -1845,22 +1851,11 @@ export function ChatMessageList({
                           />
                           )}
                           {(errorCategory === "generic" || errorCategory === "attachment") &&
-                            (onChooseAnotherModel ? (
-                              <button
-                                type="button"
-                                data-testid="chat-error-choose-model"
-                                onClick={onChooseAnotherModel}
-                                disabled={isSending || isSendPreparing}
-                                className={secondaryButtonClass}
-                              >
-                                <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
-                                {t("chat.chooseAnotherModel")}
-                              </button>
-                            ) : (
+                            !chooseModelOnError && (
                               <span className="flex items-center text-xs font-semibold text-zinc-600 dark:text-zinc-400">
                                 {t("chat.tryAnotherModelHint")}
                               </span>
-                            ))}
+                            )}
                           {errorCategory === "concurrency" && msg.id === concurrencyRetryMessageId && (
                             <span
                               data-testid="concurrency-retry-hint"
