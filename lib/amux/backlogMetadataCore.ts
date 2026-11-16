@@ -10,6 +10,7 @@ import {
   type BoardPromotionKind,
   type BoardPromotionPriority,
 } from "./boardPromotionCore.ts";
+import { AMUX_INTAKE_SAFETY_MAX_BYTES } from "./intakeLimitsCore.ts";
 
 /**
  * Owner-only metadata writer for one backlog card.
@@ -38,7 +39,9 @@ export const BACKLOG_METADATA_CODE_LATCH = true;
 
 export const BACKLOG_METADATA_COST_MIN_MICROUSD = 0;
 export const BACKLOG_METADATA_COST_MAX_MICROUSD = 5_000_000;
-export const BACKLOG_METADATA_RAW_BODY_MAX_BYTES = 4_096;
+/** The one request-body safety value of the idea flow; the cost ceiling above
+ * is the limit that stays (it bounds an operational estimate, not a size). */
+export const BACKLOG_METADATA_RAW_BODY_MAX_BYTES = AMUX_INTAKE_SAFETY_MAX_BYTES;
 export const BACKLOG_METADATA_AUDIT_ACTION = "amux.backlog_metadata.updated";
 
 /**

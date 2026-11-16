@@ -6,6 +6,7 @@ import {
   amuxCatalogTextRefused,
   boardImportApplyPermitted,
 } from "./boardImportCore.ts";
+import { AMUX_INTAKE_SAFETY_MAX_BYTES } from "./intakeLimitsCore.ts";
 
 /**
  * Manual intake of one explicit Codex registration.
@@ -25,9 +26,9 @@ export const AMUX_INTAKE_CANONICALIZATION_VERSION = AMUX_MANIFEST_CANONICALIZATI
 export const AMUX_INTAKE_APPLY_ENV = "TOMVERSE_AMUX_INTAKE_APPLY";
 export const AMUX_INTAKE_DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
 export const AMUX_INTAKE_APPROVAL_TTL_MS = 15 * 60 * 1000;
-export const AMUX_INTAKE_RAW_BODY_MAX_BYTES = 16_384;
-export const AMUX_INTAKE_TITLE_MAX_BYTES = 200;
-export const AMUX_INTAKE_TEXT_MAX_BYTES = 2_000;
+/** The one request-body safety value of the idea flow; no title or text
+ * length limit remains (owner direction 2026-11-16). */
+export const AMUX_INTAKE_RAW_BODY_MAX_BYTES = AMUX_INTAKE_SAFETY_MAX_BYTES;
 
 /**
  * Second apply latch. One environment variable must not be enough to create
@@ -118,9 +119,8 @@ const taskIdRefused = (value: string): boolean => {
   return /[\u0000-\u001f\\/]/.test(value);
 };
 
-const scannedText = (value: string, maxBytes: number): boolean =>
+const scannedText = (value: string): boolean =>
   bytes(value) >= 1 &&
-  bytes(value) <= maxBytes &&
   !amuxCatalogTextRefused(value);
 
 /** Uses the shipped latch constant. A caller cannot supply the latch. */
@@ -185,9 +185,9 @@ const proposalRefused = (value: unknown, sourceTaskId: string): string | null =>
   ) {
     return "metadata_incomplete";
   }
-  if (!scannedText(record.title, AMUX_INTAKE_TITLE_MAX_BYTES)) return "content_refused";
-  if (!scannedText(record.scope, AMUX_INTAKE_TEXT_MAX_BYTES)) return "content_refused";
-  if (!scannedText(record.completion, AMUX_INTAKE_TEXT_MAX_BYTES)) return "content_refused";
+  if (!scannedText(record.title)) return "content_refused";
+  if (!scannedText(record.scope)) return "content_refused";
+  if (!scannedText(record.completion)) return "content_refused";
   if (
     record.title.includes(sourceTaskId) ||
     record.scope.includes(sourceTaskId) ||

@@ -5,6 +5,7 @@ import {
   type AdminAuditHashInput,
   adminAuditEntryHashVariants,
 } from "../adminAuditIntegrityCore.ts";
+import { AMUX_INTAKE_SAFETY_MAX_BYTES } from "./intakeLimitsCore.ts";
 
 /**
  * Catalog-only AMUX board import.
@@ -34,11 +35,12 @@ export const BOARD_IMPORT_CARD_STATUS = "backlog";
 export const BOARD_IMPORT_CARD_KIND = "unknown";
 /** Schema default for every imported card. Not a mapping from an investment rank. */
 export const BOARD_IMPORT_CARD_PRIORITY = "p3";
-export const BOARD_IMPORT_RAW_BODY_MAX_BYTES = 1_048_576;
+/** The one request-body safety value of the idea flow (owner direction
+ * 2026-11-16); the item count below stays because the source-presence read
+ * is capped one past it and reports a truncated read. */
+export const BOARD_IMPORT_RAW_BODY_MAX_BYTES = AMUX_INTAKE_SAFETY_MAX_BYTES;
 export const BOARD_IMPORT_MAX_ITEMS = 256;
 export const BOARD_IMPORT_EXPIRY_MS = 15 * 60 * 1000;
-export const BOARD_IMPORT_PREVIEW_LIMIT = 10;
-export const BOARD_IMPORT_PREVIEW_WINDOW_MS = 60_000;
 export const BOARD_IMPORT_EXPIRE_BATCH = 20;
 export const BOARD_IMPORT_STATEMENT_TIMEOUT = "15000";
 export const BOARD_IMPORT_APPLY_ENV = "TOMVERSE_AMUX_BOARD_IMPORT_APPLY";
@@ -342,34 +344,6 @@ export const boardImportContentTypeAccepted = (header: string | null): boolean =
   if (mediaType !== "application/json") return false;
   return parameters.every((parameter) => parameter === "charset=utf-8" || parameter === "charset=utf8");
 };
-
-/**
- * Per-account preview admission. Ten requests a minute is a product limit.
- * It is not a proof against denial of service: the map lives in one process
- * and does not coordinate across instances.
- */
-export const admitBoardImportPreview = (
-  timestamps: readonly number[],
-  now: number,
-): { allowed: boolean; retained: number[] } => {
-  const retained = timestamps.filter(
-    (timestamp) => timestamp <= now && now - timestamp < BOARD_IMPORT_PREVIEW_WINDOW_MS,
-  );
-  if (retained.length >= BOARD_IMPORT_PREVIEW_LIMIT) return { allowed: false, retained };
-  return { allowed: true, retained: [...retained, now] };
-};
-
-/** Drops accounts whose preview window has emptied, so the process map does not keep them. */
-export const pruneBoardImportPreviewHits = (
-  entries: readonly (readonly [string, readonly number[]])[],
-  now: number,
-): Array<[string, number[]]> =>
-  entries.flatMap(([userId, timestamps]) => {
-    const retained = timestamps.filter(
-      (timestamp) => timestamp <= now && now - timestamp < BOARD_IMPORT_PREVIEW_WINDOW_MS,
-    );
-    return retained.length === 0 ? [] : [[userId, retained]];
-  });
 
 /**
  * True only when a stored audit hash is the HMAC of these fields under one

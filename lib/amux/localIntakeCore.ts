@@ -18,18 +18,17 @@ export const LOCAL_INTAKE_POLICY_VERSION = 3;
 export const LOCAL_INTAKE_SCHEMA_VERSION = 1;
 export const LOCAL_INTAKE_SOURCE_SYSTEM = "local-agent-intake";
 export const LOCAL_INTAKE_AGENT_ID = "amux-intake";
-export const LOCAL_INTAKE_CARD_CAP = 8;
-export const LOCAL_INTAKE_PACKAGE_MAX_BYTES = 65_536;
+/**
+ * Owner direction 2026-11-16: a package is never refused or cut for its card
+ * count, a list's length, a text's length or its snapshot's age (the live
+ * board digest already ties it to the board). The one ceiling left is the
+ * request-body safety value shared with the rest of the idea flow
+ * (AMUX_INTAKE_SAFETY_MAX_BYTES), which only keeps one body from holding
+ * unbounded memory. The former 8 KiB input size holds only under
+ * TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS (scanAmuxV4Input).
+ */
+export const LOCAL_INTAKE_PACKAGE_MAX_BYTES = AMUX_INTAKE_SAFETY_MAX_BYTES;
 export const LOCAL_INTAKE_INPUT_MAX_BYTES = 8_192;
-export const LOCAL_INTAKE_TEXT_MAX_BYTES = 2_000;
-export const LOCAL_INTAKE_TITLE_MAX_BYTES = 200;
-export const LOCAL_INTAKE_ITEM_MAX_BYTES = 500;
-export const LOCAL_INTAKE_LIST_CAP = 12;
-export const LOCAL_INTAKE_PATH_CAP = 32;
-export const LOCAL_INTAKE_DEPENDENCY_CAP = 16;
-export const LOCAL_INTAKE_DUPLICATE_CAP = 8;
-export const LOCAL_INTAKE_QUESTION_CAP = 12;
-export const LOCAL_INTAKE_SNAPSHOT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 export const LOCAL_INTAKE_APPLY_ENV = "TOMVERSE_AMUX_INTAKE_LOCAL_APPLY";
 export const LOCAL_INTAKE_SOURCE_KEY_SECRET_ENV = "AMUX_INTAKE_LOCAL_SOURCE_KEY_SECRET";
 export const LOCAL_INTAKE_APPLY_CODE_LATCH = true;
@@ -178,7 +177,7 @@ const sameKeys = (value: object, keys: readonly string[]): boolean => {
   return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
 };
 
-const bounded = (value: string, max: number): boolean => bytes(value) >= 1 && bytes(value) <= max;
+const nonEmpty = (value: string): boolean => bytes(value) >= 1;
 
 export const localIntakeApplyPermitted = (
   envValue: string | undefined,
@@ -266,9 +265,10 @@ const scanIntakeInputWithSecret = (
 };
 
 /** Operator text, before any v3 model process starts. The v4 idea input passes
- * its own size ceiling (lib/amux/ideaInputCore.ts); v3 keeps 8 KiB. */
+ * its own size ceiling (lib/amux/ideaInputCore.ts); v3 uses the one
+ * request-body safety value. */
 export const scanLocalIntakeInput = (value: string,
-  maxBytes: number = LOCAL_INTAKE_INPUT_MAX_BYTES): { ok: true } | { ok: false; code: string } =>
+  maxBytes: number = AMUX_INTAKE_SAFETY_MAX_BYTES): { ok: true } | { ok: false; code: string } =>
   scanIntakeInputWithSecret(value, secretPattern, maxBytes);
 
 /** Separate v4 input gate; this does not change the already enabled v3 path.
@@ -289,7 +289,7 @@ const proseRefused = (value: string): string | null => {
 };
 
 const relativePathRefused = (value: string): boolean =>
-  !RELATIVE_PATH_PATTERN.test(value) || value.split("/").includes("..") || bytes(value) > LOCAL_INTAKE_TITLE_MAX_BYTES;
+  !RELATIVE_PATH_PATTERN.test(value) || value.split("/").includes("..");
 
 export const localIntakeCardDigest = (card: LocalIntakeCard): string =>
   createHash("sha256")
@@ -321,13 +321,11 @@ export const localIntakeStoredSourceKey = (
 
 const stringList = (
   value: unknown,
-  cap: number,
-  itemMax: number,
 ): { ok: true; items: string[] } | { ok: false; code: string } => {
-  if (!Array.isArray(value) || value.length > cap) return { ok: false, code: "schema_rejected" };
+  if (!Array.isArray(value)) return { ok: false, code: "schema_rejected" };
   const items: string[] = [];
   for (const entry of value) {
-    if (typeof entry !== "string" || !bounded(entry, itemMax)) return { ok: false, code: "schema_rejected" };
+    if (typeof entry !== "string" || !nonEmpty(entry)) return { ok: false, code: "schema_rejected" };
     const refused = proseRefused(entry);
     if (refused) return { ok: false, code: refused };
     items.push(entry);
@@ -342,32 +340,27 @@ const parseCard = (value: unknown): { ok: true; card: LocalIntakeCard } | { ok: 
   if (typeof record.localId !== "string" || !LOCAL_ID_PATTERN.test(record.localId)) {
     return { ok: false, code: "schema_rejected" };
   }
-  const texts: Array<[unknown, number]> = [
-    [record.title, LOCAL_INTAKE_TITLE_MAX_BYTES],
-    [record.problem, LOCAL_INTAKE_TEXT_MAX_BYTES],
-    [record.rationale, LOCAL_INTAKE_TEXT_MAX_BYTES],
-    [record.priorityRationale, LOCAL_INTAKE_TEXT_MAX_BYTES],
-  ];
-  for (const [text, max] of texts) {
-    if (typeof text !== "string" || !bounded(text, max)) return { ok: false, code: "schema_rejected" };
+  const texts: unknown[] = [record.title, record.problem, record.rationale, record.priorityRationale];
+  for (const text of texts) {
+    if (typeof text !== "string" || !nonEmpty(text)) return { ok: false, code: "schema_rejected" };
     const refused = proseRefused(text);
     if (refused) return { ok: false, code: refused };
   }
-  const scopeIn = stringList(record.scopeIn, LOCAL_INTAKE_LIST_CAP, LOCAL_INTAKE_ITEM_MAX_BYTES);
+  const scopeIn = stringList(record.scopeIn);
   if (!scopeIn.ok) return scopeIn;
-  const scopeOut = stringList(record.scopeOut, LOCAL_INTAKE_LIST_CAP, LOCAL_INTAKE_ITEM_MAX_BYTES);
+  const scopeOut = stringList(record.scopeOut);
   if (!scopeOut.ok) return scopeOut;
-  const acceptance = stringList(record.acceptanceCriteria, LOCAL_INTAKE_LIST_CAP, LOCAL_INTAKE_ITEM_MAX_BYTES);
+  const acceptance = stringList(record.acceptanceCriteria);
   if (!acceptance.ok) return acceptance;
-  const evidence = stringList(record.evidence, LOCAL_INTAKE_LIST_CAP, LOCAL_INTAKE_ITEM_MAX_BYTES);
+  const evidence = stringList(record.evidence);
   if (!evidence.ok) return evidence;
-  const risks = stringList(record.risks, LOCAL_INTAKE_LIST_CAP, LOCAL_INTAKE_ITEM_MAX_BYTES);
+  const risks = stringList(record.risks);
   if (!risks.ok) return risks;
-  const dependencies = stringList(record.dependencyIds, LOCAL_INTAKE_DEPENDENCY_CAP, LOCAL_INTAKE_TITLE_MAX_BYTES);
+  const dependencies = stringList(record.dependencyIds);
   if (!dependencies.ok) return dependencies;
-  const duplicates = stringList(record.duplicateCandidateIds, LOCAL_INTAKE_DUPLICATE_CAP, LOCAL_INTAKE_TITLE_MAX_BYTES);
+  const duplicates = stringList(record.duplicateCandidateIds);
   if (!duplicates.ok) return duplicates;
-  if (!Array.isArray(record.repositoryPaths) || record.repositoryPaths.length > LOCAL_INTAKE_PATH_CAP) {
+  if (!Array.isArray(record.repositoryPaths)) {
     return { ok: false, code: "schema_rejected" };
   }
   for (const path of record.repositoryPaths) {
@@ -488,15 +481,15 @@ export const parseLocalIntakePackage = (
   ) {
     return { ok: false, code: "schema_rejected" };
   }
-  if (typeof record.summary !== "string" || !bounded(record.summary, LOCAL_INTAKE_TEXT_MAX_BYTES)) {
+  if (typeof record.summary !== "string" || !nonEmpty(record.summary)) {
     return { ok: false, code: "schema_rejected" };
   }
   const summaryRefused = proseRefused(record.summary);
   if (summaryRefused) return { ok: false, code: summaryRefused };
-  const questions = stringList(record.questions, LOCAL_INTAKE_QUESTION_CAP, LOCAL_INTAKE_ITEM_MAX_BYTES);
+  const questions = stringList(record.questions);
   if (!questions.ok) return questions;
-  if (!Array.isArray(record.cards) || record.cards.length < 1 || record.cards.length > LOCAL_INTAKE_CARD_CAP) {
-    return { ok: false, code: record.cards && Array.isArray(record.cards) && record.cards.length > LOCAL_INTAKE_CARD_CAP ? "card_cap_exceeded" : "schema_rejected" };
+  if (!Array.isArray(record.cards) || record.cards.length < 1) {
+    return { ok: false, code: "schema_rejected" };
   }
   const cards: LocalIntakeCard[] = [];
   for (const entry of record.cards) {
@@ -569,15 +562,16 @@ export type LocalIntakeInspection =
 
 export const inspectLocalIntakePackage = (
   raw: string,
-  input: { now: Date; liveSnapshotDigest: string },
+  input: { now?: Date; liveSnapshotDigest: string },
 ): LocalIntakeInspection => {
   const parsed = parseLocalIntakePackage(raw);
   if (!parsed.ok) return { ok: false, code: parsed.code, writes: 0 };
   const structural = structuralRefusal(parsed.pkg);
   if (structural) return { ok: false, code: structural, writes: 0 };
-  const snapshotAt = Date.parse(parsed.pkg.snapshotGeneratedAt);
-  if (!Number.isFinite(snapshotAt) || input.now.getTime() - snapshotAt > LOCAL_INTAKE_SNAPSHOT_MAX_AGE_MS) {
-    return { ok: false, code: "snapshot_stale", writes: 0 };
+  // No snapshot age limit: the live board digest below ties the package to
+  // the board it was written against.
+  if (!Number.isFinite(Date.parse(parsed.pkg.snapshotGeneratedAt))) {
+    return { ok: false, code: "schema_rejected", writes: 0 };
   }
   if (parsed.pkg.boardSnapshotDigest !== input.liveSnapshotDigest) {
     return { ok: false, code: "snapshot_digest_mismatch", writes: 0 };
@@ -595,33 +589,21 @@ export const inspectLocalIntakePackage = (
   };
 };
 
-const utf8Prefix = (value: string, max: number): string => {
-  let size = 0;
-  let end = 0;
-  for (const char of value) {
-    const next = size + Buffer.byteLength(char, "utf8");
-    if (next > max) break;
-    size = next;
-    end += char.length;
-  }
-  return value.slice(0, end);
-};
-
 export const buildLocalIntakeSnapshot = (
   cards: readonly LocalIntakeSnapshotCard[],
   generatedAt: string,
 ): { ok: true; generatedAt: string; digest: string; cards: LocalIntakeSnapshotCard[] } | { ok: false; code: string } => {
   if (!ISO_PATTERN.test(generatedAt)) return { ok: false, code: "schema_rejected" };
-  // No card count refuses a snapshot (owner decision 2026-11-15): the whole
-  // board is the intake's context; each title is already bounded below.
+  // No card count refuses a snapshot and no title or summary is cut (owner
+  // decisions 2026-11-15 and 2026-11-16): the whole board is the context.
   const normalized = [...cards]
     .map((card) => ({
       id: card.id,
-      title: utf8Prefix(card.title, LOCAL_INTAKE_TITLE_MAX_BYTES),
+      title: card.title,
       status: card.status,
       priority: card.priority,
       kind: card.kind,
-      summary: utf8Prefix(card.summary || card.title, LOCAL_INTAKE_TITLE_MAX_BYTES),
+      summary: card.summary || card.title,
       dependencyIds: [...card.dependencyIds].sort(),
       sourceDigest: card.sourceDigest,
     }))
