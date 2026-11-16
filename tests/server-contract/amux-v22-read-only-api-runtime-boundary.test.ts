@@ -109,7 +109,8 @@ const tx = {
     recoveryApprovalId: assignmentRecoveryApprovalId,
     perAttemptMicroUsd: BigInt("3400000"),
   }) },
-  adminAuditLog: { findUnique: async () => ({
+  // No owner ceiling re-approval stands for this Task.
+  adminAuditLog: { findMany: async () => [], findUnique: async () => ({
     action: "amux.v22.worker.assigned", targetId: assignmentId,
     metadata: { v52GradeRouting: false },
   }) },
