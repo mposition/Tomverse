@@ -368,3 +368,27 @@ test("a request that already names a path outside passes like the absolute open;
       { kind: "unverified" }, escaped);
   }
 });
+
+test("a trace line over 64 KiB is read in full, not a reason to drop the result", () => {
+  // The open inside the long line is still seen; an unlisted one still refuses.
+  const padding = ` ${"x".repeat(70_000)}`;
+  const longLine = (file) =>
+    `123 openat(AT_FDCWD<${directory}>, "${file}", O_RDONLY${padding}) = 3<${directory}/${file}>\n`;
+  const ok = createAmuxTrackedCheckoutOpenTraceObserver({ directory, files,
+    diagnostic: true });
+  const bytes = Buffer.from(longLine("src/a.ts") + line("src/b.ts"), "utf8");
+  for (let offset = 0; offset < bytes.length; offset += 4_096)
+    ok.observeChunk(bytes.subarray(offset, offset + 4_096));
+  assert.deepEqual(ok.finish({ traceComplete: true }),
+    { kind: "complete", files: ["src/a.ts", "src/b.ts"], longLines: 1 });
+  // The count is a diagnostic only: an ordinary result keeps its shape.
+  const plain = createAmuxTrackedCheckoutOpenTraceObserver({ directory, files });
+  plain.observeChunk(Buffer.from(longLine("src/a.ts")));
+  assert.deepEqual(plain.finish({ traceComplete: true }),
+    { kind: "complete", files: ["src/a.ts"] });
+  const refused = createAmuxTrackedCheckoutOpenTraceObserver({ directory, files,
+    diagnostic: true });
+  refused.observeChunk(Buffer.from(longLine("secrets.env")));
+  assert.deepEqual(refused.finish({ traceComplete: true }),
+    { kind: "unverified", reason: "unlisted_open", longLines: 1 });
+});
