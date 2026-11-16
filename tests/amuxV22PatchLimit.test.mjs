@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import test from "node:test";
 
-import { AMUX_V22_FILE_MAX_BYTES, AMUX_V22_PATCH_ENVELOPE_MAX_BYTES,
+import { AMUX_V22_CHANGED_PATHS_JSON_MAX_BYTES, AMUX_V22_FILE_MAX_BYTES, AMUX_V22_PATCH_ENVELOPE_MAX_BYTES,
   AMUX_V22_PATCH_MAX_BYTES } from "../lib/amux/v22PatchLimit.ts";
 import { TREE_LIMITS } from "../lib/engineeringAgentTreeVerify.ts";
 
@@ -72,5 +72,19 @@ test("the settlement route, the evidence and both database checks hold one patch
     const body = sql.slice(sql.lastIndexOf(constraint));
     assert.match(body.slice(0, 400), new RegExp(`(?:<=|AND) ${AMUX_V22_PATCH_MAX_BYTES}\\b`),
       `${constraint} in ${latest}`);
+  }
+});
+
+test("the result store has no patch bound of its own, and the path inventory shares the patch's", () => {
+  const store = read("lib/amux/v22TaskResultStore.ts");
+  assert.ok(!store.includes("export const AMUX_V22_PATCH_MAX_BYTES"));
+  assert.ok(store.includes('import { AMUX_V22_PATCH_MAX_BYTES } from "@/lib/amux/v22PatchLimit";'));
+  assert.equal(AMUX_V22_CHANGED_PATHS_JSON_MAX_BYTES, AMUX_V22_PATCH_MAX_BYTES);
+  // Both routes that carry the inventory read the patch envelope, with no count of paths.
+  for (const file of ["app/api/internal/amux/v22/execution/settle/route.ts",
+    "app/api/internal/amux/v22/review/record/route.ts"]) {
+    const route = read(file);
+    assert.ok(route.includes("AMUX_V22_PATCH_ENVELOPE_MAX_BYTES"), file);
+    assert.ok(!route.includes("4_096"), file);
   }
 });

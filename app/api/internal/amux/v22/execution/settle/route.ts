@@ -7,6 +7,7 @@ import { AMUX_MAX_EXPECTED_REVISION, AMUX_PRISMA_INT_MAX,
 import { AMUX_V22_EXECUTION_ROUTE_BUDGET_MS,
   withAmuxRouteBudget } from "@/lib/amux/dbBoundary";
 import { settleAmuxV22TaskExecution } from "@/lib/amux/execution";
+import { AMUX_V22_PATCH_ENVELOPE_MAX_BYTES } from "@/lib/amux/v22PatchLimit";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 import { amuxInternalErrorResponse, amuxJsonNoStore,
   isAmuxInputError } from "@/lib/amux/internalRoute";
@@ -33,8 +34,9 @@ const requestSchema = z.object({ attempt_id: z.string().uuid(),
   generation: z.number().int().min(1).max(AMUX_PRISMA_INT_MAX),
   task_revision: z.number().int().min(0).max(AMUX_MAX_EXPECTED_REVISION),
   outcome: z.enum(["succeeded", "failed", "blocked"]),
-  invocation_ids: z.array(z.string().uuid()).max(128),
-  changed_paths: z.array(z.string().max(32 * 1024)).max(4_096).optional(),
+  // Counts are bounded by the body (the proxy buffer), not by a number of ours.
+  invocation_ids: z.array(z.string().uuid()),
+  changed_paths: z.array(z.string().max(32 * 1024)).optional(),
   read_only_retry: readOnlyRetrySchema.optional(),
   // What the sidecar said about a run with no verified result (owner
   // decision 2026-11-15, lib/amux/infraFailureCore.ts). Codes only.
@@ -42,7 +44,7 @@ const requestSchema = z.object({ attempt_id: z.string().uuid(),
     code: z.string().regex(/^[a-z0-9_]{1,64}$/),
     cli_started: z.boolean().nullable().optional(),
     exit_code: z.number().int().min(-1_000).max(1_000).nullable().optional(),
-    elapsed_ms: z.number().int().min(0).max(86_400_000).nullable().optional(),
+    elapsed_ms: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).nullable().optional(),
   }).strict().optional(),
 }).strict();
 
@@ -56,7 +58,7 @@ export async function POST(request: Request) {
       reason: "v22_execution_disabled" }, 409);
   return withAmuxRouteBudget(async () => {
     try {
-      const body = await readLimitedJson(request, 64 * 1_024, requestSchema);
+      const body = await readLimitedJson(request, AMUX_V22_PATCH_ENVELOPE_MAX_BYTES, requestSchema);
       const result = await settleAmuxV22TaskExecution({
         attemptId: body.attempt_id, worker: body.worker,
         instanceId: body.instance_id, generation: body.generation,

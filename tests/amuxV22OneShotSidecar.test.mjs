@@ -657,6 +657,40 @@ test("result text is available for exact transfer but never persisted in the sid
   } finally { await rm(stateDir, { recursive: true, force: true }); }
 });
 
+test("a finished result and patch wait on disk until confirmed, across a restart", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "amux-v22-pending-"));
+  try {
+    const { createHash } = await import("node:crypto");
+    const text = "Result that outlives the memory window";
+    const patchBody = "diff --git a/example b/example\n";
+    const sha = (value) => createHash("sha256").update(value).digest("hex");
+    const run = async (input) => ({ kind: "succeeded", attemptId: input.attemptId,
+      resultText: text, resultSha256: sha(text), patchBody, patchDigest: sha(patchBody),
+      patchBaseSha: "a".repeat(40) });
+    const first = createAmuxV22SidecarHandler({ worker: "worker-a", stateDir, run });
+    assert.equal((await first({ op: "execute", ...request })).kind, "in_progress");
+    const finished = await readFinished(first);
+    assert.equal(finished.resultText, text);
+    assert.equal(finished.patchBody, patchBody);
+    // The journal never holds the text; two owner-only files do.
+    assert.equal((await readFile(join(stateDir, `${attemptId}.result`), "utf8")).includes(text), false);
+    const files = await readdir(stateDir);
+    assert.ok(files.includes(`${attemptId}.result.pending`));
+    assert.ok(files.includes(`${attemptId}.patch.pending`));
+    // A new process (the unit restarted) still serves both.
+    const second = createAmuxV22SidecarHandler({ worker: "worker-a", stateDir, run: () => { throw new Error("no rerun"); } });
+    const again = await second({ op: "readback", attemptId });
+    assert.equal(again.resultText, text);
+    assert.equal(again.patchBody, patchBody);
+    assert.equal((await second({ op: "confirm_result", attemptId, sourceSha256: sha(text) })).kind, "confirmed");
+    assert.equal((await second({ op: "readback", attemptId })).resultText, undefined);
+    assert.equal((await second({ op: "readback", attemptId })).patchBody, patchBody);
+    assert.equal((await second({ op: "confirm_patch", attemptId, patchDigest: sha(patchBody) })).kind, "confirmed");
+    assert.equal((await second({ op: "readback", attemptId })).patchBody, undefined);
+    assert.deepEqual((await readdir(stateDir)).filter((name) => name.endsWith(".pending")), []);
+  } finally { await rm(stateDir, { recursive: true, force: true }); }
+});
+
 test("a crash after the claim is unknown, never a second invocation", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "amux-v22-crash-"));
   let release;

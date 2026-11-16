@@ -6,6 +6,7 @@ import { captureAmuxV22Patch, captureAmuxV22PatchBaseline,
   captureAmuxV52ChangedPaths, captureAmuxV52ReviewCommit,
   discardAmuxV52AttemptChanges, syncAmuxV22WorktreeBase } from
   "../lib/amux/v22PatchCapture.mjs";
+import { AMUX_V22_GIT_STEP_TIMEOUT_MS } from "../lib/amux/v22PatchLimit.ts";
 
 const BASE = "a".repeat(40);
 const PATCH = "diff --git a/lib/example.ts b/lib/example.ts\n" +
@@ -316,7 +317,7 @@ test("v52 inventories every changed name independently of the publish patch cap"
   assert.deepEqual(result.contractPaths,
     ["LIB/AMUX/Execution.ts", "docs/policy/new.md"]);
   assert.equal(calls.find(({ command }) => command[0] === "diff")
-    .maxBuffer, 32 * 1024);
+    .maxBuffer, 4 * 1024 * 1024);
 });
 
 test("v52 includes ignored contract paths without scanning unrelated ignored files", async () => {
@@ -356,24 +357,23 @@ test("v52 treats missing, malformed and invalid path inventories as unavailable"
   assert.deepEqual(await captureAmuxV52ChangedPaths("/repo", BASE,
     { run: async () => { throw new Error("git failed"); } }),
     { ok: false, reason: "changed_paths_unavailable" });
-  const tooMany = Array.from({ length: 4_097 }, (_, index) =>
-    `${index.toString(36)}\0`).join("");
+  const diffOf = (names) => async (_binary, args) => ({ stdout: Buffer.from(
+    args.slice(6)[0] === "rev-parse" ?
+      args.slice(6)[1] === "--show-toplevel" ? "/repo" : BASE :
+      args.slice(6)[0] === "diff" ? names : "") });
+  // No count of ours: tens of thousands of short names are still reported.
+  const many = Array.from({ length: 50_000 }, (_, index) =>
+    `d/${index.toString(36)}\0`).join("");
+  const manyResult = await captureAmuxV52ChangedPaths("/repo", BASE,
+    { run: diffOf(many), realpath: async (path) => path });
+  assert.equal(manyResult.ok, true);
+  assert.equal(manyResult.files.length, 50_000);
+  // Only the settlement body's proxy buffer bounds the list.
+  const tooLarge = Array.from({ length: 30_000 }, (_, index) =>
+    `p/${index.toString(36).padStart(5, "0")}${"x".repeat(150)}\0`).join("");
+  assert.ok(Buffer.byteLength(tooLarge, "utf8") > 4 * 1024 * 1024);
   assert.deepEqual(await captureAmuxV52ChangedPaths("/repo", BASE,
-    { run: async (_binary, args) => ({ stdout: Buffer.from(
-      args.slice(6)[0] === "rev-parse" ?
-        args.slice(6)[1] === "--show-toplevel" ? "/repo" : BASE :
-        args.slice(6)[0] === "diff" ? tooMany : "") }),
-      realpath: async (path) => path }),
-    { ok: false, reason: "changed_paths_unavailable" });
-  const tooLarge = Array.from({ length: 600 }, (_, index) =>
-    `p/${index.toString(36).padStart(3, "0")}${"x".repeat(36)}\0`).join("");
-  assert.ok(Buffer.byteLength(tooLarge, "utf8") < 32 * 1024);
-  assert.deepEqual(await captureAmuxV52ChangedPaths("/repo", BASE,
-    { run: async (_binary, args) => ({ stdout: Buffer.from(
-      args.slice(6)[0] === "rev-parse" ?
-        args.slice(6)[1] === "--show-toplevel" ? "/repo" : BASE :
-        args.slice(6)[0] === "diff" ? tooLarge : "") }),
-      realpath: async (path) => path }),
+    { run: diffOf(tooLarge), realpath: async (path) => path }),
     { ok: false, reason: "changed_paths_unavailable" });
 });
 
@@ -484,7 +484,7 @@ test("a worker checkout moves to its publication base once clean and the base is
   const fetch = fetched.calls.find((call) => call.command[0] === "fetch");
   assert.deepEqual(fetch.command, ["fetch", "--no-tags", "--quiet", "origin",
     "refs/heads/develop"]);
-  assert.equal(fetch.timeout, 120_000);
+  assert.equal(fetch.timeout, AMUX_V22_GIT_STEP_TIMEOUT_MS);
 
   const exact = repo({ fetchable: [base] });
   assert.deepEqual(await syncAmuxV22WorktreeBase("/repo", base, { run: exact.run, realpath }),
