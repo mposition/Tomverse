@@ -24,28 +24,31 @@ import { JOURNEY_FAMILIES, JOURNEY_SYSTEM_PROMPT, journeyPromptText } from "../l
 import { SCOUT_SYSTEM_PROMPT } from "../lib/productResearchScoutCore.ts";
 
 /**
- * A page with one assistant message, as the chat renders it: its status and
- * error code as data attributes, and a report button only on an error card.
+ * A page whose newest assistant message is what the chat renders: its status and
+ * error code as data attributes, whether it carries a finished-answer marker, and
+ * a report button only on an error card.
  */
-const pageWith = ({ status = "normal", code = null, modelId = "gpt-6-luna", text = "an answer", reportButton = false } = {}) => {
+const pageWith = ({ status = "normal", code = null, modelId = "gpt-6-luna", finished = true, reportButton = false, none = false } = {}) => {
   const clicks = [];
-  const answer = {
-    count: async () => 1,
-    getAttribute: async (name) => ({ "data-message-status": status, "data-error-code": code, "data-model-id": modelId })[name] ?? null,
-    innerText: async () => text,
-    getByTestId: () => ({ isVisible: async () => reportButton, click: async () => clicks.push("report") }),
+  return {
+    clicks,
+    evaluate: async () => (none ? null : { status, code, modelId, finished }),
+    locator: () => ({ last: () => ({ getByTestId: () => ({ isVisible: async () => reportButton, click: async () => clicks.push("report") }) }) }),
+    getByTestId: () => ({ isVisible: async () => false }),
   };
-  return { clicks, locator: () => ({ last: () => answer }) };
 };
-const emptyPage = () => ({ locator: () => ({ last: () => ({ count: async () => 0 }) }) });
 
-test("the chat's own verdict decides whether a turn failed", async () => {
-  assert.deepEqual(await readTurnOutcome(pageWith()), { state: "answered", errorCode: null, modelId: "gpt-6-luna" });
-  assert.deepEqual(await readTurnOutcome(pageWith({ status: "error", code: "EMPTY_RESPONSE", text: "응답이 비어 있습니다" })),
-    { state: "failed", errorCode: "EMPTY_RESPONSE", modelId: "gpt-6-luna" });
-  assert.deepEqual(await readTurnOutcome(pageWith({ status: "error", code: null })), { state: "failed", errorCode: "UNKNOWN", modelId: "gpt-6-luna" });
-  assert.equal((await readTurnOutcome(pageWith({ text: "  " }))).state, "empty");
-  assert.equal((await readTurnOutcome(emptyPage())).state, "none");
+test("the chat's own verdict decides whether a turn failed, and only a finished answer counts as answered", async () => {
+  assert.deepEqual(await readTurnOutcome(pageWith()), { state: "answered", errorCode: null, modelId: "gpt-6-luna", timedOut: false });
+  assert.deepEqual(await readTurnOutcome(pageWith({ status: "error", code: "EMPTY_RESPONSE" })),
+    { state: "failed", errorCode: "EMPTY_RESPONSE", modelId: "gpt-6-luna", timedOut: false });
+  assert.equal((await readTurnOutcome(pageWith({ status: "error" }))).errorCode, "UNKNOWN");
+  assert.equal((await readTurnOutcome(pageWith({ status: "cancelled" }))).errorCode, "CANCELLED");
+  // Still streaming: the status stays "normal", but no finished-answer marker is there yet.
+  assert.equal((await readTurnOutcome(pageWith({ finished: false }))).state, "unfinished");
+  // The walker's wait gave up: not answered, whatever text is on screen.
+  assert.equal((await readTurnOutcome(pageWith(), { timedOut: true })).state, "unfinished");
+  assert.equal((await readTurnOutcome(pageWith({ none: true }))).state, "unfinished");
 });
 
 test("a failed turn leads the judge's signals as a product failure, never as a layout question", () => {
@@ -54,7 +57,7 @@ test("a failed turn leads the judge's signals as a product failure, never as a l
   assert.match(fact, /^TURN FAILED: /);
   assert.match(fact, /ATTACHMENT_TEXT_TOO_LARGE/);
   assert.match(fact, /gpt-6-luna/);
-  assert.match(turnOutcomeFact({ state: "empty", errorCode: null, modelId: null }), /^TURN FAILED: .*no answer at all/);
+  assert.match(turnOutcomeFact({ state: "unfinished", errorCode: null, modelId: null, timedOut: true }), /^TURN FAILED: no finished answer when the walker stopped waiting/);
   // The judge is told what the line means (the 2026-11-16 run critiqued the error card's buttons instead).
   assert.match(SCOUT_SYSTEM_PROMPT, /TURN FAILED line, the product did not answer/);
   assert.match(SCOUT_SYSTEM_PROMPT, /never only the look of the error card/);
@@ -72,6 +75,10 @@ test("one failure class is one report a run, a walker-broken turn is never repor
   const rules = { allowWrite: null, refusedWrites: [] };
   // No report button on screen: counted as a failure, the report says why it was not sent.
   const first = await reporter.check(pageWith({ status: "error", code: "EMPTY_RESPONSE" }), rules, "generated.pdf");
+  // An unfinished turn is a failure for the judge, but there is no error card to report from.
+  const stalled = pageWith({ finished: false, reportButton: true });
+  assert.match(await reporter.check(stalled, rules, "generated.journey", { timedOut: true }), /^TURN FAILED: no finished answer/);
+  assert.deepEqual(stalled.clicks, []);
   assert.match(first, /not sent: no_report_button/);
   // The same code on the same model again: a fact for the judge, no second report attempt.
   const again = pageWith({ status: "error", code: "EMPTY_RESPONSE", reportButton: true });
@@ -83,7 +90,7 @@ test("one failure class is one report a run, a walker-broken turn is never repor
   assert.deepEqual(walkerBroken.clicks, []);
   // An answered turn adds nothing.
   assert.equal(await reporter.check(pageWith(), rules, "generated.xlsx"), null);
-  assert.deepEqual(reporter.counts, { turnFailures: 3, reported: 0 });
+  assert.deepEqual(reporter.counts, { turnFailures: 4, reported: 0 });
   assert.equal(rules.allowWrite, null, "the report's write rule is never left open");
   assert.ok(SCOUT_TURN_REPORTS_MAX >= 1);
 });
@@ -145,4 +152,16 @@ test("the chat still renders what the walker reads and the report dialog it fill
   for (const id of ["feedback-dialog", "feedback-message", "feedback-email-updates", "feedback-submit"]) {
     assert.ok(dialog.includes(`data-testid="${id}"`), id);
   }
+});
+
+test("a deploy check's permit names the build, and there is none without a build commit", async () => {
+  const { scoutGenerationPermitSubject } = await import("../lib/productResearchScoutSettings.ts");
+  assert.equal(scoutGenerationPermitSubject("generated.deploy-check", { RAILWAY_GIT_COMMIT_SHA: "180ece8489cf501362a0c8cef78a8a78579d4219" }),
+    "permit.generated.deploy-check@180ece8489cf501362a0c8cef78a8a78579d4219");
+  assert.equal(scoutGenerationPermitSubject("generated.deploy-check", {}), null);
+  assert.equal(scoutGenerationPermitSubject("generated.deploy-check", { RAILWAY_GIT_COMMIT_SHA: "not a sha" }), null);
+  assert.equal(scoutGenerationPermitSubject("generated.pdf", {}), "permit.generated.pdf");
+  // The finished-answer marker the verdict waits for is still rendered.
+  const { readFileSync } = await import("node:fs");
+  assert.ok(readFileSync(new URL("../components/chat/ChatMessageList.tsx", import.meta.url), "utf8").includes('triggerTestId="memory-answer-feedback"'));
 });

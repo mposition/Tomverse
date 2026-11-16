@@ -118,6 +118,9 @@ test("a build's deploy check is granted once, and the next build gets its own", 
     process.env.RAILWAY_GIT_COMMIT_SHA = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
     assert.deepEqual(await reserveScoutGenerations(["generated.deploy-check"], noAudit), ["generated.deploy-check"], "a new build is checked");
     assert.equal((await scoutUsageToday()).generations, 3, "each check is a permit from the daily cap");
+    delete process.env.RAILWAY_GIT_COMMIT_SHA;
+    assert.deepEqual(await reserveScoutGenerations(["generated.deploy-check", "generated.pdf"], noAudit), ["generated.pdf"],
+      "with no build commit there is nothing to check once per build");
   } finally {
     if (previous === undefined) delete process.env.RAILWAY_GIT_COMMIT_SHA;
     else process.env.RAILWAY_GIT_COMMIT_SHA = previous;
