@@ -551,7 +551,9 @@ export async function finishEngineeringAgentRun(input: {
  *   agent pull request does.
  * - Anything else, and a closed adapter (the mode turned off included, where
  *   the number never reaches AMUX and the reason is `adapter_closed`): a
- *   state mismatch (engineering-agent.md §11), which stops the agent until a person resolves it.
+ *   state mismatch (engineering-agent.md §11). It has no run of its own; its
+ *   cause key names the publish item, so it holds that item's card until a
+ *   person resolves it, not the whole agent (owner decision 2026-11-15).
  */
 const CARD_MOVED_ON: ReadonlySet<string> = new Set(["task_not_in_review", "not_the_workers_review"]);
 

@@ -10,8 +10,9 @@ import { amuxContentUnitKeyId,
   deleteAmuxContentUnitKey } from "./ideaKeyStore.ts";
 import { amuxIdeaHasActiveRetentionHold } from
   "./ideaRetentionHoldRead.ts";
+import { amuxAnalysisEndedWhere, amuxSessionContentPurgeDue,
+  amuxSessionContentRetentionMs } from "./ideaRetentionCore.ts";
 
-const RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const BATCH_SIZE = 8;
 const targetFor = (ideaId: string, claimId: string): AmuxRetirableContent =>
   ({ ideaId, purpose: "analysis_result", subjectId: claimId });
@@ -37,14 +38,17 @@ export async function commitAmuxDueSessionAnalysisResultPurge(
     where: { claimId },
   });
   const idea = await tx.amuxIdeaSubmission.findUnique({
-    where: { id: found.ideaId }, select: { submittedAt: true },
+    where: { id: found.ideaId }, select: { submittedAt: true,
+      analysisDeadlineAt: true, analysisCompletedAt: true, cancelledAt: true },
   });
   const nowRows = await tx.$queryRaw<Array<{ now: Date }>>`
     SELECT clock_timestamp() AS "now"`;
   const now = nowRows[0]?.now;
   if (!row || !idea || !now || row.bodyPurgedAt || !row.ciphertext)
     return "skipped";
-  if (idea.submittedAt.getTime() + RETENTION_MS > now.getTime() ||
+  // A page of an analysis still running is never purged: a later page may
+  // still need it (owner direction 2026-11-15).
+  if (!amuxSessionContentPurgeDue({ ...idea, dbNow: now }) ||
       await amuxIdeaHasActiveRetentionHold(tx, row.ideaId, now))
     return "skipped";
   const target = targetFor(row.ideaId, row.claimId);
@@ -88,7 +92,9 @@ export async function purgeDueAmuxSessionAnalysisResults(
   if (!now) throw new AmuxContentRetirementError("integrity_unavailable");
   const due = await prisma.amuxIdeaSessionAnalysisResult.findMany({
     where: { ciphertext: { not: null }, bodyPurgedAt: null,
-      idea: { submittedAt: { lte: new Date(now.getTime() - RETENTION_MS) },
+      idea: { submittedAt: { lte: new Date(now.getTime() -
+          amuxSessionContentRetentionMs()) },
+        ...amuxAnalysisEndedWhere(now),
         retentionHolds: { none: { releasedAt: null,
           expiresAt: { gt: now } } } } },
     orderBy: [{ createdAt: "asc" }, { claimId: "asc" }],

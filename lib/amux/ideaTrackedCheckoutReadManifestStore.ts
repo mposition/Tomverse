@@ -10,6 +10,8 @@ import { amuxContentUnitKeyId, createAmuxContentUnitKeys,
 import { AmuxContentRetirementError, recordAmuxContentBodyPurge } from
   "./ideaContentKeyRetirementService.ts";
 import { amuxIdeaHasActiveRetentionHold } from "./ideaRetentionHoldRead.ts";
+import { amuxSessionContentPurgeDue, amuxSessionContentRetentionDays,
+  amuxSessionContentRetentionMs } from "./ideaRetentionCore.ts";
 import { prisma } from "../prisma.ts";
 import {
   AMUX_V19_READ_MANIFEST_AUDIT_ACTOR,
@@ -60,10 +62,14 @@ export function amuxTrackedCheckoutReadManifestKeyIdentity(
     subjectId: manifestId };
 }
 
-export const AMUX_READ_MANIFEST_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+/** The read-manifest retention after intake: seven days under the legacy
+ * switch, ninety now (ideaRetentionCore.ts). A manifest is purged only once
+ * its idea's analysis has also ended. */
+export const amuxReadManifestRetentionMs = (): number => amuxSessionContentRetentionMs();
+export const amuxReadManifestRetentionDays = (): number => amuxSessionContentRetentionDays();
 
 export function amuxReadManifestDueAt(submittedAt: Date): Date {
-  return new Date(submittedAt.getTime() + AMUX_READ_MANIFEST_RETENTION_MS);
+  return new Date(submittedAt.getTime() + amuxReadManifestRetentionMs());
 }
 
 /** The only DB writer of the read-manifest table. Its guarded purge keeps
@@ -87,7 +93,8 @@ export async function commitAmuxDueReadManifestPurge(tx: Prisma.TransactionClien
     where: { id: manifestId },
   });
   const idea = await tx.amuxIdeaSubmission.findUnique({
-    where: { id: found.ideaId }, select: { submittedAt: true },
+    where: { id: found.ideaId }, select: { submittedAt: true,
+      analysisDeadlineAt: true, analysisCompletedAt: true, cancelledAt: true },
   });
   // Truncate, never round: bodyPurgedAt is refused by the guard when it is
   // ahead of the unrounded clock, and ::TIMESTAMP(3) rounds up half the time.
@@ -95,7 +102,8 @@ export async function commitAmuxDueReadManifestPurge(tx: Prisma.TransactionClien
     SELECT date_trunc('milliseconds', clock_timestamp() AT TIME ZONE 'UTC') AS "now"`;
   const now = nowRows[0]?.now;
   if (!row || !idea || !now || row.bodyPurgedAt || !row.ciphertext) return "skipped";
-  if (amuxReadManifestDueAt(idea.submittedAt) > now ||
+  // A running analysis keeps every page's manifest (owner direction 2026-11-15).
+  if (!amuxSessionContentPurgeDue({ ...idea, dbNow: now }) ||
       await amuxIdeaHasActiveRetentionHold(tx, row.ideaId, now)) return "skipped";
   const target = amuxTrackedCheckoutReadManifestKeyIdentity(row.ideaId, row.id);
   if (row.keyId !== amuxContentUnitKeyId(target) || row.keyVersion !== 1) {
@@ -137,7 +145,7 @@ export async function prepareAmuxTrackedCheckoutReadManifest(
 
 /** Commit the key's non-content identity before the external key is written.
  * This row remains discoverable even if PutObject or the manifest COMMIT is
- * uncertain; the seven-day sweeper can then address the exact key. */
+ * uncertain; the retention sweeper can then address the exact key. */
 export async function recordAmuxTrackedCheckoutReadManifestKeyIntent(
   tx: Prisma.TransactionClient, input: AmuxTrackedCheckoutVerifiedReadInput,
   maxClaim?: AmuxMaxCheckoutClaim,
@@ -156,7 +164,6 @@ export async function recordAmuxTrackedCheckoutReadManifestKeyIntent(
         AND i."submissionOrigin" = 'session'
         AND i."cancelledAt" IS NULL AND i."analysisCompletedAt" IS NULL
         AND i."analysisDeadlineAt" > (clock_timestamp() AT TIME ZONE 'UTC')
-        AND i."submittedAt" + INTERVAL '7 days' > clock_timestamp()
       FOR KEY SHARE OF i
     `;
     if (locked.length !== 1) {
@@ -318,7 +325,7 @@ async function requireMaxManifestClaim(tx: Prisma.TransactionClient,
 }
 
 /** The claim link was committed with the key intent before key creation.
- * It remains readable after settlement or seven-day ciphertext retirement. */
+ * It remains readable after settlement or ciphertext retirement. */
 export async function readAmuxMaxManifestIntentBinding(
   tx: Prisma.TransactionClient, ideaId: string, referenceOrdinal: number,
   manifestId: string, keyIntentAuditLogId: string,
@@ -416,14 +423,18 @@ function onlyRow<T>(rows: T[]): T | null {
   return rows[0] ?? null;
 }
 
-/** Database-clock access fence, shared by the Admin reader and DB test. */
+/** Database-clock access fence, shared by the Admin reader and DB test: the
+ * manifest is readable until its purge is due (retention passed and analysis
+ * ended), or while a hold covers it. */
 export async function ownerMayReadManifest(
   actorUserId: string, ideaId: string, manifestId: string,
 ): Promise<boolean> {
   const rows = await prisma.$queryRaw<Array<{ allowed: boolean }>>`
     WITH clock AS (SELECT (clock_timestamp() AT TIME ZONE 'UTC') AS "now")
     SELECT (m."bodyPurgedAt" IS NULL AND
-      (i."submittedAt" + INTERVAL '7 days' > clock."now" OR
+      (i."submittedAt" + ${amuxReadManifestRetentionDays()}::integer * INTERVAL '1 day' > clock."now" OR
+        (i."analysisCompletedAt" IS NULL AND i."cancelledAt" IS NULL AND
+          i."analysisDeadlineAt" > clock."now") OR
         EXISTS (SELECT 1 FROM "AmuxIdeaRetentionHold" h
           WHERE h."ideaId" = i."id" AND h."releasedAt" IS NULL
             AND h."expiresAt" > clock."now"))) AS "allowed"
@@ -447,7 +458,7 @@ export async function readAmuxTrackedCheckoutReadManifestForOwner(
   });
   if (!row) return null;
   // The retention worker may be delayed. Its lag never extends Admin access
-  // beyond the absolute seven-day deadline unless a valid hold is active.
+  // beyond the purge time (retention passed, analysis ended) unless a valid hold is active.
   if (!await ownerMayReadManifest(actorUserId, ideaId, row.id)) return null;
   if (!row.ciphertext || !row.keyId || !row.keyVersion) {
     throw new Error("read_manifest_integrity_unavailable");

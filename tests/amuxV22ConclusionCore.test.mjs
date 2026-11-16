@@ -17,6 +17,10 @@ import {
   parseAmuxV22Conclusion,
 } from "../lib/amux/v22ConclusionCore.ts";
 
+// The earlier, strict reading (TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW=disabled);
+// amuxV22LocalCliFlow.test.mjs covers the local CLI flow's lenient one.
+process.env.TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW = "disabled";
+
 const line = (value) => `${AMUX_V22_CONCLUSION_MARKER} ${JSON.stringify(value)}`;
 const valid = { verdict: "proceed", findings: "The router fails on empty input.",
   handoff: [{ task: "AMUX-ROUTERFAIL-004", note: "Guard the empty case first." }],
@@ -135,7 +139,8 @@ test("labels name the brief's local reference beside the display key; handoff no
 test("delivery wiring: rules for investigate only, the section after the resume answer, its digest in the receipt audit", () => {
   const source = readFileSync(new URL("../lib/amux/delivery.ts", import.meta.url), "utf8");
   assert.match(source, /conclusionMode !== "off" &&\s+amuxV22ExecutionRole\(assignment\.role\) === "investigate"/);
-  assert.match(source, /prompt: head \+ resumeSection \+ priorSection \+ tail,/,
+  // The earlier flow's inline prompt; the review section (#4006) sits beside the prior one.
+  assert.match(source, /prompt: head \+ resumeSection \+ priorSection \+ reviewSection \+ tail,/,
     "the brief stays whole in the tail; the section is beside it, not in it");
   assert.match(source, /prior_conclusion_digest: content\.priorConclusionDigest/);
   assert.match(source, /AMUX_V22_RESUME_PROMPT_MAX_BYTES - 2 -\s+Buffer\.byteLength\(head \+ resumeSection \+ tail/,

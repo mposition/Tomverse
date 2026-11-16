@@ -117,3 +117,18 @@ test("the idea names each check with its link and fits the size limit", () => {
   const unread = developCiRepairIdea({ headSha: HEAD, checks: [{ id: 9, name: "X", conclusion: "failure", logTail: null }], maxBytes: 8_192 });
   assert.ok(unread.includes("could not be read"));
 });
+
+test("every failed job's whole log goes into the idea when the caller asks for it", () => {
+  // Owner direction 2026-11-15: no three-job or 6,000-character cut; only the
+  // idea's 4 MiB safety ceiling still trims a log, from its start.
+  const logs = [1, 2, 3, 4, 5].map((id) => `job ${id} start\n${"step output line\n".repeat(2_000)}job ${id} failed here`);
+  const checks = logs.map((logTail, index) => ({ id: index + 1, name: `Check ${index + 1}`,
+    conclusion: "failure", logTail }));
+  const longest = Math.max(...logs.map((log) => log.length));
+  const idea = developCiRepairIdea({ headSha: HEAD, checks, maxBytes: 4 * 1024 * 1024, tailChars: longest });
+  for (const log of logs) assert.ok(idea.includes(log));
+  const trimmed = developCiRepairIdea({ headSha: HEAD, checks, maxBytes: 60_000, tailChars: longest });
+  assert.ok(Buffer.byteLength(trimmed, "utf8") <= 60_000);
+  for (let id = 1; id <= 5; id += 1) assert.ok(trimmed.includes(`job ${id} failed here`));
+  assert.equal(developCiLogTail(logs[0], logs[0].length), logs[0]);
+});

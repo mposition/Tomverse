@@ -41,15 +41,23 @@ review client, bridge별 object 읽기 권한과 state directory 순이다. 검�
 같은 diff를 다시 제출하지 않는다. 앱 기록 route의 응답이 불명확하면 앱 DB의
 시도별 검토 기록을 먼저 읽는다.
 
-판정이 `reject`이면 helper는 검토 서버 `status`가 이미 돌려준 구조화 findings로
-짧은 반려 요약(심각도 순, 최대 8줄)을 만들어 최종 결과와 state 파일에 함께 남기고,
-bridge는 그 요약을 기록 요청의 `findings_summary`로 보낸다(운영자 결정 2026-11-14).
-추가 검토 서버 호출은 없다. 앱은 비밀값처럼 보이는 줄을 지우고 링크를 `[link]`로
-바꾸고 2,000자로 줄여 `AmuxV52ReviewRecord.findingsSummary`에 저장하며, Admin 카드
-상세와 owner queue에서 반려된 시도마다 보여 준다. 요약은 표시용일 뿐 요청 digest와
-감사 metadata에 들어가지 않고 판정을 바꾸지 않는다. 요약이 없는 이전 기록은 사유
-원문이 있는 검토 job id를 안내한다. 이 필드를 보내는 bridge는 앱 기록 route가 필드를
-받게 된 뒤에 배치한다. 이전 앱은 모르는 필드가 있는 요청을 거절한다.
+판정이 `reject`이면 helper는 검토 서버 `status`가 이미 돌려준 구조화 findings와 reviewer별 이유 코드로
+지적 문서(JSON, reviewer·severity·summary·file·line, 한도 없음)를 만들어 최종 결과와 state 파일에 함께
+남기고, bridge는 그것을 기록 요청의 `findings_summary` 텍스트로 그대로 보낸다(운영자 결정 2026-11-15, 앞선
+2026-11-14 결정의 8줄 요약을 대체). 어떤 reviewer가 지적을 적지 않고 거절했으면 그 slot의 report 글을
+읽어(8초 제한, 실패해도 판정은 그대로) 같은 문서에 `note`로 넣는다. 앱은 비밀값처럼 보이는 줄을 지우고 링크를
+`[link]`로 바꾼 뒤 판정 행 옆에 암호화된 content unit(`AmuxV52ReviewFindings`, 보존은 Task 종료 후 90일)으로
+저장하고, Admin 카드 상세·운영자 확인 대기·Decision Maker 카드·다음 시도의 prompt가 읽는다. 본문은 요청
+digest와 감사 metadata에 들어가지 않고(감사에는 digest와 개수만) 판정을 바꾸지 않는다. 내용이 없는 이전 기록과
+보존 기한이 지난 기록은 검토 job id와 CLI 안내를 보인다. 배치 순서는 앱(migration 포함)이 먼저고, 그다음
+bridge와 helper다. 앱은 JSON 문서와 이전 helper의 줄 텍스트를 모두 받는다. 이전 앱은 모르는 필드가 있는 요청을
+거절하고, 한도가 넓어진 helper의 큰 `findings_summary`(최대 4,000,000자)를 받지 못한다.
+
+같은 reviewer 공급사가 한 Task의 최근 두 검토를 연달아 거절하면 앱은 다음 시도의 delivery에
+`review_avoid_vendors`를 싣고, bridge는 helper 입력의 `avoidReviewerVendors`로, helper는 review client에
+`--avoid-vendor`로 넘긴다. bridge의 delivery profile은 모르는 필드를 거절하므로 앱은
+`TOMVERSE_AMUX_V52_REVIEW_AVOID_VENDORS=enabled`일 때만 이 필드를 보낸다(기본 꺼짐). 새 bridge와 helper,
+review client·서버를 모두 배치한 뒤에만 켠다.
 
 검증할 때는 staging의 한 v4 Task에서 Task 등록, 같은 등급 배정, 정상 종료 후
 로컬 commit과 검토 job, 앱의 `amux.review.recorded` 감사, 판정에 따른 상태 전이,

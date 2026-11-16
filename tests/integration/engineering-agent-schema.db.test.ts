@@ -6,7 +6,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import type { Session } from "next-auth";
 
 import { writeAdminAuditLog } from "@/lib/adminAudit";
-import { OWNER_QUEUE_LIMITS } from "@/lib/engineeringAgentCore";
+import { OWNER_QUEUE_LEGACY_LIMITS } from "@/lib/engineeringAgentCore";
 import { prisma } from "@/lib/prisma";
 
 // Real PostgreSQL evidence for the engineering agent's state tables
@@ -800,29 +800,26 @@ test("a partial registration is an owner decision, resolved only after a person 
 });
 
 test("a temporary table of the same name does not stand in for the real one", async () => {
-  // A full decision queue, which an empty temporary table would hide.
-  const open = [];
-  while (open.length < OWNER_QUEUE_LIMITS.decision) open.push(await newItem("decision"));
+  // An empty temporary attempt table would make the guard refuse a run of a
+  // real attempt; the guard reads the trigger's own schema, so it starts.
   const { task, attempt } = await amuxAttempt();
-  await refused(
-    prisma.$transaction(async (tx) => {
-      await tx.$executeRawUnsafe(
-        'CREATE TEMP TABLE "EngineeringAgentWorkItem" ("kind" TEXT, "state" TEXT) ON COMMIT DROP',
-      );
-      await tx.engineeringAgentRun.create({
-        data: {
-          id: nextRunId(),
-          amuxAttemptId: attempt.id,
-          cardId: task.id,
-          cardKind: "code",
-          baseSha: sha1("base"),
-          leaseExpiresAt: inSeconds(60),
-        },
-      });
-    }),
-    "the queue is counted from the real table",
-  );
-  for (const item of open) await setState(item.id, "expired");
+  const id = nextRunId();
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe(
+      'CREATE TEMP TABLE "AmuxExecutionAttempt" ("id" TEXT, "taskId" TEXT) ON COMMIT DROP',
+    );
+    await tx.engineeringAgentRun.create({
+      data: {
+        id,
+        amuxAttemptId: attempt.id,
+        cardId: task.id,
+        cardKind: "code",
+        baseSha: sha1("base"),
+        leaseExpiresAt: inSeconds(60),
+      },
+    });
+  });
+  await endRun(id);
 });
 
 test("a registration result is written once, and the round cap is the database's", async () => {
@@ -885,39 +882,30 @@ test("a request's end is kept, so a retry never starts over", async () => {
   await refused(prisma.engineeringAgentRequest.delete({ where: { key } }), "a request is never deleted");
 });
 
-test("no run starts while the owner queue is full, counting what running work may still produce", async () => {
-  // Open owner items fill the decision queue, one of them a draft, which is
-  // the product of its own run.
+test("owner decision 2026-11-15: a run starts whatever the owner queues hold", async () => {
+  // More open owner items than the old cap of 8 (one a draft, the product of its own run).
   const open = [await newItem("state_mismatch"), await newProduct("t2_draft")];
-  while (open.length < OWNER_QUEUE_LIMITS.decision) open.push(await newItem("decision"));
-  await refused(newRun(), "a full decision queue refuses a new run");
+  while (open.length < OWNER_QUEUE_LEGACY_LIMITS.decision + 1) open.push(await newItem("decision"));
+  await endRun((await newRun()).id);
   for (const item of open) await setState(item.id, item.kind === "state_mismatch" ? "resolved" : "expired");
 
-  // An active run takes a place in both queues, for the pull request or the
-  // decision it may still produce; so does an unsettled publish item.
+  // More active runs than the old cap, and an unsettled publish item beside them.
   const running = [];
-  while (running.length < OWNER_QUEUE_LIMITS.pr) running.push(await newRun());
-  await refused(newRun(), "active runs fill the queue");
-  await endRun(running.pop()!.id);
+  while (running.length < OWNER_QUEUE_LEGACY_LIMITS.pr + 1) running.push(await newRun());
   const pending = await newProduct("publish");
-  await refused(newRun(), "an unsettled publish item holds the place a run left");
-  await retirePublish(pending.id);
   running.push(await newRun());
+  await retirePublish(pending.id);
   for (const run of running) await endRun(run.id);
 });
 
-test("open pull requests fill the queue, and no first-T1 window holds it to one", async () => {
-  // Every run in this file starts under t1 within minutes of the first, so
-  // a window would refuse the second pull request.
+test("open pull requests never fill the queue, and no first-T1 window holds it to one", async () => {
   const bindings = [];
-  while (bindings.length < OWNER_QUEUE_LIMITS.pr) {
+  while (bindings.length < OWNER_QUEUE_LEGACY_LIMITS.pr + 1) {
     const { run, binding } = await publishedRun();
     assert.equal(run.modeAtStart, "t1");
     await endRun(run.id);
     bindings.push(binding);
   }
-  await refused(newRun(), "open pull requests fill the queue");
-  await retireBinding(bindings.pop()!.id);
   await endRun((await newRun()).id);
   for (const binding of bindings) await retireBinding(binding.id);
 });

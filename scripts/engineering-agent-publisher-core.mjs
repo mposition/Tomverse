@@ -156,7 +156,7 @@ export const decideLookup = ({ runId, branch, consumed, branchOid, pulls, headCo
  *   }
  *   workspace(baseSha) -> {
  *     baseCommitterDate,
- *     build({ patch, identity, date, message }) -> { treeId, commitSha, commitObject } | null,
+ *     build({ patch, identity, date, message }) -> { treeId, commitSha, commitObject } | { refused } | null,
  *     push(commitSha, branch, token) -> boolean,
  *     commitObjectAt(sha) -> string | null,
  *     dispose(),
@@ -335,6 +335,9 @@ export async function runPublisherCycle(ports) {
       message,
     });
     if (built === null) return await report("revalidation_refused", { reason: "patch_does_not_apply" });
+    // A blob the applied tree adds carried a secret: a binary file's bytes
+    // are not in the patch text scanned above.
+    if (built.refused) return await report("revalidation_refused", { reason: built.refused });
     if (built.treeId !== work.expectedTreeId) return await report("revalidation_refused", { reason: "tree_mismatch" });
     if (built.commitObject !== expected) return await report("revalidation_refused", { reason: "commit_mismatch" });
 

@@ -276,9 +276,10 @@ jobs:
             do from develop with this part merged (files, behaviour, tests). It
             is published under its own heading in the same public PR, so the
             same rule holds: describe code, do not quote the request. No
-            headings, no line that is only "---", and under 15,000
-            characters (the PR body under 30,000). Leave it unwritten when
-            the request is done.
+            headings and no line that is only "---". With the PR body it
+            must fit GitHub's 65,536-character pull request body, so keep
+            the two together under 60,000 characters. Leave it unwritten
+            when the request is done.
           PROMPT
           )
           set +e
@@ -314,9 +315,13 @@ jobs:
           # against accidents and the public PR, not against that.)
           pub=$(mktemp -d)
           git diff --cached > "${pub}/change.patch"
+          # GitHub publishes at most 65,536 characters of a PR body, never fewer
+          # than its bytes, so nothing past 65,536 bytes of a file could reach
+          # the PR; publish fits the body to that limit without splitting a
+          # character.
           for name in title.txt body.md next.md; do
             source="${OUT_DIR}/${name}"
-            if [ -f "$source" ] && [ ! -L "$source" ]; then head -c 60000 "$source" > "${pub}/${name}"; else : > "${pub}/${name}"; fi
+            if [ -f "$source" ] && [ ! -L "$source" ]; then head -c 65536 "$source" > "${pub}/${name}"; else : > "${pub}/${name}"; fi
           done
           for value in "${ANTHROPIC_API_KEY:-}" "${CLAUDE_CODE_OAUTH_TOKEN:-}"; do
             if [ -n "$value" ] && grep -rqF -- "$value" "$pub"; then
@@ -409,23 +414,43 @@ jobs:
           title=$(head -n 1 "${in}/title.txt" | tr -d '\000-\037' | cut -c 1-100)
           [ -n "$title" ] || title="feat: implement an AMUX idea"
           body="${RUNNER_TEMP}/pr-body.md"
-          # GitHub takes a PR body of up to 65,536 characters: 40,000 for the
-          # body, 20,000 for the remaining work, the rest for the footer.
-          { head -c 40000 "${in}/body.md" | grep -v -x -e '## Remaining work (next lane run)' || true
-            # The next part's claim reads this section back from the merged PR
-            # (the claim job), from its heading (only here, so the body above may
-            # not carry it) up to the line that is only "---".
-            if [ "$CONTINUES" = "true" ]; then
-              printf '\n\n## Remaining work (next lane run)\n\n'
-              head -c 20000 "${in}/next.md" | grep -v -x -e '---' -e '## Remaining work (next lane run)' || true
-              if [ "$(wc -c < "${in}/next.md")" -gt 20000 ]; then
-                # Said where the next part reads it, never cut silently.
-                printf '\n\n(The remaining work was cut at 20,000 bytes here; the next part should check what is still missing.)\n'
-              fi
-            fi
-            printf '\n\n---\nOpened by the AMUX idea lane (attempt `%s`, part %s%s). A draft into develop.\n\n' \
+          parts=$(mktemp -d)
+          # GitHub's one limit: a PR body of up to 65,536 characters. Everything
+          # goes in whole while it fits. Past it, the remaining work (which the
+          # next part reads back) is kept first and the description gives way,
+          # and a cut is said where it happens, never silent. Budgets count
+          # bytes, never fewer than characters, and a cut never splits a
+          # UTF-8 character (iconv -c drops a broken tail and exits 1 for it).
+          fit() { head -c "$2" "$1" | iconv -f UTF-8 -t UTF-8 -c 2>/dev/null || true; }
+          size() { wc -c < "$1"; }
+          # The next part's claim reads the section back from the merged PR
+          # (the claim job), from its heading (only here, so the body may not
+          # carry it) up to the line that is only "---".
+          grep -v -x -e '## Remaining work (next lane run)' "${in}/body.md" > "${parts}/body" || true
+          : > "${parts}/next"
+          : > "${parts}/heading"
+          if [ "$CONTINUES" = "true" ]; then
+            grep -v -x -e '---' -e '## Remaining work (next lane run)' "${in}/next.md" > "${parts}/next" || true
+            printf '\n\n## Remaining work (next lane run)\n\n' > "${parts}/heading"
+          fi
+          printf '\n\n(Cut here at GitHub'"'"'s 65,536-character pull request body limit; check what is still missing.)\n' > "${parts}/note"
+          { printf '\n\n---\nOpened by the AMUX idea lane (attempt `%s`, part %s%s). A draft into develop.\n\n' \
               "$ATTEMPT" "${PART:-1}" "$([ "$CONTINUES" = "true" ] && echo '; the next part runs after this merges')"
-            printf '🤖 Generated with [Claude Code](https://claude.com/claude-code)\n'; } > "$body"
+            printf '🤖 Generated with [Claude Code](https://claude.com/claude-code)\n'; } > "${parts}/footer"
+          # Room for the two texts once the heading, the footer and a cut note
+          # for each are set aside.
+          room=$((65536 - $(size "${parts}/heading") - $(size "${parts}/footer") - 2 * $(size "${parts}/note")))
+          next_size=$(size "${parts}/next")
+          next_keep=$(( next_size < room ? next_size : room ))
+          body_room=$((room - next_keep))
+          { fit "${parts}/body" "$body_room"
+            if [ "$(size "${parts}/body")" -gt "$body_room" ]; then cat "${parts}/note"; fi
+            cat "${parts}/heading"
+            if [ "$CONTINUES" = "true" ]; then
+              fit "${parts}/next" "$next_keep"
+              if [ "$next_size" -gt "$next_keep" ]; then cat "${parts}/note"; fi
+            fi
+            cat "${parts}/footer"; } > "$body"
           git checkout -q -b "$BRANCH"
           git -c core.hooksPath=/dev/null -c user.name="tomverse-idea-lane[bot]" \
               -c user.email="tomverse-idea-lane-bot@users.noreply.github.com" \

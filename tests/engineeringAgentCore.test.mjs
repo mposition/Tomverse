@@ -7,8 +7,7 @@ import test from "node:test";
 
 import {
   AMUX_SETTLEMENT_FOR_OUTCOME,
-  OWNER_QUEUE_LIMITS,
-  OWNER_QUEUE_TOTAL,
+  OWNER_QUEUE_LEGACY_LIMITS,
   PUBLISH_STATES,
   PUBLISH_TERMINAL_STATES,
   PUBLISH_TRANSITIONS,
@@ -479,15 +478,17 @@ test("shadow claims but never publishes; a freeze stops claims and publishing, n
 
 /* Owner queues --------------------------------------------------------- */
 
-test("the owner queues hold eight pull requests and eight decisions", () => {
-  // Owner decision 2026-11-09.
-  assert.deepEqual({ ...OWNER_QUEUE_LIMITS }, { pr: 8, decision: 8 });
-  assert.equal(OWNER_QUEUE_TOTAL, 16);
+test("the owner queues are counted, never capped; the kill switch brings back eight and eight", () => {
+  // Owner decision 2026-11-15; the caps are owner decision 2026-11-09's.
+  for (const [prs, decisions] of [[0, 0], [8, 8], [500, 500]])
+    assert.deepEqual(decideOwnerQueues({ openPrBindings: prs, pendingDecisions: decisions }),
+      { prFull: false, decisionFull: false, claimAllowed: true });
+  assert.deepEqual({ ...OWNER_QUEUE_LEGACY_LIMITS }, { pr: 8, decision: 8 });
 });
 
-test("either full queue stops the claim at its limit and not before", () => {
+test("with the kill switch either full queue stops the claim at its limit and not before", () => {
   const verdict = (openPrBindings, pendingDecisions) =>
-    decideOwnerQueues({ openPrBindings, pendingDecisions });
+    decideOwnerQueues({ openPrBindings, pendingDecisions }, true);
   assert.deepEqual(verdict(7, 7), { prFull: false, decisionFull: false, claimAllowed: true });
   assert.deepEqual(verdict(8, 0), { prFull: true, decisionFull: false, claimAllowed: false });
   assert.deepEqual(verdict(0, 8), { prFull: false, decisionFull: true, claimAllowed: false });

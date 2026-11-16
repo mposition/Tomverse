@@ -61,8 +61,9 @@ const requestSchema = z.object({}).strict();
 const OPERATION = "auto_promotion_tick";
 
 /** Owner decision 2026-11-14: before promotion reads its candidates, extend
- * the active window of scores whose confirmed inputs are unchanged (default
- * off, `TOMVERSE_AMUX_V4_SCORE_AUTO_REFRESH=enabled`). Each refresh must leave
+ * the windows of scores whose confirmed inputs are unchanged (on by default
+ * since 2026-11-15; `TOMVERSE_AMUX_V4_SCORE_AUTO_REFRESH=disabled` turns it
+ * off, see amuxScoreAutoRefreshEnabled). Each refresh must leave
  * room for the claim and promotion transactions after it. A refusal never
  * fails the tick; a refresh whose COMMIT outcome is lost stops it, answered
  * like the promotion's own lost write, before any claim or promotion runs. */

@@ -38,8 +38,10 @@ test("v22 encrypted Task result DB refuses incomplete, oversized, and unbound ro
     await client.query("SET LOCAL statement_timeout = '5s'");
     await reject([...ids, null, null, null, digest, digest, 1], "23514",
       "AmuxV22TaskResult_body_check");
+    // One byte past the v22 transport backstop (32 MiB,
+    // 20261116011100_amux_v22_task_result_report_size); it was 64 KiB.
     await reject([...ids, Buffer.from("x"), "synthetic", 1,
-      digest, digest, 65_537], "23514", "AmuxV22TaskResult_digest_check");
+      digest, digest, 33_554_433], "23514", "AmuxV22TaskResult_digest_check");
     await reject([...ids, Buffer.from("x"), "synthetic", 1,
       digest, digest, 1], "23503");
     const trigger = await client.query(`SELECT count(*)::int AS count

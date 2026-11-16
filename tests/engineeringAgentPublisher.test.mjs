@@ -260,6 +260,9 @@ test("every difference before the push refuses, and nothing is pushed", async ()
     [{ work: writeWork({ commitDigest: "0".repeat(64) }) }, "revalidation_refused", "commit_digest_mismatch"],
     [{ work: writeWork({ patchDigest: "0".repeat(64) }) }, "revalidation_refused", "content_check_failed"],
     [{ work: writeWork(), build: () => null }, "revalidation_refused", "patch_does_not_apply"],
+    // A blob the applied tree adds carries a secret the patch text hid (a
+    // binary file's bytes): refused before the push.
+    [{ work: writeWork(), build: () => ({ refused: "content_check_failed" }) }, "revalidation_refused", "content_check_failed"],
     [{ work: writeWork(), build: (input) => ({ treeId: "9".repeat(40), commitSha: COMMIT, commitObject: input.message }) }, "revalidation_refused", "tree_mismatch"],
     [{ work: writeWork(), build: () => ({ treeId: TREE, commitSha: COMMIT, commitObject: "tree x\n" }) }, "revalidation_refused", "commit_mismatch"],
     [{ work: writeWork(), branchBefore: "a".repeat(40) }, "lookup_impossible", "branch_exists"],

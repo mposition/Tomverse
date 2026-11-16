@@ -21,7 +21,7 @@ const catalogSchema = z.object({
     featureRef: ref, revision, contentDigest: digest,
     status: z.enum(["backlog", "todo", "doing", "review", "done", "blocked", "cancelled"]) })
     .strict()).max(1_000),
-  legacyCards: z.array(z.object({ ref, title: z.string().min(1).max(200) })
+  legacyCards: z.array(z.object({ ref, title: z.string().min(1) })
     .strict()).max(1_000),
 }).strict();
 type Catalog = z.infer<typeof catalogSchema>;

@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "migrationSqlSha256": "f7014301c588018ccc64a077b4576c4d15a7a0a51daa0c513cd63de2153ddfa6",
+  "replacedChecks": [
+    {
+      "table": "AmuxIdeaSubmission",
+      "constraint": "AmuxIdeaSubmission_analysis_deadline_check",
+      "previousDefinitionSha256": "01dd18df5fe5d453ee80dc15f6c3815d045da73c6f4344a58e17cad143d641fb"
+    }
+  ]
+}

@@ -35,16 +35,20 @@ test("routing: evidence words no longer send a system card to the operator, a fi
   assert.ok(asked.refusals.includes("irreversible_term"), "a word in the fixed question still routes");
 });
 
-test("v52: every rejection returns to todo with the switch on; off, the second still blocks", async () => {
+test("v52: every rejection returns to todo unless switched off; off, the second still blocks", async () => {
   const { decideAmuxV52ReviewDisposition, amuxV52RejectRetryInBudgetEnabled } =
     await import("../lib/amux/v52ReviewCore.ts");
-  assert.equal(amuxV52RejectRetryInBudgetEnabled(undefined), false);
+  // Owner decision 2026-11-15: on by default; only `disabled` brings back the old rule.
+  assert.equal(amuxV52RejectRetryInBudgetEnabled(undefined), true);
   assert.equal(amuxV52RejectRetryInBudgetEnabled("enabled"), true);
+  assert.equal(amuxV52RejectRetryInBudgetEnabled("disabled"), false);
   assert.deepEqual(decideAmuxV52ReviewDisposition("reject", 1, false),
     { status: "blocked", reason: "review_server_rejected_twice" });
   assert.deepEqual(decideAmuxV52ReviewDisposition("reject", 3, true),
     { status: "todo", reason: "review_server_rejected" });
   assert.deepEqual(decideAmuxV52ReviewDisposition("unknown", 0, true),
+    { status: "todo", reason: "review_server_unknown" });
+  assert.deepEqual(decideAmuxV52ReviewDisposition("unknown", 0, false),
     { status: "blocked", reason: "review_server_unknown" });
   assert.deepEqual(decideAmuxV52ReviewDisposition("accept", 4, true),
     { status: "review", reason: "review_server_accepted" });
@@ -65,8 +69,10 @@ test("engineering agent: a card-scoped mismatch holds no other card; an unbound 
 
 test("the stalled card sweep reads only a promoted todo Task whose budget is spent", async () => {
   const sweep = await import("../lib/amux/stalledCardSweep.ts");
-  assert.equal(sweep.amuxStalledCardSweepEnabled(undefined), false);
+  // Owner direction 2026-11-15: on unless disabled.
+  assert.equal(sweep.amuxStalledCardSweepEnabled(undefined), true);
   assert.equal(sweep.amuxStalledCardSweepEnabled("enabled"), true);
+  assert.equal(sweep.amuxStalledCardSweepEnabled("disabled"), false);
   const calls = [];
   const tx = { $queryRaw: async (strings, ...values) => {
     calls.push({ sql: strings.join("?").replace(/\s+/g, " "), values });
@@ -80,7 +86,8 @@ test("the stalled card sweep reads only a promoted todo Task whose budget is spe
   assert.ok(sql.includes(`w."status" = 'todo' AND w."v22ReceiptId" IS NOT NULL`),
     "only a promoted card, which the settlement can file");
   assert.ok(!sql.includes("backlog"), "a backlog card is not swept: the settlement cannot file it");
-  assert.ok(values.includes(5) && values.includes("attempt_budget_exhausted"));
+  // The claim's own budget: infrastructure failures left out, their own bound kept.
+  assert.ok(values.includes(30) && values.includes(12) && values.includes("attempt_budget_exhausted"));
 });
 
 test("DM merge keeps its allow list: lib code and API routes stay a person's", async () => {
