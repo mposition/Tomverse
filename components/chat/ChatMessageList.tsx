@@ -1847,6 +1847,10 @@ export function ChatMessageList({
                             triggerTestId="report-error-button"
                           />
                           )}
+                          {/*
+                            Chat opens its model picker here, once per card;
+                            nothing is sent, the next turn stays the user's.
+                          */}
                           {(errorCategory === "generic" || errorCategory === "attachment") &&
                             (onChooseAnotherModel ? (
                               <button

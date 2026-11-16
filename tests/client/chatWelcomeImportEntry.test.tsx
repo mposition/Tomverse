@@ -62,6 +62,12 @@ test("the mobile recent-chats row sits above the import card so a short screen c
   assert.match(html, /data-testid="recent-conversations-disclosure"[^>]*class="[^"]*\bmin-h-11\b[^"]*\bshrink-0\b/);
 });
 
+test("the import card keeps its content height so a wrapped hint is not cut off on a narrow phone", () => {
+  const html = renderWelcome({ lang: "ko" });
+  assert.match(html, /data-testid="chat-import-entry"[^>]*class="[^"]*\bmin-h-16\b[^"]*\bshrink-0\b/);
+  assert.doesNotMatch(html, /data-testid="chat-import-entry"[^>]*class="(?:[^"]*\s)?(?:h-16|max-h-\S+|truncate|line-clamp-\d|overflow-hidden)[\s"]/);
+});
+
 test("an available import entry does not depend on the starter catalogue being enabled", () => {
   const html = renderWelcome({ starters: false });
   assert.match(html, /data-testid="chat-import-entry"/);

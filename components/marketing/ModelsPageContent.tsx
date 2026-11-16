@@ -210,14 +210,14 @@ const copy = {
 } satisfies Record<Language, Record<string, string>>;
 
 const filterCopy = {
-  en: { search: "Search model name or ID", toggle: "Search and filter models", allProviders: "All providers", plan: "Available with plan", allPlans: "All plans", results: "Models shown", empty: "No models match these filters.", clear: "Clear filters" },
-  ko: { search: "모델명 또는 ID 검색", toggle: "모델 검색·필터", allProviders: "모든 공급자", plan: "이용할 플랜", allPlans: "모든 플랜", results: "표시된 모델", empty: "조건에 맞는 모델이 없습니다.", clear: "필터 초기화" },
-  zh: { search: "搜索模型名称或 ID", allProviders: "所有供应商", plan: "可用套餐", allPlans: "所有套餐", results: "显示的模型", empty: "没有符合筛选条件的模型。", clear: "清除筛选" },
-  "zh-Hant": { search: "搜尋模型名稱或 ID", allProviders: "所有供應商", plan: "可用方案", allPlans: "所有方案", results: "顯示的模型", empty: "沒有符合篩選條件的模型。", clear: "清除篩選" },
-  fr: { search: "Rechercher un nom ou ID de modèle", allProviders: "Tous les fournisseurs", plan: "Disponible avec l’offre", allPlans: "Toutes les offres", results: "Modèles affichés", empty: "Aucun modèle ne correspond à ces filtres.", clear: "Effacer les filtres" },
-  de: { search: "Modellname oder ID suchen", allProviders: "Alle Anbieter", plan: "Verfügbar im Tarif", allPlans: "Alle Tarife", results: "Angezeigte Modelle", empty: "Keine Modelle entsprechen diesen Filtern.", clear: "Filter zurücksetzen" },
-  es: { search: "Buscar nombre o ID de modelo", allProviders: "Todos los proveedores", plan: "Disponible con el plan", allPlans: "Todos los planes", results: "Modelos mostrados", empty: "Ningún modelo coincide con estos filtros.", clear: "Borrar filtros" },
-  pt: { search: "Buscar nome ou ID de modelo", allProviders: "Todos os provedores", plan: "Disponível no plano", allPlans: "Todos os planos", results: "Modelos exibidos", empty: "Nenhum modelo corresponde a estes filtros.", clear: "Limpar filtros" },
+  en: { modelId: "Model ID", search: "Search model name or ID", toggle: "Search and filter models", allProviders: "All providers", plan: "Available with plan", allPlans: "All plans", results: "Models shown", empty: "No models match these filters.", clear: "Clear filters" },
+  ko: { modelId: "모델 ID", search: "모델명 또는 ID 검색", toggle: "모델 검색·필터", allProviders: "모든 공급자", plan: "이용할 플랜", allPlans: "모든 플랜", results: "표시된 모델", empty: "조건에 맞는 모델이 없습니다.", clear: "필터 초기화" },
+  zh: { modelId: "模型 ID", search: "搜索模型名称或 ID", allProviders: "所有供应商", plan: "可用套餐", allPlans: "所有套餐", results: "显示的模型", empty: "没有符合筛选条件的模型。", clear: "清除筛选" },
+  "zh-Hant": { modelId: "模型 ID", search: "搜尋模型名稱或 ID", allProviders: "所有供應商", plan: "可用方案", allPlans: "所有方案", results: "顯示的模型", empty: "沒有符合篩選條件的模型。", clear: "清除篩選" },
+  fr: { modelId: "ID du modèle", search: "Rechercher un nom ou ID de modèle", allProviders: "Tous les fournisseurs", plan: "Disponible avec l’offre", allPlans: "Toutes les offres", results: "Modèles affichés", empty: "Aucun modèle ne correspond à ces filtres.", clear: "Effacer les filtres" },
+  de: { modelId: "Modell-ID", search: "Modellname oder ID suchen", allProviders: "Alle Anbieter", plan: "Verfügbar im Tarif", allPlans: "Alle Tarife", results: "Angezeigte Modelle", empty: "Keine Modelle entsprechen diesen Filtern.", clear: "Filter zurücksetzen" },
+  es: { modelId: "ID del modelo", search: "Buscar nombre o ID de modelo", allProviders: "Todos los proveedores", plan: "Disponible con el plan", allPlans: "Todos los planes", results: "Modelos mostrados", empty: "Ningún modelo coincide con estos filtros.", clear: "Borrar filtros" },
+  pt: { modelId: "ID do modelo", search: "Buscar nome ou ID de modelo", allProviders: "Todos os provedores", plan: "Disponível no plano", allPlans: "Todos os planos", results: "Modelos exibidos", empty: "Nenhum modelo corresponde a estes filtros.", clear: "Limpar filtros" },
 } satisfies Record<Language, Record<string, string>>;
 
 export function ModelsPageContent() {
@@ -344,7 +344,6 @@ export function ModelsPageContent() {
                 </span>
                 <div className="min-w-0">
                   <h2 className="font-bold">{model.name}</h2>
-                  <p className="break-words text-sm font-semibold leading-5 text-zinc-600 dark:text-zinc-300">{model.id}</p>
                 </div>
               </div>
               <p data-testid={lang === "ko" || lang === "en" ? "model-selection-criteria" : undefined} className="mt-4 text-sm leading-6 text-zinc-600 dark:text-zinc-300">

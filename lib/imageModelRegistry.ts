@@ -29,7 +29,7 @@ import {
  * lookup, provider health and readiness. Keeping the name attached to that
  * meaning is what makes adding a gateway safe -- nothing has to be re-read.
  */
-export type ImageModelProvider = "openai" | "google" | "xai" | "fal" | "qwen";
+export type ImageModelProvider = "openai" | "google" | "xai" | "fal" | "qwen" | "bfl";
 
 /**
  * Who made the model, which is a different question and is about to stop having
@@ -46,7 +46,7 @@ export type ImageModelProvider = "openai" | "google" | "xai" | "fal" | "qwen";
  * current roster, not a relationship, and the two are separate aliases so the
  * next reader has to decide which one they mean.
  */
-export type ImageModelOwner = "openai" | "google" | "xai" | "fal" | "qwen";
+export type ImageModelOwner = "openai" | "google" | "xai" | "fal" | "qwen" | "bfl";
 
 export type ImageModelLifecycle = "stable" | "preview";
 
@@ -920,6 +920,9 @@ const IMAGE_PROVIDER_THINKING_BILLING: Readonly<
   xai: "not_billed",
   google: "per_token_uncapped",
   qwen: "not_billed",
+  // Black Forest Labs bills FLUX 3 per image by resolution tier, with prompts
+  // and references "included at no extra charge" (price page, 2026-11-16).
+  bfl: "not_billed",
 };
 
 /**
@@ -932,6 +935,9 @@ const IMAGE_PROVIDER_THINKING_BILLING: Readonly<
  */
 const IMAGE_PER_IMAGE_BILLED_MODELS: Readonly<Partial<Record<ImageModelProvider, RegExp>>> = {
   qwen: /^qwen-image-/,
+  // Read for the FLUX 3 image endpoints only. FLUX.2 is billed per megapixel
+  // and its request is not pinned (lib/bflImageRequest.ts), so it has no bound.
+  bfl: /^flux-3-image(-klein)?$/,
 };
 
 /**
