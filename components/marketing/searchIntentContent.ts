@@ -1009,8 +1009,13 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
         },
         {
           "title": "Prepare files for better results",
-          "body": "Signed-in attachment formats are listed below. Choose an image-capable model for image attachments. Document text may be extracted before it is sent, so an accepted upload extension does not mean every model supports the original file natively. Use clear, non-corrupted files and ask a specific question. Password-protected, scanned, malformed, or very large documents may not contain extractable text. Check important numbers, citations, formulas, and conclusions against the original file.",
-          formatGroups: attachmentFormatGroups
+          "body": "Signed-in attachment formats are listed below. Note: an accepted upload extension does not mean every model supports the original file natively, because document text may be extracted before it is sent.",
+          formatGroups: attachmentFormatGroups,
+          "bullets": [
+            "Model choice: Choose an image-capable model for image attachments.",
+            "File condition: Use clear, non-corrupted files. Password-protected, scanned, malformed, or very large documents may not contain extractable text.",
+            "Verification: Ask a specific question, then check important numbers, citations, formulas, and conclusions against the original file."
+          ]
         },
         {
           "title": "Upload limits",
