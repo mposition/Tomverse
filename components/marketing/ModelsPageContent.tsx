@@ -14,7 +14,7 @@ import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
 import { statusLinkLabel, statusNewTabCopy } from "./statusLinkCopy";
 import { PROVIDER_LABELS } from "./ModelCatalogueSection";
 
-const copy = {
+export const modelsPageCopy = {
   en: {
     eyebrow: "Models",
     title: "Find a model for your question.",
@@ -208,6 +208,8 @@ const copy = {
     planHintMax: "Requer o plano Max pago.",
   },
 } satisfies Record<Language, Record<string, string>>;
+
+const copy = modelsPageCopy;
 
 const filterCopy = {
   en: { modelId: "Model ID", search: "Search model name or ID", toggle: "Search and filter models", allProviders: "All providers", plan: "Available with plan", allPlans: "All plans", results: "Models shown", empty: "No models match these filters.", clear: "Clear filters" },
