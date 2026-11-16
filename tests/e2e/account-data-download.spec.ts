@@ -107,7 +107,7 @@ for (const theme of ["light", "dark"] as const) {
     await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
     const notice = page.getByTestId("chat-consent-notice");
     await expect(notice).toBeVisible({ timeout: 15_000 });
-    await expect(notice).toContainText("동의하면 기능 사용·유입 경로 통계를 수집해 Tomverse를 개선합니다.", { useInnerText: true });
+    await expect(notice).toContainText("기능 사용·유입 경로 통계를 수집해", { useInnerText: true });
     await notice.scrollIntoViewIfNeeded();
     const metrics = await notice.evaluate(element => {
       const visible = (selector: string) => Array.from(element.querySelectorAll(selector)).filter(node => node.getBoundingClientRect().height > 0);

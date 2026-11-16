@@ -8,7 +8,8 @@ import { prepareGuestPage } from "./support/app-fixtures";
 // the viewport (owner decision 2026-11-16; it used to be a card under the
 // header that pushed every first-visit hero ~180px down). A bottom bar can sit
 // over the hero CTA on a short phone, so the page reserves the bar's height as
-// bottom padding: scrolling always brings the CTA clear of the bar. The bar's
+// bottom padding: scrolling always brings the CTA clear of the bar. On a phone
+// it is at most two rows (sentence, then actions), about half the old card. The bar's
 // X hides it for the rest of the session without recording a choice.
 //
 // F004 -- the brand was the only shrinkable item in the header row, so the
@@ -67,7 +68,7 @@ for (const viewport of MARKETING_VIEWPORTS) {
     expect(placement.left).toBe(0);
     expect(Math.abs(placement.width - placement.viewport)).toBeLessThanOrEqual(1);
     expect(Math.abs(placement.bottomGap)).toBeLessThanOrEqual(1);
-    expect(placement.height, "the bar stays small").toBeLessThanOrEqual(viewport.width < 768 ? 72 : 64);
+    expect(placement.height, "the bar stays small").toBeLessThanOrEqual(viewport.width < 768 ? 96 : 64);
     expect(Math.abs(placement.bodyPadding - placement.height), "page reserves the bar height").toBeLessThanOrEqual(1);
 
     const dimensions = await page.evaluate(() => ({

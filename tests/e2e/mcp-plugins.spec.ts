@@ -25,15 +25,15 @@ for (const theme of ["light", "dark"] as const) {
       return route.fulfill({ json: { enabled: false, servers: [], connections: [], invocations: [] } });
     });
     await page.goto("/plugins?lang=ko");
-    const notice = page.getByTestId("chat-consent-notice");
+    const notice = page.getByTestId("marketing-consent-slot").getByTestId("chat-consent-notice");
     await expect(notice).toBeVisible();
-    await expect(notice).toContainText("동의하면 기능 사용·유입 경로 통계를 수집해 Tomverse를 개선합니다.", { useInnerText: true });
+    await expect(notice).toContainText("기능 사용·유입 경로 통계를 수집해", { useInnerText: true });
     const github = page.locator('[data-testid="plugin-card"][data-provider="github"] h3');
     await github.evaluate(element => element.scrollIntoView({ block: "center", behavior: "instant" }));
     expect(await github.evaluate(element => {
       const rect = element.getBoundingClientRect();
       const notice = document.querySelector('[data-testid="chat-consent-notice"]')!.getBoundingClientRect();
-      return rect.bottom <= notice.top && element.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2));
+      return notice.bottom <= rect.top && element.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2));
     })).toBe(true);
     await notice.scrollIntoViewIfNeeded();
     expect(await notice.getByRole("link").evaluate(element => element.getClientRects().length)).toBe(1);

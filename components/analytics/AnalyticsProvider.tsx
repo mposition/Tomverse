@@ -127,9 +127,10 @@ export function SettingsConsentSlot() {
   return <div ref={register} data-testid="settings-consent-slot" className="px-4 py-2 empty:hidden" />;
 }
 
-// The plugin workspace registers this slot under its header for the analytics
-// settings pill. The consent notice itself no longer uses it: outside chat and
-// sign-in it is a slim bar fixed to the bottom of the viewport (owner decision
+// The plugin workspace registers this slot under its header for the consent
+// notice and the analytics settings pill: on a phone its own tab bar is fixed
+// to the bottom of the screen. Everywhere else outside chat and sign-in the
+// notice is a slim bar fixed to the bottom of the viewport (owner decision
 // 2026-11-16), and the page reserves the bar's height as bottom padding.
 type MarketingConsentSlotSetter = (node: HTMLDivElement | null) => void;
 const MarketingConsentSlotContext =
@@ -818,11 +819,15 @@ export function AnalyticsProvider({
   const isSettingsRoute = pathname === "/settings" || Boolean(pathname?.startsWith("/settings/"));
   const isPluginRoute = pathname === "/plugins";
   const readableNotice = pathname === CHAT_WORKSPACE_PATH;
+  // /plugins keeps its slot under the header: on a phone its own tab bar is
+  // fixed to the bottom of the screen and would sit on top of the bar.
   const inlineSlot = isChatWorkspacePath(pathname)
     ? chatConsentSlot
     : pathname === "/auth/signin"
       ? authConsentSlot
-      : null;
+      : isPluginRoute
+        ? marketingConsentSlot
+        : null;
 
   const showConsentPrompt =
     !disabled &&
@@ -971,7 +976,12 @@ export function AnalyticsProvider({
                 role="region"
                 aria-label={promptCopy.title}
                 data-testid="chat-consent-notice"
-                className="mx-2 mb-2 rounded-xl border border-zinc-200 bg-white/95 px-1.5 py-1.5 text-zinc-700 shadow-md shadow-zinc-900/5 dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-200 dark:shadow-black/20 sm:mx-4 sm:ml-auto sm:max-w-sm sm:p-3"
+                className={
+                  inlineSlot === marketingConsentSlot
+                    ? // The plugin slot already supplies the page gutter.
+                      "rounded-xl border border-zinc-200 bg-white/95 px-1.5 py-0.5 text-zinc-700 shadow-md shadow-zinc-900/5 dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-200 dark:shadow-black/20 sm:p-3"
+                    : "mx-2 mb-2 rounded-xl border border-zinc-200 bg-white/95 px-1.5 py-1.5 text-zinc-700 shadow-md shadow-zinc-900/5 dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-200 dark:shadow-black/20 sm:mx-4 sm:ml-auto sm:max-w-sm sm:p-3"
+                }
               >
                 {noticeInner}
               </div>,
@@ -992,41 +1002,53 @@ export function AnalyticsProvider({
             className="fixed inset-x-0 bottom-0 z-30 border-t border-zinc-200 bg-white/95 pb-[env(safe-area-inset-bottom)] text-zinc-700 shadow-[0_-4px_16px_rgba(24,24,27,0.08)] backdrop-blur dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-200 dark:shadow-[0_-4px_16px_rgba(0,0,0,0.35)]"
           >
             <div className="@container/notice mx-auto max-w-7xl py-1.5 pl-3 pr-1 sm:px-6">
-              <div className="flex items-center gap-1.5 @2xl/notice:gap-4">
-                <p className="min-w-0 flex-1 text-xs leading-4 text-zinc-600 dark:text-zinc-300 @2xl/notice:text-[13px] @2xl/notice:leading-5">
+              {/*
+                Narrow: the sentence across the full width, then one row with
+                the policy link and the actions (X last). A single row would
+                crush the sentence to five lines at 320px. From @md everything
+                sits on one row. From @5xl (a desktop-width bar) the copy is the
+                full body: the regional opt-in prompt has to say what is
+                measured and why; a phone gets that from the short sentence plus
+                the policy link.
+              */}
+              <div className="flex flex-col gap-1 @md/notice:flex-row @md/notice:items-center @md/notice:gap-3 @2xl/notice:gap-4">
+                <p className="min-w-0 pr-2 pt-1 text-xs leading-4 text-zinc-600 dark:text-zinc-300 @md/notice:flex-1 @md/notice:pr-0 @md/notice:pt-0 @2xl/notice:text-[13px] @2xl/notice:leading-5">
                   <span className="hidden font-bold text-zinc-900 dark:text-zinc-50 @2xl/notice:inline">
                     {promptCopy.title}.{" "}
                   </span>
-                  {promptCopy.mobileBody}{" "}
-                  <Link
-                    href="/privacy"
-                    className="whitespace-nowrap font-bold text-blue-700 underline underline-offset-2 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200"
-                  >
+                  <span className="@5xl/notice:hidden">{promptCopy.mobileBody}</span>
+                  <span className="hidden @5xl/notice:inline">{promptCopy.body}</span>{" "}
+                  <Link href="/privacy" className="hidden @md/notice:inline whitespace-nowrap font-bold text-blue-700 underline underline-offset-2 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200">
                     {copy.privacy}
                   </Link>
                 </p>
-                <div className="flex shrink-0 items-center gap-1.5 @2xl/notice:gap-2">
-                  <ConsentAction
-                    kind="decline"
-                    onClick={decline}
-                    label={promptCopy.decline}
-                    shortLabel={promptCopy.declineShort}
-                  />
-                  <ConsentAction
-                    kind="accept"
-                    onClick={accept}
-                    label={promptCopy.accept}
-                    shortLabel={promptCopy.acceptShort}
-                  />
-                  <button
-                    type="button"
-                    data-testid="analytics-consent-dismiss"
-                    onClick={dismissNotice}
-                    aria-label={copy.dismiss}
-                    className="inline-flex size-11 items-center justify-center rounded-lg text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
-                  >
-                    <X aria-hidden="true" className="size-4" />
-                  </button>
+                <div className="flex shrink-0 items-center justify-between gap-1.5 @2xl/notice:gap-2">
+                  <Link href="/privacy" className="text-xs @md/notice:hidden whitespace-nowrap font-bold text-blue-700 underline underline-offset-2 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200">
+                    {copy.privacy}
+                  </Link>
+                  <div className="flex items-center gap-1.5 @2xl/notice:gap-2">
+                    <ConsentAction
+                      kind="decline"
+                      onClick={decline}
+                      label={promptCopy.decline}
+                      shortLabel={promptCopy.declineShort}
+                    />
+                    <ConsentAction
+                      kind="accept"
+                      onClick={accept}
+                      label={promptCopy.accept}
+                      shortLabel={promptCopy.acceptShort}
+                    />
+                    <button
+                      type="button"
+                      data-testid="analytics-consent-dismiss"
+                      onClick={dismissNotice}
+                      aria-label={copy.dismiss}
+                      className="inline-flex size-11 shrink-0 items-center justify-center rounded-lg text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                    >
+                      <X aria-hidden="true" className="size-4" />
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
