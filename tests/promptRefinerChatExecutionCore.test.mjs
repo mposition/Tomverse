@@ -132,7 +132,7 @@ test("Router, shadow and provider formatting use the consumed view; signed conte
     /const guestAutoSelection = guestAutoRun[\s\S]*?text: profileTextFor\(autoRoutingMessages\)/,
   );
   assert.match(route, /const latestMessage = executionMessages\[executionMessages.length - 1\]/);
-  assert.match(route, /query: latestUserPromptText\(messages\)/);
+  assert.match(route, /const query = latestUserPromptText\(messages\)/);
   assert.match(route, /for \(const \[messageIndex, msg\] of executionMessages\.entries\(\)\)/);
   // The consumed view replaces every message object after `latestMessage` is
   // taken, so the provider loop must not find the current turn by identity.
