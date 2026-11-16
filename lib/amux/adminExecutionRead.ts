@@ -8,6 +8,8 @@ import { loadAmuxContentUnitKeys } from "./ideaKeyStore.ts";
 import { readAmuxV22TaskResultForOwner } from "./v22TaskResultStore.ts";
 import { readAmuxLegacyCardView } from "./legacyCardOwnerService.ts";
 import { readAmuxV4TaskCeilingReapprovalView } from "./v4TaskCeilingReapprovalService.ts";
+import { AMUX_V4_TASK_CEILING_REAPPROVED_ACTION,
+  amuxV4TaskApprovedCeilingInForce } from "./v4TaskCeilingReapprovalCore.ts";
 import { amuxFeedbackTaskWhere, projectAmuxTaskFeedback, readAmuxV4ApprovedCeiling,
   rollupAmuxTaskFeedback } from
   "./v22TaskFeedbackCore.ts";
@@ -688,7 +690,7 @@ export async function readAmuxExecutionFeedback(parent: {
   if (cards.length > 500) return { parent, complete: false,
     reason: "task_limit", rollup: null };
   const ids = cards.map((card) => card.id);
-  const [attempts, usage, decisions, observations, approvals] = ids.length ? await Promise.all([
+  const [attempts, usage, decisions, observations, approvals, reapprovals] = ids.length ? await Promise.all([
     prisma.amuxExecutionAttempt.findMany({ where: { taskId: { in: ids } },
       select: { taskId: true, id: true, startedAt: true, endedAt: true,
         outcome: true, settledCostMicrousd: true, costConfirmed: true } }),
@@ -710,11 +712,18 @@ export async function readAmuxExecutionFeedback(parent: {
       action: "register_card",
     }, select: { id: true, registeredWorkItemId: true,
       confirmationSnapshot: true } }),
-  ]) : [[], [], [], [], []];
+    // Owner ceiling re-approvals, newest first: the first per Task is in force.
+    prisma.adminAuditLog.findMany({ where: {
+      action: AMUX_V4_TASK_CEILING_REAPPROVED_ACTION, targetType: "AmuxWorkItem",
+      targetId: { in: ids },
+    }, orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      select: { targetId: true, entryHash: true, actorUserId: true, metadata: true } }),
+  ]) : [[], [], [], [], [], []];
   const feedback = cards.map((card) => projectAmuxTaskFeedback({
-    ...card, approvedCeilingMicrousd: readAmuxV4ApprovedCeiling(
+    ...card, approvedCeilingMicrousd: approvedCeilingInForce(
       approvals.find((row) => row.id === card.v4SourceApprovalId &&
-        row.registeredWorkItemId === card.id)?.confirmationSnapshot),
+        row.registeredWorkItemId === card.id)?.confirmationSnapshot,
+      reapprovals.find((row) => row.targetId === card.id)),
     attempts: attempts.filter((row) => row.taskId === card.id),
     usage: usage.filter((row) => row.taskId === card.id),
     decisions: decisions.filter((row) => row.proposal.taskId === card.id),
@@ -726,6 +735,24 @@ export async function readAmuxExecutionFeedback(parent: {
   }));
   return { parent, complete: true, reason: null,
     rollup: rollupAmuxTaskFeedback(feedback) };
+}
+
+/** The registration receipt of a confirmation snapshot, or undefined. */
+function confirmationReceipt(snapshot: unknown): unknown {
+  const card = snapshot && typeof snapshot === "object" ?
+    (snapshot as { card?: unknown }).card : undefined;
+  const task = card && typeof card === "object" ? (card as { task?: unknown }).task : undefined;
+  return task && typeof task === "object" ? (task as { costReceipt?: unknown }).costReceipt : undefined;
+}
+
+/**
+ * The approved ceiling of a Task with no owner re-approval reads as before
+ * (readAmuxV4ApprovedCeiling); with one, the re-approval core decides.
+ */
+function approvedCeilingInForce(snapshot: unknown,
+  latest: { entryHash: string | null; actorUserId: string | null; metadata: unknown } | undefined) {
+  return latest ? amuxV4TaskApprovedCeilingInForce(confirmationReceipt(snapshot), latest) :
+    readAmuxV4ApprovedCeiling(snapshot);
 }
 
 /** The digest-verified title reader the card number backfill shares (docs/policy/amux-card-display-key.md §5). */

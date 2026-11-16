@@ -87,3 +87,17 @@ export function readAmuxV4TaskCeilingReapproval(row: AmuxV4TaskCeilingReapproval
     next !== null && next.role === confirmed.role &&
     value.newReceiptDigest === next.receiptDigest ? next : null;
 }
+
+/**
+ * The approved ceiling the Admin feedback shows for one Task: the latest owner
+ * re-approval over the registration receipt, as readAmuxV52TaskReceipt reads
+ * it. A latest entry that does not read leaves the ceiling unknown rather than
+ * showing the lower registration amount.
+ */
+export function amuxV4TaskApprovedCeilingInForce(confirmationReceipt: unknown,
+  latest: AmuxV4TaskCeilingReapprovalRow | null | undefined): bigint | null {
+  const confirmed = validV4TaskReceipt(confirmationReceipt);
+  if (!latest) return confirmed ? BigInt(confirmed.ceilingMicroUsd) : null;
+  const next = confirmed ? readAmuxV4TaskCeilingReapproval(latest, confirmed) : null;
+  return next ? BigInt(next.ceilingMicroUsd) : null;
+}
