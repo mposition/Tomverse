@@ -44,6 +44,10 @@ Auto router optimizer가 cycle마다 쌓는 `code` 권장안(예: "answer 호출
   AMUX 전달이 실패하거나 불명이면 예약을 보존하고, 같은 Send to AMUX를 다시 사용해 기존의
   결정적 request id로 결과를 읽어 마칩니다. 예약을 자동 삭제하거나 에이전트가 인수하지 않습니다.
 
+테스트 전과 검토 요청 직전에는 정확한 base/head를 코드 로그에 남깁니다. 제출 거절·검토 거절·검토 불명은 stdout/stderr의
+비밀값을 가린 마지막 12,000자를 해당 작업의 비공개 `review_submit`/`review_wait` 로그에 보존합니다.
+명령 출력은 앱 결과·중단 알림·journal event에 보내지 않으며, 검토를 자동 재제출하거나 불명 상태를 풀지 않습니다.
+
 ### 제한된 자동 재시도 (2026-11-15 운영자 요청)
 
 앱의 `DAILY_PRODUCT_AGENT_RETRIES_ENABLED=true`를 켜면 `tests`·`no_change`만 최초 포함 최대

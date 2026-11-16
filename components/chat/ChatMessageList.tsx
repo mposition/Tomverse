@@ -1757,27 +1757,6 @@ export function ChatMessageList({
                                 {t("chat.retry")}
                               </button>
                             )}
-                          {/*
-                            Chat (the single transcript, which restores the
-                            question instead of resending it) opens its model
-                            picker here, so the "try another model" hint below
-                            is an action rather than only advice. Nothing is
-                            sent: the next turn stays the user's submission.
-                            When the transcript wires onChooseAnotherModel, that
-                            button below is the one picker, so this one stays out.
-                          */}
-                          {(errorCategory === "generic" || errorCategory === "attachment") &&
-                            !onRetryLast && !onChooseAnotherModel && onRestoreQuestion && onRequestCloseModel && (
-                              <button
-                                type="button"
-                                data-testid="chat-error-choose-model"
-                                onClick={onRequestCloseModel}
-                                className={secondaryButtonClass}
-                              >
-                                <RotateCcw className="h-3.5 w-3.5" />
-                                {t("chat.chooseAnotherModel")}
-                              </button>
-                            )}
                           {errorCategory === "concurrency" &&
                             msg.id === concurrencyRetryMessageId &&
                             onRetryConcurrency && (
@@ -1846,6 +1825,10 @@ export function ChatMessageList({
                             triggerTestId="report-error-button"
                           />
                           )}
+                          {/*
+                            Chat opens its model picker here, once per card;
+                            nothing is sent, the next turn stays the user's.
+                          */}
                           {(errorCategory === "generic" || errorCategory === "attachment") &&
                             (onChooseAnotherModel ? (
                               <button

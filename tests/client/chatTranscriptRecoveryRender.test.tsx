@@ -97,6 +97,7 @@ test("Chat error cards offer the model picker beside question restoration; Revie
       <LanguageProvider initialLang="en">
         <ChatMessageList messages={[question, failed]} currentChatId="c"
           onRestoreQuestion={recovering ? () => {} : undefined}
+          onChooseAnotherModel={recovering ? () => {} : undefined}
           onRetryLast={retry} onRequestCloseModel={() => {}} />
       </LanguageProvider>
     </SessionProvider>

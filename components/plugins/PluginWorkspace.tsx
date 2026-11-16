@@ -189,7 +189,7 @@ export function PluginWorkspace() {
               <p className={styles.help} data-testid="plugin-capability">{card.provider ? mcpProviderSummary(card.provider, lang) : c.customDescription}</p>
               {card.server?.origin ? <p className={styles.help}>{card.server.origin}</p> : null}
               {card.provider && <div className={styles.badges}><span>{p[card.provider.kind]}</span>{card.provider.sources.map(source => <span key={source}>{source === "openai" ? "Codex" : "Claude Code"}</span>)}</div>}
-              <div className={styles.cardFooter}><span>{conn ? conn.status === "connected" ? c.connected : c.expired : card.server ? c.disconnected : addCustom ? c.customReady : c.serverSetup}</span>
+              <div className={styles.cardFooter}><span>{conn ? conn.status === "connected" ? c.connected : c.expired : card.server ? c.notConnected : addCustom ? c.customReady : c.serverSetup}</span>
                 <button type="button" data-testid={card.id === "custom" ? "plugin-custom-add" : undefined} disabled={busy || (!card.server && !card.provider && !addCustom)}
                   onClick={() => conn ? choose(conn) : card.server ? openAdd(card.id) : addCustom ? openCustom() : chooseProvider(card.provider!)}>{conn ? c.manage : card.server || addCustom ? c.connect : p.details}</button></div>
             </article>;
