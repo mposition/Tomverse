@@ -574,6 +574,30 @@ test("the sender sends at most MAX_DISPATCHES_PER_HOUR an hour, and what is over
   }
 });
 
+test("a burst of refused dispatches still stops at MAX_DISPATCHES_PER_HOUR", async () => {
+  // Review r-20261116-191958-8b665b: a refused request leaves the sent ledger
+  // to be sent again, but its POST counts toward the hour (a bad token, 429).
+  const now = 10 * 60 * 60_000;
+  const files = {};
+  for (let i = 0; i < MAX_DISPATCHES_PER_HOUR + 5; i += 1) {
+    const sha = (i + 4096).toString(16).padStart(40, "0");
+    files[`${sha}.json`] = requestFile(sha, now - 1000 + i);
+  }
+  const posts = [];
+  const h = senderHarness({ now, files, fetchImpl: async (url, init) => {
+    posts.push(JSON.parse(init.body).inputs.head_sha);
+    return { status: 401, body: null };
+  } });
+  try {
+    await h.sender.scanOnce();
+    assert.equal(posts.length, MAX_DISPATCHES_PER_HOUR);
+    assert.match(h.lines.at(-1), /rate cap/);
+    assert.deepEqual(h.sent(), {}, "every refused request is still to be sent again");
+  } finally {
+    rmSync(h.stateDir, { recursive: true, force: true });
+  }
+});
+
 test("settings: the sender needs its token and absolute paths; the proposing half refuses any dispatch token", () => {
   const env = { [DISPATCH_TOKEN_ENV]: TOKEN, PR_CI_AUTO_FIX_REPO: "o/r", PR_CI_AUTO_FIX_OUTBOX: "/out", STATE_DIRECTORY: "/state" };
   assert.deepEqual(senderSettings(env), { token: TOKEN, repo: "o/r", outbox: "/out", stateDir: "/state" });
