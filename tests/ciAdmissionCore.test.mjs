@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  CI_ADMISSION_CHECK_LIMIT,
   CI_ADMISSION_HOLD_LABEL,
   CI_ADMISSION_RAMP_MS,
   CI_ADMISSION_WAIT_RECHECK_MS,
@@ -250,13 +249,13 @@ test("a pending status admission left is cleared once its pull request is ready 
   assert.deepEqual(kinds(evaluation).filter((k) => k.startsWith("clear_status")), ["clear_status:1", "clear_status:2", "clear_status:3"]);
 });
 
-test("GitHub is asked only about drafts the free slots reach, ci:hold ones not in line, at most the limit", () => {
-  const open = Array.from({ length: CI_ADMISSION_CHECK_LIMIT + 3 }, (_, i) =>
+// Owner decision 2026-11-16: no limit of six; the free slots decide how many.
+test("GitHub is asked about every draft the free slots reach, ci:hold ones not in line", () => {
+  const open = Array.from({ length: 12 }, (_, i) =>
     pull(i + 1, i === 0 ? { labels: [CI_ADMISSION_HOLD_LABEL] } : i === 1 ? { draft: false } : {}),
   );
-  const checked = ciAdmissionDraftsToCheck({ state: state(), openPulls: open, running: new Set(), nowMs: T0 }).map((p) => p.number);
-  assert.equal(checked.length, CI_ADMISSION_CHECK_LIMIT);
-  assert.deepEqual(checked.slice(0, 2), [3, 4]);
+  const checked = ciAdmissionDraftsToCheck({ state: state({ capacity: 40 }), openPulls: open, running: new Set(), nowMs: T0 }).map((p) => p.number);
+  assert.deepEqual(checked, [3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
   // Every slot taken by running CI: nothing to ask about.
   const busy = [pull(1, { draft: false }), pull(2, { draft: false }), pull(3, { draft: false }), pull(4)];
   assert.deepEqual(ciAdmissionDraftsToCheck({ state: state(), openPulls: busy, running: runs(busy[0], busy[1], busy[2]), nowMs: T0 }), []);
@@ -502,4 +501,10 @@ test("a round records the runners it read, and a stored state without a record s
   const { saturation, ...stored } = emptyCiAdmissionState();
   assert.deepEqual(saturation, []);
   assert.deepEqual(parseCiAdmissionState(JSON.stringify(stored)).saturation, []);
+});
+
+// Owner decision 2026-11-16: the line held 300 pull requests and cut the rest.
+test("the line keeps every open pull request it handles, past the old 300", () => {
+  const open = Array.from({ length: 350 }, (_, i) => pull(i + 1));
+  assert.equal(ciAdmissionOrder([], open).length, 350);
 });

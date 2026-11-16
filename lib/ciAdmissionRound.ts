@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 
 import {
+  CI_ADMISSION_MAX_EVENTS,
   CI_ADMISSION_STATE_SETTING_KEY,
   ciAdmissionDraftsToCheck,
   evaluateCiAdmission,
@@ -302,7 +303,7 @@ async function round(deps: RoundDeps): Promise<CiAdmissionRoundOutcome> {
           pendingStatus: current.pendingStatus.filter((entry) => !cleared.has(`${entry.number}@${entry.headSha}`)),
           // A release that did not happen reserves nothing.
           released: current.released.filter((entry) => !failedReleases.has(entry.number)),
-          events: [...current.events, ...extra].slice(-50),
+          events: [...current.events, ...extra].slice(-CI_ADMISSION_MAX_EVENTS),
         });
       },
       { timeout: TX_TIMEOUT_MS, maxWait: TX_TIMEOUT_MS },
