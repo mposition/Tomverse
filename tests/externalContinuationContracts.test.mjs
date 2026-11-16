@@ -1260,12 +1260,17 @@ test("a retry reuses the attempt's idempotency key and only cancel clears it", (
     // answer's body has drained.
     assert.match(startBody, /isOwnerCurrentRef\.current\?\.\(\) \?\? true/);
     assert.match(startBody, /if \(!isCurrent\(\)\) \{\s*await discardResponseBody\(response\);\s*settleStale\(\);\s*return false;/);
-    assert.match(startBody, /await discardResponseBody\(response\);\s*if \(!isCurrent\(\)\) \{\s*settleStale\(\);\s*return false;\s*\}\s*setStatus\("failed"\)/);
+    const failedResponse = startBody.slice(startBody.indexOf("if (!response.ok) {"), startBody.indexOf("const body ="));
+    assert.match(failedResponse, /await discardResponseBody\(response\);\s*if \(!isCurrent\(\)\) \{\s*settleStale\(\);\s*return false;\s*\}/);
+    // Instrumentation may follow the ownership guard, but failure state must
+    // never be published before a stale response has returned.
+    assert.ok(failedResponse.indexOf("return false;") < failedResponse.indexOf('setStatus("failed")'));
     assert.match(startBody, /if \(!isCurrent\(\)\) \{\s*settleStale\(\);\s*return false;\s*\}\s*if \(!body\.conversationId\)/);
 
     // Cancel drops the key, because that is the deliberate "start a second
     // fork"; a success this screen acted on ends the attempt. Nothing else.
-    assert.match(startBody, /openAttemptKeys\.delete\(endpoint\);\s*router\.push\(/);
+    const clearedAttempt = startBody.indexOf("openAttemptKeys.delete(endpoint)");
+    assert.ok(clearedAttempt >= 0 && clearedAttempt < startBody.indexOf("router.push("), "the successful attempt is cleared before navigation");
     const cancelBody = launcher.slice(launcher.indexOf("const cancel = useCallback"));
     assert.match(cancelBody, /openAttemptKeys\.delete\(endpoint\)/);
     assert.equal((launcher.match(/openAttemptKeys\.delete\(/g) ?? []).length, 2);
