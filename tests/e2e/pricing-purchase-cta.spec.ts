@@ -647,6 +647,15 @@ test.describe("the sign-in round trip keeps the purchase intent", { tag: "@ui-ri
       "?lang=en&intent=subscription&target=max&trigger=account#plans"
     );
 
+    // A Free account returning with a Max intent goes straight to the Max
+    // checkout. Wait for it before counting text in the card: the dialog sits
+    // inside the card and carries its own "Upgrade to Max", so a count taken
+    // while it is opening depends on timing.
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+
     const maxCard = page.getByTestId("pricing-plan-card-max");
     await expect(maxCard).toHaveAttribute("data-requested-target", "true");
     await expect(page.getByTestId("pricing-plan-card-pro")).not.toHaveAttribute(
