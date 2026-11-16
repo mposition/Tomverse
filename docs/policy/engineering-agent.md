@@ -7,6 +7,7 @@ approvedBy: mposition · approvedAt: 2026-10-15 · 정책 버전: 6
 |---|---|---|
 | (미부여) | (미승인) | 최초 초안 |
 | 6 (버전 유지) | 2026-11-16 mposition | 운영자 결정(대화, 버전 증가 없음): push 규칙의 경로·형태 판정을 없앰 — 분류 안 된 경로, 목록에 없는 최상위 디렉터리, 새 framework 진입 파일, 런타임 로더, 실행 비트, binary, 정책처럼 보이는 테스트 이름, framework 버전 재확인. 돈·비밀값·통제 평면 판정(결정값 경보, 자격증명 도달, 통제 평면 경로·slice, 정책 문서가 이름 댄 테스트)과 symlink·submodule은 남김. diff 편집 budget 1,000 → 5,000. run이 기록한 정지는 GitHub App 신원·namespace 신호(`config_missing`·`unbound_app_pr`·`unbound_app_ref`)만 사람 확인으로 남기고 나머지(`state_mismatch`, 옛 `circuit_open`)는 기록만으로 붙잡지 않음(불일치는 열려 있는 동안만 정지). circuit latch와 armed gate(7일 monitor 확인, 26시간 종료 기록)를 없앰. 결과 불명 자동 조회는 이미 끝나지 않았고(간격 최대 16시간) 그대로. GitHub check-runs·reviews 읽기는 페이지를 넘기고 binding 기록 CHECK는 1 MiB 하나로(migration `engineering_agent_binding_record_size`) |
+| 6 (버전 유지) | 2026-11-16 mposition | 운영자 결정(대화, 버전 증가 없음): 켜짐 동작을 되돌리기만 하던 스위치 `ENGINEERING_AGENT_LEGACY_HALTS`, `ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP`, `ENGINEERING_AGENT_V22_REVIEW_PR`, `TOMVERSE_ENGINEERING_AGENT_T2_DM_REVIEW`와 어댑터 코드 래치, 그리고 push 규칙이 쓰지 않는 `CONVENTION_VERSIONS`를 없앤다. 엔지니어링 에이전트 전체 정지(`ENGINEERING_AGENT_KILL_SWITCH`)와 게시 경계는 그대로이며, 남는 스위치는 `enabled`/`disabled`로 적고 기존 값도 같은 뜻으로 읽는다. |
 | 6 | 2026-10-15 mposition | 자동 개발: fork 게시, 게이트 파일 slice, develop 자동 병합 |
 | 5 | 2026-10-15 mposition | v22 `implement` 게시 경로만: AMUX 작업 검토 단계를 없애고 GitHub에서 관측한 사람의 승인·병합으로 `done`, PR 번호는 게시 capability가 발급된 attempt에 기록, 이미지 증명은 배포 파이프라인이 산출하고 앱이 대조, `t1` 진입은 shadow 기간·판정 건수·비율 대신 일회성 점검 기록과 이 승인(§13 약화, 독립 검토). 판정 과소 관측 시 `shadow` 복귀, push 금지 집합·T1/T2·승인·병합 금지는 그대로 |
 | 4 | 2026-10-07 mposition | 배포 이미지에 실제로 없는 비런타임 파일만 통제 평면 slice에서 제외할 수 있는 좁은 예외. 동일 base commit·tree·운영자가 확인한 이미지 digest와 전체 파일 목록, 앱의 목록 SHA 재계산, 런타임 source SHA·deployment ID 대조, 동적 파일 접근 분석과 배포 후 실측이 모두 필요하다. 앱이 OCI digest를 독립 조회한다고 주장하지 않는다. v22 게시 경로는 Task 실행·기존 Publisher 스위치와 별도인 기본 꺼짐 코드 latch를 둔다. 게시 산출물이 없는 성공에는 `private_result`를 기록한다. 하나라도 없으면 기존 T2 유지 |
@@ -180,8 +181,8 @@ v22 `implement` Task의 패치가 T2로 판정되어도 아래를 모두 만족�
 표시 코드(`AMUX-FILEREQ-005`)로 시작한다(운영자 요청 2026-11-13). 앱이 카드 행에서 읽어 형식을 검사한
 코드만 쓰고, 아이디어에서 나온 카드 제목은 쓰지 않는다.
 
-- 앱 변수 `ENGINEERING_AGENT_V22_REVIEW_PR`가 정확히 `off`가 아니다(기본 켜짐, 운영자 결정 2026-11-15 —
-  스위치를 기다리는 T2 patch는 아무도 검토할 수 없는 결과였다).
+- 이 경로는 늘 열려 있다(운영자 결정 2026-11-15 — 스위치를 기다리는 T2 patch는 아무도 검토할 수 없는
+  결과였다. 2026-11-16에 `ENGINEERING_AGENT_V22_REVIEW_PR` 스위치를 없앴다).
 - T1 후보와 같은 결속(run·카드·base·patch digest, `t1`로 시작한 run, 카드의 공개 PR 동의, 게시 스위치)이
   성립하고, base 증거로 결과 tree를 만들 수 있다. 게이트 증거를 읽지 못해 T2가 된 경우도 포함한다.
 - `.github/workflows/` 아래 파일을 바꾸지 않는다. 게시 서비스의 토큰에는 `workflows` 권한이 없어 GitHub이
@@ -198,7 +199,7 @@ v22 `implement` Task의 패치가 T2로 판정되어도 아래를 모두 만족�
 되지 않는다. 앱은 claim 요청 헤더 `x-engineering-publisher-features`에 `review_draft`를 적은 게시 서비스에만
 검토 항목의 쓰기 claim을 준다. 그래서 이 기능 이전에 배포된 게시 서비스는 이 항목을 ready PR로 열 수 없다.
 PR 대기열 상한(§12), 결과 불명 처리(§10), 병합은 사람이 한다는 규칙은 T1과 같다. 위 조건에 맞지 않는 T2는
-지금처럼 비공개 초안으로 남는다. 운영자가 `TOMVERSE_ENGINEERING_AGENT_T2_DM_REVIEW=enabled`를 켜면 열린 T2 초안은
+지금처럼 비공개 초안으로 남는다. 열린 T2 초안은 항상(스위치 `TOMVERSE_ENGINEERING_AGENT_T2_DM_REVIEW`는 2026-11-16에 없앴다)
 DM에 조언 카드로 올라가고(docs/policy/amux-decision-maker.md 결과 검토 항), 그 답은 결정 대기 화면에 참고로만 보인다.
 승인과 거절은 여전히 사람이 한다.
 
@@ -590,8 +591,8 @@ snapshot과 같아야 한다) → 사람이 병합하고 본 앱이 병합을 �
       멈췄다. 앱은 병합 관측의 감사 기록에 실제로 병합된 head(`mergedHeadSha`), PR diff
       digest(`mergedDiffDigest`, 읽지 못했으면 null), 그것이 검증된 변경과 같은지
       (`mergedHeadVerified`)를 남긴다. 그래서 자동 수정이 바꾼 내용도 승인된 diff로 기록된다.
-      `ENGINEERING_AGENT_LEGACY_HALTS=enabled`이면 종전 규칙(검증된 head이거나, 바이트 단위로
-      같은 diff — 운영자 결정 2026-11-13, #3828)으로 돌아간다.
+      종전 규칙(검증된 head이거나, 바이트 단위로 같은 diff — 운영자 결정 2026-11-13, #3828)으로
+      돌아가는 스위치(`ENGINEERING_AGENT_LEGACY_HALTS`)는 2026-11-16에 없앴다.
 
     병합 전에 기록된 승인 review는 검증된 변경의 병합과 승인권자 본인의 병합에 그대로 승인이다.
     **다른 주체(bot·App·다른 계정)가 승인 뒤 움직인 head를 병합했다면 승인이 아니다** — review가
@@ -663,8 +664,8 @@ snapshot과 같아야 한다) → 사람이 병합하고 본 앱이 병합을 �
 - 결정 항목이 열려 있는 결과 불명 게시 항목은 **다시 조회하지 않는다.** 사람이 그 결정을
   확인하면 다음 회차가 한 번 조회하고, 그래도 모르면 결정 항목 하나를 새로 연다. 같은 게시
   항목의 결정 항목을 확인하면 그 항목의 이전 결정 항목도 함께 확인 처리된다(감사 기록에 목록).
-  예외(운영자 결정 2026-11-14, AMUXFLOW/B1; 2026-11-15부터 기본 켜짐,
-  `ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP=disabled`가 끈다): 열린 결정 항목이 기다림을 채운
+  예외(운영자 결정 2026-11-14, AMUXFLOW/B1; 2026-11-15부터 늘 켜짐, 2026-11-16에
+  `ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP` 스위치를 없앴다): 열린 결정 항목이 기다림을 채운
   게시 항목은 사람 확인 없이 다시 조회한다. 조회는 읽기뿐이다.
   기다림은 30분이고, 그 게시 항목이 연 결정 항목 하나마다 두 배가 된다(최대 32배, 16시간).
   횟수 상한은 없다(2026-11-15 운영자 결정. 그 전에는 결정 항목 3개에서 멈추고 사람을 기다렸다). 조회가 결과를 확정하면
@@ -815,8 +816,8 @@ Admin › 엔지니어링 Agent 대기열의 "다시 판정"으로도 `tier_pend
   `lib/amux/reviewMergeObserved.ts`). 막힌 상태가 오래 갈 것이 분명해도 배정을 미루지 않는다:
   막는 조건은 대개 한 시간 안에 풀리고, 미루면 worker가 놀고 이미 시작된 run의 결과는 어차피
   보존해야 한다. 보존은 행 하나이고 시도를 쓰지 않는다. 이 시도들은 DM에게 다시 실행을
-  묻지 않는다(`docs/policy/amux-decision-maker.md`). `ENGINEERING_AGENT_LEGACY_HALTS=enabled`이거나
-  v22 게시(`TOMVERSE_AMUX_V22_ENGINEERING_PUBLICATION`)가 꺼져 있으면 보존된 결과를 게시하지 않고
+  묻지 않는다(`docs/policy/amux-decision-maker.md`). v22 게시(`TOMVERSE_AMUX_V22_ENGINEERING_PUBLICATION`)가
+  꺼져 있으면 보존된 결과를 게시하지 않고
   종전대로 사람·DM 검토에 남긴다.
 - engineering run은 AMUX 실행 시도 하나와 1:1이고 AMUX 실행 시작과 같은 트랜잭션에서
   만들어진다(게시 대기 결과를 나중에 게시하는 run은 이미 끝난 시도에 열리고 같은 트랜잭션에서
@@ -904,8 +905,8 @@ Admin › 엔지니어링 Agent 대기열의 "다시 판정"으로도 `tier_pend
   더 이상 세지 않는다(migration `engineering_agent_run_guard_uncapped`,
   `engineering_agent_work_item_guard_uncapped`). 대기 항목은 오래되어도 만료되지 않고 처리될
   때까지 남는다(미claim 게시 14일·결정 7일 만료는 호출처 없이 남아 있던 코드와 함께 지웠다).
-  나이는 화면의 생성 시각으로 본다. `ENGINEERING_AGENT_LEGACY_HALTS=enabled`이면 앱이
-  admission에서 8·8 상한을 다시 건다(DB는 세지 않으므로 앱만의 판정이다). 등록은 소유자
+  나이는 화면의 생성 시각으로 본다. 앱도 admission에서 상한을 걸지 않는다(8·8 상한을 되살리던
+  `ENGINEERING_AGENT_LEGACY_HALTS`는 2026-11-16에 없앴다). 등록은 소유자
   대기 항목이 아니지만 §2.2의 상한을 따른다. 결속은 관측 round가 PR이 닫히면 `closed`로,
   branch가 사라지면 `pruned`로 옮긴다. 병합된 PR은 승인 관측기가 병합을 기록한 뒤에만
   옮긴다.
@@ -936,14 +937,16 @@ Admin › 엔지니어링 Agent 대기열의 "다시 판정"으로도 `tier_pend
 
   자격 증명 노출은 kill switch와 사고 처리의 몫이다: patch의 secret은 저장 전에 거절되고,
   새어 나간 key는 기다리지 않고 폐기한다. 정지 중에는 claim과 등록이 없고 관측만 계속한다.
+  전체 정지 변수 `ENGINEERING_AGENT_KILL_SWITCH`는 `enabled`로 켜고 `disabled`이거나 비어 있으면 꺼진다
+  (이미 들어 있는 `1`·`true` 등 다른 값도 계속 켜짐이고, `0`·`false`는 계속 꺼짐이다).
   run이 기록한 정지(§11)는 위 1·2의 신호(`config_missing`, `unbound_app_pr`, `unbound_app_ref`)만
   Admin 화면의 확인으로 푼다(권한 + step-up + 감사). 기록된 정지는 새 run의 시작을 막으므로 "다음
   정상 run"이 풀 수 없고, 그래서 사람 확인이 남는 것은 이 셋뿐이다(운영자 결정 2026-11-16). run이
   기록한 `state_mismatch`와 옛 `circuit_open`은 기록만으로 붙잡지 않는다 — 불일치는 열려 있는 동안
   실시간 판정으로 정지하고, 해소되면 다음 판정이 깨끗하다.
-  `ENGINEERING_AGENT_LEGACY_HALTS=enabled` 하나가 2026-11-15 결정(카드 단위 보류, 움직인 head,
-  스스로 풀리는 정지, 승인권자 병합의 diff, 대기열 상한, 결과 보존)을 종전 동작으로 돌리는 kill
-  switch다. 2026-11-16에 없앤 차단기, armed gate, 위 셋 밖의 사람 확인은 되살리지 않는다.
+  2026-11-15 결정(카드 단위 보류, 움직인 head, 스스로 풀리는 정지, 승인권자 병합의 diff, 대기열
+  상한, 결과 보존)을 종전 동작으로 돌리던 kill switch `ENGINEERING_AGENT_LEGACY_HALTS`는 2026-11-16에
+  없앴다. 같은 날 없앤 차단기, armed gate, 위 셋 밖의 사람 확인도 되살리지 않는다.
 - **정지 복구 도구**는 운영자가 로컬에서 돌린다. 읽기 전용 계획을 먼저 내고, 항목이
   소수를 넘으면 사고로 처리한다. 사고 종결은 게시 App key 폐기 또는 설치 해제, 모드
   `off`, 기록이며, 재진입은 새 전용성 기록과 **이 정책의 새 버전 승인** 뒤다.

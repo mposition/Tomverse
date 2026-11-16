@@ -19,6 +19,7 @@ allowlistGenesisCommit: 8e3dbf64452ab75e3c6f080c8f5f531c02ace387
 | 7 (버전 유지) | 2026-10-20 mposition | 운영자 결정(AGENTS.md Frontier 절, 버전 증가 없음): 릴리스 열차(1절 5항, 8절 12항) — `main:next` 라벨, AEST 출발 시각, `release/train-*` push와 main PR 생성, 기본 꺼진 `QA_RELEASE_TRAIN_ENABLED` |
 | 7 (버전 유지) | 2026-11-03 mposition | 운영자 결정(AGENTS.md Frontier 절, 버전 증가 없음): CI 자동 수정은 예외 없이 모든 열린 PR을 고침 — workflow·action 파일도, PR당 시도 상한도 없음(8절 3항). 레인의 제외 목록은 그대로 |
 | 7 (버전 유지) | 2026-11-16 mposition | 운영자 결정(대화, 버전 증가 없음): 병합 레인이 develop의 latch를 스스로 풂(8절 5항) — 결과 불명, dev 배포 실패·불명·대기 초과·읽기 실패, 결과 보고 침묵으로 걸린 latch를 다시 읽어 그 시도가 레인이 읽은 결과로 닫혔고 열린 시도가 없으며 dev 배포가 정상일 때만. 다른 base 병합, develop 밖 merge commit, revision 불일치와 main 병합·production 배포는 그대로 사람만. 레인의 제외 목록과 DM 병합 범위는 그대로 |
+| 7 (버전 유지) | 2026-11-16 mposition | 운영자 결정(대화, 버전 증가 없음): main 병합·production 배포와 유료 호출에 닿는 서비스 스위치(`QA_RELEASE_*_ENABLED`, `MERGE_LANE_KILL_SWITCH`, `TRAIN_MODEL_RESOLVE`, `MODEL_VERDICT`, `CI_ADVICE_ENABLED`, `CI_ADMISSION_MODE`)는 그대로 둔다. 값은 `enabled`/`disabled`로 적고 기존 `true`·`false` 값도 같은 뜻으로 읽는다. CI 입장의 브랜치 갱신 끄개(`CI_ADMISSION_UPDATE_BRANCH`)는 없앴다. |
 | 7 (버전 유지) | 2026-11-15 mposition | 운영자 결정(AGENTS.md Frontier 절, 버전 증가 없음): DM 승인 PR의 병합 범위에 차단 목록을 추가(8절 3항 예외 하나) — 앱의 `TOMVERSE_AMUX_DM_MERGE_SCOPE`가 정확히 `blocklist`일 때만 켜지고, 기본은 2026-11-13의 허용 목록(운영자 결정 2026-11-16: 기본 꺼짐으로 배포). 레인의 다른 제외와 main 제외는 그대로 |
 
 **규범은 이 파일의 `develop` 현재 내용 하나입니다.** 이전 버전의 본문은 그 버전을 병합한 PR(버전 1 #1946, 버전 2 #1950,
@@ -328,7 +329,7 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
    보고까지 90초 이내였고, 본 앱을 다시 읽어 열린 시도도 latch도 없으면, 같은 회차가 처음부터와 같은 순서(dev 배포 확인,
    후보 선택, 지시 발급·소비, 병합)로 다음 PR을 진행합니다. 배포 실패·불명·대기 초과로 닫거나 latch한 회차는 이어 가지 않습니다.
 6. **스위치.** 병합은 다음이 **모두** 성립할 때만 합니다. 각 스위치는 **그것을 읽을 수 있는 쪽이 판정**합니다.
-   - 서비스 활성화 변수가 `true` — 병합 레인 서비스가 판정합니다.
+   - 서비스 활성화 변수가 `enabled`(이미 들어 있는 `true`도 같은 뜻) — 병합 레인 서비스가 판정합니다.
    - kill switch 변수가 **선언되어 있고 비어 있음** — 병합 레인 서비스가 판정합니다. 공백을 포함해 어떤 문자든 들어 있으면
      정지이고, 선언되지 않은 것은 읽지 못한 것으로 보아 정지입니다.
    - develop 레인 스위치(운영자 제어 기록)가 켜져 있음 — 본 앱이 판정합니다.
@@ -395,12 +396,12 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
       develop의 지금 파일과 같거나, PR의 hunk마다 문맥을 포함한 결과 블록이 main에 통째로 있을 때입니다. 그러면 "내용 대조로 main에
       있음"이 되어 목록에서 빠집니다. 나머지는 "확인되지 않은 변경"으로 남고, 모델이 PR 본문, 그 변경, 그 파일을 나중에 건드린 main
       PR 본문을 보고 "릴리스 필요·불필요·운영자 판단"과 이유를 답하며, 근거로는 보여 준 PR만 인정합니다. 모델은 열차
-      전용 키로 돌며 한 회차 10건까지, 같은 차이는 한 번만 묻습니다(실패는 6시간 뒤 다시). `QA_RELEASE_TRAIN_MODEL_VERDICT=false`로
+      전용 키로 돌며 한 회차 10건까지, 같은 차이는 한 번만 묻습니다(실패는 6시간 뒤 다시). `QA_RELEASE_TRAIN_MODEL_VERDICT=disabled`(이미 쓰던 `false`도 같은 뜻)로
       끕니다. 결과는 표시 전용 AppSetting 하나이고 열차는 읽지 않습니다. Admin은 판정과 근거를 후보마다 보여 주고, 모델이 불필요로 본
       후보를 한 번에 숨기는 버튼을 둡니다(숨김은 위의 감사 기록 그대로).
     - **조립**은 서비스가 공개 저장소를 임시 디렉터리에 새로 clone한 main 위에서 develop 병합 순서대로 `cherry-pick -m 1`을
       합니다. main에 이미 있는 PR(main에서 도달 가능하거나, 적용할 변경이 없음)은 건너뜁니다. 충돌한 PR은
-      `QA_RELEASE_TRAIN_MODEL_RESOLVE=true`이고 열차 전용 키 `QA_RELEASE_TRAIN_ANTHROPIC_API_KEY`가 있을 때 모델에 넘깁니다(운영자
+      `QA_RELEASE_TRAIN_MODEL_RESOLVE=enabled`(`true`도 같은 뜻)이고 열차 전용 키 `QA_RELEASE_TRAIN_ANTHROPIC_API_KEY`가 있을 때 모델에 넘깁니다(운영자
       2026-10-28, `lib/qaReleaseTrainResolve.ts`, 기본 꺼짐, 호출마다 과금). 모델은 PR의 diff와 충돌 구간(diff3, 앞뒤 20줄)을 보고
       각 구간이 main에서 될 줄만 씁니다. main의 줄에 이 PR의 변경만 더하고, main에 없는 다른 PR의 줄은 들이지 않습니다. 모든
       구간에 답하지 않았거나 충돌 표시가 남은 답은 쓰지 않습니다. 텍스트가 아닌 파일, 한쪽에서 지운 파일은 넘기지 않습니다. 한 열차에서
@@ -440,8 +441,8 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
     - **GitHub 쓰기는 둘뿐**입니다: `release/train-*` 브랜치 push와 그 브랜치의 main PR 생성(ready). PR 본문은 탑승·제외 목록과
       7.9.1 기록 칸(RC SHA, Rollback SHA = 출발 시점의 main head, Verified·Back-merge 칸)입니다. **main 병합은 하지 않습니다**
       — 운영자가 GitHub나 `npm run merge-train -- --include-main`으로 합니다. label·comment·status는 쓰지 않습니다.
-    - **스위치**: 별도 Railway 서비스 "QA Release Train"(production, 30분마다, `.railway/agent-runners.ts`)에서 `QA_RELEASE_TRAIN_ENABLED`가 정확히
-      `true`일 때만 돕니다(기본 꺼짐). 2026-10-22 운영자 결정으로 병합 레인 서비스에서 분리했습니다 — train 실패가 develop
+    - **스위치**: 별도 Railway 서비스 "QA Release Train"(production, 30분마다, `.railway/agent-runners.ts`)에서 `QA_RELEASE_TRAIN_ENABLED`가 `enabled`(또는
+      `true`)일 때만 돕니다(기본 꺼짐). 2026-10-22 운영자 결정으로 병합 레인 서비스에서 분리했습니다 — train 실패가 develop
       레인을 함께 멈추지 않게 하기 위해서입니다. 레인의 App과 앱 secret을 같이 쓰므로 앱 쪽에 새로 둘 것은 없습니다. 출발마다 본 앱이 먼저 승인합니다: 서비스가 든
       revision이 최신 운영자 제어 revision과 같고 같은 출발을 전에 승인하지 않았을 때만이며(레인 latch는 보지 않습니다 —
       운영자 결정 2026-10-23, train은 레인과 독립), 승인과 결과를 병합 레인 actor의 시스템 감사
@@ -489,7 +490,7 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
 
 열차 서비스가 하루 한 번, develop 커밋의 check별 소요 시간과 CI 입장의 러너 부하 기록(이름과 숫자뿐, 로그와 diff는 보내지 않음)을
 모델에 보내 대기 시간을 줄일 방안을 받아 Admin 개요에 보여 줍니다(`lib/qaReleaseCiAdvice.ts`). 제안 생성은 아무것도 자동으로
-바꾸지 않으며 감사 이벤트가 아닙니다. 유료 호출이라 `QA_RELEASE_CI_ADVICE_ENABLED`가 정확히 `true`일 때만 돌고(기본 꺼짐), 열차의
+바꾸지 않으며 감사 이벤트가 아닙니다. 유료 호출이라 `QA_RELEASE_CI_ADVICE_ENABLED`가 `enabled`(또는 `true`)일 때만 돌고(기본 꺼짐), 열차의
 Anthropic 키로 24시간에 최대 1회입니다. 호출 전에 시각을 먼저 기록하고 기록에 성공한 회차만 호출하므로, 어떤 실패도 호출을 되풀이하지 않습니다.
 
 2026-11-13 운영자 요청: 개선안 목록에 완료·거절·AMUX 전송·작업문 복사를 제공합니다. 항목은 내용별 고정 ID와 처리 이력을

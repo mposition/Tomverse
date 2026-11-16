@@ -229,8 +229,8 @@ amux wsl bridge halted: no new assignments; cause=<원인>; restart only after c
 결과 불명(`read_only_api_outcome_unknown`, `api_model_access_*`)일 때만 종료 코드 3으로 사람을 기다린다. 그 밖의
 halt(`dispatch_outcome_unknown`, `settle_outcome_unknown`, `pending_session_missing` 등)는 종료 코드 75로 끝나고
 systemd(`Restart=on-failure`, `RestartSec=60`)가 다시 시작한다. 새 프로세스는 다시 등록하고, 남은 attempt는
-lease가 끝나면 앱이 플랫폼 실패로 다른 워커에게 보낸다(카드 시도를 쓰지 않는다). bridge에
-`TOMVERSE_AMUX_BRIDGE_READ_BACK_PROCEED=disabled`를 두면 모든 halt가 예전처럼 종료 코드 3이다. 아래 자동 재시작
+lease가 끝나면 앱이 플랫폼 실패로 다른 워커에게 보낸다(카드 시도를 쓰지 않는다). 이 동작의 스위치
+(`TOMVERSE_AMUX_BRIDGE_READ_BACK_PROCEED`)는 2026-11-16에 없앴고 늘 켜져 있다. 아래 자동 재시작
 timer는 종료 코드 3으로 남은 halt에만 계속 쓰인다.
 
 코드: `scripts/amux-bridge-autorestart/`. 테스트: `tests/amuxBridgeAutorestart.test.mjs`.
@@ -371,10 +371,10 @@ systemctl list-unit-files 'tomverse-amux-*' 'amux-*' --no-pager
 
 ### 6.1 알림
 
-- sync route는 sync token이 맞으면 라우팅 스위치를 보기 전에 호출 시각을 기록한다(`lib/amux/dmRelayHeartbeat.ts`, 쓰는
+- sync route는 sync token이 맞으면 다른 일을 하기 전에 호출 시각을 기록한다(`lib/amux/dmRelayHeartbeat.ts`, 쓰는
   곳은 이 route 하나). 기록에 실패해도 relay의 tick은 실패하지 않는다.
-- 감시는 **production 배포에서 `TOMVERSE_AMUX_DM_ROUTING=enabled`일 때만** 본다. 전용 Ubuntu relay는 production을
-  부른다. dev·staging에 라우팅 스위치가 켜져 있어도 그 환경에 relay가 설치됐다는 뜻이 아니므로 감시하거나 복구를 알리지
+- 감시는 **production 배포에서만** 본다(2026-11-16에 `TOMVERSE_AMUX_DM_ROUTING` 조건을 없앴다). 전용 Ubuntu relay는 production을
+  부른다. dev·staging에는 그 환경에 relay가 설치됐다는 뜻이 아니므로 감시하거나 복구를 알리지
   않는다. 배포 환경은 `resolveDeploymentEnvironment`로 판정하며 `NODE_ENV=production`만으로 dev를 production으로 보지
   않는다. 마지막 호출이 **5분**(idle tick 10번)보다 오래됐거나
   기록이 없으면 `AMUX_DM_RELAY_SILENT`를 보내고, 같은 상태는 3시간마다 다시 알린다. 다시 호출하면 `…_RECOVERED`가 간다.

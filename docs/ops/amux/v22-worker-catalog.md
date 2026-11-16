@@ -179,10 +179,11 @@ are outside this repair.
 
 ## Local CLI flow (owner decision 2026-11-15)
 
-A v22 one-shot run behaves like a local CLI session; this is the default.
-`TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW=disabled` restores the earlier behaviour in
-the app, the sidecar and the bridge, so set it the same way on Railway and in
-the box's sidecar and bridge unit drop-ins. Source:
+A v22 one-shot run behaves like a local CLI session, always. The switch that
+restored the earlier behaviour (`TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW=disabled`)
+was removed on 2026-11-16 together with that behaviour; delete the variable
+from Railway and from the box's sidecar and bridge unit drop-ins. Only the
+risk-accepted read-only retry keeps its exact earlier launch. Source:
 `lib/amux/v22LocalCliFlowCore.ts`; policy: `docs/policy/development-agent-orchestration.md`
 "v22 worker 실행: 로컬 CLI 흐름".
 
@@ -284,5 +285,6 @@ until it is):
    after the next stage or keepalive round, and the worker's row on Admin ›
    AMUX settings › Workers.
 
-`TOMVERSE_AMUX_INFRA_FAILURE_ROUTING=disabled` on the app turns the whole
-change off (the route answers 409 and the bridge only logs it).
+The change is always on: the `TOMVERSE_AMUX_INFRA_FAILURE_ROUTING` switch that
+turned it off was removed on 2026-11-16, and the worker-health route no longer
+answers 409 `disabled`.

@@ -1808,9 +1808,8 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   `lib/amux/dbBoundary.ts`의 `decisionMakerRouting`(상한 12),
   `tests/server-contract/amux-decision-maker-routing-route.test.ts`,
   `tests/server-contract/amux-decision-maker-routing-route-budget.test.ts`. bridge가 부를 판정 route이며
-  **`TOMVERSE_AMUX_DM_ROUTING=enabled`가 아니면 body를 읽기 전에 409 `dm_routing_disabled`입니다** — 이
-  route를 부르는 bridge 경로가 S2(docs/policy/amux-decision-maker.md §12)이므로, 그 승인 전에는 스위치와
-  상관없이 요청 원장에 아무것도 쓰지 않습니다. 판정은 body store의
+  인증 뒤 항상 열려 있습니다(2026-11-16에 `TOMVERSE_AMUX_DM_ROUTING` 스위치와 409 `dm_routing_disabled`를 없앴습니다;
+  DM 전체 kill switch는 DB switch입니다). 판정은 body store의
   `recordDecisionMakerRequestWithCardText()` 하나이고(route는 인증·body·key ring·예산·경계만), 같은 (카드,
   질문 revision)은 기존 요청을 돌려주므로 결과 불명 뒤 같은 질문을 다시 보내는 것은 조회입니다. key ring
   오류는 DB에 닿기 전에 503이며 로그에는 코드만 남깁니다. 응답과 로그에 카드 문구·digest·감사 id는
@@ -1898,8 +1897,7 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   `decisionMakerResultLookupRead`(3)·`decisionMakerResultUnknown`(9),
   `tests/server-contract/amux-decision-maker-broker-routes.test.ts`,
   `tests/server-contract/amux-decision-maker-broker-routes-budget.test.ts`. 라우팅 뒤에 bridge·broker가 부르는 원장 기록
-  route이며, S1f3과 같이 **`TOMVERSE_AMUX_DM_ROUTING=enabled`가 아니면 body를 읽기 전에 409 `dm_routing_disabled`**이고 key
-  ring도 DB도 건드리지 않습니다. route는 인증·body·key ring·예산·경계만 하고 판정은 동작마다 store 함수 하나입니다 — 배정과
+  route이며, 인증 뒤 항상 열려 있습니다(2026-11-16에 `TOMVERSE_AMUX_DM_ROUTING` 스위치를 없앴습니다). route는 인증·body·key ring·예산·경계만 하고 판정은 동작마다 store 함수 하나입니다 — 배정과
   결과 제출은 body store의 조합, 나머지는 request store이며, route에는 SQL도 스위치 읽기도 없습니다. store가 돌려준 거절은
   `unknown_request` 404, `digest_key_unavailable`·`settings_unreadable` 503, 그 밖은 409이고, 결과 제출은 원장의 확정
   답(accepted·existing·rejected·already_rejected)이 모두 200과 그 status입니다. **요청 키 K_R은 배정 응답에만 있습니다** —
@@ -2046,7 +2044,7 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   지웁니다(검토 3, 재검토). 표식을 포함해 이름이 둘 이상인(hard link) 항목이 있으면 `hard_link`로 거부하고, 빌드는 기존 항목을 먼저 unlink한
   뒤 모든 파일을 배타적 생성(`wx`, `COPYFILE_EXCL`)으로만 씁니다 — 기존 파일 안에 쓰지 않습니다(세 번째 검토 r-20261017-121031-9ff0a9).
   unit을 enable·start하지 않고, CLI는 `--version`만(nobody, 네트워크 없는 namespace, 빈
-  환경) 실행하며, 앱의 `TOMVERSE_AMUX_DM_ROUTING`은 그대로 꺼져 있습니다. bridge relay(S2-2b)와 cleanup_unknown 보고 route는
+  환경) 실행하며, 당시 앱의 라우팅 route는 아직 열리지 않았습니다. bridge relay(S2-2b)와 cleanup_unknown 보고 route는
   없습니다.
 - **S2-2b1(선택지별 효과 등급·경로와 정책 버전 2)**: `lib/amux/decisionMakerCore.ts`의 `DmCardOption`, 효과 등급 목록과 변경
   경로 상한, `dmOptionEffectWellFormed()`, 카드 텍스트 형식 `amux-dm-card-text-v2`, 정책 버전 상수, request core의 `parseDmCard()`,
@@ -2061,7 +2059,7 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   텍스트에 들어가며, 용어 목록의 입력은 아닙니다(맥락 경로도 아님). 테스트가 로컬 `dm_ask.rs`의 목록·상한과 정책의 효과 등급 표를
   직접 읽어 대조하므로 한쪽만 바꾸면 실패합니다. **결과 제출의 선택지는 계속 `{ id, label }`이고 선택지 집합 digest도 그 둘만
   묶습니다** — 등급·경로가 바뀌면 로컬 AMUX에서 새 질문 revision, 곧 새 요청입니다. 카드 텍스트 v1(선택지 `{ id, label }`)은 읽지
-  않습니다. 그것을 쓰는 경로는 처음부터 `TOMVERSE_AMUX_DM_ROUTING`으로 닫힌 라우팅 route 하나였고, 읽지 못한 텍스트는 Admin에
+  않습니다. 그것을 쓰는 경로는 처음부터 열린 적 없는 라우팅 route 하나였고, 읽지 못한 텍스트는 Admin에
   카드가 아니라 unreadable로 보입니다. **정책 버전 상수는 2입니다**(2026-10-17 승인) — 새 요청 행이 그 값을 결속 값으로 남기고,
   결과는 상수가 아니라 행에 저장된 값과 대조하므로 이전 행은 자기 버전으로 결속됩니다. bridge relay는 결과 결속에 저장된 값을
   보내야 합니다. 요청 행의 CHECK는 `>= 1`이라 migration이 없습니다. 용어 목록·비밀 경로 목록·경로 문법·출력 상한은 바뀌지
