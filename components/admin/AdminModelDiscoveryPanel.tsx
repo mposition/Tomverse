@@ -11,7 +11,7 @@ import { AdminStatusChip } from "@/components/admin/ui/AdminStatusChip";
 import { AdminTile } from "@/components/admin/ui/AdminTile";
 import { AdminWriteButton } from "@/components/admin/ui/AdminWriteButton";
 import type { AdminTone } from "@/lib/adminUiCore";
-import { catalogImageDraftHref, isRuntimeImageProvider } from "@/lib/runtimeImageProviders";
+import { catalogImageDraftHref, runtimeImageProviderFor } from "@/lib/runtimeImageProviders";
 import {
   WORK_ITEM_EXCLUSION_REASONS,
   analysisFingerprint,
@@ -209,6 +209,12 @@ const imageDraftMember = (group: ModelFamilyGroup) => {
   )
     ? candidate
     : null;
+};
+
+/** The runtime image provider of a group's draft member, or null when none has an adapter. */
+const imageDraftProvider = (group: ModelFamilyGroup) => {
+  const member = imageDraftMember(group);
+  return member ? runtimeImageProviderFor(member.provider) : null;
 };
 
 const buildGroups = (rows: readonly ModelWorkItemRow[]): ModelFamilyGroup[] => {
@@ -828,10 +834,10 @@ export function AdminModelDiscoveryPanel() {
               </a>
             ) : null}
             {view === "open" && !live && imageDraftMember(group) ? (
-              isRuntimeImageProvider(imageDraftMember(group)!.provider) ? (
+              imageDraftProvider(group) ? (
                 <a
                   data-testid="model-discovery-image-draft"
-                  href={catalogImageDraftHref(imageDraftMember(group)!.provider, imageDraftMember(group)!.apiModel)}
+                  href={catalogImageDraftHref(imageDraftProvider(group)!, imageDraftMember(group)!.apiModel)}
                   className="inline-flex min-h-8 items-center rounded-xl border border-violet-500/40 bg-violet-500/10 px-3 text-xs font-bold text-violet-300 hover:bg-violet-500/20"
                 >
                   {m.table.imageDraft}

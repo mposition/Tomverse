@@ -4,11 +4,29 @@
  * other provider needs an adapter first. Dependency-free so the client panels
  * can read the same list the server's profile schema enforces.
  */
-export const RUNTIME_IMAGE_PROVIDERS = ["openai", "google", "xai", "fal", "qwen"] as const;
+export const RUNTIME_IMAGE_PROVIDERS = ["openai", "google", "xai", "fal", "qwen", "bfl"] as const;
 export type RuntimeImageProvider = (typeof RUNTIME_IMAGE_PROVIDERS)[number];
 
 export const isRuntimeImageProvider = (provider: string): provider is RuntimeImageProvider =>
   (RUNTIME_IMAGE_PROVIDERS as readonly string[]).includes(provider);
+
+/**
+ * The provider id a discovery work item names under another spelling. New
+ * provider research files a proposal under a slug of the company's name
+ * ("Black Forest Labs" -> "black-forest-labs"), while the provider id is short
+ * because it is also an env name (IMAGE_PROVIDER_BFL_COST_*), which a hyphen
+ * cannot be.
+ */
+const RUNTIME_IMAGE_PROVIDER_ALIASES: Readonly<Record<string, RuntimeImageProvider>> = {
+  "black-forest-labs": "bfl",
+};
+
+/** The runtime provider a discovered model belongs to, or null when none has an adapter. */
+export const runtimeImageProviderFor = (provider: string): RuntimeImageProvider | null => {
+  const key = provider.trim().toLowerCase();
+  if (isRuntimeImageProvider(key)) return key;
+  return Object.hasOwn(RUNTIME_IMAGE_PROVIDER_ALIASES, key) ? RUNTIME_IMAGE_PROVIDER_ALIASES[key] : null;
+};
 
 /** Where the discovery queue sends an image candidate: the catalogue, prefilled. */
 export const catalogImageDraftHref = (provider: string, apiModelId: string) =>
@@ -58,6 +76,19 @@ const XAI_RUNTIME_SIZES = ["1024x1024"] as const;
 const XAI_RUNTIME_QUALITIES = ["low", "medium"] as const;
 
 /**
+ * BFL's FLUX 3 request maps 1K square only and has no quality setting
+ * (lib/bflImageRequest.ts), so one quality: three would sell the same request
+ * at three prices. FLUX 3 Image takes no output format and BFL's documented
+ * formats are JPEG and PNG; the adapter stores only a type listed here. No
+ * provenance is claimed: BFL documents none for FLUX 3.
+ */
+const BFL_RUNTIME_PROFILE = {
+  sizes: ["1024x1024"],
+  qualities: ["medium"],
+  outputMimeTypes: ["image/jpeg", "image/png"],
+} as const;
+
+/**
  * The starting profile for a runtime image model handed over from the
  * discovery queue. Every field is the operator's to correct; the schema and
  * the judge decide whether it can serve.
@@ -79,6 +110,13 @@ export const runtimeImageProfileTemplate = (
   provenance: [] as string[],
   outputMimeTypes: ["image/png"] as string[],
   ...(provider === "qwen" ? { sizes: [...QWEN_RUNTIME_SIZES] } : {}),
+  ...(provider === "bfl"
+    ? {
+        sizes: [...BFL_RUNTIME_PROFILE.sizes],
+        qualities: [...BFL_RUNTIME_PROFILE.qualities],
+        outputMimeTypes: [...BFL_RUNTIME_PROFILE.outputMimeTypes],
+      }
+    : {}),
   ...(provider === "xai"
     ? {
         sizes: [...XAI_RUNTIME_SIZES],
