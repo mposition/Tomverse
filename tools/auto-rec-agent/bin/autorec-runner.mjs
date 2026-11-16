@@ -317,6 +317,7 @@ async function work(deps, claim, ctx) {
     return failed(scope.reason);
   }
 
+  deps.log("change_prepared", { base, head });
   ctx.stage = "tests";
   const changed = changes.map((change) => change.path);
   const related = selectRelatedTests(changed, fs.listTestFiles(worktree), (path) => fs.readText(join(worktree, path)));

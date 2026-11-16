@@ -323,6 +323,16 @@ test("a refused review submit preserves a redacted private diagnostic and exact 
   assert.doesNotMatch(JSON.stringify({ gatewayCalls, events }), /retained-error-detail|confidential/);
 });
 
+test("a failed test preserves the prepared range before worktree cleanup without submitting review", async () => {
+  const { deps, calls, gatewayCalls, events } = fakeRunner({ rules: [[/--test-concurrency=1/, exit(1)]] });
+  assert.equal(await runLocked(deps), 0);
+  assert.deepEqual(events.find(({ event }) => event === "change_prepared"), { event: "change_prepared", base: BASE, head: HEAD });
+  assert.ok(events.findIndex(({ event }) => event === "change_prepared") < events.findIndex(({ event }) => event === "tests_run"));
+  assert.equal(resultOf(gatewayCalls).reason, "tests");
+  assert.equal(ran(calls, /review\.mjs submit/), false);
+  assert.equal(ops(gatewayCalls).includes("publish"), false);
+});
+
 test("an unknown review wait preserves diagnostics without submitting another review", async () => {
   const { deps, calls, runLogs, gatewayCalls } = fakeRunner({ rules: [
     [/review\.mjs wait/, { ...exit(2), stderr: "review-outcome-unknown-fixture" }],
