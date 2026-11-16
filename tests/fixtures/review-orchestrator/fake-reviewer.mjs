@@ -25,6 +25,8 @@ if (mode === "accept" || mode === "promptfile") {
 } else if (mode === "noisy") {
   process.stderr.write("x".repeat(256 * 1024));
   process.stdout.write(block({ verdict: "accept", findings: [] }));
+} else if (mode === "fail") {
+  process.exit(3);
 } else if (mode === "sleep") {
   setTimeout(() => process.stdout.write(block({ verdict: "accept", findings: [] })), 60_000);
 }

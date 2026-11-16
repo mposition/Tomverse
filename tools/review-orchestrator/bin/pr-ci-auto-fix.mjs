@@ -16,7 +16,11 @@
  *   PR_CI_AUTO_FIX_WORK                    absolute directory for the model's checkout and log,
  *                                          outside HOME, the review stateDir and the outbox
  *   PR_CI_AUTO_FIX_MODEL                   optional, default sonnet
- *   PR_CI_AUTO_FIX_MIN_REMAINING_PERCENT   optional, default 30: the account quota a pass needs
+ *   PR_CI_AUTO_FIX_MIN_REMAINING_PERCENT   optional, default 30: the account quota a pass needs. The
+ *                                          subscription account is shared with AMUX and the reviews,
+ *                                          and a pass can run for hours (retries come on their own, with
+ *                                          backoff), so the rest of the account is kept for them; 0 turns
+ *                                          the floor off, and a spent account still stops a pass
  *   PR_CI_AUTO_FIX_CONFLICTS               optional: "on" also resolves conflicts with the base branch
  *                                          (the workflow publishes them only when the repository
  *                                          variable PR_AUTO_FIX_CONFLICTS_ENABLED is "true")
