@@ -56,7 +56,7 @@ export const purchaseCtaCopy: Record<Language, PurchaseCtaCopy> = {
     currentPlan: "Current plan",
     upgradeTo: (plan) => `Upgrade to ${plan}`,
     changePlanTo: (plan) => `Change to ${plan}`,
-    signInAndStart: (plan) => `Sign in to start ${plan}`,
+    signInAndStart: (plan) => `Sign in or join to start ${plan}`,
     managePlan: "Ask support to change plan",
     managePlanHint:
       "Changing plan online is not supported yet. Support can make the change for you.",
@@ -81,7 +81,7 @@ export const purchaseCtaCopy: Record<Language, PurchaseCtaCopy> = {
     currentPlan: "현재 플랜",
     upgradeTo: (plan) => `${plan}로 업그레이드`,
     changePlanTo: (plan) => `${plan}(으)로 변경`,
-    signInAndStart: (plan) => `로그인하고 ${plan} 시작`,
+    signInAndStart: (plan) => `로그인 또는 가입하고 ${plan} 시작`,
     managePlan: "고객지원에 플랜 변경 문의",
     managePlanHint:
       "온라인 플랜 변경은 아직 지원하지 않습니다. 고객지원이 대신 변경해 드립니다.",
@@ -106,7 +106,7 @@ export const purchaseCtaCopy: Record<Language, PurchaseCtaCopy> = {
     currentPlan: "当前方案",
     upgradeTo: (plan) => `升级到 ${plan}`,
     changePlanTo: (plan) => `切换到 ${plan}`,
-    signInAndStart: (plan) => `登录后开通 ${plan}`,
+    signInAndStart: (plan) => `登录或注册后开通 ${plan}`,
     managePlan: "联系支持变更方案",
     managePlanHint: "目前尚不支持在线变更方案，支持团队可以为你完成变更。",
     startFree: "免费开始",
@@ -129,7 +129,7 @@ export const purchaseCtaCopy: Record<Language, PurchaseCtaCopy> = {
     currentPlan: "目前方案",
     upgradeTo: (plan) => `升級到 ${plan}`,
     changePlanTo: (plan) => `切換到 ${plan}`,
-    signInAndStart: (plan) => `登入後開通 ${plan}`,
+    signInAndStart: (plan) => `登入或註冊後開通 ${plan}`,
     managePlan: "聯絡支援變更方案",
     managePlanHint: "目前尚不支援線上變更方案，支援團隊可以為您完成變更。",
     startFree: "免費開始",
@@ -153,7 +153,7 @@ export const purchaseCtaCopy: Record<Language, PurchaseCtaCopy> = {
     currentPlan: "Formule actuelle",
     upgradeTo: (plan) => `Passer à ${plan}`,
     changePlanTo: (plan) => `Passer à ${plan}`,
-    signInAndStart: (plan) => `Se connecter pour démarrer ${plan}`,
+    signInAndStart: (plan) => `Connexion ou inscription pour ${plan}`,
     managePlan: "Demander un changement au support",
     managePlanHint:
       "Le changement de formule en ligne n'est pas encore pris en charge. Le support peut le faire pour vous.",
@@ -179,7 +179,7 @@ export const purchaseCtaCopy: Record<Language, PurchaseCtaCopy> = {
     currentPlan: "Aktueller Tarif",
     upgradeTo: (plan) => `Auf ${plan} upgraden`,
     changePlanTo: (plan) => `Zu ${plan} wechseln`,
-    signInAndStart: (plan) => `Anmelden und ${plan} starten`,
+    signInAndStart: (plan) => `Anmelden oder registrieren für ${plan}`,
     managePlan: "Tarifwechsel beim Support anfragen",
     managePlanHint:
       "Ein Tarifwechsel online wird noch nicht unterstützt. Der Support nimmt ihn für dich vor.",
@@ -205,7 +205,7 @@ export const purchaseCtaCopy: Record<Language, PurchaseCtaCopy> = {
     currentPlan: "Plan actual",
     upgradeTo: (plan) => `Actualizar a ${plan}`,
     changePlanTo: (plan) => `Cambiar a ${plan}`,
-    signInAndStart: (plan) => `Inicia sesión para empezar con ${plan}`,
+    signInAndStart: (plan) => `Inicia sesión o regístrate para ${plan}`,
     managePlan: "Pedir el cambio a soporte",
     managePlanHint:
       "Cambiar de plan en línea aún no está disponible. Soporte puede hacer el cambio por ti.",
@@ -231,7 +231,7 @@ export const purchaseCtaCopy: Record<Language, PurchaseCtaCopy> = {
     currentPlan: "Plano atual",
     upgradeTo: (plan) => `Fazer upgrade para ${plan}`,
     changePlanTo: (plan) => `Mudar para ${plan}`,
-    signInAndStart: (plan) => `Entrar para começar no ${plan}`,
+    signInAndStart: (plan) => `Entre ou cadastre-se para o ${plan}`,
     managePlan: "Pedir a mudança ao suporte",
     managePlanHint:
       "Mudar de plano online ainda não é suportado. O suporte faz a mudança para você.",

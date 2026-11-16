@@ -971,6 +971,10 @@ export function PricingPageContent() {
   );
   const planChangeTriggerRef = useRef<HTMLButtonElement | null>(null);
   const purchaseResumedRef = useRef(false);
+  // The plan whose checkout dialog opens on its own after sign-in.
+  const [resumedSubscriptionPlan, setResumedSubscriptionPlan] = useState<
+    "pro" | "max" | null
+  >(null);
   const creditPackCtaRef = useRef<HTMLDivElement | null>(null);
   const annualCopy = annualLabelByLanguage[lang] ?? annualLabelByLanguage.en!;
   const saleCopy = saleLabelByLanguage[lang] ?? saleLabelByLanguage.en!;
@@ -1128,6 +1132,62 @@ export function PricingPageContent() {
     );
   }, [
     account.addonCreditsRemaining,
+    account.plan,
+    account.planCreditsRemaining,
+    account.status,
+    pageIntent,
+  ]);
+
+  // The same round trip for a subscription: "Sign in or join to start Pro"
+  // comes back here with `intent=subscription&target=pro`, and the visitor
+  // goes straight to that plan's checkout dialog instead of having to find and
+  // press "Upgrade" again. Only when the card would offer a fresh upgrade -- a
+  // Pro subscriber returning with a Pro intent gets the page as it is. The
+  // dialog opens empty: a promotion code is never carried in the link.
+  useEffect(() => {
+    if (purchaseResumedRef.current) return;
+    if (!pageIntent || pageIntent.intent !== "subscription") return;
+    const targetPlan = pageIntent.targetPlan;
+    if (!targetPlan) return;
+    if (account.status !== "authenticated" || !account.plan) return;
+    const ctaState = resolvePlanCtaState({
+      sessionStatus: account.status,
+      currentPlan: account.plan,
+      cardPlan: targetPlan === "max" ? "Max" : "Pro",
+      hasActiveSubscription: account.hasActiveSubscription,
+      currentBillingInterval: account.billingInterval,
+    });
+    if (ctaState !== "upgrade") return;
+    purchaseResumedRef.current = true;
+    trackProductEvent("purchase_intent_resumed", 0, {
+      cta_location: pageIntent.ctaLocation || `pricing_plan_card_${targetPlan}`,
+      purchase_type: "subscription",
+      target_plan: targetPlan,
+      authentication_state: "authenticated",
+      current_plan: account.plan.toLowerCase() as "free" | "pro" | "max",
+      ...(pageIntent.trigger ? { trigger: pageIntent.trigger } : {}),
+      plan_credits_remaining: account.planCreditsRemaining,
+      addon_credits_remaining: account.addonCreditsRemaining,
+    });
+    queueMicrotask(() => setResumedSubscriptionPlan(targetPlan));
+
+    if (typeof window === "undefined") return;
+    // A reload after closing the dialog must not reopen it.
+    const params = new URLSearchParams(window.location.search);
+    params.delete("intent");
+    params.delete("target");
+    const nextSearch = params.toString();
+    window.history.replaceState(
+      null,
+      "",
+      `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${
+        window.location.hash
+      }`
+    );
+  }, [
+    account.addonCreditsRemaining,
+    account.billingInterval,
+    account.hasActiveSubscription,
     account.plan,
     account.planCreditsRemaining,
     account.status,
@@ -1871,6 +1931,7 @@ export function PricingPageContent() {
                     plan={plan.name === "Max" ? "Max" : "Pro"}
                     initialBillingInterval={lang === "ko" ? subscriptionInterval : undefined}
                     trigger={pageIntent?.trigger || undefined}
+                    autoOpen={resumedSubscriptionPlan === planId}
                     className={`inline-flex min-h-12 w-full items-center justify-center rounded-xl px-4 py-3 text-center text-sm font-bold transition ${planCtaSurface(plan.highlighted)}`}
                   >
                     {plan.cta}
