@@ -1,5 +1,6 @@
 "use client";
 
+import { beginConnectedJourney, journeyStep, targetImportJourney, type ConnectedJourney } from "@/lib/connectedJourneyAnalytics";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -46,7 +47,7 @@ import { continuationQuickActionState } from "@/lib/continuationQuickAction";
 export function ContinuationQuickAction({
     externalConversationId,
     /** The source's title, for the button's accessible name. */
-    sourceTitle, primaryLabel,
+    sourceTitle, primaryLabel, journeyEntry,
     locked,
     continuationCount,
     latestContinuationId,
@@ -55,6 +56,7 @@ export function ContinuationQuickAction({
     externalConversationId: string;
     sourceTitle: string;
     primaryLabel?: string;
+    journeyEntry?: "import_complete";
     locked: boolean;
     continuationCount: number;
     latestContinuationId: string | null;
@@ -66,7 +68,9 @@ export function ContinuationQuickAction({
 }) {
     const { t } = useLanguage();
     const router = useRouter();
-    const launcher = useContinuationLauncher({ externalConversationId });
+    const launcher = useContinuationLauncher({ externalConversationId }, { journeyEntry });
+    const existingJourney = useRef<ConnectedJourney | null>(null);
+    const existingLinkStarted = useRef(false);
     const [menuOpen, setMenuOpen] = useState(false);
     const menuId = useId();
     const containerRef = useRef<HTMLDivElement | null>(null);
@@ -82,6 +86,8 @@ export function ContinuationQuickAction({
     // traps focus or leaves it on a removed node is a keyboard dead end, and
     // this one sits inside a list where the next stop matters.
     const closeMenu = useCallback((returnFocus: boolean) => {
+        journeyStep(existingJourney.current, "cancelled", "user_cancelled");
+        existingJourney.current = null;
         setMenuOpen(false);
         if (returnFocus) triggerRef.current?.focus();
     }, []);
@@ -138,6 +144,12 @@ export function ContinuationQuickAction({
         return (
             <Link
                 href={continuationPath(latestContinuationId)}
+                onNavigate={() => {
+                    if (journeyEntry && !existingLinkStarted.current) {
+                        existingLinkStarted.current = true;
+                        targetImportJourney(beginConnectedJourney(journeyEntry, "existing"), latestContinuationId);
+                    }
+                }}
                 className={buttonClass}
                 data-testid="continuation-quick-action-open"
                 aria-label={interpolate(t("continuation.quickOpenFor"), {
@@ -165,7 +177,13 @@ export function ContinuationQuickAction({
                         count: continuationCount,
                         title: sourceTitle,
                     })}
-                    onClick={() => setMenuOpen((open) => !open)}
+                    onClick={() => {
+                        if (menuOpen) closeMenu(false);
+                        else {
+                            existingJourney.current = journeyEntry ? beginConnectedJourney(journeyEntry, "existing") : null;
+                            setMenuOpen(true);
+                        }
+                    }}
                 >
                     {interpolate(t("continuation.quickMany"), {
                         count: continuationCount,
@@ -191,6 +209,7 @@ export function ContinuationQuickAction({
                                 data-testid="continuation-quick-action-menu-item"
                                 className="block w-full min-h-11 px-3 py-2 text-left text-sm text-zinc-800 hover:bg-zinc-50 dark:text-zinc-100 dark:hover:bg-zinc-800"
                                 onClick={() => {
+                                    targetImportJourney(existingJourney.current, entry.conversationId);
                                     setMenuOpen(false);
                                     router.push(
                                         continuationPath(entry.conversationId)

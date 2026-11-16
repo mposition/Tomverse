@@ -15,12 +15,16 @@
  */
 
 import { discardResponseBody } from "./discardResponseBody";
-export async function prepareChatContextBundle(input: {
+export type ChatContextPreparationInput = {
     /** Null for a guest, or for a conversation that does not exist yet. */
     conversationId: string | null;
     modelIds: string[];
     prompt: string;
-}): Promise<string | null> {
+    /** Reuse this signed source subset after the current question was saved. */
+    previousContextBundle?: string;
+};
+
+export async function prepareChatContextBundle(input: ChatContextPreparationInput): Promise<string | null> {
     try {
         const response = await fetch("/api/chat/context", {
             method: "POST",
@@ -29,6 +33,9 @@ export async function prepareChatContextBundle(input: {
                 conversationId: input.conversationId,
                 modelIds: input.modelIds,
                 prompt: input.prompt,
+                ...(input.previousContextBundle
+                    ? { previousContextBundle: input.previousContextBundle }
+                    : {}),
             }),
         });
         if (!response.ok) {

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  isProductAnalyticsAllowed,
   normalizeAnalyticsCountry,
   parseDefaultEnabledAnalyticsCountries,
   resolveAnalyticsConsentPolicy,
@@ -42,5 +43,24 @@ test("other countries are enabled only after an explicit operator allowlist", ()
 
 test("an explicitly empty allowlist disables default-on analytics", () => {
   assert.equal(resolveAnalyticsConsentPolicy("AU", "").mode, "opt_in");
+});
+
+test("collection waits for policy resolution and honors every consent state", () => {
+  const australia = resolveAnalyticsConsentPolicy("AU");
+  const uk = resolveAnalyticsConsentPolicy("GB");
+  const unknown = resolveAnalyticsConsentPolicy(undefined);
+  for (const [consent, expected] of [
+    [null, [false, false, false, false]],
+    ["loading", [false, false, false, false]],
+    ["unset", [false, true, false, false]],
+    ["accepted", [false, true, true, true]],
+    ["declined", [false, false, false, false]],
+  ]) {
+    assert.deepEqual(
+      [null, australia, uk, unknown].map(policy => isProductAnalyticsAllowed(consent, policy)),
+      expected,
+      `Consent state: ${consent}`,
+    );
+  }
 });
 

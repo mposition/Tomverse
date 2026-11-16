@@ -1,3 +1,4 @@
+import type { ConnectedJourney } from "./connectedJourneyAnalytics";
 import type { ComparisonReview, ReviewMode, ReviewSetup, Citation } from "../packages/chat-core/src/review";
 
 export const REVIEW_CHAT_PARAM = "reviewDraft";
@@ -100,7 +101,7 @@ export function formatReviewChat(source: ReviewChatSource, selection: ReviewChat
   return text.length <= REVIEW_CHAT_LIMIT ? { text, omitted, sourceUrl } : null;
 }
 
-export type ReviewChatPacket = Readonly<{ id: string; identity: string; epoch: number; createdAt: number; text: string }>;
+export type ReviewChatPacket = Readonly<{ id: string; identity: string; epoch: number; createdAt: number; text: string; journey?: ConnectedJourney | null }>;
 let owner: string | null = null;
 let epoch = 0;
 let pending: ReviewChatPacket | null = null;
@@ -110,10 +111,10 @@ export function observeReviewChatIdentity(identity: string | null) {
   if (identity !== owner) { owner = identity; epoch++; clearPending(); }
   return epoch;
 }
-export function stageReviewChatPacket(identity: string, text: string, now = Date.now(), expectedEpoch = epoch) {
+export function stageReviewChatPacket(identity: string, text: string, now = Date.now(), expectedEpoch = epoch, journey?: ConnectedJourney | null) {
   if (owner !== identity || expectedEpoch !== epoch || !identity.startsWith("account:") || !text || text.length > REVIEW_CHAT_LIMIT) return null;
   clearPending();
-  pending = Object.freeze({ id: crypto.randomUUID(), identity, epoch, createdAt: now, text });
+  pending = Object.freeze({ id: crypto.randomUUID(), identity, epoch, createdAt: now, text, journey });
   expiryTimer = setTimeout(clearPending, REVIEW_CHAT_TTL);
   if (typeof expiryTimer === "object") expiryTimer.unref();
   return pending;

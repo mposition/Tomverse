@@ -1,3 +1,4 @@
+import { prepareMemoryHistoryContext } from "@/lib/memoryHistorySnapshot";
 import { randomUUID } from "node:crypto";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { z } from "zod";
@@ -69,6 +70,7 @@ const preflightSchema = z
         conversationId: z.string().min(1).max(64),
         modelIds: z.array(z.string().min(1).max(100)).min(2).max(3),
         prompt: z.string().max(50_000),
+        previousContextBundle: z.string().min(1).max(8_192).optional(),
         attachments: z
             .array(
                 z
@@ -159,6 +161,9 @@ export async function POST(request: Request) {
             preflightSchema
         );
         const uniqueModelIds = Array.from(new Set(payload.modelIds));
+        if (payload.previousContextBundle !== undefined && !session?.user?.id) {
+            throw new ChatAccessError(400, "INVALID_CONTEXT_BUNDLE", "Invalid chat context.");
+        }
         if (uniqueModelIds.length !== payload.modelIds.length) {
             return Response.json(
                 {
@@ -323,6 +328,10 @@ export async function POST(request: Request) {
         const turnContext = await buildChatTurnContext({
             userId: session?.user?.id ?? null,
             query: payload.prompt,
+            memorySemanticContext: session?.user?.id ? prepareMemoryHistoryContext({
+                request, userId: session.user.id, conversationId: canPersistTurn ? payload.conversationId : null,
+                query: payload.prompt, modelIds: uniqueModelIds, previousContextBundle: payload.previousContextBundle,
+            }) : undefined,
             profileVersionId,
             plan: access.plan ?? null,
             // Priced under the same mode the chat route will send under. If

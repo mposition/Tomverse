@@ -1,5 +1,6 @@
 import "server-only";
 
+import { summarizeConnectedJourneys, type ConnectedJourneySummary } from "./connectedJourneyAggregation";
 import { prisma } from "@/lib/prisma";
 import {
   isGa4DebugModeEnabled,
@@ -33,6 +34,7 @@ const actorKey = (row: ActorRow, identityLinks?: Map<string, string>) =>
       `anonymous:${row.anonymousIdHash}`;
 
 export type ProductAnalyticsDashboard = {
+  connectedJourneys: ConnectedJourneySummary | null;
   available: boolean;
   generatedAt: string;
   configured: {
@@ -80,6 +82,7 @@ const emptyTouchAttribution = (): ProductAnalyticsDashboard["touchAttribution30d
 });
 
 const emptyDashboard = (): ProductAnalyticsDashboard => ({
+  connectedJourneys: null,
   available: false,
   generatedAt: new Date().toISOString(),
   configured: {
@@ -134,6 +137,7 @@ export async function getProductAnalyticsDashboard(): Promise<ProductAnalyticsDa
       signupConversionRows,
       guestLeadRows,
       unobservedSignups,
+      journeyRows,
     ] = await Promise.all([
       prisma.productAnalyticsEvent.groupBy({
         by: ["eventName"],
@@ -233,6 +237,15 @@ export async function getProductAnalyticsDashboard(): Promise<ProductAnalyticsDa
           createdAt: { gte: thirtyDaysAgo },
           productAnalyticsEvents: { none: { eventName: "signup_completed" } },
         },
+      }),
+      // Full cohort plus one observation window: older valid starts keep their
+      // in-window follow-up stages from appearing as orphans. No truncated take.
+      prisma.productAnalyticsEvent.findMany({
+        where: { eventName: "connected_journey_step", occurredAt: { gte: new Date(thirtyDaysAgo.getTime() - 24 * 60 * 60 * 1000), lte: now } },
+        select: { userId: true, occurredAt: true, properties: true },
+      }).catch((error: unknown) => {
+        console.error("Connected journey query failed", { errorName: error instanceof Error ? error.name : "UnknownError" });
+        return null;
       }),
     ]);
 
@@ -342,6 +355,7 @@ export async function getProductAnalyticsDashboard(): Promise<ProductAnalyticsDa
       reviewCompletedUsers > 0 ? (count / reviewCompletedUsers) * 100 : 0;
 
     return {
+      connectedJourneys: journeyRows === null ? null : summarizeConnectedJourneys(journeyRows, now),
       available: true,
       generatedAt: now.toISOString(),
       configured: {

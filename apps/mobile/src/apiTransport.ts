@@ -200,7 +200,12 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       : null;
   }
   async function streamModel(persisted: Conversation, sourceId: string, modelId: string, signal: AbortSignal, progress: (text: string) => void, review = false, admission?: { admissionToken: string; contextBundle?: string }, continuation?: ContinuationTurnContext, research?: { locale: string }) {
-    const messages = research ? persisted.messages.filter(message => message.id === sourceId && message.role === "user").map(message => ({ id: message.id, role: "user" as const, content: message.content })) : fitChatRequestTranscript(persisted.messages.filter(message =>
+    // A prepared Review binds the saved authored question. Concurrent appends
+    // cannot become its current query or alter the transcript being verified.
+    const sourceIndex = admission?.contextBundle ? persisted.messages.findIndex(message => message.id === sourceId) : -1;
+    if (admission?.contextBundle && sourceIndex < 0) throw Error("SAVED_MESSAGE_MISSING");
+    const transcript = admission?.contextBundle ? persisted.messages.slice(0, sourceIndex + 1) : persisted.messages;
+    const messages = research ? persisted.messages.filter(message => message.id === sourceId && message.role === "user").map(message => ({ id: message.id, role: "user" as const, content: message.content })) : fitChatRequestTranscript(transcript.filter(message =>
       (message.role === "user" || !review || message.modelId === modelId) &&
       (message.role === "user" || message.status === "normal" || message.status === "incomplete" || !message.status))
       .map(message => toChatRequestMessage({ id: message.id, role: message.role, content: message.content, attachments: message.attachments })));

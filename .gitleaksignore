@@ -1911,6 +1911,11 @@ ef19bafeab994f19af5c9a244d416a394c2105f6:tests/amuxV19SessionAnalysisResultRoute
 0037915e8b8e455172d375f0c1613b4020f7acc4:docs/ops/mcp-provider-inventory.json:sourcegraph-access-token:5890
 0037915e8b8e455172d375f0c1613b4020f7acc4:docs/ops/mcp-provider-inventory.json:sourcegraph-access-token:5908
 
+# Public token-count enum label in a Memory input assertion, not a credential.
+# The follow-up assembles the label from words so future edits do not repeat
+# the finding. Only this immutable commit/path/rule/line is suppressed.
+8f6fee6eea07b8c0873de99e25087b08bd38c3e8:tests/memorySemanticInput.test.mjs:generic-api-key:34
+
 # Synthetic idempotency key in a native transport test, not a credential.
 #
 # Commit f3e50cee8 introduced tests/nativeReviewHandoffTransport.test.mjs with
@@ -1921,3 +1926,8 @@ ef19bafeab994f19af5c9a244d416a394c2105f6:tests/amuxV19SessionAnalysisResultRoute
 # Scope: exactly these two findings in that one commit -- nothing wider.
 f3e50cee8ef2da7d8da21a4426eb599813419628:tests/nativeReviewHandoffTransport.test.mjs:generic-api-key:16
 f3e50cee8ef2da7d8da21a4426eb599813419628:tests/nativeReviewHandoffTransport.test.mjs:generic-api-key:37
+
+# Synthetic connected-journey UUID in the dashboard contract fixture, never a
+# credential. The current fixture generates its UUID at runtime. Pin only the
+# introducing commit's exact finding; keep all other history and files scanned.
+5f34ac5e321fe8e7346de15c983d198e607b9e33:tests/server-contract/connected-journey-dashboard.test.mjs:generic-api-key:30
