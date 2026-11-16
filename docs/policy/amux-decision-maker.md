@@ -176,7 +176,11 @@ approvedBy: mposition · approvedAt: 2026-10-17 · 정책 버전: 2
    쓰기가 기록됐는지 확인한 뒤에만 이어 간다. 기록된 전송 의도의 답을 읽지 못했으면 아무것도 보내지 않고
    `transmit_unknown`·`unavailable` 결과·배정 폐기를 owed로 둔다. owed cleanup 보고는 그 인스턴스로의 새 전송을,
    owed pause는 그 세션으로의 새 전달을 막는다. 이전 바이너리의 halt는 자동 재시작이 원인과 무관하게, 1시간
-   제한 없이 재시작한다.
+   제한 없이 재시작한다. owed 기록(과 그것이 만드는 인스턴스·세션 차단)은 재시작을 넘어 남는다. relay는 기록이
+   바뀔 때마다 상태 디렉터리(unit의 `StateDirectory=`, `STATE_DIRECTORY`)의 `owed-records.json` 하나를 원자적으로
+   바꿔 쓰고(0600, 디렉터리 0700, symlink·다른 소유자는 거절) 시작할 때 되읽는다. 읽을 수 없는 파일이거나 쓰기가
+   실패하면 새 전송·전달은 시작하지 않고(차단 상태를 모르거나 파일이 뒤처졌으므로) 이미 있는 기록의 재전송만 하면서
+   매 tick 다시 시도한다. halt는 아니다. 파일 크기 상한은 없고 비밀값은 기록에 없다.
 2. **늦은 결과를 받는다.** `result_unknown`이 이름 붙인 digest와 같은 결과는 그 뒤에도 같은 마감 안이면
    받는다(같은 출력의 readback). 다른 digest는 여전히 `result_unknown`으로 거절한다(migration
    `20261116140000_amux_dm_request_windows`).

@@ -20,15 +20,28 @@
 //! app may not know it owes), and a session's pause that session (no other
 //! answer is delivered to a session whose delivery is unknown before its pause
 //! is confirmed, §9).
+//!
+//! The records survive a restart (`OwedStore`, owner review 2026-11-16): the
+//! relay restarts often now -- after any halt of an older binary and after a
+//! reboot -- and a result whose answer was lost, a cleanup report, or a
+//! session's pause held only in memory would be forgotten with the process,
+//! with the instance and session blocks they carry. Every change to the
+//! records is written to one local file before the relay goes on, and the
+//! first tick reads it back.
 
 use std::collections::BTreeSet;
+use std::fs;
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
 
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::flow::{AppRoute, DmApp, DmLocal, LocalRoute};
 use super::wire::{lookup_settled, read_app_answer, submission_settled, AppAnswer, HttpAnswer};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum OwedRecord {
     /// §2-3: close an assigned request whose card was not sent.
     Discard { request_id: String },
@@ -36,7 +49,7 @@ pub enum OwedRecord {
     TransmitOutcome {
         request_id: String,
         instance: String,
-        outcome: &'static str,
+        outcome: String,
     },
     /// §5: a cleanup the broker could not confirm. Nothing more is sent to
     /// the instance while it is owed.
@@ -57,8 +70,8 @@ pub enum OwedRecord {
     /// or `not_sent` with its reason.
     DeliveryOutcome {
         request_id: String,
-        outcome: &'static str,
-        reason: Option<&'static str>,
+        outcome: String,
+        reason: Option<String>,
     },
     /// §9: pause the session of a delivery whose result is unknown, and read
     /// its receipt. No other answer goes to the session while it is owed.
@@ -301,6 +314,236 @@ pub fn held_sessions(owed: &[OwedRecord]) -> BTreeSet<String> {
         .collect()
 }
 
+// ---------------------------------------------------------------------------
+// The records on disk
+// ---------------------------------------------------------------------------
+
+/// A path for the state directory, for a run by hand; under systemd the unit's
+/// `StateDirectory=` sets `STATE_DIRECTORY` and this is not needed.
+pub const OWED_STATE_DIR_ENV: &str = "TOMVERSE_AMUX_DM_RELAY_STATE_DIR";
+const SYSTEMD_STATE_DIR_ENV: &str = "STATE_DIRECTORY";
+/// The one file in the state directory.
+pub const OWED_STATE_FILE: &str = "owed-records.json";
+const OWED_STATE_TMP: &str = ".owed-records.json.tmp";
+/// The file's format. Another number is a file this binary cannot read.
+const OWED_STATE_VERSION: u64 = 1;
+
+#[derive(Serialize)]
+struct StateOut<'a> {
+    version: u64,
+    records: &'a [OwedRecord],
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StateIn {
+    #[allow(dead_code)]
+    version: u64,
+    records: Vec<OwedRecord>,
+}
+
+/// The owed records in one local file, replaced whole on every change.
+///
+/// The file holds what the relay would otherwise send again from memory: the
+/// request keys and digests and a result's submission, the text the app's
+/// ledger holds as well. It holds no token, secret or request key (no record
+/// has such a field); it is still private to the relay's account: the
+/// directory `0700`, the file `0600`, neither a symlink nor owned by another
+/// account. There is no size limit: one result can hold a DM's whole output.
+#[derive(Debug, Clone)]
+pub struct OwedStore {
+    dir: PathBuf,
+}
+
+/// A step of a replacement, for a test that fails one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SaveStep {
+    BeforeRename,
+}
+
+impl OwedStore {
+    pub fn new(dir: impl Into<PathBuf>) -> Self {
+        Self { dir: dir.into() }
+    }
+
+    /// The directory the environment names: this relay's own variable, else
+    /// the first one systemd's `StateDirectory=` set. None when neither is.
+    pub fn from_env() -> Option<Self> {
+        let named = std::env::var(OWED_STATE_DIR_ENV)
+            .ok()
+            .filter(|dir| !dir.is_empty())
+            .or_else(|| {
+                std::env::var(SYSTEMD_STATE_DIR_ENV)
+                    .ok()
+                    .and_then(|dirs| dirs.split(':').next().map(str::to_owned))
+                    .filter(|dir| !dir.is_empty())
+            })?;
+        Some(Self::new(named))
+    }
+
+    pub fn path(&self) -> PathBuf {
+        self.dir.join(OWED_STATE_FILE)
+    }
+
+    /// The records the last save left. No file is no records. A file the relay
+    /// cannot trust or read -- a symlink, another owner, readable by others,
+    /// not JSON, another version, a record it does not know -- is an error:
+    /// the caller must not go on as if nothing were owed.
+    pub fn load(&self) -> Result<Vec<OwedRecord>, String> {
+        match fs::symlink_metadata(&self.dir) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(format!("state directory is not readable: {error}")),
+            Ok(meta) => check_private(&meta, "state directory", true)?,
+        }
+        let path = self.path();
+        match fs::symlink_metadata(&path) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(format!("state file is not readable: {error}")),
+            Ok(meta) => check_private(&meta, "state file", false)?,
+        }
+        let bytes =
+            fs::read(&path).map_err(|error| format!("state file is not readable: {error}"))?;
+        let value: Value = serde_json::from_slice(&bytes)
+            .map_err(|error| format!("state file is not valid JSON: {error}"))?;
+        match value.get("version").and_then(Value::as_u64) {
+            Some(OWED_STATE_VERSION) => {}
+            other => return Err(format!("state file has an unsupported version ({other:?})")),
+        }
+        serde_json::from_value::<StateIn>(value)
+            .map(|state| state.records)
+            .map_err(|error| format!("state file has an unreadable record: {error}"))
+    }
+
+    /// Replaces the file with `records`: the same directory's temporary file,
+    /// written and synced, renamed over the file, and the directory synced. A
+    /// failure at any step leaves the previous file as it was.
+    pub fn save(&self, records: &[OwedRecord]) -> Result<(), String> {
+        self.save_with(records, &|_| Ok(()))
+    }
+
+    fn save_with(
+        &self,
+        records: &[OwedRecord],
+        hook: &dyn Fn(SaveStep) -> io::Result<()>,
+    ) -> Result<(), String> {
+        let bytes = serde_json::to_vec(&StateOut {
+            version: OWED_STATE_VERSION,
+            records,
+        })
+        .map_err(|error| format!("records cannot be written: {error}"))?;
+        self.ensure_dir()?;
+        let tmp = self.dir.join(OWED_STATE_TMP);
+        let written = self.write_tmp(&tmp, &bytes).and_then(|()| {
+            hook(SaveStep::BeforeRename).map_err(|error| format!("before rename: {error}"))?;
+            fs::rename(&tmp, self.path()).map_err(|error| format!("rename: {error}"))
+        });
+        if let Err(reason) = written {
+            let _ = fs::remove_file(&tmp);
+            return Err(format!("state file was not replaced ({reason})"));
+        }
+        sync_dir(&self.dir).map_err(|error| format!("state directory was not synced: {error}"))
+    }
+
+    fn write_tmp(&self, tmp: &Path, bytes: &[u8]) -> Result<(), String> {
+        // A leftover of a process that died mid-write; never followed.
+        match fs::remove_file(tmp) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(format!("leftover temporary file: {error}")),
+        }
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options
+            .open(tmp)
+            .map_err(|error| format!("create: {error}"))?;
+        file.write_all(bytes)
+            .map_err(|error| format!("write: {error}"))?;
+        file.sync_all().map_err(|error| format!("sync: {error}"))
+    }
+
+    /// The directory exists, private to this account and no symlink; made
+    /// `0700` when missing.
+    fn ensure_dir(&self) -> Result<(), String> {
+        if fs::symlink_metadata(&self.dir).is_err() {
+            let mut builder = fs::DirBuilder::new();
+            builder.recursive(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::DirBuilderExt;
+                builder.mode(0o700);
+            }
+            builder
+                .create(&self.dir)
+                .map_err(|error| format!("state directory cannot be created: {error}"))?;
+        }
+        let meta = fs::symlink_metadata(&self.dir)
+            .map_err(|error| format!("state directory is not readable: {error}"))?;
+        check_private(&meta, "state directory", true)
+    }
+}
+
+/// Not a symlink, the right kind, owned by this account, closed to group and
+/// others. (Other platforms have no such modes; the relay runs on Ubuntu.)
+fn check_private(meta: &fs::Metadata, what: &str, directory: bool) -> Result<(), String> {
+    if meta.file_type().is_symlink() {
+        return Err(format!("{what} is a symlink"));
+    }
+    if directory && !meta.is_dir() || !directory && !meta.is_file() {
+        return Err(format!(
+            "{what} is not a {}",
+            if directory {
+                "directory"
+            } else {
+                "regular file"
+            }
+        ));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if let Some(uid) = effective_uid() {
+            if meta.uid() != uid {
+                return Err(format!(
+                    "{what} is owned by uid {}, not this account's {uid}",
+                    meta.uid()
+                ));
+            }
+        }
+        if meta.mode() & 0o077 != 0 {
+            return Err(format!(
+                "{what} is open to group or others (mode {:o})",
+                meta.mode() & 0o7777
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// This process's effective uid from `/proc/self/status` (`Uid:` real,
+/// effective, saved, filesystem); None where there is no such file.
+#[cfg(unix)]
+fn effective_uid() -> Option<u32> {
+    let status = fs::read_to_string("/proc/self/status").ok()?;
+    let line = status.lines().find(|line| line.starts_with("Uid:"))?;
+    line.split_whitespace().nth(2)?.parse().ok()
+}
+
+#[cfg(unix)]
+fn sync_dir(dir: &Path) -> io::Result<()> {
+    fs::File::open(dir)?.sync_all()
+}
+
+/// Windows cannot open a directory to sync it; nothing runs the relay there.
+#[cfg(not(unix))]
+fn sync_dir(_dir: &Path) -> io::Result<()> {
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -431,5 +674,262 @@ mod tests {
             .push_back(answered(200, json!({"paused": true})));
         assert_eq!(settle_all(&app, &local, &mut owed).await, 1);
         assert!(owed.is_empty());
+    }
+
+    /// One record of every kind, the result as large as a DM's whole output.
+    fn every_kind() -> Vec<OwedRecord> {
+        vec![
+            OwedRecord::Discard {
+                request_id: REQUEST_ID.into(),
+            },
+            OwedRecord::TransmitOutcome {
+                request_id: REQUEST_ID.into(),
+                instance: "decision-maker-openai".into(),
+                outcome: "unknown".into(),
+            },
+            OwedRecord::CleanupUnknown {
+                request_id: REQUEST_ID.into(),
+                instance: "decision-maker-openai".into(),
+            },
+            OwedRecord::Result {
+                request_id: REQUEST_ID.into(),
+                instance: "decision-maker-openai".into(),
+                submission: json!({"request_id": REQUEST_ID, "output": {"raw": "x".repeat(300 * 1024)}}),
+                result_digest: "d".repeat(64),
+                unknown_settled: false,
+            },
+            OwedRecord::DeliveryOutcome {
+                request_id: REQUEST_ID.into(),
+                outcome: "not_sent".into(),
+                reason: Some("send_refused".into()),
+            },
+            OwedRecord::DeliveryOutcome {
+                request_id: REQUEST_ID.into(),
+                outcome: "receipt".into(),
+                reason: None,
+            },
+            OwedRecord::Pause {
+                card_id: "AMUX-1".into(),
+                question_revision: 1,
+                request_id: REQUEST_ID.into(),
+                session: "claude-impl".into(),
+            },
+        ]
+    }
+
+    #[test]
+    fn every_kind_of_record_is_read_back_as_it_was_saved_whatever_its_size() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = OwedStore::new(dir.path().join("state"));
+        assert_eq!(store.load(), Ok(Vec::new()), "no directory, no records");
+        let records = every_kind();
+        store.save(&records).unwrap();
+        assert_eq!(store.load().unwrap(), records);
+        // Replaced whole by the next save, however few records are left.
+        store.save(&records[..1]).unwrap();
+        assert_eq!(store.load().unwrap(), records[..1]);
+        store.save(&[]).unwrap();
+        assert_eq!(store.load(), Ok(Vec::new()));
+        let leftovers: Vec<_> = fs::read_dir(dir.path().join("state"))
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .collect();
+        assert_eq!(
+            leftovers,
+            vec![OWED_STATE_FILE],
+            "no temporary file is left"
+        );
+    }
+
+    #[test]
+    fn a_record_serialises_its_own_fields_and_no_token_or_key() {
+        // The fields of every kind, so a field added later is seen here before
+        // it reaches a file: the request keys and the relay's tokens are not
+        // part of any record.
+        let mut seen = std::collections::BTreeMap::new();
+        for record in every_kind() {
+            let value = serde_json::to_value(&record).unwrap();
+            let kind = value["kind"].as_str().unwrap().to_owned();
+            let mut keys: Vec<String> = value.as_object().unwrap().keys().cloned().collect();
+            keys.sort();
+            seen.insert(kind, keys);
+        }
+        let expect = |kind: &str, keys: &[&str]| {
+            assert_eq!(seen[kind], keys.to_vec(), "{kind}");
+        };
+        expect("discard", &["kind", "request_id"]);
+        expect(
+            "transmit_outcome",
+            &["instance", "kind", "outcome", "request_id"],
+        );
+        expect("cleanup_unknown", &["instance", "kind", "request_id"]);
+        expect(
+            "result",
+            &[
+                "instance",
+                "kind",
+                "request_id",
+                "result_digest",
+                "submission",
+                "unknown_settled",
+            ],
+        );
+        expect(
+            "delivery_outcome",
+            &["kind", "outcome", "reason", "request_id"],
+        );
+        expect(
+            "pause",
+            &[
+                "card_id",
+                "kind",
+                "question_revision",
+                "request_id",
+                "session",
+            ],
+        );
+    }
+
+    #[test]
+    fn a_failure_while_replacing_the_file_leaves_the_previous_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = OwedStore::new(dir.path().join("state"));
+        let before = every_kind();
+        store.save(&before).unwrap();
+        let bytes = fs::read(store.path()).unwrap();
+        let error = store
+            .save_with(&before[..2], &|step| {
+                assert_eq!(step, SaveStep::BeforeRename);
+                Err(io::Error::other("disk full"))
+            })
+            .unwrap_err();
+        assert!(error.contains("disk full"), "{error}");
+        assert_eq!(fs::read(store.path()).unwrap(), bytes);
+        assert_eq!(store.load().unwrap(), before);
+        assert!(!dir.path().join("state").join(OWED_STATE_TMP).exists());
+        // A rename that cannot happen (a directory is in the way) fails the
+        // same way, and the temporary file does not stay.
+        let blocked = tempfile::tempdir().unwrap();
+        let store = OwedStore::new(blocked.path().join("state"));
+        fs::create_dir_all(store.path()).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(
+                blocked.path().join("state"),
+                fs::Permissions::from_mode(0o700),
+            )
+            .unwrap();
+        }
+        assert!(store.save(&before).is_err());
+        assert!(!blocked.path().join("state").join(OWED_STATE_TMP).exists());
+    }
+
+    /// A file the relay cannot read is an error, never "nothing owed".
+    #[test]
+    fn a_file_that_cannot_be_read_is_an_error_not_an_empty_list() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = OwedStore::new(dir.path().join("state"));
+        store.save(&every_kind()).unwrap();
+        let good = fs::read_to_string(store.path()).unwrap();
+        for (label, text) in [
+            ("not JSON", "{".to_owned()),
+            ("empty", String::new()),
+            ("no version", r#"{"records": []}"#.to_owned()),
+            (
+                "another version",
+                r#"{"version": 2, "records": []}"#.to_owned(),
+            ),
+            (
+                "unknown record",
+                r#"{"version": 1, "records": [{"kind": "mystery"}]}"#.to_owned(),
+            ),
+            (
+                "a record missing a field",
+                r#"{"version": 1, "records": [{"kind": "discard"}]}"#.to_owned(),
+            ),
+            (
+                "an extra field",
+                r#"{"version": 1, "records": [], "note": 1}"#.to_owned(),
+            ),
+            ("cut short", good[..good.len() / 2].to_owned()),
+        ] {
+            fs::write(store.path(), text).unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(store.path(), fs::Permissions::from_mode(0o600)).unwrap();
+            }
+            assert!(store.load().is_err(), "{label}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_state_is_private_and_a_symlink_or_open_file_is_refused() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        let store = OwedStore::new(&state);
+        store.save(&every_kind()).unwrap();
+        let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&state), 0o700, "created private");
+        assert_eq!(mode(&store.path()), 0o600);
+        // Open to others: refused until a person closes it.
+        fs::set_permissions(store.path(), fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(store
+            .load()
+            .unwrap_err()
+            .contains("open to group or others"));
+        fs::set_permissions(store.path(), fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(store.load().is_ok());
+        fs::set_permissions(&state, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(store
+            .load()
+            .unwrap_err()
+            .contains("open to group or others"));
+        assert!(store.save(&[]).is_err());
+        fs::set_permissions(&state, fs::Permissions::from_mode(0o700)).unwrap();
+        // The file a symlink to a good file.
+        let real = dir.path().join("real.json");
+        fs::copy(store.path(), &real).unwrap();
+        fs::set_permissions(&real, fs::Permissions::from_mode(0o600)).unwrap();
+        fs::remove_file(store.path()).unwrap();
+        symlink(&real, store.path()).unwrap();
+        assert!(store.load().unwrap_err().contains("symlink"));
+        // The directory a symlink to a good directory.
+        let link = dir.path().join("link");
+        symlink(&state, &link).unwrap();
+        let through = OwedStore::new(&link);
+        assert!(through.load().unwrap_err().contains("symlink"));
+        assert!(through.save(&[]).unwrap_err().contains("symlink"));
+    }
+
+    #[test]
+    fn the_directory_comes_from_this_relays_variable_or_systemds() {
+        // One test: the process environment is shared.
+        let keep: Vec<_> = [OWED_STATE_DIR_ENV, SYSTEMD_STATE_DIR_ENV]
+            .iter()
+            .map(|name| (*name, std::env::var(name).ok()))
+            .collect();
+        std::env::remove_var(OWED_STATE_DIR_ENV);
+        std::env::remove_var(SYSTEMD_STATE_DIR_ENV);
+        assert!(OwedStore::from_env().is_none());
+        std::env::set_var(SYSTEMD_STATE_DIR_ENV, "/var/lib/a:/var/lib/b");
+        assert_eq!(
+            OwedStore::from_env().unwrap().path(),
+            Path::new("/var/lib/a").join(OWED_STATE_FILE)
+        );
+        std::env::set_var(OWED_STATE_DIR_ENV, "/srv/own");
+        assert_eq!(
+            OwedStore::from_env().unwrap().path(),
+            Path::new("/srv/own").join(OWED_STATE_FILE)
+        );
+        for (name, value) in keep {
+            match value {
+                Some(value) => std::env::set_var(name, value),
+                None => std::env::remove_var(name),
+            }
+        }
     }
 }

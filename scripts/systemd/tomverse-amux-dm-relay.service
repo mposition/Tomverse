@@ -45,8 +45,18 @@ RestrictSUIDSGID=yes
 LockPersonality=yes
 # The app over HTTPS, the local AMUX over loopback, the broker's socket.
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
-# Nothing the relay opens is under /var/lib; the broker's socket is under /run.
+# /var/lib is hidden but for the relay's own state directory. The owed records
+# (a result whose answer was lost, a cleanup report, a session's pause) are kept
+# in one file there, so a restart -- now common, after any halt of an older
+# binary and after a reboot -- does not forget them or the instance and session
+# they hold back (dm_relay/owed.rs, OwedStore). `StateDirectory=` makes the
+# directory (0700, this account) and sets STATE_DIRECTORY for the relay;
+# TemporaryFileSystem would hide it, so it is bound back in.
 TemporaryFileSystem=/var/lib:ro
+StateDirectory=tomverse-amux-dm-relay
+StateDirectoryMode=0700
+BindPaths=/var/lib/tomverse-amux-dm-relay
+ReadWritePaths=/var/lib/tomverse-amux-dm-relay
 UMask=0077
 
 # Owner decision 2026-11-14: the enabled relay starts at boot, as the worker

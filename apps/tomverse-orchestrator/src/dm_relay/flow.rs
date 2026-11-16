@@ -928,7 +928,7 @@ where
         OwedRecord::TransmitOutcome {
             request_id: request_id.to_owned(),
             instance: instance.to_owned(),
-            outcome: transmit_outcome(outcome.transmission),
+            outcome: transmit_outcome(outcome.transmission).to_owned(),
         },
     )
     .await
@@ -959,7 +959,7 @@ where
         OwedRecord::TransmitOutcome {
             request_id: request_id.to_owned(),
             instance: instance.to_owned(),
-            outcome: "unknown",
+            outcome: "unknown".to_owned(),
         },
         OwedRecord::Result {
             request_id: request_id.to_owned(),

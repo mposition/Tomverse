@@ -18,7 +18,7 @@ use super::flow::{
     listed_markers, relay_candidate_holding, release_marker, scan, AppRoute, DmApp, DmBroker,
     DmLocal, LocalRead, LocalRoute, MarkerKey, RelayEnd, LOCAL_MARKER_LIST_PATH,
 };
-use super::owed::{held_instances, held_sessions, settle_all, OwedRecord};
+use super::owed::{held_instances, held_sessions, settle_all, OwedRecord, OwedStore};
 use super::wire::{BrokerExchange, HttpAnswer, DM_RESULT_LINE_MAX_BYTES};
 
 /// Off unless exactly `enabled`.
@@ -315,6 +315,16 @@ pub struct Relay<A, L, B> {
     /// App records (and session pauses) not answered for yet, sent again by
     /// their keys on every tick (`owed`). Nothing stops the relay.
     records: Vec<OwedRecord>,
+    /// The file the records are kept in between processes (`owed::OwedStore`);
+    /// None keeps them in memory only.
+    store: Option<OwedStore>,
+    /// Whether `records` hold what the file held. Until they do the relay does
+    /// not know what it owes, so it starts nothing new.
+    records_loaded: bool,
+    /// What the file holds now: the records of the last load or save.
+    persisted: Vec<OwedRecord>,
+    /// The last save failed: the file is behind `records`.
+    save_failed: bool,
     /// Where the next scan's window starts (`flow::scan_window`).
     cursor: Option<String>,
     /// Where the walk over the operator-confirmed answers stands (stage S2-2b3).
@@ -347,12 +357,23 @@ impl<A: DmApp, L: DmLocal, B: DmBroker> Relay<A, L, B> {
             settled: BTreeSet::new(),
             owed: BTreeSet::new(),
             records: Vec::new(),
+            store: None,
+            records_loaded: true,
+            persisted: Vec::new(),
+            save_failed: false,
             cursor: None,
             delivery_cursor: None,
             settled_start: false,
             direct_cursor: DirectCursor::starting_at(now_secs()),
             v22_cursor: None,
         }
+    }
+
+    /// Keeps the owed records in `store` and reads them back on the first tick.
+    pub fn with_store(mut self, store: OwedStore) -> Self {
+        self.store = Some(store);
+        self.records_loaded = false;
+        self
     }
 
     /// The records the relay still owes.
@@ -369,6 +390,83 @@ impl<A: DmApp, L: DmLocal, B: DmBroker> Relay<A, L, B> {
             );
             self.records.push(record);
         }
+        self.save_state();
+    }
+
+    /// Reads the file the first time (and again every tick it could not be
+    /// read). A file the relay cannot read or trust is never taken for an
+    /// empty one: what it owes, and the instances and sessions that holds
+    /// back, are not known, so nothing new is started until it reads (a
+    /// person fixes or removes the file). Only the code and the reason are
+    /// logged, never a record.
+    fn load_state(&mut self) -> bool {
+        if self.records_loaded {
+            return true;
+        }
+        let Some(store) = &self.store else {
+            self.records_loaded = true;
+            return true;
+        };
+        match store.load() {
+            Ok(mut loaded) => {
+                if !loaded.is_empty() {
+                    println!(
+                        "amux dm relay: {} owed record(s) restored from {}",
+                        loaded.len(),
+                        store.path().display()
+                    );
+                }
+                self.persisted = loaded.clone();
+                loaded.append(&mut self.records);
+                self.records = loaded;
+                self.records_loaded = true;
+                true
+            }
+            Err(reason) => {
+                println!(
+                    "amux dm relay: the owed records in {} cannot be read ({reason}); \
+                     nothing new is sent or delivered until they can, and the read is tried again every tick",
+                    store.path().display()
+                );
+                false
+            }
+        }
+    }
+
+    /// Writes the records when they differ from the file. A write that fails
+    /// is tried again every tick, and nothing new starts while it does: a
+    /// record the file does not hold would be forgotten by a restart.
+    fn save_state(&mut self) {
+        let Some(store) = &self.store else {
+            return;
+        };
+        if !self.records_loaded {
+            return;
+        }
+        if self.records == self.persisted {
+            self.save_failed = false;
+            return;
+        }
+        match store.save(&self.records) {
+            Ok(()) => {
+                self.persisted = self.records.clone();
+                self.save_failed = false;
+            }
+            Err(reason) => {
+                self.save_failed = true;
+                println!(
+                    "amux dm relay: the owed records cannot be written to {} ({reason}); \
+                     nothing new is sent or delivered until they can, and the write is tried again every tick",
+                    store.path().display()
+                );
+            }
+        }
+    }
+
+    /// Whether the relay may start something new: it knows what it owes and
+    /// the file holds it.
+    fn may_start_new(&self) -> bool {
+        self.records_loaded && !self.save_failed
     }
 
     pub fn owed(&self) -> &BTreeSet<MarkerKey> {
@@ -391,7 +489,13 @@ impl<A: DmApp, L: DmLocal, B: DmBroker> Relay<A, L, B> {
     /// window the app gives a DM.
     pub async fn tick(&mut self) -> Tick {
         self.release_owed().await;
-        let settled_records = settle_all(&self.app, &self.local, &mut self.records).await > 0;
+        // The owed records first, from the file at the start (a process that
+        // ended left them there), and again after they were sent: a settled
+        // record leaves the file, a result whose unknown was recorded changes.
+        let loaded = self.load_state();
+        let settled_records =
+            loaded && settle_all(&self.app, &self.local, &mut self.records).await > 0;
+        self.save_state();
         // Nothing is in flight between questions, so every marker the local
         // AMUX holds now was left by a request this process no longer runs: a
         // release that failed, or a bridge that stopped mid-request. The list
@@ -410,6 +514,9 @@ impl<A: DmApp, L: DmLocal, B: DmBroker> Relay<A, L, B> {
         // own records, nothing sent again -- before anything is delivered, so
         // a session whose delivery is unknown is paused before another answer
         // could reach it (§9).
+        if !self.may_start_new() {
+            return Tick::Idle;
+        }
         if !self.settled_start {
             match self.settle().await {
                 Settle::Nothing => self.settled_start = true,
@@ -420,9 +527,15 @@ impl<A: DmApp, L: DmLocal, B: DmBroker> Relay<A, L, B> {
         // Stage S2-2b4 (§2-7): the operator's direct answers close their
         // questions' requests before a confirmation could be delivered.
         let closed = self.report_direct().await;
+        if !self.may_start_new() {
+            return Tick::Idle;
+        }
         // A person's confirmed answer goes before a new question: it is the
         // end of a question already asked.
         let delivered = self.deliver().await || closed;
+        if !self.may_start_new() {
+            return Tick::Idle;
+        }
         // A v22 worker's questions: the app answers a confirmed one, and the
         // cards to file and to close (`v22_question`). Never halts.
         let v22 = super::v22_question::sync_v22_questions(
@@ -1706,5 +1819,178 @@ mod tests {
         );
         // Nothing is ever sent again: the delivery route is never called.
         assert!(!relay.local.routes().contains(&LocalRoute::Answers));
+    }
+
+    /// A relay whose app and local AMUX answer nothing, and whose broker must
+    /// never be reached, keeping its owed records in `store`.
+    fn relay_keeping(
+        store: &OwedStore,
+    ) -> Relay<
+        crate::dm_relay::flow::tests::FakeApp,
+        crate::dm_relay::flow::tests::FakeLocal,
+        crate::dm_relay::flow::tests::FakeBroker,
+    > {
+        use crate::dm_relay::flow::tests::{FakeApp, FakeBroker, FakeLocal};
+        let mut relay = Relay::new(
+            FakeApp::default(),
+            FakeLocal::default(),
+            FakeBroker::answering(|_| panic!("nothing is sent to the broker")),
+            false,
+        )
+        .with_store(store.clone());
+        // The start is settled (stage S2-2b4; its own test asks the app first).
+        relay.settled_start = true;
+        relay
+    }
+
+    fn owed_kinds() -> Vec<OwedRecord> {
+        vec![
+            OwedRecord::CleanupUnknown {
+                request_id: REQUEST_ID.into(),
+                instance: INSTANCE.into(),
+            },
+            OwedRecord::Pause {
+                card_id: "AMUX-1".into(),
+                question_revision: 1,
+                request_id: REQUEST_ID.into(),
+                session: "claude-impl".into(),
+            },
+            OwedRecord::Result {
+                request_id: REQUEST_ID.into(),
+                instance: INSTANCE.into(),
+                submission: json!({"request_id": REQUEST_ID, "output": "x".repeat(300 * 1024)}),
+                result_digest: "d".repeat(64),
+                unknown_settled: false,
+            },
+        ]
+    }
+
+    /// Review r-20261116-181100-29e229: the owed records were memory only, so
+    /// a restart forgot a result with its digest and the cleanup report's
+    /// instance block.
+    #[tokio::test]
+    async fn owed_records_and_the_holds_they_carry_survive_a_restart_until_settled() {
+        use crate::dm_relay::flow::tests::{answered, recorded, FakeApp, FakeLocal};
+        let dir = tempfile::tempdir().unwrap();
+        let store = OwedStore::new(dir.path().join("state"));
+        let records = owed_kinds();
+
+        let mut first = relay_keeping(&store);
+        first.tick().await;
+        first.owe(records.clone());
+        assert_eq!(store.load().unwrap(), records, "written when owed");
+        drop(first);
+
+        // A new process: nothing in memory, then the file's records, held back
+        // and sent again by their keys.
+        let mut second = relay_keeping(&store);
+        assert!(second.records().is_empty());
+        second.tick().await;
+        assert_eq!(second.records(), records.as_slice());
+        assert_eq!(
+            held_instances(second.records())
+                .into_iter()
+                .collect::<Vec<_>>(),
+            vec![INSTANCE]
+        );
+        assert_eq!(
+            held_sessions(second.records())
+                .into_iter()
+                .collect::<Vec<_>>(),
+            vec!["claude-impl"]
+        );
+        let routes = second.app.all_routes();
+        assert!(routes.contains(&AppRoute::CleanupUnknown), "{routes:?}");
+        assert!(routes.contains(&AppRoute::ResultLookup), "{routes:?}");
+        assert_eq!(store.load().unwrap(), records, "still owed, still on disk");
+        drop(second);
+
+        // The app and the local AMUX answer: the records settle and leave the
+        // file, so a later restart owes nothing.
+        let app = FakeApp::with(vec![
+            (AppRoute::CleanupUnknown, recorded()),
+            (
+                AppRoute::ResultLookup,
+                answered(200, json!({"found": true, "status": "accepted"})),
+            ),
+        ]);
+        let local = FakeLocal::default();
+        local
+            .answers
+            .lock()
+            .unwrap()
+            .entry(LocalRoute::AnswerUnknown.path())
+            .or_default()
+            .push_back(answered(200, json!({"paused": true})));
+        let mut third = relay_keeping(&store);
+        third.app = app;
+        third.local = local;
+        third.tick().await;
+        assert!(third.records().is_empty());
+        assert_eq!(store.load(), Ok(Vec::new()));
+    }
+
+    #[tokio::test]
+    async fn a_file_that_cannot_be_read_starts_nothing_new_and_is_read_again_every_tick() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        let store = OwedStore::new(&state);
+        let records = owed_kinds();
+        store.save(&records).unwrap();
+        let good = std::fs::read(store.path()).unwrap();
+        std::fs::write(store.path(), b"{ not json").unwrap();
+
+        let mut relay = relay_keeping(&store);
+        assert_eq!(relay.tick().await, Tick::Idle);
+        assert_eq!(relay.tick().await, Tick::Idle);
+        assert!(relay.records().is_empty());
+        // No app write, no delivery, no scan: the held instances and sessions
+        // are not known, so nothing is sent.
+        assert!(
+            relay.app.all_routes().is_empty(),
+            "{:?}",
+            relay.app.all_routes()
+        );
+        assert!(relay.local.routes().is_empty());
+        assert_eq!(
+            std::fs::read(store.path()).unwrap(),
+            b"{ not json",
+            "the file is neither replaced nor discarded"
+        );
+
+        // Fixed by a person: the next tick reads it and the relay goes on.
+        std::fs::write(store.path(), &good).unwrap();
+        relay.tick().await;
+        assert_eq!(relay.records(), records.as_slice());
+        assert!(relay.app.all_routes().contains(&AppRoute::DeliveriesNext));
+    }
+
+    #[tokio::test]
+    async fn a_file_that_cannot_be_written_starts_nothing_new_until_it_can() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        let store = OwedStore::new(&state);
+        let mut relay = relay_keeping(&store);
+        relay.tick().await;
+        assert!(relay.may_start_new());
+        // The state directory's place is taken by a file: nothing can be saved.
+        std::fs::write(&state, b"in the way").unwrap();
+        relay.owe(vec![OwedRecord::Discard {
+            request_id: REQUEST_ID.into(),
+        }]);
+        assert!(!relay.may_start_new());
+        let before = relay.app.all_routes().len();
+        assert_eq!(relay.tick().await, Tick::Idle);
+        // The owed record is still sent again; nothing new is started.
+        assert_eq!(
+            relay.app.all_routes()[before..].to_vec(),
+            vec![AppRoute::AssignmentDiscard]
+        );
+        // Fixed: the next tick writes it and goes on.
+        std::fs::remove_file(&state).unwrap();
+        relay.tick().await;
+        assert!(relay.may_start_new());
+        assert_eq!(store.load().unwrap(), relay.records());
+        assert!(relay.app.all_routes().contains(&AppRoute::DeliveriesNext));
     }
 }

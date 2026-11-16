@@ -332,6 +332,13 @@ relay(`tomverse-amux-dm-relay.service`, `scripts/systemd/tomverse-amux-dm-relay.
 바이너리는 halt해도 프로세스가 끝나지 않았다. `amux dm relay halt: <cause>; …` 한 줄을 남기고 `active`인 채로 local
 marker만 풀었다. 그래서 systemd 상태만으로는 멈춤을 알 수 없고, 앱의 호출 기록이 주 신호다.
 
+owed 기록(재전송할 결과·cleanup 보고·세션 pause와 그 차단)은 재시작 뒤에도 남는다. relay unit의
+`StateDirectory=tomverse-amux-dm-relay`(`/var/lib/tomverse-amux-dm-relay/owed-records.json`, 파일 0600, 디렉터리 0700)에
+바뀔 때마다 원자적으로 쓰고 시작할 때 읽는다. journal의 `owed records ... cannot be read`/`cannot be written` 줄은 그 파일을
+읽거나 쓰지 못해 새 전송·전달을 시작하지 않고 매 tick 다시 시도하는 중이라는 뜻이다(halt가 아니다). 깨진 파일은 지우지
+않고 두므로, 내용을 확인한 뒤 고치거나(소유자 `tomverse-bridge`, 0600) 옮겨 두면 다음 tick에 이어 간다. 이 unit이
+설치되기 전의 박스에서는 `no state directory` 줄이 나오고 기록은 메모리에만 있다. 6.0절로 unit을 다시 설치한다.
+
 | | 어디서 | 무엇을 보는가 | 잡는 것 | 알림 |
 |---|---|---|---|---|
 | 앱의 호출 기록 | 앱의 15분 인프라 감시 | relay의 마지막 sync 호출 시각(`AppSetting` `amuxDmRelayLastSyncAt`) | halt, 프로세스 정지, 호스트·네트워크 끊김 | `AMUX_DM_RELAY_SILENT` → Slack·운영자 이메일·Sentry |

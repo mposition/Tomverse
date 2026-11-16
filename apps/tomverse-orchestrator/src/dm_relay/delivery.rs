@@ -539,8 +539,8 @@ where
 {
     let mut record = OwedRecord::DeliveryOutcome {
         request_id: delivery.request_id().to_owned(),
-        outcome,
-        reason,
+        outcome: outcome.to_owned(),
+        reason: reason.map(str::to_owned),
     };
     if owed::settle(app, local, &mut record).await {
         run

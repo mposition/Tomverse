@@ -15,7 +15,9 @@
 //! (the `tomverse-bridge` service) as one task beside the worker loop and
 //! never halts that loop. Nothing stops the relay itself: a write whose
 //! answer was lost or refused for now is owed and sent again by its key on
-//! every tick (`owed`, owner direction 2026-11-16).
+//! every tick (`owed`, owner direction 2026-11-16), and the owed records are
+//! kept in a local file so a restart does not forget them or the instance and
+//! session holds they carry (`owed::OwedStore`).
 //!
 //! Stage S2-2b3 (`delivery`, §2-7, §7, §9): each tick, before its question
 //! scan, the relay carries at most one operator-confirmed answer to the
@@ -89,6 +91,25 @@ pub async fn run_from_env(
                 io::UnixBroker::system(),
                 wire::DM_SEND_OPTION_EFFECTS,
             );
+            // The owed records survive a restart in the unit's state directory
+            // (`StateDirectory=` sets `STATE_DIRECTORY`). Without one -- a unit
+            // installed before the directory existed -- they stay in memory, as
+            // before, and the log says so.
+            let relay = match owed::OwedStore::from_env() {
+                Some(store) => {
+                    println!(
+                        "amux dm relay: owed records are kept in {}",
+                        store.path().display()
+                    );
+                    relay.with_store(store)
+                }
+                None => {
+                    println!(
+                        "amux dm relay: no state directory (STATE_DIRECTORY); owed records are kept in memory only and a restart forgets them"
+                    );
+                    relay
+                }
+            };
             io::run(relay).await;
             0
         }
