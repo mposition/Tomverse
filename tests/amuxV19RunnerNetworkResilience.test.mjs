@@ -343,7 +343,10 @@ test("every stop prints its fixed reason on the cycle status line", async () => 
   const run = (steps) => runAmuxV19MaxSessionCycleOnce({ origin,
     stateDirectory: "/state" }, { claim: claimed,
     readIdea: async () => ({ kind: "unavailable" }),
-    haltFile: () => ({ release: async () => {} }), ...steps });
+    marker: () => ({ release: async () => {} }),
+    // Every stop after the claim reports it unknown (operator, 2026-11-16).
+    reportUnknown: async () => ({ kind: "recorded", status: "owner_consumed",
+      settledMicroUsd: "0", recovered: false, retryWrite: false }), ...steps });
 
   const unreachableQueue = await runAmuxV19MaxSessionCycleOnce({ origin }, {
     claim: async () => ({ kind: "unavailable", reason: "read_unreachable" }) });
@@ -361,7 +364,7 @@ test("every stop prints its fixed reason on the cycle status line", async () => 
     reason: "read_unreachable" }) });
   assert.equal(amuxV19MaxSessionCycleStatus(idea).line,
     "AMUX_V19_MAX_SESSION_CYCLE_outcome_unknown stage=idea_read " +
-    "reason=read_unreachable\n");
+    "reason=read_unreachable unknownReport=recorded haltReleased=true\n");
 
   // The staging failure of 2026-10-20, now with its reasons: the stop read
   // and the unknown report both lost the link.
@@ -375,7 +378,8 @@ test("every stop prints its fixed reason on the cycle status line", async () => 
   assert.equal(amuxV19MaxSessionCycleStatus(analysis).line,
     "AMUX_V19_MAX_SESSION_CYCLE_outcome_unknown stage=analysis " +
     "reason=stop_aborted cliStarted=false beforeCli=false " +
-    "unknownReport=unconfirmed reportReason=readback_unreachable\n");
+    "unknownReport=unconfirmed reportReason=readback_unreachable " +
+    "haltReleased=false\n");
 
   const result = await run({
     readIdea: async () => ({ kind: "ready", prompt: "unused" }),
@@ -385,7 +389,7 @@ test("every stop prints its fixed reason on the cycle status line", async () => 
       reason: "stop_requested" }) });
   assert.equal(amuxV19MaxSessionCycleStatus(result).line,
     "AMUX_V19_MAX_SESSION_CYCLE_outcome_unknown stage=result " +
-    "reason=stop_requested\n");
+    "reason=stop_requested unknownReport=recorded haltReleased=true\n");
 
   // A step without its own reason still names where it stopped.
   const bare = await run({});

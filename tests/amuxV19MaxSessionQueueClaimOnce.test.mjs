@@ -71,10 +71,6 @@ test("uncertain or mismatched claim is never reported as safe to retry",
         recovered: false, retryWrite: false }), "claim_mismatch"],
       [async ({ identity }) => ({ kind: "claimed",
         claimId: identity.claimId, requestId: identity.requestId,
-        reservationId: identity.reservationId, reservedMicroUsd: null,
-        recovered: true, retryWrite: false }), "claim_read_back"],
-      [async ({ identity }) => ({ kind: "claimed",
-        claimId: identity.claimId, requestId: identity.requestId,
         reservationId: identity.reservationId, reservedMicroUsd: "invalid",
         recovered: false, retryWrite: false }), "claim_mismatch"],
     ]) {
@@ -88,6 +84,23 @@ test("uncertain or mismatched claim is never reported as safe to retry",
         retryWrite: false })), { kind: "outcome_unknown",
       receiptStatus: "partial", retryWrite: false });
   });
+
+// Operator, 2026-11-16: a subscription claim reserves nothing, and a claim
+// found by its readback is the same committed claim, so both go on.
+test("a zero reservation and a read-back claim are claimed; a left marker is recovered", async () => {
+  for (const [reservedMicroUsd, recovered] of [["0", false], [null, true]]) {
+    const result = await claimAmuxV19MaxQueueSelectionOnce(selection, {},
+      async ({ identity }) => ({ kind: "claimed", claimId: identity.claimId,
+        requestId: identity.requestId, reservationId: identity.reservationId,
+        reservedMicroUsd, recovered, retryWrite: false }));
+    assert.equal(result.kind, "claimed", String(recovered));
+  }
+  const named = { claimId: ideaId, requestId: ideaId, reservationId: ideaId,
+    ideaId, invocationOrdinal: 0 };
+  assert.deepEqual(await claimAmuxV19MaxQueueSelectionOnce(selection, {},
+    async () => ({ kind: "recover", identity: named })),
+  { kind: "recover", identity: named });
+});
 
 test("a pre-write refusal keeps its kind and fixed reason word only", async () => {
   assert.deepEqual(await claimAmuxV19MaxQueueSelectionOnce(selection, {},
