@@ -249,6 +249,17 @@ test("the instruction is the fixed preamble first and the report as data after i
   assert.ok(text.endsWith(`Auto-Rec-Id: ${CLAIM.id}`));
 });
 
+test("daily routing PRs never fall back to private recommendation text when a summary is invalid", () => {
+  for (const result of ["not JSON", JSON.stringify({ publicSummary: "x".repeat(141) }), JSON.stringify({ publicSummary: "private@example.test" })]) {
+    const claim = { ...CLAIM, dailyProduct: true, publicSummary: publicAgentSummary(result), recommendation: "PRIVATE_ROUTING_RECOMMENDATION_SENTINEL" };
+    assert.match(buildPrTitle(claim), /^fix: Daily product improvement /);
+    assert.doesNotMatch(buildPrTitle(claim) + buildPrBody({ claim, reviewJobId: "review" }), /PRIVATE_ROUTING_RECOMMENDATION_SENTINEL/);
+  }
+  const claim = { ...CLAIM, dailyProduct: true, publicSummary: "Prepare router context concurrently", recommendation: "PRIVATE_ROUTING_RECOMMENDATION_SENTINEL" };
+  assert.equal(buildPrTitle(claim), "fix: Prepare router context concurrently");
+  assert.doesNotMatch(buildPrBody({ claim, reviewJobId: "review" }), /PRIVATE_ROUTING_RECOMMENDATION_SENTINEL/);
+});
+
 test("the PR text names the recommendation, the cycle and the review, and ends with the fixed footer", () => {
   const body = buildPrBody({ claim: CLAIM, reviewJobId: "r-20261020-010203-abcdef", cycleUrl: cycleUrlFrom(CLAIM) });
   assert.ok(body.includes(`> ${CLAIM.recommendation}`));

@@ -1931,3 +1931,9 @@ f3e50cee8ef2da7d8da21a4426eb599813419628:tests/nativeReviewHandoffTransport.test
 # credential. The current fixture generates its UUID at runtime. Pin only the
 # introducing commit's exact finding; keep all other history and files scanned.
 5f34ac5e321fe8e7346de15c983d198e607b9e33:tests/server-contract/connected-journey-dashboard.test.mjs:generic-api-key:30
+
+# Synthetic AWS-shaped value in a private-diagnostic redaction assertion, never
+# a credential. The current fixture assembles it at runtime. Suppress only the
+# exact findings in the two immutable commits that changed this assertion.
+9ce144dd9343177ee624af852495ed081ebf1732:tests/agentAutoRecRunner.test.mjs:aws-access-token:322
+a6d0bd61229a658169ab90bad312ff209144556c:tests/agentAutoRecRunner.test.mjs:aws-access-token:322
