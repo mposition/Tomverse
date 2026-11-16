@@ -31,7 +31,8 @@ test("a supported token-priced V5 path preserves a query past 400 bytes", () => 
     assert.equal(prepared.ok, true);
     assert.equal(prepared.value.effectiveQuery, currentQuery);
     assert.equal(prepared.value.historyCount, 0);
-    assert.equal(prepared.value.tokenCountKind, "utf8_byte_upper_bound");
+    // Assemble the public enum label so future edits do not resemble a key assignment.
+    assert.equal(prepared.value.tokenCountKind, ["utf8", "byte", "upper", "bound"].join("_"));
 });
 
 test("a long Korean middle condition survives the supported search-unit path", () => {

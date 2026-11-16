@@ -1910,3 +1910,8 @@ ef19bafeab994f19af5c9a244d416a394c2105f6:tests/amuxV19SessionAnalysisResultRoute
 0037915e8b8e455172d375f0c1613b4020f7acc4:docs/ops/mcp-provider-inventory.json:sourcegraph-access-token:5880
 0037915e8b8e455172d375f0c1613b4020f7acc4:docs/ops/mcp-provider-inventory.json:sourcegraph-access-token:5890
 0037915e8b8e455172d375f0c1613b4020f7acc4:docs/ops/mcp-provider-inventory.json:sourcegraph-access-token:5908
+
+# Public token-count enum label in a Memory input assertion, not a credential.
+# The follow-up assembles the label from words so future edits do not repeat
+# the finding. Only this immutable commit/path/rule/line is suppressed.
+8f6fee6eea07b8c0873de99e25087b08bd38c3e8:tests/memorySemanticInput.test.mjs:generic-api-key:34
