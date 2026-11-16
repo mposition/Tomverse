@@ -2098,8 +2098,8 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
     await tx.$executeRawUnsafe('ALTER TABLE "AmuxIdeaSubmission" ENABLE TRIGGER "AmuxIdeaSubmission_identity_guard"');
   });
   const before = await prisma.$transaction((tx) => readAnalysisBudgetSnapshot(tx));
-  assert.equal(BigInt(before.spentMicroUsd) + BigInt(before.reservedMicroUsd),
-    BigInt(before.limitMicroUsd));
+  // Operator, 2026-11-16: a subscription claim reserves nothing of the month.
+  assert.equal(claim.reservedMicroUsd, "0");
   const resultIdentity = { claimId: claim.claimId,
     requestId: claim.requestId, reservationId: claim.reservationId,
     ideaId, invocationOrdinal: 0, referenceOrdinal: 0,
@@ -2230,10 +2230,11 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
   assert.equal(row.budgetMode, "max_shadow");
   assert.equal(row.settledMicroUsd, BigInt("1600020"));
   const after = await prisma.$transaction((tx) => readAnalysisBudgetSnapshot(tx));
-  assert.equal(after.reservedMicroUsd, "0");
+  assert.equal(after.reservedMicroUsd, before.reservedMicroUsd);
   assert.equal(after.remainingMicroUsd, "0");
+  // Nothing was reserved, so the whole measured usage is the shadow total.
   assert.equal(BigInt(after.shadowOverrunMicroUsd),
-    BigInt("1600020") - BigInt(claim.reservedMicroUsd));
+    BigInt(before.shadowOverrunMicroUsd) + BigInt("1600020"));
   assert.equal(BigInt(after.spentMicroUsd),
     BigInt(before.spentMicroUsd) + BigInt("1600020"));
   await assert.rejects(prisma.amuxIdeaAnalysisBudgetWindow.update({
@@ -2300,20 +2301,22 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
       else process.env[name] = unknownOldEnv[name];
     }
   }
-  assert.equal(unknown.status, "outcome_unknown");
+  // Operator, 2026-11-16: the system closes an unknown subscription outcome
+  // at zero in the same transaction; nothing waits for the owner.
+  assert.equal(unknown.status, "owner_consumed");
+  assert.equal((unknown as { settledMicroUsd?: string }).settledMicroUsd, "0");
   const unknownReadback = await prisma.$transaction((tx) =>
     readAmuxSessionBudgetResolution(tx, {
       claimId: unknownClaim.claimId, session }));
-  assert.equal(unknownReadback.status, "outcome_unknown");
-  const ownerResolution = await prisma.$transaction((tx) =>
+  assert.equal(unknownReadback.status, "owner_consumed");
+  assert.equal(unknownReadback.settledMicroUsd, "0");
+  await assert.rejects(prisma.$transaction((tx) =>
     commitAmuxSessionBudgetUnknownResolution(tx, {
       claimId: unknownClaim.claimId, session, request,
       verification: "proven_not_started",
       localEvidenceDigest: sha256("synthetic Max CLI not-started proof"),
       readbackDigest: unknownReadback.readbackDigest, ownerConfirmed: true,
-    }));
-  assert.equal(ownerResolution.status, "released");
-  assert.equal(ownerResolution.settledMicroUsd, "0");
+    })), "a closed claim has nothing left for the owner to resolve");
   assert.equal(await prisma.$transaction((tx) =>
     commitAmuxDueSessionAnalysisResultPurge(tx, claim.claimId)), "skipped");
   assert.deepEqual(await purgeDueAmuxOrphanSessionResultKeys(async () => {

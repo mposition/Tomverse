@@ -9,10 +9,12 @@ import { AMUX_V19_SESSION_BUDGET_TARGET } from "@/lib/adminAuditSystemActors";
 import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import { AmuxSessionBudgetSettlementError,
   commitAmuxSessionBudgetOutcome } from "./ideaSessionAnalysisBudgetSettlementService.ts";
+import { AMUX_V19_SESSION_ANALYSIS_STOP_ACTION } from "./ideaSessionLateResult.ts";
+
+export { AMUX_V19_SESSION_ANALYSIS_STOP_ACTION };
 
 type Tx = Prisma.TransactionClient;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-export const AMUX_V19_SESSION_ANALYSIS_STOP_ACTION = "amux.v19.session_analysis.stopped";
 
 export class AmuxIdeaSessionAnalysisStopError extends Error {
   constructor(readonly code: "forbidden" | "not_found" | "not_stoppable" |
@@ -33,9 +35,12 @@ function ownerId(session: Session): string {
 /** docs/policy/amux-intake.md v19 item 3: the owner stops one in-flight v19
  * session analysis. The stop is a human audit entry, and in the same
  * transaction the claim becomes outcome_unknown through the ordinary system
- * settlement, which keeps the full reserved cost. From then on the database
- * refuses that claim's result row and any success or failure settlement, the
- * runner's stop poll answers stop, and nothing is sent again. */
+ * settlement: a bounded claim keeps its full reserved cost for the owner to
+ * resolve, a subscription claim is closed by the system at zero (operator,
+ * 2026-11-16). From then on the database refuses that claim's result row and
+ * any success or failure settlement (a stopped claim never takes a late
+ * result), the runner's stop poll answers stop, nothing is sent again, and
+ * the idea is not queued again on its own. */
 export async function commitAmuxIdeaSessionAnalysisStop(tx: Tx, input: {
   session: Session; request: Request; ideaId: string; claimId: string;
   ownerConfirmed: true;

@@ -59,7 +59,7 @@ test("Max result write requires its distinct launcher credential and switches", 
   });
 });
 
-test("Max result refuses unmeasured and caller-asserted settlement", async () => {
+test("Max result refuses invalid and caller-asserted settlement", async () => {
   const path = "/api/internal/amux/v19/analysis-budget/max-result";
   await withEnv({ TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET: secret,
     TOMVERSE_AMUX_V19_SESSION_BUDGET_MAX_RESULT_WRITE: "enabled",
@@ -67,7 +67,12 @@ test("Max result refuses unmeasured and caller-asserted settlement", async () =>
     TOMVERSE_AMUX_V19_SESSION_ANALYSIS_STOP_POLL_READ: "enabled" },
   async () => {
     assert.equal((await postResult(request(path, { ...ids,
-      outcome: "verified_success", inputTokens: 0,
+      outcome: "verified_success", inputTokens: -1,
+      outputTokens: 0 }))).status, 400);
+    // Operator, 2026-11-16: zero reported tokens is a result that settles at
+    // zero, so it passes the body check and reaches the settlement.
+    assert.notEqual((await postResult(request(path, { ...ids,
+      outcome: "invocation_failed", inputTokens: 0,
       outputTokens: 0 }))).status, 400);
     assert.equal((await postResult(request(path, { ...ids,
       outcome: "verified_success", inputTokens: 100,

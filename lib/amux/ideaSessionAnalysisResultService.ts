@@ -110,7 +110,10 @@ export async function preflightAmuxMaxSessionResult(tx: Tx,
   if (!validIdentity(input)) throw new AmuxMaxSessionResultError("invalid_result");
   await takeAuditChainLock(tx);
   try {
-    await requireActiveMaxCheckoutClaim(tx, input.ideaId, input);
+    // A result may also arrive after the system closed its unknown claim
+    // (operator, 2026-11-16); ideaSessionLateResult.ts decides which.
+    await requireActiveMaxCheckoutClaim(tx, input.ideaId, input,
+      { lateResult: true });
     const pins = await readPinnedSessionReferenceShas(tx, input.ideaId);
     if (input.referenceOrdinal >= pins.length) {
       throw new AmuxMaxSessionResultError("not_ready");
@@ -153,7 +156,7 @@ export async function commitAmuxMaxSessionResult(tx: Tx,
       ![input.inputTokens, input.outputTokens].every((value) =>
         Number.isSafeInteger(value) && value >= 0 &&
         value <= 2_147_483_647) ||
-      input.inputTokens + input.outputTokens <= 0 ||
+      // A CLI that reported no tokens still answered (operator, 2026-11-16).
       (input.cliAttestation?.modelAttestation !== "served" &&
         input.cliAttestation?.modelAttestation !== "requested") ||
       !/^[a-f0-9]{64}$/.test(input.cliAttestation?.cliSha256 ?? "") ||
@@ -205,15 +208,16 @@ export async function commitAmuxMaxSessionResult(tx: Tx,
         invocationOrdinal: input.invocationOrdinal },
       cliAttestation: input.cliAttestation,
     });
-    if (input.invocationOrdinal === 0) {
-      const advanced = await tx.amuxIdeaSubmission.updateMany({
-        where: { id: input.ideaId, state: "submitted", cancelledAt: null,
-          analysisCompletedAt: null },
-        data: { state: "analyzing" },
-      });
-      if (advanced.count !== 1) {
-        throw new AmuxMaxSessionResultError("integrity_unavailable");
-      }
+    // The idea's first result starts its analysis. With retries that need not
+    // be invocation 0 (operator, 2026-11-16); a later result finds it started.
+    const advanced = await tx.amuxIdeaSubmission.updateMany({
+      where: { id: input.ideaId, state: "submitted", cancelledAt: null,
+        analysisCompletedAt: null },
+      data: { state: "analyzing" },
+    });
+    if (advanced.count !== 1 && (await tx.amuxIdeaSubmission.findUnique({
+      where: { id: input.ideaId }, select: { state: true } }))?.state !== "analyzing") {
+      throw new AmuxMaxSessionResultError("integrity_unavailable");
     }
     const claim = await tx.amuxIdeaSessionAnalysisBudgetClaim.findUnique({
       where: { id: input.claimId }, select: { modelId: true } });

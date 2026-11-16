@@ -26,7 +26,9 @@ export class AmuxIdeaAutoCancellationError extends Error {
 
 /** Dark transaction body for the approved seven-day retention tick. It
  * terminates analysis eligibility, marks an in-flight child outcome unknown,
- * and preserves its full budget hold and evidence. It does not erase the idea.
+ * and preserves a paid hold and the evidence; an in-flight subscription claim
+ * is closed by the system at zero (operator, 2026-11-16). It does not erase
+ * the idea.
  * A caller must not blindly retry an uncertain COMMIT; the idea and audit row
  * require a read-back first. */
 export async function commitAmuxOverdueIdeaAnalysisCancellation(

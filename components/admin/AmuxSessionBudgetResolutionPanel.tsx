@@ -15,7 +15,7 @@ const MICRO_USD = /^(?:0|[1-9][0-9]{0,18})$/;
 
 export type SessionBudgetUnknownList = {
   rows: Array<{ claimId: string; invocationOrdinal: number; budgetMode: string; createdAt: string }>;
-  total: number; limit: number;
+  total: number;
 };
 export type SessionBudgetReadback = {
   claimId: string; status: string; reservedMicroUsd: string; readbackDigest: string;
@@ -28,8 +28,7 @@ const record = (value: unknown): Record<string, unknown> | null =>
 export function readSessionBudgetUnknownList(value: unknown): SessionBudgetUnknownList | null {
   const body = record(value);
   if (body?.state !== "unknown_list" || !Array.isArray(body.rows) ||
-      !Number.isSafeInteger(body.total) || !Number.isSafeInteger(body.limit) ||
-      (body.total as number) < body.rows.length) return null;
+      !Number.isSafeInteger(body.total) || body.total !== body.rows.length) return null;
   const rows: SessionBudgetUnknownList["rows"] = [];
   for (const item of body.rows) {
     const row = record(item);
@@ -39,7 +38,7 @@ export function readSessionBudgetUnknownList(value: unknown): SessionBudgetUnkno
     rows.push({ claimId: row.claimId, invocationOrdinal: row.invocationOrdinal as number,
       budgetMode: row.budgetMode, createdAt: row.createdAt });
   }
-  return { rows, total: body.total as number, limit: body.limit as number };
+  return { rows, total: body.total as number };
 }
 
 /** One exact claim's read-back; a reply for another claim is unread. */
@@ -109,7 +108,7 @@ export function AmuxSessionBudgetResolutionPanel() {
     <p className="text-zinc-400">{m.inFlightHint}</p>
     <p role={failure ? "alert" : "status"} data-testid="amux-session-budget-resolution-state">
       {failure ? m[failure] : !list ? m.loading : list.rows.length === 0 ? m.empty
-        : m.shown(list.rows.length, list.total, list.limit)}</p>
+        : m.shown(list.total)}</p>
     {list && list.rows.length > 0 ? <ul className="space-y-3">{list.rows.map((row) =>
       <UnknownClaimRow key={row.claimId} row={row} onStatus={onStatus} />)}</ul> : null}
     <button type="button" onClick={() => void load()}
