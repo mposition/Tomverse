@@ -106,6 +106,27 @@ test("real generations come from their own cap, as many as it still allows, and 
   assert.deepEqual(await reserveScoutGenerations(asked, noAudit), ["generated.pdf"]);
 });
 
+test("a build's deploy check is granted once, and the next build gets its own", async () => {
+  const previous = process.env.RAILWAY_GIT_COMMIT_SHA;
+  try {
+    await writeScoutSettings({ modelId: "fixture-model", dailyCallCap: 1, generationDailyCap: 5 }, noAudit);
+    process.env.RAILWAY_GIT_COMMIT_SHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    assert.deepEqual(await reserveScoutGenerations(["generated.deploy-check"], noAudit), ["generated.deploy-check"]);
+    assert.deepEqual(await reserveScoutGenerations(["generated.deploy-check"], noAudit), [], "the hourly run does not check the same build twice");
+    assert.deepEqual(await reserveScoutGenerations(["generated.deploy-check", "generated.pdf"], noAudit), ["generated.pdf"],
+      "the daily run skips a checked build and keeps its other permits");
+    process.env.RAILWAY_GIT_COMMIT_SHA = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    assert.deepEqual(await reserveScoutGenerations(["generated.deploy-check"], noAudit), ["generated.deploy-check"], "a new build is checked");
+    assert.equal((await scoutUsageToday()).generations, 3, "each check is a permit from the daily cap");
+    delete process.env.RAILWAY_GIT_COMMIT_SHA;
+    assert.deepEqual(await reserveScoutGenerations(["generated.deploy-check", "generated.pdf"], noAudit), ["generated.pdf"],
+      "with no build commit there is nothing to check once per build");
+  } finally {
+    if (previous === undefined) delete process.env.RAILWAY_GIT_COMMIT_SHA;
+    else process.env.RAILWAY_GIT_COMMIT_SHA = previous;
+  }
+});
+
 test("no permit is granted when nothing would judge the result", async () => {
   await reset();
   await writeScoutSettings({ modelId: null, dailyCallCap: 10, generationDailyCap: 5 }, noAudit);

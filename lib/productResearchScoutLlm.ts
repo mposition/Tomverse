@@ -88,7 +88,7 @@ export type ScoutLlm = {
   /** The model-written task (docs/policy/product-research-agent.md §14): one text-only call for today's request. */
   readonly planScenario: (recentTitles: readonly string[], today: Date) => Promise<ScenarioPlan>;
   /** The journey planner (§14): one text-only call for today's steps across Chat. */
-  readonly planJourney: (recentTitles: readonly string[], today: Date) => Promise<JourneyPlan>;
+  readonly planJourney: (recentTitles: readonly string[], today: Date, productionFailures?: readonly string[]) => Promise<JourneyPlan>;
 };
 
 export type JourneyPlan = {
@@ -267,10 +267,10 @@ export async function scoutLlmFor(modelId: string | null): Promise<ScoutLlm | nu
       });
       return { scenario: value, inputTokens, outputTokens };
     },
-    planJourney: async (recentTitles, today) => {
+    planJourney: async (recentTitles, today, productionFailures = []) => {
       const { value, inputTokens, outputTokens } = await plan(JOURNEY_SUBJECT, {
         system: JOURNEY_SYSTEM_PROMPT,
-        prompt: journeyPromptText(recentTitles, today),
+        prompt: journeyPromptText(recentTitles, today, productionFailures),
         schema: JOURNEY_OUTPUT_SCHEMA,
         name: "product_research_scout_journey",
         maxOutputTokens: JOURNEY_MAX_OUTPUT_TOKENS,

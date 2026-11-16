@@ -1110,6 +1110,8 @@ export function ChatMessageList({
                 data-message-id={msg.id || undefined}
                 data-message-role={msg.role}
                 data-model-id={msg.modelId || ""}
+                data-message-status={msg.status || undefined}
+                data-error-code={msg.status === "error" ? msg.errorCode || undefined : undefined}
                 data-carried-answer={msg.carriedAnswer ? "true" : undefined}
                 data-message-source={imported ? "imported" : "native"}
                 data-search-focused={highlightedMessageId === msg.id ? "true" : undefined}
