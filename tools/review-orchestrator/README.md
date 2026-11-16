@@ -8,11 +8,28 @@
   세션에서 부르는 도구이며, 결과는 서버 디스크에만 남습니다. 앱으로 나가는 것은
   설정했을 때의 **내용 없는 상태 보고 하나**뿐이고, 그것도 daemon이 아니라 별도 계정의
   sender가 보내며, 앱이 그 최신값 한 행을 씁니다(아래 "Agent office 상태 보고").
-- 판정은 결정적 코드가 합니다. reviewer의 답은 마지막 ```json 블록 하나로만
-  읽고, 형식이 맞지 않으면 `unknown`입니다. blocker·major 지적이 있으면 reviewer가
-  accept라고 해도 reject입니다.
-- **결과를 모르면 다시 보내지 않습니다.** timeout, 비정상 종료, 파싱 실패, 서버
-  재시작은 모두 `unknown`으로 끝나고, 재요청은 사람이 정합니다.
+- 판정은 결정적 코드가 합니다. reviewer의 답은 마지막 ```json 블록(fence가 없어도
+  `verdict`가 든 JSON 객체)에서 읽습니다. 지적 개수와 길이에 한도가 없고, 모양이 조금
+  다른 지적(다른 severity 이름, 문자열 지적, 문자열 line)은 버리지 않고 읽을 수 있는
+  만큼 살립니다(운영자 결정 2026-11-15). 판정 자체를 읽을 수 없으면 `unknown`이고
+  accept로 짐작하지 않습니다. blocker·major 지적이 있으면 reviewer가 accept라고 해도
+  reject입니다.
+- reviewer는 diff를 prompt에서 받지 않고 자기 checkout에서 `git diff <base> <head>`로
+  통째로 읽습니다. 그래서 diff 크기와 파일 목록 개수에 서버가 두는 한도가 없고, scope도
+  서버가 자르지 않습니다. scope는 SSH 명령 인자 하나로 오므로 전송 한계(RPC token 120,000자,
+  scope 약 60,000바이트)만 남습니다. AMUX는 20,000자 안에서 보냅니다.
+  지침 파일(AGENTS.md 등) 변경만 checkout이 base 판이라 prompt에 통째로 보여 줍니다.
+- **timeout은 끝이 아닙니다.** 시간을 넘긴 reviewer는 죽이고, 그 slot을 이미 시간을
+  넘긴 vendor와 이 job의 다른 slot이 쓰는 vendor를 뺀 채 대기열에 되돌립니다. 시도할
+  다른 vendor가 남지 않았을 때만 `unknown`(`timeout`)입니다. 운영자가 reviewer를 지정한
+  slot은 그대로 끝납니다. 비정상 종료, 서버 재시작은 여전히 `unknown`이고 재요청은
+  호출한 쪽이 정합니다.
+- **같은 reviewer만 반복되지 않게 합니다.** `submit --avoid-vendor <vendor>[,<vendor>]`는
+  그 vendor를 피하라는 선호입니다. 다른 vendor의 provider가 있고 쓸 수 없는 상태가 아니면
+  (바빠도 기다립니다) 피하고, 없으면 원래대로 배정하므로 검토가 불가능해지거나 멈추지
+  않습니다. 서버는 capabilities에 `reviewer-avoid-vendors-v1`을 보이고, 오래된 서버는 이
+  필드를 무시합니다. AMUX는 같은 vendor가 한 Task의 최근 두 검토를 연달아 거절하면 이
+  선호를 보냅니다(`TOMVERSE_AMUX_V52_REVIEW_AVOID_VENDORS`, 기본 꺼짐).
 
 ## 배정 규칙
 
@@ -452,9 +469,9 @@ SSH 키·다른 작업의 소스는 보이지 않습니다.
 |---|---|---|
 | `maxBundleBytes` | 50 MiB | 전송 중에 `bundle_too_large` |
 | `maxChangeBytes` | 200 MiB (압축 해제 기준 새 객체 총량) | worktree를 만들기 전에 `change_too_large` |
-| `maxPendingJobs` | 20 | `queue_full` |
+| `maxPendingJobs` | 200 | `queue_full` |
 | `maxOutputBytes` / `maxStderrBytes` | 8 MiB / 1 MiB | stdout은 `unknown`, stderr는 앞부분만 보관 |
-| `retentionDays` | 30 | 끝난 작업과 `refs/review/<id>`를 daemon이 한 시간마다 지움 |
+| `retentionDays` | 365 | 끝난 작업과 `refs/review/<id>`를 daemon이 한 시간마다 지움 |
 
 ## Agent office 상태 보고
 

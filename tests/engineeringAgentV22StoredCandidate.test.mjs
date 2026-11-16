@@ -32,8 +32,11 @@ test("stored v22 patch reaches the pinned candidate loader only with consent", a
   const value = await loadEngineeringAgentV22StoredCandidate(attemptId,
     ports({ loadCandidate: async (input) => {
       called++;
+      // File bytes stored beside the text are not read: the candidate is
+      // rebuilt from the text alone (owner decision 2026-11-15).
+      assert.ok(patch.files);
       assert.deepEqual(input, { baseSha: snapshot.baseSha,
-        files: patch.files });
+        patchText: patch.text });
       return candidate;
     } }));
   assert.equal(called, 1);

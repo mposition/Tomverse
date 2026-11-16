@@ -3,12 +3,12 @@
 export const AMUX_V22_WORKER_CLAIM_CODE_LATCH = true;
 export const AMUX_V22_WORKER_CLAIM_ENV = "TOMVERSE_AMUX_V22_WORKER_CLAIM";
 /**
- * Tasks held by workers at once, across every lane. Owner decision
- * 2026-11-13: the workers run in parallel up to this many, one Task per
- * worker; the lane only orders the candidates (SEV1 first). Each attempt
- * still reserves its own approved cost and the daily caps still apply.
+ * Tasks held by workers at once, across every lane: one per verified worker
+ * and no other bound (owner direction 2026-11-15, "제한을 줄 이유가
+ * 없습니다"; it was at most six from 2026-11-13). The lane only orders the
+ * candidates (SEV1 first). Each attempt still reserves its own approved cost
+ * and the daily caps still apply.
  */
-export const AMUX_V22_GLOBAL_ACTIVE_LIMIT = 6;
 export const AMUX_V22_PER_WORKER_ACTIVE_LIMIT = 1;
 export const AMUX_V22_CLAIM_LANES = ["normal", "parallel", "sev1"] as const;
 export type AmuxV22ClaimLane = (typeof AMUX_V22_CLAIM_LANES)[number];
@@ -108,8 +108,8 @@ export const amuxV22WorkerClaimEnabled = (value: string | undefined) =>
 /**
  * Whether one more Task may be assigned now. Until 2026-11-13 each lane
  * (normal, parallel, SEV1) held one Task, so nearly every Task, being normal,
- * waited for the one before it and the other workers stayed idle. Now the
- * only limit is the global one, and never more Tasks than verified workers.
+ * waited for the one before it and the other workers stayed idle. Since
+ * 2026-11-15 the only limit is the verified workers themselves.
  */
 export function amuxV22ClaimCapacity(input: {
   verifiedWorkerCount: number;
@@ -120,8 +120,7 @@ export function amuxV22ClaimCapacity(input: {
     (value) => Number.isSafeInteger(value) && value >= 0) ||
     verifiedWorkerCount === 0) return { allowed: false as const,
       reason: "capacity_unconfigured" as const };
-  if (totalAssigned >= Math.min(AMUX_V22_GLOBAL_ACTIVE_LIMIT,
-      verifiedWorkerCount)) return { allowed: false as const,
+  if (totalAssigned >= verifiedWorkerCount) return { allowed: false as const,
     reason: "global_capacity_full" as const };
   return { allowed: true as const, reason: null };
 }
@@ -158,9 +157,21 @@ export function chooseAmuxV22WorkerRoute(input: {
   lastAssignedAtByProvider?: ReadonlyMap<string, number>;
   /** A paid API run (the read-only recovery retry): the cheapest route first. */
   preferLowerPrice?: boolean;
+  /**
+   * The workers, and their providers, that just failed this Task on the
+   * platform (lib/amux/infraFailureCore.ts, owner decision 2026-11-15): they
+   * go last, so the retry reaches another worker and provider first. They are
+   * never excluded; the worker quarantine does that.
+   */
+  infraFailedWorkers?: readonly string[];
+  infraFailedProviders?: readonly string[];
 }) {
   const candidates = input.routes.filter((route) =>
     !input.isReview || !input.priorAuthorWorkers.includes(route.workerName));
+  const infraWorkers = new Set(input.infraFailedWorkers ?? []);
+  const infraProviders = new Set((input.infraFailedProviders ?? []).map((value) => value.toLowerCase()));
+  const infraPenalty = (route: AmuxV22EligibleRoute) =>
+    infraWorkers.has(route.workerName) ? 2 : infraProviders.has(route.provider.toLowerCase()) ? 1 : 0;
   const active = (provider: string) =>
     input.activeByProvider?.get(provider.toLowerCase()) ?? 0;
   const lastAssigned = (worker: string) => input.lastAssignedAtByWorker?.get(worker) ?? 0;
@@ -176,6 +187,8 @@ export function chooseAmuxV22WorkerRoute(input: {
     const rightPrior = input.isReview &&
       input.priorAuthorProviders.includes(right.provider) ? 1 : 0;
     if (leftPrior !== rightPrior) return leftPrior - rightPrior;
+    const infra = infraPenalty(left) - infraPenalty(right);
+    if (infra !== 0) return infra;
     const load = active(left.provider) - active(right.provider);
     if (load !== 0) return load;
     if (input.preferLowerPrice === true) {

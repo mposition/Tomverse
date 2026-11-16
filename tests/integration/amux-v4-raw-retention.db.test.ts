@@ -349,7 +349,9 @@ test("the title backfill copies a sent Scout suggestion's title onto a live idea
   await prisma.$executeRawUnsafe(backfill);
   const read = (id: string) => prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id } })
     .then((row) => row.title);
-  assert.equal(await read(live), amuxIdeaTitleFromText(sentTitle));
+  // The 2026-11-04 backfill repeats the rule of its day, the 80-character cut
+  // that the legacy switch keeps (owner direction 2026-11-15 removed it).
+  assert.equal(await read(live), amuxIdeaTitleFromText(sentTitle, true));
   assert.equal(await read(live), `${"가".repeat(79)}…`);
   assert.equal(await read(purgedId), null);
   assert.equal(await read(untouched), null);

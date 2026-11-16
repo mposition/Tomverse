@@ -11,7 +11,8 @@ import { BoardImportError } from "./boardImportCore.ts";
 import { AMUX_EXECUTION_GRADE_ENV,
   amuxExecutionGradeRoutingEnabled, amuxWorkerMatchesExecutionGrade,
   isAmuxV52TaskConfirmation } from "./executionGradeCore.ts";
-import type { AmuxOrchestratorReceiptRecorder } from "./dbBoundary.ts";
+import { type AmuxOrchestratorReceiptRecorder, amuxRouteHasBudgetForMs } from "./dbBoundary.ts";
+import { AUTO_TICK_TRANSACTION_MAX_MS } from "./autoPromotionCore.ts";
 import { findOpenAmuxOrchestratorHalt } from "./orchestratorHaltStore.ts";
 import { lockAmuxAdmissionAndReadIncident } from "./incident.ts";
 import { readAmuxAssignmentCatalogs } from "./workerAssignmentCatalog.ts";
@@ -37,6 +38,12 @@ import { amuxV22SafeStopFencedWorkers } from "./v22LegacySafeStopFence.ts";
 import { amuxWorkerRuntimeUsesReadOnlyApi } from "./workerRuntime.ts";
 import { amuxV22RoutesWithSettledUsage } from "./v22WorkerUsageGate.ts";
 import { amuxApprovedCeilingOverrun, decideAmuxAttemptBudget } from "./executionBudgetCore.ts";
+import { readAmuxAttemptBudgetFacts, recentAmuxInfraFailureWorkers } from "./infraFailureStore.ts";
+import { type AmuxWorkerCircuit, amuxWorkerCircuitAdmits } from "./workerCircuitCore.ts";
+import { readAmuxWorkerCircuits, reportOpenAmuxWorkerCircuits } from "./workerHealthStore.ts";
+import { AMUX_CARD_WAIT_MAX_ROUTES, type AmuxCardWaitDetail } from "./cardWaitReasonCore.ts";
+import { type AmuxCardWaitEntry, clearAmuxCardWaitReasons, recordAmuxCardWaitReasons,
+  reportLongAmuxCardWaits } from "./cardWaitReasonStore.ts";
 import { evaluateAmuxV4TaskReadyInTransaction,
   loadAmuxV4TaskReadyContext } from "./v4TaskReadyService.ts";
 import { amuxV22ClaimCapacity, amuxV22ExecutionRole, amuxV22RequiredTool,
@@ -46,7 +53,26 @@ import { amuxV22ClaimCapacity, amuxV22ExecutionRole, amuxV22RequiredTool,
   "./v22WorkerClaimCore.ts";
 
 type Candidate = { id: string };
-const MAX_CANDIDATES = 12;
+/** Candidates one tick reads (owner direction 2026-11-15: widened from 12).
+ * The tick stops early, leaving the rest for the next, when its route budget
+ * no longer fits another claim transaction. */
+const MAX_CANDIDATES = 100;
+
+/** A refusal that carries why, so the tick can store it for the card
+ * (owner decision 2026-11-15, lib/amux/cardWaitReasonStore.ts). */
+class AmuxClaimSkipError extends BoardImportError {
+  readonly detail: AmuxCardWaitDetail;
+  constructor(code: string, detail: AmuxCardWaitDetail) {
+    super(code, 409);
+    this.detail = detail;
+  }
+}
+
+/** The approved routes, each with the first reason it could not take the card. */
+const routeDetail = <T extends { workerName: string; provider: string }>(
+  routes: readonly T[], why: (route: T) => string | null) =>
+  routes.slice(0, AMUX_CARD_WAIT_MAX_ROUTES).map((route) => ({ worker: route.workerName,
+    provider: route.provider.toLowerCase(), why: why(route) ?? "not_chosen" }));
 
 async function candidates(tx: Prisma.TransactionClient): Promise<Candidate[]> {
   return tx.$queryRaw<Candidate[]>`
@@ -107,7 +133,8 @@ async function implementAuthors(tx: Prisma.TransactionClient, taskId: string) {
 }
 
 async function claimCandidate(taskId: string, assignmentId: string,
-  context: Awaited<ReturnType<typeof loadAmuxV4TaskReadyContext>>) {
+  context: Awaited<ReturnType<typeof loadAmuxV4TaskReadyContext>>,
+  circuits: ReadonlyMap<string, AmuxWorkerCircuit>) {
   return withAutoTransaction(assignmentId, TICK_TRANSACTION_LIMITS,
     async (tx, now, recordReceipt: AmuxOrchestratorReceiptRecorder) => {
       const incident = await lockAmuxAdmissionAndReadIncident(tx, now);
@@ -148,7 +175,8 @@ async function claimCandidate(taskId: string, assignmentId: string,
       if ((!ready.ready && !reconfirmOnly) || !promotion || promotion.workItemId !== taskId ||
           promotion.sourceApprovalId !== ready.sourceApprovalId ||
           promotion.briefDigest !== ready.briefDigest) {
-        throw new BoardImportError("task_not_ready", 409);
+        throw new AmuxClaimSkipError("task_not_ready", { reasons: ready.ready ?
+          ["promotion_receipt_changed"] : [...ready.reasons] });
       }
       if (!amuxV22TaskRoleSupported(card.taskRole)) {
         throw new BoardImportError("one_shot_role_unavailable", 409);
@@ -159,12 +187,17 @@ async function claimCandidate(taskId: string, assignmentId: string,
       // requeued it and the next tick, which assigns at most one Task, took it
       // again ahead of every lower-scored Task (production 2026-11-06 to 11-07:
       // 149 assignments of one Task, no other Task assigned).
-      const prior = await tx.amuxExecutionAttempt.aggregate({ where: { taskId },
-        _count: { _all: true }, _max: { attemptNumber: true },
-        _sum: { reservedCostMicrousd: true } });
-      if (!decideAmuxAttemptBudget({ historical_rows: prior._count._all,
-          greatest_attempt_number: prior._max.attemptNumber }).allowed) {
-        throw new BoardImportError("attempt_budget_exhausted", 409);
+      // Infrastructure failures keep their attempt number but use none of the
+      // card's attempts (owner decision 2026-11-15, infraFailureCore.ts).
+      const prior = await readAmuxAttemptBudgetFacts(tx, taskId);
+      const priorReserved = prior.reservedMicrousd;
+      const attemptBudget = decideAmuxAttemptBudget({ historical_rows: prior.historicalRows,
+        greatest_attempt_number: prior.greatestAttemptNumber, infra_rows: prior.infraRows,
+        infra_window_rows: prior.infraWindowRows });
+      if (!attemptBudget.allowed) {
+        throw new AmuxClaimSkipError("attempt_budget_exhausted", {
+          limit: attemptBudget.exhausted_limit, attemptsUsed: attemptBudget.attempts_used,
+          maxAttempts: attemptBudget.max_attempts });
       }
       const lane = await currentLane(tx, taskId);
       // Orchestration policy version 35, section 3: the variables while R2c is
@@ -265,23 +298,28 @@ async function claimCandidate(taskId: string, assignmentId: string,
         AMUX_V22_READ_ONLY_API_EXECUTOR_KIND ?
         currentAmuxV22ReadOnlyApiExecutionFrame(
           recovery.apiExecutionFrame, { now }) : null;
-      const matchingRoutes = runnable.routes.filter((route) => {
+      // Each route's first reason it cannot take the card, or null; the same
+      // conditions as before, named so the card can say why it waits
+      // (owner decision 2026-11-15).
+      const routeExclusion = (route: (typeof runnable.routes)[number]): string | null => {
         const worker = catalog.find((item) => item.worker_name === route.workerName);
         const runtime = liveByName.get(route.workerName);
         const nativeApiOnly = !!runtime &&
           amuxWorkerRuntimeUsesReadOnlyApi(runtime.protocolCapabilities);
-        return worker && runtime?.status === "idle" && runtime.dispatchReady &&
-          !safeStopFenced.has(route.workerName) &&
-          !busy.has(route.workerName) && verifiedNames.has(route.workerName) &&
-          amuxV22OneShotRouteSupported(route.provider, route.modelId) &&
-          worker.provider === route.provider.toLowerCase() &&
-          worker.model === route.modelId &&
-          worker.routing_roles.includes(executionRole) &&
-          (!exactGradeRouting ||
-            amuxWorkerMatchesExecutionGrade(card.executionGrade,
-              worker.worker_name, ceilings)) &&
-          worker.tool_capabilities.includes(requiredTool) &&
-          (!nativeApiOnly || (!!recovery?.riskAcceptanceId &&
+        if (!worker) return "not_in_catalog";
+        if (!runtime) return "offline";
+        if (busy.has(route.workerName) || runtime.status === "busy") return "busy";
+        if (runtime.status !== "idle" || !runtime.dispatchReady) return "starting";
+        if (safeStopFenced.has(route.workerName)) return "safe_stop_fenced";
+        if (!verifiedNames.has(route.workerName)) return "operator_excluded";
+        if (!amuxV22OneShotRouteSupported(route.provider, route.modelId) ||
+            worker.provider !== route.provider.toLowerCase() ||
+            worker.model !== route.modelId) return "route_mismatch";
+        if (!worker.routing_roles.includes(executionRole)) return "role";
+        if (exactGradeRouting && !amuxWorkerMatchesExecutionGrade(card.executionGrade,
+          worker.worker_name, ceilings)) return "grade";
+        if (!worker.tool_capabilities.includes(requiredTool)) return "tool";
+        return (!nativeApiOnly || (!!recovery?.riskAcceptanceId &&
             recovery.readOnlyExecutorKind ===
               AMUX_V22_READ_ONLY_API_EXECUTOR_KIND)) &&
           (!recovery?.riskAcceptanceId ||
@@ -303,30 +341,34 @@ async function claimCandidate(taskId: string, assignmentId: string,
                currentApiFrame.catalogDigest === approved.catalogDigest &&
                currentApiFrame.pricingVersion === approved.receipt.pricingVersion &&
                BigInt(currentApiFrame.maximumCostMicroUsd) ===
-                 BigInt(route.perAttemptMicroUsd)))));
-      });
+                 BigInt(route.perAttemptMicroUsd))))) ? null : "recovery_binding";
+      };
+      const matchingRoutes = runnable.routes.filter((route) => routeExclusion(route) === null);
       const apiModelAccessCurrent = amuxV22ApiModelAccessCurrent(recovery, now);
       const telemetry = await getAmuxWorkerTelemetry(catalog.filter((worker) =>
         matchingRoutes.some((route) => route.workerName === worker.worker_name) &&
         !(recovery?.readOnlyExecutorKind ===
             AMUX_V22_READ_ONLY_API_EXECUTOR_KIND &&
           recovery.workerName === worker.worker_name)), now, tx);
-      const quotaRoutes = matchingRoutes.filter((route) => {
+      const quotaExclusion = (route: (typeof runnable.routes)[number]): string | null => {
         if (recovery?.readOnlyExecutorKind ===
               AMUX_V22_READ_ONLY_API_EXECUTOR_KIND &&
             route.workerName === recovery.workerName)
-          return apiModelAccessCurrent;
+          return apiModelAccessCurrent ? null : "api_model_access_stale";
         const quota = telemetry.get(route.workerName);
         // Another provider's limit shows up as a failed attempt, not a
         // blocked claim: its reading reaches this check only while
         // TOMVERSE_AMUX_V22_NON_CLAUDE_QUOTA_GATE is enabled (telemetry.ts),
         // and then only a fresh exhausted one holds the route.
         if (amuxV22Provider(route.provider) !== "anthropic")
-          return !quota?.scoring.provider_exhausted;
-        return quota?.evidence.quota.state === "fresh" &&
-          !quota.scoring.provider_exhausted &&
-          (quota.scoring.quota_remaining.value ?? 0) > 0;
-      });
+          return quota?.scoring.provider_exhausted ? "quota_exhausted" : null;
+        // An Anthropic route needs a fresh reading: a sign-in whose usage
+        // cannot be read (an expired login, 2026-11-15) is held here.
+        if (quota?.evidence.quota.state !== "fresh") return "quota_unobserved";
+        return !quota.scoring.provider_exhausted &&
+          (quota.scoring.quota_remaining.value ?? 0) > 0 ? null : "quota_exhausted";
+      };
+      const quotaRoutes = matchingRoutes.filter((route) => quotaExclusion(route) === null);
       const authors = card.taskRole === "review" ?
         await implementAuthors(tx, taskId) : [];
       if (card.taskRole === "review" && authors.length === 0) {
@@ -348,9 +390,13 @@ async function claimCandidate(taskId: string, assignmentId: string,
       // that failure (amuxV22WorkerUsageUnverified).
       const settled = await amuxV22RoutesWithSettledUsage(tx, quotaRoutes,
         recovery?.priorAttemptId ?? null, taskId);
+      // A worker failing on the platform again and again waits out its
+      // quarantine (workerCircuitCore.ts, owner decision 2026-11-15).
+      const admittedRoutes = settled.routes.filter((route) =>
+        amuxWorkerCircuitAdmits(circuits.get(route.workerName)));
       const resumeRoutes = amuxV22ResumeRoutes({
         resumeWorker: resume?.worker ?? null,
-        approvedRoutes: approved.receipt.routes, routes: settled.routes,
+        approvedRoutes: approved.receipt.routes, routes: admittedRoutes,
         workerServesGrade: (workerName) => !exactGradeRouting ||
           amuxWorkerMatchesExecutionGrade(card.executionGrade, workerName,
             ceilings) });
@@ -366,24 +412,45 @@ async function claimCandidate(taskId: string, assignmentId: string,
         if (provider) lastAssignedAtByProvider.set(provider,
           Math.max(lastAssignedAtByProvider.get(provider) ?? 0, at));
       }
+      // A card the platform just failed goes to another worker, and another
+      // provider, first (owner decision 2026-11-15).
+      const recentInfra = resumeRoutes.length ? await recentAmuxInfraFailureWorkers(tx, taskId) : [];
       const route = chooseAmuxV22WorkerRoute({ routes: resumeRoutes,
         priorAuthorWorkers: authorWorkers, priorAuthorProviders: authorProviders,
-        isReview: card.taskRole === "review", activeByProvider, lastAssignedAtByWorker, lastAssignedAtByProvider });
-      if (!route) throw new BoardImportError(
-        exactGradeRouting && matchingRoutes.length === 0 ? "no_worker_for_grade" :
-          settled.unsettled ? "usage_unverified" : "worker_unavailable", 409);
+        isReview: card.taskRole === "review", activeByProvider, lastAssignedAtByWorker, lastAssignedAtByProvider,
+        infraFailedWorkers: recentInfra,
+        infraFailedProviders: recentInfra.flatMap((worker) => providerOf.get(worker) ?? []) });
+      if (!route) {
+        const settledNames = new Set(settled.routes.map((item) => item.workerName));
+        const admittedNames = new Set(admittedRoutes.map((item) => item.workerName));
+        const resumeNames = new Set(resumeRoutes.map((item) => item.workerName));
+        const code = exactGradeRouting && matchingRoutes.length === 0 ? "no_worker_for_grade" :
+          settled.routes.length > 0 && admittedRoutes.length === 0 ? "worker_quarantined" :
+          settled.unsettled ? "usage_unverified" : "worker_unavailable";
+        throw new AmuxClaimSkipError(code, { routes: routeDetail(runnable.routes, (item) => {
+          const match = routeExclusion(item);
+          if (match) return match;
+          const quota = quotaExclusion(item);
+          if (quota) return quota;
+          if (!settledNames.has(item.workerName)) return "usage_unsettled";
+          if (!admittedNames.has(item.workerName)) return "quarantined";
+          if (!resumeNames.has(item.workerName)) return "resume_worker";
+          return card.taskRole === "review" && authorWorkers.includes(item.workerName) ?
+            "review_author" : null;
+        }) });
+      }
       if (recovery) {
         const quote = recovery.riskAcceptanceId ? amuxV22ReadOnlyRetryRouteCost({
-          priorReservedMicroUsd: prior._sum.reservedCostMicrousd ?? BigInt(0),
+          priorReservedMicroUsd: priorReserved,
           catalogApprovalId: recoveryApproved.approvalId, receipt: recoveryApproved.receipt,
           routeId: route.routeId, workerName: route.workerName,
           provider: route.provider, modelId: route.modelId }) :
-          amuxV22RecoveryCost({ priorReservedMicroUsd: prior._sum.reservedCostMicrousd ?? BigInt(0),
+          amuxV22RecoveryCost({ priorReservedMicroUsd: priorReserved,
             catalogApprovalId: approved.approvalId, receipt: approved.receipt });
         if (!amuxV22RecoveryStartAllowed({ approval: recovery, taskId,
-          assignmentRevision: card.revision, historicalAttempts: prior._count._all,
-          nextAttemptNumber: Math.max(prior._count._all, prior._max.attemptNumber ?? 0) + 1,
-          priorReservedMicroUsd: prior._sum.reservedCostMicrousd ?? BigInt(0),
+          assignmentRevision: card.revision, historicalAttempts: prior.historicalRows,
+          nextAttemptNumber: Math.max(prior.historicalRows, prior.greatestAttemptNumber ?? 0) + 1,
+          priorReservedMicroUsd: priorReserved,
           assignedMicroUsd: BigInt(route.perAttemptMicroUsd),
           catalogApprovalId: approved.approvalId, costDigest: quote.costDigest }))
           throw new BoardImportError("recovery_approval_changed", 409);
@@ -419,7 +486,7 @@ async function claimCandidate(taskId: string, assignmentId: string,
       // attempt would take the Task's reserved total past its approved
       // ceiling. Execution start records the same calculation.
       const ceilingOverrun = amuxApprovedCeilingOverrun({ approvedReceipt: approvedCost,
-        priorReservedMicroUsd: prior._sum.reservedCostMicrousd ?? BigInt(0),
+        priorReservedMicroUsd: priorReserved,
         nextAttemptMicroUsd: BigInt(route.perAttemptMicroUsd) });
       if (ceilingOverrun) console.warn(JSON.stringify({ subsystem: "amux",
         event: "v22_approved_ceiling_overrun", phase: "claim", taskId,
@@ -510,7 +577,7 @@ const SKIPPED_CODES = new Set(["not_unassigned_todo", "task_not_ready",
   "worker_unavailable", "one_shot_role_unavailable", "attempt_budget_exhausted",
   "review_author_unknown", "conflict", "usage_unverified", "no_worker_for_grade",
   "cost_reconfirmation_required", "lane_unbound", "recovery_approval_changed",
-  "role_unavailable"]);
+  "role_unavailable", "worker_quarantined"]);
 
 /**
  * One admitted tick assigns every ready Task it can, one transaction each, up
@@ -524,17 +591,36 @@ export async function tickV22WorkerClaim(): Promise<ClaimTickResult> {
     return { claimed: false as const, reason: "apply_disabled" as const };
   }
   const rows = await prisma.$transaction((tx) => candidates(tx));
-  if (!rows.length) return { claimed: false as const, reason: "no_candidate" as const };
+  // Read once per tick, before any claim: which workers wait out a quarantine
+  // after repeated infrastructure failures (owner decision 2026-11-15). A
+  // failed read quarantines nobody.
+  const circuits = await readAmuxWorkerCircuits().catch(() => new Map<string, AmuxWorkerCircuit>());
+  if (!rows.length) {
+    await reportOpenAmuxWorkerCircuits(circuits);
+    return { claimed: false as const, reason: "no_candidate" as const };
+  }
   const claims: Array<Extract<ClaimTickResult, { claimed: true }>> = [];
   const skipped: Record<string, number> = {};
+  // Why each card passed over waits, stored for its Admin card.
+  const waits: AmuxCardWaitEntry[] = [];
   let stop: string | null = null;
-  for (const candidate of rows) {
+  let stopIndex = rows.length;
+  for (const [index, candidate] of rows.entries()) {
+    // Two claim transactions' room left: this one and the stores below.
+    if (!amuxRouteHasBudgetForMs(2 * AUTO_TICK_TRANSACTION_MAX_MS)) {
+      skipped.tick_budget = rows.length - index;
+      break;
+    }
     let context: Awaited<ReturnType<typeof loadAmuxV4TaskReadyContext>>;
     try { context = await loadAmuxV4TaskReadyContext(candidate.id); }
-    catch { skipped.context_unreadable = (skipped.context_unreadable ?? 0) + 1; continue; }
+    catch {
+      skipped.context_unreadable = (skipped.context_unreadable ?? 0) + 1;
+      waits.push({ taskId: candidate.id, stage: "claim", code: "context_unreadable", detail: {} });
+      continue;
+    }
     const assignmentId = randomUUID();
     try {
-      const claimed = await claimCandidate(candidate.id, assignmentId, context);
+      const claimed = await claimCandidate(candidate.id, assignmentId, context, circuits);
       if (claimed.claimed) claims.push(claimed);
     } catch (error) {
       if (!(error instanceof BoardImportError)) throw error;
@@ -545,20 +631,33 @@ export async function tickV22WorkerClaim(): Promise<ClaimTickResult> {
         catch { readBack = { claimed: false, reason: "outcome_unknown" }; }
         if (readBack.claimed) { claims.push(readBack); continue; }
         stop = "outcome_unknown";
+        stopIndex = index;
         break;
       }
       if (SKIPPED_CODES.has(error.code)) {
         skipped[error.code] = (skipped[error.code] ?? 0) + 1;
+        waits.push({ taskId: candidate.id, stage: "claim", code: error.code,
+          detail: error instanceof AmuxClaimSkipError ? error.detail : {} });
         continue;
       }
       // Global capacity full, or a reason that holds every candidate alike.
       stop = error.code;
+      stopIndex = index;
       break;
     }
   }
+  // A stop holds this card and every one after it alike.
+  if (stop && stop !== "outcome_unknown") for (const candidate of rows.slice(stopIndex))
+    waits.push({ taskId: candidate.id, stage: "claim", code: stop, detail: { holdsAll: true } });
+  await recordAmuxCardWaitReasons(waits);
+  await clearAmuxCardWaitReasons(claims.map((claim) => claim.taskId));
+  await reportLongAmuxCardWaits();
+  await reportOpenAmuxWorkerCircuits(circuits);
   console.info(JSON.stringify({ event: "amux_v22_claim_tick",
     candidates: rows.length, claimed: claims.length,
-    workers: claims.map((claim) => claim.workerName), skipped, stop }));
+    workers: claims.map((claim) => claim.workerName), skipped, stop,
+    quarantined: [...circuits].filter(([, circuit]) => circuit.state === "open")
+      .map(([worker]) => worker) }));
   if (claims.length > 0) return claims[0]!;
   if (stop) return { claimed: false as const, reason: stop };
   return { claimed: false as const, reason: skipped.no_worker_for_grade ?

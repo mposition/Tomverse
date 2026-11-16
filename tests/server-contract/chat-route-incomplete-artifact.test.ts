@@ -9,6 +9,7 @@ import { renderPresentationPptx } from "../../lib/generatedArtifactPptx";
 import { renderWorkbook } from "../../lib/generatedArtifactXlsx";
 import { admitWorkbookSpecSafely } from "../../lib/generatedArtifactCore";
 import { canonicalWorkbookSpecFor } from "../../lib/generatedArtifactWorkbookRevision";
+import { CHAT_ATTACHMENT_PARSE_CHARACTERS } from "../../lib/chatAttachmentLimits";
 
 /*
   The real `ai`, imported statically rather than through `createRequire`.
@@ -99,6 +100,8 @@ type StreamScript = {
   finishReason: string;
   rawFinishReason: string;
   text: string;
+  /** The provider stream breaks with this after `text`, instead of closing. */
+  failAfterText?: unknown;
 };
 
 let script: StreamScript = {
@@ -207,7 +210,13 @@ mock.module("ai", {
           async start(controller) {
             await driven;
             controller.enqueue(script.text);
+            // Erroring here would discard the text just queued. A provider
+            // stream that breaks does so after its last chunk was read.
+            if (script.failAfterText) return;
             controller.close();
+          },
+          pull(controller) {
+            if (script.failAfterText) controller.error(script.failAfterText);
           },
         }),
         response: Promise.resolve({
@@ -423,7 +432,6 @@ const { ROUTER_VERSIONS } = require(resolve(ROOT, "lib/routerDecision.ts")) as {
 };
 
 let forcedAutoRoute: string | null = null;
-let autoSelectionCalls = 0;
 let forcedRouterOutput: Record<string, unknown> | null = null;
 let forcedImageIntent = false;
 let imageIntentCalls = 0;
@@ -529,7 +537,6 @@ mock.module(mod("lib/autoModelSelection.ts"), {
   namedExports: {
     ...realAutoSelection,
     selectAutoModel: (input: unknown) => {
-      autoSelectionCalls += 1;
       return forcedAutoRoute
         ? routedSelection(forcedAutoRoute)
         : realAutoSelection.selectAutoModel(input);
@@ -664,7 +671,6 @@ const ask = async (
   forcedImageIntent = imageIntent;
   imageIntentCalls = 0;
   routerDecisionKept = null;
-  autoSelectionCalls = 0;
   script = {
     begins: [],
     executes: [],
@@ -701,8 +707,24 @@ const ask = async (
     throw new Error(`status ${response.status}: ${await response.text()}`);
   }
   const mode = response.headers.get("X-Chat-Response-Mode");
-  const body = await response.text();
-  return { body, mode, trailer: response.status === 200 ? readTrailer(body) : null };
+  // Read chunk by chunk rather than with `text()`: a stream the route fails
+  // part way still delivered what came before the break, and one test below
+  // is about exactly those bytes.
+  let body = "";
+  let streamError: unknown = null;
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      body += decoder.decode(value, { stream: true });
+    }
+  } catch (error) {
+    if (!script.failAfterText) throw error;
+    streamError = error;
+  }
+  return { body, mode, trailer: response.status === 200 ? readTrailer(body) : null, streamError };
 };
 
 /**
@@ -1410,18 +1432,20 @@ const revisionPptx = (text: string) => Buffer.from(renderPresentationPptx({ file
   slides: [{ layout: "titleAndContent", title: "Plan", bullets: [text] }] }));
 
 for (const [extension, render] of [["docx", revisionDocx], ["pptx", revisionPptx]] as const) {
-  test(`GF-13 latest ${extension} overflow uses the actual shared budget and stops before final answer dispatch`, async () => {
+  // Earlier files no longer share one 300,000-character budget with the turn's
+  // own file (operator decision 2026-11-16): a large earlier file cannot push
+  // the latest file out, and the latest file still arrives whole.
+  test(`GF-13 latest ${extension} is sent whole after a large earlier file`, async () => {
     try {
       const historical = addInputFixture("previous-text", "txt", Buffer.from("x".repeat(299_990)));
-      const current = addInputFixture("current-office", extension, render("Keep blue. Budget is 200."));
-      const result = await ask({}, { autoRoutedTo: MODEL_ID, expectedStatus: 413, messages: [
+      const current = addInputFixture("current-office", extension, render("Keep blue. Budget is 200. Tail confirmed."));
+      await ask({}, { autoRoutedTo: MODEL_ID, messages: [
         { role: "user", content: "Earlier input", attachments: [historical] },
         { role: "assistant", content: "Understood" },
         { role: "user", content: "Create a revised file from the attachment", attachments: [current] },
       ] });
-      assert.equal(JSON.parse(result.body).code, "ATTACHMENT_TEXT_TOO_LARGE");
-      assert.equal(lastStreamTextOptions, null, "final answer provider must not run on partial text");
-      assert.ok(autoSelectionCalls > 0, "Auto selection already occurred; this test does not claim zero Auto cost");
+      assert.ok(lastStreamTextOptions, "final answer provider was not dispatched");
+      assert.match(JSON.stringify(lastStreamTextOptions!.messages), /Tail confirmed/);
       assert.equal(world.artifactRows.length, 0);
     } finally { clearInputFixtures(); }
   });
@@ -1443,13 +1467,13 @@ for (const [extension, render] of [["docx", revisionDocx], ["pptx", revisionPptx
 }
 
 for (const extension of ["txt", "csv"]) {
+  // A latest file whose text alone passes the parser ceiling, which no turn
+  // could carry, is still refused whole rather than truncated.
   test(`GF-13 latest ${extension} is refused rather than truncated at Send`, async () => {
     try {
-      const historical = addInputFixture("past-plain", "txt", Buffer.from("x".repeat(299_990)));
-      const current = addInputFixture("latest-plain", extension, Buffer.from("keep,200\nlast,300\n"));
+      const current = addInputFixture("latest-plain", extension,
+        Buffer.from("keep,200\n".repeat(Math.ceil(CHAT_ATTACHMENT_PARSE_CHARACTERS / 9) + 1)));
       const result = await ask({}, { expectedStatus: 413, messages: [
-        { role: "user", content: "Earlier input", attachments: [historical] },
-        { role: "assistant", content: "Understood" },
         { role: "user", content: "Create a revised file", attachments: [current] },
       ] });
       assert.equal(JSON.parse(result.body).code, "ATTACHMENT_TEXT_TOO_LARGE");
@@ -1507,20 +1531,19 @@ test("XLSX revision Send provides the complete canonical workbook through a requ
   }
 });
 
-test("XLSX revision Send uses the real remaining extraction budget before final provider dispatch", async () => {
+test("XLSX revision Send keeps the whole workbook after a large earlier file", async () => {
   const previous = process.env.GENERATED_ARTIFACT_REVISION_ENABLED;
   process.env.GENERATED_ARTIFACT_REVISION_ENABLED = "true";
   try {
     const historical = addInputFixture("historical-budget", "txt", Buffer.from("x".repeat(299_990)));
     const { reference } = workbookRevisionFixture();
-    const result = await ask({}, { autoRoutedTo: MODEL_ID, expectedStatus: 413, messages: [
+    await ask({}, { autoRoutedTo: MODEL_ID, messages: [
       { role: "user", content: "Earlier input", attachments: [historical] },
       { role: "assistant", content: "Understood" },
       { role: "user", content: "Create the revised workbook", attachments: [reference] },
     ] });
-    assert.equal(JSON.parse(result.body).code, "ATTACHMENT_TEXT_TOO_LARGE");
-    assert.equal(lastStreamTextOptions, null);
-    assert.ok(autoSelectionCalls > 0, "the existing Auto call precedes extraction; it is not zero-cost validation");
+    assert.ok(lastStreamTextOptions, "final answer provider was not dispatched");
+    assert.match(JSON.stringify(lastStreamTextOptions!.messages), /TAIL_MARKER/);
     assert.equal(world.artifactRows.length, 0);
   } finally {
     clearInputFixtures();
@@ -1549,5 +1572,132 @@ test("XLSX revision Send refuses missing canonical data and copies from another 
     clearInputFixtures();
     if (previous === undefined) delete process.env.GENERATED_ARTIFACT_REVISION_ENABLED;
     else process.env.GENERATED_ARTIFACT_REVISION_ENABLED = previous;
+  }
+});
+
+/* -------------------------------------------------------------------------- */
+/* The error report for a turn that failed inside its 200 stream                */
+/* -------------------------------------------------------------------------- */
+
+/*
+  docs/policy/trace-feedback-automation.md §3.3 (operator decision 2026-11-16).
+
+  An empty answer is settled inside a stream whose headers left long ago, so
+  the signed error-report token cannot ride in one. It rides in the trailer.
+  Driven through the real route and read back with the real parser and the
+  real verifier: this is the token the feedback endpoint will be handed.
+*/
+const withErrorReportSigning = async <T,>(run: () => Promise<T>): Promise<T> => {
+  const previous = process.env.ERROR_REPORT_SIGNING_SECRET;
+  process.env.ERROR_REPORT_SIGNING_SECRET = "an-error-report-secret-of-32-chars!!";
+  try {
+    return await run();
+  } finally {
+    if (previous === undefined) delete process.env.ERROR_REPORT_SIGNING_SECRET;
+    else process.env.ERROR_REPORT_SIGNING_SECRET = previous;
+  }
+};
+
+type ErrorReportTrailer = { errorReport?: { token: string; code: string } } | null;
+
+test("an empty answer's trailer carries a signed error report for the turn's own trace", async () => {
+  const evidence: Array<Record<string, unknown>> = [];
+  OVERRIDES.traceErrorEvidence = {
+    create: ((args: { data: Record<string, unknown> }) => {
+      evidence.push(args.data);
+      return args.data;
+    }) as (args: never) => unknown,
+  };
+  try {
+    await withErrorReportSigning(async () => {
+      const { trailer } = await ask({ text: "" });
+      const report = (trailer as ErrorReportTrailer)?.errorReport;
+      assert.ok(report, "the empty answer's trailer carried no error report");
+      assert.equal(report.code, "AI_EMPTY_RESPONSE.END_TURN");
+
+      const { verifyErrorReportToken } = require(
+        resolve(ROOT, "lib/errorReportToken.ts")
+      ) as typeof import("../../lib/errorReportToken");
+      const outcome = verifyErrorReportToken(report.token);
+      assert.equal(outcome.status, "verified");
+      assert.equal(outcome.payload?.errorCode, report.code);
+      assert.equal(outcome.payload?.routeClass, "chat");
+      assert.match(outcome.payload?.traceId ?? "", /^[0-9a-f-]{36}$/);
+
+      // The evidence row the token points at: the server's facts, recorded
+      // against the same trace and occurrence, on a response that was a 200.
+      await new Promise((settle) => setImmediate(settle));
+      assert.equal(evidence.length, 1);
+      assert.equal(evidence[0].occurrenceId, outcome.payload?.occurrenceId);
+      assert.equal(evidence[0].traceId, outcome.payload?.traceId);
+      assert.equal(evidence[0].errorCode, report.code);
+      assert.equal(evidence[0].httpStatus, 200);
+      assert.equal(evidence[0].phase, "stream");
+      assert.equal(evidence[0].failureLayer, "provider_stream");
+      assert.equal(evidence[0].modelId, MODEL_ID);
+    });
+  } finally {
+    delete OVERRIDES.traceErrorEvidence;
+  }
+});
+
+test("an answer that completed gets no error report, signing configured or not", async () => {
+  await withErrorReportSigning(async () => {
+    const { trailer } = await ask({});
+    assert.equal((trailer as ErrorReportTrailer)?.errorReport, undefined);
+  });
+});
+
+test("without a signing secret an empty answer still closes normally, with no report", async () => {
+  const previous = process.env.ERROR_REPORT_SIGNING_SECRET;
+  delete process.env.ERROR_REPORT_SIGNING_SECRET;
+  try {
+    const { trailer } = await ask({ text: "" });
+    assert.ok(trailer, "the trailer itself still arrives");
+    assert.equal((trailer as ErrorReportTrailer)?.errorReport, undefined);
+  } finally {
+    if (previous !== undefined) process.env.ERROR_REPORT_SIGNING_SECRET = previous;
+  }
+});
+
+test("a stream that breaks mid-answer delivers its error report, then the error it always raised", async () => {
+  const providerFailure = Object.assign(new Error("upstream overloaded"), {
+    name: "AI_APICallError",
+    statusCode: 503,
+    isRetryable: true,
+  });
+  await withErrorReportSigning(async () => {
+    const { body, trailer, streamError } = await ask({
+      text: "Half an answer",
+      failAfterText: providerFailure,
+    });
+    // The client still sees a broken stream -- an older one behaves exactly
+    // as before -- but the trailer was read first.
+    assert.equal(streamError, providerFailure);
+    assert.ok(body.startsWith("Half an answer"));
+    const report = (trailer as ErrorReportTrailer)?.errorReport;
+    assert.ok(report, "the failed stream delivered no error report before breaking");
+    assert.equal(report.code, "AI_STREAM_FAILED.AI_APICallError.HTTP_503.RETRYABLE");
+
+    const { verifyErrorReportToken } = require(
+      resolve(ROOT, "lib/errorReportToken.ts")
+    ) as typeof import("../../lib/errorReportToken");
+    const outcome = verifyErrorReportToken(report.token);
+    assert.equal(outcome.status, "verified");
+    assert.equal(outcome.payload?.errorCode, report.code);
+  });
+});
+
+test("a broken stream with signing off raises the same error and sends no trailer", async () => {
+  const previous = process.env.ERROR_REPORT_SIGNING_SECRET;
+  delete process.env.ERROR_REPORT_SIGNING_SECRET;
+  try {
+    const failure = new Error("upstream closed");
+    const { body, trailer, streamError } = await ask({ text: "Half", failAfterText: failure });
+    assert.equal(streamError, failure);
+    assert.equal(trailer, null);
+    assert.equal(body, "Half");
+  } finally {
+    if (previous !== undefined) process.env.ERROR_REPORT_SIGNING_SECRET = previous;
   }
 });

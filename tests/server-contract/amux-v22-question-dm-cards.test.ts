@@ -42,7 +42,10 @@ test("a question's relay card names the asking card and carries the worker's con
   const [card] = await openAmuxV22QuestionCards([pendingRow()] as never);
   assert.equal(card.title, "AMUX-AUTOFILE-003 File retry trailer signal");
   assert.match(card.context, /^Card: AMUX-AUTOFILE-003 "File retry trailer signal", question 1 from worker codex-impl\./);
-  assert.match(card.context, /lib\/amux\/fileRetry\.ts has no signal yet\./);
+  // With the workspace on (the default) the worker's context is evidence/CONTEXT.md, whole;
+  // the workspace route reads it again from the question's run (decisionMakerWorkspaceService.ts).
+  assert.match(card.context, /evidence\/CONTEXT\.md is what the worker found, whole\./);
+  assert.doesNotMatch(card.context, /has no signal yet/);
   assert.deepEqual(card.context_paths, ["lib/amux/fileRetry.ts"]);
   assert.deepEqual(card.options.map((option: { id: string }) => option.id), ["a", "b"]);
   // The card's own sealed title is opened with the card's own row.

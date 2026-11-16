@@ -15,6 +15,7 @@ import { amuxPermittedTargetRefSafe, inspectAmuxStoredAnalysisUnit,
   snapshotAmuxPermittedTarget,
   type AmuxPermittedTargetRef } from "./ideaAnalysisChunkCore.ts";
 import { amuxAnalysisFreeformSubjectId } from "./ideaAnalysisDraftSealCore.ts";
+import { amuxIntakeCap, amuxIntakeLegacyLimits } from "./intakeLimitsCore.ts";
 import { matchesAmuxIdeaAnalysisUnitCommitments } from
   "./ideaAnalysisResultReadCore.ts";
 import { ideaTransferBrowserDigest } from "./ideaTransferBrowserCore.ts";
@@ -183,7 +184,7 @@ export async function readPreviousOutputPage(tx: Prisma.TransactionClient, input
       throw new IdeaTransferPreviewError("integrity_unavailable");
     }
     const refs = dataRecord.permittedTargetRefs;
-    if (!Array.isArray(refs) || refs.length > 96) {
+    if (!Array.isArray(refs) || refs.length > amuxIntakeCap(96)) {
       throw new IdeaTransferPreviewError("integrity_unavailable");
     }
     inherited = refs.map((raw) => snapshotAmuxPermittedTarget(raw)).filter((ref):
@@ -235,9 +236,13 @@ export async function readPreviousOutputPage(tx: Prisma.TransactionClient, input
   const unique = new Map(combined.map((target) => [target.ref, target]));
   const nodes = [...unique.values()].filter((target) => target.kind === "node");
   const cards = [...unique.values()].filter((target) => target.kind === "card");
-  const permittedTargetRefs = [...nodes.slice(-64),
-    ...cards.slice(-(96 - Math.min(64, nodes.length)))];
-  if (permittedTargetRefs.length > 96 || permittedTargetRefs.some((target) =>
+  // Owner direction 2026-11-15: a later page keeps every earlier proposal as a
+  // target, so it can name any of them; only the legacy switch keeps the
+  // former window of the newest 64 nodes and 96 targets in all.
+  const legacy = amuxIntakeLegacyLimits();
+  const permittedTargetRefs = legacy ? [...nodes.slice(-64),
+    ...cards.slice(-(96 - Math.min(64, nodes.length)))] : [...nodes, ...cards];
+  if (permittedTargetRefs.length > amuxIntakeCap(96, legacy) || permittedTargetRefs.some((target) =>
       !amuxPermittedTargetRefSafe(target, input.chunkIndex))) {
     throw new IdeaTransferPreviewError("integrity_unavailable");
   }

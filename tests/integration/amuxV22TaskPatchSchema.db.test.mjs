@@ -40,7 +40,7 @@ test("v22 encrypted patch candidate is bounded and bound to one Task result", {
     await reject([...ids, null, null, null, digest, digest,
       "b".repeat(40), 1], "23514", "AmuxV22TaskPatch_body_check");
     await reject([...ids, Buffer.from("x"), "synthetic", 1,
-      digest, digest, "b".repeat(40), 65_537], "23514",
+      digest, digest, "b".repeat(40), 4_194_305], "23514",
     "AmuxV22TaskPatch_digest_check");
     await reject([...ids, Buffer.from("x"), "synthetic", 1,
       digest, digest, "b".repeat(40), 1], "23503");

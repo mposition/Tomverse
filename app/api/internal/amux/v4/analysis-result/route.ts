@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { readLimitedJson } from "@/lib/apiSecurity";
 import { amuxJsonNoStore } from "@/lib/amux/internalRoute";
+import { amuxAnalysisAnswerRequestMaxBytes } from "@/lib/amux/ideaAnalysisChunkCore";
 import { AMUX_V4_ANALYSIS_AGENT_SECRET_ENV,
   isAmuxV4AnalysisAgentAuthorized } from "@/lib/amux/ideaAnalysisQueueCore";
 import { AmuxIdeaAnalysisResultError,
@@ -30,7 +31,8 @@ const id = z.string().regex(/^[A-Za-z0-9:_-]{1,128}$/);
 const bodySchema = z.object({ requestId: id, ideaId: id, previewId: id,
   holdId: id, leaseGeneration: z.literal(1),
   outcome: z.enum(["verified_success", "invocation_failed", "outcome_unknown"]),
-  rawModelOutput: z.string().max(65_536).nullable(),
+  // The service bounds the answer by amuxAnalysisChunkMaxBytes (bytes).
+  rawModelOutput: z.string().nullable(),
   inputTokens: z.number().int().nonnegative().nullable(),
   outputTokens: z.number().int().nonnegative().nullable() }).strict();
 
@@ -52,7 +54,10 @@ export async function POST(request: Request): Promise<Response> {
     return amuxJsonNoStore({ error: "Invalid content type." }, 415);
   }
   let body: z.infer<typeof bodySchema>;
-  try { body = await readLimitedJson(request, 70 * 1024, bodySchema); }
+  try {
+    body = await readLimitedJson(request, amuxAnalysisAnswerRequestMaxBytes(70 * 1024),
+      bodySchema);
+  }
   catch { return amuxJsonNoStore({ error: "Invalid request." }, 400); }
   let keys = loadCurrentAmuxContentKeys(process.env);
   let unitIds: string[] | undefined;

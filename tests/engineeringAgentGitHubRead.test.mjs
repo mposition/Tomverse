@@ -30,6 +30,8 @@ const fakeFetch = (routes) => {
     const handler = routes[path.split("?")[0]];
     if (!handler) return new Response("{}", { status: 404 });
     const answer = handler(path);
+    // Bytes are a raw body (a blob read with `application/vnd.github.raw+json`).
+    if (answer instanceof Uint8Array) return new Response(answer, { status: 200 });
     const withLink = answer !== null && typeof answer === "object" && "link" in answer;
     return new Response(JSON.stringify(withLink ? answer.body : answer), {
       status: 200,
@@ -139,17 +141,34 @@ test("v22 base tree is complete, self-consistent and read from the fixed repo", 
     await assert.rejects(readEngineeringAgentPinnedBaseTree(PIN,
       { env, fetchImpl: movedRoutes(compare) }, { onDevelop: true }),
     /invalid_input/);
-  const blobFetch = fakeFetch({ [`/git/blobs/${blobId}`]: () => ({
-    sha: blobId, encoding: "base64", size: blob.length,
-    content: blob.toString("base64"),
-  }) }).fetchImpl;
+  // A blob is read raw, never as base64 JSON, and must hash to its id.
+  const blobFetch = fakeFetch({ [`/git/blobs/${blobId}`]: () =>
+    Buffer.from(blob) });
   assert.deepEqual(Buffer.from(await readEngineeringAgentGitBlob(blobId,
-    { env, fetchImpl: blobFetch })), blob);
+    { env, fetchImpl: blobFetch.fetchImpl })), blob);
+  assert.equal(blobFetch.seen[0].init.headers.Accept,
+    "application/vnd.github.raw+json");
+  assert.equal(blobFetch.seen[0].init.redirect, "error");
   await assert.rejects(readEngineeringAgentGitBlob(blobId, { env,
-    fetchImpl: fakeFetch({ [`/git/blobs/${blobId}`]: () => ({
-      sha: blobId, encoding: "base64", size: blob.length,
-      content: Buffer.from("wrong").toString("base64"),
-    }) }).fetchImpl }), /invalid_response/);
+    fetchImpl: fakeFetch({ [`/git/blobs/${blobId}`]: () =>
+      Buffer.from("wrong") }).fetchImpl }), /invalid_response/);
+  // A caller's bound is kept while streaming.
+  await assert.rejects(readEngineeringAgentGitBlob(blobId, { env,
+    fetchImpl: blobFetch.fetchImpl }, blob.length - 1), /oversized_response/);
+  await assert.rejects(readEngineeringAgentGitBlob(blobId, { env,
+    fetchImpl: fakeFetch({}).fetchImpl }), /http_error/);
+  // GitHub's own file limit is the ceiling (200 KiB / 2 MiB until 2026-11-15).
+  await assert.rejects(readEngineeringAgentGitBlob(blobId, { env,
+    fetchImpl: blobFetch.fetchImpl }, 100 * 1024 * 1024 + 1), /invalid_input/);
+});
+
+test("a blob larger than the old 200 KiB default is read whole", async () => {
+  const blob = Buffer.alloc(534 * 1024, "x");
+  const blobId = createHash("sha1").update(`blob ${blob.length}\0`)
+    .update(blob).digest("hex");
+  const read = await readEngineeringAgentGitBlob(blobId, { env,
+    fetchImpl: fakeFetch({ [`/git/blobs/${blobId}`]: () => blob }).fetchImpl });
+  assert.equal(read.length, blob.length);
 });
 
 test("develop's checks need the read-only token, and an error carries a code, never upstream text", async () => {

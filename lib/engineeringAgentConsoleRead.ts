@@ -14,14 +14,15 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 
 import {
-  OWNER_QUEUE_LIMITS,
+  ENGINEERING_AGENT_LEGACY_HALTS_ENV,
+  OWNER_QUEUE_LEGACY_LIMITS,
+  engineeringAgentLegacyHalts,
   killSwitchEngaged,
   ENGINEERING_AGENT_KILL_SWITCH_ENV,
   unknownOutcomeDecisionWorkItemId,
 } from "@/lib/engineeringAgentCore";
 import { engineeringAgentPullRequestResumable, readEngineeringAgentSwitches } from "@/lib/engineeringAgentStore";
 import {
-  ENGINEERING_AGENT_PATCH_FILE_LIMIT,
   ENGINEERING_AGENT_CARD_ITEM_KINDS,
   ENGINEERING_AGENT_REVIEW_PR_CAUSE_PREFIX,
   engineeringAgentCardItems,
@@ -41,8 +42,20 @@ import { prisma } from "@/lib/prisma";
 export const ENGINEERING_AGENT_CONSOLE_SECTIONS = ["queue", "runs", "pull-requests", "settings"] as const;
 export type EngineeringAgentConsoleSection = (typeof ENGINEERING_AGENT_CONSOLE_SECTIONS)[number];
 
-/** How many rows a list shows. The screen states it. */
+/** How many rows a list shows at first, and adds each time "show more" is pressed. The screen states it. */
 export const ENGINEERING_AGENT_CONSOLE_LIMIT = 50;
+/**
+ * The most rows one read can be asked for (owner decision 2026-11-15: no
+ * display cap; a longer list offers the next page instead of ending): the
+ * size one admin request still answers in a few seconds, as the owner queue's.
+ */
+export const ENGINEERING_AGENT_CONSOLE_MAX_LIMIT = 2_000;
+
+/** The `limit` a request asked for: a whole number from one page up to the maximum, else one page. */
+export const engineeringAgentConsoleRequestedLimit = (raw: unknown): number => {
+  const value = typeof raw === "string" && /^[0-9]{1,5}$/.test(raw) ? Number(raw) : ENGINEERING_AGENT_CONSOLE_LIMIT;
+  return Math.min(ENGINEERING_AGENT_CONSOLE_MAX_LIMIT, Math.max(ENGINEERING_AGENT_CONSOLE_LIMIT, value));
+};
 
 export type EngineeringAgentOwnerItemView = {
   id: string;
@@ -86,7 +99,7 @@ export type EngineeringAgentOwnerItemContext = {
     endedAt: string | null;
   };
   pullRequests: EngineeringAgentItemPullRequest[];
-  /** The draft's changed files, at most ENGINEERING_AGENT_PATCH_FILE_LIMIT; `fileCount` is all of them. */
+  /** The draft's changed files, all of them; `fileCount` is their number. */
   files: EngineeringAgentPatchFile[];
   fileCount: number;
   /** The cross-vendor review of the run's commit, when one was recorded. */
@@ -143,6 +156,8 @@ export type EngineeringAgentConsolePayload = {
   section: EngineeringAgentConsoleSection;
   canWrite: boolean;
   limit: number;
+  /** More rows than this read holds wait in the section: the screen offers the next page. */
+  more: boolean;
   queue?: {
     items: EngineeringAgentOwnerItemView[];
     totals: { t2_draft: number; decision: number; state_mismatch: number };
@@ -153,8 +168,9 @@ export type EngineeringAgentConsolePayload = {
     mode: string;
     frozen: boolean;
     killSwitch: boolean;
-    pullRequests: { occupied: number; limit: number };
-    decisions: { occupied: number; limit: number };
+    /** The queue's length; `limit` is null while it is uncapped (owner decision 2026-11-15). */
+    pullRequests: { occupied: number; limit: number | null };
+    decisions: { occupied: number; limit: number | null };
   };
 };
 
@@ -280,7 +296,7 @@ async function readOwnerItemContexts(
         endedAt: run.endedAt?.toISOString() ?? null,
       },
       pullRequests: run.bindings.map(engineeringAgentItemPullRequest),
-      files: files.slice(0, ENGINEERING_AGENT_PATCH_FILE_LIMIT),
+      files,
       fileCount: files.length,
       review: review
         ? {
@@ -321,15 +337,16 @@ export async function readEngineeringAgentConsole(
   section: EngineeringAgentConsoleSection,
   canWrite: boolean,
   canReadDm = false,
+  limit: number = ENGINEERING_AGENT_CONSOLE_LIMIT,
 ): Promise<EngineeringAgentConsolePayload> {
-  const base = { section, canWrite, limit: ENGINEERING_AGENT_CONSOLE_LIMIT };
+  const base = { section, canWrite, limit, more: false };
 
   if (section === "queue") {
     const [items, grouped] = await Promise.all([
       prisma.engineeringAgentWorkItem.findMany({
         where: { kind: { in: [...ownerKinds] }, state: "open" },
         orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-        take: ENGINEERING_AGENT_CONSOLE_LIMIT,
+        take: limit,
         select: {
           id: true,
           kind: true,
@@ -362,8 +379,10 @@ export async function readEngineeringAgentConsole(
         select: { id: true, kind: true, state: true, reason: true },
       })).filter(engineeringAgentPullRequestResumable).map((row) => row.id),
     );
+    const waiting = grouped.reduce((sum, row) => sum + row._count._all, 0);
     return {
       ...base,
+      more: waiting > items.length,
       queue: {
         items: items.map(({ run, ...item }) => ({
           ...item,
@@ -382,9 +401,10 @@ export async function readEngineeringAgentConsole(
   }
 
   if (section === "runs") {
-    const rows = await prisma.engineeringAgentRun.findMany({
+    const read = await prisma.engineeringAgentRun.findMany({
       orderBy: [{ startedAt: "desc" }, { id: "desc" }],
-      take: ENGINEERING_AGENT_CONSOLE_LIMIT,
+      // One more than shown, so the screen knows whether a next page exists.
+      take: limit + 1,
       select: {
         id: true,
         cardId: true,
@@ -397,8 +417,10 @@ export async function readEngineeringAgentConsole(
         endedAt: true,
       },
     });
+    const rows = read.slice(0, limit);
     return {
       ...base,
+      more: read.length > limit,
       runs: rows.map((row) => ({
         ...row,
         startedAt: row.startedAt.toISOString(),
@@ -408,9 +430,9 @@ export async function readEngineeringAgentConsole(
   }
 
   if (section === "pull-requests") {
-    const rows = await prisma.engineeringAgentBinding.findMany({
+    const read = await prisma.engineeringAgentBinding.findMany({
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: ENGINEERING_AGENT_CONSOLE_LIMIT,
+      take: limit + 1,
       select: {
         id: true,
         runId: true,
@@ -426,8 +448,10 @@ export async function readEngineeringAgentConsole(
       value !== null && typeof value === "object" && !Array.isArray(value)
         ? (value as Record<string, unknown>)[key]
         : undefined;
+    const rows = read.slice(0, limit);
     return {
       ...base,
+      more: read.length > limit,
       pullRequests: rows.map((row) => {
         const verdict = field(row.approvalObservation, "verdict");
         const merged = field(row.mergeObservation, "merged");
@@ -446,6 +470,7 @@ export async function readEngineeringAgentConsole(
   }
 
   const switches = await readEngineeringAgentSwitches(prisma);
+  const legacyCaps = engineeringAgentLegacyHalts(process.env[ENGINEERING_AGENT_LEGACY_HALTS_ENV]);
   const [bindings, pendingPublish, activeRuns, openOwnerItems] = await Promise.all([
     prisma.engineeringAgentBinding.count({ where: { state: { in: ["open", "closed"] }, supersededAt: null } }),
     prisma.engineeringAgentWorkItem.count({
@@ -460,8 +485,10 @@ export async function readEngineeringAgentConsole(
       mode: switches.mode,
       frozen: switches.frozen,
       killSwitch: killSwitchEngaged(process.env[ENGINEERING_AGENT_KILL_SWITCH_ENV]),
-      pullRequests: { occupied: bindings + pendingPublish + activeRuns, limit: OWNER_QUEUE_LIMITS.pr },
-      decisions: { occupied: openOwnerItems + activeRuns, limit: OWNER_QUEUE_LIMITS.decision },
+      pullRequests: { occupied: bindings + pendingPublish + activeRuns,
+        limit: legacyCaps ? OWNER_QUEUE_LEGACY_LIMITS.pr : null },
+      decisions: { occupied: openOwnerItems + activeRuns,
+        limit: legacyCaps ? OWNER_QUEUE_LEGACY_LIMITS.decision : null },
     },
   };
 }
@@ -489,7 +516,8 @@ const cardItemSelect = {
  * The open T2 drafts and state mismatches of the given AMUX cards, for the
  * owner queue (Admin › Execution › Waiting on me). Read only, the same rows
  * and rejudge rule the engineering console's queue shows; the actions stay in
- * the engineering routes.
+ * the engineering routes. Every open item of those cards (owner decision
+ * 2026-11-15: no display cap; the cards themselves bound the read).
  */
 export async function readEngineeringAgentCardItems(
   cardIds: readonly string[],
@@ -499,14 +527,12 @@ export async function readEngineeringAgentCardItems(
     prisma.engineeringAgentWorkItem.findMany({
       where: { state: "open", kind: { in: [...ENGINEERING_AGENT_CARD_ITEM_KINDS] }, run: { cardId: { in: [...cardIds] } } },
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-      take: ENGINEERING_AGENT_CONSOLE_LIMIT,
       select: cardItemSelect,
     }),
     // A mismatch about a published item has no run; its card is the published item's.
     prisma.engineeringAgentWorkItem.findMany({
       where: { state: "open", kind: "state_mismatch", runId: null, causeKey: { startsWith: ENGINEERING_AGENT_REVIEW_PR_CAUSE_PREFIX } },
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-      take: ENGINEERING_AGENT_CONSOLE_LIMIT,
       select: cardItemSelect,
     }),
   ]);

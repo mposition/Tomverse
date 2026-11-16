@@ -28,6 +28,7 @@ import {
   skippedCommits,
 } from "../scripts/merge-train-core.mjs";
 import {
+  type QaReleaseDmMergeScope,
   type QaReleaseExclusion,
   judgeQaReleaseMergeLaneExclusion,
   type QaReleaseExclusionInput,
@@ -80,6 +81,17 @@ export type QaReleaseLaneState = {
 };
 
 export type QaReleaseDmApprovedPull = { number: number; headSha: string; headRef: string };
+
+/**
+ * The scope the lane judges a reported Decision Maker approval in (owner
+ * decision 2026-11-15): always the block list. The app reads the scope switch
+ * (TOMVERSE_AMUX_DM_MERGE_SCOPE on the app service, default the allow list) and reports only the
+ * pull requests its own scope lets through -- with the stored patch's lines,
+ * which the lane cannot see -- so the app's reading is the one that narrows,
+ * and the lane needs no variable of its own (its start check admits none).
+ * The lane's judgement is a second look at the paths, never a wider one.
+ */
+export const QA_RELEASE_LANE_DM_MERGE_SCOPE: QaReleaseDmMergeScope = "blocklist";
 
 /**
  * Whether the app's report covers this pull request as GitHub lists it now:
@@ -337,6 +349,7 @@ async function observeVerdicts(
   pickNumber: number | null,
   priority?: readonly number[],
   state: Pick<QaReleaseLaneState, "dmApproved"> = {},
+  dmMergeScope: QaReleaseDmMergeScope = "allowlist",
 ): Promise<void> {
   const shown = new Map(exclusions);
   for (const pull of ordered) {
@@ -344,7 +357,7 @@ async function observeVerdicts(
     if (pull.baseRefName !== "develop" || refusalReason(pull, "develop") !== null) continue;
     const read = await ports.github.exclusionInputs(pull).catch(() => null);
     if (read === null) continue;
-    const inputs = { ...read, dmApproved: qaReleaseDmApprovedPull(state, pull) };
+    const inputs = { ...read, dmApproved: qaReleaseDmApprovedPull(state, pull), dmMergeScope };
     const judged = judgeQaReleaseMergeLaneExclusion(inputs);
     shown.set(pull.number, judged);
     if (judged.excluded) excludingFiles.set(pull.number, qaReleaseMergeLaneExcludingFiles(inputs));
@@ -382,7 +395,7 @@ export async function runQaReleaseMergeLaneRound(
     try {
       const pulls = await ports.github.listOpenDevelopPulls();
       const ordered = [...pulls].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt) || a.number - b.number);
-      await observeVerdicts(ports, observer, ordered, new Map(), new Map(), null);
+      await observeVerdicts(ports, observer, ordered, new Map(), new Map(), null, undefined, {}, QA_RELEASE_LANE_DM_MERGE_SCOPE);
     } catch {
       // The screen keeps the last verdicts.
     }
@@ -476,6 +489,7 @@ async function startNextAttempt(
   let ordered: QaReleaseLanePullRequest[];
   const exclusions = new Map<number, QaReleaseExclusion>();
   const excludingFiles = new Map<number, ReturnType<typeof qaReleaseMergeLaneExcludingFiles>>();
+  const dmMergeScope = QA_RELEASE_LANE_DM_MERGE_SCOPE;
   try {
     pulls = await ports.github.listOpenDevelopPulls();
     ordered = qaReleaseLaneOrder(pulls, state.priority);
@@ -485,7 +499,8 @@ async function startNextAttempt(
     for (const pull of ordered) {
       if (pull.baseRefName !== "develop" || refusalReason(pull, "develop") !== null) continue;
       // The one exception to the `agent` branch rule is the app's report, at this very head.
-      const inputs = { ...(await ports.github.exclusionInputs(pull)), dmApproved: qaReleaseDmApprovedPull(state, pull) };
+      const inputs = { ...(await ports.github.exclusionInputs(pull)), dmApproved: qaReleaseDmApprovedPull(state, pull),
+        dmMergeScope };
       const judged = judgeQaReleaseMergeLaneExclusion(inputs);
       exclusions.set(pull.number, judged);
       if (judged.excluded) excludingFiles.set(pull.number, qaReleaseMergeLaneExcludingFiles(inputs));
@@ -495,7 +510,8 @@ async function startNextAttempt(
     return { exitCode: 1, outcome: "candidates_unknown" };
   }
   const { pick } = pickQaReleaseLaneCandidate(pulls, exclusions, state.priority);
-  if (observer) await observeVerdicts(ports, observer, ordered, exclusions, excludingFiles, pick?.number ?? null, state.priority, state);
+  if (observer) await observeVerdicts(ports, observer, ordered, exclusions, excludingFiles, pick?.number ?? null, state.priority, state,
+    dmMergeScope);
   if (pick === null) return { exitCode: 0, outcome: "idle" };
 
   const issued = await ports.app.issue({ pullRequestNumber: pick.number, headSha: pick.headRefOid }).catch(() => null);

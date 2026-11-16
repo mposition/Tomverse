@@ -310,10 +310,18 @@ export const isAmuxWorkerLatchEventKind = (value: unknown): value is AmuxWorkerL
 export const isAmuxWorkerTrialOutcome = (value: unknown): value is AmuxWorkerTrialOutcome =>
   isOneOf(AMUX_WORKER_TRIAL_OUTCOMES, value);
 
-/** Activation gate 2: three trial cards and US$5 per worker, three failures for a latch. */
+/**
+ * Activation gate 2 named three trial cards per worker and a latch after
+ * three failures in a row; nothing ever counted either. Owner direction
+ * 2026-11-15 merged them into one automatic stop: the worker quarantine
+ * (lib/amux/workerCircuitCore.ts), derived from the worker's own latest
+ * attempts, which also lets the worker back in by itself. A latch event that
+ * is already recorded still holds its worker until a person releases it. The
+ * observation table's own bounds stay, as its database CHECKs on
+ * `trialNumber` and `costMicroUsd` mirror them; nothing gates on them.
+ */
 export const AMUX_WORKER_TRIAL_CARD_COUNT = 3;
 export const AMUX_WORKER_TRIAL_COST_CAP_MICRO_USD = 5_000_000;
-export const AMUX_WORKER_LATCH_CONSECUTIVE_FAILURES = 3;
 
 /**
  * Section 7: the latch is open when its newest event is an opening. `null`

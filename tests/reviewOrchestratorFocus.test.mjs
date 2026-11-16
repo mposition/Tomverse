@@ -88,9 +88,9 @@ test("the reviewer is shown only focus..head; earlier rounds are named as contex
     assert.equal(result.fileCount, 2);
     assert.equal(result.focusFileCount, 1);
     const prompt = await reviewAndReadPrompt(f);
-    assert.match(prompt, /ROUND FIVE TEXT/);
     assert.doesNotMatch(prompt, /ROUND FOUR TEXT/);
     assert.match(prompt, new RegExp(`Review the commits ${round4}\\.\\.`));
+    assert.match(prompt, new RegExp(`git diff ${round4} [0-9a-f]{40}`));
     assert.match(prompt, /- round5\.md/);
     assert.doesNotMatch(prompt, /- round4\.md/);
   } finally {

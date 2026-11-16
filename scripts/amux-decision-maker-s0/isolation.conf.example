@@ -31,7 +31,7 @@ ANTHROPIC_CLI=/home/amux-dm-anthropic/.local/bin/claude
 # else. S0 records the exact host list each CLI needs; start from these.
 OPENAI_HOSTS=api.openai.com:443 chatgpt.com:443
 ANTHROPIC_HOSTS=api.anthropic.com:443
-GITHUB_HOSTS=api.github.com:443 raw.githubusercontent.com:443
+GITHUB_HOSTS=api.github.com:443 github.com:443
 
 # Hosts that no DM account and not the broker may reach. They are a sample:
 # any one reached is a leak.

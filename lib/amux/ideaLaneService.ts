@@ -9,10 +9,12 @@ import { prisma } from "@/lib/prisma";
 import { openAmuxContent, verifyAmuxContentDigest } from "./ideaCrypto.ts";
 import { inspectAmuxIdeaInput } from "./ideaInputCore.ts";
 import { loadAmuxContentKeyRing } from "./ideaKeyStore.ts";
+import { amuxIntakeLegacyLimits } from "./intakeLimitsCore.ts";
 import {
   AMUX_IDEA_LANE_LEASE_MS,
   AMUX_IDEA_LANE_MAX_ATTEMPTS,
   AMUX_IDEA_LANE_PUBLISH_FENCE_MS,
+  AMUX_IDEA_LANE_REPEATED_FAILURE_STOP,
   AMUX_IDEA_LANE_SECRET_ENV,
   amuxIdeaLaneBranch,
   amuxIdeaLaneClaimable,
@@ -63,6 +65,7 @@ export async function claimAmuxIdeaLane(scope: { actorUserId?: string } = {}): P
     await tx.$executeRaw`SELECT set_config('statement_timeout', '5000', true)`;
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('amux_idea_lane_claim'))`;
     const now = await databaseNow(tx);
+    const legacy = amuxIntakeLegacyLimits();
     const since = new Date(now.getTime() - 86_400_000);
     const today = await tx.amuxIdeaLaneAttempt.count({ where: { claimedAt: { gt: since } } });
     if (today >= amuxIdeaLaneDailyAttempts()) return null;
@@ -96,8 +99,19 @@ export async function claimAmuxIdeaLane(scope: { actorUserId?: string } = {}): P
           AND ((a."outcome" = 'pr_open' AND a."claimedAt" > p."partStart")
             OR (a."outcome" IS NULL
               AND a."leaseUntil" > (${now.toISOString()}::timestamptz AT TIME ZONE 'UTC'))))
-        AND (SELECT count(*) FROM "AmuxIdeaLaneAttempt" a WHERE a."ideaId" = i."id"
-          AND a."claimedAt" > p."partStart") < ${AMUX_IDEA_LANE_MAX_ATTEMPTS}
+        -- A part the lane gave up on (amuxIdeaLaneGivesUp): its newest runs
+        -- ended in the same failure AMUX_IDEA_LANE_REPEATED_FAILURE_STOP times
+        -- in a row (a run that never reported is lease_expired); with the
+        -- legacy switch, AMUX_IDEA_LANE_MAX_ATTEMPTS runs of any outcome. The
+        -- live and PR-opening runs were left out above, so the rest are failures.
+        AND CASE WHEN ${legacy}::boolean THEN
+          (SELECT count(*) FROM "AmuxIdeaLaneAttempt" a WHERE a."ideaId" = i."id"
+            AND a."claimedAt" > p."partStart") < ${AMUX_IDEA_LANE_MAX_ATTEMPTS}
+        ELSE NOT EXISTS (SELECT 1 FROM (SELECT COALESCE(a."outcome", 'lease_expired') AS "outcome"
+            FROM "AmuxIdeaLaneAttempt" a WHERE a."ideaId" = i."id" AND a."claimedAt" > p."partStart"
+            ORDER BY a."claimedAt" DESC LIMIT ${AMUX_IDEA_LANE_REPEATED_FAILURE_STOP}) newest
+          HAVING count(*) = ${AMUX_IDEA_LANE_REPEATED_FAILURE_STOP} AND count(DISTINCT newest."outcome") = 1)
+        END
       -- SEV1 first: an idea the develop CI repair pass handed over (its system
       -- audit entry is the mark; only that pass writes the action), then age.
       ORDER BY EXISTS (SELECT 1 FROM "AdminAuditLog" l
@@ -110,7 +124,7 @@ export async function claimAmuxIdeaLane(scope: { actorUserId?: string } = {}): P
     let pick: Candidate | null = null;
     let pickState: AmuxIdeaLaneState | null = null;
     for (const idea of candidates) {
-      const state = amuxIdeaLaneState(idea.attempts ?? [], nowMs);
+      const state = amuxIdeaLaneState(idea.attempts ?? [], nowMs, legacy);
       if (!amuxIdeaLaneClaimable(state)) continue;
       // The owner's close (ideaOwnerCloseService.ts) and the analysis path's
       // first source plan lock this row too, so
@@ -138,7 +152,7 @@ export async function claimAmuxIdeaLane(scope: { actorUserId?: string } = {}): P
   const { attemptId, idea, part, previousPrNumber } = claimed;
   const text = await openIdeaText(idea).catch(() => null);
   if (text === null) {
-    // Counted as a failed run, so an unreadable idea stops at the attempt limit.
+    // Counted as a failed run, so an unreadable idea stops once job_failed repeats.
     await recordAmuxIdeaLaneResult({ attemptId, outcome: "job_failed", prNumber: null });
     return null;
   }

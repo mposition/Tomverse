@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { POST as claimPost } from "@/app/api/internal/amux/claim/route";
+import { AMUX_MAX_EXECUTION_ATTEMPTS } from "@/lib/amux/executionBudgetCore";
 import { POST as queuePost } from "@/app/api/internal/amux/queue/route";
 import { POST as routingSnapshotPost } from "@/app/api/internal/amux/routing-snapshot/route";
 import { POST as ownedQueuePost } from "@/app/api/internal/amux/owned-queue/route";
@@ -360,6 +361,9 @@ test("AMUX Prisma-call ceiling refuses N+1 before issuing its SQL", async () => 
   );
 });
 
+/** A duration as PostgreSQL shows it back from current_setting. */
+const pgDuration = (ms: number) => (ms % 1000 === 0 ? `${ms / 1000}s` : `${ms}ms`);
+
 test("AMUX LOCAL timeout settings do not leak to another connection use", async () => {
   await withAmuxDbBoundary(
     {
@@ -375,7 +379,8 @@ test("AMUX LOCAL timeout settings do not leak to another connection use", async 
           current_setting('idle_in_transaction_session_timeout') AS idle
       `;
       assert.equal(values[0]?.statement, "200ms");
-      assert.equal(values[0]?.idle, `${AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS}ms`);
+      // PostgreSQL shows a whole number of seconds in seconds (1000ms reads back as 1s).
+      assert.equal(values[0]?.idle, pgDuration(AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS));
     },
   );
   const values = await prisma.$queryRaw<
@@ -385,7 +390,7 @@ test("AMUX LOCAL timeout settings do not leak to another connection use", async 
       current_setting('idle_in_transaction_session_timeout') AS idle
   `;
   assert.notEqual(values[0]?.statement, "200ms");
-  assert.notEqual(values[0]?.idle, `${AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS}ms`);
+  assert.notEqual(values[0]?.idle, pgDuration(AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS));
 });
 
 const signals = (
@@ -1143,7 +1148,7 @@ test("incident admission refusals keep claim and execution-start audits atomic",
   }
 });
 
-test("execution start blocks a task after five historical attempts without resetting the budget", async () => {
+test("execution start blocks a task after the runaway guard's historical attempts without resetting the budget", async () => {
   const taskId = await createTodo("amux-attempt-budget");
   const worker = `amux-attempt-worker-${randomUUID()}`;
   const instanceId = randomUUID();
@@ -1155,7 +1160,8 @@ test("execution start blocks a task after five historical attempts without reset
       data: { owner: worker, claimedAt: base, revision: 1 },
     });
     await prisma.amuxExecutionAttempt.createMany({
-      data: Array.from({ length: 5 }, (_, index) => ({
+      // No fixed count of five since 2026-11-15: the runaway guard's counted attempts.
+      data: Array.from({ length: AMUX_MAX_EXECUTION_ATTEMPTS }, (_, index) => ({
         id: randomUUID(),
         taskId,
         worker,
@@ -1165,7 +1171,7 @@ test("execution start blocks a task after five historical attempts without reset
         attemptNumber: index + 1,
         heartbeatAt: base,
         leaseExpiresAt: null,
-        startedAt: new Date(base.getTime() - (5 - index) * 1_000),
+        startedAt: new Date(base.getTime() - (AMUX_MAX_EXECUTION_ATTEMPTS - index) * 1_000),
         endedAt: base,
         outcome: "failed",
         toStatus: "todo",
@@ -1207,7 +1213,7 @@ test("execution start blocks a task after five historical attempts without reset
     ]);
     assert.equal(task.status, "blocked");
     assert.equal(task.revision, 2);
-    assert.equal(attemptCount, 5);
+    assert.equal(attemptCount, AMUX_MAX_EXECUTION_ATTEMPTS);
     assert.equal(escalation.status, "open");
   } finally {
     await prisma.amuxHumanEscalation.deleteMany({ where: { taskId } });
@@ -4920,9 +4926,10 @@ test("the admin card list reads attempt counts and the latest attempt in set que
       data: { drag: 0 },
     });
 
-    const list = await listAmuxCardsForAdmin();
+    const list = await listAmuxCardsForAdmin({ ids: [taskId] });
     const row = list.rows.find((candidate) => candidate.id === taskId);
-    assert.ok(row, "the freshly updated card is within the newest rows");
+    assert.ok(row, "the card the page names is read");
+    assert.ok((list.statusCounts.todo ?? 0) >= 1, "the board's counts include it");
     assert.equal(row.attemptCount, 2);
     assert.equal(row.lastAttemptOutcome, "blocked");
     assert.equal(row.lastAttemptToStatus, "blocked");

@@ -14,8 +14,9 @@ import { finishClaimedAmuxSessionResultKeyRetirement,
   verifyAmuxSessionResultKeyRetired } from "./ideaKeyStore.ts";
 import { amuxIdeaHasActiveRetentionHold } from
   "./ideaRetentionHoldRead.ts";
+import { amuxAnalysisEndedWhere, amuxSessionContentPurgeDue,
+  amuxSessionContentRetentionMs } from "./ideaRetentionCore.ts";
 
-const RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const BATCH_SIZE = 8;
 type Candidate = { claimId: string; ideaId: string };
 const keyFor = (row: Candidate) => ({ ideaId: row.ideaId,
@@ -41,7 +42,8 @@ async function claimDue(row: Candidate): Promise<string | null> {
         select: { budgetMode: true, claimAuditLogId: true,
           analysisResult: { select: { claimId: true } },
           reservation: { select: { ideaId: true,
-            idea: { select: { submittedAt: true } } } },
+            idea: { select: { submittedAt: true, analysisDeadlineAt: true,
+              analysisCompletedAt: true, cancelledAt: true } } } },
           resultOrphanKeyRetirement: { select: { claimId: true } } },
       });
       const nowRows = await tx.$queryRaw<Array<{ now: Date }>>`
@@ -50,8 +52,9 @@ async function claimDue(row: Candidate): Promise<string | null> {
       if (!claim || !now || claim.budgetMode !== "max_shadow" ||
           claim.reservation.ideaId !== row.ideaId ||
           claim.analysisResult || claim.resultOrphanKeyRetirement ||
-          claim.reservation.idea.submittedAt.getTime() + RETENTION_MS >
-            now.getTime() ||
+          // While the analysis runs, a claim without a result may still get
+          // one; its key is no orphan yet (owner direction 2026-11-15).
+          !amuxSessionContentPurgeDue({ ...claim.reservation.idea, dbNow: now }) ||
           await amuxIdeaHasActiveRetentionHold(tx, row.ideaId, now))
         return null;
       const auditId = await writeSystemAuditLog({ tx,
@@ -182,7 +185,9 @@ export async function purgeDueAmuxOrphanSessionResultKeys(
     where: { budgetMode: "max_shadow", analysisResult: null,
       resultOrphanKeyRetirement: null,
       reservation: { idea: {
-        submittedAt: { lte: new Date(now.getTime() - RETENTION_MS) },
+        submittedAt: { lte: new Date(now.getTime() -
+          amuxSessionContentRetentionMs()) },
+        ...amuxAnalysisEndedWhere(now),
         retentionHolds: { none: { releasedAt: null,
           expiresAt: { gt: now } } },
       } } },

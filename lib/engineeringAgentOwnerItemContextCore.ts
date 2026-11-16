@@ -35,9 +35,6 @@ export const engineeringAgentMismatchPublishItemId = (causeKey: string): string 
 
 export type EngineeringAgentPatchFile = { path: string; added: number; removed: number };
 
-/** The most files a card lists; the count beside it says how many there are. */
-export const ENGINEERING_AGENT_PATCH_FILE_LIMIT = 50;
-
 /**
  * The files a unified diff changes, with added and removed line counts, in
  * patch order. Counting only: the text is never applied or interpreted.
@@ -117,7 +114,7 @@ export type EngineeringAgentCardItemView = {
   patchDigest: string | null;
   baseSha: string | null;
   rejudgeable: boolean;
-  /** The draft's changed files, at most ENGINEERING_AGENT_PATCH_FILE_LIMIT; `fileCount` is all of them. */
+  /** The draft's changed files, all of them; `fileCount` is their number. */
   files: EngineeringAgentPatchFile[];
   fileCount: number;
 };
@@ -175,7 +172,7 @@ export function engineeringAgentCardItems(
       patchDigest: row.patchDigest,
       baseSha: row.baseSha,
       rejudgeable: engineeringAgentDraftRejudgeable(row, row.run),
-      files: files.slice(0, ENGINEERING_AGENT_PATCH_FILE_LIMIT),
+      files,
       fileCount: files.length,
     });
     byCard.set(cardId, list);

@@ -93,13 +93,29 @@ export function decideEngineeringAgentPrApproval(input: EngineeringAgentPrApprov
 
 /**
  * Approval is settled before the merge (engineering-agent.md §9-10), or by
- * the merge itself when an account on the approver list merged the verified
- * head into develop (owner decision 2026-11-12: one person reviews and merges
- * their own agent's pull request, so a separate GitHub review was never
- * written and every such merge stopped the agent). Any other merge with no
- * approval recorded first -- a bot's, an app's, another account's, or of a
- * head the app did not verify -- is not approved, whatever its reviews say
- * now, and stops the agent.
+ * the merge itself when an account on the approver list merged into develop
+ * (owner decision 2026-11-12: one person reviews and merges their own agent's
+ * pull request, so a separate GitHub review was never written and every such
+ * merge stopped the agent).
+ *
+ * Owner decision 2026-11-15 (`approverMergeApprovesMergedDiff`, the default):
+ * the approver's merge approves whatever head and diff it merged. A person
+ * who merges on GitHub merges the diff GitHub shows them then, so a head that
+ * moved after verification -- develop merged in, a conflict the CI auto-fix
+ * resolved, the owner's own push -- is still that person's approval; the
+ * observer records the merged head and diff with it. Before it (and with
+ * ENGINEERING_AGENT_LEGACY_HALTS) the approver's merge counted only at the
+ * verified head or the verified diff.
+ *
+ * An approval recorded before the merge still stands for a merge of the
+ * verified head or diff, and for the approver's own merge. It no longer
+ * stands for someone else's merge of a head that moved after it: the review
+ * approved a diff that is not the one merged (with the kill switch on it
+ * still does, as before).
+ *
+ * Any other merge -- a bot's, an app's, another account's, into main -- is
+ * not approved, whatever its reviews say now. It opens a decision for that
+ * card; it no longer stops the agent (engineeringAgentMismatchCardScoped).
  */
 export function decideEngineeringAgentMergedPr(input: {
   merged: boolean;
@@ -107,13 +123,18 @@ export function decideEngineeringAgentMergedPr(input: {
   /** The merger is a person on the approver list (lib/engineeringAgentGitHubRead.ts). */
   mergedByApprover?: boolean;
   baseRef?: string;
-  /** The merged head is the commit the app recorded as verified. */
+  /** The merged head is the commit the app recorded as verified, or its diff is the verified one. */
   headVerified?: boolean;
+  /** Owner decision 2026-11-15: the approver's develop merge approves the diff it merged. */
+  approverMergeApprovesMergedDiff?: boolean;
 }): "done" | "merged_without_approval" | "open" {
   if (!input.merged) return "open";
-  if (input.approvalRecordedBeforeMerge) return "done";
-  return input.mergedByApprover === true && input.baseRef === "develop" && input.headVerified === true ?
-    "done" : "merged_without_approval";
+  const approverMerge = input.mergedByApprover === true && input.baseRef === "develop";
+  const sameChange = input.headVerified === true;
+  if (input.approvalRecordedBeforeMerge &&
+      (input.approverMergeApprovesMergedDiff !== true || sameChange || approverMerge)) return "done";
+  if (!approverMerge) return "merged_without_approval";
+  return sameChange || input.approverMergeApprovesMergedDiff === true ? "done" : "merged_without_approval";
 }
 
 /**

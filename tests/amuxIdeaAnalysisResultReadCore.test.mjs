@@ -39,7 +39,13 @@ test("analysis audit commitments reject a changed, missing or reordered unit", (
   const manyCommitments = manyUnits.map((unit) => ({ id: unit.id,
     localRef: unit.localRef, kind: unit.unitKind,
     digest: unit.bodyDigest, digestKeyId: unit.bodyDigestKeyId }));
-  assert.equal(matchesAmuxIdeaAnalysisUnitCommitments(manyCommitments, manyUnits), false);
+  // Owner direction 2026-11-15: a page may hold more than 40 units; the legacy
+  // switch restores the former cap.
+  assert.equal(matchesAmuxIdeaAnalysisUnitCommitments(manyCommitments, manyUnits), true);
+  process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS = "enabled";
+  try {
+    assert.equal(matchesAmuxIdeaAnalysisUnitCommitments(manyCommitments, manyUnits), false);
+  } finally { delete process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS; }
   assert.equal(matchesAmuxIdeaAnalysisUnitCommitments([
     commitments[0], { ...commitments[1], unexpected: "text" },
   ], units), false);

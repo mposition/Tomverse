@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 
+import { amuxV22LocalCliFlowEnabled } from "./v22LocalCliFlowCore.ts";
+
 /**
  * An investigate run's structured conclusion (owner decision 2026-11-07).
  *
@@ -67,8 +69,13 @@ const boundedText = (value: unknown, max: number) =>
  * (a brief, a log, a prior Task's section) is never read as this run's.
  * Strict: an unknown key, a wrong type or a value over its bound is no
  * conclusion, and the result goes to review as before.
+ *
+ * The local CLI flow (v22LocalCliFlowCore.ts) reads it leniently instead.
  */
-export function parseAmuxV22Conclusion(resultText: string): AmuxV22Conclusion | null {
+export function parseAmuxV22Conclusion(resultText: string,
+  { lenient = amuxV22LocalCliFlowEnabled() }: { lenient?: boolean } = {}):
+  AmuxV22Conclusion | null {
+  if (lenient) return parseAmuxV22ConclusionLenient(resultText);
   const lines = resultText.split(/\r?\n/).map((line) => line.trim())
     .filter((line) => line.length > 0);
   const last = lines.at(-1);
@@ -107,6 +114,71 @@ export function parseAmuxV22Conclusion(resultText: string): AmuxV22Conclusion | 
   return { verdict: record.verdict as AmuxV22ConclusionVerdict, findings, handoff, evidence };
 }
 
+const stripControl = (value: string) =>
+  value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "").trim();
+const looseText = (value: unknown): string | null => {
+  if (typeof value === "string") return stripControl(value) || null;
+  if (Array.isArray(value)) {
+    const joined = value.filter((item) => typeof item === "string")
+      .map((item) => stripControl(item as string)).filter(Boolean).join("\n");
+    return joined || null;
+  }
+  return null;
+};
+
+/** At most this much text may follow the conclusion's JSON (a closing code
+ * fence, a sign-off); more means the marker is not the report's last word. */
+const LENIENT_TRAILER_MAX_CHARS = 300;
+
+/**
+ * The local CLI flow's reading: no length or count bound, unknown keys
+ * ignored, and as much as can be read kept. The conclusion is the report's
+ * last marker line (a leading code fence or backtick is fine); its JSON may
+ * run over several lines (pretty-printed) and be followed only by a short
+ * trailer. Only the verdict is required. A malformed handoff or evidence item
+ * is dropped rather than losing the conclusion.
+ */
+function parseAmuxV22ConclusionLenient(resultText: string): AmuxV22Conclusion | null {
+  const lines = resultText.split(/\r?\n/);
+  let start = -1;
+  for (let index = lines.length - 1; index >= 0 && start < 0; index -= 1) {
+    if (lines[index]!.trim().replace(/^`+/, "").trim()
+      .startsWith(AMUX_V22_CONCLUSION_MARKER)) start = index;
+  }
+  if (start < 0) return null;
+  const first = lines[start]!;
+  const body = [first.slice(first.indexOf(AMUX_V22_CONCLUSION_MARKER) +
+    AMUX_V22_CONCLUSION_MARKER.length), ...lines.slice(start + 1)].join("\n").trim();
+  const end = body.lastIndexOf("}");
+  if (!body.startsWith("{") || end < 0) return null;
+  const trailer = body.slice(end + 1).replace(/`+/g, "").trim();
+  if (trailer.length > LENIENT_TRAILER_MAX_CHARS) return null;
+  let raw: unknown;
+  try { raw = JSON.parse(body.slice(0, end + 1)); } catch { return null; }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const record = raw as Record<string, unknown>;
+  const verdict = typeof record.verdict === "string" ?
+    record.verdict.trim().toLowerCase().replace(/[\s-]+/g, "_") : null;
+  if (!verdict || !(AMUX_V22_CONCLUSION_VERDICTS as readonly string[]).includes(verdict))
+    return null;
+  const findings = looseText(record.findings) ?? "(no findings given)";
+  const handoff: AmuxV22Conclusion["handoff"] = [];
+  for (const item of Array.isArray(record.handoff) ? record.handoff : []) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const entry = item as Record<string, unknown>;
+    const task = typeof entry.task === "string" ? entry.task.trim() : "*";
+    const note = looseText(entry.note);
+    if (note) handoff.push({ task: task || "*", note });
+  }
+  const evidence: string[] = [];
+  for (const item of Array.isArray(record.evidence) ? record.evidence :
+    typeof record.evidence === "string" ? [record.evidence] : []) {
+    const path = looseText(item);
+    if (path) evidence.push(path);
+  }
+  return { verdict: verdict as AmuxV22ConclusionVerdict, findings, handoff, evidence };
+}
+
 /** The digest the result row keeps beside its verdict. */
 export function amuxV22ConclusionSha256(conclusion: AmuxV22Conclusion): string {
   return createHash("sha256").update(JSON.stringify([conclusion.verdict,
@@ -123,6 +195,19 @@ export const AMUX_V22_CONCLUSION_RULES = [
   `- findings up to ${AMUX_V22_CONCLUSION_FINDINGS_MAX_CHARS} characters; at most ${AMUX_V22_CONCLUSION_HANDOFF_MAX} handoff notes and ${AMUX_V22_CONCLUSION_EVIDENCE_MAX} evidence entries; no other keys. The JSON stays on that one line.`,
   "- The dependent Tasks receive your findings and their note as reference material.",
 ].join("\n");
+
+/** The same request in the local CLI flow: no length or count limit. */
+export const AMUX_V22_LOCAL_CLI_CONCLUSION_RULES = [
+  "Conclusion:",
+  "- Unless you end with an owner question, end your final message with one conclusion:",
+  `  ${AMUX_V22_CONCLUSION_MARKER} {"verdict":"proceed","findings":"<what you found and why>","handoff":[{"task":"<dependent Task key, or *>","note":"<what that Task needs from your findings>"}],"evidence":["<repository path or URL you relied on>"]}`,
+  "- verdict: proceed (the dependent Tasks can go ahead as planned), replan (the remaining plan should change; say how in findings), stop (the idea should not go on; say why), needs_owner (a decision only the owner can make; say which).",
+  "- Write findings, notes and evidence as fully as they need to be; there is no length limit. Keep the conclusion last.",
+  "- The dependent Tasks receive your findings and their note as reference material.",
+].join("\n");
+
+export const amuxV22ConclusionRules = (flow = amuxV22LocalCliFlowEnabled()) =>
+  flow ? AMUX_V22_LOCAL_CLI_CONCLUSION_RULES : AMUX_V22_CONCLUSION_RULES;
 
 /**
  * Where a settlement sends an investigate Task by its verdict, or null for the
@@ -204,8 +289,20 @@ export type AmuxV22PriorConclusionEntry = {
  */
 export function buildAmuxV22PriorConclusionSection(input: {
   entries: readonly AmuxV22PriorConclusionEntry[];
-  budgetBytes: number;
+  /** null (the local CLI flow): every entry whole, no bound. */
+  budgetBytes: number | null;
 }): { section: string; digest: string; included: number } | null {
+  if (input.budgetBytes === null) {
+    if (input.entries.length === 0) return null;
+    const section = [PRIOR_HEAD, ...input.entries.map((entry) => entry.source === "result" ?
+      [`From ${entry.label}:`,
+        "Result (this Task recorded no conclusion line; its final report follows):",
+        entry.findings].join("\n") :
+      [`From ${entry.label}:`, `Findings: ${entry.findings}`,
+        ...(entry.note ? [`Note for this Task: ${entry.note}`] : [])].join("\n")), ""].join("\n");
+    return { section, digest: createHash("sha256").update(section, "utf8").digest("hex"),
+      included: input.entries.length };
+  }
   const budget = Math.min(AMUX_V22_PRIOR_CONCLUSION_MAX_BYTES, Math.floor(input.budgetBytes));
   if (input.entries.length === 0 || !Number.isFinite(budget)) return null;
   const headBytes = Buffer.byteLength(PRIOR_HEAD, "utf8") + 2;

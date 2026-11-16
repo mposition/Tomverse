@@ -4,17 +4,27 @@
  * Claude Code session on develop and opens a draft PR. No execution approval,
  * plan approval or recovery proof: a failed or vanished run is simply tried
  * again, and the irreversible boundaries are kept by
- * - the attempt limits below (per idea, and per day for spending),
+ * - the daily attempt limit below, for spending (the lane may run on a paid
+ *   API key), and a stop for an idea whose runs keep failing the same way,
  * - the PR being a draft that a person reviews and merges.
  *
  * Pure: the service (ideaLaneService.ts) reads the attempts, this decides.
  */
+import { amuxIntakeLegacyLimits } from "./intakeLimitsCore.ts";
 
 export const AMUX_IDEA_LANE_ENV = "AMUX_IDEA_LANE_ENABLED";
 export const AMUX_IDEA_LANE_SECRET_ENV = "AMUX_IDEA_LANE_SYNC_SECRET";
 export const AMUX_IDEA_LANE_DAILY_ENV = "AMUX_IDEA_LANE_MAX_ATTEMPTS_PER_DAY";
-/** Runs one idea may use before the lane gives up on it. */
+/** With TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS only: runs one part of an idea may
+ * use before the lane gives up on it, whatever their outcomes. */
 export const AMUX_IDEA_LANE_MAX_ATTEMPTS = 3;
+/**
+ * Owner direction 2026-11-15: a part of an idea is retried until its newest
+ * runs ended in the same failure this many times in a row (a run that never
+ * reported counts as lease_expired). A different failure is a new problem and
+ * is tried again; the daily limit still bounds what all of them spend.
+ */
+export const AMUX_IDEA_LANE_REPEATED_FAILURE_STOP = 3;
 export const AMUX_IDEA_LANE_DEFAULT_DAILY_ATTEMPTS = 10;
 /**
  * The workflow's implement (150 min) and publish (10 min) timeouts plus an hour
@@ -52,7 +62,8 @@ export type AmuxIdeaLaneAttemptFact = {
 
 export type AmuxIdeaLaneState = {
   /**
-   * running: a run holds its lease; queued: the next claim retries it; failed: out of attempts;
+   * running: a run holds its lease; queued: the next claim retries it; failed: its runs kept failing
+   * (the same failure AMUX_IDEA_LANE_REPEATED_FAILURE_STOP times in a row);
    * merged / pr_closed: its PR merged, or was closed without a merge.
    */
   state: "running" | "queued" | "pr_open" | "merged" | "pr_closed" | "failed";
@@ -73,7 +84,24 @@ export type AmuxIdeaLaneState = {
 const isPartBoundary = (item: AmuxIdeaLaneAttemptFact) =>
   item.outcome === "pr_open" && item.continues === true && !!item.mergedAtMs;
 
-export function amuxIdeaLaneState(attempts: readonly AmuxIdeaLaneAttemptFact[], nowMs: number): AmuxIdeaLaneState | null {
+/**
+ * Whether the lane gives up on a part whose runs all finished without a PR:
+ * its newest runs ended in the same failure AMUX_IDEA_LANE_REPEATED_FAILURE_STOP
+ * times in a row. With the legacy switch, after AMUX_IDEA_LANE_MAX_ATTEMPTS runs.
+ * The claim query (ideaLaneService.ts) repeats this rule in SQL.
+ */
+export function amuxIdeaLaneGivesUp(finished: readonly AmuxIdeaLaneAttemptFact[],
+  legacy: boolean = amuxIntakeLegacyLimits()): boolean {
+  if (legacy) return finished.length >= AMUX_IDEA_LANE_MAX_ATTEMPTS;
+  const newest = [...finished].sort((a, b) => b.claimedAtMs - a.claimedAtMs)
+    .slice(0, AMUX_IDEA_LANE_REPEATED_FAILURE_STOP);
+  const outcome = (item: AmuxIdeaLaneAttemptFact) => item.outcome ?? "lease_expired";
+  return newest.length === AMUX_IDEA_LANE_REPEATED_FAILURE_STOP &&
+    newest.every((item) => outcome(item) === outcome(newest[0]!));
+}
+
+export function amuxIdeaLaneState(attempts: readonly AmuxIdeaLaneAttemptFact[], nowMs: number,
+  legacy: boolean = amuxIntakeLegacyLimits()): AmuxIdeaLaneState | null {
   if (attempts.length === 0) return null;
   // A larger idea runs in parts, one PR each, a part only after the one before
   // it merged. Everything before the newest merged part is settled history.
@@ -100,7 +128,7 @@ export function amuxIdeaLaneState(attempts: readonly AmuxIdeaLaneAttemptFact[], 
       continues: opened.continues === true };
   }
   if (current.some(live)) return { ...base, state: "running", prNumber: null };
-  return { ...base, state: current.length >= AMUX_IDEA_LANE_MAX_ATTEMPTS ? "failed" : "queued", prNumber: null };
+  return { ...base, state: amuxIdeaLaneGivesUp(current, legacy) ? "failed" : "queued", prNumber: null };
 }
 
 export const amuxIdeaLaneClaimable = (state: AmuxIdeaLaneState | null) => state === null || state.state === "queued";
@@ -123,8 +151,9 @@ export type AmuxIdeaLaneCandidateFacts = {
  * conditions of the claim hold trivially with no attempts.
  */
 export function amuxIdeaLaneView(attempts: readonly AmuxIdeaLaneAttemptFact[], nowMs: number,
-  candidate: AmuxIdeaLaneCandidateFacts, enabled: boolean): AmuxIdeaLaneState | null {
-  const state = amuxIdeaLaneState(attempts, nowMs);
+  candidate: AmuxIdeaLaneCandidateFacts, enabled: boolean,
+  legacy: boolean = amuxIntakeLegacyLimits()): AmuxIdeaLaneState | null {
+  const state = amuxIdeaLaneState(attempts, nowMs, legacy);
   if (state || !enabled) return state;
   const takes = candidate.submissionOrigin === "owner" && candidate.state === "submitted" && !candidate.cancelled &&
     candidate.rawReadable && candidate.analysisDeadlineMs > nowMs && !candidate.sourcePlan && candidate.chunks === 0;
