@@ -9,6 +9,7 @@ import {
   sanitizeOperationalStack,
   sanitizeOperationalText,
 } from "@/lib/operationalMonitoringCore";
+import { withoutDisabledServerIntegrations } from "@/lib/sentryServerIntegrations";
 
 const tracesSampleRate = Number(process.env.SENTRY_TRACES_SAMPLE_RATE || "0");
 
@@ -23,6 +24,8 @@ Sentry.init({
   // under production while the same process answered "staging".
   environment: resolveSentryEnvironmentTag(),
   release: process.env.SENTRY_RELEASE || process.env.RAILWAY_GIT_COMMIT_SHA,
+  // VercelAI locks streamed OpenAI model calls; see lib/sentryServerIntegrations.ts.
+  integrations: withoutDisabledServerIntegrations,
   // Sentry 11 replaced `sendDefaultPii: false` with `dataCollection`, and an
   // unset `dataCollection` collects user info, cookies, bodies and AI/MCP
   // content. This is the SDK's documented v10 default, kept as it was.
