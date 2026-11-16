@@ -337,7 +337,7 @@ owed 기록(재전송할 결과·cleanup 보고·세션 pause와 그 차단)은 
 기록이 생기는 즉시(그 기록의 첫 호출 전에) 그리고 바뀔 때마다 원자적으로 쓰고 시작할 때 읽는다. journal의 `owed records ... cannot be read`/`cannot be written` 줄은 그 파일을
 읽거나 쓰지 못해 새 전송·전달을 시작하지 않고 매 tick 다시 시도하는 중이라는 뜻이다(halt가 아니다). 깨진 파일은 지우지
 않고 두므로, 내용을 확인한 뒤 고치거나(소유자 `tomverse-bridge`, 0600) 옮겨 두면 다음 tick에 이어 간다. 이 unit이
-설치되기 전의 박스에서는 `no state directory` 줄이 나오고 기록은 메모리에만 있다. 6.0절로 unit을 다시 설치한다.
+설치되기 전의 박스에서도 relay는 기본 경로 `/var/lib/tomverse-amux-dm-relay`를 쓰려 하고, 옛 unit의 `/var/lib` 보호 때문에 쓰지 못하면 새 전송·전달을 시작하지 않는다(메모리만으로 돌지 않는다). 6.0절로 unit을 다시 설치한다.
 
 | | 어디서 | 무엇을 보는가 | 잡는 것 | 알림 |
 |---|---|---|---|---|
@@ -387,9 +387,9 @@ systemctl list-unit-files 'tomverse-amux-*' 'amux-*' --no-pager
   기록이 없으면 `AMUX_DM_RELAY_SILENT`를 보내고, 같은 상태는 3시간마다 다시 알린다. 다시 호출하면 `…_RECOVERED`가 간다.
   감시가 15분마다 돌므로 멈춘 뒤 알림까지는 5~20분이다. 기록을 읽지 못하면 `AMUX_DM_RELAY_CHECK_FAILED`를 따로 보낸다.
 - 예외 하나: relay는 DM 질문 하나를 broker에 맡기면 그 답을 최대 3시간 4분(`DM_BROKER_RESPONSE_DEADLINE`: 작업 공간
-  1시간과 DM 실행 2시간, 2026-11-16) 기다리고, 그동안 sync를 부르지 않는다. 그래서 sync가 5분 넘게 없어도 **190분 안에
-  만들어진 DM 요청**(`AmuxDecisionMakerRequest.createdAt`, `AMUX_DM_RELAY_QUESTION_MS`)이 있으면 "질문 중"으로 보고 아무것도
-  보내지 않는다(정상이라고도 하지 않는다). 질문 중에 relay가 죽었다면 알림은 그 요청 뒤 190분이 지나서 간다.
+  1시간과 DM 실행 2시간, 2026-11-16) 기다리고, 그동안 sync를 부르지 않는다. 그래서 sync가 5분 넘게 없어도 **250분 안에
+  만들어진 DM 요청**(launch 전 작업 공간 대기 최대 1시간 포함)(`AmuxDecisionMakerRequest.createdAt`, `AMUX_DM_RELAY_QUESTION_MS`)이 있으면 "질문 중"으로 보고 아무것도
+  보내지 않는다(정상이라고도 하지 않는다). 질문 중에 relay가 죽었다면 알림은 그 요청 뒤 250분이 지나서 간다.
 - heartbeat 쓰기는 sync route의 예산(15초) 안에서 맨 먼저 돌고, 연결 대기 0.5초·transaction 1.5초·문장 1초·잠금 0.5초로
   묶여 있다. 넘으면 버리고 sync는 그대로 진행한다.
 - 알림을 받으면 호스트에서 relay의 journal을 먼저 읽는다(읽기 전용, `tommy`로도 된다).

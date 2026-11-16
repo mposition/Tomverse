@@ -37,9 +37,11 @@ export const AMUX_DM_RELAY_SILENT_MS = 5 * 60_000;
  * inside that question's tick: the broker's response deadline
  * (DM_BROKER_RESPONSE_DEADLINE_MS, 3 hours 4 minutes since 2026-11-16: a
  * two-hour run and an hour's workspace before it; it was 39 minutes), the
- * relay's own steps before it, and the result's writes after it.
+ * relay's own wait of up to an hour for the workspace before it launches, its
+ * other steps, and the result's writes after it: 250 minutes (review
+ * r-20261116-215147-09f5b1; it was 190).
  */
-export const AMUX_DM_RELAY_QUESTION_MS = 190 * 60_000;
+export const AMUX_DM_RELAY_QUESTION_MS = 250 * 60_000;
 
 /** How often a relay that stays silent pages again. */
 export const AMUX_DM_RELAY_REMINDER_MS = 3 * 60 * 60_000;

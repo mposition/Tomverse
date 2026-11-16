@@ -98,8 +98,9 @@ test("the question read looks back only the question window", async () => {
   reset();
   const now = new Date("2026-11-14T03:00:00.000Z");
   await heartbeat.readAmuxDmRelayLastQuestionAt(now);
-  // 190 minutes: the broker's 184 (an hour of workspace and a two-hour run, owner direction 2026-11-16) and the writes.
-  assert.equal(world.questionAfterMs, new Date("2026-11-13T23:50:00.000Z").getTime());
+  // 250 minutes: the relay's hour waiting for the workspace, the broker's 184
+  // (an hour of workspace and a two-hour run, owner direction 2026-11-16) and the writes.
+  assert.equal(world.questionAfterMs, new Date("2026-11-13T22:50:00.000Z").getTime());
 });
 
 test("calling, asking and silent", () => {
@@ -111,8 +112,8 @@ test("calling, asking and silent", () => {
     state: "silent", lastSyncAt: ago(6), minutesSilent: 6,
   });
   assert.equal(core.judgeAmuxDmRelayLiveness(ago(30), ago(40), now).state, "asking");
-  assert.equal(core.judgeAmuxDmRelayLiveness(ago(190), ago(189), now).state, "asking");
-  assert.equal(core.judgeAmuxDmRelayLiveness(ago(200), ago(191), now).state, "silent");
+  assert.equal(core.judgeAmuxDmRelayLiveness(ago(250), ago(249), now).state, "asking");
+  assert.equal(core.judgeAmuxDmRelayLiveness(ago(260), ago(251), now).state, "silent");
   assert.equal(core.judgeAmuxDmRelayLiveness(null, ago(10), now).state, "asking");
   assert.deepEqual(core.judgeAmuxDmRelayLiveness(null, null, now), {
     state: "silent", lastSyncAt: null, minutesSilent: null,

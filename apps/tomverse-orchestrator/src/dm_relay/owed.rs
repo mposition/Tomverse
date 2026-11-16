@@ -703,6 +703,9 @@ impl OwedBook {
 /// `StateDirectory=` sets `STATE_DIRECTORY` and this is not needed.
 pub const OWED_STATE_DIR_ENV: &str = "TOMVERSE_AMUX_DM_RELAY_STATE_DIR";
 const SYSTEMD_STATE_DIR_ENV: &str = "STATE_DIRECTORY";
+/// The unit's `StateDirectory=tomverse-amux-dm-relay`, used when neither
+/// variable names one.
+pub const OWED_STATE_DEFAULT_DIR: &str = "/var/lib/tomverse-amux-dm-relay";
 /// The one file in the state directory.
 pub const OWED_STATE_FILE: &str = "owed-records.json";
 const OWED_STATE_TMP: &str = ".owed-records.json.tmp";
@@ -748,8 +751,13 @@ impl OwedStore {
     }
 
     /// The directory the environment names: this relay's own variable, else
-    /// the first one systemd's `StateDirectory=` set. None when neither is.
-    pub fn from_env() -> Option<Self> {
+    /// the first one systemd's `StateDirectory=` set, else the unit's own
+    /// `OWED_STATE_DEFAULT_DIR`. There is always one: a relay that ran without
+    /// a file would forget its duties at a restart (review
+    /// r-20261116-215147-09f5b1). Where the directory cannot be written (a
+    /// unit from before it existed), the first write fails and the relay
+    /// starts nothing new until it can.
+    pub fn from_env() -> Self {
         let named = std::env::var(OWED_STATE_DIR_ENV)
             .ok()
             .filter(|dir| !dir.is_empty())
@@ -758,8 +766,9 @@ impl OwedStore {
                     .ok()
                     .and_then(|dirs| dirs.split(':').next().map(str::to_owned))
                     .filter(|dir| !dir.is_empty())
-            })?;
-        Some(Self::new(named))
+            })
+            .unwrap_or_else(|| OWED_STATE_DEFAULT_DIR.to_owned());
+        Self::new(named)
     }
 
     pub fn path(&self) -> PathBuf {
@@ -1334,15 +1343,19 @@ mod tests {
             .collect();
         std::env::remove_var(OWED_STATE_DIR_ENV);
         std::env::remove_var(SYSTEMD_STATE_DIR_ENV);
-        assert!(OwedStore::from_env().is_none());
+        // Neither variable: the unit's own directory, never memory only.
+        assert_eq!(
+            OwedStore::from_env().path(),
+            Path::new(OWED_STATE_DEFAULT_DIR).join(OWED_STATE_FILE)
+        );
         std::env::set_var(SYSTEMD_STATE_DIR_ENV, "/var/lib/a:/var/lib/b");
         assert_eq!(
-            OwedStore::from_env().unwrap().path(),
+            OwedStore::from_env().path(),
             Path::new("/var/lib/a").join(OWED_STATE_FILE)
         );
         std::env::set_var(OWED_STATE_DIR_ENV, "/srv/own");
         assert_eq!(
-            OwedStore::from_env().unwrap().path(),
+            OwedStore::from_env().path(),
             Path::new("/srv/own").join(OWED_STATE_FILE)
         );
         for (name, value) in keep {

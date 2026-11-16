@@ -92,24 +92,14 @@ pub async fn run_from_env(
                 wire::DM_SEND_OPTION_EFFECTS,
             );
             // The owed records survive a restart in the unit's state directory
-            // (`StateDirectory=` sets `STATE_DIRECTORY`). Without one -- a unit
-            // installed before the directory existed -- they stay in memory, as
-            // before, and the log says so.
-            let relay = match owed::OwedStore::from_env() {
-                Some(store) => {
-                    println!(
-                        "amux dm relay: owed records are kept in {}",
-                        store.path().display()
-                    );
-                    relay.with_store(store)
-                }
-                None => {
-                    println!(
-                        "amux dm relay: no state directory (STATE_DIRECTORY); owed records are kept in memory only and a restart forgets them"
-                    );
-                    relay
-                }
-            };
+            // (`StateDirectory=` sets `STATE_DIRECTORY`, else the unit's own
+            // path). A unit that cannot write it starts nothing new until it can.
+            let store = owed::OwedStore::from_env();
+            println!(
+                "amux dm relay: owed records are kept in {}",
+                store.path().display()
+            );
+            let relay = relay.with_store(store);
             io::run(relay).await;
             0
         }
