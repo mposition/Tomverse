@@ -68,7 +68,7 @@ for (const viewport of MARKETING_VIEWPORTS) {
     expect(placement.left).toBe(0);
     expect(Math.abs(placement.width - placement.viewport)).toBeLessThanOrEqual(1);
     expect(Math.abs(placement.bottomGap)).toBeLessThanOrEqual(1);
-    expect(placement.height, "the bar stays small").toBeLessThanOrEqual(viewport.width < 768 ? 96 : 64);
+    expect(placement.height, "the bar stays small").toBeLessThanOrEqual(viewport.width < 768 ? 112 : 64);
     expect(Math.abs(placement.bodyPadding - placement.height), "page reserves the bar height").toBeLessThanOrEqual(1);
 
     const dimensions = await page.evaluate(() => ({

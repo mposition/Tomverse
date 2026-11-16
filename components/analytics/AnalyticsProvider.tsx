@@ -995,11 +995,13 @@ export function AnalyticsProvider({
             aria-label={promptCopy.title}
             data-testid="chat-consent-notice"
             data-variant="bottom-bar"
+            // max-h-[50vh]: at 200% text on a short phone the bar scrolls
+            // inside itself instead of covering most of the page.
             // z-30 keeps the bar above page content but under the sticky
             // header and its menu (z-40) and every dialog (checkout is z-90):
             // at z-100 it sat on top of the checkout modal on phones and took
             // the taps meant for Apply and Continue.
-            className="fixed inset-x-0 bottom-0 z-30 border-t border-zinc-200 bg-white/95 pb-[env(safe-area-inset-bottom)] text-zinc-700 shadow-[0_-4px_16px_rgba(24,24,27,0.08)] backdrop-blur dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-200 dark:shadow-[0_-4px_16px_rgba(0,0,0,0.35)]"
+            className="fixed inset-x-0 bottom-0 z-30 max-h-[50vh] overflow-y-auto border-t border-zinc-200 bg-white/95 pb-[env(safe-area-inset-bottom)] text-zinc-700 shadow-[0_-4px_16px_rgba(24,24,27,0.08)] backdrop-blur dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-200 dark:shadow-[0_-4px_16px_rgba(0,0,0,0.35)]"
           >
             <div className="@container/notice mx-auto max-w-7xl py-1.5 pl-3 pr-1 sm:px-6">
               {/*
@@ -1012,7 +1014,7 @@ export function AnalyticsProvider({
                 the policy link.
               */}
               <div className="flex flex-col gap-1 @md/notice:flex-row @md/notice:items-center @md/notice:gap-3 @2xl/notice:gap-4">
-                <p className="min-w-0 pr-2 pt-1 text-sm leading-5 text-zinc-600 dark:text-zinc-300 @md/notice:flex-1 @md/notice:pr-0 @md/notice:pt-0">
+                <p className="min-w-0 pr-2 pt-1 text-sm leading-5 text-zinc-600 dark:text-zinc-300 @md/notice:flex-1 @md/notice:pr-0 @md/notice:pt-0 @2xl/notice:text-[13px]">
                   <span className="hidden font-bold text-zinc-900 dark:text-zinc-50 @2xl/notice:inline">
                     {promptCopy.title}.{" "}
                   </span>
