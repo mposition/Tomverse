@@ -395,6 +395,7 @@ export const de = {
         responseFailed: "Die Anfrage ist fehlgeschlagen.",
         traceId: "Trace-ID",
         errorDetails: "Fehlerdetails",
+        errorDiagnostics: "Diagnosedetails",
         retry: "Erneut versuchen",
         reduceModelCount: "Anzahl der Modelle verringern",
         chooseAnotherModel: "Anderes Modell wählen",

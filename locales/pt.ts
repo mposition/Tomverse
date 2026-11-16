@@ -406,6 +406,7 @@ export const pt = {
         responseFailed: "A solicitação falhou.",
         traceId: "ID de rastreamento",
         errorDetails: "Detalhes do erro",
+        errorDiagnostics: "Detalhes de diagnóstico",
         retry: "Tentar novamente",
         reduceModelCount: "Reduzir o número de modelos",
         chooseAnotherModel: "Escolher outro modelo",

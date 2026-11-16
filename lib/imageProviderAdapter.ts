@@ -14,6 +14,16 @@ import {
   imageThinkingCapEnforced,
   type ImageModelProfile,
 } from "@/lib/imageModelRegistry";
+import {
+  BFL_API_KEY_HEADER,
+  BFL_POLL_INTERVAL_MS,
+  bflSubmitUrl,
+  buildBflImageRequest,
+  isBflFlux3ImageModel,
+  isBflUrl,
+  parseBflPollResponse,
+  parseBflSubmitResponse,
+} from "@/lib/bflImageRequest";
 import { BoundedBufferError, readResponseToBuffer } from "@/lib/boundedBuffer";
 import { numericUsage } from "@/lib/imageBillingMeasurementCore";
 import { readImageDimensions } from "@/lib/imageDimensions";
@@ -306,6 +316,22 @@ const getFalApiKey = () => {
   return key;
 };
 
+/**
+ * Black Forest Labs' key, kept out of PROVIDER_API_KEY_ENV_NAMES for the same
+ * reason as fal's: BFL serves no chat model. `BFL_API_KEY` is the name BFL's
+ * own documentation uses.
+ */
+const getBflApiKey = () => {
+  const key = process.env.BFL_API_KEY?.trim();
+  if (!key) {
+    throw new ImageProviderError(
+      "provider_failed",
+      "Image provider is not configured."
+    );
+  }
+  return key;
+};
+
 /** The key the Qwen chat provider uses (DASHSCOPE_API_KEY); no image-scoped name is invented. */
 const getQwenApiKey = () => {
   const key = resolveProviderApiKey("qwen");
@@ -491,6 +517,9 @@ const dispatchImageRequest = async (
   }
   if (model.provider === "qwen") {
     return generateWithQwen(model, input);
+  }
+  if (model.provider === "bfl") {
+    return generateWithBfl(model, input);
   }
   if (model.provider !== "openai") {
     throw new ImageProviderError(
@@ -1329,6 +1358,221 @@ const generateWithQwen = async (
     return await deliver();
   } catch (error) {
     if (error instanceof ImageProviderError) error.afterGeneration = true;
+    throw error;
+  }
+};
+
+/**
+ * FLUX 3 on the Black Forest Labs API: submit a task, poll the URL it returns
+ * until it is ready, then fetch the signed image (valid ten minutes).
+ *
+ * Reached only through a runtime catalogue row the judge admitted -- no BFL
+ * model is seeded -- and generation only: the edit check above refuses this
+ * provider.
+ *
+ *   * **one submit.** Billing is per image, and a submit whose answer was lost
+ *     may still have started a billed task; a second submit would buy a second
+ *     image the user does not pay for. Polls are free reads, so a lost or
+ *     throttled poll is simply asked again until the shared deadline.
+ *   * **the key goes only to bfl.ai.** The polling URL comes out of the
+ *     response and is sent the key, so it is checked first (`isBflUrl`), and
+ *     no request follows a redirect.
+ *   * **moderation is not a failure of ours.** BFL withholds moderated output
+ *     and does not charge for it; it surfaces as a moderation rejection, which
+ *     is never retried.
+ *   * **the file is measured against what was priced**: a type the profile may
+ *     store, read under fal's 16 MiB limit (the same 1K image), 1024x1024.
+ */
+const generateWithBfl = async (
+  model: ImageModelProfile,
+  input: { prompt: string; size: ImageSize }
+): Promise<ImageProviderResult> => {
+  const apiModelId = model.apiModelId;
+  const body = buildBflImageRequest({ apiModelId, prompt: input.prompt, size: input.size });
+  if (!body || !isBflFlux3ImageModel(apiModelId)) {
+    throw new ImageProviderError(
+      "provider_failed",
+      `Image size ${input.size} has no BFL request mapping for ${model.id}.`
+    );
+  }
+  const requestParams = auditableRequestParams(body);
+  const apiKey = getBflApiKey();
+  // One budget for submit, polls and download together, so a slow queue
+  // cannot stretch the job past the lease the executor planned for.
+  const deadline = Date.now() + PROVIDER_TIMEOUT_MS;
+  const remainingMs = () => Math.max(1, deadline - Date.now());
+  const keyHeaders = { [BFL_API_KEY_HEADER]: apiKey, accept: "application/json" };
+
+  let response: Response;
+  try {
+    response = await fetch(bflSubmitUrl(apiModelId), {
+      method: "POST",
+      headers: { ...keyHeaders, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      redirect: "manual",
+      signal: AbortSignal.timeout(remainingMs()),
+    });
+  } catch (error) {
+    throw new ImageProviderError(
+      "provider_failed",
+      error instanceof Error && error.name === "TimeoutError"
+        ? "Image provider request timed out."
+        : "Image provider request failed.",
+      null,
+      null,
+      requestParams
+    );
+  }
+
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new ImageProviderError(
+      // 402 is BFL's "insufficient credits": Tomverse's prepaid balance, not
+      // anything the user did.
+      response.status === 402
+        ? "provider_failed"
+        : classifyImageProviderFailure(response.status, payload),
+      `Image provider rejected the request (HTTP ${response.status}).`,
+      response.status,
+      null,
+      requestParams
+    );
+  }
+  const submitted = parseBflSubmitResponse(payload);
+  if (!submitted) {
+    throw new ImageProviderError(
+      "provider_failed",
+      "Image provider returned no task it can be polled for.",
+      response.status,
+      null,
+      requestParams
+    );
+  }
+  const providerRequestId = submitted.id;
+  const failAfterSubmit = (message: string, status: number | null = null) =>
+    new ImageProviderError("provider_failed", message, status, providerRequestId, requestParams);
+
+  const poll = async () => {
+    for (;;) {
+      if (Date.now() + BFL_POLL_INTERVAL_MS >= deadline) {
+        throw failAfterSubmit("Image provider did not finish before the deadline.");
+      }
+      await wait(BFL_POLL_INTERVAL_MS);
+      let pollResponse: Response;
+      try {
+        pollResponse = await fetch(submitted.pollingUrl, {
+          headers: keyHeaders,
+          redirect: "manual",
+          signal: AbortSignal.timeout(remainingMs()),
+        });
+      } catch {
+        continue;
+      }
+      if (pollResponse.status === 429 || pollResponse.status >= 500) {
+        await pollResponse.body?.cancel().catch(() => undefined);
+        continue;
+      }
+      if (!pollResponse.ok) {
+        await pollResponse.body?.cancel().catch(() => undefined);
+        throw failAfterSubmit(
+          `Image provider task could not be read (HTTP ${pollResponse.status}).`,
+          pollResponse.status
+        );
+      }
+      // A body cut off mid-read is a lost poll, not an answer: ask again rather
+      // than give up on a task that may already be billed.
+      let pollPayload: unknown;
+      try {
+        pollPayload = await pollResponse.json();
+      } catch {
+        continue;
+      }
+      const state = parseBflPollResponse(pollPayload);
+      if (state.state === "pending") continue;
+      if (state.state === "moderated") {
+        throw new ImageProviderError(
+          "provider_moderation_rejected",
+          `Image provider withheld the result (${state.status}).`,
+          null,
+          providerRequestId,
+          requestParams
+        );
+      }
+      if (state.state === "failed") {
+        throw failAfterSubmit(`Image provider task ended without an image (${state.status}).`);
+      }
+      return state;
+    }
+  };
+
+  // From an accepted submit on, the task may have been billed: anything but a
+  // moderation refusal is a failure after generation (`afterGeneration`).
+  const deliver = async (): Promise<ImageProviderResult> => {
+    const ready = await poll();
+    let asset: Response;
+    try {
+      // No key: the signed link carries its own authority.
+      asset = await fetch(ready.sampleUrl, {
+        redirect: "manual",
+        signal: AbortSignal.timeout(remainingMs()),
+      });
+    } catch {
+      throw failAfterSubmit("Image provider asset could not be downloaded.");
+    }
+    const releaseAsset = () => asset.body?.cancel().catch(() => undefined);
+    if (!asset.ok || !isBflUrl(asset.url)) {
+      await releaseAsset();
+      throw failAfterSubmit("Image provider asset was not served from the expected location.", asset.status);
+    }
+    // FLUX 3 Image takes no output format, so the file's own type decides,
+    // and it has to be one this profile may store.
+    const mimeType = (asset.headers.get("content-type") ?? "").split(";", 1)[0]!.trim().toLowerCase();
+    if (!model.outputMimeTypes.includes(mimeType)) {
+      await releaseAsset();
+      throw failAfterSubmit("Image provider asset is not a type this model may store.");
+    }
+    let imageBytes: Buffer;
+    try {
+      imageBytes = await readResponseToBuffer(asset, FAL_MAX_ASSET_BYTES);
+    } catch (error) {
+      throw failAfterSubmit(
+        error instanceof BoundedBufferError
+          ? "Image provider asset was larger than the accepted limit."
+          : "Image provider asset could not be read."
+      );
+    }
+    if (imageBytes.byteLength === 0) {
+      throw failAfterSubmit("Image provider asset was empty.");
+    }
+    const dimensions = readImageDimensions(imageBytes, mimeType);
+    const [expectedWidth, expectedHeight] = input.size.split("x").map(Number);
+    if (!dimensions || dimensions.width !== expectedWidth || dimensions.height !== expectedHeight) {
+      throw failAfterSubmit("Image provider returned a different size than the one that was priced.");
+    }
+    const usage = { ...(submitted.usage ?? {}), ...(ready.usage ?? {}) };
+    return {
+      imageBytes,
+      mimeType,
+      // Billed per image by resolution tier; no token usage to record.
+      inputTokens: 0,
+      thinkingTokens: 0,
+      outputTokens: 0,
+      // BFL's own figures (credits of $0.01, megapixels), kept for comparison
+      // against the fixed price, never used to compute it.
+      providerUsage: Object.keys(usage).length ? usage : null,
+      providerRequestId,
+      provenance: [...model.provenance],
+      outputWidth: dimensions.width,
+      outputHeight: dimensions.height,
+      requestParams,
+    };
+  };
+  try {
+    return await deliver();
+  } catch (error) {
+    if (error instanceof ImageProviderError && error.failurePhase !== "provider_moderation_rejected") {
+      error.afterGeneration = true;
+    }
     throw error;
   }
 };

@@ -149,6 +149,38 @@ for (const theme of ["light", "dark"] as const) {
   });
 }
 
+for (const appearance of ["studio", "classic"] as const) test(`desktop ${appearance} command bar names the open conversation and truncates a long title`, async ({ page }) => {
+  const title = "2026년 하반기 신규 구독자 대상 이메일 캠페인 문구 세 가지 안을 비교하고 수정하기 위한 긴 대화 제목";
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await prepareGuestPage(page, "ko", appearance, appearance);
+  const account = await mockAuthenticatedApi(page, {
+    productKey: "chat", selectedModels: ["gpt-6-luna"], selectionMode: "manual", language: "ko",
+    messages: [{ id: "title-question", role: "user", content: "캠페인 문구를 비교해 주세요." }],
+  });
+  account.title = title;
+  await mockUserUsage(page, { plan: "Max" });
+  await suppressTransientUi(page);
+  await restoreActiveConversation(page);
+  await page.context().addCookies([{ name: "__tomverse_e2e_chat_workspace", value: "1", url: "http://127.0.0.1:3100" }]);
+  await page.route("**/api/products/chat/capabilities", route => route.fulfill({ json: { autoSelection: { offered: true } } }));
+  await page.goto("/chat?lang=ko");
+  await expect(page.getByText("캠페인 문구를 비교해 주세요.", { exact: true })).toBeVisible();
+  const crumb = page.getByTestId("chat-command-bar").getByTestId("command-bar-conversation-title");
+  await expect(crumb).toHaveAttribute("data-has-title", "true");
+  await expect(crumb).toHaveAttribute("title", title);
+  await expect(crumb).toBeVisible();
+  await expect(crumb).toContainText(title);
+  await expect(crumb).not.toContainText("새 채팅");
+  await expect(page).toHaveTitle(`${title} · Tomverse`);
+  // One line, ellipsised, and the controls to its right stay on screen.
+  const box = await crumb.evaluate(node => ({ lines: Math.round(node.getBoundingClientRect().height / parseFloat(getComputedStyle(node).lineHeight || "20")), clipped: node.scrollWidth > node.clientWidth, weight: getComputedStyle(node.querySelector(".review-conversation-name")!).fontWeight }));
+  expect(box.clipped).toBe(true);
+  expect(box.lines).toBeLessThanOrEqual(1);
+  expect(Number(box.weight)).toBeGreaterThanOrEqual(700);
+  await expectInsideVisibleViewport(page, page.getByTestId("workspace-usage"), "usage button beside a long title");
+  await expectAccessibleContrast(crumb.locator(".review-conversation-name"), "conversation title");
+});
+
 for (const width of [1440, 390]) for (const theme of ["light", "dark"] as const) {
   test(`Chat Studio ${width}px ${theme} preserves draft, Auto, tools and answers across Classic`, { tag: "@ui-risk" }, async ({ page }) => {
     await installChatModelStub(page, { "gpt-6-luna": { kind: "success", chunks: ["The Studio answer completed."] } });

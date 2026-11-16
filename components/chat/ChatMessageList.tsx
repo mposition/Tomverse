@@ -1757,25 +1757,6 @@ export function ChatMessageList({
                                 {t("chat.retry")}
                               </button>
                             )}
-                          {/*
-                            Chat (the single transcript, which restores the
-                            question instead of resending it) opens its model
-                            picker here, so the "try another model" hint below
-                            is an action rather than only advice. Nothing is
-                            sent: the next turn stays the user's submission.
-                          */}
-                          {(errorCategory === "generic" || errorCategory === "attachment") &&
-                            !onRetryLast && onRestoreQuestion && onRequestCloseModel && (
-                              <button
-                                type="button"
-                                data-testid="chat-error-choose-model"
-                                onClick={onRequestCloseModel}
-                                className={secondaryButtonClass}
-                              >
-                                <RotateCcw className="h-3.5 w-3.5" />
-                                {t("chat.chooseAnotherModel")}
-                              </button>
-                            )}
                           {errorCategory === "concurrency" &&
                             msg.id === concurrencyRetryMessageId &&
                             onRetryConcurrency && (
@@ -1844,6 +1825,10 @@ export function ChatMessageList({
                             triggerTestId="report-error-button"
                           />
                           )}
+                          {/*
+                            Chat opens its model picker here, once per card;
+                            nothing is sent, the next turn stays the user's.
+                          */}
                           {(errorCategory === "generic" || errorCategory === "attachment") &&
                             (onChooseAnotherModel ? (
                               <button
@@ -1881,14 +1866,16 @@ export function ChatMessageList({
                           </p>
                         )}
                         {errorAuxiliaryLines.length > 0 && (
-                          // Collapsed by default: the card leads with the problem
-                          // and its recovery actions; the trace ID is for support
-                          // and already travels with the error report.
-                          <details data-testid="chat-error-auxiliary-info" className="mt-2">
-                            <summary className="cursor-pointer text-[11px] leading-4 text-zinc-600 dark:text-zinc-400">
-                              {t("chat.errorDetails")}
+                          // The trace ID already travels with "Report error"
+                          // (msg.errorReport), so it stays folded away until
+                          // someone asks for the diagnostic details.
+                          <details data-testid="chat-error-auxiliary-info" className="mt-2 space-y-0.5">
+                            <summary
+                              data-testid="chat-error-auxiliary-toggle"
+                              className="cursor-pointer text-[11px] leading-4 text-zinc-600 dark:text-zinc-400"
+                            >
+                              {t("chat.errorDiagnostics")}
                             </summary>
-                            <div className="mt-1 space-y-0.5">
                             {errorAuxiliaryLines.map((line, lineIndex) => (
                               <p
                                 key={lineIndex}
@@ -1905,7 +1892,6 @@ export function ChatMessageList({
                                 {line}
                               </p>
                             ))}
-                            </div>
                           </details>
                         )}
                       </div>

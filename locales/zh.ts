@@ -415,6 +415,7 @@ export const zh = {
         responseFailed: "请求失败。",
         traceId: "追踪 ID",
         errorDetails: "错误详情",
+        errorDiagnostics: "诊断信息",
         retry: "重试",
         reduceModelCount: "减少模型数量",
         chooseAnotherModel: "选择其他模型",
