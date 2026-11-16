@@ -182,6 +182,20 @@ test("daily skip assessments accept a single JSON fence without losing a valid r
   assert.equal(gatewayCalls.find(x => x.header.op === "result").header.reason, "already_satisfied");
 });
 
+test("an unrelated PR without a usable diff does not halt daily implementation", async () => {
+  const { deps, gatewayCalls } = fakeRunner({ gateway: { work_context: { status: "context", pulls: [{ number: 5, head: HEAD }] } }, rules: [
+    [/rev-parse refs\/autorec\/context\//, ok(HEAD)],
+    [/diff --name-only/, exit(128)],
+    [/^claude /, (_signature, options) => {
+      assert.match(options.input, /"pathsUnavailable":true/);
+      return ok(JSON.stringify({ result: JSON.stringify({ disposition: "implemented", evidence: "An unmet change remains; the unrelated PR cannot provide it." }) }));
+    }],
+  ] });
+  deps.config.dailyProduct = true;
+  assert.equal(await runLocked(deps), 0);
+  assert.equal(gatewayCalls.find(x => x.header.op === "result").header.outcome, "pr_opened");
+});
+
 test("daily mode continues after a known no-change result and ends at an empty queue", async () => {
   let claims = 0;
   const { deps, gatewayCalls } = fakeRunner({

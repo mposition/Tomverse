@@ -1382,8 +1382,12 @@ async function fixConflict(pass, chosen) {
         prompt: conflictPrompt({ files: [], base: pull.base.ref, contextFile }),
         deny: deniedPaths({ stateDir: config.stateDir, outbox }), timeoutMs: (provider.timeoutSeconds ?? config.timeoutSeconds) * 1000 });
       const reason = resultCode(answer.tail);
-      if (!answer.ok || reason !== "fixed") {
-        const outcome = answer.ok && reason === "obsolete" ? "obsolete" : "no_change";
+      if (!answer.ok) {
+        record(key, { outcome: answer.timedOut ? "model_timeout" : "model_failed", answer: answerLine(answer.tail) });
+        return { outcome: "model_failed" };
+      }
+      if (reason !== "fixed") {
+        const outcome = reason === "obsolete" ? "obsolete" : "no_change";
         record(key, { outcome, reason, answer: answerLine(answer.tail) });
         return { outcome };
       }

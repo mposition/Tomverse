@@ -277,8 +277,8 @@ async function work(deps, claim, ctx) {
         // instead of stopping the entire batch on an unrelated PR update.
         pr.head = actual.stdout.trim();
         const paths = await git(config.mirror, ["diff", "--name-only", `${base}...${pr.head}`]);
-        if (paths.code !== 0) return failed("setup_failed", "work_context_diff");
-        pr.paths = paths.stdout.slice(0, 1500);
+        pr.pathsUnavailable = paths.code !== 0;
+        pr.paths = paths.code === 0 ? paths.stdout.slice(0, 1500) : "";
         pr.pathsTruncated = paths.stdout.length > 1500;
       }
     }

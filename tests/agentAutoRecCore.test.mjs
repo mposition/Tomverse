@@ -4,8 +4,10 @@ import { publicAgentSummary } from "../tools/auto-rec-agent/lib/core.mjs";
 
 test("only a bounded public summary is eligible for the commit and PR", () => {
   assert.equal(publicAgentSummary(JSON.stringify({ publicSummary: "Keep the mobile model label visible" })), "Keep the mobile model label visible");
+  assert.equal(publicAgentSummary('```json\n{"publicSummary":"Keep the mobile model label visible"}\n```'), "Keep the mobile model label visible");
   for (const publicSummary of ["email user@example.test", "See https://private.example.test", "a\nnew line", "x".repeat(141)]) {
     assert.equal(publicAgentSummary(JSON.stringify({ publicSummary })), null);
+    assert.equal(publicAgentSummary("```json\n" + JSON.stringify({ publicSummary }) + "\n```"), null);
   }
   assert.equal(publicAgentSummary("Private unstructured result"), null);
 });

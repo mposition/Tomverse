@@ -627,6 +627,16 @@ function crissCrossFixture({ baseInBranch = false } = {}) {
 
 const mergeTreeStatus = (cwd, ...args) => spawnSync("git", ["merge-tree", "--write-tree", "--name-only", "--no-messages", ...args], { cwd, encoding: "utf8" }).status;
 
+test("a clean-merge relevance timeout retains its diagnostic cause without dispatch", async () => {
+  const f = crissCrossFixture();
+  try {
+    const result = await pass(f, () => ({ ok: false, timedOut: true, tail: "" }));
+    assert.equal(result.outcome, "model_failed");
+    assert.equal(readLedger(join(f.config.stateDir, "ci-fix", "ledger.json"))[`${f.head}:conflict`].outcome, "model_timeout");
+    assert.equal(existsSync(join(f.outbox, `${f.head}.json`)), false);
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
 test("a conflict only GitHub sees retains git's merge after one relevance assessment", async () => {
   const f = crissCrossFixture();
   try {
