@@ -72,8 +72,10 @@ operator's login. The operator's own CLI use keeps the source fresh.
 Antigravity is the one exception (below).
 
 Claude (`anthropic:<worker>`, from `~/.claude/.credentials.json` to
-`<worker>/cli/.credentials.json`) is staged only with at least 2 h left on the
-access token. Until 2026-11-06 the timer staged Codex and Copilot only; the
+`<worker>/cli/.credentials.json`) is staged whenever its access token has not
+expired; the login keepalive refreshes it 10 minutes before expiry and
+restages the copies (the former 2 h minimum only left the same token in place
+and failed the unit for two hours of every token, 2026-11-16). Until 2026-11-06 the timer staged Codex and Copilot only; the
 Claude copies made on 2026-10-12 expired that night, the quota reading
 stopped, and the claim admitted no Anthropic route from then on. The timer
 therefore runs hourly, and its `ExecStart` lists the Claude workers too, with

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
-  AMUX_V22_CLAUDE_AUTH_MIN_REMAINING_MS, AMUX_V22_CLAUDE_REFRESH_PLACEHOLDER,
+  AMUX_V22_CLAUDE_REFRESH_PLACEHOLDER,
   inspectAmuxV22ClaudeAuth, inspectAmuxV22WorkerAuth, stageAmuxV22WorkerAuth,
 } from "../lib/amux/v22WorkerAuthStage.mjs";
 import { AMUX_V19_CURSOR_REFRESH_PLACEHOLDER, inspectAmuxV19ChannelAuth } from
@@ -33,16 +33,23 @@ test("the Claude copy keeps the access token and its expiry but never the refres
   assert.equal("refreshTokenExpiresAt" in auth, false);
 });
 
-test("an expired, short-lived or malformed Claude login is refused", () => {
-  const short = NOW + AMUX_V22_CLAUDE_AUTH_MIN_REMAINING_MS - 1;
-  for (const bytes of [login({ expiresAt: NOW - 1 }), login({ expiresAt: short }),
+test("an expired or malformed Claude login is refused", () => {
+  for (const bytes of [login({ expiresAt: NOW - 1 }), login({ expiresAt: NOW }),
     login({ accessToken: "x" }), login({ refreshToken: undefined }),
     login({ scopes: "user:inference" }), Buffer.from("{}"), Buffer.from("not json"),
     Buffer.from(JSON.stringify({ primaryApiKey: "sk-ant-api03-x" }))]) {
     assert.throws(() => inspectAmuxV22ClaudeAuth(bytes, NOW), /unsafe AMUX v22 worker sign-in/);
   }
-  assert.doesNotThrow(() => inspectAmuxV22ClaudeAuth(
-    login({ expiresAt: NOW + AMUX_V22_CLAUDE_AUTH_MIN_REMAINING_MS }), NOW));
+});
+
+test("a short-lived Claude login is still copied: the keepalive refreshes it, and refusing left the same token", () => {
+  // 2026-11-16: an access token with 65 minutes left was refused every hour
+  // until the keepalive refreshed it, so the stage unit and the workers'
+  // health signal read failed for two hours of every token.
+  for (const left of [60_000, 65 * 60_000, 2 * 60 * 60_000 - 1]) {
+    const { expiresAt } = inspectAmuxV22ClaudeAuth(login({ expiresAt: NOW + left }), NOW);
+    assert.equal(expiresAt, NOW + left);
+  }
 });
 
 test("only the four worker providers are staged", () => {
@@ -134,7 +141,7 @@ test("a failed rename leaves no temporary copy of the token behind", async () =>
 test("a refused login or a check run leaves the current copy unchanged", async () => {
   const { home, stateRoot, cli } = await box();
   await writeFile(join(cli, ".credentials.json"), "current");
-  await writeFile(join(home, ".claude", ".credentials.json"), login({ expiresAt: NOW + 60_000 }));
+  await writeFile(join(home, ".claude", ".credentials.json"), login({ expiresAt: NOW - 60_000 }));
   await assert.rejects(stageAmuxV22WorkerAuth({ provider: "anthropic", worker: "claude-impl",
     home, stateRoot, now: NOW }), /worker sign-in/);
   await writeFile(join(home, ".claude", ".credentials.json"), login());
