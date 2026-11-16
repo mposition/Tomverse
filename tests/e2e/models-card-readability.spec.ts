@@ -5,7 +5,7 @@ import { expectAccessibleContrast } from "./support/ui-audit";
 import { prepareGuestPage } from "./support/app-fixtures";
 
 for (const language of ["ko", "en"] as const) for (const width of [320, 1440]) for (const theme of ["light", "dark"] as const) {
-  test(`model-card labels and identifier are readable in ${language} at ${width}px in ${theme}`, async ({ page }) => {
+  test(`model-card labels are readable, without the internal id, in ${language} at ${width}px in ${theme}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
     await prepareGuestPage(page, language);
     await setDeterministicTheme(page, theme);
@@ -17,9 +17,13 @@ for (const language of ["ko", "en"] as const) for (const width of [320, 1440]) f
     await expect(page.locator("html")).toHaveClass(new RegExp(theme));
     const fields = language === "ko"
       ? ["이용 시작 플랜", "공급자", "짧은 요청의 기본 크레딧", "상태"]
-      : ["Access starts with", "Provider", "Credit category", "Base credits for a short request", "Status"];
+      : width < 640
+        ? ["Access", "Provider", "Credit category", "Base credits", "Status"]
+        : ["Access starts with", "Provider", "Credit category", "Base credits for a short request", "Status"];
     if (language === "ko") await expect(card.getByText("크레딧 사용 등급", { exact: true })).toHaveCount(0);
-    for (const text of [model.id, ...fields]) {
+    // The card names the model for people; the internal model id is not shown (#4027).
+    await expect(card.getByText(model.id, { exact: true })).toHaveCount(0);
+    for (const text of fields) {
       const label = card.getByText(text, { exact: true });
       await expect(label).toBeVisible();
       const metrics = await label.evaluate((node) => ({ font: parseFloat(getComputedStyle(node).fontSize), leading: parseFloat(getComputedStyle(node).lineHeight), overflow: node.scrollWidth > node.clientWidth + 1 }));
