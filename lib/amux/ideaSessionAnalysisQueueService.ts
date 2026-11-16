@@ -42,7 +42,9 @@ export async function listAmuxSessionAnalysisCandidates(
       select: { id: true, ideaId: true, modelProvider: true, modelId: true,
         createdAt: true,
         idea: { select: { analysisDeadlineAt: true } },
-        budgetClaims: { orderBy: { invocationOrdinal: "desc" },
+        // The retry wait reads the claims back to the last result, and it
+        // stops growing at its 24-hour cap by the tenth failure in a row.
+        budgetClaims: { orderBy: { invocationOrdinal: "desc" }, take: 16,
           select: { id: true, invocationOrdinal: true, status: true,
             budgetMode: true, closedAt: true } } },
     });

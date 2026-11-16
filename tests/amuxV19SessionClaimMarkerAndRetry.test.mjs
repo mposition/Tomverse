@@ -107,6 +107,17 @@ test("the next claim is due after a result, or after a failure once its wait pas
     { due: true, afterFailure: true });
 });
 
+test("a subscription claim left open with an unknown outcome is due at once, for the writer to close", () => {
+  const now = new Date("2026-11-16T12:00:00.000Z");
+  assert.deepEqual(amuxSessionNextClaimDue([{ status: "outcome_unknown",
+    budgetMode: "max_shadow", closedAt: null, ownerStopped: false }], now),
+  { due: true, afterFailure: true });
+  // The owner's stop still holds it.
+  assert.deepEqual(amuxSessionNextClaimDue([{ status: "outcome_unknown",
+    budgetMode: "max_shadow", closedAt: null, ownerStopped: true }], now),
+  { due: false, retryAt: null });
+});
+
 test("a running, paid or owner-stopped claim is never queued again on its own", () => {
   const now = new Date("2026-11-16T12:00:00.000Z");
   for (const latest of [

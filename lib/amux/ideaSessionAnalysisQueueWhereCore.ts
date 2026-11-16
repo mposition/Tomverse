@@ -13,8 +13,13 @@ export function buildAmuxSessionAnalysisQueueWhere(now: Date,
     // amuxSessionNextClaimDue (ideaSessionAnalysisRetryCore.ts), which also
     // queues a failed subscription analysis again after its wait (operator,
     // 2026-11-16) and leaves a paid or owner-stopped one where it is.
-    AND: [{ budgetClaims: { none: {
-      status: { in: ["in_flight", "outcome_unknown"] } } } }],
+    // A paid claim's unknown outcome stays with the owner; a subscription one
+    // left open from before the system closed them is due (the claim writer
+    // closes it at zero first).
+    AND: [{ budgetClaims: { none: { OR: [
+      { status: "in_flight" },
+      { status: "outcome_unknown", budgetMode: { not: "max_shadow" } },
+    ] } } }],
     idea: { submissionOrigin: "session", state: { in: ["submitted", "analyzing"] },
       cancelledAt: null, analysisCompletedAt: null, analysisDeadlineAt: { gt: now },
       rawCiphertext: { not: null }, rawPurgedAt: null,

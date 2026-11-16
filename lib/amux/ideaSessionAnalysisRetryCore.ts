@@ -39,6 +39,15 @@ export function amuxSessionNextClaimDue(claims: readonly AmuxSessionClaimFact[],
   now: Date): { due: true; afterFailure: boolean } | { due: false; retryAt: Date | null } {
   const latest = claims[0];
   if (!latest || latest.status === "succeeded") return { due: true, afterFailure: false };
+  // A subscription claim left open with an unknown outcome was recorded before
+  // the system closed such claims itself (2026-11-16). It is due at once: the
+  // claim writer closes it at zero (closeOpenAmuxSessionShadowUnknownClaimsInTx)
+  // and takes the next invocation in the same transaction. Left out of the
+  // queue, nothing would ever reach that close.
+  if (latest.status === "outcome_unknown" && latest.budgetMode === "max_shadow" &&
+      latest.closedAt === null && !latest.ownerStopped) {
+    return { due: true, afterFailure: true };
+  }
   if (!AMUX_SESSION_RETRYABLE_STATUSES.includes(latest.status) ||
       latest.budgetMode !== "max_shadow" || latest.ownerStopped ||
       !(latest.closedAt instanceof Date) || !Number.isFinite(latest.closedAt.getTime())) {
