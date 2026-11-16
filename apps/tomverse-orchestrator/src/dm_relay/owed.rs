@@ -143,6 +143,9 @@ pub fn refused_for_now(reason: &str) -> bool {
                 // a 503 that recorded nothing; review r-20261116-195913-289714).
                 | "dm_settings_unreadable"
                 | "dm_state_unreadable"
+                // A returned refusal the results route answers at 503
+                // (dmReturnedRefusalStatus; review r-20261116-200908-ddabe2).
+                | "digest_key_unavailable"
                 | "dm_key_period_changed"
         )
 }
@@ -906,6 +909,7 @@ mod tests {
             "dm_state_unreadable",
             "dm_digest_key_unavailable",
             "dm_digest_keys_unavailable",
+            "digest_key_unavailable",
         ] {
             assert!(refused_for_now(reason), "{reason}");
         }

@@ -29,9 +29,18 @@ test("every 503 code of the Decision Maker routes keeps the relay's write owed",
     ...readdirSync(join(root, "lib/amux")).filter((name) => /^decisionMaker.*\.ts$/.test(name))
       .map((name) => join(root, "lib/amux", name)),
   ];
-  const codes = new Set(files.flatMap((file) =>
-    [...readFileSync(file, "utf8").matchAll(/refused\(\s*503\s*,\s*"([a-z_]+)"\s*\)/g)]
-      .map((match) => match[1])));
+  const codes = new Set(files.flatMap((file) => {
+    const text = readFileSync(file, "utf8");
+    return [
+      // A literal answer: refused(503, "code").
+      ...[...text.matchAll(/refused\(\s*503\s*,\s*"([a-z_]+)"\s*\)/g)].map((match) => match[1]),
+      // A returned refusal mapped to 503 (dmReturnedRefusalStatus): every code
+      // compared on a line that returns 503 (review r-20261116-200908-ddabe2).
+      ...text.split("\n").filter((line) => /return 503\b/.test(line))
+        .flatMap((line) => [...line.matchAll(/===\s*"([a-z_]+)"/g)].map((match) => match[1])),
+    ];
+  }));
+  assert.ok(codes.has("digest_key_unavailable"), "the returned-refusal mapping is read");
   assert.ok(codes.size >= 4, `found ${[...codes].join(", ")}`);
   for (const code of codes) assert.ok(listed.has(code), `${code} is not kept owed by the relay`);
 });
