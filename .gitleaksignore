@@ -1927,3 +1927,14 @@ a264ed7037ff8bbaecb3aff531a182f2a7d4ebbd:tests/e2e-admin/amux-owner-review-repor
 634cc3097c5d46a6eb30fc97c8a18c3a1b971cf6:tests/marketingSeoProposalDiagnosis.test.mjs:github-pat:88
 6913c67d88d315c295a751d3ecc8598c05664164:tests/marketingSeoProposalDiagnosis.test.mjs:aws-access-token:90
 6913c67d88d315c295a751d3ecc8598c05664164:tests/marketingSeoProposalDiagnosis.test.mjs:github-pat:88
+
+# Synthetic idempotency key in a native transport test, not a credential.
+#
+# Commit f3e50cee8 introduced tests/nativeReviewHandoffTransport.test.mjs with
+# a UUID used as a request idempotency key. It identifies a retry and never
+# authenticated anything; the follow-up commit builds it from parts. The
+# introducing commit is immutable history and stays pinned here.
+#
+# Scope: exactly these two findings in that one commit -- nothing wider.
+f3e50cee8ef2da7d8da21a4426eb599813419628:tests/nativeReviewHandoffTransport.test.mjs:generic-api-key:16
+f3e50cee8ef2da7d8da21a4426eb599813419628:tests/nativeReviewHandoffTransport.test.mjs:generic-api-key:37

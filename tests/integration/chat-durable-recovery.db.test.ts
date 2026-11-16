@@ -31,6 +31,8 @@ import {
   readChatResponseAttempt,
   terminalChatResponseAttempt,
 } from "@/lib/chatResponseAttemptPersistence";
+import { serializeContinuationSourcePlan } from "@/lib/continuationSourceManifest";
+import { planContinuationSeed } from "@/lib/externalContinuationSeedCore";
 import { prisma } from "@/lib/prisma";
 
 const reset = () =>
@@ -547,6 +549,22 @@ test("assistant Message and completed attempt commit or roll back together", asy
   const chat = await seedChat();
   const claimed = claimInput(chat, { ownerId: "worker-atomic" });
   await claimChatResponseAttempt(claimed);
+  const continuationSourcePlan = serializeContinuationSourcePlan({
+    plan: planContinuationSeed({
+      messages: [{ role: "user", ordinal: 0, content: "Imported context.", truncated: false }],
+      sourceMessageCount: 1,
+    }),
+    sourceId: "source-fixture",
+    sourceConversationDigest: "source-digest-fixture",
+    sourceDigestVersion: 1,
+    attempt: {
+      assistantMessageId: claimed.assistantMessageId,
+      sourceUserMessageId: chat.sourceUserMessageId,
+      attemptIndex: 0,
+      actualModelId: "provider/model-a",
+      provider: "provider",
+    },
+  });
   await assert.rejects(
     prisma.$transaction(async (tx) => {
       await tx.message.create({
@@ -569,6 +587,7 @@ test("assistant Message and completed attempt commit or roll back together", asy
           actualModelId: "provider/model-a",
           provider: "provider",
           finishReason: "stop",
+          continuationSourcePlan,
         },
         tx
       );
@@ -586,6 +605,10 @@ test("assistant Message and completed attempt commit or roll back together", asy
     })).status,
     "claimed"
   );
+  assert.equal((await prisma.chatResponseAttempt.findUniqueOrThrow({
+    where: { assistantMessageId: claimed.assistantMessageId },
+    select: { continuationSourcePlan: true },
+  })).continuationSourcePlan, null);
 
   await prisma.$transaction(async (tx) => {
     await tx.message.create({
@@ -608,6 +631,7 @@ test("assistant Message and completed attempt commit or roll back together", asy
         actualModelId: "provider/model-a",
         provider: "provider",
         finishReason: "stop",
+        continuationSourcePlan,
       },
       tx
     );
@@ -622,6 +646,53 @@ test("assistant Message and completed attempt commit or roll back together", asy
     })).status,
     "completed"
   );
+  assert.deepEqual(
+    (await prisma.chatResponseAttempt.findUniqueOrThrow({
+      where: { assistantMessageId: claimed.assistantMessageId },
+      select: { continuationSourcePlan: true },
+    })).continuationSourcePlan,
+    continuationSourcePlan
+  );
+});
+
+test("failed attempts cannot persist continuation source evidence", async () => {
+  const chat = await seedChat("failed-source-plan");
+  const claimed = claimInput(chat, { ownerId: "worker-failed-source-plan" });
+  await claimChatResponseAttempt(claimed);
+  const continuationSourcePlan = serializeContinuationSourcePlan({
+    plan: planContinuationSeed({
+      messages: [{ role: "user", ordinal: 0, content: "Imported context.", truncated: false }],
+    }),
+    sourceId: "source-fixture",
+    sourceConversationDigest: "source-digest-fixture",
+    sourceDigestVersion: 1,
+    attempt: {
+      assistantMessageId: claimed.assistantMessageId,
+      sourceUserMessageId: chat.sourceUserMessageId,
+      attemptIndex: 0,
+      actualModelId: "provider/model-a",
+      provider: "provider",
+    },
+  });
+  await expectAttemptCas(terminalChatResponseAttempt({
+    userId: chat.userId,
+    assistantMessageId: claimed.assistantMessageId,
+    ownerId: claimed.ownerId,
+    expectedRevision: 0,
+    status: "failed",
+    finalContent: "",
+    actualModelId: "provider/model-a",
+    provider: "provider",
+    finishReason: "error",
+    failureCode: "internal_error",
+    continuationSourcePlan,
+  }), "continuation_source_attempt_mismatch");
+  const row = await prisma.chatResponseAttempt.findUniqueOrThrow({
+    where: { assistantMessageId: claimed.assistantMessageId },
+    select: { status: true, continuationSourcePlan: true },
+  });
+  assert.equal(row.status, "claimed");
+  assert.equal(row.continuationSourcePlan, null);
 });
 
 test("a terminal attempt is immutable", async () => {

@@ -668,6 +668,7 @@ run(
     // claims, draft/checkpoint CAS, DB-clock leases and deletion cascades can
     // all look correct in one process while failing under PostgreSQL races.
     "tests/integration/chat-durable-recovery.db.test.ts",
+    "tests/integration/review-continuation-handoff.db.test.ts",
     "tests/integration/provider-recovery.db.test.ts",
     "tests/integration/provider-failure-scope.db.test.ts",
     "tests/integration/provider-probe.db.test.ts",

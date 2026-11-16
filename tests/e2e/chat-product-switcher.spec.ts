@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { mockReviewHandoffBackground } from "./support/review-handoff-background-fixtures";
 
 import {
   expectNoHorizontalOverflow,
@@ -54,6 +55,7 @@ async function openProductSwitcher(page: Page) {
 
 test.describe("Tomverse Chat and Review product switcher", () => {
   test.beforeEach(async ({ page }) => {
+    await mockReviewHandoffBackground(page);
     await prepareGuestPage(page, "en");
     await mockAuthenticatedApi(page, { autoSelectionOffered: true });
     await page.route("**/api/products/chat/capabilities", async (route) => {
@@ -100,6 +102,28 @@ test.describe("Tomverse Chat and Review product switcher", () => {
       "href",
       "/review?lang=en"
     );
+  });
+
+  test("ordinary Chat answer Compare keeps its existing Review draft flow", async ({ page }) => {
+    const question = "Compare two weekend itineraries.";
+    await mockAuthenticatedApi(page, { productKey: "chat", messages: [
+      { id: "normal-question", role: "user", content: question },
+      { id: "normal-answer", role: "assistant", content: "Two weekend options.", modelId: "gpt-5-6-luna" },
+    ] });
+    const execution: string[] = [];
+    const transferredPrompts: string[] = [];
+    page.on("request", request => {
+      const url = new URL(request.url());
+      const pathname = url.pathname;
+      if (pathname === "/review" && url.searchParams.has("prompt")) transferredPrompts.push(url.searchParams.get("prompt")!);
+      if (request.method() === "POST" && (pathname.includes("review-handoff") || pathname === "/api/chat" || pathname.endsWith("/messages"))) execution.push(pathname);
+    });
+    await page.goto("/chat?lang=en&conversation=qa-conversation");
+    await page.getByTestId("chat-compare-in-review").click();
+    await expect(page).toHaveURL(/\/review(?:\?|$)/);
+    await expect(page.getByTestId("chat-textarea")).toHaveValue(question);
+    expect(transferredPrompts).toContain(question);
+    expect(execution).toEqual([]);
   });
 
   test("Review is current and does not present Smart Adaptive as a product", async ({
@@ -241,6 +265,7 @@ test.describe("Tomverse Chat and Review product switcher", () => {
 
 test.describe("Guest Chat and Review product entry", () => {
   test("a guest switches directly between products and retains each idle draft", async ({ page }) => {
+    await mockReviewHandoffBackground(page);
     await prepareGuestPage(page, "en");
     const writes: string[] = [];
     page.on("request", (request) => {

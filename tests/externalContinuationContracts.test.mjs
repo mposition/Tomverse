@@ -1044,7 +1044,7 @@ test("a Compare-in-Review answer is owned by the press's selection", () => {
     // new ticket, and an admitted product switch clears the press's ticket.
     assert.match(client, /reviewForkTicketRef\.current === conversationSelectionTicketRef\.current &&/);
     assert.match(client, /reviewForkTicketRef\.current = conversationSelectionTicketRef\.current;\s*void startReviewFork\(\);/);
-    assert.match(client, /if \(admitted\) reviewForkTicketRef\.current = null;/);
+    assert.match(client, /if \(admitted\) \{ reviewForkTicketRef\.current = null;/);
     // Leaving for Review preserves drafts like the switcher, and is blocked in
     // the same states (review round 6).
     assert.match(client, /beforeNavigate: \(\) => reviewForkAdmissionRef\.current\(\),/);
