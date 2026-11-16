@@ -1,5 +1,6 @@
 ﻿"use client";
 
+import { bindJourneyFirstSource, captureJourneyDraft, connectedDraftScope, invalidateJourneyDraft, observeJourneyWorkspace, type ConnectedJourney } from "@/lib/connectedJourneyAnalytics";
 import { ReviewChatHandoffProvider, ReviewChatAction } from "@/components/chat/ReviewChatHandoff";
 import { AvailableCreditsProvider } from "@/components/credits/UsageMeter";
 import { ReviewAnalysisActions } from "@/components/chat/ReviewAnalysisActions";
@@ -1258,6 +1259,10 @@ export function ChatPageClient({
     mountedSurface === "chat" ? "chat" : "review",
     isReviewHandoff ? "review-handoff" : "chat"
   );
+  useEffect(() => {
+    observeJourneyWorkspace(connectedDraftScope(mountedSurface, activeDraftKey), currentChatId, identityKey,
+      isInitialConversationResolved && (mountedSurface !== "chat" || draftHydrated));
+  }, [mountedSurface, activeDraftKey, currentChatId, identityKey, isInitialConversationResolved, draftHydrated]);
   /*
     The first real ChatInput caller is deliberately fixture-only. It proves
     state ownership, exact-draft binding and decision focus in the complete
@@ -5917,8 +5922,14 @@ export function ChatPageClient({
   // submit at a time, and the flag is released in `finally` so a rejected or
   // aborted attempt can never wedge the composer shut.
   const handleGlobalSubmit = async (
-    options?: GlobalSubmitOptions
+    options?: GlobalSubmitOptions,
+    inheritedJourney?: ConnectedJourney | null,
   ): Promise<void> => {
+    // Carry the original click through routing/preparation and recursive re-entry.
+    const submitJourney = inheritedJourney === undefined
+      ? !isGuestMode && typeof options?.overrideText !== "string"
+        ? captureJourneyDraft(connectedDraftScope(mountedSurface, activeDraftKey)) : null
+      : inheritedJourney;
     if (reviewHandoffAccess.pending || reviewHandoffAccess.failed ||
         (isReviewHandoff && (!draftHydrated || draftConflict || draftSyncFailed))) {
       showToast(reviewContinuationHandoffCopy.draftFailed, "info");
@@ -5954,7 +5965,7 @@ export function ChatPageClient({
       flushSync(() => mutateModelSettings(currentChatIdRef.current, panels,
         disabledPanels.filter(id => id !== panelId)));
       return handleGlobalSubmitRef.current({ submittedAtMonotonicMs, reviewRouteChecked: true,
-        imageIntentChecked: true, imageTurnsByModel: plan.turns, overrideModelIds: plan.panelIds });
+        imageIntentChecked: true, imageTurnsByModel: plan.turns, overrideModelIds: plan.panelIds }, submitJourney);
     }
     const professionalImageRouting = mountedSurface === "workspace" &&
       inConversationImagesAllowed &&
@@ -6011,14 +6022,14 @@ export function ChatPageClient({
         reviewWorkspaceRef.current.imagePromptMode !== routeRequestedKind ||
         (liveProviders.length > 0 && !sameStringList(providers, liveProviders))) return;
       if (!decision) {
-        if (professionalImageRouting) return handleGlobalSubmitRef.current({ submittedAtMonotonicMs, reviewRouteChecked: true, imageIntentChecked: true });
+        if (professionalImageRouting) return handleGlobalSubmitRef.current({ submittedAtMonotonicMs, reviewRouteChecked: true, imageIntentChecked: true }, submitJourney);
         reviewWorkspace.setError(reviewWorkspaceCopy[lang].failed); return;
       }
       if (decision.kind === "blocked") {
         reviewWorkspace.setError(t(imageGenerationEnabled ? "chat.imageGenerationPlanGateBody" : "chat.imageGenerationDisabledNotice")); return;
       }
       if (professionalImageRouting && decision.kind === "text") {
-        return handleGlobalSubmitRef.current({ submittedAtMonotonicMs, reviewRouteChecked: true, imageIntentChecked: true });
+        return handleGlobalSubmitRef.current({ submittedAtMonotonicMs, reviewRouteChecked: true, imageIntentChecked: true }, submitJourney);
       }
       const chosen = decision.choices.flatMap(choice => choice.modelId ? [choice.modelId] : []);
       if (decision.kind === "image") {
@@ -6039,7 +6050,7 @@ export function ChatPageClient({
         reviewWorkspace.setUnsupportedProviders([]);
         flushSync(() => mutateModelSettings(currentChatIdRef.current, plan.panelIds, []));
         return handleGlobalSubmitRef.current({ ...options, submittedAtMonotonicMs, reviewRouteChecked: true,
-          imageIntentChecked: true, imageTurnsByModel: plan.turns });
+          imageIntentChecked: true, imageTurnsByModel: plan.turns }, submitJourney);
       }
       if (!chosen.length || decision.choices.some(choice => !choice.modelId)) {
         reviewWorkspace.setError(reviewWorkspaceCopy[lang].noText); return;
@@ -6058,7 +6069,7 @@ export function ChatPageClient({
       if (owner !== identityNamespaceKey(identityNamespaceRef.current) ||
         epoch !== submitIdentityFenceRef.current.epoch || ticket !== conversationSelectionTicketRef.current ||
         !sameStringList(chosen, latestModelSettingsRef.current.models)) return;
-      return handleGlobalSubmitRef.current({ ...options, submittedAtMonotonicMs, reviewRouteChecked: true, imageIntentChecked: true });
+      return handleGlobalSubmitRef.current({ ...options, submittedAtMonotonicMs, reviewRouteChecked: true, imageIntentChecked: true }, submitJourney);
     }
     // A restored Guest `auto` value is an intent, not routing authority. The
     // background capability read will either confirm it or return the UI to
@@ -6120,7 +6131,7 @@ export function ChatPageClient({
         imageIntentChecked: true,
         submittedAtMonotonicMs,
         imageTurnDecision,
-      });
+      }, submitJourney);
     }
     const waitForCommittedAutoScope = async (
       expectedConversationId: string,
@@ -6278,7 +6289,7 @@ export function ChatPageClient({
           draftSettlement: sendAuthority.draftSettlement,
           freshLocation: sendAuthority.freshLocation,
         },
-      });
+      }, submitJourney);
     }
     const blankAutoPreparation = newChatAutoPreparationRef.current;
     if (
@@ -6321,7 +6332,7 @@ export function ChatPageClient({
               }
             : {}),
         },
-      });
+      }, submitJourney);
     }
     if (
       currentChatIdRef.current === null &&
@@ -6412,7 +6423,7 @@ export function ChatPageClient({
         }
         resetPromptRefinerState();
       }
-      await runGlobalSubmit(options, owner, submittedAtMonotonicMs);
+      await runGlobalSubmit(options, owner, submittedAtMonotonicMs, submitJourney);
     } finally {
       const preparedBlank = options?.preparedBlankChat;
       preparedBlank?.freshLocation?.cancelUnlessHandedOff();
@@ -6451,6 +6462,7 @@ export function ChatPageClient({
     options: GlobalSubmitOptions | undefined,
     submitOwner: PendingSubmissionOwner,
     submittedAtMonotonicMs: number,
+    journeyDraft: ConnectedJourney | null,
   ) => {
     const preparation = createLatencyStages({ submitHandoffMs: boundedLatencyMs(performance.now() - submittedAtMonotonicMs) });
     const submitOwnerIsCurrent = () => {
@@ -7565,6 +7577,7 @@ export function ChatPageClient({
         pickedRef.current = null;
         setPickedSource(null);
       }
+      if (messageWasSaved && !imageTurnSend && !options?.researchMode) bindJourneyFirstSource(journeyDraft, activeChatId, userMsgId);
       setPromptPayload({
         ...(!imageTurnSend && sourcePassages ? {sourcePassages} : {}),
         id: comparisonId,
@@ -7645,7 +7658,7 @@ export function ChatPageClient({
           submittedAttachmentIds: attachments.map((attachment) => attachment.id),
           currentText: currentDraft.text,
           currentAttachmentIds: currentDraft.attachments.map((attachment) => attachment.id),
-        })) discardDraft(activeChatId, promptAttachments);
+        })) discardDraft(activeChatId, promptAttachments, true);
       }
       setConversations((current) =>
         current.map((item) =>
@@ -9030,6 +9043,7 @@ export function ChatPageClient({
       voiceTurnRef.current = pending;
       // Use the normal draft and Send pipeline: Auto routing, tools, credits,
       // durable messages, and existing conversation context all stay canonical.
+      invalidateJourneyDraft(connectedDraftScope(mountedSurface, activeDraftKey), "draft_replaced");
       flushSync(() => setInputValue(text));
       void handleGlobalSubmitRef.current().then(() => {
         if (!pending.promptId) pending.reject(new Error("The voice request was not sent."));
@@ -10229,6 +10243,7 @@ export function ChatPageClient({
       });
       return;
     }
+    invalidateJourneyDraft(connectedDraftScope(mountedSurface, activeDraftKey), "draft_replaced");
     setInputValue(seedText);
     setFocusToken((value) => value + 1);
   };
@@ -10642,7 +10657,7 @@ export function ChatPageClient({
     // (components/credits/UsageMeter.tsx); the picker is several components
     // below this one, none of which use the balance themselves.
     <AvailableCreditsProvider value={comparisonAvailableCredits}>
-    <ReviewChatHandoffProvider identity={identityKey}
+    <ReviewChatHandoffProvider identity={identityKey} entry={reviewWorkspace.appearance === "studio" ? "review_studio" : "review_classic"}
       supported={routeSurface === "workspace" && !isGuestMode && Boolean(currentChatId)}
       sourceScope={reviewChatSourceScope}
       navigate={id => { if (!handleProductSwitch()) return false; router.push(`/chat?${REVIEW_CHAT_PARAM}=${encodeURIComponent(id)}`); return true; }}>
@@ -10735,6 +10750,7 @@ export function ChatPageClient({
           onLockedImageClick={handleLockedImageClick}
           onStartImageDraft={canOfferNewImage && (inConversationImagesAllowed || mountedSurface === "chat") ? (text, modelId, options) => {
             if (mountedSurface === "workspace" && reviewWorkspace.mode === "easy") {
+              invalidateJourneyDraft(connectedDraftScope(mountedSurface, activeDraftKey), "draft_replaced");
               reviewWorkspace.setImagePromptMode(true); setInputValue(text); setFocusToken(value => value + 1);
             } else handleStartImageDraft(text, modelId, options);
           } : undefined}
@@ -10932,6 +10948,7 @@ export function ChatPageClient({
           onLockedImageClick={handleLockedImageClick}
           onStartImageDraft={canOfferNewImage && (inConversationImagesAllowed || mountedSurface === "chat") ? (text, modelId, options) => {
             if (mountedSurface === "workspace" && reviewWorkspace.mode === "easy") {
+              invalidateJourneyDraft(connectedDraftScope(mountedSurface, activeDraftKey), "draft_replaced");
               reviewWorkspace.setImagePromptMode(true); setInputValue(text); setFocusToken(value => value + 1);
             } else handleStartImageDraft(text, modelId, options);
           } : undefined}

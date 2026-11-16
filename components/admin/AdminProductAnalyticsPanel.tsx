@@ -132,6 +132,29 @@ export async function AdminProductAnalyticsPanel({
         </div>
       </div>
 
+      <AdminTile title={m.journeys.title}>
+        <div data-testid="connected-journeys" className="space-y-3">
+          <p className="text-sm text-zinc-400">{m.journeys.description}</p>
+          {!dashboard.connectedJourneys ? <p role="status">{m.journeys.unavailable}</p> : <>
+            {!dashboard.connectedJourneys.groups.length ? <p>{m.journeys.none}</p> : <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm"><thead><tr>
+                {(["entry", "variant", "mature", "preview", "ready", "sent", "replied", "rate", "pending", "pendingReplied"] as const).map(key => <th key={key} className="p-2">{m.journeys[key]}</th>)}
+              </tr></thead><tbody>{dashboard.connectedJourneys.groups.map(row => <tr key={`${row.entry}:${row.continuation}`}>
+                <td className="p-2">{m.journeys[row.entry]}</td><td className="p-2">{row.continuation ? m.journeys[row.continuation] : "—"}</td>
+                {[row.mature, row.preview, row.ready, row.sent, row.replied].map((value, index) => <td key={index} className="p-2 tabular-nums">{number.format(value)}</td>)}
+                <td className="p-2 tabular-nums">{row.rate === null ? "—" : `${percent.format(row.rate)} (${row.replied}/${row.mature})`}</td>
+                <td className="p-2">{number.format(row.pending)}</td><td className="p-2">{number.format(row.pendingReplied)}</td>
+              </tr>)}</tbody></table>
+            </div>}
+            <p className="text-sm">{m.journeys.diagnostic}: {[
+              ...(["cancelled", "invalidated", "issue", "unobserved"] as const).map(key => `${m.journeys[key]}: ${dashboard.connectedJourneys!.groups.reduce((sum, row) => sum + row[key], 0)}`),
+              ...Object.entries(dashboard.connectedJourneys.diagnostics).map(([key, value]) => `${m.journeys[key as keyof typeof dashboard.connectedJourneys.diagnostics]}: ${value}`),
+            ].join(" · ")}</p>
+          </>}
+          <p className="text-xs leading-5 text-zinc-500">{m.journeys.note}</p>
+        </div>
+      </AdminTile>
+
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <AdminKpiCard
           label={p.northStar}

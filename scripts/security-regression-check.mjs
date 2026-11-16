@@ -1883,8 +1883,7 @@ const checks = [
     name: "GA4 loads only after consent or a resolved notice-and-opt-out policy",
     file: "components/analytics/AnalyticsProvider.tsx",
     test: (source) =>
-      source.includes('consent === "accepted" ||') &&
-      source.includes('resolvedPolicy.mode === "notice_opt_out"') &&
+      /const\s+analyticsEnabled\s*=\s*isProductAnalyticsAllowed\(\s*consent,\s*resolvedPolicy\s*\)\s*;/.test(source) &&
       source.includes("analyticsEnabled && analyticsClientReady && measurementId") &&
       source.includes("googletagmanager.com/gtag/js") &&
       source.includes("disableAnalyticsClient"),
@@ -2611,7 +2610,9 @@ const checks = [
         source.includes('"DE"') &&
         source.includes('country === "ZZ"') &&
         provider.includes('fetch("/api/analytics/consent-policy"') &&
-        provider.includes('resolvedPolicy.mode === "notice_opt_out"') &&
+        source.includes('consent === "accepted" ||') &&
+        source.includes('consent === "unset" && policy.mode === "notice_opt_out"') &&
+        provider.includes("isProductAnalyticsAllowed(consent, resolvedPolicy)") &&
         provider.includes("analyticsEnabled && analyticsClientReady && measurementId") &&
         client.includes('analytics_storage: analyticsStorage') &&
         client.includes('ad_storage: "denied"') &&

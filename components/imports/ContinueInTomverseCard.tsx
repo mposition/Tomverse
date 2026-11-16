@@ -65,13 +65,13 @@ export function ContinueInTomverseCard({
 }) {
     const { t } = useLanguage();
     const [state, setState] = useState<CardState>({ kind: "idle" });
-    const launcher = useContinuationLauncher({ externalConversationId });
+    const launcher = useContinuationLauncher({ externalConversationId }, { journeyEntry: "import_viewer" });
     const creating = launcher.status === "creating";
 
-    // Arming does not mint anything. A failed attempt collapses back to this
+    // Arming starts the observation, but does not mint a product idempotency key. A failed attempt collapses back to this
     // CTA, so pressing it again is a retry of that attempt and must keep its
     // key; only `launcher.cancel()` below says otherwise.
-    const arm = useCallback(() => setState({ kind: "armed" }), []);
+    const arm = useCallback(() => { launcher.begin(); setState({ kind: "armed" }); }, [launcher]);
 
     if (!enabled) return null;
 

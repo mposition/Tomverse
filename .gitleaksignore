@@ -1943,3 +1943,8 @@ a264ed7037ff8bbaecb3aff531a182f2a7d4ebbd:tests/e2e-admin/amux-owner-review-repor
 # Scope: exactly these two findings in that one commit -- nothing wider.
 f3e50cee8ef2da7d8da21a4426eb599813419628:tests/nativeReviewHandoffTransport.test.mjs:generic-api-key:16
 f3e50cee8ef2da7d8da21a4426eb599813419628:tests/nativeReviewHandoffTransport.test.mjs:generic-api-key:37
+
+# Synthetic connected-journey UUID in the dashboard contract fixture, never a
+# credential. The current fixture generates its UUID at runtime. Pin only the
+# introducing commit's exact finding; keep all other history and files scanned.
+5f34ac5e321fe8e7346de15c983d198e607b9e33:tests/server-contract/connected-journey-dashboard.test.mjs:generic-api-key:30
