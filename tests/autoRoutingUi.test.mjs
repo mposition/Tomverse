@@ -161,6 +161,7 @@ test("every supported language carries the whole control vocabulary", () => {
       "label",
       "compactLabel",
       "description",
+      "modeHint",
       "activeSummary",
       "turnedOn",
       "turnedOff",
