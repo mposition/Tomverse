@@ -9,6 +9,7 @@ import { renderPresentationPptx } from "../../lib/generatedArtifactPptx";
 import { renderWorkbook } from "../../lib/generatedArtifactXlsx";
 import { admitWorkbookSpecSafely } from "../../lib/generatedArtifactCore";
 import { canonicalWorkbookSpecFor } from "../../lib/generatedArtifactWorkbookRevision";
+import { CHAT_ATTACHMENT_PARSE_CHARACTERS } from "../../lib/chatAttachmentLimits";
 
 /*
   The real `ai`, imported statically rather than through `createRequire`.
@@ -423,7 +424,6 @@ const { ROUTER_VERSIONS } = require(resolve(ROOT, "lib/routerDecision.ts")) as {
 };
 
 let forcedAutoRoute: string | null = null;
-let autoSelectionCalls = 0;
 let forcedRouterOutput: Record<string, unknown> | null = null;
 let forcedImageIntent = false;
 let imageIntentCalls = 0;
@@ -529,7 +529,6 @@ mock.module(mod("lib/autoModelSelection.ts"), {
   namedExports: {
     ...realAutoSelection,
     selectAutoModel: (input: unknown) => {
-      autoSelectionCalls += 1;
       return forcedAutoRoute
         ? routedSelection(forcedAutoRoute)
         : realAutoSelection.selectAutoModel(input);
@@ -664,7 +663,6 @@ const ask = async (
   forcedImageIntent = imageIntent;
   imageIntentCalls = 0;
   routerDecisionKept = null;
-  autoSelectionCalls = 0;
   script = {
     begins: [],
     executes: [],
@@ -1408,18 +1406,20 @@ const revisionPptx = (text: string) => Buffer.from(renderPresentationPptx({ file
   slides: [{ layout: "titleAndContent", title: "Plan", bullets: [text] }] }));
 
 for (const [extension, render] of [["docx", revisionDocx], ["pptx", revisionPptx]] as const) {
-  test(`GF-13 latest ${extension} overflow uses the actual shared budget and stops before final answer dispatch`, async () => {
+  // Earlier files no longer share one 300,000-character budget with the turn's
+  // own file (operator decision 2026-11-16): a large earlier file cannot push
+  // the latest file out, and the latest file still arrives whole.
+  test(`GF-13 latest ${extension} is sent whole after a large earlier file`, async () => {
     try {
       const historical = addInputFixture("previous-text", "txt", Buffer.from("x".repeat(299_990)));
-      const current = addInputFixture("current-office", extension, render("Keep blue. Budget is 200."));
-      const result = await ask({}, { autoRoutedTo: MODEL_ID, expectedStatus: 413, messages: [
+      const current = addInputFixture("current-office", extension, render("Keep blue. Budget is 200. Tail confirmed."));
+      await ask({}, { autoRoutedTo: MODEL_ID, messages: [
         { role: "user", content: "Earlier input", attachments: [historical] },
         { role: "assistant", content: "Understood" },
         { role: "user", content: "Create a revised file from the attachment", attachments: [current] },
       ] });
-      assert.equal(JSON.parse(result.body).code, "ATTACHMENT_TEXT_TOO_LARGE");
-      assert.equal(lastStreamTextOptions, null, "final answer provider must not run on partial text");
-      assert.ok(autoSelectionCalls > 0, "Auto selection already occurred; this test does not claim zero Auto cost");
+      assert.ok(lastStreamTextOptions, "final answer provider was not dispatched");
+      assert.match(JSON.stringify(lastStreamTextOptions!.messages), /Tail confirmed/);
       assert.equal(world.artifactRows.length, 0);
     } finally { clearInputFixtures(); }
   });
@@ -1441,13 +1441,13 @@ for (const [extension, render] of [["docx", revisionDocx], ["pptx", revisionPptx
 }
 
 for (const extension of ["txt", "csv"]) {
+  // A latest file whose text alone passes the parser ceiling, which no turn
+  // could carry, is still refused whole rather than truncated.
   test(`GF-13 latest ${extension} is refused rather than truncated at Send`, async () => {
     try {
-      const historical = addInputFixture("past-plain", "txt", Buffer.from("x".repeat(299_990)));
-      const current = addInputFixture("latest-plain", extension, Buffer.from("keep,200\nlast,300\n"));
+      const current = addInputFixture("latest-plain", extension,
+        Buffer.from("keep,200\n".repeat(Math.ceil(CHAT_ATTACHMENT_PARSE_CHARACTERS / 9) + 1)));
       const result = await ask({}, { expectedStatus: 413, messages: [
-        { role: "user", content: "Earlier input", attachments: [historical] },
-        { role: "assistant", content: "Understood" },
         { role: "user", content: "Create a revised file", attachments: [current] },
       ] });
       assert.equal(JSON.parse(result.body).code, "ATTACHMENT_TEXT_TOO_LARGE");
@@ -1505,20 +1505,19 @@ test("XLSX revision Send provides the complete canonical workbook through a requ
   }
 });
 
-test("XLSX revision Send uses the real remaining extraction budget before final provider dispatch", async () => {
+test("XLSX revision Send keeps the whole workbook after a large earlier file", async () => {
   const previous = process.env.GENERATED_ARTIFACT_REVISION_ENABLED;
   process.env.GENERATED_ARTIFACT_REVISION_ENABLED = "true";
   try {
     const historical = addInputFixture("historical-budget", "txt", Buffer.from("x".repeat(299_990)));
     const { reference } = workbookRevisionFixture();
-    const result = await ask({}, { autoRoutedTo: MODEL_ID, expectedStatus: 413, messages: [
+    await ask({}, { autoRoutedTo: MODEL_ID, messages: [
       { role: "user", content: "Earlier input", attachments: [historical] },
       { role: "assistant", content: "Understood" },
       { role: "user", content: "Create the revised workbook", attachments: [reference] },
     ] });
-    assert.equal(JSON.parse(result.body).code, "ATTACHMENT_TEXT_TOO_LARGE");
-    assert.equal(lastStreamTextOptions, null);
-    assert.ok(autoSelectionCalls > 0, "the existing Auto call precedes extraction; it is not zero-cost validation");
+    assert.ok(lastStreamTextOptions, "final answer provider was not dispatched");
+    assert.match(JSON.stringify(lastStreamTextOptions!.messages), /TAIL_MARKER/);
     assert.equal(world.artifactRows.length, 0);
   } finally {
     clearInputFixtures();
