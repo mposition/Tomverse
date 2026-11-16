@@ -355,8 +355,19 @@ export class Orchestrator {
       const { job, slots } = byId.get(decision.jobId);
       const slot = slots.find((s) => s.index === decision.slot);
       if (decision.kind === "impossible") {
+        // A retried slot whose exclusions left it no vendor -- the one it was
+        // waiting for went to another slot of the job -- would wait for good.
+        // Its exclusions are dropped and it waits its backoff, then goes round
+        // the vendors again (review r-20261116-223613-55be3b).
+        if ((slot.excludeVendors ?? []).length > 0 && slot.status === "queued") {
+          const attempts = slot.attempts ?? 1;
+          this.requeueSlot(job.id, slot, { retriedAfter: slot.retriedAfter ?? "no_alternative",
+            excludeVendors: [], attempts, delayMs: retryDelayMs(attempts) });
+          this.log(`no vendor left for ${job.id}#${slot.index}; exclusions dropped, retried in ${Math.round(retryDelayMs(attempts) / 1000)}s`);
+          continue;
+        }
         // Nobody can take this slot right now (a provider was disabled, a
-        // vendor is excluded): it waits in the queue for a later pass.
+        // vendor's quota is spent): it waits in the queue for a later pass.
         const key = `${job.id}#${slot.index}`;
         if (!this.waitingLogged.has(key)) {
           this.waitingLogged.add(key);

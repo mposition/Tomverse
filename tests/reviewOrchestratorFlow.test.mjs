@@ -383,6 +383,32 @@ test("a failed automatic slot does not count the vendor a waiting pinned slot ho
   }
 });
 
+// Review r-20261116-223613-55be3b: a retried slot whose last alternative went
+// to another slot of the job has no vendor left. Its exclusions are dropped and
+// it backs off instead of waiting as impossible for good.
+test("a retried slot left with no vendor drops its exclusions and backs off", async () => {
+  const f = fixture({});
+  try {
+    f.commit("a.txt", "no vendor left\n");
+    const { jobId } = JSON.parse(f.client("submit", "--author", "codex", "--repo", "demo",
+      "--reviewers", "2").stdout);
+    const store = new Store(f.config.stateDir);
+    // Slot 1 failed on Anthropic; the only other vendor (xAI) holds slot 0.
+    store.writeSlot(jobId, { ...store.readSlot(jobId, 0), status: "done", provider: "cursor",
+      vendor: "xai", verdict: "accept", findings: [] });
+    store.writeSlot(jobId, { index: 1, status: "queued", excludeVendors: ["anthropic"],
+      retriedAfter: "timeout", attempts: 1 });
+    const orchestrator = new Orchestrator(f.config);
+    orchestrator.tick(allAvailable(f.config));
+    const slot = store.readSlot(jobId, 1);
+    assert.equal(slot.status, "queued");
+    assert.deepEqual(slot.excludeVendors, []);
+    assert.ok(slot.notBefore > Date.now(), "it waits its backoff");
+  } finally {
+    f.cleanup();
+  }
+});
+
 // Owner decision 2026-11-16: a job never ends unknown because reviewers failed.
 // Once every vendor has timed out, the slot waits (longer each time) and goes
 // round the vendors again.
