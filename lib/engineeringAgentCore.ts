@@ -387,8 +387,9 @@ export const UNKNOWN_OUTCOME_DECISION_CAUSE_PREFIX = "unknown:";
  * Read back, then proceed (owner decision 2026-11-14, AMUXFLOW/B1): an
  * unknown outcome is looked up again by the publisher on its own once its
  * decision has waited this long -- twice as long for each decision the item
- * already opened, up to 2^MAX_DOUBLINGS times (owner decision 2026-11-15; at
- * most three decisions until then). A lookup only reads GitHub, and a lookup
+ * already opened, up to 2^MAX_DOUBLINGS times (16 hours) and then at that
+ * interval with no end (owner decisions 2026-11-15 and 2026-11-16; at most
+ * three decisions until 2026-11-15). A lookup only reads GitHub, and a lookup
  * that settles the result closes the open decisions with it. On by default
  * since owner decision 2026-11-15; exactly `disabled` turns it off.
  */
@@ -396,6 +397,7 @@ export const ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_ENV = "ENGINEERING_AGENT_UNKN
 export const engineeringAgentUnknownAutoLookupEnabled = (value: string | undefined) =>
   value?.trim() !== "disabled";
 export const ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_AFTER_MS = 30 * 60_000;
+/** Where the wait stops growing; the lookups go on at that interval. */
 export const ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_MAX_DOUBLINGS = 5;
 /** How long an item's open decision waits before the next lookup, given how
  * many decisions the item has opened in all. */
@@ -643,15 +645,15 @@ export const ENGINEERING_AGENT_KILL_SWITCH_ENV = "ENGINEERING_AGENT_KILL_SWITCH"
 
 /**
  * Instants the app keeps beside the switches, each written by one recorded
- * act: the Admin acknowledgement that clears a halt (§12), each
- * service's report that a cycle ran to its end, and the operator's record that
- * both dead-man monitors are active and alerting (the armed gate, §12). An
- * absent or unparseable value is no record at all.
+ * act: the Admin acknowledgement that clears a halt (§12), and each
+ * service's report that a cycle ran to its end (shown in Admin). An absent or
+ * unparseable value is no record at all. The armed gate -- a monitor
+ * confirmation within 7 days and both services finished within 26 hours
+ * before the mode could leave `off` -- is gone (owner decision 2026-11-16).
  */
 export const ENGINEERING_AGENT_HALT_ACKNOWLEDGED_SETTING_KEY = "engineeringAgent.haltAcknowledgedAt";
 export const ENGINEERING_AGENT_RUNNER_LAST_FINISH_SETTING_KEY = "engineeringAgent.runnerLastFinishAt";
 export const ENGINEERING_AGENT_PUBLISHER_LAST_FINISH_SETTING_KEY = "engineeringAgent.publisherLastFinishAt";
-export const ENGINEERING_AGENT_MONITORS_CONFIRMED_SETTING_KEY = "engineeringAgent.monitorsConfirmedAt";
 /**
  * The latest unbound pull request or ref the runner observed outside a run,
  * as `{"halt":"unbound_app_pr","at":"<ISO instant>","subject":{"prNumber":7}}`.
@@ -774,8 +776,6 @@ export const OWNER_QUEUE_LEGACY_LIMITS = {
   decision: 8,
 } as const;
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-
 export type QueueReading = {
   /** Bindings with an open PR or a remaining branch. */
   openPrBindings: number;
@@ -818,7 +818,6 @@ export type HaltValue = (typeof HALT_VALUES)[number];
 export type HaltReading = {
   /** Publisher App bot login and registration time are both configured. */
   appIdentityConfigured: boolean;
-  circuitLatched: boolean;
   unboundAppPrs: number;
   unboundAppRefs: number;
   openStateMismatches: number;
@@ -844,7 +843,6 @@ export const higherHalt = (a: HaltValue, b: HaltValue): HaltValue =>
 
 export const decideHalt = (reading: HaltReading): HaltValue => {
   if (!reading.appIdentityConfigured) return "config_missing";
-  if (reading.circuitLatched) return "circuit_open";
   if (reading.unboundAppPrs > 0) return "unbound_app_pr";
   if (reading.unboundAppRefs > 0) return "unbound_app_ref";
   if (reading.openStateMismatches > 0) return "state_mismatch";
@@ -853,10 +851,8 @@ export const decideHalt = (reading: HaltReading): HaltValue => {
 
 /**
  * What a runner may report when its run ends: the readings only it can make
- * -- the publisher App's identity, unbound App pull requests and refs. A
- * latched circuit and an open state mismatch are the app's to read, never a
- * runner's to assert: one report of `circuit_open` would otherwise latch the
- * circuit without the repeated failures that are its definition (§12).
+ * -- the publisher App's identity, unbound App pull requests and refs. An
+ * open state mismatch is the app's to read, never a runner's to assert.
  */
 export const RUNNER_REPORTABLE_HALTS = ["none", "config_missing", "unbound_app_pr", "unbound_app_ref"] as const;
 export type RunnerReportableHalt = (typeof RUNNER_REPORTABLE_HALTS)[number];
@@ -883,7 +879,10 @@ export type RunnerReportableHalt = (typeof RUNNER_REPORTABLE_HALTS)[number];
  *
  * Only ENGINEERING_AGENT_GLOBAL_HALTS still halt everything.
  * `ENGINEERING_AGENT_LEGACY_HALTS=enabled` is the one kill switch back to the
- * behaviour before this decision, everywhere at once.
+ * behaviour before this decision, everywhere at once -- except what went on
+ * 2026-11-16 (owner decision), which it does not bring back: the circuit, the
+ * armed gate, and a person's acknowledgement for recorded halts other than
+ * the App's identity and namespace signals (ACKNOWLEDGEMENT_ONLY_HALTS).
  */
 export const ENGINEERING_AGENT_LEGACY_HALTS_ENV = "ENGINEERING_AGENT_LEGACY_HALTS";
 export const engineeringAgentLegacyHalts = (value: string | undefined) => value?.trim() === "enabled";
@@ -899,10 +898,9 @@ export const engineeringAgentMismatchCardScoped = (legacyHaltsValue: string | un
  * refused before anything is stored, and a leaked key is revoked, not waited
  * out. Everything not listed here holds one card at most.
  *
- * `circuit_open` is not one of them: the halts the circuit counted are each
- * one of these (with its own clearing) or a card's hold, and a card that keeps
- * failing is held by its attempt budget. It latches and halts only with
- * ENGINEERING_AGENT_LEGACY_HALTS.
+ * `circuit_open` is not one of them, and nothing writes it any more (owner
+ * decision 2026-11-16): the circuit that latched after three incidents in
+ * thirty days is gone. It stays a known value for the runs that recorded it.
  */
 export const ENGINEERING_AGENT_GLOBAL_HALTS: Readonly<Record<Exclude<HaltValue, "none" | "circuit_open">, string>> =
   Object.freeze({
@@ -920,69 +918,43 @@ export const ENGINEERING_AGENT_GLOBAL_HALTS: Readonly<Record<Exclude<HaltValue, 
 
 export const combineRunHalt = (input: {
   reported: RunnerReportableHalt;
-  circuitLatched: boolean;
   openStateMismatches: number;
 }): HaltValue =>
   decideHalt({
     appIdentityConfigured: input.reported !== "config_missing",
-    circuitLatched: input.circuitLatched,
     unboundAppPrs: input.reported === "unbound_app_pr" ? 1 : 0,
     unboundAppRefs: input.reported === "unbound_app_ref" ? 1 : 0,
     openStateMismatches: input.openStateMismatches,
   });
 
-export const CIRCUIT_WINDOW_DAYS = 30;
-export const CIRCUIT_INCIDENT_LIMIT = 3;
-
-export type TerminatedRun = {
-  startedAt: Date;
-  endedAt: Date;
-  halt: HaltValue;
-};
+/**
+ * The halts a run's record holds until a person acknowledges it: the
+ * publisher App's identity missing, and a pull request or branch in its
+ * namespace that nothing the agent did accounts for -- the security signals
+ * (owner decision 2026-11-16). A recorded halt holds every new run, so no
+ * later run could clear one; that is why only these hold.
+ *
+ * Any other value a run recorded holds nothing by itself any more: a state
+ * mismatch halts while it is open (the app reads it live, and the next reading
+ * after it is resolved is clean), and `circuit_open` is not written since the
+ * circuit went. Until 2026-11-16 each of them held until acknowledged.
+ */
+export const ACKNOWLEDGEMENT_ONLY_HALTS: readonly HaltValue[] = ["config_missing", "unbound_app_pr", "unbound_app_ref"];
 
 /**
- * Whether the circuit is latched. Runs are counted from the app's own run rows,
- * which a trigger keeps from being edited or deleted.
- *
- * - Runs that started before the last acknowledgement are ignored.
- * - An incident starts at a terminated run whose halt is not `none` and whose
- *   previous terminated run was `none` or does not exist, so one long halt is
- *   one incident rather than one per run.
- * - Three incident starts that ever fell within thirty days of each other since
- *   the acknowledgement latch it, and so does the latest terminated run already
- *   being `circuit_open`.
- *
- * Only an acknowledgement in the Admin console clears it. The passage of time
- * does not: incidents that latched the circuit keep it latched however old they
- * become, which is why this takes no clock.
+ * The halt the recorded runs still hold: of the runs that ended after the
+ * last acknowledgement, the latest whose halt is one of
+ * ACKNOWLEDGEMENT_ONLY_HALTS, or null.
  */
-export const isCircuitLatched = (input: {
-  runs: readonly TerminatedRun[];
+export const heldRunHalt = (input: {
+  runs: ReadonlyArray<{ endedAt: Date; halt: HaltValue }>;
   acknowledgedAt: Date | null;
-}): boolean => {
-  const considered = input.runs
-    .filter(
-      (run) =>
-        input.acknowledgedAt === null ||
-        run.startedAt.getTime() >= input.acknowledgedAt.getTime(),
-    )
-    .slice()
+}): HaltValue | null => {
+  const held = [...input.runs]
+    .filter((run) => ACKNOWLEDGEMENT_ONLY_HALTS.includes(run.halt) &&
+      (input.acknowledgedAt === null || run.endedAt.getTime() > input.acknowledgedAt.getTime()))
     .sort((a, b) => a.endedAt.getTime() - b.endedAt.getTime());
-
-  if (considered.length === 0) return false;
-  if (considered[considered.length - 1].halt === "circuit_open") return true;
-
-  const starts: number[] = [];
-  considered.forEach((run, index) => {
-    if (run.halt === "none") return;
-    const previous = index === 0 ? null : considered[index - 1];
-    if (previous === null || previous.halt === "none") starts.push(run.endedAt.getTime());
-  });
-  const windowMs = CIRCUIT_WINDOW_DAYS * DAY_MS;
-  for (let i = CIRCUIT_INCIDENT_LIMIT - 1; i < starts.length; i += 1) {
-    if (starts[i] - starts[i - (CIRCUIT_INCIDENT_LIMIT - 1)] <= windowMs) return true;
-  }
-  return false;
+  return held.length === 0 ? null : held[held.length - 1].halt;
 };
 
 /**
@@ -1013,48 +985,6 @@ export const shouldSendSuccessHeartbeat = (input: {
   finishedNormally: boolean;
   halt: HaltValue;
 }) => input.finishedNormally && input.halt === "none";
-
-/* ------------------------------------------------------------------------- */
-/* Armed gate                                                                 */
-/* ------------------------------------------------------------------------- */
-
-export const ARMED_GATE_LAST_FINISH_HOURS = 26;
-export const ARMED_GATE_MONITOR_CONFIRMATION_DAYS = 7;
-
-export type ArmedGateReading = {
-  runnerLastFinishAt: Date | null;
-  publisherLastFinishAt: Date | null;
-  /** The operator's record that both monitors are active and alerting. */
-  monitorsConfirmedAt: Date | null;
-  now: Date;
-};
-
-export type ArmedGateVerdict =
-  | { armed: true }
-  | {
-      armed: false;
-      missing: Array<"runner_finish" | "publisher_finish" | "monitor_confirmation">;
-    };
-
-/** Turning the mode on from `off` passes this gate (policy §12). */
-export const decideArmedGate = (reading: ArmedGateReading): ArmedGateVerdict => {
-  const now = reading.now.getTime();
-  const recent = (at: Date | null, ms: number) =>
-    at !== null && now - at.getTime() <= ms && at.getTime() <= now;
-  const missing: Array<"runner_finish" | "publisher_finish" | "monitor_confirmation"> =
-    [];
-  const finishMs = ARMED_GATE_LAST_FINISH_HOURS * 60 * 60 * 1000;
-  if (!recent(reading.runnerLastFinishAt, finishMs)) missing.push("runner_finish");
-  if (!recent(reading.publisherLastFinishAt, finishMs)) {
-    missing.push("publisher_finish");
-  }
-  if (
-    !recent(reading.monitorsConfirmedAt, ARMED_GATE_MONITOR_CONFIRMATION_DAYS * DAY_MS)
-  ) {
-    missing.push("monitor_confirmation");
-  }
-  return missing.length === 0 ? { armed: true } : { armed: false, missing };
-};
 
 /* ------------------------------------------------------------------------- */
 /* What the publisher may write                                               */

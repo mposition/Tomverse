@@ -185,20 +185,26 @@ test("develop's checks need the read-only token, and an error carries a code, ne
   });
 });
 
-test("a page that is not the whole list is refused, not read as the whole", async () => {
+// Owner decision 2026-11-16: a listing longer than one page is read to its end.
+test("check runs are read over every page GitHub links, and a read that does not add up is refused", async () => {
   const head = "d".repeat(40);
-  const one = [{ id: 1, name: "unit", conclusion: "success" }];
-  const cases = [
-    { total_count: 101, check_runs: one },
-    { body: runs(one), link: NEXT },
-  ];
-  for (const answer of cases) {
-    const { fetchImpl } = fakeFetch({
-      "/commits/develop": () => ({ sha: head }),
-      [`/commits/${head}/check-runs`]: () => answer,
-    });
-    await assert.rejects(readEngineeringAgentDevelopChecks({ env, fetchImpl }), /invalid_response/);
-  }
+  const all = Array.from({ length: 230 }, (_, i) => ({ id: i + 1, name: `check-${i}`, conclusion: "success" }));
+  const paged = (list, total = list.length) => (path) => {
+    const page = Number(new URL(`https://x${path}`).searchParams.get("page"));
+    const slice = list.slice((page - 1) * 100, page * 100);
+    return page * 100 < list.length ? { body: { total_count: total, check_runs: slice }, link: NEXT } :
+      { total_count: total, check_runs: slice };
+  };
+  const read = (handler) => readEngineeringAgentDevelopChecks({ env, fetchImpl: fakeFetch({
+    "/commits/develop": () => ({ sha: head }), [`/commits/${head}/check-runs`]: handler }).fetchImpl });
+  const whole = await read(paged(all));
+  assert.equal(whole.checkRuns.length, 230);
+  assert.deepEqual(whole.checkRuns.at(-1), { id: 230, name: "check-229", conclusion: "success" });
+  // GitHub's count says more than the pages held: a run added between pages, say.
+  await assert.rejects(read(paged(all, 231)), /invalid_response/);
+  await assert.rejects(read(() => ({ total_count: 101, check_runs: all.slice(0, 1) })), /invalid_response/);
+  // A next page linked after an empty one is not a listing.
+  await assert.rejects(read(() => ({ body: { total_count: 0, check_runs: [] }, link: NEXT })), /invalid_response/);
 });
 
 /* The approval observer's read of one published pull request (engineering-agent.md §9-10). */
@@ -217,7 +223,7 @@ const pullFetch = (overrides = {}) => {
       typeof overrides.files === "function" ? overrides.files(url) :
         overrides.files ?? [{ filename: "components/chat/Ordinary.tsx",
           status: "modified" }],
-    "/pulls/42/reviews": () => overrides.reviews ?? [
+    "/pulls/42/reviews": (_accept, url) => typeof overrides.reviews === "function" ? overrides.reviews(url) : overrides.reviews ?? [
       { id: 9, user: { id: 60078951, login: "mposition" }, state: "APPROVED", commit_id: HEAD, submitted_at: "2026-10-15T05:30:00Z" },
       { id: 10, user: { id: 60078951, login: "mposition" }, state: "PENDING", commit_id: HEAD },
     ],
@@ -252,6 +258,18 @@ test("a published pull request is read with its reviews, required checks and dif
   // A pending review is the reviewer's draft and is not read.
   assert.deepEqual(observed.reviews.map((review) => [review.id, review.login]), [[9, "mposition"]]);
   assert.equal(observed.diffDigest, createHash("sha256").update(diff).digest("hex"));
+});
+
+test("reviews are read over every page GitHub links", async () => {
+  const HEAD = "1".repeat(40);
+  const reviews = Array.from({ length: 150 }, (_, i) => ({ id: i + 1, user: { id: 7, login: "someone" },
+    state: "COMMENTED", commit_id: HEAD, submitted_at: "2026-10-15T05:30:00Z" }));
+  const { fetchImpl } = pullFetch({ reviews: (url) => {
+    const page = Number(new URL(url).searchParams.get("page"));
+    return page === 1 ? { body: reviews.slice(0, 100), link: NEXT } : reviews.slice(100);
+  } });
+  const observed = await readEngineeringAgentPullObservation(42, { env, fetchImpl });
+  assert.equal(observed.reviews.length, 150);
 });
 
 test("a check still running or missing decides nothing; a failed one is a failure", async () => {

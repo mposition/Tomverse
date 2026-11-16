@@ -2249,6 +2249,14 @@ export const RAW_SQL_ALLOWLIST = [
       "Creates the latch table and the triggers that constrain its insert and refuse update, delete and truncate. It names those verbs to refuse or constrain them and writes no row.",
   },
   {
+    path: "prisma/migrations/20261116150000_engineering_agent_binding_record_size/migration.sql",
+    table: "EngineeringAgentBinding",
+    tableMentions: 1,
+    writeVerbs: 4,
+    reason:
+      "This migration only replaces the binding's three record CHECKs (snapshot, approval and merge observation) with one 1 MiB size bound and no review id count (owner decision 2026-11-16). It writes no row and changes no trigger.",
+  },
+  {
     path: "prisma/migrations/20261004020000_qa_release_merge_lane_latch/migration.sql",
     table: "AdminAuditLog",
     tableMentions: 1,

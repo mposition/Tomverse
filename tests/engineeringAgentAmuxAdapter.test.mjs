@@ -199,27 +199,25 @@ test("the adapter reaches only the AMUX writers version 12 allows it", () => {
 });
 
 test("a run's halt is the runner's report combined with the app's, and a report of none lowers nothing", () => {
-  assert.equal(combineRunHalt({ reported: "none", circuitLatched: true, openStateMismatches: 0 }), "circuit_open");
-  assert.equal(combineRunHalt({ reported: "none", circuitLatched: false, openStateMismatches: 2 }), "state_mismatch");
-  assert.equal(combineRunHalt({ reported: "none", circuitLatched: false, openStateMismatches: 0 }), "none");
-  // The circuit and a mismatch are the app's readings, never a runner's report.
+  assert.equal(combineRunHalt({ reported: "none", openStateMismatches: 2 }), "state_mismatch");
+  assert.equal(combineRunHalt({ reported: "none", openStateMismatches: 0 }), "none");
+  // A mismatch is the app's reading, never a runner's report; nothing writes circuit_open.
   assert.deepEqual([...RUNNER_REPORTABLE_HALTS].sort(), ["config_missing", "none", "unbound_app_pr", "unbound_app_ref"]);
   const finish = readFileSync("app/api/internal/engineering-agent/run/finish/route.ts", "utf8");
   assert.match(finish, /halt: z\.enum\(RUNNER_REPORTABLE_HALTS\)/);
   for (const reported of RUNNER_REPORTABLE_HALTS) {
-    for (const circuitLatched of [false, true]) {
-      for (const openStateMismatches of [0, 1]) {
-        const halt = combineRunHalt({ reported, circuitLatched, openStateMismatches });
-        if (reported !== "none") assert.notEqual(halt, "none", `${reported} is never lowered`);
-        if (circuitLatched || openStateMismatches > 0) assert.notEqual(halt, "none");
-        // The result is a value decideHalt can give.
-        assert.ok(HALT_VALUES.includes(halt));
-      }
+    for (const openStateMismatches of [0, 1]) {
+      const halt = combineRunHalt({ reported, openStateMismatches });
+      if (reported !== "none") assert.notEqual(halt, "none", `${reported} is never lowered`);
+      if (openStateMismatches > 0) assert.notEqual(halt, "none");
+      assert.notEqual(halt, "circuit_open");
+      // The result is a value decideHalt can give.
+      assert.ok(HALT_VALUES.includes(halt));
     }
   }
   assert.equal(
-    combineRunHalt({ reported: "config_missing", circuitLatched: true, openStateMismatches: 1 }),
-    decideHalt({ appIdentityConfigured: false, circuitLatched: true, unboundAppPrs: 0, unboundAppRefs: 0, openStateMismatches: 1 }),
+    combineRunHalt({ reported: "config_missing", openStateMismatches: 1 }),
+    decideHalt({ appIdentityConfigured: false, unboundAppPrs: 0, unboundAppRefs: 0, openStateMismatches: 1 }),
   );
 });
 
