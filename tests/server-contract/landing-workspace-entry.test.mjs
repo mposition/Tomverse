@@ -32,7 +32,6 @@ mock.module(mod("components/marketing/MarketingChatAvailability.tsx"), {
   namedExports: { MarketingChatAvailabilityProvider: AvailabilityProvider },
 });
 for (const [path, name] of [
-  ["components/analytics/MarketingConsentReservation.tsx", "MarketingConsentReservation"],
   ["components/AppToastViewport.tsx", "AppToastViewport"],
   ["components/marketing/MarketingProviders.tsx", "MarketingProviders"],
   ["components/seo/StructuredData.tsx", "StructuredData"],
@@ -77,7 +76,7 @@ test("the public trial is available without session, auth-secret or account roll
 
 test("the static marketing shell supplies public Guest entry without an account offer", () => {
   const shell = MarketingShell({ children: null });
-  const availability = shell.props.children[2].props.children;
+  const availability = shell.props.children[1].props.children;
   assert.equal(availability.type, AvailabilityProvider);
   assert.equal(availability.props.guestTrialAvailable, true);
   assert.equal("chatSurfaceAvailable" in availability.props, false);
