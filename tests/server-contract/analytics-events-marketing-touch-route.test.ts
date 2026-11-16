@@ -403,3 +403,31 @@ test("conversions and other events never start a repair", async () => {
   await POST(event("landing_view"));
   assert.equal(repairQueries.length, 0);
 });
+
+const connectedProps = (key = randomUUID(), stage = "started") => ({
+  journey_key: key, journey_kind: "review_chat", journey_entry: "review_studio", journey_stage: stage,
+});
+
+test("connected journeys require an authenticated actor and reject unrelated fields", async () => {
+  assert.equal((await POST(event("connected_journey_step", connectedProps()))).status, 401);
+  session = { user: { id: "journey-owner" } };
+  for (const extra of [{ title: "private title" }, { product_id: "chat" }, { journey_reason: "raw failure" }]) {
+    assert.equal((await POST(event("connected_journey_step", { ...connectedProps(), ...extra }))).status, 400);
+  }
+  assert.equal((await POST(event("chat_started", connectedProps()))).status, 400);
+  assert.equal(created.length, 0);
+});
+
+test("connected stage dedupe uses authenticated actor, kind, random key and stage, independently of delivery id", async () => {
+  session = { user: { id: "journey-owner" } };
+  const properties = connectedProps();
+  assert.equal((await POST(event("connected_journey_step", properties))).status, 202);
+  assert.equal((await POST(event("connected_journey_step", properties))).status, 202);
+  assert.equal(created[0].dedupeKey, created[1].dedupeKey);
+  assert.equal(String(created[0].dedupeKey).includes(properties.journey_key), false);
+  session = { user: { id: "another-owner" } };
+  await POST(event("connected_journey_step", properties));
+  assert.notEqual(created[0].dedupeKey, created[2].dedupeKey);
+  await POST(event("connected_journey_step", { ...properties, journey_stage: "ready" }));
+  assert.notEqual(created[2].dedupeKey, created[3].dedupeKey);
+});

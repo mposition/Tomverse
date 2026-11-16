@@ -1,0 +1,17 @@
+{
+  "compiler": "6.0.3",
+  "roots": 4846,
+  "completedBatches": 69,
+  "generatedRouteChecks": 726,
+  "allRootsCovered": true,
+  "sourceUnchanged": true,
+  "noEmit": true,
+  "incrementalCacheScope": "fresh_run_only",
+  "sourceDigest": "a324af00cb971b966ff723c7ede419f5564e8b68140e5f778ec894da5afdca66",
+  "verifiedPriorBatches": 27,
+  "resumedBatches": 42,
+  "initialOldSpaceMb": 3072,
+  "resumedOldSpaceMb": [
+    4096
+  ]
+}

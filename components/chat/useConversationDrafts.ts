@@ -1,5 +1,6 @@
 "use client";
 
+import { connectedDraftScope, invalidateJourneyDraft, moveJourneyDraft } from "@/lib/connectedJourneyAnalytics";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import type { ChatAttachment } from "./types";
@@ -73,7 +74,7 @@ export type ConversationDraftsApi = {
    * conversation was deleted, or the user explicitly asked for a blank new
    * chat -- never on a plain conversation switch.
    */
-  discardDraft: (scopeId?: string | null, keep?: ChatAttachment[]) => void;
+  discardDraft: (scopeId?: string | null, keep?: ChatAttachment[], consumedBySend?: boolean) => void;
   /**
    * Hands the pending-conversation draft over to the real id the server just
    * issued, so a send that fails after the conversation was created still
@@ -1020,6 +1021,7 @@ export function useConversationDrafts(
           text: resolveDraftUpdate(update, existing.text),
         }));
       if (next === current) return;
+      if (!readDraftEntry(next, key).text && readDraftEntry(current, key).text) invalidateJourneyDraft(connectedDraftScope(sessionProduct, key), "draft_cleared");
       replaceDrafts(next);
       const meta = metaFor(key, scopeKey);
       meta.generation += 1;
@@ -1029,7 +1031,7 @@ export function useConversationDrafts(
       scheduleSave(key);
       bumpSyncRevision();
     },
-    [bumpSyncRevision, currentConversationId, metaFor, replaceDrafts, resolveKey, scheduleSave]
+    [bumpSyncRevision, currentConversationId, metaFor, replaceDrafts, resolveKey, scheduleSave, sessionProduct]
   );
 
   const setDraftAttachments = useCallback(
@@ -1079,8 +1081,9 @@ export function useConversationDrafts(
   );
 
   const discardDraft = useCallback(
-    (scopeId?: string | null, keep: ChatAttachment[] = []) => {
+    (scopeId?: string | null, keep: ChatAttachment[] = [], consumedBySend = false) => {
       const key = resolveKey(scopeId);
+      if (!consumedBySend) invalidateJourneyDraft(connectedDraftScope(sessionProduct, key), "draft_cleared");
       const existing = draftsRef.current[key];
       if (existing) releasePreviews(existing.attachments, keep);
       replaceDrafts(removeDraftEntry(draftsRef.current, key));
@@ -1092,7 +1095,7 @@ export function useConversationDrafts(
       meta.frozen = false;
       scheduleSave(key);
     },
-    [currentConversationId, metaFor, replaceDrafts, resolveKey, scheduleSave]
+    [currentConversationId, metaFor, replaceDrafts, resolveKey, scheduleSave, sessionProduct]
   );
 
   const migrateDraft = useCallback(
@@ -1107,6 +1110,8 @@ export function useConversationDrafts(
       const fromKey = draftKeyFor(fromScopeId, expectedIdentityKey);
       const toKey = draftKeyFor(toScopeId, expectedIdentityKey);
       if (fromKey === toKey) return;
+      if (draftsRef.current[toKey] && !owner) invalidateJourneyDraft(connectedDraftScope(sessionProduct, fromKey), "draft_replaced");
+      else moveJourneyDraft(connectedDraftScope(sessionProduct, fromKey), connectedDraftScope(sessionProduct, toKey));
       const moving = draftsRef.current[fromKey];
       if (!moving) return;
       // moveDraftEntry lets an existing target draft win, which means the
@@ -1153,6 +1158,7 @@ export function useConversationDrafts(
       replaceDrafts,
       scheduleSave,
       setConflict,
+      sessionProduct,
     ]
   );
 
@@ -1480,6 +1486,7 @@ export function useConversationDrafts(
       const meta = syncMetaRef.current.get(key);
       if (!meta?.conflict) return;
       const repairAttachments = meta.repairAttachmentsOnResolution;
+      invalidateJourneyDraft(connectedDraftScope(sessionProduct, key), "draft_replaced");
       if (choice === "use-server") {
         const current = readDraftEntry(draftsRef.current, key);
         const remote = meta.conflictDraft;
@@ -1507,7 +1514,7 @@ export function useConversationDrafts(
       if (choice === "overwrite-local" || repairAttachments) scheduleSave(key);
       bumpSyncRevision();
     },
-    [bumpSyncRevision, replaceDrafts, scheduleSave, setConflict]
+    [bumpSyncRevision, replaceDrafts, scheduleSave, setConflict, sessionProduct]
   );
 
   const retryDraftSync = useCallback(() => {

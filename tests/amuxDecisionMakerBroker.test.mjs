@@ -486,12 +486,16 @@ const workspaceLaunch = (broker, workspace) => {
   });
 };
 
-const hasGit = (() => {
+const gitExecutable = (() => {
   try {
-    execFileSync("git", ["--version"], { stdio: "ignore" });
-    return true;
+    // The workspace keeps the system host's Linux PATH even on a test host.
+    const executable = process.platform === "win32"
+      ? execFileSync("where.exe", ["git"], { encoding: "utf8" }).trim().split(/\r?\n/)[0]
+      : "git";
+    execFileSync(executable, ["--version"], { stdio: "ignore" });
+    return executable;
   } catch {
-    return false;
+    return null;
   }
 })();
 
@@ -499,7 +503,7 @@ const hasGit = (() => {
 const localRepository = (root) => {
   const repo = join(root, "origin");
   mkdirSync(repo, { recursive: true });
-  const git = (...args) => execFileSync("git", ["-C", repo, ...args], { encoding: "utf8" }).trim();
+  const git = (...args) => execFileSync(gitExecutable, ["-C", repo, ...args], { encoding: "utf8" }).trim();
   git("init", "-q");
   git("config", "user.email", "test@example.invalid");
   git("config", "user.name", "test");
@@ -511,7 +515,7 @@ const localRepository = (root) => {
   return { url: pathToFileURL(repo).href, sha: git("rev-parse", "HEAD") };
 };
 
-test("a launch builds the workspace: the checkout, the patch applied, every evidence byte, read by the launcher, then deleted", { skip: !hasGit && "git is not installed" }, async () => {
+test("a launch builds the workspace: the checkout, the patch applied, every evidence byte, read by the launcher, then deleted", { skip: !gitExecutable && "git is not installed" }, async () => {
   const seen = [];
   const launcher = scripted(OPENAI, async (socket, request, fixture) => {
     const base = fixture.at(fixture.paths.requestDirectory);
@@ -529,7 +533,7 @@ test("a launch builds the workspace: the checkout, the patch applied, every evid
   const probe = makeTempRoot();
   const origin = localRepository(probe);
   try {
-    await withBroker(OPENAI, { launcher, workspaceGit: { executable: "git", cloneUrl: origin.url } }, async (broker) => {
+    await withBroker(OPENAI, { launcher, workspaceGit: { executable: gitExecutable, cloneUrl: origin.url } }, async (broker) => {
       const workspace = { state: "worker_head", targetSha: origin.sha, files: [{ name: "PATCH.diff", text: BIG_PATCH }] };
       const answer = await broker.call(workspaceLaunch(broker, workspace));
       assert.equal(answer.transmission, "process_ended", JSON.stringify(broker.logs.at(-1)));
@@ -572,10 +576,10 @@ test("a launch whose workspace is not the one its payload names is refused befor
   });
 });
 
-test("a workspace that cannot be fetched is refused: nothing is sent, and the directory is gone", { skip: !hasGit && "git is not installed" }, async () => {
+test("a workspace that cannot be fetched is refused: nothing is sent, and the directory is gone", { skip: !gitExecutable && "git is not installed" }, async () => {
   const probe = makeTempRoot();
   try {
-    await withBroker(OPENAI, { workspaceGit: { executable: "git", cloneUrl: pathToFileURL(join(probe, "missing")).href } }, async (broker) => {
+    await withBroker(OPENAI, { workspaceGit: { executable: gitExecutable, cloneUrl: pathToFileURL(join(probe, "missing")).href } }, async (broker) => {
       const workspace = { state: "develop", targetSha: WORKSPACE_SHA, files: [] };
       const answer = await broker.call(workspaceLaunch(broker, workspace));
       assert.deepEqual(answer.launch, { outcome: "broker_refused", reasons: ["workspace_unavailable"] });

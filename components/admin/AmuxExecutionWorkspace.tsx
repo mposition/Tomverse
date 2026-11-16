@@ -13,6 +13,7 @@ import { AmuxCardListPanel } from "./AmuxCardListPanel";
 import { AmuxTaskQuestionSection } from "./AmuxWorkerQuestion";
 import { AmuxLegacyCardPanel, type AmuxLegacyCardView, isAmuxRemakeOnlyCardKind } from "./AmuxLegacyCardPanel";
 import { AmuxSettledCardEscalationPanel } from "./AmuxSettledCardEscalationPanel";
+import { AmuxTaskCeilingPanel, type AmuxTaskCeilingView } from "./AmuxTaskCeilingPanel";
 import { isAmuxSettledCardWithOpenEscalation } from "@/lib/amux/settledCardEscalationCore";
 import { AmuxCardIdentity, AmuxSourceKeySuffix, amuxCardLabel, amuxDistinctSourceKey } from "./AmuxCardIdentity";
 import styles from "./AmuxExecutionWorkspace.module.css";
@@ -99,6 +100,8 @@ type Detail = Omit<Card, "score"> & { revision: number; body: string | null;
   outcomeWriteEnabled: boolean;
   /** A legacy WORKBOARD card's recreate and close; null or absent for any other card. */
   legacyCard?: AmuxLegacyCardView | null;
+  /** The owner's re-approval of a waiting Task's cost ceiling; null or absent when none is read. */
+  ceilingReapproval?: AmuxTaskCeilingView | null;
   result: { attemptId: string; state: "available" | "purged";
     createdAt: string; text: string | null; sha256: string | null;
     patch: { state: "available"; baseSha: string; sha256: string } |
@@ -1019,6 +1022,13 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, initialView = "bo
         taskId={selected.id} revision={selected.revision} view={selected.legacyCard} canAct={canReviewCards}
         // The board moves the card to the archive; the panel keeps its answer and the idea link.
         onChanged={() => void refreshBoard()} />}
+      {selected.ceilingReapproval && <AmuxTaskCeilingPanel key={selected.id + ":" + selected.revision}
+        taskId={selected.id} revision={selected.revision} view={selected.ceilingReapproval} canAct={canReviewCards}
+        onChanged={() => {
+          void refreshBoard();
+          if (new URL(window.location.href).searchParams.get("taskId") === selected.id)
+            void openCard(selected.id, false, true);
+        }} />}
       {ownerEscalation && isAmuxSettledCardWithOpenEscalation({ status: selected.status,
         escalationId: ownerEscalation.id }) && <AmuxSettledCardEscalationPanel
         key={selected.id + ":" + ownerEscalation.id} taskId={selected.id} escalationId={ownerEscalation.id}

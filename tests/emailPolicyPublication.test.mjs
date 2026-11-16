@@ -285,6 +285,7 @@ test("the approved page leaves release notes closed on the notice and the date a
   assert.deepEqual(publicationProblems({ documents: approvedDocuments, notice: delivered, now: NOW }), []);
   const observed = documentFacts();
   const unapproved = observed.filter(document => !document.approvedDigests.includes(document.publishedDigest)).map(document => document.path).sort();
+  assert.ok(unapproved.includes("/privacy"), "the observed Memory notice edit does not grant publication approval");
   assert.deepEqual(
     publicationProblems({ documents: observed, notice: delivered, now: NOW })
       .filter(problem => problem.refusal === "document_not_amended").map(problem => problem.subject).sort(),

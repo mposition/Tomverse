@@ -14,6 +14,7 @@ import { parse as parseYaml } from "yaml";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { gunzipSync } from "node:zlib";
+import { resolveBashCommand } from "./support/gitBash.mjs";
 import {
   CI_FIX_ADMISSION_CORE_URL,
   CI_FIX_ADMISSION_MANIFEST_PATH,
@@ -154,13 +155,15 @@ test("a head is ready only when every workflow's newest run has finished", () =>
 
 test("every run block of the workflow parses as bash", () => {
   // Review r-20261103-040829-46fc42: an unterminated quote broke the push step.
+  const bash = resolveBashCommand();
+  assert.ok(bash, "a usable Bash is required to validate workflow scripts");
   const workflow = parseYaml(read("../.github/workflows/pr-ci-auto-fix.yml"));
   let blocks = 0;
   for (const job of Object.values(workflow.jobs)) {
     for (const step of job.steps ?? []) {
       if (typeof step.run !== "string") continue;
       blocks += 1;
-      const checked = spawnSync("bash", ["-n"], { input: step.run, encoding: "utf8" });
+      const checked = spawnSync(bash, ["-n"], { input: step.run, encoding: "utf8" });
       assert.equal(checked.status, 0, `${step.name}: ${checked.stderr}`);
     }
   }

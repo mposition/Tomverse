@@ -1,3 +1,5 @@
+import { buildChatStreamTrailerChunk } from "../../lib/webSearchStreamTrailer";
+import { observeConnectedJourneyEvents } from "./support/connected-journey-fixtures";
 import { expect, test, type Page } from "@playwright/test";
 import { mockReviewHandoffBackground } from "./support/review-handoff-background-fixtures";
 import { mockAuthenticatedApi, prepareGuestPage, expectNoHorizontalOverflow } from "./support/app-fixtures";
@@ -11,6 +13,7 @@ async function setup(page: Page, baseURL: string, appearance: "studio" | "classi
   await mockAuthenticatedApi(page, { selectedModels: reviewModels, productKey: "review", extraConversations: [
     { id: "previous-chat", title: "Previous Chat", productKey: "chat", selectedModels: [reviewModels[0]] },
   ] });
+  const journeys = await observeConnectedJourneyEvents(page, baseURL);
   let analysisSetup: Record<string, unknown> = {};
   page.on("response", async response => {
     if (response.request().method() === "GET" && /\/comparison-reviews(?:\?|$)/.test(response.url())) analysisSetup = await response.json().catch(() => ({}));
@@ -19,8 +22,9 @@ async function setup(page: Page, baseURL: string, appearance: "studio" | "classi
   const api = await mockComparisonReview(page, { withSecondary: true, recoverStored: true, withoutSynthesis: true });
   await page.context().addCookies([{ name: "__tomverse_e2e_chat_workspace", value: "1", url: baseURL }]);
   await page.goto("/review?lang=ko&conversation=qa-conversation");
-  await expect(page.locator('[data-testid="chat-input"]:visible')).toBeVisible();
-  return { ...api, getSetup: () => analysisSetup };
+  await expect(page.getByTestId("studio-analysis-entry")
+    .or(page.getByRole("button", { name: "AI 답변 교차검토" }))).toBeVisible();
+  return { ...api, journeys, getSetup: () => analysisSetup };
 }
 async function openAnalysis(page: Page) {
   const studio = page.getByTestId("studio-analysis-entry");
@@ -64,6 +68,8 @@ test("saved balanced result crosses client navigation once, waits for new draft 
   await expect(page).not.toHaveURL(/reviewDraft/);
   expect((await draftInput(page).inputValue()).split("Compare these approaches")).toHaveLength(2);
   expect(api.getRunCount()).toBe(1); expect(forbidden).toEqual([]);
+  await expect.poll(() => api.journeys.map(e => e.journey_stage)).toEqual(["started", "preview_ready", "ready"]);
+  expect(api.journeys[0].journey_entry).toBe("review_studio");
   const editedSaved = page.waitForResponse(response => response.url().endsWith("/api/products/chat/drafts/new") && response.request().method() === "PUT" && response.request().postDataJSON().text === "User edited draft");
   await draftInput(page).fill("User edited draft");
   await editedSaved;
@@ -99,7 +105,7 @@ test("selecting another Chat discards a pending packet and fences a late new-dra
 
 for (const decision of ["append", "cancel"] as const) {
   test(`Classic selected reviewer finding preserves an existing draft on ${decision}`, async ({ page, baseURL }) => {
-    await setup(page, baseURL!, "classic");
+    const api = await setup(page, baseURL!, "classic");
     await openAnalysis(page);
     const reviewer = page.getByRole("tab", { name: /검토자 2|Reviewer 2/ });
     if (await reviewer.isVisible()) await reviewer.click();
@@ -123,6 +129,8 @@ for (const decision of ["append", "cancel"] as const) {
     await expect(page).not.toHaveURL(/reviewDraft/);
     await expect(page.locator('[data-testid="chat-input"]:visible').getByText("kept.txt", { exact: true })).toBeVisible();
     if (decision === "append") await expect(page.getByTestId("draft-conflict-dialog")).toBeVisible();
+    await expect.poll(() => api.journeys.map(e => e.journey_stage)).toEqual(["started", "preview_ready", "issue", decision === "append" ? "ready" : "cancelled"]);
+    expect(new Set(api.journeys.map(e => e.journey_key)).size).toBe(1);
   });
 }
 
@@ -219,7 +227,7 @@ test("preview fits 320px at enlarged text and Escape returns focus to the source
 });
 
 test("Quick Summary projects its own saved shape and actual Send uses the ordinary Chat path", async ({ page, baseURL }) => {
-  await setup(page, baseURL!, "classic");
+  const api = await setup(page, baseURL!, "classic");
   const source = { question: "Quick original question", responses: [{ messageId: "a", content: "first quote" }, { messageId: "b", content: "second quote" }] };
   const summary = { id: "quick-1", title: "Quick", reviewerModelId: "judge", source, responseMap: [
     { responseId: "A", messageId: "a", modelId: reviewModels[0], modelName: "First model" },
@@ -246,6 +254,9 @@ test("Quick Summary projects its own saved shape and actual Send uses the ordina
   await expect.poll(() => writes.some(url => url === "/api/conversations/qa-conversation/messages")).toBe(true);
   await expect.poll(() => writes.filter(url => url === "/api/chat").length).toBe(1);
   await expect(page.getByText("Follow-up from the existing Chat path", { exact: true })).toBeVisible();
+  await expect.poll(() => api.journeys.map(e => e.journey_stage)).toEqual(["started", "preview_ready", "ready", "send_dispatched", "reply_observed"]);
+  expect(new Set(api.journeys.map(e => e.journey_key)).size).toBe(1);
+  expect(api.journeys[0].journey_entry).toBe("review_quick_summary");
 });
 
 test("failed hydration preserves the packet; cancel fences a late GET and manual typing", async ({ page, baseURL }) => {
@@ -270,4 +281,81 @@ test("failed hydration preserves the packet; cancel fences a late GET and manual
   release();
   await expect(draftInput(page)).toHaveValue("Typed while hydration was pending");
   await expect(page).not.toHaveURL(/reviewDraft/);
+});
+
+for (const appearance of ["studio", "classic"] as const) {
+  test(`connected ${appearance} handoff observes the first ordinary response`, async ({ page, baseURL }) => {
+    const api = await setup(page, baseURL!, appearance);
+    await openAnalysis(page);
+    await page.getByTestId("review-chat-continue").click();
+    await mockAuthenticatedApi(page, { productKey: "chat", selectedModels: [reviewModels[0]] });
+    await page.getByRole("button", { name: "채팅 초안 열기", exact: true }).click();
+    await expect(draftInput(page)).toHaveValue(/Compare these approaches/);
+    await page.route("**/api/chat", route => route.fulfill({ contentType: "text/plain; charset=utf-8", body: "Observed first connected answer" }));
+    await page.getByTestId("chat-send-button").click();
+    await expect.poll(() => api.journeys.map(e => e.journey_stage)).toEqual(["started", "preview_ready", "ready", "send_dispatched", "reply_observed"]);
+    expect(new Set(api.journeys.map(e => e.journey_key)).size).toBe(1);
+    expect(api.journeys[0].journey_entry).toBe(`review_${appearance}`);
+  });
+}
+
+for (const completion of ["incomplete", "empty"] as const) {
+  test(`connected first stream excludes ${completion} answers`, async ({ page, baseURL }) => {
+    const api = await setup(page, baseURL!, "classic");
+    await openAnalysis(page);
+    await page.getByTestId("review-chat-continue").click();
+    await mockAuthenticatedApi(page, { productKey: "chat", selectedModels: [reviewModels[0]] });
+    await page.getByRole("button", { name: "채팅 초안 열기", exact: true }).click();
+    await expect(draftInput(page)).toHaveValue(/Compare these approaches/);
+    await page.route("**/api/chat", route => route.fulfill({ contentType: "text/plain; charset=utf-8", body: completion === "empty" ? " " : "Truncated answer" + buildChatStreamTrailerChunk({ searchMetadata: null, completion: { status: "incomplete", incompleteReason: "length" } }) }));
+    await page.getByTestId("chat-send-button").click();
+    await expect.poll(() => api.journeys.map(e => e.journey_stage)).toEqual(["started", "preview_ready", "ready", "send_dispatched", "issue"]);
+    expect(api.journeys.at(-1)?.journey_reason).toBe(completion === "empty" ? "empty_response" : "response_incomplete");
+  });
+}
+
+test("connected draft clear prevents a later ordinary question from inheriting the journey", async ({ page, baseURL }) => {
+  const api = await setup(page, baseURL!, "classic");
+  await openAnalysis(page);
+  await page.getByTestId("review-chat-continue").click();
+  await mockAuthenticatedApi(page, { productKey: "chat", selectedModels: [reviewModels[0]] });
+  await page.getByRole("button", { name: "채팅 초안 열기", exact: true }).click();
+  await expect(draftInput(page)).toHaveValue(/Compare these approaches/);
+  await draftInput(page).fill("");
+  await expect.poll(() => api.journeys.at(-1)?.journey_reason).toBe("draft_cleared");
+  await draftInput(page).fill("An unrelated new question");
+  await page.route("**/api/chat", route => route.fulfill({ contentType: "text/plain; charset=utf-8", body: "Unrelated answer" }));
+  await page.getByTestId("chat-send-button").click();
+  await expect(page.getByText("Unrelated answer", { exact: true })).toBeVisible();
+  expect(api.journeys.map(e => e.journey_stage)).toEqual(["started", "preview_ready", "ready", "invalidated"]);
+});
+
+test("connected dispatched marker observes an exact completed source on reload without resending", async ({ page, baseURL }) => {
+  const api = await setup(page, baseURL!, "classic");
+  await openAnalysis(page);
+  await page.getByTestId("review-chat-continue").click();
+  await mockAuthenticatedApi(page, { productKey: "chat", selectedModels: [reviewModels[0]] });
+  await page.getByRole("button", { name: "채팅 초안 열기", exact: true }).click();
+  await expect(draftInput(page)).toHaveValue(/Compare these approaches/);
+  let sent: Record<string, string> = {};
+  let posts = 0;
+  await page.route("**/api/chat", route => { sent = route.request().postDataJSON(); posts++; return route.abort("failed"); });
+  await page.getByTestId("chat-send-button").click();
+  await expect.poll(() => api.journeys.some(e => e.journey_stage === "issue")).toBe(true);
+  expect(api.journeys.some(e => e.journey_stage === "reply_observed")).toBe(false);
+  const count = posts;
+  const timestamp = new Date().toISOString();
+  const attempt = { assistantMessageId: sent.assistantMessageId, conversationId: "qa-conversation", sourceUserMessageId: sent.sourceUserMessageId, requestedModelId: reviewModels[0], actualModelId: reviewModels[0], provider: "openai", status: "completed", partialContent: "Canonical recovered answer", checkpointRevision: 1, finishReason: "stop", failureCode: null, terminalAt: timestamp, createdAt: timestamp, updatedAt: timestamp };
+  await page.route(url => url.pathname === "/api/conversations/qa-conversation", route => {
+    if (route.request().method() !== "GET") return route.fallback();
+    return route.fulfill({ json: { id: "qa-conversation", title: "Recovered conversation", kind: "chat", productKey: "chat", surface: "chat", selectedModels: [reviewModels[0]], disabledPanels: [], selectionMode: "manual", webSearchMode: "off", memoryMode: "inherit", isLocked: false, messages: [
+      { id: sent.sourceUserMessageId, role: "user", content: "Connected question", createdAt: timestamp },
+      { id: sent.assistantMessageId, role: "assistant", content: "Canonical recovered answer", status: "normal", modelId: reviewModels[0], createdAt: timestamp },
+    ], responseAttempts: [attempt], messagePage: { hasMore: false, nextCursor: null } } });
+  });
+  await page.reload();
+  await expect(page.getByText("Canonical recovered answer", { exact: true })).toBeVisible();
+  await expect.poll(() => api.journeys.some(e => e.journey_stage === "reply_observed")).toBe(true);
+  expect(posts).toBe(count);
+  expect(new Set(api.journeys.map(e => e.journey_key)).size).toBe(1);
 });

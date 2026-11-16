@@ -24,6 +24,7 @@ export const poolMemorySchema = z.object({
 }).strict();
 export const retrievalSchema = z.object({
   query: text,
+  history: z.array(text).max(2).optional(),
   pool: z.array(poolMemorySchema).min(1).max(50),
   relevantIds: z.array(id).max(50),
 }).strict();
@@ -39,7 +40,8 @@ export const retrievalCorpusSchema = z.object({
   version: id, source: z.literal("synthetic"),
   pools: z.record(id, z.array(poolMemorySchema).min(1).max(50)),
   cases: z.array(z.object({
-    id, language: z.enum(["ko", "en"]), tag: id, pool: id, query: text, relevantIds: z.array(id).max(50),
+    id, language: z.enum(["ko", "en"]), tag: id, pool: id, query: text,
+    history: z.array(text).max(2).optional(), relevantIds: z.array(id).max(50),
   }).strict()).min(1).max(5000),
 }).strict();
 export const corpusSchema = z.object({

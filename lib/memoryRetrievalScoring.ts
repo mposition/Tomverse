@@ -159,6 +159,16 @@ export type MemoryContextSelection = {
     signature: string;
 };
 
+/** Reject wholesale replacement of current-query matches by zero-overlap history hits. */
+export function contextualRankingDisplacesCurrentQuery(
+    lexical: MemoryContextSelection,
+    contextual: MemoryContextSelection
+): boolean {
+    const ranked = contextual.selected.filter(candidate => candidate.tier === "relevant");
+    return lexical.selected.some(candidate => candidate.tier === "relevant" && candidate.termHits > 0) &&
+        ranked.length > 0 && ranked.every(candidate => candidate.termHits === 0);
+}
+
 const utf8Bytes = (text: string) => new TextEncoder().encode(text).length;
 
 export function estimateMemoryTokens(statement: string): number {

@@ -146,8 +146,15 @@ model, collection time, query/selection versions and settings in `provenance`.
 `scoreEvidence` distinguishes provider, mock, oracle and unverified legacy files.
 Mismatch is rejected; incomplete score maps fall back to lexical and are reported
 in coverage. Neither mock scores nor transport tests establish measured semantic
-retrieval or generated-answer accuracy. Memory uses its own head/tail query and
-two-pool candidate budget; knowledge query behavior is unchanged.
+retrieval or generated-answer accuracy. The default `current-query` mode reproduces
+the legacy head/tail query. `full-query` preserves the whole current query and
+`full-query+history` adds up to two synthetic previous user bodies. Knowledge query
+behavior and the two-pool candidate budget are unchanged.
+
+The `relevance` corpus separates project omission/switching/correction, long-query
+middle conditions, irrelevant history, absent candidates, and assistant-only
+references outside this implementation's scope. User bodies may contain copied
+Review or external text; this scope does not classify or remove that material.
 
 Measures lexical `selectMemoryContext` and, beside it, the same function given
 `externalRelevance` scores (the section 9a rerank path). The reranked set is what the
@@ -158,6 +165,7 @@ budget. This small pool does not exercise the DB400 cap or database read filters
 ```powershell
 node --import tsx tools/memory-quality/cli.ts retrieval --semantic --rerank-scores <scores.json>
 node --import tsx tools/memory-quality/cli.ts retrieval --semantic --corpus all --rerank-scores <scores.json>
+node --import tsx tools/memory-quality/cli.ts retrieval --semantic --corpus relevance --query-mode full-query+history --rerank-scores <scores.json>
 ```
 
 Output (`semantic.<corpus>`): lexical and semantic Korean Recall@5 and irrelevant
@@ -165,6 +173,13 @@ injection rates, the delta, a per-tag table (`byTag.<tag>.lexical|semantic|delta
 per-case `differences` (gold memories gained or lost, with both top-5 lists) and
 `coverage`. A case with no entry in the scores file keeps its lexical selection, like a
 failed provider call, and is listed under `casesFallingBackToLexical`.
+New full-query score files bind the effective query, mode, normalized current query,
+actual included history, corpus and ordered candidate digests. A provider result
+from a different mode or history cannot be reused. Full-query live inputs use the
+same model-limit preparation and unbounded Memory wire policy as the product;
+their configured rerank billing unit is required and recorded. Unsupported model
+or billing contracts stop before dispatch. These tools still have their own
+explicit call budget and do not enable a product flag or product privacy gate.
 
 Scores file: `{ "<caseId>": { "<memoryId>": <score 0..1> } }`, or the wrapped form
 `--save-scores` writes (`format: "memory-rerank-scores-v1"`, `scores`, `usage`).

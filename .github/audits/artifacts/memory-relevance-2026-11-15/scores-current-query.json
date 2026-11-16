@@ -1,0 +1,175 @@
+{
+  "format": "memory-rerank-scores-v1",
+  "corpus": "relevance",
+  "rerankModel": "rerank-v5.0-fast",
+  "complete": true,
+  "usage": {
+    "calls": 10,
+    "maxCalls": 10,
+    "searchUnits": 0,
+    "searchUnitsUnreported": 10,
+    "rerankInputTokens": 1110,
+    "rerankInputTokensUnreported": 0,
+    "embedInputTokens": 0
+  },
+  "scores": {
+    "project_omission": {
+      "atlas": 0.4114,
+      "vega": 0.4039,
+      "coffee": 0.0036
+    },
+    "project_switch": {
+      "atlas": 0.3551,
+      "vega": 0.3326,
+      "coffee": 0.0041
+    },
+    "latest_correction": {
+      "atlas": 0.1251,
+      "vega": 0.1017,
+      "coffee": 0.0022
+    },
+    "long_middle_ko": {
+      "atlas": 0.0261,
+      "vega": 0.0256,
+      "coffee": 0.0234
+    },
+    "mixed_script": {
+      "atlas": 0.6054,
+      "coffee": 0.002,
+      "vega": 0.1075
+    },
+    "irrelevant_history": {
+      "coffee": 0.0498,
+      "atlas": 0.0015,
+      "vega": 0.0011
+    },
+    "no_relevant_memory": {
+      "atlas": 0.0024,
+      "coffee": 0.002,
+      "vega": 0.0016
+    },
+    "candidate_absent": {
+      "atlas": 0.2539,
+      "coffee": 0.0044,
+      "vega": 0.2124
+    },
+    "assistant_reference": {
+      "atlas": 0.0468,
+      "vega": 0.0471,
+      "coffee": 0.0036
+    },
+    "copied_user_material": {
+      "atlas": 0.0764,
+      "coffee": 0.0052,
+      "vega": 0.0647
+    }
+  },
+  "provenance": {
+    "kind": "provider",
+    "provider": "cohere",
+    "model": "rerank-v5.0-fast",
+    "collectedAt": "2026-11-15T10:43:53.338Z",
+    "corpusDigest": "643e8f79d94adc83c2be4afabf9c9f4b77c04a678520a8a81d32ebb00f019823",
+    "requests": {
+      "project_omission": {
+        "queryHash": "75abb5040601910aac61a5115fbf318723e5fc83705d57632986606e8199a0d6",
+        "candidateIds": [
+          "atlas",
+          "vega",
+          "coffee"
+        ],
+        "candidatesHash": "3e84335c8fb5fe319a44dfbc70364653a8b673d1d70caf0fc40c5d1cc751a6f5"
+      },
+      "project_switch": {
+        "queryHash": "c4378c068d8e3ef25b5ffbf570de98eb8d70dde5eb47868330f3bf428d7c95bc",
+        "candidateIds": [
+          "atlas",
+          "vega",
+          "coffee"
+        ],
+        "candidatesHash": "3e84335c8fb5fe319a44dfbc70364653a8b673d1d70caf0fc40c5d1cc751a6f5"
+      },
+      "latest_correction": {
+        "queryHash": "272dd8f0cfb8546a3116c78972a32723a3dc5365b6020b543c4b3717abbb5472",
+        "candidateIds": [
+          "atlas",
+          "vega",
+          "coffee"
+        ],
+        "candidatesHash": "3e84335c8fb5fe319a44dfbc70364653a8b673d1d70caf0fc40c5d1cc751a6f5"
+      },
+      "long_middle_ko": {
+        "queryHash": "e89197b942a1f7ffa7956be8c47e1d915989308565c7016a67312623b834f8af",
+        "candidateIds": [
+          "atlas",
+          "vega",
+          "coffee"
+        ],
+        "candidatesHash": "3e84335c8fb5fe319a44dfbc70364653a8b673d1d70caf0fc40c5d1cc751a6f5"
+      },
+      "mixed_script": {
+        "queryHash": "ca15a49d1db881b5ffce997cebcc3b0d05d04751f91a3f3cc68b8655064c3dae",
+        "candidateIds": [
+          "atlas",
+          "coffee",
+          "vega"
+        ],
+        "candidatesHash": "d3ef4aa1a4cbcf6ac477a51787f05264a2a10230eb546babd561ea5a7b93611a"
+      },
+      "irrelevant_history": {
+        "queryHash": "bcb203e7adf7c5448060dde2359477bce9a01417df87972f9252138d6450a5a4",
+        "candidateIds": [
+          "coffee",
+          "atlas",
+          "vega"
+        ],
+        "candidatesHash": "2306b3aca4a5f27aeef24d2e5c7a7bb3e707222a6fdce218472117fd440853bb"
+      },
+      "no_relevant_memory": {
+        "queryHash": "16cb54a03e351b7d04578e551421b1023ebd20e959f967b0d1c8b93c9379c62c",
+        "candidateIds": [
+          "atlas",
+          "coffee",
+          "vega"
+        ],
+        "candidatesHash": "d3ef4aa1a4cbcf6ac477a51787f05264a2a10230eb546babd561ea5a7b93611a"
+      },
+      "candidate_absent": {
+        "queryHash": "858280bb1ab292f7997808dd6cd3a3106a1e4563d3ef18af79101504f214984b",
+        "candidateIds": [
+          "atlas",
+          "coffee",
+          "vega"
+        ],
+        "candidatesHash": "d3ef4aa1a4cbcf6ac477a51787f05264a2a10230eb546babd561ea5a7b93611a"
+      },
+      "assistant_reference": {
+        "queryHash": "ed1e351fd5753ebcac65c23e09dced31453257df13da47314564232262b6084e",
+        "candidateIds": [
+          "atlas",
+          "vega",
+          "coffee"
+        ],
+        "candidatesHash": "3e84335c8fb5fe319a44dfbc70364653a8b673d1d70caf0fc40c5d1cc751a6f5"
+      },
+      "copied_user_material": {
+        "queryHash": "dc5ea7e2c63c880e4f3e388f1f86534689bc7761c75c11629a7c43769a4bb733",
+        "candidateIds": [
+          "atlas",
+          "coffee",
+          "vega"
+        ],
+        "candidatesHash": "d3ef4aa1a4cbcf6ac477a51787f05264a2a10230eb546babd561ea5a7b93611a"
+      }
+    },
+    "settings": {
+      "maxCalls": 10,
+      "queryVersion": "memory-query-v2",
+      "queryMode": "current-query",
+      "retrievalVersion": 5,
+      "minRerankScore": 0.1,
+      "maxRerankCandidates": 100,
+      "maxRecentExtraCandidates": 50
+    }
+  }
+}
