@@ -37,9 +37,12 @@ ref를 수정하지 않는다.
 review client, bridge별 object 읽기 권한과 state directory 순이다. 검토 서버가 사용하는
 기존 독립 reviewer 선정 규칙은 그대로다. v52 contract 경로는 서버의 별도
 경로 목록과 관계없이 두 독립 vendor를 명시적으로 요청하고 검증한다. helper 또는 review
-서버 오류는 `unknown`으로 기록해 Task를 `blocked`로 넘기며, 제출 claim이 있으면
-같은 diff를 다시 제출하지 않는다. 앱 기록 route의 응답이 불명확하면 앱 DB의
-시도별 검토 기록을 먼저 읽는다.
+서버가 job id를 돌려주지 않으면(요청 실패) attempt를 `unknown`으로 닫지 않고, state 파일에
+실패 횟수와 다음 시각을 적어 15초에서 시작해 두 배씩(최대 5분) 기다린 뒤 같은 diff를 다시
+제출한다(운영자 결정 2026-11-16). bridge는 이 응답(`waiting`)을 진행 중으로 본다. 같은
+commit의 job이 둘 생겨도 attempt가 저장한 job id만 읽으므로 판정은 틀리지 않는다. job id를
+아는 attempt는 읽기만 다시 하고 제출하지 않는다. helper가 저장소를 준비하지 못해도 같은
+방식으로 기다린다. 앱 기록 route의 응답이 불명확하면 앱 DB의 시도별 검토 기록을 먼저 읽는다.
 
 판정이 `reject`이면 helper는 검토 서버 `status`가 이미 돌려준 구조화 findings와 reviewer별 이유 코드로
 지적 문서(JSON, reviewer·severity·summary·file·line, 한도 없음)를 만들어 최종 결과와 state 파일에 함께

@@ -2580,6 +2580,9 @@ fn v22_digest(value: &str) -> bool {
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum V52ReviewStep {
     Pending { #[serde(rename = "jobId")] job_id: String },
+    /// The launcher's submit did not return a job id; it sends the request
+    /// again after its own backoff. The attempt keeps waiting, no verdict.
+    Waiting,
     Final {
         evidence: V52ReviewEvidence,
         /// A reject's reasons for the owner (display only; the app bounds
@@ -2618,12 +2621,18 @@ pub fn v22_result_asks_owner(text: &str) -> bool {
                 && !text.chars().any(v22_question_control)
         })
     };
-    if !bounded(map.get("question"), 2_000) || !bounded(map.get("unblocks"), 1_000) {
+    // One cap for every text field, the card's (the Decision Maker's prompt,
+    // 256 KiB), and no count of options: the app's parser holds no other
+    // (lib/amux/v22OwnerQuestionCore.ts, owner decision 2026-11-15). A longer
+    // text here read as no question and sent a run that asked one to review.
+    const QUESTION_TEXT_MAX: usize = 256 * 1024;
+    if !bounded(map.get("question"), QUESTION_TEXT_MAX)
+        || !bounded(map.get("unblocks"), QUESTION_TEXT_MAX) {
         return false;
     }
     let options = match map.get("options") {
         None | Some(serde_json::Value::Null) => return true,
-        Some(serde_json::Value::Array(items)) if items.len() <= 6 => items,
+        Some(serde_json::Value::Array(items)) => items,
         _ => return false,
     };
     let mut ids = std::collections::BTreeSet::new();
@@ -2631,7 +2640,7 @@ pub fn v22_result_asks_owner(text: &str) -> bool {
         let id = option.get("id").and_then(serde_json::Value::as_str).unwrap_or("");
         let id_ok = id.len() <= 32 && id.chars().next().is_some_and(|c| c.is_ascii_lowercase())
             && id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-');
-        id_ok && ids.insert(id.to_owned()) && bounded(option.get("label"), 300)
+        id_ok && ids.insert(id.to_owned()) && bounded(option.get("label"), QUESTION_TEXT_MAX)
     })
 }
 
@@ -3975,6 +3984,10 @@ async fn run_bridge(mut scope: WorkerScope) -> i32 {
                                                         };
                                                         let (evidence, findings_summary) = match review {
                                                             Ok(V52ReviewStep::Pending { job_id: _job_id }) => {
+                                                                still_running.push(entry);
+                                                                continue;
+                                                            },
+                                                            Ok(V52ReviewStep::Waiting) => {
                                                                 still_running.push(entry);
                                                                 continue;
                                                             },
@@ -7717,7 +7730,12 @@ AMUX_OWNER_QUESTION: {\"question\":\"Q?\",\"unblocks\":\"u\"}
 "));
         // At the bound, and with C1 text the app also allows.
         assert!(v22_result_asks_owner(&format!(
-            "AMUX_OWNER_QUESTION: {{\"question\":\"{}\",\"unblocks\":\"u\\u0085\"}}", "가".repeat(2_000))));
+            "AMUX_OWNER_QUESTION: {{\"question\":\"{}\",\"unblocks\":\"u\\u0085\"}}", "가".repeat(256 * 1024))));
+        // No count of options and no short cap on a question or a label.
+        let many: Vec<String> = (0..20).map(|n| format!("{{\"id\":\"o{n}\",\"label\":\"x\"}}")).collect();
+        assert!(v22_result_asks_owner(&format!(
+            "AMUX_OWNER_QUESTION: {{\"question\":\"{}\",\"unblocks\":\"u\",\"options\":[{}]}}",
+            "q".repeat(5_000), many.join(","))));
         for text in [
             "AMUX_OWNER_QUESTION: {\"question\":\"Q?\",\"unblocks\":\"u\"}
 Done.",
@@ -7728,7 +7746,7 @@ Done.",
             "AMUX_OWNER_QUESTION: {\"question\":\"Q?\",\"unblocks\":\"u\",\"options\":[{\"id\":\"a\",\"label\":\"x\"},{\"id\":\"a\",\"label\":\"y\"}]}",
             "All done.",
             // The bound is on the raw text, as the app's: padding counts.
-            &format!("AMUX_OWNER_QUESTION: {{\"question\":\"{}Q\",\"unblocks\":\"u\"}}", " ".repeat(2_000)),
+            &format!("AMUX_OWNER_QUESTION: {{\"question\":\"{}Q\",\"unblocks\":\"u\"}}", " ".repeat(256 * 1024)),
             "AMUX_OWNER_QUESTION: {\"question\":\"Q\\u0007\",\"unblocks\":\"u\"}",
         ] {
             assert!(!v22_result_asks_owner(text), "{text}");

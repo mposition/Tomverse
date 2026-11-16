@@ -52,16 +52,39 @@ test("one submission stays pending and then records independent acceptance", () 
   } finally { cleanup(); }
 });
 
-test("ambiguous submit records unknown and never submits again", () => {
+test("a failed submit waits, backs off and is sent again", () => {
   let submits = 0;
-  const { options, cleanup } = fixture(() => {
+  let clock = 1_000_000;
+  const jobId = "r-20261016-110001-abcdef";
+  const { options, cleanup } = fixture((_program, args) => {
+    if (!args.includes("submit")) return { code: 3, stdout: JSON.stringify({ jobId,
+      base: input.baseSha, head: input.commitSha, author: input.author,
+      repo: "tomverse", authorVendor: input.authorVendor, touchesContract: false,
+      status: "pending", reviews: [] }) };
     submits += 1;
-    return { code: 65, stdout: "" };
+    return submits < 3 ? { code: 65, stdout: "" } :
+      { code: 3, stdout: JSON.stringify({ jobId }) };
   });
+  options.now = () => clock;
   try {
-    assert.equal(reviewStep(input, options).evidence.verdict, "unknown");
-    assert.equal(reviewStep(input, options).evidence.verdict, "unknown");
+    assert.deepEqual(reviewStep(input, options), { kind: "waiting" });
     assert.equal(submits, 1);
+    // Inside the backoff nothing is sent.
+    assert.deepEqual(reviewStep(input, options), { kind: "waiting" });
+    assert.equal(submits, 1);
+    clock += 15_001;
+    assert.deepEqual(reviewStep(input, options), { kind: "waiting" });
+    assert.equal(submits, 2);
+    // The backoff doubles, then holds at five minutes.
+    clock += 29_999;
+    assert.deepEqual(reviewStep(input, options), { kind: "waiting" });
+    assert.equal(submits, 2);
+    clock += 2;
+    assert.deepEqual(reviewStep(input, options), { kind: "pending", jobId });
+    assert.equal(submits, 3);
+    // A known job is never submitted again.
+    assert.deepEqual(reviewStep(input, options).kind, "pending");
+    assert.equal(submits, 3);
   } finally { cleanup(); }
 });
 
