@@ -54,7 +54,9 @@ async function loadRoute(): Promise<{ POST: (request: Request) => Promise<Respon
       assertAmuxLegacyCardOwner: async () => { if (!world.recent) throw new Error("reauth"); } } });
     mock.module(mod("lib/amux/v4TaskCeilingReapprovalService.ts"), { namedExports: {
       reapproveAmuxV4TaskCeilingForOwner: async (input: Record<string, unknown>) => {
-        const { session: _session, request: _request, ...rest } = input;
+        const rest = { ...input };
+        delete rest.session;
+        delete rest.request;
         world.closes.push(rest);
         if (world.outcome === "busy") throw new FakeOwnerError("busy");
         if (world.outcome === "throw") throw new Error("database gone");
