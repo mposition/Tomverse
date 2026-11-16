@@ -507,7 +507,8 @@ test("createdAt and the assignment deadline are the database's, whatever the wri
   assert.ok(row);
   assert.ok(row.createdAt.getTime() >= before.getTime() - 1);
   assert.ok(row.createdAt.getTime() <= afterInsert.getTime() + 1);
-  assert.equal(row.assignmentDeadlineAt.getTime() - row.createdAt.getTime(), 2 * MINUTE);
+  // Owner direction 2026-11-16 (migration 20261116140000_amux_dm_request_windows): a day.
+  assert.equal(row.assignmentDeadlineAt.getTime() - row.createdAt.getTime(), 24 * 60 * MINUTE);
 });
 
 test("one request per card question revision; the store returns the first", async () => {
@@ -641,7 +642,8 @@ test("an event numbered below the request's newest is refused, and createdAt is 
   await insertEvent(requestId, INTENT);
   const rows = await rowsOf(requestId);
   assert.ok(rows[0]!.createdAt.getTime() >= before.getTime() - 1, "createdAt is the insert's clock, not 2001");
-  assert.equal(rows[0]!.resultDeadlineAt!.getTime() - rows[0]!.createdAt.getTime(), 30 * MINUTE);
+  // Owner direction 2026-11-16: eight hours.
+  assert.equal(rows[0]!.resultDeadlineAt!.getTime() - rows[0]!.createdAt.getTime(), 8 * 60 * MINUTE);
   await rejectsWith(
     insertEvent(requestId, { kind: "transmit_receipt", instance: OPENAI, sequence: Number(rows[1]!.sequence) - 1 }),
     /AMUX_DM_REQUEST_EVENT_OUT_OF_ORDER|duplicate key|Unique constraint|sequence_key/i,
@@ -1182,7 +1184,7 @@ test("a request has one terminal result; its pair returns it, another digest is 
   });
 });
 
-test("an unknown result hands the request to the operator; no later result is accepted", async () => {
+test("an unknown result is read back: a later result of its digest is accepted, another digest is rejected", async () => {
   const shared = binding({ askingProvider: "codex" });
   const { requestId } = await prisma.$transaction((tx) =>
     recordDecisionMakerRequest(tx, { keyRing: RING, binding: shared, card: CARD }),
@@ -1196,24 +1198,33 @@ test("an unknown result hands the request to the operator; no later result is ac
   );
   assert.equal(unknown.recorded, true);
   const requestBinding = withoutProvider((await readDecisionMakerRequestState(prisma, requestId))!.binding);
-  const late = await prisma.$transaction((tx) =>
+  const submit = (resultDigest: string) => prisma.$transaction((tx) =>
     submitDecisionMakerResult(tx, {
       requestId,
       requireLeaseAt: noLease,
       submission: {
         instance: ANTHROPIC,
         resultKind: "proposal",
-        resultDigest: DIGEST_C,
+        resultDigest,
         binding: { ...requestBinding, policyVersion: DM_POLICY_VERSION, transmission },
       },
     }),
   );
-  assert.ok(late.status === "rejected" && late.reason === "result_unknown");
-  // The anthropic instance's own actor recorded both.
-  const events = (await rowsOf(requestId)).filter((row) => row.kind === "result_unknown" || row.kind === "result_rejected");
-  assert.deepEqual(events.map((row) => row.kind), ["result_unknown", "result_rejected"]);
+  // Another digest is not the output the unknown names: rejected, as before.
+  const other = await submit(DIGEST_D);
+  assert.ok(other.status === "rejected" && other.reason === "result_unknown");
+  // Owner direction 2026-11-16: the same digest, read back and submitted again, is the request's result.
+  const late = await submit(DIGEST_C);
+  assert.equal(late.status, "accepted");
+  assert.deepEqual(await lookupDecisionMakerResult(prisma, { requestId, resultDigest: DIGEST_C }), {
+    status: "accepted", eventId: (late as { event: { eventId: string } }).event.eventId, resultKind: "proposal",
+  });
+  // The anthropic instance's own actor recorded all three.
+  const events = (await rowsOf(requestId)).filter((row) =>
+    row.kind === "result_unknown" || row.kind === "result_rejected" || row.kind === "result");
+  assert.deepEqual(events.map((row) => row.kind), ["result_unknown", "result_rejected", "result"]);
   const audits = await prisma.adminAuditLog.findMany({ where: { targetId: { in: events.map((row) => row.id) } } });
-  assert.equal(audits.length, 2);
+  assert.equal(audits.length, 3);
   for (const audit of audits) {
     assert.equal((audit.metadata as { systemActor?: string }).systemActor, "amux-decision-maker-anthropic");
   }
