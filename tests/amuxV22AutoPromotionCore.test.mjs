@@ -37,7 +37,7 @@ test("initial exception needs the exact live flag and owner audit metadata", () 
   assert.equal(amuxV22GraduationPermitted({ graduated: true,
     environmentValue: undefined, authorization: null }), true);
   assert.deepEqual(autoGraduationAccepted([]), {
-    ok: false, code: "graduation_unmet", count: 0, spanMs: 0,
+    ok: true, count: 0, spanMs: 0,
   });
 });
 

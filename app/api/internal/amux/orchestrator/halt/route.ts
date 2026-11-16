@@ -44,7 +44,7 @@ import type { AmuxOrchestratorHaltRow } from "@/lib/amux/orchestratorHaltStore";
 const OPERATION = "orchestrator_halt";
 
 /** The halt keys one state read may ask about. */
-const MAX_HALT_KEYS = 16;
+const MAX_HALT_KEYS = 64;
 
 const recordSchema = z
   .object({

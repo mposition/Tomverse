@@ -50,18 +50,12 @@ export const AUTO_EXPIRE_BATCH = 50;
  * in `metadata.systemActor`, so this is a marker and not an account id.
  */
 export const AUTO_SYSTEM_ACTOR_ROW_ID = `system:${AMUX_AUTO_PROMOTER_AUDIT_ACTOR}`;
-export const AUTO_GRADUATION_DECISIONS = 20;
-export const AUTO_GRADUATION_SPAN_MS = 14 * 24 * 60 * 60 * 1000;
 export const AUTO_COST_EVENT_CENTS = 500;
 export const AUTO_COST_24H_CENTS = 1_500;
 export const AUTO_COST_30D_CENTS = 10_000;
 export const AUTO_COST_24H_MS = 24 * 60 * 60 * 1000;
 export const AUTO_COST_30D_MS = 30 * 24 * 60 * 60 * 1000;
-export const AUTO_GLOBAL_ACTIVE_CAP = 3;
-export const AUTO_PER_WORKER_CAP = 1;
 export const AUTO_GRANT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-export const AUTO_UNKNOWN_BURST_COUNT = 2;
-export const AUTO_UNKNOWN_BURST_MS = 15 * 60 * 1000;
 
 export const AUTO_GRANT_STATUSES = ["active", "consumed", "expired"] as const;
 export const AUTO_CONSUMPTION_STATUSES = ["consumed", "outcome_unknown"] as const;
@@ -206,16 +200,17 @@ export const autoPromotionApplyPermitted = (input: {
   codeLatch: boolean;
 }): boolean => boardImportApplyPermitted(input);
 
+/**
+ * No count of human decisions and no span gates the automatic path (owner
+ * decision 2026-11-16: it was 20 decisions over 14 days). The measurement is
+ * still taken, for the screen that reports it; the path is always open to it.
+ */
 export const autoGraduationAccepted = (
   decisions: readonly AutoHumanDecision[],
-): { ok: true; count: number; spanMs: number } | { ok: false; code: "graduation_unmet"; count: number; spanMs: number } => {
+): { ok: true; count: number; spanMs: number } => {
   const times = decisions.map((row) => row.createdAt.getTime()).filter((time) => !Number.isNaN(time));
   const count = times.length;
-  if (count === 0) return { ok: false, code: "graduation_unmet", count, spanMs: 0 };
-  const spanMs = Math.max(...times) - Math.min(...times);
-  if (count < AUTO_GRADUATION_DECISIONS || spanMs < AUTO_GRADUATION_SPAN_MS) {
-    return { ok: false, code: "graduation_unmet", count, spanMs };
-  }
+  const spanMs = count === 0 ? 0 : Math.max(...times) - Math.min(...times);
   return { ok: true, count, spanMs };
 };
 
@@ -250,10 +245,6 @@ export const autoWorkerAdmitted = (
 ): { ok: true } | { ok: false; code: "worker_not_admitted" } =>
   workerId === null ? { ok: true } : { ok: false, code: "worker_not_admitted" };
 
-export const autoGlobalWipAccepted = (
-  activeCount: number,
-): { ok: true } | { ok: false; code: "auto_wip_full" } =>
-  activeCount >= AUTO_GLOBAL_ACTIVE_CAP ? { ok: false, code: "auto_wip_full" } : { ok: true };
 
 export const autoGrantExpiresAt = (grantedAt: Date): Date => new Date(grantedAt.getTime() + AUTO_GRANT_TTL_MS);
 
@@ -268,25 +259,16 @@ export const autoGrantUsable = (input: {
 
 export const autoHaltRequired = (input: {
   criticalCodes: readonly AutoCriticalCode[];
-  unknownAt: readonly Date[];
-  now: Date;
 }): { halt: false } | { halt: true; reason: (typeof AUTO_HALT_REASONS)[number]; violationCode: AutoCriticalCode | null } => {
+  // Unknown outcomes never halt the path (owner decision 2026-11-16: two in
+  // fifteen minutes did): each is recorded and parks its own card, and the
+  // card's own read-back settles it. Only a critical violation halts.
   const critical = input.criticalCodes[0];
   if (critical) return { halt: true, reason: "critical_violation", violationCode: critical };
-  const start = input.now.getTime() - AUTO_UNKNOWN_BURST_MS;
-  const recent = input.unknownAt.filter((value) => {
-    const time = value.getTime();
-    return time >= start && time <= input.now.getTime();
-  });
-  if (recent.length >= AUTO_UNKNOWN_BURST_COUNT) {
-    return { halt: true, reason: "outcome_unknown_burst", violationCode: null };
-  }
   return { halt: false };
 };
 
 export const autoReadbackCritical = (input: {
-  activeCount: number;
-  ownerCounts: readonly number[];
   costCents24h: number;
   costCents30d: number;
   unapprovedTodo: number;
@@ -294,8 +276,6 @@ export const autoReadbackCritical = (input: {
 }): AutoCriticalCode[] => {
   const codes: AutoCriticalCode[] = [];
   if (input.costCents24h > AUTO_COST_24H_CENTS || input.costCents30d > AUTO_COST_30D_CENTS) codes.push("cost_exceeded");
-  if (input.activeCount > AUTO_GLOBAL_ACTIVE_CAP) codes.push("global_wip_exceeded");
-  if (input.ownerCounts.some((count) => count > AUTO_PER_WORKER_CAP)) codes.push("worker_cap_exceeded");
   if (input.unapprovedTodo > 0) codes.push("unapproved_todo");
   if (input.lifecycleWrites > 0) codes.push("lifecycle_write");
   return codes;
@@ -489,31 +469,15 @@ export const autoSystemConsumeDigest = (input: {
   });
 
 /**
- * Lost consume outcomes, one per attempted consumption id. A consumption row
- * flagged by read-back and the read-back row for the same id are one event,
- * not two: counting both would let one lost outcome open a halt alone.
- */
-export const autoUnknownEvents = (input: {
-  consumptions: readonly { id: string; outcomeUnknownAt: Date | null }[];
-  unknowns: readonly { id: string; recordedAt: Date }[];
-}): Date[] => {
-  const events = new Map<string, Date>();
-  for (const row of input.unknowns) events.set(row.id, row.recordedAt);
-  for (const row of input.consumptions) {
-    if (row.outcomeUnknownAt && !events.has(row.id)) events.set(row.id, row.outcomeUnknownAt);
-  }
-  return [...events.values()];
-};
-
-/**
  * HTTP status of the internal tick for its `reason`. A deterministic refusal
  * is a finished tick (200). The gate (`apply_disabled`) and a lost outcome
  * (`outcome_unknown` for the consume, `expiry_outcome_unknown` for the expiry
  * step) are 409; a missing audit key is 503; an unbound audit or an
  * unexpected failure is 500.
  */
-/** Grants one tick may try before it stops; still at most one card moves. */
-export const AUTO_TICK_GRANT_ATTEMPTS = 10;
+/** Grants one tick may try before it stops; still at most one card moves.
+ * Each refused grant is one cheap read, so the tick tries them all. */
+export const AUTO_TICK_GRANT_ATTEMPTS = 1_000;
 
 /**
  * Refusals that belong to the picked grant's own card, so the tick tries the

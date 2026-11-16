@@ -17,8 +17,6 @@ import {
   AUTO_COST_30D_CENTS,
   AUTO_COST_EVENT_CENTS,
   AUTO_EXPIRE_BATCH,
-  AUTO_GRADUATION_DECISIONS,
-  AUTO_GRADUATION_SPAN_MS,
   AUTO_PROMOTION_CANONICALIZATION_VERSION,
   AUTO_PROMOTION_CODE_LATCH as AUTO_LATCH,
   AUTO_PROMOTION_POLICY_VERSION,
@@ -35,7 +33,6 @@ import {
   autoConsumeBindingAccepted,
   autoConsumeRequestIsBound,
   autoCostAccepted,
-  autoGlobalWipAccepted,
   autoGraduationAccepted,
   autoGrantExpiresAt,
   autoGrantUsable,
@@ -46,7 +43,6 @@ import {
   autoTickHttpStatus,
   autoTransactionFailure,
   autoTransactionStatementCancelled,
-  autoUnknownEvents,
   autoWorkerAdmitted,
   parseAutoConsumeRequest,
   parseAutoGrantRequest,
@@ -63,27 +59,15 @@ test("version 10 keeps the auto latch open and ships the recommendation latch op
   assert.equal(autoPromotionApplyPermitted({ envValue: "enabled", codeLatch: true }), true);
   assert.equal(autoPromotionApplyPermitted({ envValue: "enabled", codeLatch: false }), false);
   assert.equal(autoPromotionApplyPermitted({ envValue: "true", codeLatch: true }), false);
-  assert.equal(AUTO_GRADUATION_DECISIONS, 20);
-  assert.equal(AUTO_GRADUATION_SPAN_MS, 14 * day);
   assert.equal(AUTO_COST_EVENT_CENTS, 500);
   assert.equal(AUTO_COST_24H_CENTS, 1500);
   assert.equal(AUTO_COST_30D_CENTS, 10000);
 });
 
-test("graduation needs 20 human decisions spanning 14 days", () => {
-  const nineteen = Array.from({ length: 19 }, (_, index) => ({ createdAt: at(index * day) }));
-  assert.equal(autoGraduationAccepted(nineteen).ok, false);
-  const burst = Array.from({ length: 20 }, () => ({ createdAt: now }));
-  assert.equal(autoGraduationAccepted(burst).ok, false);
-  const spanned = [
-    { createdAt: now },
-    ...Array.from({ length: 18 }, () => ({ createdAt: at(day) })),
-    { createdAt: at(14 * day) },
-  ];
-  assert.equal(autoGraduationAccepted(spanned).ok, true);
-  const exact = [{ createdAt: now }, { createdAt: at(14 * day) }];
-  while (exact.length < 20) exact.push({ createdAt: at(14 * day) });
-  assert.equal(autoGraduationAccepted(exact).ok, true);
+test("graduation is measured, never a gate (no 20 decisions over 14 days since 2026-11-16)", () => {
+  assert.deepEqual(autoGraduationAccepted([]), { ok: true, count: 0, spanMs: 0 });
+  const few = [{ createdAt: now }, { createdAt: at(day) }];
+  assert.deepEqual(autoGraduationAccepted(few), { ok: true, count: 2, spanMs: day });
 });
 
 test("cost caps are USD cents and ordinary overages refuse before a card write", () => {
@@ -98,19 +82,15 @@ test("cost caps are USD cents and ordinary overages refuse before a card write",
   assert.equal(autoCostAccepted({ proposedCents: 500, entries: month, now }).ok, false);
 });
 
-test("worker isolation refuses a worker id and a fourth active card without calling either a critical violation", () => {
+test("worker isolation refuses a worker id; no count of active cards is a critical violation", () => {
   assert.equal(autoWorkerAdmitted(null).ok, true);
   assert.equal(autoWorkerAdmitted("worker-a").code, "worker_not_admitted");
-  assert.equal(autoGlobalWipAccepted(3).code, "auto_wip_full");
-  assert.equal(autoGlobalWipAccepted(2).ok, true);
   assert.deepEqual(autoReadbackCritical({
-    activeCount: 4,
-    ownerCounts: [2],
     costCents24h: 0,
     costCents30d: 0,
     unapprovedTodo: 0,
     lifecycleWrites: 0,
-  }), ["global_wip_exceeded", "worker_cap_exceeded"]);
+  }), []);
 });
 
 test("a grant lasts seven days and an expired grant is missing", () => {
@@ -121,14 +101,11 @@ test("a grant lasts seven days and an expired grant is missing", () => {
   assert.equal(autoGrantUsable({ status: "consumed", expiresAt: expires, now }).code, "grant_missing");
 });
 
-test("one critical violation or two unknown outcomes inside 15 minutes halts", () => {
-  assert.equal(autoHaltRequired({ criticalCodes: [], unknownAt: [now], now }).halt, false);
-  assert.equal(autoHaltRequired({ criticalCodes: ["cost_exceeded"], unknownAt: [], now }).halt, true);
-  const burst = autoHaltRequired({ criticalCodes: [], unknownAt: [at(-15 * 60 * 1000), now], now });
-  assert.equal(burst.halt, true);
-  assert.equal(burst.reason, "outcome_unknown_burst");
-  const apart = autoHaltRequired({ criticalCodes: [], unknownAt: [at(-15 * 60 * 1000 - 1), now], now });
-  assert.equal(apart.halt, false);
+test("one critical violation halts; unknown outcomes never do", () => {
+  assert.equal(autoHaltRequired({ criticalCodes: [] }).halt, false);
+  const critical = autoHaltRequired({ criticalCodes: ["cost_exceeded"] });
+  assert.equal(critical.halt, true);
+  assert.equal(critical.reason, "critical_violation");
 });
 
 const item = {
@@ -303,21 +280,6 @@ test("a consume must use the bound item and amount, and the system path needs a 
     autoConsumeBindingAccepted({ binding: legacy, item, amountCents: 0, requireBound: true }).code,
     "grant_unbound",
   );
-});
-
-test("one lost outcome is one event, so it cannot open a halt alone", () => {
-  const events = autoUnknownEvents({
-    consumptions: [{ id: consumptionId, outcomeUnknownAt: now }],
-    unknowns: [{ id: consumptionId, recordedAt: now }],
-  });
-  assert.equal(events.length, 1);
-  assert.equal(autoHaltRequired({ criticalCodes: [], unknownAt: events, now }).halt, false);
-  const two = autoUnknownEvents({
-    consumptions: [{ id: consumptionId, outcomeUnknownAt: at(-60_000) }, { id: snapshotId, outcomeUnknownAt: null }],
-    unknowns: [{ id: grantId, recordedAt: now }],
-  });
-  assert.equal(two.length, 2);
-  assert.equal(autoHaltRequired({ criticalCodes: [], unknownAt: two, now }).halt, true);
 });
 
 test("the tick answers 200 for a finished decision and 409 only for the switch and a lost outcome", () => {
@@ -507,7 +469,7 @@ test("a tick skips a grant refused for its own card and stops on a refusal about
   for (const code of ["auto_halted", "graduation_unmet", "capacity_unconfigured", "auto_wip_full", "incident_blocked", "outcome_unknown", "audit_key_missing"]) {
     assert.equal(autoTickCardSpecificRefusal(code), false, code);
   }
-  assert.ok(AUTO_TICK_GRANT_ATTEMPTS >= 2 && AUTO_TICK_GRANT_ATTEMPTS <= 20);
+  assert.ok(AUTO_TICK_GRANT_ATTEMPTS >= 2, "a tick tries every grant a queue can hold");
 });
 
 test("the halt read-back counts only lifecycle rows the consume itself could write", async () => {
@@ -681,8 +643,8 @@ test("the tick holds the audit chain lock only for the appends that end each sho
   assert.ok(lastRead > 0 && firstWrite > lastRead, "every read before the first write");
   const readback = between("export async function commitAutoHaltFromReadback", "export async function recordAutoOutcomeUnknown");
   assert.ok(readback.indexOf("readAutoHaltLocked(") < readback.indexOf("writeAutoHaltLocked("));
-  // The pending lost outcome counts in the halt decision as it will once written.
-  assert.match(record, /mark\.kind === "record" \? \{ id: input\.consumptionId, recordedAt: now \} : null/);
+  // A lost outcome is not counted in the halt decision (it never halts, 2026-11-16).
+  assert.match(record, /readAutoHaltLocked\(tx, now\)/, "the halt read no longer counts the lost outcome it is about to record");
 });
 
 test("the tick's three transactions fit its route budget, and each statement fits its transaction", () => {
