@@ -70,7 +70,6 @@ import {
   ENGINEERING_AGENT_V22_TIER_PENDING_REASON,
   engineeringAgentV22ReviewPrEnabled,
   ENGINEERING_AGENT_KILL_SWITCH_ENV,
-  ENGINEERING_AGENT_MONITORS_CONFIRMED_SETTING_KEY,
   ENGINEERING_AGENT_OBSERVED_HALT_SETTING_KEY,
   OBSERVABLE_HALTS,
   higherHalt,
@@ -97,13 +96,11 @@ import {
   ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_MAX_DOUBLINGS,
   engineeringAgentUnknownAutoLookupEnabled,
   WRITE_ITEM_KINDS,
-  decideArmedGate,
   decideOwnerQueues,
   decideWriteItemTransition,
   engineeringBranchName,
-  isCircuitLatched,
+  heldRunHalt,
   isRunId,
-  parseEngineeringAgentMode,
   parseSettingInstant,
   resolveEngineeringAgentSwitches,
   unknownOutcomeDecisionCauseKey,
@@ -248,7 +245,6 @@ export const ENGINEERING_AGENT_AUDIT_ACTIONS = Object.freeze({
   registrationRecorded: "engineering_agent.registration_recorded",
   registrationResolved: "engineering_agent.registration_resolved",
   haltAcknowledged: "engineering_agent.halt_acknowledged",
-  monitorsConfirmed: "engineering_agent.monitors_confirmed",
   serviceFinished: "engineering_agent.service_finished",
   haltObserved: "engineering_agent.halt_observed",
   haltCleared: "engineering_agent.halt_cleared",
@@ -322,12 +318,12 @@ export type EngineeringAgentHaltState = {
    */
   orphanedRuns: number;
   /**
-   * The latest halt a run recorded after the last Admin acknowledgement, or
-   * null when none has. A recorded halt holds until a person acknowledges it
-   * (§12); a later run that ends clean does not clear it.
+   * The halt the recorded runs still hold (heldRunHalt: the App's identity
+   * and namespace signals, until a person acknowledges them), or the observed
+   * unbound reading that still holds, or null (§12). Since owner decision
+   * 2026-11-16 no other value a run recorded holds by itself.
    */
   unacknowledgedHalt: HaltValue | null;
-  circuitLatched: boolean;
   /**
    * Mismatches and orphaned runs hold only their card (AMUXFLOW/B2; the
    * default since owner decision 2026-11-15, off with ENGINEERING_AGENT_LEGACY_HALTS).
@@ -362,12 +358,11 @@ const lockEngineeringAgentHalt = async (tx: EngineeringAgentTransaction) => {
 };
 
 /**
- * What the app itself knows about a halt (§12): an open state mismatch, a
- * halt a run recorded since the last Admin acknowledgement, and whether
- * repeated incidents latched the circuit since then. The unbound pull
- * request and ref readings are the runner's, recorded on the runs it ends.
- * Only the acknowledgement clears a recorded halt or the circuit; the
- * passage of time and a clean run do not.
+ * What the app itself knows about a halt (§12): an open state mismatch, and
+ * an App identity or namespace signal a run recorded since the last Admin
+ * acknowledgement. Those readings are the runner's, recorded on the runs it
+ * ends; only the acknowledgement clears them. A mismatch halts while it is
+ * open, never longer.
  */
 export async function readEngineeringAgentHaltState(
   db: PrismaClient | Prisma.TransactionClient,
@@ -398,11 +393,8 @@ export async function readEngineeringAgentHaltState(
     select: { startedAt: true, endedAt: true, halt: true },
   });
   const acknowledgedAt = parseSettingInstant(acknowledgement?.value);
-  const runs = terminated.map((run) => ({ startedAt: run.startedAt, endedAt: run.endedAt!, halt: storedHalt(run.halt) }));
-  const recorded = runs.filter(
-    (run) => run.halt !== "none" && (acknowledgedAt === null || run.endedAt.getTime() > acknowledgedAt.getTime()),
-  );
-  const fromRuns = recorded.length === 0 ? null : recorded[recorded.length - 1].halt;
+  const runs = terminated.map((run) => ({ endedAt: run.endedAt!, halt: storedHalt(run.halt) }));
+  const fromRuns = heldRunHalt({ runs, acknowledgedAt });
   // An observation outside a run halts the same way, until acknowledged.
   const observedSetting = await db.appSetting.findUnique({
     where: { key: ENGINEERING_AGENT_OBSERVED_HALT_SETTING_KEY },
@@ -412,7 +404,6 @@ export async function readEngineeringAgentHaltState(
   // A reading a later clean one explained no longer holds (owner decision
   // 2026-11-15). A clearance is a recorded fact: turning the kill switch on
   // afterwards stops further clearances, it does not bring one back.
-  const legacy = engineeringAgentLegacyHalts(process.env[ENGINEERING_AGENT_LEGACY_HALTS_ENV]);
   const observedHolds = observed !== null && observed.clearedAt === null &&
     (acknowledgedAt === null || observed.at.getTime() > acknowledgedAt.getTime());
   const observedHalt = observedHolds ? observed!.halt : null;
@@ -425,11 +416,6 @@ export async function readEngineeringAgentHaltState(
     orphanedRuns: orphaned,
     unacknowledgedHalt:
       fromRuns === null ? observedHalt : observedHalt === null ? fromRuns : higherHalt(fromRuns, observedHalt),
-    // The circuit halts only with the kill switch (owner decision 2026-11-15,
-    // ENGINEERING_AGENT_GLOBAL_HALTS): every halt it counted is now a security
-    // boundary that clears on its own terms or one card's hold, and a card
-    // that keeps failing is held by its own attempt budget.
-    circuitLatched: legacy && isCircuitLatched({ runs, acknowledgedAt }),
     observedHalt: observedHolds ? { halt: observed!.halt, subject: observed!.subject } : null,
   };
 }
@@ -455,14 +441,11 @@ const parseObservedHalt = (value: string | undefined): ObservedHaltValue | null 
 
 /**
  * The one halt value a service is told, so it can decide its dead-man signal
- * (§12: no success signal while halted): what a person must acknowledge
- * first, then a latched circuit, then an open mismatch or orphaned run.
+ * (§12: no success signal while halted): a halt the runs or an observation
+ * still hold first, then an open mismatch or orphaned run.
  */
 export const currentEngineeringAgentHalt = (state: EngineeringAgentHaltState): HaltValue => {
-  if (state.unacknowledgedHalt !== null) {
-    return state.circuitLatched ? higherHalt(state.unacknowledgedHalt, "circuit_open") : state.unacknowledgedHalt;
-  }
-  if (state.circuitLatched) return "circuit_open";
+  if (state.unacknowledgedHalt !== null) return state.unacknowledgedHalt;
   if (state.cardScoped ? (state.unscopedStateMismatches ?? 0) > 0 :
     state.openStateMismatches > 0 || state.orphanedRuns > 0) return "state_mismatch";
   return "none";
@@ -591,8 +574,7 @@ async function engineeringAgentCardHeld(
 export const engineeringAgentHalted = (state: EngineeringAgentHaltState): boolean =>
   (state.cardScoped ? (state.unscopedStateMismatches ?? 0) > 0 :
     state.openStateMismatches > 0 || state.orphanedRuns > 0) ||
-  state.unacknowledgedHalt !== null ||
-  state.circuitLatched;
+  state.unacknowledgedHalt !== null;
 
 /**
  * Whether a run may start at all, asked before AMUX writes anything for it
@@ -2169,30 +2151,6 @@ export async function setEngineeringAgentSwitch(
   if (input.name === "freeze" && input.value !== "true" && input.value !== "false") refuse("freeze_value_invalid");
   const key = input.name === "mode" ? ENGINEERING_AGENT_MODE_SETTING_KEY : ENGINEERING_AGENT_FREEZE_SETTING_KEY;
   const previous = await tx.appSetting.findUnique({ where: { key }, select: { value: true } });
-  // Turning the mode on from `off` passes the armed gate (§12). Turning it
-  // off, and freezing, never do.
-  if (input.name === "mode" && input.value !== "off" && parseEngineeringAgentMode(previous?.value) === "off") {
-    const readings = await tx.appSetting.findMany({
-      where: {
-        key: {
-          in: [
-            ENGINEERING_AGENT_RUNNER_LAST_FINISH_SETTING_KEY,
-            ENGINEERING_AGENT_PUBLISHER_LAST_FINISH_SETTING_KEY,
-            ENGINEERING_AGENT_MONITORS_CONFIRMED_SETTING_KEY,
-          ],
-        },
-      },
-      select: { key: true, value: true },
-    });
-    const at = (settingKey: string) => parseSettingInstant(readings.find((row) => row.key === settingKey)?.value);
-    const gate = decideArmedGate({
-      runnerLastFinishAt: at(ENGINEERING_AGENT_RUNNER_LAST_FINISH_SETTING_KEY),
-      publisherLastFinishAt: at(ENGINEERING_AGENT_PUBLISHER_LAST_FINISH_SETTING_KEY),
-      monitorsConfirmedAt: at(ENGINEERING_AGENT_MONITORS_CONFIRMED_SETTING_KEY),
-      now: await databaseNow(tx),
-    });
-    if (!gate.armed) refuse(`armed_gate_${gate.missing.join("_")}`);
-  }
   await tx.appSetting.upsert({ where: { key }, update: { value: input.value }, create: { key, value: input.value } });
   const known = (value: string | undefined) =>
     value === undefined ? null : ["off", "shadow", "t1", "true", "false"].includes(value) ? value : "unrecognised";
@@ -2224,8 +2182,9 @@ const writeInstant = async (tx: EngineeringAgentTransaction, key: string): Promi
 };
 
 /**
- * A person clears the halts only a person clears (§12): a halt a run recorded
- * and a latched circuit, from this instant on. It does not resolve an open
+ * A person clears what a run or an observation recorded, from this instant on
+ * (§12): the only way to clear an App identity or namespace signal a run
+ * recorded (an observed one also clears once a later reading explains it). It does not resolve an open
  * state mismatch or a run whose attempt ended -- those stay until their own
  * cause is dealt with -- and it says in its audit entry what it cleared.
  */
@@ -2246,7 +2205,6 @@ export async function acknowledgeEngineeringAgentHalt(
     summary: ENGINEERING_AGENT_AUDIT_ACTIONS.haltAcknowledged,
     metadata: {
       unacknowledgedHalt: before.unacknowledgedHalt,
-      circuitLatched: before.circuitLatched,
       openStateMismatches: before.openStateMismatches,
       orphanedRuns: before.orphanedRuns,
     },
@@ -2256,32 +2214,7 @@ export async function acknowledgeEngineeringAgentHalt(
 }
 
 /**
- * The operator's record that both dead-man monitors are active and their
- * alerts reach someone, confirmed on the monitors' own screen (§12, the armed
- * gate). The app cannot see the monitors; this is a person's statement, made
- * under their name.
- */
-export async function recordEngineeringAgentMonitorsConfirmed(
-  tx: EngineeringAgentTransaction,
-  input: { session: Session; request?: Request },
-): Promise<{ auditLogId: string; confirmedAt: Date }> {
-  humanActorId(input.session);
-  const confirmedAt = await writeInstant(tx, ENGINEERING_AGENT_MONITORS_CONFIRMED_SETTING_KEY);
-  const auditLogId = await writeAdminAuditLog({
-    session: input.session,
-    request: input.request,
-    action: ENGINEERING_AGENT_AUDIT_ACTIONS.monitorsConfirmed,
-    targetType: "AppSetting",
-    targetId: ENGINEERING_AGENT_MONITORS_CONFIRMED_SETTING_KEY,
-    summary: ENGINEERING_AGENT_AUDIT_ACTIONS.monitorsConfirmed,
-    metadata: {},
-    tx,
-  });
-  return { auditLogId, confirmedAt };
-}
-
-/**
- * A service's report that a cycle ran to its end (§12, the armed gate). It is
+ * A service's report that a cycle ran to its end (§12, shown in Admin). It is
  * the service speaking about itself -- an indicator, not evidence -- and it is
  * recorded whatever the switches say, as a cycle in mode `off` still runs.
  */
@@ -2404,7 +2337,9 @@ export const engineeringAgentBindingSnapshotSchema = z
     baseSha: sha1,
     diffDigest: sha256,
     treeId: sha1,
-    invalidatedReviewIds: z.array(reviewId).max(100),
+    // No count of its own: the binding CHECK bounds the whole record at 1 MiB
+    // (migration engineering_agent_binding_record_size, owner decision 2026-11-16).
+    invalidatedReviewIds: z.array(reviewId),
   })
   .strict();
 

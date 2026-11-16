@@ -111,6 +111,7 @@ const lanePorts = (pulls, filesOf, issue = { issued: false, reason: "lane_off" }
         issue: record("issue", issue),
         consume: record("consume", { consumed: true }),
         report: record("report", { recorded: true }),
+        release: record("release", { released: false, reason: "not_releasable" }),
       },
       github: {
         listOpenDevelopPulls: record("list", pulls),

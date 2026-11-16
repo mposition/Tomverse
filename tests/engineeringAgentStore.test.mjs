@@ -151,7 +151,6 @@ const RECORDS_WHAT_HAPPENED = [
   "openEngineeringAgentRunMismatches",
   "recordEngineeringAgentPublishResult",
   "acknowledgeEngineeringAgentHalt",
-  "recordEngineeringAgentMonitorsConfirmed",
   "recordEngineeringAgentServiceFinish",
   "acceptEngineeringAgentRequest",
   "moveEngineeringAgentRequest",

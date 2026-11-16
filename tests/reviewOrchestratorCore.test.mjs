@@ -11,9 +11,9 @@ import { aggregate, parseReviewerOutput } from "../tools/review-orchestrator/lib
 import { globToRegExp, requiredReviewers, validateConfig } from "../tools/review-orchestrator/lib/config.mjs";
 import { decodeRpc, tokenFromSshCommand } from "../tools/review-orchestrator/bin/review-orchestrator.mjs";
 import { encodeRpc, parseArgs, repoNameFromRemote, supportsReviewerSelection } from "../tools/review-orchestrator/client/review.mjs";
-import { reviewerEnv } from "../tools/review-orchestrator/lib/service.mjs";
+import { retryDelayMs, reviewerEnv } from "../tools/review-orchestrator/lib/service.mjs";
 import { isInstructionPath } from "../tools/review-orchestrator/lib/git.mjs";
-import { release, tryAcquire } from "../tools/review-orchestrator/lib/fsutil.mjs";
+import { release, tryAcquire, withLock } from "../tools/review-orchestrator/lib/fsutil.mjs";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -402,6 +402,37 @@ test("a lock is taken over only from a dead owner, and released only by its owne
       writeFileSync(path, `${process.pid} 1 cafecafecafecafe\n`);
       assert.ok(tryAcquire(path));
     }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Owner decision 2026-11-16: a slot every vendor failed waits out its delay, then goes round again.
+test("a queued slot is not assigned before its notBefore time", () => {
+  const waiting = { job: { id: "r-w", authorVendor: "openai" }, slots: [{ index: 0, status: "queued", notBefore: 5_000 }] };
+  assert.deepEqual(planAssignments({ jobs: [waiting], providers: PROVIDERS, load: {}, now: 4_999 }), []);
+  assert.equal(planAssignments({ jobs: [waiting], providers: PROVIDERS, load: {}, now: 5_000 }).length, 1);
+});
+
+test("the retry delay doubles from one minute and stops growing at 30 minutes", () => {
+  const minutes = [1, 2, 3, 4, 5, 6, 7, 20].map((attempts) => retryDelayMs(attempts) / 60_000);
+  assert.deepEqual(minutes, [1, 2, 4, 8, 16, 30, 30, 30]);
+  assert.equal(retryDelayMs(0), 60_000);
+});
+
+test("a mirror lock waiter has no deadline: it waits for a live owner and then takes the lock", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "review-orch-lock-"));
+  try {
+    const path = join(dir, "mirror.lock");
+    const token = tryAcquire(path);
+    assert.notEqual(token, null);
+    let entered = false;
+    const waiter = withLock(path, async () => { entered = true; });
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    assert.equal(entered, false, "still waiting for the owner");
+    release(path, token);
+    await waiter;
+    assert.equal(entered, true);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

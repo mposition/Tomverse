@@ -109,10 +109,10 @@ test("events are consecutive", async () => {
 
 test("the lane sets and a person releases; neither may do the other's, and an unaudited event is refused", async () => {
   const next = ((await newest())?.sequence ?? 0) + 1;
-  await assert.rejects(append(next, true, "deploy_failed", "person"), /set by the merge lane, released by a person/);
-  await assert.rejects(append(next, true, "deploy_failed", "none"), /set by the merge lane, released by a person/);
+  await assert.rejects(append(next, true, "deploy_failed", "person"), /set by the merge lane, released by a person or by the lane/);
+  await assert.rejects(append(next, true, "deploy_failed", "none"), /set by the merge lane, released by a person or by the lane/);
   await append(next, true, "deploy_failed", "lane");
-  await assert.rejects(append(next + 1, false, null, "lane"), /set by the merge lane, released by a person/);
+  await assert.rejects(append(next + 1, false, null, "lane"), /set by the merge lane, released by a person or by the lane/);
   await append(next + 1, false, null, "person");
 });
 

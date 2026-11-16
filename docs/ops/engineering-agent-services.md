@@ -51,8 +51,8 @@
    Pull requests write, Metadata read뿐입니다. **Workflows 권한을 주지 않습니다.**
    서비스는 이 셋 밖의 권한이 실린 토큰을 받으면 즉시 폐기하고 멈춥니다.
 6. **dead-man monitor** — 두 서비스에 각각 하나씩, 앱·Railway·GitHub와 무관한
-   외부 monitor를 만들고 알림 채널을 연결합니다. 확인했으면 Admin의 엔지니어링
-   에이전트 화면에서 "monitor 확인"을 기록합니다(armed gate가 읽습니다).
+   외부 monitor를 만들고 알림 채널을 연결합니다(2026-11-16부터 앱에 확인을 기록하지
+   않습니다: armed gate를 없앴습니다).
 7. **확인** — `npm run railway:agents:plan`이 변경 없음을 보이면 변수 이름이 선언과
    같다는 뜻입니다. 두 서비스는 모드가 `off`인 동안 회차를 끝까지 돌고 아무것도
    하지 않으며, 정상 종료마다 dead-man monitor에 성공 신호를 보냅니다.
@@ -110,7 +110,7 @@
    그 시각 이후 각 dead-man monitor에 ping이 들어왔는지 봅니다.
    `npm run railway:agents:use-production` → `npm run railway:agents:plan`이 변경
    없음을 보이는지도 봅니다.
-6. 그다음에만 모드를 다시 켭니다(armed gate가 최근 종료와 monitor 확인을 다시 봅니다).
+6. 그다음에 모드를 다시 켭니다.
 7. `npm run railway:iac:use-staging`으로 CLI 연결을 되돌려 둡니다.
 
 **되돌리기.** 이 변경을 되돌리는 PR(revert)로 합니다. 옛 선언은 이 변경 바로 앞의

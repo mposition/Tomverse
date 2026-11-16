@@ -26,7 +26,9 @@ import {
   CI_FIX_INSTALL_TIMEOUT_MS,
   CI_FIX_REPORT_ENTRIES,
   CI_FIX_MAX_PATCH_CHARS,
-  CI_FIX_MAX_QUEUED_PER_HOUR,
+  CI_FIX_AUTO_RETRY_MAX_MS,
+  CI_FIX_MAX_LOG_CHARS,
+  ciFixAutoRetryDelayMs,
   CI_FIX_MAX_RUN_IDS,
   answerLine,
   ciFixAbility,
@@ -71,7 +73,8 @@ import {
 import {
   DISPATCH_TOKEN_ENV,
   MAX_DISPATCHES_PER_HOUR,
-  REQUEST_MAX_AGE_MS,
+  SEND_RETRY_MAX_MS,
+  sendRetryDelayMs,
   createDispatchSender,
   dispatchInputs,
   dispatchWorkflow,
@@ -354,7 +357,7 @@ test("the sender posts once to the default branch, refuses redirects and reports
     return { status: 204, body: null };
   };
   const request = { prNumber: 5, headSha: SHA_A, runIds: [7], patchGzB64: "QUJD", createdAt: 1 };
-  assert.deepEqual(await dispatchWorkflow({ repo: "o/r", token: TOKEN, request, fetchImpl }), { ok: true, outcome: "http_204" });
+  assert.deepEqual(await dispatchWorkflow({ repo: "o/r", token: TOKEN, request, fetchImpl }), { ok: true, status: 204, outcome: "http_204" });
   assert.equal(calls[0].url, "https://api.github.com/repos/o/r/actions/workflows/pr-ci-auto-fix.yml/dispatches");
   assert.equal(calls[0].init.redirect, "error");
   assert.equal(calls[0].init.headers.authorization, `Bearer ${TOKEN}`);
@@ -400,25 +403,26 @@ const requestFile = (sha, createdAt, extra = {}) =>
   JSON.stringify({ schemaVersion: 1, prNumber: 5, headSha: sha, runIds: [1], patchGzB64: "QUJD", createdAt, ...extra });
 
 test("each request is sent once, oldest first, and recorded before its POST", async () => {
-  const now = 10 * 60 * 60_000;
+  const now = 30 * 24 * 60 * 60_000;
   const shaC = "c".repeat(40);
   const h = senderHarness({
     now,
     files: {
       [`${SHA_B}.json`]: requestFile(SHA_B, now - 1000),
       [`${SHA_A}.json`]: requestFile(SHA_A, now - 2000),
-      [`${shaC}.json`]: requestFile(shaC, now - REQUEST_MAX_AGE_MS - 1),
+      // A week old: still sent (nothing is dropped for its age), and first, being the oldest.
+      [`${shaC}.json`]: requestFile(shaC, now - 7 * 24 * 60 * 60_000),
       "notes.txt": "x",
       [`${"d".repeat(40)}.json`]: requestFile(SHA_A, now),
     },
   });
   try {
     await h.sender.scanOnce();
-    assert.deepEqual(h.posts, [SHA_A, SHA_B], "oldest first; the stale and the misnamed one are not sent");
+    assert.deepEqual(h.posts, [shaC, SHA_A, SHA_B], "oldest first, however old; the misnamed one is not sent");
     assert.ok(h.lines.some((line) => /is not a valid request/.test(line)));
     await h.sender.scanOnce();
-    assert.deepEqual(h.posts, [SHA_A, SHA_B], "a sent request is not sent again");
-    assert.deepEqual(Object.keys(h.sent()).sort(), [`${SHA_A}@${now - 2000}`, `${SHA_B}@${now - 1000}`]);
+    assert.deepEqual(h.posts, [shaC, SHA_A, SHA_B], "a sent request is not sent again");
+    assert.deepEqual(Object.keys(h.sent()).sort(), [`${SHA_A}@${now - 2000}`, `${SHA_B}@${now - 1000}`, `${shaC}@${now - 7 * 24 * 60 * 60_000}`].sort());
   } finally {
     rmSync(h.stateDir, { recursive: true, force: true });
   }
@@ -441,7 +445,104 @@ test("an unknown dispatch outcome is never retried", async () => {
   }
 });
 
-test("the sender sends at most MAX_DISPATCHES_PER_HOUR an hour", async () => {
+// Owner decision 2026-11-16: a request GitHub refused is sent again, later each time, never dropped.
+test("a dispatch GitHub refused is sent again after a growing wait", async () => {
+  const now = 10 * 60 * 60_000;
+  const key = `${SHA_A}@${now - 1}`;
+  let clock = now;
+  let status = 422;
+  const stateDir = mkdtempSync(join(tmpdir(), "ci-fix-sender-retry-"));
+  const lines = [];
+  const posts = [];
+  const sender = createDispatchSender({
+    settings: { token: TOKEN, repo: "o/r", outbox: "/outbox", stateDir },
+    log: (line) => lines.push(line),
+    now: () => clock,
+    listOutbox: () => [`${SHA_A}.json`],
+    readRequest: () => requestFile(SHA_A, now - 1),
+    fetchImpl: async () => {
+      posts.push(clock);
+      return { status, body: null };
+    },
+  });
+  try {
+    await sender.scanOnce();
+    assert.equal(posts.length, 1);
+    assert.equal(JSON.parse(readFileSync(join(stateDir, "sent.json"), "utf8"))[key], undefined, "a refused request is not recorded as sent");
+    assert.match(lines.at(-1), /http_422; sending again in 60s/);
+    clock += 59_000;
+    await sender.scanOnce();
+    assert.equal(posts.length, 1, "it waits out the first minute");
+    clock += 2_000;
+    await sender.scanOnce();
+    assert.equal(posts.length, 2);
+    assert.match(lines.at(-1), /sending again in 120s/, "the wait doubles");
+    // Far later the wait stops growing, and the request goes out when GitHub takes it.
+    for (let i = 0; i < 12; i += 1) {
+      clock += SEND_RETRY_MAX_MS + 1;
+      await sender.scanOnce();
+    }
+    assert.match(lines.filter((line) => /sending again/.test(line)).at(-1), /sending again in 1800s/);
+    status = 204;
+    clock += SEND_RETRY_MAX_MS + 1;
+    await sender.scanOnce();
+    assert.match(lines.at(-1), /dispatched/);
+    assert.ok(JSON.parse(readFileSync(join(stateDir, "sent.json"), "utf8"))[key], "recorded as sent once GitHub took it");
+    const sentCount = posts.length;
+    clock += SEND_RETRY_MAX_MS + 1;
+    await sender.scanOnce();
+    assert.equal(posts.length, sentCount, "then never again");
+  } finally {
+    rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("a 5xx answer is an outcome nobody saw: the request is never sent again", async () => {
+  const now = 10 * 60 * 60_000;
+  let clock = now;
+  const stateDir = mkdtempSync(join(tmpdir(), "ci-fix-sender-5xx-"));
+  const lines = [];
+  const posts = [];
+  const sender = createDispatchSender({
+    settings: { token: TOKEN, repo: "o/r", outbox: "/outbox", stateDir },
+    log: (line) => lines.push(line),
+    now: () => clock,
+    listOutbox: () => [`${SHA_A}.json`],
+    readRequest: () => requestFile(SHA_A, now - 1),
+    fetchImpl: async () => {
+      posts.push(clock);
+      return { status: 502, body: null };
+    },
+  });
+  try {
+    await sender.scanOnce();
+    assert.match(lines.at(-1), /http_502; not sending this request again/);
+    clock += SEND_RETRY_MAX_MS * 4;
+    await sender.scanOnce();
+    assert.equal(posts.length, 1);
+  } finally {
+    rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("the send wait doubles from a minute and stops at half an hour", () => {
+  assert.deepEqual([1, 2, 3, 4, 5, 6, 7, 99].map((failures) => sendRetryDelayMs(failures) / 60_000), [1, 2, 4, 8, 16, 30, 30, 30]);
+});
+
+test("a request dated in the future is not sent", async () => {
+  const now = 10 * 60 * 60_000;
+  const h = senderHarness({ now, files: { [`${SHA_A}.json`]: requestFile(SHA_A, now + 60 * 60_000) } });
+  try {
+    await h.sender.scanOnce();
+    await h.sender.scanOnce();
+    assert.deepEqual(h.posts, []);
+    assert.equal(h.lines.filter((line) => /dated in the future/.test(line)).length, 1);
+  } finally {
+    rmSync(h.stateDir, { recursive: true, force: true });
+  }
+});
+
+test("the sender sends at most MAX_DISPATCHES_PER_HOUR an hour, and what is over goes out the next hour", async () => {
   const now = 10 * 60 * 60_000;
   const files = {};
   for (let i = 0; i < MAX_DISPATCHES_PER_HOUR + 2; i += 1) {
@@ -453,6 +554,21 @@ test("the sender sends at most MAX_DISPATCHES_PER_HOUR an hour", async () => {
     await h.sender.scanOnce();
     assert.equal(h.posts.length, MAX_DISPATCHES_PER_HOUR);
     assert.match(h.lines.at(-1), /rate cap/);
+    // The cap delays: the two over are still in the outbox, and go once an hour has passed.
+    const later = createDispatchSender({
+      settings: { token: TOKEN, repo: "o/r", outbox: "/outbox", stateDir: h.stateDir },
+      log: () => {},
+      now: () => now + 61 * 60_000,
+      listOutbox: () => Object.keys(files),
+      readRequest: (path) => files[path.replace(/^.*[\\/]/, "")],
+      fetchImpl: async (url, init) => {
+        h.posts.push(JSON.parse(init.body).inputs.head_sha);
+        return { status: 204, body: null };
+      },
+    });
+    await later.scanOnce();
+    assert.equal(h.posts.length, MAX_DISPATCHES_PER_HOUR + 2);
+
   } finally {
     rmSync(h.stateDir, { recursive: true, force: true });
   }
@@ -751,20 +867,23 @@ test("a job log is read as its tail, holding about twice the cap", async () => {
   assert.equal(await readTail(null, 20), "");
 });
 
-test("the proposing half queues no faster than the sender sends", async () => {
+// Owner decision 2026-11-16: no hourly cap on what a pass queues; the sender's cap only delays.
+test("a pass queues however many requests went out in the last hour", async () => {
   const f = passFixture();
   try {
     const now = 10 * 3_600_000;
     const ledger = {};
-    for (let i = 0; i < CI_FIX_MAX_QUEUED_PER_HOUR; i += 1) {
+    for (let i = 0; i < 100; i += 1) {
       ledger[i.toString(16).padStart(40, "0")] = { outcome: "queued", at: now - 1000, queuedAt: now - 1000 };
     }
     mkdirSync(join(f.config.stateDir, "ci-fix"), { recursive: true });
     writeFileSync(join(f.config.stateDir, "ci-fix", "ledger.json"), JSON.stringify(ledger));
+    let ran = 0;
     const result = await runCiFix({ ...f, model: "sonnet", minRemainingPercent: 0,
       quota: async () => ({ state: "available", remainingPercent: 90 }),
-      claude: () => assert.fail("the model must not run"), clock: () => now, log: () => {} });
-    assert.equal(result.outcome, "rate_capped");
+      claude: () => { ran += 1; return { ok: true, timedOut: false, tail: "RESULT: transient" }; }, clock: () => now, log: () => {} });
+    assert.notEqual(result.outcome, "rate_capped");
+    assert.equal(ran, 1, "the model ran");
   } finally {
     rmSync(f.root, { recursive: true, force: true });
   }
@@ -795,14 +914,12 @@ test("an unreadable log costs no attempt, and a refused patch is recorded and no
   }
 });
 
-test("an expired request is logged once and not sent", async () => {
-  const now = REQUEST_MAX_AGE_MS + 10 * 60 * 60_000;
-  const h = senderHarness({ now, files: { [`${SHA_A}.json`]: requestFile(SHA_A, now - REQUEST_MAX_AGE_MS - 1) } });
+test("a request left in the outbox for days is still sent", async () => {
+  const now = 100 * 24 * 60 * 60_000;
+  const h = senderHarness({ now, files: { [`${SHA_A}.json`]: requestFile(SHA_A, now - 30 * 24 * 60 * 60_000) } });
   try {
     await h.sender.scanOnce();
-    await h.sender.scanOnce();
-    assert.deepEqual(h.posts, []);
-    assert.equal(h.lines.filter((line) => /expired/.test(line)).length, 1);
+    assert.deepEqual(h.posts, [SHA_A]);
   } finally {
     rmSync(h.stateDir, { recursive: true, force: true });
   }
@@ -1063,6 +1180,13 @@ test("an operator's label tries a head once more, and only once", async () => {
 
     assert.equal((await pass(4000)).outcome, "nothing_to_fix", "the label is not a standing licence");
     assert.equal(calls, 2);
+
+    // Asked again after that try: tried again, as often as it is asked (no count ends it).
+    labelledAt = 4800;
+    assert.equal((await pass(5000)).outcome, "no_change");
+    assert.equal(calls, 3);
+    assert.equal(readLedger(ledgerPath)[f.sha].attempts, 3);
+    assert.equal((await pass(6000)).outcome, "nothing_to_fix");
   } finally {
     rmSync(f.root, { recursive: true, force: true });
   }
@@ -1090,7 +1214,7 @@ test("a head given up on is tried once more, unasked, when the pass can do more 
     assert.equal(calls, 2);
     const entry = readLedger(ledgerPath)[f.sha];
     assert.equal(entry.at, 3000, "the retry starts the entry afresh");
-    assert.equal(entry.retried, undefined, "an ability retry leaves the label's one retry for the operator");
+    assert.equal(entry.retried, undefined, "only a label's retry is marked as asked for");
     assert.equal(entry.ability, ciFixAbility({ kind: "ci", install: true }));
 
     assert.equal((await pass(4000, true)).outcome, "nothing_to_fix", "one try per ability");
@@ -1354,19 +1478,91 @@ test("an entry written before abilities were recorded is tried once more, and on
 
 test("an ability retry never revisits a head whose fix was sent", () => {
   const ability = ciFixAbility({ kind: "ci" });
-  for (const outcome of ["queued", "pushed", "superseded", "attempts_exhausted"]) {
+  for (const outcome of ["queued", "pushed", "superseded"]) {
     assert.equal(retryable({ outcome, at: 1, ability: "old" }, null, 10, ability), false, outcome);
   }
   assert.equal(retryable({ outcome: "patch_refused", at: 1, ability: "old" }, null, 10, ability), "ability");
   assert.equal(retryable({ outcome: "patch_refused", at: 1, ability }, null, 10, ability), false, "same ability, no label");
   assert.equal(retryable({ outcome: "started", at: 1, ability: "old" }, null, 10, ability), false, "a running try is not stale yet");
   assert.equal(retryable({ outcome: "no_change", at: 1, ability }, 5, 10, ability), "label");
+  assert.equal(retryable({ outcome: "no_change", at: 1, ability, retried: true }, 5, 10, ability), "label", "a label retry may be asked for again");
   assert.notEqual(ciFixAbility({ kind: "ci", install: true }), ciFixAbility({ kind: "ci", install: false }));
   assert.notEqual(ciFixAbility({ kind: "ci", regenerate: true }), ciFixAbility({ kind: "ci", regenerate: false }));
   assert.equal(ciFixAbility({ kind: "conflict", regenerate: true }), ciFixAbility({ kind: "conflict" }));
   // Installing packages is a CI fix's ability; a conflict resolution does not install.
   assert.equal(ciFixAbility({ kind: "conflict", install: true }), ciFixAbility({ kind: "conflict" }));
   assert.notEqual(ciFixAbility({ kind: "conflict" }), ciFixAbility({ kind: "ci" }));
+});
+
+// Owner decision 2026-11-16: a try that failed for a reason about the run, not the head, goes round again by itself.
+test("the wait before an automatic retry doubles from 30 minutes and stops at six hours", () => {
+  assert.deepEqual([1, 2, 3, 4, 5, 6, 99].map((tries) => ciFixAutoRetryDelayMs(tries) / 60_000), [30, 60, 120, 240, 360, 360, 360]);
+  assert.equal(ciFixAutoRetryDelayMs(undefined), 30 * 60_000);
+  assert.equal(CI_FIX_AUTO_RETRY_MAX_MS, 6 * 3_600_000);
+});
+
+test("a try that failed for the run's sake is retried after its backoff without a label or a new ability", () => {
+  const ability = ciFixAbility({ kind: "ci" });
+  const minute = 60_000;
+  for (const outcome of ["model_failed", "model_timeout", "error", "not_published", "digest_unresolved", "attempts_exhausted"]) {
+    const entry = { outcome, at: 0, ability, attempts: 1 };
+    assert.equal(retryable(entry, null, 29 * minute, ability), false, `${outcome} waits the first 30 minutes`);
+    assert.equal(retryable(entry, null, 30 * minute, ability), "auto", outcome);
+    assert.equal(retryable({ ...entry, attempts: 3 }, null, 119 * minute, ability), false, "the third try waits two hours");
+    assert.equal(retryable({ ...entry, attempts: 3 }, null, 120 * minute, ability), "auto");
+    assert.equal(retryable({ ...entry, attempts: 40 }, null, 6 * 60 * minute, ability), "auto", "the wait stops growing at six hours");
+  }
+  // A try that started and never ended crashed: retried after the longer of an hour and its backoff.
+  assert.equal(retryable({ outcome: "started", at: 0, ability, attempts: 1 }, null, 61 * minute, ability), "auto");
+  assert.equal(retryable({ outcome: "started", at: 0, ability, attempts: 4 }, null, 61 * minute, ability), false);
+  // The model's own answers are not retried by themselves: the same log gets the same answer.
+  for (const outcome of ["no_change", "patch_refused", "patch_too_large", "image_registry_refused", "queued", "pushed"]) {
+    assert.equal(retryable({ outcome, at: 0, ability, attempts: 1 }, null, 100 * 60 * minute, ability), false, outcome);
+  }
+  // A label or a new ability still goes first.
+  assert.equal(retryable({ outcome: "model_failed", at: 0, ability: "old", attempts: 1 }, null, 31 * minute, ability), "ability");
+  assert.equal(retryable({ outcome: "model_failed", at: 0, ability, attempts: 1 }, 5, 31 * minute, ability), "label");
+});
+
+test("a head whose model run failed is tried again by itself with a growing wait, and never gives up", async () => {
+  const f = passFixture();
+  try {
+    let calls = 0;
+    const claude = () => {
+      calls += 1;
+      return { ok: false, timedOut: calls % 2 === 0, tail: "", errorTail: "login expired" };
+    };
+    const minute = 60_000;
+    const pass = (at) => runCiFix({ ...f, model: "sonnet", minRemainingPercent: 0,
+      quota: async () => ({ state: "available", remainingPercent: 90 }), claude, clock: () => at, log: () => {} });
+    const ledgerPath = join(f.config.stateDir, "ci-fix", "ledger.json");
+
+    assert.equal((await pass(0)).outcome, "model_failed");
+    assert.equal(readLedger(ledgerPath)[f.sha].attempts, 1);
+    assert.equal((await pass(29 * minute)).outcome, "nothing_to_fix", "the first wait is 30 minutes");
+    assert.equal((await pass(30 * minute)).outcome, "model_failed");
+    assert.equal(readLedger(ledgerPath)[f.sha].outcome, "model_timeout");
+    assert.equal(readLedger(ledgerPath)[f.sha].attempts, 2);
+    assert.equal((await pass(89 * minute)).outcome, "nothing_to_fix", "the second wait is an hour");
+    assert.equal((await pass(90 * minute)).outcome, "model_failed");
+    // Many tries later the wait is six hours and the head is still tried.
+    let at = 90 * minute;
+    for (let i = 0; i < 6; i += 1) {
+      at += 6 * 60 * minute;
+      assert.equal((await pass(at)).outcome, "model_failed");
+    }
+    assert.equal(readLedger(ledgerPath)[f.sha].attempts, 9);
+    assert.equal((await pass(at + 6 * 60 * minute - 1)).outcome, "nothing_to_fix");
+    assert.equal((await pass(at + 6 * 60 * minute)).outcome, "model_failed");
+    // Once a try goes through, the loop ends with the patch queued.
+    const mended = () => ({ ok: true, timedOut: false, tail: "RESULT: transient" });
+    const done = await runCiFix({ ...f, model: "sonnet", minRemainingPercent: 0,
+      quota: async () => ({ state: "available", remainingPercent: 90 }), claude: mended, clock: () => at + 12 * 60 * minute, log: () => {} });
+    assert.equal(done.outcome, "no_change");
+    assert.equal(CI_FIX_MAX_LOG_CHARS > 240_000, true);
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
 });
 
 test("the report carries numbers, commit ids and fixed names only, newest first", () => {

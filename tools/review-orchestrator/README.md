@@ -19,11 +19,16 @@
   서버가 자르지 않습니다. scope는 SSH 명령 인자 하나로 오므로 전송 한계(RPC token 120,000자,
   scope 약 60,000바이트)만 남습니다. AMUX는 20,000자 안에서 보냅니다.
   지침 파일(AGENTS.md 등) 변경만 checkout이 base 판이라 prompt에 통째로 보여 줍니다.
-- **timeout은 끝이 아닙니다.** 시간을 넘긴 reviewer는 죽이고, 그 slot을 이미 시간을
-  넘긴 vendor와 이 job의 다른 slot이 쓰는 vendor를 뺀 채 대기열에 되돌립니다. 시도할
-  다른 vendor가 남지 않았을 때만 `unknown`(`timeout`)입니다. 운영자가 reviewer를 지정한
-  slot은 그대로 끝납니다. 비정상 종료, 서버 재시작은 여전히 `unknown`이고 재요청은
-  호출한 쪽이 정합니다.
+- **reviewer가 답하지 못한 것은 끝이 아닙니다.** 시간을 넘김(`timeout`)·출력 한도 초과·비정상 종료·실행
+  실패는 그 slot을 이미 실패한 vendor와 이 job의 다른 slot이 쓰는 vendor를 뺀 채 대기열에 되돌려
+  다른 vendor가 맡게 합니다. 시도할 vendor가 남지 않으면 제외 목록을 비우고 1분, 2분, 4분 …
+  최대 30분을 기다린 뒤 다시 돕니다(`unknown`으로 끝내지 않습니다). worktree 준비나 prompt 파일 쓰기처럼
+  이 서버의 문제는 vendor를 탓하지 않고 같은 방식으로 기다리기만 합니다. 운영자가 reviewer를 지정한
+  slot은 그 reviewer가 다시 맡습니다. 서버 재시작은 실행 중이던 slot을 그대로 대기열에 되돌려 처음부터
+  다시 돌리고, 배정할 수 있는 reviewer가 지금 없으면(provider를 껐거나 vendor가 모두 제외됨)
+  slot은 `unknown`으로 닫히지 않고 대기열에서 기다립니다. 대기열 길이에도 상한이 없습니다.
+  `unknown`은 reviewer가 답했지만 판정을 읽을 수 없을 때, 그리고 운영자가 `cancel`한 slot뿐입니다.
+- **운영자 결정 2026-11-16 (대화):** 검토 서버와 CI 자동 수정의 대기열 상한·재시작 unknown·배정 불가 unknown·head당 1회·라벨 재시도·48시간 폐기·전송 20회·시간당 상한을 없앴습니다. 실패는 다른 vendor나 backoff로 다시 돕니다.
 - **같은 reviewer만 반복되지 않게 합니다.** `submit --avoid-vendor <vendor>[,<vendor>]`는
   그 vendor를 피하라는 선호입니다. 다른 vendor의 provider가 있고 쓸 수 없는 상태가 아니면
   (바빠도 기다립니다) 피하고, 없으면 원래대로 배정하므로 검토가 불가능해지거나 멈추지
@@ -417,9 +422,9 @@ $RO status
 
 ## 서버 업데이트 (drain)
 
-재시작하면 실행 중이던 검토는 `unknown`(`orchestrator_restarted`)으로 닫히고, 쓰는 사람이
-많으면 서버가 비는 순간이 오지 않습니다. 그래서 **drain으로 새 배정을 멈추고, 실행 중인
-검토가 끝난 뒤** 재시작합니다. drain 중에도 요청은 받아서 대기열에 쌓이고, 잃지 않습니다.
+재시작하면 실행 중이던 검토는 끊겨서 대기열에 되돌아가 처음부터 다시 돕니다(`orchestrator_restarted`).
+쓰는 사람이 많으면 서버가 비는 순간이 오지 않고 끊긴 만큼 시간과 구독 quota를 다시 씁니다. 그래서
+**drain으로 새 배정을 멈추고, 실행 중인 검토가 끝난 뒤** 재시작합니다. drain 중에도 요청은 받아서 대기열에 쌓이고, 잃지 않습니다.
 drain 표시는 상태 폴더의 파일이라 재시작해도 남으므로, 마지막에 직접 풉니다.
 
 **서버의 관리 계정 bash.** 첫 줄은 이 창에서만 쓰는 변수입니다.
@@ -463,14 +468,17 @@ reviewer CLI는 자기 계정이 읽을 수 있는 파일을 모두 읽을 수 �
 읽을 수 없게 둡니다. 같은 구독 계정으로 로그인해도 그 세션은 따로 해지할 수 있고,
 SSH 키·다른 작업의 소스는 보이지 않습니다.
 
-## 디스크와 대기열 상한
+## 디스크 상한
+
+대기열 길이에는 상한이 없습니다(`maxPendingJobs`와 `queue_full`은 없어졌고, 옛 설정 파일에 남은 그 키는
+무시합니다). 아래는 이 서버의 디스크와 메모리를 지키는 값뿐입니다. 모델의 한도가 아닙니다. reviewer는 diff를 자기
+checkout에서 읽습니다.
 
 | 설정 | 기본값 | 넘으면 |
 |---|---|---|
-| `maxBundleBytes` | 50 MiB | 전송 중에 `bundle_too_large` |
-| `maxChangeBytes` | 200 MiB (압축 해제 기준 새 객체 총량) | worktree를 만들기 전에 `change_too_large` |
-| `maxPendingJobs` | 200 | `queue_full` |
-| `maxOutputBytes` / `maxStderrBytes` | 8 MiB / 1 MiB | stdout은 `unknown`, stderr는 앞부분만 보관 |
+| `maxBundleBytes` | 1 GiB | 전송 중에 `bundle_too_large` |
+| `maxChangeBytes` | 1 GiB (압축 해제 기준 새 객체 총량) | worktree를 만들기 전에 `change_too_large` |
+| `maxOutputBytes` / `maxStderrBytes` | 8 MiB / 1 MiB | stdout이 넘으면 reviewer를 죽이고 다른 vendor로 다시 보냅니다. stderr는 앞부분만 보관 |
 | `retentionDays` | 365 | 끝난 작업과 `refs/review/<id>`를 daemon이 한 시간마다 지움 |
 
 ## Agent office 상태 보고
@@ -583,7 +591,8 @@ sender를 업데이트할 때는 ④의 `curl` 두 줄과 `chmod`를 다시 실�
 이 저장소의 열린 PR이면 base·브랜치·draft와 상관없이, 그 PR에서 돈 CI(pull_request run)가 실패하면 이 서버의
 구독 Claude CLI가 가장 작은 수정을 만들고 `.github/workflows/pr-ci-auto-fix.yml`이 검사한 뒤
 그 PR 브랜치에 `auto-fix(ci):` 커밋 하나로 push합니다(API key 과금 없이 구독 quota를 씁니다,
-운영자 결정 2026-10-23). head 하나에 한 번만 시도하고, PR당 시도 횟수에는 상한이 없습니다.
+운영자 결정 2026-10-23). 시도 횟수에는 상한이 없습니다. 실행 쪽 사유로 끝난 시도(모델 실패·시간 초과, 오류, 게시되지
+않은 수정안, registry 무응답)는 사람이 라벨을 붙이지 않아도 서버가 알아서, 매번 더 늦춰 다시 시도합니다(아래 "다시 시도").
 
 **예외 없이 고칩니다(운영자 결정 2026-11-03).** 대상은 열린 PR 전부입니다(main으로 가는 PR, release·hotfix·Dependabot
 브랜치, draft 포함). 모델은 테스트, 삭제, `scripts/`, 정책·계약 문서, `package.json`·lock, 루트 설정, `.github/workflows`·`actions`까지
@@ -626,9 +635,9 @@ workflow 권한이 없으면 push가 거절됩니다.
 
 **보낸 수정의 확인.** 다음 pass가 PR의 새 head를 보고, 그것이 자동 수정 커밋(접두사가 맞고 부모가 시도한
 head)이면 ledger를 `pushed`로, 다른 무엇이 브랜치를 옮겼으면 `superseded`로 바꿉니다. 입장 화면의
-"push됨"은 `pushed`이고 그 자동 수정 커밋이 지금도 head일 때만 나옵니다(보고의 `settled`). 보낸 지 2시간이
-지나도 head가 그대로면 workflow가 거절했거나 push가 실패한 것으로 보고 `not_published`로 끝냅니다. 이 상태는
-다시 분석할 수 있고, 같은 head의 다른 종류 수정을 더 막지 않습니다.
+"push됨"은 `pushed`이고 그 자동 수정 커밋이 지금도 head일 때만 나옵니다(보고의 `settled`). 보낸 지 12시간이
+지나도 head가 그대로면 workflow가 거절했거나 push가 실패한 것으로 보고 `not_published`로 적습니다. 이 상태는
+서버가 알아서 다시 시도하고(아래 "다시 시도"), 같은 head의 다른 종류 수정을 더 막지 않습니다.
 
 **marketing admission manifest 재생성(기본 꺼짐, 켜려면 운영자 승인).** 모델은 명령을 실행할 수 없어
 `config/marketing-admission-code-manifest.json`의 digest를 만들 수 없습니다. 목록의 파일을 고친 PR은 그래서 `not_found`로 멈췄습니다(#3328).
@@ -667,7 +676,9 @@ head)이면 ledger를 `pushed`로, 다른 무엇이 브랜치를 옮겼으면 `s
   - lockfile은 브랜치의 것이라 임의의 경로로 가는 링크를 만들 수 있습니다. 그래서 설치 뒤 모델 앞에서 한 번 검사합니다.
     링크가 checkout 밖을 가리키거나(`link_outside`), hard link·특수 파일이 있으면 설치한 패키지를 지웁니다.
     패키지가 가진 지시 파일(`CLAUDE.md`, `.claude/` 등)은 지웁니다.
-  - 설치는 15분 안에 끝나야 합니다. 그래서 unit의 `TimeoutStartSec`가 65분입니다.
+  - 설치는 15분 안에 끝나야 합니다. 모델의 시간 제한은 provider의 `timeoutSeconds`(기본 7200초 = 2시간)이므로
+    unit의 `TimeoutStartSec`는 그 둘과 checkout·patch 작업까지 넘기는 150분입니다. systemd가 모델이 아직 일하는
+    pass를 먼저 죽이지 않게 하려는 값이라, `timeoutSeconds`를 7200보다 올리면 함께 올립니다.
   결과는 ledger의 `packages`(`installed` 또는 사유)와 로그 `packages not installed: …`에 남습니다.
   켜려면 갱신된 `pr-ci-auto-fix.service`를 ④처럼 다시 설치한 뒤, `read.env`에 한 줄을 더합니다.
   - **npm은 10 이상이어야 합니다**(CI는 npm 10.9). Ubuntu 패키지의 npm 9.2는 이 저장소 lockfile의 workspace를
@@ -690,8 +701,10 @@ head)이면 ledger를 `pushed`로, 다른 무엇이 브랜치를 옮겼으면 `s
 
 - **제안 pass(`bin/pr-ci-auto-fix.mjs`, `review` 계정, 5분마다 timer)**: GitHub를 **읽기 전용
   토큰**으로 읽고, 대상 PR을 하나 고르고, daemon이 마지막으로 읽은 Claude quota가
-  `PR_CI_AUTO_FIX_MIN_REMAINING_PERCENT`(기본 30) 이상일 때만 모델을 부릅니다. 한 시간에 6건
-  넘게 내보내지 않습니다(sender의 상한과 같아서 sender에서 기다리다 만료되는 요청이 없습니다).
+  `PR_CI_AUTO_FIX_MIN_REMAINING_PERCENT`(기본 30) 이상일 때만 모델을 부릅니다. 이 문턱은 구독 계정을 AMUX·검토와
+  나눠 쓰는 몫을 지키는 값입니다. pass 하나가 몇 시간까지 돌 수 있고 재시도가 저절로 반복되므로 계정의 나머지를
+  남겨 둡니다. 0으로 두면 문턱이 없어지고(`read.env`나 drop-in), 소진된 계정은 그래도 멈춥니다. 시간당 수정안 상한은
+  없습니다(sender의 전송 상한은 요청을 늦출 뿐 버리지 않습니다).
   로그를 읽지 못하면 시도로 치지 않고 다음 pass가 다시 합니다.
 - **모델이 받는 로그.** 실패한 job마다 로그 끝 16MB를 읽어, 실패를 말하는 줄만 앞뒤 몇 줄과 함께 뽑습니다.
   우선순위는 실패한 step의 마지막 출력(`##[error]Process completed with exit code N` 바로 위, 가까우면
@@ -700,8 +713,8 @@ head)이면 ledger를 `pushed`로, 다른 무엇이 브랜치를 옮겼으면 `s
   아니라서 뽑지 않습니다. step 출력을 맨 앞에 두는 것은 release record 검사나 `npm ci`처럼 결과를 평문으로만
   쓰는 실패가 다른 실패 줄을 남기지 않기 때문입니다(#3089·#2997, 2026-10-29). job 끝부분만 자르지 않습니다.
   실패 뒤에 이어지는 정리 단계 로그가 오류 줄을 밀어냈기 때문입니다(#3048, 2026-10-27). 실패 줄이 앞 job과
-  같은 job은 이름만 적습니다(실패 줄이 없으면 실패한 step 이름으로 비교합니다). 전체는 60,000자 안에서 job마다
-  몫을 나눕니다.
+  같은 job은 이름만 적습니다(실패 줄이 없으면 실패한 step 이름으로 비교합니다). 전체는 600,000자(구독 CLI의 200,000 token 문맥 안에 들어가는 크기이고, 비용 한도가 아닙니다) 안에서 job마다
+  몫을 나눕니다. 보통의 실패는 이보다 훨씬 작습니다.
 - **모델의 답.** 모델의 마지막 답이 서버 로그(`ci-fix: #PR model said: ...`)와 ledger의 `answer`에 남습니다.
   실행이 실패하면 stderr도 `stderr`에 남습니다. `no_change`의 이유는 여기서 봅니다.
   답의 마지막 줄 `RESULT: fixed|transient|outside_rules|not_found`는 ledger의 `reason`이 되고, 상태 보고로
@@ -710,14 +723,23 @@ head)이면 ledger를 `pushed`로, 다른 무엇이 브랜치를 옮겼으면 `s
   (`lib/ci-fix.mjs`, 프롬프트와 설치 경로)의 내용과, CI 수정이면 설치·manifest 스위치(`PR_CI_AUTO_FIX_INSTALL`, `PR_CI_AUTO_FIX_REGENERATE`)의 digest입니다.
   고치지 못했거나 검사에 거부된 head도, 그 뒤 능력이 바뀌면 라벨 없이 **한 번 더** 시도합니다. 스위치를
   켜거나 서버 checkout을 갱신한 경우입니다. 같은 능력으로는 다시 시도하지 않습니다. 보낸 수정은 대상이
-  아니고, 한 pass에 하나·시간당 상한·quota는 그대로입니다. 이 기록이 없던 예전 항목은 첫
+  아니고, 한 pass에 하나·quota 문턱은 그대로입니다. 이 기록이 없던 예전 항목은 첫
   갱신 뒤에 한 번 다시 시도합니다(운영자 결정 2026-11-02: 운영자가 라벨을 붙여야만 다시 시도하는 것은
   자동화가 아니다).
-- **다시 분석.** 같은 head는 같은 능력으로 한 번만 시도합니다. 운영자가 입장 화면에서 "다시 분석"을 누르면 입장 App이
-  PR의 `ci:fix-again` 라벨을 뗐다가 다시 붙이고, 다음 pass가 그 head를 **한 번 더** 시도합니다(ledger에 `retried`).
-  서버는 PR의 이벤트에서 라벨이 붙은 시각을 읽어, 그 head의 시도보다 **나중에** 붙은 라벨만 요청으로 봅니다.
-  그래서 예전 head에서 남은 라벨은 새 head를 다시 시도하게 하지 않습니다. 고치지 못함·분석 실패·검사 거부만
-  대상입니다. 입장 라운드는 보고에서 현재 head의 재시도가 시작된 것을 확인했을 때만 라벨을 뗍니다(보고가 없거나 기록이 빠진 것은 근거가 아닙니다).
+- **다시 시도(운영자 결정 2026-11-16, 횟수 상한 없음).** 시도가 끝난 사유에 따라 셋입니다.
+  - **저절로(`auto`).** `model_failed`·`model_timeout`·`error`·`not_published`·`digest_unresolved`와, 시작만 하고 끝을 못 적은
+    시도(pass가 죽음)는 head에 대해 아무것도 말해 주지 않으므로, 사람이 라벨을 붙이지 않아도 다시 시도합니다.
+    기다리는 시간은 시도마다 두 배입니다(30분, 1시간, 2시간, 4시간, 최대 6시간. ledger의 `attempts`).
+    죽은 시도는 1시간이 지난 뒤부터입니다. 한 번 더 시도하는 데 쓰는 것은 구독 quota뿐이고, quota 문턱이 그 총량을 막습니다.
+  - **모델의 답(`no_change`·`patch_refused`·`patch_too_large`)은 저절로 다시 시도하지 않습니다.** 같은 로그를 다시 읽으면
+    같은 답이 나오므로 시도마다 quota만 씁니다. 라벨이나 능력 변화(위)가 있을 때만 다시 시도합니다.
+  - **다시 분석(라벨, 횟수 제한 없음).** 운영자가 입장 화면에서 "다시 분석"을 누르면 입장 App이
+    PR의 `ci:fix-again` 라벨을 뗐다가 다시 붙이고, 다음 pass가 그 head를 다시 시도합니다(ledger에 `retried`, 그 시도에만).
+    서버는 PR의 이벤트에서 라벨이 붙은 시각을 읽어, 그 head의 **마지막** 시도보다 나중에 붙은 라벨만 요청으로 봅니다.
+    그래서 예전 head나 예전 시도에서 남은 라벨은 다시 시도하게 하지 않고, 몇 번이든 다시 누를 수 있습니다.
+    고치지 못함·분석 실패·검사 거부가 대상입니다. 입장 라운드는 보고에서 현재 head의 재시도가 **돌고 있는 것**
+    (`started`)을 확인했을 때만 라벨을 뗍니다(보고가 없거나 기록이 빠진 것, 끝난 시도는 근거가 아닙니다. 끝난 뒤에
+    운영자가 다시 눌렀을 수 있습니다). 라벨이 남아도 서버는 마지막 시도보다 새 라벨만 보므로 해롭지 않습니다.
 - **모델이 볼 수 있는 것.** 이 계정에는 구독 자격증명(`~/.claude/.credentials.json`)이 있고, 모델이
   만든 patch는 공개 브랜치로 push되므로, 읽힌 비밀은 되돌릴 수 없이 유출됩니다. 그래서:
   - 도구는 Read/Edit/Write/Grep/Glob뿐이고 shell·MCP·네트워크는 막혀 있습니다.
@@ -735,9 +757,13 @@ head)이면 ledger를 `pushed`로, 다른 무엇이 브랜치를 옮겼으면 `s
 - **sender(`bin/pr-ci-auto-fix-sender.mjs`, systemd `DynamicUser`)**: workflow를 dispatch할 수
   있는 유일한 토큰을 갖습니다. Node 내장 모듈만 쓰는 파일 하나이고, 운영자가 GitHub main에서
   root 소유 경로로 받습니다. outbox 파일은 `review` 계정이 쓰므로 필드 단위로 다시 만들고,
-  요청 하나에 한 번(head와 생성 시각으로 기록합니다. POST 전에 기록하므로 결과를 모르는 요청도 다시
-  보내지 않습니다), head 하나에 최대 4건(CI 수정·충돌 해결 × 첫 시도·다시 분석), 한 시간에 최대 6건
-  보냅니다. 예전 sender가 head만으로 남긴 기록은 그 시각 이전에 만든 요청을 보낸 것으로 봅니다. 6시간이 지난 요청은 로그 한 줄을 남기고 버립니다.
+  GitHub가 받을 때까지 요청 하나를 보냅니다(head와 생성 시각으로 기록합니다). POST 전에 기록하므로 시간 초과, 연결 끊김,
+  5xx처럼 결과를 모르는 요청(run이 시작됐을 수도 있음)은 다시 보내지 않고(제안 쪽이 head가 그대로인 것을 보고 `not_published`로
+  새 요청을 만듭니다), GitHub가 4xx로 **거절한** 요청(run이 시작되지 않음)만 기록에서 빼고 1분, 2분, 4분 … 최대 30분 간격으로
+  outbox에 있는 동안 계속 다시 보냅니다. 오래된 요청을 버리지 않고
+  head당 전송 횟수 상한도 없습니다. 남은 상한은 한 시간에 최대 60건이며 이것은 늦출 뿐 버리지 않습니다(outbox를 쓰는 `review` 계정이
+  위조해도 이 계정이 보낼 수 있는 양의 한계입니다). 예전 sender가 head만으로 남긴 기록은 그 시각 이전에 만든 요청을 보낸 것으로 봅니다.
+  outbox의 30일 지난 파일은 제안 pass가 지웁니다(디스크 정리일 뿐, 보내는 쪽의 마감이 아닙니다).
 - **판단의 경계는 workflow입니다.** dispatch 입력을 믿지 않고 GitHub 기록으로 다시 확인합니다
   (PR이 그 head에서 열려 있고 브랜치가 이 저장소의 것인지, 넘겨받은 run이 그 커밋에서 실패한 pull_request run이면서 그 workflow의
   최신 run인지 — reopen 등으로 같은 커밋에 새로 돈 green run이 있으면 거절합니다 —, 충돌이면 base 커밋이 PR의 base 브랜치에 있는지). 그 뒤 `scripts/pr-ci-auto-fix-guard.mjs`가 patch를 검사하고

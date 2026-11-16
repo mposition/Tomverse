@@ -8,6 +8,7 @@ import test from "node:test";
 import {
   attributedPathMatcher,
   checkListing,
+  DIFF_EDIT_BUDGET,
   diffLines,
   gitObjectId,
   resultListingFromChanges,
@@ -622,10 +623,12 @@ test("a diff is counted exactly within its budget and read whole past it", () =>
     assert.equal(built.ok, true);
     return { entry: built.entries[0], after };
   };
-  const within = build(400);
-  assert.equal(within.entry.addedLines + within.entry.removedLines, 800);
-  const past = build(600);
-  assert.equal(past.entry.addedLines, 600);
-  assert.equal(past.entry.removedLines, 600);
+  // Every line differs, so the edits are twice the line count.
+  const within = build(DIFF_EDIT_BUDGET / 2 - 100);
+  assert.equal(within.entry.addedLines + within.entry.removedLines, DIFF_EDIT_BUDGET - 200);
+  assert.notEqual(within.entry.addedText, within.after);
+  const past = build(DIFF_EDIT_BUDGET / 2 + 100);
+  assert.equal(past.entry.addedLines, DIFF_EDIT_BUDGET / 2 + 100);
+  assert.equal(past.entry.removedLines, DIFF_EDIT_BUDGET / 2 + 100);
   assert.equal(past.entry.addedText, past.after);
 });

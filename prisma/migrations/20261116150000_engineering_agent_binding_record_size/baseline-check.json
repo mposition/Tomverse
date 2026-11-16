@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "migrationSqlSha256": "1304626ad8df6aeec5cc03e0ca5e26b21fb6fa40fdccef7f1fc24a9c96a6f81a",
+  "replacedChecks": [
+    {
+      "table": "EngineeringAgentBinding",
+      "constraint": "EngineeringAgentBinding_snapshot_check",
+      "previousDefinitionSha256": "3ef75756ce5d317ad2d4d1c5a573e5bb3977f753bc1b857de9fe9c2fe2fcf7f2"
+    },
+    {
+      "table": "EngineeringAgentBinding",
+      "constraint": "EngineeringAgentBinding_approvalObservation_check",
+      "previousDefinitionSha256": "52b31cf28df4386bb1915970a5bf960c53b43981b25f0c3ffbde9e1ba3f3b791"
+    },
+    {
+      "table": "EngineeringAgentBinding",
+      "constraint": "EngineeringAgentBinding_mergeObservation_check",
+      "previousDefinitionSha256": "c322af150d0ad5c762c231e933f1380b281c162079120ae144b6a9e4d733211a"
+    }
+  ]
+}

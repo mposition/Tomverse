@@ -8,8 +8,11 @@
  * request in the line, what became of the try on its current head.
  *
  * The operator's "Analyse again" puts CI_FIX_AGAIN_LABEL on the pull
- * request; the server tries that head once more, and the admission round
- * takes the label off once the report shows the retry. Pure.
+ * request; the server tries that head again (as often as it is asked), and
+ * the admission round takes the label off once the report shows the retry
+ * running. A try that failed for a reason about the run, not the head (the
+ * model failed or timed out, the fix was never published), the server tries
+ * again by itself, later each time, so the button is for the rest. Pure.
  */
 // Types only: the Admin screen imports this module, and the status core holds node:crypto.
 import type { ReviewStatusSnapshot, StoredReviewStatus } from "./reviewOrchestratorStatusCore.ts";
@@ -83,11 +86,11 @@ export function ciFixView(stored: StoredReviewStatus | null, nowMs: number, stal
  * - failed: the model run failed or timed out;
  * - refused: the fix broke a rule here (a secret, a binary) or did not fit;
  * - not_published: the fix was sent but never became the head (the workflow
- *   refused it, the push failed or it expired);
- * - exhausted: two auto-fix commits already, no more tries.
- * A try on an older head says nothing unless it was the fix that moved it.
+ *   refused it or the push failed).
+ * No count ends the tries. A try on an older head says nothing unless it was
+ * the fix that moved it.
  */
-export type CiFixState = "analysing" | "sent" | "pushed" | "not_fixed" | "failed" | "refused" | "not_published" | "exhausted";
+export type CiFixState = "analysing" | "sent" | "pushed" | "not_fixed" | "failed" | "refused" | "not_published";
 
 /** tools/review-orchestrator/lib/ci-fix.mjs: a try started this long ago and never ended crashed. */
 export const CI_FIX_STARTED_STALE_MS = 3_600_000;
@@ -108,14 +111,14 @@ export function ciFixState(fix: CiFixTry | undefined, headSha: string, nowMs: nu
     case "model_timeout":
     case "error":
     case "unknown":
+    // Recorded by a server that stopped after two fixes; this one tries such a head again.
+    case "attempts_exhausted":
       return "failed";
     case "patch_refused":
     case "patch_too_large":
       return "refused";
     case "not_published":
       return "not_published";
-    case "attempts_exhausted":
-      return "exhausted";
     case "pushed":
     case "superseded":
       // Settled only once the head moved: not this head's state.
@@ -123,19 +126,21 @@ export function ciFixState(fix: CiFixTry | undefined, headSha: string, nowMs: nu
   }
 }
 
-/** Whether "Analyse again" can help: the current head was tried, not fixed, and not retried yet. */
+/** Whether "Analyse again" can help: the current head was tried and not fixed. It can be asked again after every try. */
 export function ciFixRetryable(fix: CiFixTry | undefined, headSha: string, nowMs: number): boolean {
   const state = ciFixState(fix, headSha, nowMs);
-  return fix !== undefined && !fix.retried && (state === "not_fixed" || state === "failed" || state === "refused" || state === "not_published");
+  return fix !== undefined && (state === "not_fixed" || state === "failed" || state === "refused" || state === "not_published");
 }
 
 /**
  * Open pull requests whose "try again" label has done its work: the report
- * shows the retry started on their current head. Only that confirmation
- * takes a label off -- a report that is missing, unread or lacks the entry
- * says nothing, and the operator's request stays. A label left on from an
- * earlier head is harmless: the server acts only on one put on after the
- * head's try, and "Analyse again" puts it on afresh.
+ * shows the label's retry running on their current head. Only that
+ * confirmation takes a label off -- a report that is missing, unread or lacks
+ * the entry says nothing, and the operator's request stays. A finished retry
+ * is not taken as confirmation: the operator may have asked again since, and
+ * that ask must reach the server. A label left on is harmless: the server acts
+ * only on one put on after the head's latest try, and "Analyse again" puts
+ * it on afresh.
  */
 export function ciFixLabelsToClear(
   pulls: readonly { number: number; headSha: string; labels?: readonly string[] }[],
@@ -145,7 +150,7 @@ export function ciFixLabelsToClear(
     .filter((pull) => (pull.labels ?? []).includes(CI_FIX_AGAIN_LABEL))
     .filter((pull) => {
       const fix = view.byPull[pull.number];
-      return fix !== undefined && fix.head === pull.headSha && fix.retried;
+      return fix !== undefined && fix.head === pull.headSha && fix.retried && fix.outcome === "started";
     })
     .map((pull) => pull.number);
 }

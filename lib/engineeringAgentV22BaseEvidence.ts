@@ -4,8 +4,7 @@ import { createHash } from "node:crypto";
 import { lstat, readFile } from "node:fs/promises";
 import { resolve, sep } from "node:path";
 
-import { CONVENTION_VERSIONS, isCanonicalRepoPath } from
-  "@/lib/agentAuthorityFiles";
+import { isCanonicalRepoPath } from "@/lib/agentAuthorityFiles";
 import type { TreeEntry } from "@/lib/engineeringAgentTreeVerify";
 import { gitObjectId } from "@/lib/engineeringAgentTreeVerify";
 import type { WorkflowFile } from "@/lib/agentCredentialReachability";
@@ -98,8 +97,6 @@ export async function loadEngineeringAgentV22BaseEvidence(input: {
 }): Promise<{
   baseFiles: { path: string; text: string }[];
   workflows: WorkflowFile[];
-  installedVersions: Record<keyof typeof CONVENTION_VERSIONS,
-    string | null>;
   policyDocuments: string[];
   /** Names the `.dockerignore` blob the exclusion was read from. */
   exclusionDigest: string;
@@ -110,7 +107,6 @@ export async function loadEngineeringAgentV22BaseEvidence(input: {
   const baseFiles: { path: string; text: string }[] = [];
   const workflows: WorkflowFile[] = [];
   const policyDocuments: string[] = [];
-  let lockText: string | null = null;
   const baseBytes = async (entry: TreeEntry): Promise<Uint8Array | null> => {
     const path = resolve(root, entry.path);
     if (!path.startsWith(`${root}${sep}`)) return null;
@@ -197,22 +193,13 @@ export async function loadEngineeringAgentV22BaseEvidence(input: {
         entry.path === "scripts/security-regression-check.mjs" ||
         /^docs\/(?:policy|ui-contracts)\//.test(entry.path))
       policyDocuments.push(text);
-    if (entry.path === "package-lock.json") lockText = text;
   }
-  if (lockText === null || !baseFiles.some((file) =>
-    file.path === "tsconfig.json")) return null;
-  let lock: { packages?: Record<string, { version?: string }> };
-  try { lock = JSON.parse(lockText); }
-  catch { return null; }
+  if (!baseFiles.some((file) => file.path === "tsconfig.json")) return null;
   return { baseFiles, workflows, policyDocuments,
     exclusionDigest: createHash("sha256").update(JSON.stringify({
       // v2: test helpers the image leaves out are read (gate slice, 2026-10-29).
       format: "engineering-agent-v22-deploy-exclusion-v2",
       dockerIgnoreOid: ignoreEntry.oid,
     })).digest("hex"),
-    installedVersions: Object.fromEntries(
-      Object.keys(CONVENTION_VERSIONS).map((name) => [name,
-        lock.packages?.[`node_modules/${name}`]?.version ?? null]),
-    ) as Record<keyof typeof CONVENTION_VERSIONS, string | null>,
   };
 }

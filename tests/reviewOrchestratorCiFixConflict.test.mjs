@@ -24,7 +24,7 @@ import {
   writeDispatchRequest,
 } from "../tools/review-orchestrator/lib/ci-fix.mjs";
 import { validateConfig } from "../tools/review-orchestrator/lib/config.mjs";
-import { MAX_SENDS_PER_HEAD, createDispatchSender, dispatchInputs, normaliseDispatchRequest } from "../tools/review-orchestrator/bin/pr-ci-auto-fix-sender.mjs";
+import { createDispatchSender, dispatchInputs, normaliseDispatchRequest } from "../tools/review-orchestrator/bin/pr-ci-auto-fix-sender.mjs";
 import {
   PR_CI_AUTO_FIX_CONFLICT_PREFIX,
   judgePrCiAutoFixConflict,
@@ -336,7 +336,7 @@ test("one head carries one request: a conflict waits while a CI fix for that hea
   }
 });
 
-test("the real sender sends a head's first request and, when it was not published, the operator's retry", async () => {
+test("the real sender sends a head's first request and, when it was not published, the automatic retry", async () => {
   const f = conflictFixture();
   const stateDir = mkdtempSync(join(tmpdir(), "ci-fix-sender-state-"));
   try {
@@ -373,17 +373,11 @@ test("the real sender sends a head's first request and, when it was not publishe
     assert.equal(posts.length, 1);
     assert.equal(posts[0].kind, "conflict");
 
-    // The workflow refused it: two hours on, the head has not moved.
+    // The workflow refused it: twelve hours on, the head has not moved. Nobody
+    // asks: the pass sees the fix was not published and tries the head again.
     clock += CI_FIX_PUBLISH_WAIT_MS + 60_000;
-    assert.equal((await proposerPass()).outcome, "nothing_to_fix", "no second try without the operator");
-    const ledger = readLedger(join(f.config.stateDir, "ci-fix", "ledger.json"));
-    assert.equal(ledger[`${f.head}:conflict`].outcome, "not_published");
-
-    // "Analyse again": the same head, a new request, and the sender sends it.
-    labels = [{ name: "ci:fix-again" }];
-    labelledAt = clock;
-    clock += 60_000;
-    assert.equal((await proposerPass()).outcome, "queued");
+    assert.equal((await proposerPass()).outcome, "queued", "a fix that was never published is tried again by itself");
+    assert.equal(readLedger(join(f.config.stateDir, "ci-fix", "ledger.json"))[`${f.head}:conflict`].attempts, 2);
     await sender.scanOnce();
     assert.equal(posts.length, 2, "a new request for the same head is sent");
     await sender.scanOnce();
@@ -427,7 +421,7 @@ test("every request the sender accepts keeps its key through the sent ledger", a
   }
 });
 
-test("the sender sends each request once, honours an older sender's record, and caps a head", async () => {
+test("the sender sends each request once, honours an older sender's record, and puts no cap on a head", async () => {
   const outbox = mkdtempSync(join(tmpdir(), "ci-fix-cap-outbox-"));
   const stateDir = mkdtempSync(join(tmpdir(), "ci-fix-cap-state-"));
   try {
@@ -452,7 +446,7 @@ test("the sender sends each request once, honours an older sender's record, and 
       request(now - 4000 + index * 100);
       await sender().scanOnce();
     }
-    assert.equal(posts, MAX_SENDS_PER_HEAD - 1, "with the older record, the cap in all for the head");
+    assert.equal(posts, 24, "every new request for the head goes out; only the older sender's record is honoured");
   } finally {
     rmSync(outbox, { recursive: true, force: true });
     rmSync(stateDir, { recursive: true, force: true });

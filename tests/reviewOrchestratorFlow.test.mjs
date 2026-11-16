@@ -353,21 +353,104 @@ test("a reviewer past its timeout is killed and another vendor reviews instead",
   }
 });
 
-test("a job ends unknown on a timeout only once every other vendor has timed out too", async () => {
+// Owner decision 2026-11-16: a job never ends unknown because reviewers failed.
+// Once every vendor has timed out, the slot waits (longer each time) and goes
+// round the vendors again.
+test("a job whose every vendor timed out waits with a growing delay and is tried again", async () => {
   const f = fixture({ claude: "sleep", cursor: "sleep" }, { cursor: { timeoutSeconds: 1, priority: 1 } });
   try {
     f.config.providers.find((p) => p.id === "claude").timeoutSeconds = 1;
     f.commit("a.txt", "five again\n");
     const { jobId } = JSON.parse(f.client("submit", "--author", "codex", "--repo", "demo").stdout);
+    const store = new Store(f.config.stateDir);
     const orchestrator = new Orchestrator(f.config);
-    for (let round = 0; round < 3; round += 1) {
+    for (let round = 0; round < 2; round += 1) {
       orchestrator.tick(allAvailable(f.config));
       await orchestrator.idle();
     }
+    const waiting = store.readSlot(jobId, 0);
+    assert.equal(waiting.status, "queued", "the job is not closed as unknown");
+    assert.deepEqual(waiting.excludeVendors, [], "every vendor may be tried again");
+    assert.equal(waiting.retriedAfter, "timeout");
+    assert.equal(waiting.attempts, 2);
+    assert.ok(waiting.notBefore > Date.now() + 60_000, "the slot waits before the next round");
+    // Until the delay has passed nothing is assigned.
+    assert.deepEqual(orchestrator.tick(allAvailable(f.config)), []);
+    // After it, the slot goes out again. A vendor that fails it is skipped
+    // for an immediate try on the other; once both have failed, the delay grows.
+    const clock = Date.now() + 10 * 60_000;
+    const later = new Orchestrator(f.config, { now: () => clock });
+    for (const expected of [{ attempts: 3, delayed: false }, { attempts: 4, delayed: true }]) {
+      assert.equal(later.tick(allAvailable(f.config)).length, 1);
+      await later.idle();
+      const slot = store.readSlot(jobId, 0);
+      assert.equal(slot.status, "queued");
+      assert.equal(slot.attempts, expected.attempts);
+      assert.equal(slot.notBefore !== undefined, expected.delayed);
+      if (expected.delayed) assert.equal(slot.notBefore - clock, 8 * 60_000, "the second wait is four times the first (1, 2, 4 ... minutes)");
+    }
+    assert.equal(JSON.parse(f.client("wait", jobId).stdout).status, "pending");
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("a reviewer that exits with an error is retried on another vendor", async () => {
+  const f = fixture({ claude: "fail", cursor: "accept" }, { cursor: { priority: 1 } });
+  try {
+    f.config.providers.find((p) => p.id === "claude").priority = 2;
+    f.commit("a.txt", "five exit\n");
+    const { jobId } = JSON.parse(f.client("submit", "--author", "codex", "--repo", "demo").stdout);
+    const store = new Store(f.config.stateDir);
+    const orchestrator = new Orchestrator(f.config);
+    // Make the failing vendor the first pick, whatever the default ordering.
+    const first = orchestrator.tick({ claude: { state: "available" }, cursor: { state: "blocked" }, codex: { state: "blocked" } });
+    assert.equal(first.length, 1);
+    await orchestrator.idle();
+    const queued = store.readSlot(jobId, 0);
+    assert.deepEqual([queued.status, queued.excludeVendors, queued.retriedAfter], ["queued", ["anthropic"], "reviewer_exit_3"]);
+    orchestrator.tick(allAvailable(f.config));
+    await orchestrator.idle();
     const summary = JSON.parse(f.client("wait", jobId).stdout);
-    assert.equal(summary.status, "unknown");
-    assert.equal(summary.reviews[0].reason, "timeout");
-    assert.equal(summary.reviews[0].vendor, "xai", "the second vendor was tried before giving up");
+    assert.equal(summary.status, "accept");
+    assert.equal(summary.reviews[0].vendor, "xai");
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("a worktree failure blames no vendor and only waits before the next try", async () => {
+  const f = fixture({ claude: "accept" });
+  try {
+    f.commit("a.txt", "five worktree\n");
+    const { jobId } = JSON.parse(f.client("submit", "--author", "codex", "--repo", "demo").stdout);
+    const store = new Store(f.config.stateDir);
+    const orchestrator = new Orchestrator(f.config);
+    const job = store.readJob(jobId).job;
+    orchestrator.tick({ claude: { state: "available" }, cursor: { state: "blocked" }, codex: { state: "blocked" } });
+    await orchestrator.idle();
+    // The stand-in head is real, so the first run finishes; run the failure path directly.
+    const slot = { index: 0, status: "running", provider: "claude", vendor: "anthropic", assignedAt: 1 };
+    store.writeSlot(jobId, slot);
+    orchestrator.finish(job, slot, { verdict: "unknown", reason: "worktree_failed", findings: [] });
+    const waiting = store.readSlot(jobId, 0);
+    assert.deepEqual([waiting.status, waiting.excludeVendors, waiting.retriedAfter, waiting.attempts],
+      ["queued", [], "worktree_failed", 1]);
+    assert.ok(waiting.notBefore > Date.now());
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("a reviewer's own unparseable answer is still a closed unknown, not a retry", async () => {
+  const f = fixture({ claude: "garbage" });
+  try {
+    f.commit("a.txt", "five garbage\n");
+    const { jobId } = JSON.parse(f.client("submit", "--author", "codex", "--repo", "demo").stdout);
+    const orchestrator = new Orchestrator(f.config);
+    orchestrator.tick({ claude: { state: "available" }, cursor: { state: "blocked" }, codex: { state: "blocked" } });
+    await orchestrator.idle();
+    assert.equal(new Store(f.config.stateDir).readSlot(jobId, 0).status, "done");
   } finally {
     f.cleanup();
   }
@@ -404,7 +487,8 @@ test("the reviewer reads the whole diff from its checkout, sees the whole scope 
   }
 });
 
-test("a slot left running by a dead daemon is closed as unknown on restart", async () => {
+// Owner decision 2026-11-16: a restart cut the review off; it did not answer.
+test("a slot left running by a dead daemon goes back to the queue on restart and is reviewed again", async () => {
   const f = fixture({ claude: "accept" });
   try {
     f.commit("a.txt", "seven\n");
@@ -413,9 +497,50 @@ test("a slot left running by a dead daemon is closed as unknown on restart", asy
     store.writeSlot(jobId, { index: 0, status: "running", provider: "claude", vendor: "anthropic", assignedAt: Date.now() });
     const orchestrator = new Orchestrator(f.config);
     assert.equal(orchestrator.recoverOrphans(), 1);
-    assert.deepEqual(orchestrator.tick(allAvailable(f.config)), []);
+    const queued = store.readSlot(jobId, 0);
+    assert.deepEqual([queued.status, queued.retriedAfter, queued.notBefore, queued.excludeVendors], ["queued", "orchestrator_restarted", undefined, []]);
+    orchestrator.tick(allAvailable(f.config));
+    await orchestrator.idle();
     const summary = JSON.parse(f.client("wait", jobId).stdout);
-    assert.equal(summary.reviews[0].reason, "orchestrator_restarted");
+    assert.equal(summary.status, "accept");
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("a slot nobody can take right now waits in the queue instead of closing as unknown", async () => {
+  const f = fixture({ claude: "accept" });
+  try {
+    f.commit("a.txt", "seven wait\n");
+    const { jobId } = JSON.parse(f.client("submit", "--author", "codex", "--repo", "demo").stdout);
+    const store = new Store(f.config.stateDir);
+    const disabled = validateConfig({ ...JSON.parse(readFileSync(f.configPath, "utf8")),
+      providers: JSON.parse(readFileSync(f.configPath, "utf8")).providers.map((p) => ({ ...p, enabled: false })) });
+    const idle = new Orchestrator(disabled);
+    assert.deepEqual(idle.tick(allAvailable(disabled)).filter((d) => d.kind === "assign"), []);
+    assert.equal(store.readSlot(jobId, 0).status, "queued");
+    // A provider enabled later picks the slot up.
+    const orchestrator = new Orchestrator(f.config);
+    orchestrator.tick(allAvailable(f.config));
+    await orchestrator.idle();
+    assert.equal(JSON.parse(f.client("wait", jobId).stdout).status, "accept");
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("reviewers stopped by the daemon's own shutdown go back to the queue", async () => {
+  const f = fixture({ claude: "sleep" });
+  try {
+    f.commit("a.txt", "seven stop\n");
+    const { jobId } = JSON.parse(f.client("submit", "--author", "codex", "--repo", "demo").stdout);
+    const orchestrator = new Orchestrator(f.config);
+    orchestrator.tick({ claude: { state: "available" }, cursor: { state: "blocked" }, codex: { state: "blocked" } });
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    orchestrator.killAll();
+    await orchestrator.idle();
+    const slot = new Store(f.config.stateDir).readSlot(jobId, 0);
+    assert.deepEqual([slot.status, slot.retriedAfter, slot.excludeVendors], ["queued", "orchestrator_restarted", []]);
   } finally {
     f.cleanup();
   }
@@ -471,18 +596,21 @@ test("a bundle over the size cap is refused while streaming and leaves nothing b
   }
 });
 
-test("a late result does not overwrite a slot a restart already closed", async () => {
+test("a late result does not overwrite a slot a restart already put back in the queue", async () => {
   const f = fixture({ claude: "accept" });
   try {
     f.commit("a.txt", "eight\n");
     const { jobId } = JSON.parse(f.client("submit", "--author", "codex", "--repo", "demo").stdout);
     const orchestrator = new Orchestrator(f.config);
     orchestrator.tick(allAvailable(f.config));
-    // Another process closes the slot while the review is still running.
+    // Another process requeues the slot while the review is still running.
     new Orchestrator(f.config).recoverOrphans();
     await orchestrator.idle();
-    const summary = JSON.parse(f.client("wait", jobId).stdout);
-    assert.equal(summary.reviews[0].reason, "orchestrator_restarted");
+    const slot = new Store(f.config.stateDir).readSlot(jobId, 0);
+    assert.deepEqual([slot.status, slot.retriedAfter], ["queued", "orchestrator_restarted"], "the stale answer is dropped");
+    orchestrator.tick(allAvailable(f.config));
+    await orchestrator.idle();
+    assert.equal(JSON.parse(f.client("wait", jobId).stdout).status, "accept");
   } finally {
     f.cleanup();
   }
