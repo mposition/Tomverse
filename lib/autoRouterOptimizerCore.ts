@@ -170,6 +170,11 @@ export type OptimizerComparison = {
     b: string | null;
     verdict: "a" | "b" | "tie" | "undecided" | "no_alternative" | "unrouted";
     judged?: [JudgeWinner | null, JudgeWinner | null];
+    /**
+     * How long each side's admitted answer took on the same message, so a
+     * model's latency is read next to its verdict; null when none was admitted.
+     */
+    answerMs?: { a: number | null; b: number | null };
 };
 
 export type OptimizerRecommendationKind = "guidance" | "code" | "setting";
@@ -1398,6 +1403,7 @@ export async function runOptimizerCycle(
     // the direct comparison and the replay comparison below ask for the same
     // ones whenever the proposal picks the direct challenger, and pay once.
     const answers = new Map<string, Promise<string | null>>();
+    const answerMs = new Map<string, number>();
     const noteAnswer = (modelId: string, answered: boolean) => {
         const stats = answerStats.get(modelId) ?? { answered: 0, failed: 0 };
         if (answered) stats.answered += 1;
@@ -1415,8 +1421,11 @@ export async function runOptimizerCycle(
             const attempt = () =>
                 call("answer", async () => {
                     try {
+                        const startedAt = Date.now();
                         const result = await deps.answer(modelId, turn);
-                        noteAnswer(modelId, admitOptimizerAnswer(result.value) !== null);
+                        const admitted = admitOptimizerAnswer(result.value) !== null;
+                        noteAnswer(modelId, admitted);
+                        if (admitted) answerMs.set(key, Date.now() - startedAt);
                         return result;
                     } catch (error) {
                         noteAnswer(modelId, false);
@@ -1526,7 +1535,9 @@ export async function runOptimizerCycle(
             );
             if (!b) return { kind, a, b: null, verdict: "no_alternative" };
             const [answerA, answerB] = await Promise.all([answerOf(decision, a), answerOf(decision, b)]);
-            if (!answerA || !answerB) return { kind, a, b, verdict: "undecided" };
+            const msOf = (modelId: string) => answerMs.get(JSON.stringify([decision.id, modelId])) ?? null;
+            const timed = { answerMs: { a: msOf(a), b: msOf(b) } };
+            if (!answerA || !answerB) return { kind, a, b, verdict: "undecided", ...timed };
             const judged = await judgeOf(decision, { modelId: a, answer: answerA }, { modelId: b, answer: answerB });
             const verdict = judgedVerdict(judged);
             return {
@@ -1535,6 +1546,7 @@ export async function runOptimizerCycle(
                 b,
                 verdict: verdict === "incumbent" ? "a" : verdict === "candidate" ? "b" : verdict,
                 judged,
+                ...timed,
             };
         }),
         AUTO_ROUTER_OPTIMIZER_CONCURRENCY

@@ -115,12 +115,17 @@ export function ChatWelcomeScreen({
             <span className="min-w-0 truncate">{disclosureLabel}</span>
           </button>
         )}
+        {/*
+          `min-h-16` replaces the flex item's automatic minimum height, so
+          without `shrink-0` a short phone squeezed the card below its content
+          and the wrapped second line of the hint fell past the bottom edge.
+        */}
         {session?.user && canImport && product === "chat" && (
           <Link
             onClick={() => rememberSettingsReturnProduct(product)}
             href="/settings/imports/new"
             data-testid="chat-import-entry"
-            className="mt-4 flex min-h-16 w-full items-center gap-3 rounded-2xl border border-zinc-200 bg-white p-4 text-left text-zinc-900 transition hover:border-blue-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+            className="mt-4 flex min-h-16 w-full shrink-0 items-center gap-3 rounded-2xl border border-zinc-200 bg-white p-4 text-left text-zinc-900 transition hover:border-blue-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
           >
             <FolderInput size={20} className="shrink-0 text-blue-600 dark:text-blue-400" aria-hidden="true" />
             <span className="min-w-0 flex-1">
