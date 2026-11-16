@@ -100,10 +100,10 @@ test("exact Max claim, stop and repository pin prepare one local checkout", asyn
     ]);
   }));
 
-test("recovered claim and mismatched identity refuse without a network call", async () =>
+test("a malformed recovered flag and mismatched identity refuse without a network call", async () =>
   withEnvironment(async () => {
     let calls = 0;
-    for (const rejected of [{ ...claim, recovered: true },
+    for (const rejected of [{ ...claim, recovered: "true" },
       { ...claim, claimId: identity.ideaId }]) {
       assert.deepEqual(await prepareAmuxV19MaxTrackedCheckout({ origin,
         identity, claim: rejected, referenceOrdinal: 0,
@@ -307,7 +307,7 @@ test("claimed dispatch resolves every reference before the default-closed host",
         path.endsWith("/checkout-reference")).length, 2);
       calls.length = 0;
       assert.deepEqual(await runAmuxV19MaxClaimedTrackedCheckoutOnce({
-        ...input, claim: { ...claim, recovered: true },
+        ...input, claim: { ...claim, recovered: "true" },
       }), { kind: "refused", reason: "prepare_refused", cliStarted: false,
         beforeCli: true });
       assert.equal(calls.length, 0);
