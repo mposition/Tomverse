@@ -5,7 +5,7 @@
  * plan approval or recovery proof: a failed or vanished run is simply tried
  * again, and the irreversible boundaries are kept by
  * - the daily attempt limit below, for spending (the lane may run on a paid
- *   API key), and a stop for an idea whose runs keep failing the same way,
+ *   API key); a failed idea is not dropped but asked again after a backoff,
  * - the PR being a draft that a person reviews and merges.
  *
  * Pure: the service (ideaLaneService.ts) reads the attempts, this decides.
@@ -19,12 +19,18 @@ export const AMUX_IDEA_LANE_DAILY_ENV = "AMUX_IDEA_LANE_MAX_ATTEMPTS_PER_DAY";
  * use before the lane gives up on it, whatever their outcomes. */
 export const AMUX_IDEA_LANE_MAX_ATTEMPTS = 3;
 /**
- * Owner direction 2026-11-15: a part of an idea is retried until its newest
- * runs ended in the same failure this many times in a row (a run that never
- * reported counts as lease_expired). A different failure is a new problem and
- * is tried again; the daily limit still bounds what all of them spend.
+ * Owner direction 2026-11-16: a part of an idea is never given up on for
+ * failing. After a run that ended without a PR (a run that never reported
+ * counts as lease_expired and ends at its lease) the part waits 5 minutes,
+ * doubling with each failure in a row up to 24 hours, then is queued again.
+ * The daily attempt limit still bounds what all of them spend.
  */
-export const AMUX_IDEA_LANE_REPEATED_FAILURE_STOP = 3;
+export const AMUX_IDEA_LANE_BACKOFF_BASE_MS = 5 * 60_000;
+export const AMUX_IDEA_LANE_BACKOFF_MAX_MS = 24 * 60 * 60_000;
+/** The wait after `failures` failed runs in a row (0 before any). */
+export const amuxIdeaLaneBackoffMs = (failures: number): number =>
+  failures < 1 ? 0 : Math.min(AMUX_IDEA_LANE_BACKOFF_MAX_MS,
+    AMUX_IDEA_LANE_BACKOFF_BASE_MS * 2 ** Math.min(failures - 1, 30));
 export const AMUX_IDEA_LANE_DEFAULT_DAILY_ATTEMPTS = 10;
 /**
  * The workflow's implement (150 min) and publish (10 min) timeouts plus an hour
@@ -53,6 +59,8 @@ export function amuxIdeaLaneDailyAttempts(env: NodeJS.ProcessEnv = process.env):
 
 export type AmuxIdeaLaneAttemptFact = {
   claimedAtMs: number; leaseUntilMs: number; outcome: string | null; prNumber: number | null;
+  /** When the run reported; a run that never did ends at its lease. */
+  finishedAtMs?: number | null;
   /** Set once the PR observer saw the draft PR merged, or closed unmerged. */
   mergedAtMs?: number | null;
   prClosedAtMs?: number | null;
@@ -62,11 +70,14 @@ export type AmuxIdeaLaneAttemptFact = {
 
 export type AmuxIdeaLaneState = {
   /**
-   * running: a run holds its lease; queued: the next claim retries it; failed: its runs kept failing
-   * (the same failure AMUX_IDEA_LANE_REPEATED_FAILURE_STOP times in a row);
-   * merged / pr_closed: its PR merged, or was closed without a merge.
+   * running: a run holds its lease; queued: the next claim retries it (once
+   * retryAtMs has passed); merged / pr_closed: its PR merged, or was closed
+   * without a merge; failed: only under TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS,
+   * after AMUX_IDEA_LANE_MAX_ATTEMPTS runs.
    */
   state: "running" | "queued" | "pr_open" | "merged" | "pr_closed" | "failed";
+  /** queued after failed runs: when the backoff ends; null when it has. */
+  retryAtMs?: number | null;
   /** Runs of the current part (each part has its own attempt limit). */
   attempts: number;
   prNumber: number | null;
@@ -86,18 +97,12 @@ const isPartBoundary = (item: AmuxIdeaLaneAttemptFact) =>
 
 /**
  * Whether the lane gives up on a part whose runs all finished without a PR:
- * its newest runs ended in the same failure AMUX_IDEA_LANE_REPEATED_FAILURE_STOP
- * times in a row. With the legacy switch, after AMUX_IDEA_LANE_MAX_ATTEMPTS runs.
- * The claim query (ideaLaneService.ts) repeats this rule in SQL.
+ * only with the legacy switch, after AMUX_IDEA_LANE_MAX_ATTEMPTS runs. Without
+ * it a failed part is queued again after a backoff (amuxIdeaLaneBackoffMs).
  */
 export function amuxIdeaLaneGivesUp(finished: readonly AmuxIdeaLaneAttemptFact[],
   legacy: boolean = amuxIntakeLegacyLimits()): boolean {
-  if (legacy) return finished.length >= AMUX_IDEA_LANE_MAX_ATTEMPTS;
-  const newest = [...finished].sort((a, b) => b.claimedAtMs - a.claimedAtMs)
-    .slice(0, AMUX_IDEA_LANE_REPEATED_FAILURE_STOP);
-  const outcome = (item: AmuxIdeaLaneAttemptFact) => item.outcome ?? "lease_expired";
-  return newest.length === AMUX_IDEA_LANE_REPEATED_FAILURE_STOP &&
-    newest.every((item) => outcome(item) === outcome(newest[0]!));
+  return legacy && finished.length >= AMUX_IDEA_LANE_MAX_ATTEMPTS;
 }
 
 export function amuxIdeaLaneState(attempts: readonly AmuxIdeaLaneAttemptFact[], nowMs: number,
@@ -128,10 +133,16 @@ export function amuxIdeaLaneState(attempts: readonly AmuxIdeaLaneAttemptFact[], 
       continues: opened.continues === true };
   }
   if (current.some(live)) return { ...base, state: "running", prNumber: null };
-  return { ...base, state: amuxIdeaLaneGivesUp(current, legacy) ? "failed" : "queued", prNumber: null };
+  if (amuxIdeaLaneGivesUp(current, legacy)) return { ...base, state: "failed", prNumber: null };
+  // Every run left is a failure (live and PR-opening ones returned above).
+  // The next claim waits until the newest one's end plus the backoff.
+  const lastEnd = Math.max(...current.map((item) => item.finishedAtMs ?? item.leaseUntilMs));
+  const retryAtMs = lastEnd + amuxIdeaLaneBackoffMs(current.length);
+  return { ...base, state: "queued", prNumber: null, retryAtMs: retryAtMs > nowMs ? retryAtMs : null };
 }
 
-export const amuxIdeaLaneClaimable = (state: AmuxIdeaLaneState | null) => state === null || state.state === "queued";
+export const amuxIdeaLaneClaimable = (state: AmuxIdeaLaneState | null) =>
+  state === null || (state.state === "queued" && (state.retryAtMs ?? null) === null);
 
 /** What the claim's candidate query (ideaLaneService.ts) filters an idea on. */
 export type AmuxIdeaLaneCandidateFacts = {
