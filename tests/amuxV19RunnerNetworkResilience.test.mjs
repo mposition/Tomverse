@@ -114,7 +114,7 @@ const unreachableUntilAborted = (attempts) => {
 };
 
 test("an unsent write is sent again with no deadline until the caller stops",
-  async () => {
+  async () => clock.withLongOutage(async () => {
     const start = clock.now;
     const controller = new AbortController();
     let writes = 0;
@@ -132,7 +132,7 @@ test("an unsent write is sent again with no deadline until the caller stops",
       [...AMUX_V19_APP_RETRY_DELAYS_MS]);
     assert.ok(delays.slice(AMUX_V19_APP_RETRY_DELAYS_MS.length).every(
       (ms) => ms === AMUX_V19_APP_RETRY_DELAYS_MS.at(-1)));
-  });
+  }));
 
 test("a read is asked again after any lost answer or gateway reply", async () => {
   for (const failure of [() => { throw sentLost(); }, () => { throw timeout(); },
@@ -180,7 +180,7 @@ test("a body lost mid-stream is a lost answer: read again, never rewritten",
     assert.equal(writes, 1);
   });
 
-test("a read and a readback keep asking past any old budget", async () => {
+test("a read and a readback keep asking past any old budget", async () => clock.withLongOutage(async () => {
   const run = async (purpose, attempts) => {
     const start = clock.now;
     const gone = unreachableUntilAborted(attempts);
@@ -204,7 +204,7 @@ test("a read and a readback keep asking past any old budget", async () => {
   await request("poll", async () => { calls += 1; throw timeout(); });
   assert.equal(calls, 1);
   assert.equal(clock.now - start, 0);
-});
+}));
 
 test("a redirect is an invalid answer, not a network drop", async () => {
   const moved = Response.json({ ok: true });
@@ -273,11 +273,11 @@ test("before a gated step only an explicit continue passes", async () => {
   const waitStart = clock.now;
   const waiting = new AbortController();
   let unanswered = 0;
-  assert.equal(await confirmAmuxV19Continue(async () => {
+  assert.equal(await clock.withLongOutage(() => confirmAmuxV19Continue(async () => {
     unanswered += 1;
     if (unanswered >= 60) waiting.abort();
     return AMUX_V19_STOP_UNREACHABLE;
-  }, createAmuxV19StopContact(), waiting.signal), "stop_aborted");
+  }, createAmuxV19StopContact(), waiting.signal)), "stop_aborted");
   assert.ok(clock.now - waitStart > 120_000);
   const aborted = new AbortController();
   aborted.abort();

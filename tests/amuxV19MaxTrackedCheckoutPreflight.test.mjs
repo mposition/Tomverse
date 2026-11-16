@@ -157,13 +157,13 @@ test("a stop read unanswered for a long time waits; there is no contact limit",
     const calls = [];
     const answer = fetchFor({ calls });
     let stopReads = 0;
-    const result = await prepareAmuxV19MaxTrackedCheckout({ origin,
+    const result = await timing.withLongOutage(() => prepareAmuxV19MaxTrackedCheckout({ origin,
       identity, claim, referenceOrdinal: 0,
       fetchImpl: async (url, options) => {
         if (new URL(url).pathname.endsWith("/session-analysis-stop") &&
             ++stopReads <= 40) return new Response(null, { status: 503 });
         return answer(url, options);
-      } });
+      } }));
     // The old two-minute contact limit would have stopped the attempt here.
     assert.equal(result.kind, "ready");
     assert.ok(stopReads > 40);
