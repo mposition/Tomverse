@@ -66,7 +66,9 @@ import {
   ENGINEERING_AGENT_FREEZE_SETTING_KEY,
   ENGINEERING_AGENT_V22_PROMOTED_REASON,
   ENGINEERING_AGENT_V22_REVIEW_CAUSE_PREFIX,
+  ENGINEERING_AGENT_V22_REVIEW_PR_ENV,
   ENGINEERING_AGENT_V22_TIER_PENDING_REASON,
+  engineeringAgentV22ReviewPrEnabled,
   ENGINEERING_AGENT_KILL_SWITCH_ENV,
   ENGINEERING_AGENT_OBSERVED_HALT_SETTING_KEY,
   OBSERVABLE_HALTS,
@@ -1137,7 +1139,8 @@ export async function claimNextEngineeringAgentPublishWork(
   const publishAllowed = switches.publishAllowed && !engineeringAgentHalted(await readEngineeringAgentHaltState(tx));
   const v22PublicationEnabled = amuxV22EngineeringPublicationEnabled(
     process.env[AMUX_V22_ENGINEERING_PUBLICATION_ENV]);
-  const reviewWrites = input.reviewDrafts === true;
+  const reviewWrites = input.reviewDrafts === true && engineeringAgentV22ReviewPrEnabled(
+    process.env[ENGINEERING_AGENT_V22_REVIEW_PR_ENV]);
   const reviewKeys = `${ENGINEERING_AGENT_V22_REVIEW_CAUSE_PREFIX}%`;
   // A resume opens a pull request: the same switches as a write, and a review
   // item's only for a publisher that also opens drafts.

@@ -464,11 +464,14 @@ export const ENGINEERING_AGENT_V22_PROMOTED_REASON = "publish_promoted";
  */
 export const ENGINEERING_AGENT_V22_REVIEW_CAUSE_PREFIX = "publish_review:";
 /**
- * Always open (owner decision 2026-11-15: a T2 patch that waited for a switch
- * was a result nobody could review; the ENGINEERING_AGENT_V22_REVIEW_PR switch
- * was removed, owner decision 2026-11-16). A publisher still opens one only
- * when it names `review_draft` (ENGINEERING_PUBLISHER_FEATURES_HEADER).
+ * The app's switch for it: on by default since owner decision 2026-11-15
+ * (a T2 patch that waited for a switch was a result nobody could review);
+ * exactly `off` turns it off. A publisher still opens one only when it names
+ * `review_draft` (ENGINEERING_PUBLISHER_FEATURES_HEADER).
  */
+export const ENGINEERING_AGENT_V22_REVIEW_PR_ENV = "ENGINEERING_AGENT_V22_REVIEW_PR";
+export const engineeringAgentV22ReviewPrEnabled = (value: string | undefined) =>
+  value?.trim() !== "off";
 /**
  * The header a publisher names what it can do in. A review item is claimed
  * only by a publisher that names `review_draft`, so one deployed before this

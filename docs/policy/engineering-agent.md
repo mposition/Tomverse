@@ -7,7 +7,7 @@ approvedBy: mposition · approvedAt: 2026-10-15 · 정책 버전: 6
 |---|---|---|
 | (미부여) | (미승인) | 최초 초안 |
 | 6 (버전 유지) | 2026-11-16 mposition | 운영자 결정(대화, 버전 증가 없음): push 규칙의 경로·형태 판정을 없앰 — 분류 안 된 경로, 목록에 없는 최상위 디렉터리, 새 framework 진입 파일, 런타임 로더, 실행 비트, binary, 정책처럼 보이는 테스트 이름, framework 버전 재확인. 돈·비밀값·통제 평면 판정(결정값 경보, 자격증명 도달, 통제 평면 경로·slice, 정책 문서가 이름 댄 테스트)과 symlink·submodule은 남김. diff 편집 budget 1,000 → 5,000. run이 기록한 정지는 GitHub App 신원·namespace 신호(`config_missing`·`unbound_app_pr`·`unbound_app_ref`)만 사람 확인으로 남기고 나머지(`state_mismatch`, 옛 `circuit_open`)는 기록만으로 붙잡지 않음(불일치는 열려 있는 동안만 정지). circuit latch와 armed gate(7일 monitor 확인, 26시간 종료 기록)를 없앰. 결과 불명 자동 조회는 이미 끝나지 않았고(간격 최대 16시간) 그대로. GitHub check-runs·reviews 읽기는 페이지를 넘기고 binding 기록 CHECK는 1 MiB 하나로(migration `engineering_agent_binding_record_size`) |
-| 6 (버전 유지) | 2026-11-16 mposition | 운영자 결정(대화, 버전 증가 없음): 켜짐 동작을 되돌리기만 하던 스위치 `ENGINEERING_AGENT_LEGACY_HALTS`, `ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP`, `ENGINEERING_AGENT_V22_REVIEW_PR`, `TOMVERSE_ENGINEERING_AGENT_T2_DM_REVIEW`와 어댑터 코드 래치, 그리고 push 규칙이 쓰지 않는 `CONVENTION_VERSIONS`를 없앤다. 엔지니어링 에이전트 전체 정지(`ENGINEERING_AGENT_KILL_SWITCH`)와 게시 경계는 그대로이며, 남는 스위치는 `enabled`/`disabled`로 적고 기존 값도 같은 뜻으로 읽는다. |
+| 6 (버전 유지) | 2026-11-16 mposition | 운영자 결정(대화, 버전 증가 없음): 켜짐 동작을 되돌리기만 하던 스위치 `ENGINEERING_AGENT_LEGACY_HALTS`, `ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP`, `TOMVERSE_ENGINEERING_AGENT_T2_DM_REVIEW`와 어댑터 코드 래치, 그리고 push 규칙이 쓰지 않는 `CONVENTION_VERSIONS`를 없앤다. 엔지니어링 에이전트 전체 정지(`ENGINEERING_AGENT_KILL_SWITCH`)와 게시 경계는 그대로이며(T2 review PR 게시의 `ENGINEERING_AGENT_V22_REVIEW_PR`는 외부 게시 경계라 남긴다, 독립 검토 r-20261116-202111-281f22), 남는 스위치는 `enabled`/`disabled`로 적고 기존 값도 같은 뜻으로 읽는다. |
 | 6 | 2026-10-15 mposition | 자동 개발: fork 게시, 게이트 파일 slice, develop 자동 병합 |
 | 5 | 2026-10-15 mposition | v22 `implement` 게시 경로만: AMUX 작업 검토 단계를 없애고 GitHub에서 관측한 사람의 승인·병합으로 `done`, PR 번호는 게시 capability가 발급된 attempt에 기록, 이미지 증명은 배포 파이프라인이 산출하고 앱이 대조, `t1` 진입은 shadow 기간·판정 건수·비율 대신 일회성 점검 기록과 이 승인(§13 약화, 독립 검토). 판정 과소 관측 시 `shadow` 복귀, push 금지 집합·T1/T2·승인·병합 금지는 그대로 |
 | 4 | 2026-10-07 mposition | 배포 이미지에 실제로 없는 비런타임 파일만 통제 평면 slice에서 제외할 수 있는 좁은 예외. 동일 base commit·tree·운영자가 확인한 이미지 digest와 전체 파일 목록, 앱의 목록 SHA 재계산, 런타임 source SHA·deployment ID 대조, 동적 파일 접근 분석과 배포 후 실측이 모두 필요하다. 앱이 OCI digest를 독립 조회한다고 주장하지 않는다. v22 게시 경로는 Task 실행·기존 Publisher 스위치와 별도인 기본 꺼짐 코드 latch를 둔다. 게시 산출물이 없는 성공에는 `private_result`를 기록한다. 하나라도 없으면 기존 T2 유지 |
@@ -181,8 +181,9 @@ v22 `implement` Task의 패치가 T2로 판정되어도 아래를 모두 만족�
 표시 코드(`AMUX-FILEREQ-005`)로 시작한다(운영자 요청 2026-11-13). 앱이 카드 행에서 읽어 형식을 검사한
 코드만 쓰고, 아이디어에서 나온 카드 제목은 쓰지 않는다.
 
-- 이 경로는 늘 열려 있다(운영자 결정 2026-11-15 — 스위치를 기다리는 T2 patch는 아무도 검토할 수 없는
-  결과였다. 2026-11-16에 `ENGINEERING_AGENT_V22_REVIEW_PR` 스위치를 없앴다).
+- 이 경로는 기본으로 열려 있다(운영자 결정 2026-11-15 — 스위치를 기다리는 T2 patch는 아무도 검토할 수 없는
+  결과였다). 외부 게시 경계라 `ENGINEERING_AGENT_V22_REVIEW_PR`=`off`로 끌 수 있고, 끄면 claim과 push 직전의 마지막
+  확인 모두에서 멈춘다.
 - T1 후보와 같은 결속(run·카드·base·patch digest, `t1`로 시작한 run, 카드의 공개 PR 동의, 게시 스위치)이
   성립하고, base 증거로 결과 tree를 만들 수 있다. 게이트 증거를 읽지 못해 T2가 된 경우도 포함한다.
 - `.github/workflows/` 아래 파일을 바꾸지 않는다. 게시 서비스의 토큰에는 `workflows` 권한이 없어 GitHub이

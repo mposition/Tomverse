@@ -528,14 +528,46 @@ test("a T2 draft promoted for the owner's review opens a review item only a revi
 
   const claimNext = (reviewDrafts?: boolean) => inTx((tx) =>
     claimNextEngineeringAgentPublishWork(tx, { leaseMs: 60_000, reviewDrafts }));
-  assert.equal(await claimNext(), null, "a publisher that does not open drafts never writes it");
-  assert.equal(await claimNext(false), null);
-  const work = await claimNext(true);
-  assert.ok(work && work.mode === "write");
-  assert.equal(work.workItemId, publish.id);
-  assert.equal(work.ownerReview, true);
-  const bound = await settleAndBind(publish.id, work.fencingToken, pending.run.runId);
-  await retireBinding(bound.bindingId);
+  const previous = process.env.ENGINEERING_AGENT_V22_REVIEW_PR;
+  try {
+    process.env.ENGINEERING_AGENT_V22_REVIEW_PR = "on";
+    assert.equal(await claimNext(), null, "a publisher that does not open drafts never writes it");
+    assert.equal(await claimNext(false), null);
+    // On by default since owner decision 2026-11-15; exactly `off` turns it off.
+    process.env.ENGINEERING_AGENT_V22_REVIEW_PR = "off";
+    assert.equal(await claimNext(true), null, "the switch off holds it");
+    process.env.ENGINEERING_AGENT_V22_REVIEW_PR = "on";
+    const work = await claimNext(true);
+    assert.ok(work && work.mode === "write");
+    assert.equal(work.workItemId, publish.id);
+    assert.equal(work.ownerReview, true);
+    // Turned off after the claim, the switch still stops the push: the last look refuses.
+    const incidentKey = "amux.incidentMode";
+    const incidentBefore = await prisma.appSetting.findUnique({ where: { key: incidentKey } });
+    try {
+      await prisma.appSetting.deleteMany({ where: { key: incidentKey } });
+      await prisma.appSetting.create({ data: { key: incidentKey, value: JSON.stringify({
+        version: 1, state: "normal", transition_id: null, changed_at: new Date().toISOString(),
+        reason: "engineering agent store fixture", ticket: "TEST" }) } });
+      const look = (env: Record<string, string | undefined>) => readEngineeringAgentLastLook(prisma,
+        { workItemId: publish.id, fencingToken: work.fencingToken, commitDigest: work.commitDigest },
+        { ...process.env, ...env });
+      assert.deepEqual(await look({ ENGINEERING_AGENT_V22_REVIEW_PR: "off" }),
+        { verdict: "refuse", reason: "review_pr_off" });
+      assert.notDeepEqual(await look({ ENGINEERING_AGENT_V22_REVIEW_PR: undefined }),
+        { verdict: "refuse", reason: "review_pr_off" }, "unset is on");
+      assert.notDeepEqual(await look({ ENGINEERING_AGENT_V22_REVIEW_PR: "on" }),
+        { verdict: "refuse", reason: "review_pr_off" });
+    } finally {
+      await prisma.appSetting.deleteMany({ where: { key: incidentKey } });
+      if (incidentBefore) await prisma.appSetting.create({ data: { key: incidentKey, value: incidentBefore.value } });
+    }
+    const bound = await settleAndBind(publish.id, work.fencingToken, pending.run.runId);
+    await retireBinding(bound.bindingId);
+  } finally {
+    if (previous === undefined) delete process.env.ENGINEERING_AGENT_V22_REVIEW_PR;
+    else process.env.ENGINEERING_AGENT_V22_REVIEW_PR = previous;
+  }
 });
 
 test("a v22 publish item never claimed closes only without a live capability", async () => {

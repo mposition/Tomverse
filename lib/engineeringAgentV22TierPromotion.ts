@@ -2,8 +2,9 @@ import "server-only";
 
 import { ENGINEERING_AGENT_POLICY_VERSION,
   ENGINEERING_AGENT_V22_REVIEW_CAUSE_PREFIX,
+  ENGINEERING_AGENT_V22_REVIEW_PR_ENV,
   ENGINEERING_AGENT_V22_TIER_PENDING_REASON,
- } from "@/lib/engineeringAgentCore";
+  engineeringAgentV22ReviewPrEnabled } from "@/lib/engineeringAgentCore";
 import { EngineeringAgentStoreRefusedError,
   expireEngineeringAgentV22LapsedPublish,
   readEngineeringAgentOwnerQueues,
@@ -44,6 +45,7 @@ type Ports = {
   expireLapsed: (workItemId: string, reason: string) => Promise<unknown>;
   resolve: (input: Parameters<typeof resolveEngineeringAgentV22Product>[1]) =>
     ReturnType<typeof resolveEngineeringAgentV22Product>;
+  reviewPrEnabled: () => boolean;
   /** Once per process, before its first round: drafts kept private by the
    * code that ran before it go back to `tier_pending` (the count, or null
    * when already done). */
@@ -184,6 +186,8 @@ const livePorts: Ports = {
     (tx) => expireEngineeringAgentV22LapsedPublish(tx, { workItemId, reason })),
   resolve: (input) => runEngineeringAgentTransaction(prisma,
     (tx) => resolveEngineeringAgentV22Product(tx, input)),
+  reviewPrEnabled: () => engineeringAgentV22ReviewPrEnabled(
+    process.env[ENGINEERING_AGENT_V22_REVIEW_PR_ENV]),
 };
 
 /** A database refusal (store or trigger), as opposed to a failure to reach it. */
@@ -244,12 +248,13 @@ export async function promoteEngineeringAgentV22Draft(
     if (stored === null) return { outcome: "reissue_refused",
       reason: "tier_evidence_unavailable", workItemId: lapsed.workItemId,
       ...failure };
+    const reviewOn = lapsed.ownerReview && ports.reviewPrEnabled();
     const candidate = lapsed.ownerReview ?
-      t1Candidate(lapsed, stored) ?? reviewCandidate(lapsed, stored) :
+      (reviewOn ? t1Candidate(lapsed, stored) ?? reviewCandidate(lapsed, stored) : null) :
       t1Candidate(lapsed, stored);
     if (!candidate || candidate.expectedTreeId !== lapsed.expectedTreeId) {
       const why = !stored.ok && REASON.test(stored.reason) ? stored.reason :
-        "tier_changed";
+        lapsed.ownerReview && !reviewOn ? "review_pr_off" : "tier_changed";
       await ports.expireLapsed(lapsed.workItemId, why);
       return { outcome: "reissue_refused", reason: why };
     }
@@ -284,7 +289,8 @@ export async function promoteEngineeringAgentV22Draft(
       workItemId: pending.workItemId, attempt, ...failure };
   }
   const t1 = t1Candidate(pending, stored);
-  const review = t1 ? null : reviewCandidate(pending, stored);
+  const review = t1 || !ports.reviewPrEnabled() ? null :
+    reviewCandidate(pending, stored);
   const candidate = t1 ?? review;
   const named = stored === null ? null : !stored.ok ? stored.reason :
     stored.tier.tier !== "T1" ? "tier_two" : null;
