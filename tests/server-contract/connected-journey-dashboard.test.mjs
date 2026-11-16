@@ -27,7 +27,8 @@ beforeEach(() => {
   process.env.GA4_API_SECRET = "mock-only";
   globalThis.fetch = async (_url, init) => { sent.push(JSON.parse(init.body)); return new Response(null, { status: 204 }); };
 });
-const properties = stage => ({ journey_key: "a86b8d2c-340f-41a0-9520-8d22a5f64330", journey_kind: "review_chat", journey_entry: "review_studio", journey_stage: stage });
+const fixtureJourneyKey = randomUUID();
+const properties = stage => ({ journey_key: fixtureJourneyKey, journey_kind: "review_chat", journey_entry: "review_studio", journey_stage: stage });
 test("dashboard reads the full 30-day cohort and returns no ratio without mature starts", async () => {
   rows = [{ userId: "A", occurredAt: new Date(Date.now() - 1000), properties: properties("started") }];
   const dashboard = await getProductAnalyticsDashboard();

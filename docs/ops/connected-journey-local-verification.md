@@ -151,3 +151,42 @@ sidecar and the GA4 flush/dashboard corrections. Follow-up review
 abnormally (`reviewer_exit_1`), so the aggregate verdict is **unknown**, not accept.
 The owner explicitly chose to record unknown without resubmission on 2026-11-15.
 No push, PR, production database change, merge or deployment was performed.
+
+## Conflict refresh: 2026-11-16
+
+PR #4011 now includes develop `6e20a17857a213a346f49986ca24bb5b7a137e82`
+through the concurrent automatic conflict-resolution commit `1720598f3`.
+The resolved submit handler retains both journey capture and the upstream Review
+handoff guards; the browser fixture retains the upstream background API mocks.
+The local duplicate merge was abandoned in favor of that published commit.
+
+The automatic resolution reintroduced a desktop-composer readiness assertion in
+the shared Review fixture. The mobile Studio case reproduced its failure. Removing
+that assertion restores the existing analysis-action readiness check, which works
+on both layouts. The application code remains exactly as in `1720598f3`.
+
+PR Fast Gate also reported a synthetic dashboard fixture UUID as a generic API
+key. The fixture now generates its journey UUID at runtime. Only the original
+commit/file/rule/line fingerprint is ignored in history; no scanning rule or path
+allowlist was broadened.
+
+Final local verification after adopting the published merge:
+
+- Core journey, consent, delivery, draft, handoff and stream tests: 118 passed.
+- Review handoff preflight and reference-loader contract tests: 10 passed.
+- Dashboard contract and secret-scanner allowlist tests: 7 passed.
+- Complete desktop/mobile Review-to-Chat suite: 34 passed; two desktop-only cases
+  intentionally skipped on mobile.
+- Focused Import continuation, handoff, stale-response and journey scenarios:
+  11 passed on desktop Chromium.
+- `npm run build`, including full TypeScript checking: passed.
+- Lint of the merged application/browser paths and adjusted dashboard fixture:
+  passed. The browser harness used the same isolated production-server setup and
+  external-network block described above.
+- Gitleaks 8.24.3: the PR's first-parent, non-merge commit range passed using the
+  unchanged scanner rules and the single historical fixture fingerprint.
+
+The independent review remains **unknown**, without resubmission, as requested.
+The owner's later CI-hold removal and Ready transition were preserved. No CI
+workflow was manually started or rerun, and no PR merge, production database
+change or deployment was performed during this refresh.
