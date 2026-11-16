@@ -74,6 +74,12 @@ export function AutoRoutingToggle({
         <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
           {copy.description}
         </p>
+        <p
+          data-testid="auto-routing-mode-hint"
+          className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400"
+        >
+          {copy.modeHint}
+        </p>
       </div>
 
       <button
@@ -142,6 +148,9 @@ export function AutoRoutingComposerToggle({
       data-testid="composer-auto-routing-toggle"
       aria-checked={enabled}
       aria-label={copy.label}
+      // The model menu beside this switch reads "Auto" while it is on; the
+      // hint says they are one mode, not two settings.
+      title={copy.modeHint}
       disabled={pending}
       onClick={() => onChange(!enabled)}
       className="flex h-11 shrink-0 touch-manipulation items-center justify-end gap-2 rounded-lg px-1 text-[13px] font-medium text-zinc-600 transition-colors hover:bg-zinc-100 disabled:cursor-wait disabled:opacity-50 max-[240px]:w-full dark:text-zinc-300 dark:hover:bg-zinc-800 md:[@media(pointer:fine)]:h-8"
