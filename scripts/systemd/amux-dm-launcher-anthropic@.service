@@ -13,11 +13,11 @@ StandardError=journal
 SyslogIdentifier=amux-dm-launcher-anthropic
 Restart=no
 # docs/policy/amux-decision-maker.md §5 "hard timeout": the launcher kills the
-# CLI's process group at six hours; this unit's control group is the
-# backstop -- everything in it is stopped at six hours and two minutes, and on
+# CLI's process group at two hours; this unit's control group is the
+# backstop -- everything in it is stopped at two hours and two minutes, and on
 # any exit of the launcher, so no CLI process outlives its request.
 KillMode=control-group
-RuntimeMaxSec=362min
+RuntimeMaxSec=122min
 TimeoutStopSec=10s
 UMask=0077
 # §5: the vendor account writes only its own home (CLI state, its temporary

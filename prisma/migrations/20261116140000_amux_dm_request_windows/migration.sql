@@ -1,4 +1,4 @@
--- baseline-check: replace-function-if-body-sha256 "amux_decision_maker_request_event_guard" "e3bfad84ab8387c0ddaa4302532ea7b8f0c2cd5d6e5cb840391d1c8b0d865d05" "2ff51d56782bf4a8ccdc2f292b9ff32058e9ebcf63a5f6483403bcba17914555"
+-- baseline-check: replace-function-if-body-sha256 "amux_decision_maker_request_event_guard" "e3bfad84ab8387c0ddaa4302532ea7b8f0c2cd5d6e5cb840391d1c8b0d865d05" "f626eb52520fe7b43bd6ea1b53be2d6321b8ec99c5d372c948489594906db051"
 --
 -- AMUX Decision Maker (docs/policy/amux-decision-maker.md §2, §9, §10):
 -- the request ledger's windows, and a late result read back by its digest
@@ -390,7 +390,7 @@ BEGIN
     NEW."createdAt" := now_at;
     IF NEW."kind" = 'assign' THEN
         -- Owner direction 2026-11-16: eight hours (it was 30 minutes), past
-        -- the broker's answer deadline of 7 hours 4 minutes.
+        -- the broker's answer deadline (3 hours 4 minutes).
         NEW."resultDeadlineAt" := NEW."createdAt" + INTERVAL '8 hours';
     END IF;
     RETURN NEW;

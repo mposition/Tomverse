@@ -52,12 +52,15 @@ import {
  */
 
 /**
- * §5's hard timeout: the DM process is killed after six hours (owner
+ * §5's hard timeout: the DM process is killed after two hours (owner
  * direction 2026-11-16: a DM reads its workspace the way a local CLI does, so
- * its run has the time a long local run has; it was 30 minutes). The unit's
- * `RuntimeMaxSec` is the backstop (DM_LAUNCHER_UNIT_RUNTIME_MAX_MS).
+ * its run has the time a long local run has; it was 30 minutes). Not longer:
+ * the relay carries one question at a time and waits for this run's answer,
+ * so a CLI that hangs holds every other question and delivery until it is
+ * killed. The unit's `RuntimeMaxSec` is the backstop
+ * (DM_LAUNCHER_UNIT_RUNTIME_MAX_MS).
  */
-export const DM_LAUNCH_HARD_TIMEOUT_MS = 6 * 60 * 60 * 1000;
+export const DM_LAUNCH_HARD_TIMEOUT_MS = 2 * 60 * 60 * 1000;
 
 /** How long stdout may stay open after the process exited and its group was killed. Not in the policy. */
 export const DM_LAUNCH_STDOUT_CLOSE_GRACE_MS = 5_000;

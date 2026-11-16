@@ -34,12 +34,12 @@ export const AMUX_DM_RELAY_SILENT_MS = 5 * 60_000;
 
 /**
  * How long after a Decision Maker request was created the relay may still be
- * inside that question's tick: the 2-minute assignment window, the broker's
- * 39-minute response deadline (34 until 2026-11-15, when the Decision Maker's
- * workspace build, at most 5 minutes, came before the launcher), and 4 minutes
- * for the result's writes.
+ * inside that question's tick: the broker's response deadline
+ * (DM_BROKER_RESPONSE_DEADLINE_MS, 3 hours 4 minutes since 2026-11-16: a
+ * two-hour run and an hour's workspace before it; it was 39 minutes), the
+ * relay's own steps before it, and the result's writes after it.
  */
-export const AMUX_DM_RELAY_QUESTION_MS = 45 * 60_000;
+export const AMUX_DM_RELAY_QUESTION_MS = 190 * 60_000;
 
 /** How often a relay that stays silent pages again. */
 export const AMUX_DM_RELAY_REMINDER_MS = 3 * 60 * 60_000;

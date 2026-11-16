@@ -36,12 +36,12 @@ pub const DM_RELAY_LOCAL_TOKEN_HEADER: &str = "x-amux-dm-relay-token";
 /// socket, the broker's account and the bridge's group, `0660`.
 pub const DM_BROKER_SOCKET_PATH: &str = "/run/amux-dm-broker/broker.sock";
 
-/// `DM_BROKER_RESPONSE_DEADLINE_MS`: the hard timeout (six hours), the
+/// `DM_BROKER_RESPONSE_DEADLINE_MS`: the hard timeout (two hours), the
 /// launcher unit's two minutes, the workspace before the launcher (an hour,
 /// `DM_WORKSPACE_TIME_LIMIT_MS`), and a minute each for the broker and the
 /// bridge -- inside the result window (eight hours), so a DM that uses all of
 /// its time still answers in it. A broker silent past it is a lost answer.
-pub const DM_BROKER_RESPONSE_DEADLINE: Duration = Duration::from_millis(424 * 60 * 1000);
+pub const DM_BROKER_RESPONSE_DEADLINE: Duration = Duration::from_millis(184 * 60 * 1000);
 
 /// Connecting to a local socket is immediate; a broker that does not accept
 /// within this has received nothing.

@@ -180,7 +180,7 @@ export const dmEventAuditAction = (kind: DmRequestEventKind): string =>
  * §2, §9: the database-clock windows (owner direction 2026-11-16, migration
  * 20261116140000_amux_dm_request_windows: they were two minutes and 30
  * minutes). The result window outlasts the broker's answer deadline
- * (DM_BROKER_RESPONSE_DEADLINE_MS, 7 hours 4 minutes), so a DM that uses all
+ * (DM_BROKER_RESPONSE_DEADLINE_MS, 3 hours 4 minutes), so a DM that uses all
  * of its run still answers inside it.
  */
 export const DM_ASSIGNMENT_WINDOW_MS = 24 * 60 * 60 * 1000;

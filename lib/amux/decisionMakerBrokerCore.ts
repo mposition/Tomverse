@@ -98,7 +98,7 @@ export const DM_LAUNCHER_READY_TIMEOUT_MS = 10_000;
 /** A write of one line, and a close. */
 export const DM_LINE_WRITE_TIMEOUT_MS = 10_000;
 /**
- * The launcher unit's `RuntimeMaxSec`: the hard timeout (§5, six hours,
+ * The launcher unit's `RuntimeMaxSec`: the hard timeout (§5, two hours,
  * enforced by the launcher) plus two minutes for reading the result and the
  * vendor cleanup. systemd stops the unit's whole control group there, so a
  * launcher that hangs cannot outlive it.
@@ -109,7 +109,7 @@ export const DM_LAUNCHER_RESPONSE_TIMEOUT_MS = DM_LAUNCHER_UNIT_RUNTIME_MAX_MS +
 /**
  * What the bridge must wait at least for the broker's answer before it
  * treats the outcome as unknown: the launcher's, the workspace build before
- * it, and a minute -- 7 hours 4 minutes, inside the request's result window
+ * it, and a minute -- 3 hours 4 minutes, inside the request's result window
  * (DM_RESULT_WINDOW_MS, eight hours), so a DM that uses all of its time still
  * answers in it.
  */

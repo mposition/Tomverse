@@ -76,10 +76,10 @@ test("the sockets are systemd's fixed paths, one per launcher instance", () => {
 });
 
 test("§5 hard timeout: each deadline outlasts the one inside it, so no answer can follow a give-up", () => {
-  // Owner direction 2026-11-16: six hours, and the unit two minutes more.
-  assert.equal(DM_LAUNCH_HARD_TIMEOUT_MS, 6 * 60 * 60 * 1000);
-  assert.equal(DM_LAUNCHER_UNIT_RUNTIME_MAX_MS, 362 * 60 * 1000);
-  assert.equal(DM_BROKER_RESPONSE_DEADLINE_MS, 424 * 60 * 1000);
+  // Owner direction 2026-11-16: two hours, and the unit two minutes more.
+  assert.equal(DM_LAUNCH_HARD_TIMEOUT_MS, 2 * 60 * 60 * 1000);
+  assert.equal(DM_LAUNCHER_UNIT_RUNTIME_MAX_MS, 122 * 60 * 1000);
+  assert.equal(DM_BROKER_RESPONSE_DEADLINE_MS, 184 * 60 * 1000);
   assert.ok(DM_LAUNCH_HARD_TIMEOUT_MS < DM_LAUNCHER_UNIT_RUNTIME_MAX_MS);
   assert.ok(DM_LAUNCHER_UNIT_RUNTIME_MAX_MS < DM_LAUNCHER_RESPONSE_TIMEOUT_MS);
   assert.ok(DM_LAUNCHER_RESPONSE_TIMEOUT_MS < DM_BROKER_RESPONSE_DEADLINE_MS);

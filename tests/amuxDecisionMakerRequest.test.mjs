@@ -3073,7 +3073,7 @@ test("the 2026-11-16 windows migration pins both guards and changes only the win
     event,
     `        NEW."resultDeadlineAt" := NEW."createdAt" + INTERVAL '30 minutes';`,
     `        -- Owner direction 2026-11-16: eight hours (it was 30 minutes), past\n` +
-      `        -- the broker's answer deadline of 7 hours 4 minutes.\n` +
+      `        -- the broker's answer deadline (3 hours 4 minutes).\n` +
       `        NEW."resultDeadlineAt" := NEW."createdAt" + INTERVAL '8 hours';`,
     "result window",
   );
