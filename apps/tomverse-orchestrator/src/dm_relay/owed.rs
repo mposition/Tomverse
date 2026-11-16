@@ -606,6 +606,12 @@ impl OwedBook {
         held_instances(&self.records())
     }
 
+    /// Whether the pause of `request_id`'s session is still owed.
+    fn pause_owed(&self, request_id: &str) -> bool {
+        self.lock().entries.iter().any(|entry| matches!(&entry.record,
+            OwedRecord::Pause { request_id: owed, .. } if owed == request_id))
+    }
+
     /// The sessions held back by the owed records.
     pub fn held_sessions(&self) -> BTreeSet<String> {
         held_sessions(&self.records())
@@ -622,6 +628,16 @@ impl OwedBook {
         let Some(mut record) = self.get(id) else {
             return true;
         };
+        // §9: a delivery's unknown outcome closes the request's unsettled
+        // decision on the app, and with it the only other way back to the
+        // session. While the session's pause is still owed the outcome waits,
+        // whether the file holds both or a restart came between (review
+        // r-20261116-212109-19107f).
+        if let OwedRecord::DeliveryOutcome { request_id, outcome, .. } = &record {
+            if outcome == "unknown" && self.pause_owed(request_id) {
+                return false;
+            }
+        }
         let settled = settle(app, local, &mut record).await;
         self.update(id, if settled { None } else { Some(record) });
         settled

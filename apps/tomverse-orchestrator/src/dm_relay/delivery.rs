@@ -589,26 +589,29 @@ where
     // The outcome and the pause are both kept, and the file written, before
     // either is sent: a restart in between must still hold the session back.
     // One write for both: the outcome never reaches the file without the pause.
+    // The pause first: the outcome closes the app's unsettled decision, and
+    // it is not sent while the pause is still owed (OwedBook::settle_one).
     let ids = book.keep_all(vec![
-        OwedRecord::DeliveryOutcome {
-            request_id: delivery.request_id().to_owned(),
-            outcome: "unknown".to_owned(),
-            reason: None,
-        },
         OwedRecord::Pause {
             card_id: delivery.card_id.clone(),
             question_revision: delivery.question_revision,
             request_id: delivery.request_id().to_owned(),
             session: delivery.session.clone(),
         },
+        OwedRecord::DeliveryOutcome {
+            request_id: delivery.request_id().to_owned(),
+            outcome: "unknown".to_owned(),
+            reason: None,
+        },
     ]);
-    let (outcome, pause) = (ids[0], ids[1]);
+    let (pause, outcome) = (ids[0], ids[1]);
     let mut run = DeliveryRun::about(delivery, "delivery_unknown");
+    if !book.settle_new(app, local, pause).await {
+        // The outcome stays owed and waits for the pause (settle_one).
+        return run.missing("delivery_unknown_pause_owed");
+    }
     if !book.settle_new(app, local, outcome).await {
         run = run.missing("delivery_unknown_record_owed");
-    }
-    if !book.settle_new(app, local, pause).await {
-        run = run.missing("delivery_unknown_pause_owed");
     }
     run
 }
@@ -1444,9 +1447,16 @@ mod tests {
             ]);
             let run = deliver_next(&app, &local, &OwedBook::new(), None).await;
             assert_eq!(run.code, code);
+            // An outcome waits while its session's pause is owed: it would close
+            // the app's unsettled decision (review r-20261116-212109-19107f).
+            let expected = if owed == "session_pause" {
+                vec!["session_pause", "delivery_outcome"]
+            } else {
+                vec![owed]
+            };
             assert_eq!(
                 run.owed.iter().map(OwedRecord::code).collect::<Vec<_>>(),
-                vec![owed]
+                expected
             );
             assert_eq!(
                 local_routes(&local)
@@ -1832,13 +1842,16 @@ mod tests {
         ]);
         let run = deliver_next(&app, &local, &book, None).await;
         assert_eq!(run.code, "delivery_unknown_pause_owed");
-        let at_outcome = app.file_at(AppRoute::DeliveryOutcome);
+        // The pause was not confirmed, so the outcome was never sent: the app's
+        // unsettled decision stays, and the file holds both, pause first.
+        assert!(!app.files.lock().unwrap().iter().any(|(route, _)| *route == AppRoute::DeliveryOutcome));
+        let on_disk = store.load().unwrap();
         assert_eq!(
-            at_outcome.iter().map(OwedRecord::code).collect::<Vec<_>>(),
-            vec!["delivery_outcome", "session_pause"]
+            on_disk.iter().map(OwedRecord::code).collect::<Vec<_>>(),
+            vec!["session_pause", "delivery_outcome"]
         );
         assert_eq!(
-            crate::dm_relay::owed::held_sessions(&at_outcome)
+            crate::dm_relay::owed::held_sessions(&on_disk)
                 .into_iter()
                 .collect::<Vec<_>>(),
             vec![SESSION]
