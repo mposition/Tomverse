@@ -86,8 +86,8 @@ test("the stalled card sweep reads only a promoted todo Task whose budget is spe
   assert.ok(sql.includes(`w."status" = 'todo' AND w."v22ReceiptId" IS NOT NULL`),
     "only a promoted card, which the settlement can file");
   assert.ok(!sql.includes("backlog"), "a backlog card is not swept: the settlement cannot file it");
-  // The claim's own budget: infrastructure failures left out, their own bound kept.
-  assert.ok(values.includes(30) && values.includes(12) && values.includes("attempt_budget_exhausted"));
+  // The claim's own budget: infrastructure failures are left out and have no bound.
+  assert.ok(values.includes(30) && values.includes("attempt_budget_exhausted") && !values.includes(12));
 });
 
 test("DM merge keeps its allow list: lib code and API routes stay a person's", async () => {

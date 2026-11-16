@@ -37,7 +37,7 @@ async function spentTodoCard(tx: LifecycleTx) {
   return seed.taskId;
 }
 
-test("twelve platform failures stop a todo card until a person sends it back with retry", async () => {
+test("platform failures never stop a todo card, however many there are", async () => {
   await lifecycle(async (tx) => {
     const seed = await seedAmuxV4PortfolioRecoveryPrerequisites(queryAdapter(tx),
       { taskRole: "implement", settlementReason: "review_server_accepted" }) as {
@@ -74,9 +74,9 @@ test("twelve platform failures stop a todo card until a person sends it back wit
     });
     await fixtureCommitted(tx);
     const { readAmuxStalledCards } = await import("@/lib/amux/stalledCardSweep");
-    assert.deepEqual((await readAmuxStalledCards(tx, 5, taskId)).map((row) => row.id),
-      [taskId], "the platform bound is spent");
-    // A person's retry after them starts the bound over (infraFailureStore.ts).
+    assert.deepEqual(await readAmuxStalledCards(tx, 5, taskId), [],
+      "platform failures have no bound (2026-11-16); the claim only makes the card wait");
+    // A person's retry after them changes nothing here.
     await withoutTriggers(tx, async () => {
       await tx.$executeRaw`INSERT INTO "AmuxHumanEscalation"
         ("id", "taskId", "specialty", "reason", "status", "openedBy", "resolvedById",

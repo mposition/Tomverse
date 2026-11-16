@@ -31,8 +31,13 @@ export async function readAmuxAttemptBudgetFacts(tx: Prisma.TransactionClient,
   taskId: string, enabled = amuxInfraFailureRoutingEnabled()) {
   const reasons = enabled ? [...AMUX_INFRA_FAILURE_REASONS] : [];
   const [row] = await tx.$queryRaw<Array<{ rows: number; greatest: number | null;
-    infra: number; infraWindow?: number; reserved: bigint | null }>>`
+    infra: number; infraWindow?: number; reserved: bigint | null;
+    lastEndedAt?: Date | null; lastEndedReason?: string | null }>>`
     SELECT COUNT(*)::int AS "rows", MAX(a."attemptNumber") AS "greatest",
+      (SELECT x."endedAt" FROM "AmuxExecutionAttempt" x WHERE x."taskId" = ${taskId}
+        AND x."endedAt" IS NOT NULL ORDER BY x."endedAt" DESC, x."id" DESC LIMIT 1) AS "lastEndedAt",
+      (SELECT x."reason" FROM "AmuxExecutionAttempt" x WHERE x."taskId" = ${taskId}
+        AND x."endedAt" IS NOT NULL ORDER BY x."endedAt" DESC, x."id" DESC LIMIT 1) AS "lastEndedReason",
       (COUNT(*) FILTER (WHERE a."reason" = ANY(${reasons}::text[])))::int AS "infra",
       (COUNT(*) FILTER (WHERE a."reason" = ANY(${reasons}::text[]) AND
         (r."at" IS NULL OR a."startedAt" > r."at")))::int AS "infraWindow",
@@ -45,6 +50,9 @@ export async function readAmuxAttemptBudgetFacts(tx: Prisma.TransactionClient,
     greatestAttemptNumber: row?.greatest ?? null,
     infraRows,
     infraWindowRows: row?.infraWindow ?? infraRows,
+    /** When the newest ended run ended, and whether it was a platform failure. */
+    lastEndedAt: row?.lastEndedAt ? new Date(row.lastEndedAt) : null,
+    lastEndedIsInfra: enabled && amuxIsInfraFailureReason(row?.lastEndedReason),
     reservedMicrousd: row?.reserved ?? BigInt(0),
   };
 }

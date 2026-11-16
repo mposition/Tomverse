@@ -3,7 +3,7 @@ import test from "node:test";
 
 import {
   AMUX_INFRA_FAILURE_REASONS,
-  AMUX_MAX_INFRA_FAILURES_PER_TASK,
+  amuxInfraRetryDelayMs,
   amuxInfraFailureKindOfReason,
   amuxInfraFailureReason,
   amuxInfraFailureRoutingEnabled,
@@ -47,16 +47,16 @@ test("the review proposal guard counts attempts as the app does", async () => {
   assert.deepEqual([...listed.matchAll(/'([a-z_]+)'/g)].map((match) => match[1]).sort(),
     [...AMUX_INFRA_FAILURE_REASONS].sort());
   assert.match(sql, new RegExp(`IF attempts_used >= ${AMUX_MAX_EXECUTION_ATTEMPTS} THEN`));
-  // The attempt-number bounds hold every number the app can reach: the
-  // runaway guard plus the infrastructure bound.
+  // Platform failures have no count, so the attempt-number guards hold no
+  // upper bound either (20261116130200, 20261116130300, 20261116130400).
   for (const [file, pattern] of [
-    ["20261116011500_amux_v22_attempt_number_bound", /NEW\."attemptNumber" NOT BETWEEN 1 AND (\d+) THEN/],
-    ["20261116011600_amux_v22_recovery_attempt_bound", /recovery\."nextAttemptNumber" NOT BETWEEN 1 AND (\d+) OR/],
-    ["20261116011700_amux_v22_recovery_approval_attempt_bound", /"nextAttemptNumber" BETWEEN 1 AND (\d+) AND/],
+    ["20261116130200_amux_v22_attempt_number_unbounded", /NEW\."attemptNumber" < 1 THEN/],
+    ["20261116130300_amux_v22_recovery_attempt_unbounded", /recovery\."nextAttemptNumber" < 1 OR/],
+    ["20261116130400_amux_v22_recovery_approval_attempt_unbounded", /\("nextAttemptNumber" >= 1\)/],
   ]) {
     const text = await readFile(new URL(`../prisma/migrations/${file}/migration.sql`, import.meta.url), "utf8");
-    const bound = Number(text.match(pattern)?.[1]);
-    assert.ok(bound >= AMUX_MAX_EXECUTION_ATTEMPTS + AMUX_MAX_INFRA_FAILURES_PER_TASK, file);
+    assert.match(text, pattern, file);
+    assert.doesNotMatch(text, /AND 64|<= 64/, file);
   }
 });
 
@@ -115,31 +115,21 @@ test("infrastructure failures keep their number but use none of the card's attem
   // AMUX-SCHEDJOBS-003: five Cursor exits in twenty minutes.
   const five = decideAmuxAttemptBudget({ historical_rows: 5, greatest_attempt_number: 5, infra_rows: 5 });
   assert.deepEqual(five, { allowed: true, next_attempt_number: 6, max_attempts: AMUX_MAX_EXECUTION_ATTEMPTS });
-  const capped = decideAmuxAttemptBudget({ historical_rows: AMUX_MAX_INFRA_FAILURES_PER_TASK,
-    greatest_attempt_number: AMUX_MAX_INFRA_FAILURES_PER_TASK, infra_rows: AMUX_MAX_INFRA_FAILURES_PER_TASK });
-  assert.equal(capped.allowed, false);
-  assert.equal(capped.exhausted_limit, "infra_attempts");
+  // No count of platform failures stops a card either (2026-11-16: twelve did).
+  const many = decideAmuxAttemptBudget({ historical_rows: 200, greatest_attempt_number: 200, infra_rows: 200 });
+  assert.deepEqual(many, { allowed: true, next_attempt_number: 201, max_attempts: AMUX_MAX_EXECUTION_ATTEMPTS });
   // No fixed count of five stops an ordinary card any more.
   assert.equal(decideAmuxAttemptBudget({ historical_rows: 5, greatest_attempt_number: 5 }).allowed, true);
   assert.equal(decideAmuxAttemptBudget({ historical_rows: AMUX_MAX_EXECUTION_ATTEMPTS,
     greatest_attempt_number: AMUX_MAX_EXECUTION_ATTEMPTS }).allowed, false, "the runaway guard");
   // A paid retry still names its own exact bound.
   assert.equal(decideAmuxAttemptBudget({ historical_rows: 2, greatest_attempt_number: 2, max_attempts: 2 }).allowed, false);
-  // A person's retry starts the infrastructure bound over: only the failures
-  // since it count, and none of them use the card's attempts.
-  const afterRetry = decideAmuxAttemptBudget({ historical_rows: 14, greatest_attempt_number: 14,
-    infra_rows: 13, infra_window_rows: 1 });
-  assert.deepEqual(afterRetry, { allowed: true, next_attempt_number: 15, max_attempts: AMUX_MAX_EXECUTION_ATTEMPTS });
-  assert.equal(decideAmuxAttemptBudget({ historical_rows: 25, greatest_attempt_number: 25,
-    infra_rows: 24, infra_window_rows: AMUX_MAX_INFRA_FAILURES_PER_TASK }).exhausted_limit, "infra_attempts");
-  // The window is never larger than the total.
-  assert.equal(decideAmuxAttemptBudget({ historical_rows: 3, greatest_attempt_number: 3,
-    infra_rows: 2, infra_window_rows: 50 }).allowed, true);
-  assert.equal(settlementDestinationForBudget({ requested_status: "todo", attempt_number: 15,
-    infra_attempts_before: 13, infra_window_before: 2, infra_failure: true }).to_status, "todo");
-  assert.equal(settlementDestinationForBudget({ requested_status: "todo", attempt_number: 25,
-    infra_attempts_before: 23, infra_window_before: AMUX_MAX_INFRA_FAILURES_PER_TASK - 1,
-    infra_failure: true }).exhausted_limit, "infra_attempts");
+  // The platform failures only delay the next try: none for two, then a minute
+  // that doubles up to an hour.
+  assert.deepEqual([0, 1, 2, 3, 4, 5, 9, 10, 12, 100].map(amuxInfraRetryDelayMs),
+    [0, 0, 0, 60_000, 120_000, 240_000, 3_600_000, 3_600_000, 3_600_000, 3_600_000]);
+  assert.equal(settlementDestinationForBudget({ requested_status: "todo", attempt_number: 150,
+    infra_attempts_before: 149, infra_failure: true }).to_status, "todo");
 }));
 
 test("the kill switch restores the five-attempt count", () => withRouting("disabled", () => {
@@ -152,10 +142,9 @@ test("settlement hands a repeated failure to a person; an infrastructure failure
   assert.deepEqual(settlementDestinationForBudget({ requested_status: "todo", attempt_number: 9,
     infra_attempts_before: 8, infra_failure: true }),
   { to_status: "todo", exhausted_limit: null, max_attempts: AMUX_MAX_EXECUTION_ATTEMPTS });
-  assert.equal(settlementDestinationForBudget({ requested_status: "todo",
-    attempt_number: AMUX_MAX_INFRA_FAILURES_PER_TASK,
-    infra_attempts_before: AMUX_MAX_INFRA_FAILURES_PER_TASK - 1, infra_failure: true }).exhausted_limit,
-  "infra_attempts");
+  assert.equal(settlementDestinationForBudget({ requested_status: "todo", attempt_number: 40,
+    infra_attempts_before: 39, infra_failure: true }).to_status, "todo",
+  "no count of platform failures hands a card over");
   assert.deepEqual(settlementDestinationForBudget({ requested_status: "todo", attempt_number: 3,
     repeated_failure: true }),
   { to_status: "blocked", exhausted_limit: "repeated_failure", max_attempts: AMUX_MAX_EXECUTION_ATTEMPTS });
@@ -166,19 +155,17 @@ test("settlement hands a repeated failure to a person; an infrastructure failure
     repeated_failure: true }).to_status, "review");
 }));
 
-test("the infrastructure failure that reaches the bound keeps its own attempt reason", async () => {
-  // Review r-20261115-120153-60193b: the twelfth failure was stored as
-  // infra_attempts_exhausted, so the budget read eleven and the worker's
-  // quarantine streak reset. The bound is named by the escalation only.
+test("an infrastructure failure keeps its own attempt reason and never names a bound", async () => {
+  // Review r-20261115-120153-60193b: a failure stored under the bound's name
+  // read as one fewer and reset the worker's quarantine streak. There is no
+  // bound now (2026-11-16), so nothing opens that escalation.
   const { readFile } = await import("node:fs/promises");
   const source = await readFile(new URL("../lib/amux/execution.ts", import.meta.url), "utf8");
   const settle = source.slice(source.indexOf("await tx.amuxExecutionAttempt.update({ where: { id: attempt.id },\n        data: { endedAt: now, leaseExpiresAt: null, heartbeatAt: now,"));
   assert.match(settle.slice(0, 900), /reason: gradeEscalated \? "contract_path_touched" :\s+infraKind \? amuxInfraFailureReason\(infraKind\) :\s+next === "blocked" \? blockedReason :/);
-  assert.match(source, /const blockedReason = [\s\S]{0,400}exhaustedReason \?\? reviewDisposition\?\.reason/,
-    "the escalation still names the bound");
   const reaper = source.slice(source.indexOf("endedBy: \"system:amux-v22-execution-reaper\","));
-  assert.match(reaper.slice(0, 500), /reason: retry \|\| infraExhausted \? \(infraRetry \? amuxInfraFailureReason\("lease_expired"\) :/);
-  assert.match(reaper.slice(0, 1600), /reason: infraExhausted \?\s+AMUX_INFRA_ATTEMPTS_EXHAUSTED_REASON : "execution_lease_expired"/);
+  assert.match(reaper.slice(0, 500), /reason: retry \? \(infraRetry \? amuxInfraFailureReason\("lease_expired"\) :/);
+  assert.doesNotMatch(source, /AMUX_INFRA_ATTEMPTS_EXHAUSTED_REASON/);
   assert.ok(!AMUX_INFRA_FAILURE_REASONS.includes("infra_attempts_exhausted"),
     "the bound's name is not itself a counted failure");
 });

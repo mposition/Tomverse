@@ -195,7 +195,6 @@ async function snapshot(
     historical_rows: attemptFacts.historicalRows,
     greatest_attempt_number: attemptFacts.greatestAttemptNumber,
     infra_rows: attemptFacts.infraRows,
-    infra_window_rows: 0,
   });
   const used = Math.max(0, Math.max(attemptFacts.historicalRows,
     attemptFacts.greatestAttemptNumber ?? 0) - attemptFacts.infraRows);

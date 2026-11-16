@@ -531,7 +531,7 @@ export async function applyAmuxDmOwnerSettlementDecision(tx: Prisma.TransactionC
     const facts = await readAmuxAttemptBudgetFacts(tx, row.taskId);
     if (!decideAmuxAttemptBudget({ historical_rows: facts.historicalRows,
       greatest_attempt_number: facts.greatestAttemptNumber, infra_rows: facts.infraRows,
-      infra_window_rows: facts.infraWindowRows }).allowed)
+    }).allowed)
       return handOff("attempt_budget_spent");
     const changed = await tx.amuxWorkItem.updateMany({
       where: { id: row.taskId, revision: row.revision, status: row.status, archivedAt: null },

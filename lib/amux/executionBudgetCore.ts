@@ -1,5 +1,4 @@
-import { AMUX_MAX_INFRA_FAILURES_PER_TASK, amuxInfraFailureRoutingEnabled } from
-  "./infraFailureCore.ts";
+import { amuxInfraFailureRoutingEnabled } from "./infraFailureCore.ts";
 
 /**
  * No fixed number of attempts stops an ordinary card (owner direction
@@ -54,7 +53,7 @@ export type AmuxAttemptBudgetDecision =
     }
   | {
       allowed: false;
-      exhausted_limit: "attempts" | "infra_attempts";
+      exhausted_limit: "attempts";
       attempts_used: number;
       max_attempts: number;
     };
@@ -67,18 +66,14 @@ export type AmuxAttemptBudgetDecision =
  * `infra_rows` are the Task's attempts stored with an infrastructure failure
  * reason (lib/amux/infraFailureCore.ts, owner decision 2026-11-15): they keep
  * their number, so the next one is still unique, but they do not use the
- * card's attempts. They have their own, larger bound, which counts
- * `infra_window_rows`: those since a person last sent the card back with
- * `retry` (infraFailureStore.ts). A person's retry is the decision that the
- * platform may be tried again, so it starts that bound over; it is all of
- * `infra_rows` when not given.
+ * card's attempts and have no bound: they only delay the next try
+ * (amuxInfraRetryDelayMs).
  */
 export const decideAmuxAttemptBudget = (input: {
   historical_rows: number;
   greatest_attempt_number: number | null;
   max_attempts?: number;
   infra_rows?: number;
-  infra_window_rows?: number;
 }): AmuxAttemptBudgetDecision => {
   const maxAttempts = Math.max(
     1,
@@ -89,8 +84,6 @@ export const decideAmuxAttemptBudget = (input: {
     Math.max(0, Math.trunc(input.greatest_attempt_number ?? 0)),
   );
   const infraRows = Math.max(0, Math.trunc(input.infra_rows ?? 0));
-  const infraWindow = Math.min(infraRows,
-    Math.max(0, Math.trunc(input.infra_window_rows ?? infraRows)));
   const attemptsUsed = Math.max(0, numbered - infraRows);
   if (attemptsUsed >= maxAttempts) {
     return {
@@ -98,14 +91,6 @@ export const decideAmuxAttemptBudget = (input: {
       exhausted_limit: "attempts",
       attempts_used: attemptsUsed,
       max_attempts: maxAttempts,
-    };
-  }
-  if (infraWindow >= AMUX_MAX_INFRA_FAILURES_PER_TASK) {
-    return {
-      allowed: false,
-      exhausted_limit: "infra_attempts",
-      attempts_used: infraWindow,
-      max_attempts: AMUX_MAX_INFRA_FAILURES_PER_TASK,
     };
   }
   return {
@@ -118,18 +103,15 @@ export const decideAmuxAttemptBudget = (input: {
 /**
  * Where a settled attempt sends its Task within the budget. An attempt the
  * caller classified as an infrastructure failure (`infra_failure`) never uses
- * the card's attempts; it is bounded only by the infrastructure bound.
- * `infra_attempts_before` are the Task's earlier infrastructure failures,
- * which the attempt number still counts; `infra_window_before` those of them
- * since a person's last retry, which the bound counts (all of them when not
- * given; see decideAmuxAttemptBudget).
+ * the card's attempts and has no bound: it goes back to `todo` and waits
+ * (amuxInfraRetryDelayMs). `infra_attempts_before` are the Task's earlier
+ * infrastructure failures, which the attempt number still counts.
  */
 export const settlementDestinationForBudget = (input: {
   requested_status: "todo" | "review" | "done" | "blocked";
   attempt_number: number | null;
   max_attempts?: number;
   infra_attempts_before?: number;
-  infra_window_before?: number;
   infra_failure?: boolean;
   /** The settling run is the same result failure as the runs before it
    * (`amuxRepeatedResultFailure`): the card goes to a person and the DM. */
@@ -140,16 +122,7 @@ export const settlementDestinationForBudget = (input: {
     Math.trunc(input.max_attempts ?? amuxDefaultMaxAttempts()),
   );
   const infraBefore = Math.max(0, Math.trunc(input.infra_attempts_before ?? 0));
-  const infraWindowBefore = Math.min(infraBefore,
-    Math.max(0, Math.trunc(input.infra_window_before ?? infraBefore)));
   if (input.requested_status === "todo" && input.infra_failure === true) {
-    if (infraWindowBefore + 1 >= AMUX_MAX_INFRA_FAILURES_PER_TASK) {
-      return {
-        to_status: "blocked" as const,
-        exhausted_limit: "infra_attempts" as const,
-        max_attempts: AMUX_MAX_INFRA_FAILURES_PER_TASK,
-      };
-    }
     return { to_status: "todo" as const, exhausted_limit: null, max_attempts: maxAttempts };
   }
   if (input.requested_status === "todo" && input.repeated_failure === true) {

@@ -112,7 +112,7 @@ import { amuxV22ReadOnlyApiUsageProjection,
 import { amuxV22WorkerSafeStopFenced } from "@/lib/amux/v22LegacySafeStopFence";
 import { amuxV22OwnerQuestionSettlementPlan } from "@/lib/amux/v22OwnerQuestionCore";
 import { amuxWorkerRuntimeUsesReadOnlyApi } from "@/lib/amux/workerRuntime";
-import { AMUX_INFRA_ATTEMPTS_EXHAUSTED_REASON, amuxInfraFailureReason,
+import { amuxInfraFailureReason,
   amuxInfraFailureRoutingEnabled, amuxV22InfraFailureKind,
   type AmuxSidecarFailureReport } from "@/lib/amux/infraFailureCore";
 import { countAmuxInfraAttemptsBefore, readAmuxAttemptBudgetFacts,
@@ -486,7 +486,7 @@ export async function startAmuxV22TaskExecution(input: {
         greatestAttemptNumber: prior.greatestAttemptNumber,
       }) : decideAmuxAttemptBudget({ historical_rows: prior.historicalRows,
         greatest_attempt_number: prior.greatestAttemptNumber,
-        infra_rows: prior.infraRows, infra_window_rows: prior.infraWindowRows });
+        infra_rows: prior.infraRows });
       if (!budget.allowed) return { started: false as const,
         reason: "attempt_budget_exhausted" as const };
       // v47: the retry receipt is recomputed as of its launch check.
@@ -1832,7 +1832,6 @@ export async function settleAmuxV22TaskExecution(input: {
         requested_status: requestedStatus,
         attempt_number: attempt.attemptNumber,
         infra_attempts_before: infraBefore.total,
-        infra_window_before: infraBefore.window,
         infra_failure: infraKind !== null,
         repeated_failure: repeatedFailure,
         ...(attempt.taskId === AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID &&
@@ -1840,9 +1839,7 @@ export async function settleAmuxV22TaskExecution(input: {
           max_attempts: AMUX_V22_READ_ONLY_RETRY_TASK_ATTEMPT_LIMIT,
         } : {}),
       });
-      const exhaustedReason = budget.exhausted_limit === "infra_attempts" ?
-        AMUX_INFRA_ATTEMPTS_EXHAUSTED_REASON :
-        budget.exhausted_limit === "repeated_failure" ? AMUX_REPEATED_FAILURE_REASON :
+      const exhaustedReason = budget.exhausted_limit === "repeated_failure" ? AMUX_REPEATED_FAILURE_REASON :
         budget.exhausted_limit === "attempts" ? "attempt_budget_exhausted" : null;
       const next = effectivePathDecision === "blocked" ? "blocked" :
         budget.to_status;
@@ -2040,10 +2037,9 @@ export async function quarantineExpiredAmuxV22TaskExecutions(limit = 50) {
           { total: 0, window: 0 };
         const destination = cliRoute ? settlementDestinationForBudget({
           requested_status: "todo", attempt_number: attempt.attemptNumber,
-          infra_attempts_before: infraBefore.total, infra_window_before: infraBefore.window,
+          infra_attempts_before: infraBefore.total,
           infra_failure: infraRetry }) : null;
         const retry = destination?.to_status === "todo";
-        const infraExhausted = destination?.exhausted_limit === "infra_attempts";
         const toStatus = retry ? "todo" : "blocked";
         await tx.amuxWorkItem.update({ where: { id: task.id }, data: {
           status: toStatus, owner: null, claimedAt: null,
@@ -2053,9 +2049,7 @@ export async function quarantineExpiredAmuxV22TaskExecutions(limit = 50) {
           data: { endedAt: now, leaseExpiresAt: null,
             outcome: "expired", toStatus,
             endedBy: "system:amux-v22-execution-reaper",
-            // The bound reached is named by the escalation below; the attempt
-            // keeps its infrastructure reason so it is still counted.
-            reason: retry || infraExhausted ? (infraRetry ? amuxInfraFailureReason("lease_expired") :
+            reason: retry ? (infraRetry ? amuxInfraFailureReason("lease_expired") :
               AMUX_V22_LEASE_EXPIRED_RETRY_REASON) : "outcome_unknown" },
         });
         // An owner question this run recorded is not parked by an unknown
@@ -2070,8 +2064,7 @@ export async function quarantineExpiredAmuxV22TaskExecutions(limit = 50) {
             generation: attempt.workerGeneration, status: "busy",
           }, data: { status: "error", dispatchReady: false } });
         if (!retry) await openAmuxHumanEscalation(tx, { taskId: task.id,
-          specialty: "execution-recovery", reason: infraExhausted ?
-            AMUX_INFRA_ATTEMPTS_EXHAUSTED_REASON : "execution_lease_expired",
+          specialty: "execution-recovery", reason: "execution_lease_expired",
           openedBy: "system:amux-v22-execution-reaper" });
         await cancelPendingAmuxWorkDelivery(tx, attempt.id, now);
         await writeSystemAuditLog({ tx, systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
