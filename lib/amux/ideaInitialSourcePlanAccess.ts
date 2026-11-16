@@ -16,10 +16,6 @@ import { matchesInitialPlanSystemAudit } from "./ideaInitialPlanAuditCore.ts";
 import type { AmuxContentKeys } from "./ideaCrypto.ts";
 import { loadCurrentAmuxContentKeys } from "./ideaKeyConfig.ts";
 import { amuxContentKeyRing, loadAmuxContentUnitKeys } from "./ideaKeyStore.ts";
-import {
-  AMUX_V4_INITIAL_PLAN_WRITE_ENV,
-  initialPlanWritePermitted,
-} from "./ideaInitialSourcePlanCore.ts";
 import { createInitialIdeaOnlySourcePlan, InitialSourcePlanError } from "./ideaInitialSourcePlanService.ts";
 
 export class InitialPlanAccessError extends Error {
@@ -109,9 +105,6 @@ export async function commitInitialIdeaSourcePlan(tx: Prisma.TransactionClient, 
 /** One deterministic write. A possibly committed response is never retried. */
 export async function prepareInitialIdeaSourcePlan(session: Session, request: Request, ideaId: string) {
   const actorUserId = ownerId(session);
-  if (!initialPlanWritePermitted(process.env[AMUX_V4_INITIAL_PLAN_WRITE_ENV])) {
-    throw new InitialPlanAccessError("plan_disabled", 503);
-  }
   if (adminAuditIntegrityKeys(process.env).length === 0) {
     throw new InitialPlanAccessError("integrity_unavailable", 503);
   }

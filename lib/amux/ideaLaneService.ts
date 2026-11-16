@@ -9,10 +9,8 @@ import { prisma } from "@/lib/prisma";
 import { openAmuxContent, verifyAmuxContentDigest } from "./ideaCrypto.ts";
 import { inspectAmuxIdeaInput } from "./ideaInputCore.ts";
 import { loadAmuxContentKeyRing } from "./ideaKeyStore.ts";
-import { amuxIntakeLegacyLimits } from "./intakeLimitsCore.ts";
 import {
   AMUX_IDEA_LANE_LEASE_MS,
-  AMUX_IDEA_LANE_MAX_ATTEMPTS,
   AMUX_IDEA_LANE_PUBLISH_FENCE_MS,
   AMUX_IDEA_LANE_BACKOFF_BASE_MS,
   AMUX_IDEA_LANE_BACKOFF_MAX_MS,
@@ -66,7 +64,6 @@ export async function claimAmuxIdeaLane(scope: { actorUserId?: string } = {}): P
     await tx.$executeRaw`SELECT set_config('statement_timeout', '5000', true)`;
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('amux_idea_lane_claim'))`;
     const now = await databaseNow(tx);
-    const legacy = amuxIntakeLegacyLimits();
     const since = new Date(now.getTime() - 86_400_000);
     const today = await tx.amuxIdeaLaneAttempt.count({ where: { claimedAt: { gt: since } } });
     if (today >= amuxIdeaLaneDailyAttempts()) return null;
@@ -104,12 +101,8 @@ export async function claimAmuxIdeaLane(scope: { actorUserId?: string } = {}): P
         -- A part waiting out its backoff (amuxIdeaLaneState): every run left
         -- here is a failure, the next claim waits until the newest one's end
         -- (a run that never reported ends at its lease) plus 5 minutes
-        -- doubling per failure up to 24 hours. With the legacy switch the part
-        -- is given up on after AMUX_IDEA_LANE_MAX_ATTEMPTS runs of any outcome.
-        AND CASE WHEN ${legacy}::boolean THEN
-          (SELECT count(*) FROM "AmuxIdeaLaneAttempt" a WHERE a."ideaId" = i."id"
-            AND a."claimedAt" > p."partStart") < ${AMUX_IDEA_LANE_MAX_ATTEMPTS}
-        ELSE NOT EXISTS (SELECT 1 FROM (SELECT count(*) AS "failures",
+        -- doubling per failure up to 24 hours; a part is never given up on.
+        AND NOT EXISTS (SELECT 1 FROM (SELECT count(*) AS "failures",
               max(COALESCE(a."finishedAt", a."leaseUntil")) AS "lastEnd"
             FROM "AmuxIdeaLaneAttempt" a WHERE a."ideaId" = i."id" AND a."claimedAt" > p."partStart") f
           WHERE f."failures" > 0 AND f."lastEnd" + LEAST(
@@ -117,7 +110,6 @@ export async function claimAmuxIdeaLane(scope: { actorUserId?: string } = {}): P
               ${AMUX_IDEA_LANE_BACKOFF_BASE_MS}::double precision * interval '1 millisecond'
                 * power(2, LEAST(f."failures", 30) - 1))
             > (${now.toISOString()}::timestamptz AT TIME ZONE 'UTC'))
-        END
       -- SEV1 first: an idea the develop CI repair pass handed over (its system
       -- audit entry is the mark; only that pass writes the action), then age.
       ORDER BY EXISTS (SELECT 1 FROM "AdminAuditLog" l
@@ -130,7 +122,7 @@ export async function claimAmuxIdeaLane(scope: { actorUserId?: string } = {}): P
     let pick: Candidate | null = null;
     let pickState: AmuxIdeaLaneState | null = null;
     for (const idea of candidates) {
-      const state = amuxIdeaLaneState(idea.attempts ?? [], nowMs, legacy);
+      const state = amuxIdeaLaneState(idea.attempts ?? [], nowMs);
       if (!amuxIdeaLaneClaimable(state)) continue;
       // The owner's close (ideaOwnerCloseService.ts) and the analysis path's
       // first source plan lock this row too, so

@@ -20,7 +20,6 @@ import { isAmuxV4AnalysisProvider } from "./ideaAnalysisChannelCore.ts";
  * switch; no CLI runner or switch calls it directly. A dispatch must separately
  * prove that the selected Frontier approval, runner capability, token caps and
  * halt state are current. */
-export const AMUX_V4_ANALYSIS_BUDGET_RESERVE_CODE_LATCH = true;
 const ID = /^[A-Za-z0-9:_-]{1,128}$/;
 
 export class AmuxIdeaAnalysisReservationError extends Error {

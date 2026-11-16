@@ -10,9 +10,7 @@ import { assertRecentAdminAuthentication, isAdminReauthenticationError } from "@
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedText } from "@/lib/apiSecurity";
 import {
   AMUX_V4_SOURCE_SCOPE_PREVIEW_ENVELOPE_MAX_BYTES,
-  AMUX_V4_SOURCE_SCOPE_PREVIEW_ENV,
   inspectAmuxSourceScopePreviewRequest,
-  sourceScopePreviewPermitted,
 } from "@/lib/amux/ideaSourceScopePreviewCore";
 import {
   AmuxSourceScopePreviewError,
@@ -69,10 +67,6 @@ export async function POST(request: Request) {
   try {
     const session = await owner();
     if (session instanceof NextResponse) return session;
-    if (!sourceScopePreviewPermitted(process.env[AMUX_V4_SOURCE_SCOPE_PREVIEW_ENV])) {
-      return NextResponse.json({ error: "preview_disabled", transferAuthorized: false },
-        { status: 503, headers: noStore });
-    }
     if (request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !== "application/json") {
       return NextResponse.json({ error: "content_type_refused", transferAuthorized: false },
         { status: 415, headers: noStore });

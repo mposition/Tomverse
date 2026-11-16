@@ -19,14 +19,13 @@ import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { isAdminOwnerAccount } from "@/lib/adminAuth";
 import { AMUX_IDEA_INPUT_MAX_BYTES, amuxIdeaInputMaxBytes, inspectAmuxIdeaInput } from
   "@/lib/amux/ideaInputCore";
-import { AMUX_INTAKE_SAFETY_MAX_BYTES, amuxIntakeLegacyLimits } from "@/lib/amux/intakeLimitsCore";
+import { AMUX_INTAKE_SAFETY_MAX_BYTES } from "@/lib/amux/intakeLimitsCore";
 import { amuxIdeaLaneEnabled, amuxIdeaLaneState } from "@/lib/amux/ideaLaneCore";
 import { inspectAmuxIdeaSubmission } from "@/lib/amux/ideaSubmissionCore";
 import { SystemIdeaRefused, submitSystemIdea } from "@/lib/amux/ideaTraceReportSubmissionService";
 import {
   DEVELOP_CI_REPAIR_IDEA_ACTION,
   DEVELOP_CI_REPAIR_IDEA_TARGET,
-  DEVELOP_CI_REPAIR_LOG_TAIL_CHARS,
   DEVELOP_CI_REPAIR_MAX_JOBS,
   DEVELOP_CI_REPAIR_MODE_SETTING_KEY,
   DEVELOP_CI_REPAIR_PER_DAY,
@@ -50,8 +49,6 @@ import {
 import { prisma } from "@/lib/prisma";
 
 const LOG_TIMEOUT_MS = 15_000;
-/** The rolling tail kept while a job log streams in; only its end is used. */
-const LOG_KEEP_BYTES = 64 * 1024;
 
 export const readDevelopCiRepairMode = async (): Promise<DevelopCiRepairMode> => {
   const row = await prisma.appSetting.findUnique({
@@ -116,10 +113,8 @@ export const readDevelopJobLogTail = async (
       return null;
     }
     // Owner direction 2026-11-15: the whole log, up to the idea's 4 MiB safety
-    // ceiling, so the coding run reads all of it; the former 64 KiB read and
-    // 6,000-character tail hold only under TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS.
-    const legacy = amuxIntakeLegacyLimits();
-    const keepBytes = legacy ? LOG_KEEP_BYTES : AMUX_INTAKE_SAFETY_MAX_BYTES;
+    // ceiling, so the coding run reads all of it.
+    const keepBytes = AMUX_INTAKE_SAFETY_MAX_BYTES;
     const reader = response.body.getReader();
     const chunks: Uint8Array[] = [];
     let total = 0;
@@ -139,7 +134,7 @@ export const readDevelopJobLogTail = async (
     const kept = joined.byteLength > keepBytes ? joined.slice(joined.byteLength - keepBytes) : joined;
     // A cut may split a character at the start; the decoder replaces only that one.
     const text = new TextDecoder("utf-8").decode(kept);
-    return developCiLogTail(text, legacy ? DEVELOP_CI_REPAIR_LOG_TAIL_CHARS : text.length);
+    return developCiLogTail(text, text.length);
   } catch {
     return null;
   }
@@ -302,20 +297,18 @@ export const runDevelopCiRepairQuietly = async ({
     if (JSON.stringify(decision.state) !== JSON.stringify(state)) await writeState(decision.state);
     if (decision.action === "none") return report({ outcome: "none", reason: decision.reason });
     // Owner direction 2026-11-15: every failed job and its whole log. The
-    // former three jobs and 6,000-character tails come back under the legacy
-    // switch, and as the fallback when the whole logs trip the idea's
-    // secret or personal-data scan (a test fixture can look like a secret), so
-    // a repair is never lost to a log line.
-    const legacy = amuxIntakeLegacyLimits();
-    const jobs = legacy ? decision.checks.slice(0, DEVELOP_CI_REPAIR_MAX_JOBS) : decision.checks;
+    // former three jobs and 6,000-character tails are the fallback when the
+    // whole logs trip the idea's secret or personal-data scan (a test fixture
+    // can look like a secret), so a repair is never lost to a log line.
+    const jobs = decision.checks;
     const tails = await Promise.all(jobs.map((check) => readLogTail(check.id).catch(() => null)));
     const checks = jobs.map((check, index) => ({ ...check, logTail: tails[index] ?? null }));
     const former = () => developCiRepairIdea({ headSha: decision.headSha,
       checks: checks.slice(0, DEVELOP_CI_REPAIR_MAX_JOBS), maxBytes: AMUX_IDEA_INPUT_MAX_BYTES });
-    const whole = legacy ? null : developCiRepairIdea({ headSha: decision.headSha, checks,
-      maxBytes: amuxIdeaInputMaxBytes(false),
+    const whole = developCiRepairIdea({ headSha: decision.headSha, checks,
+      maxBytes: amuxIdeaInputMaxBytes(),
       tailChars: Math.max(1, ...checks.map((check) => check.logTail?.length ?? 0)) });
-    const idea = whole !== null && developCiRepairIdeaAdmitted(whole) ? whole : former();
+    const idea = developCiRepairIdeaAdmitted(whole) ? whole : former();
     try {
       const { ideaId } = await submit({ ownerUserId: owner.id, headSha: decision.headSha, idea, checks: decision.checks.length, now });
       return report({ outcome: "submitted", ideaId });

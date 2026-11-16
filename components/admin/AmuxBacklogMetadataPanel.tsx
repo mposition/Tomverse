@@ -13,13 +13,12 @@ type MetadataBody = {
   valid?: boolean;
   code?: string | null;
   refusal?: string | null;
-  applyPermitted?: boolean;
   status?: string;
   revision?: number;
   error?: string;
 };
 
-type PreviewFact = { text: string; valid: boolean; applyPermitted: boolean };
+type PreviewFact = { text: string; valid: boolean };
 
 export function AmuxBacklogMetadataPanel() {
   const messages = useAdminMessages(adminAmuxBacklogMetadataMessages);
@@ -42,13 +41,8 @@ export function AmuxBacklogMetadataPanel() {
       });
       const payload = (await response.json()) as MetadataBody;
       setResult(payload);
-      if (
-        response.ok &&
-        action === "preview" &&
-        typeof payload.valid === "boolean" &&
-        typeof payload.applyPermitted === "boolean"
-      ) {
-        setPreviewed({ text: body, valid: payload.valid, applyPermitted: payload.applyPermitted });
+      if (response.ok && action === "preview" && typeof payload.valid === "boolean") {
+        setPreviewed({ text: body, valid: payload.valid });
       } else {
         setPreviewed(null);
       }
@@ -65,7 +59,6 @@ export function AmuxBacklogMetadataPanel() {
   const applyReady =
     previewed !== null &&
     previewed.valid === true &&
-    previewed.applyPermitted === true &&
     previewed.text === requestText;
 
   return (
@@ -101,11 +94,7 @@ export function AmuxBacklogMetadataPanel() {
         </button>
       </div>
       <p id="amux-backlog-metadata-apply-reason" className="text-sm text-zinc-300">
-        {applyReady
-          ? messages.applyPermitted("true")
-          : previewed?.applyPermitted === false
-            ? messages.applyDisabled
-            : messages.applyWaiting}
+        {applyReady ? messages.applyPermitted : messages.applyWaiting}
       </p>
       {refusedForStepUp ? (
         <a className="text-sm font-medium underline text-zinc-100" href={STEP_UP_HREF}>
@@ -118,9 +107,6 @@ export function AmuxBacklogMetadataPanel() {
           {result.code && result.code !== "ADMIN_REAUTHENTICATION_REQUIRED" ? <p>{messages.code(result.code)}</p> : null}
           {result.refusal ? <p>{messages.refusal(result.refusal)}</p> : null}
           {typeof result.valid === "boolean" ? <p>{messages.valid(result.valid ? "true" : "false")}</p> : null}
-          {typeof result.applyPermitted === "boolean" ? (
-            <p>{messages.applyPermitted(result.applyPermitted ? "true" : "false")}</p>
-          ) : null}
           {result.status ? <p>{messages.status(result.status)}</p> : null}
           {typeof result.revision === "number" ? <p>{messages.revision(result.revision)}</p> : null}
         </div>

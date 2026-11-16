@@ -17,11 +17,9 @@ import { withAutoTransaction, TICK_TRANSACTION_LIMITS } from
   "./autoPromotionService.ts";
 import { amuxCanonicalJson, BoardImportError } from "./boardImportCore.ts";
 import { AmuxDbBoundaryError } from "./dbBoundary.ts";
-import { amuxPortfolioOwnerId, AmuxPortfolioError,
-  amuxV4PortfolioWriteEnabled, AMUX_V4_PORTFOLIO_WRITE_ENV } from
+import { amuxPortfolioOwnerId, AmuxPortfolioError } from
   "./portfolioAssessmentService.ts";
 import { amuxContentDigest, type AmuxDigestKey } from "./ideaCrypto.ts";
-import { amuxIntakeLegacyLimits } from "./intakeLimitsCore.ts";
 import { amuxRefreshedScoreWindows, AMUX_SCORE_REFRESH_LEAD_MS,
   amuxScoreAuditActionBinds, scoreAmuxPortfolio } from "./portfolioScoreCore.ts";
 import type { AmuxPortfolioScorePayload } from "./portfolioScoreSchemas.ts";
@@ -246,7 +244,7 @@ export async function writeAmuxPortfolioScoreInTx(tx: Prisma.TransactionClient,
   }
 }
 
-/** Direct writer is for synthetic DB tests; the route uses the code latch. */
+/** Direct writer is for synthetic DB tests; the route uses confirmAmuxPortfolioScore. */
 export async function commitAmuxPortfolioScore(input: { session: Session;
   request: Request; payload: AmuxPortfolioScorePayload;
   confirmationDigest: string; digestKey: AmuxDigestKey }) {
@@ -258,9 +256,6 @@ export async function commitAmuxPortfolioScore(input: { session: Session;
 
 export async function confirmAmuxPortfolioScore(
   input: Parameters<typeof commitAmuxPortfolioScore>[0]) {
-  if (!amuxV4PortfolioWriteEnabled(process.env[AMUX_V4_PORTFOLIO_WRITE_ENV])) {
-    throw new AmuxPortfolioError("write_disabled");
-  }
   return commitAmuxPortfolioScore(input);
 }
 
@@ -277,8 +272,7 @@ export type AmuxScoreRefreshOutcome =
  * back to the owner's confirm flow, untouched. `evidenceAsOf` is copied,
  * never moved. Owner direction 2026-11-15: the baseline moves forward with
  * the active window, so an unchanged score never waits at its 28-day
- * baseline for an owner (amuxRefreshedScoreWindows; the legacy-limits switch
- * copies the baseline as before). The database guard refuses any other
+ * baseline for an owner (amuxRefreshedScoreWindows). The database guard refuses any other
  * shape. The write is a system entry in the same audit chain. */
 export async function refreshAmuxPortfolioScoreInTx(
   tx: Prisma.TransactionClient,
@@ -305,10 +299,9 @@ export async function refreshAmuxPortfolioScoreInTx(
       approvedByUserId: true, approvalAuditLogId: true },
   });
   if (!prior) return skipped("no_score");
-  const legacy = amuxIntakeLegacyLimits();
   const windows = amuxRefreshedScoreWindows({ now,
     activeStaleAt: prior.activeStaleAt,
-    baselineStaleAt: prior.baselineStaleAt, legacy });
+    baselineStaleAt: prior.baselineStaleAt });
   if (!windows) return skipped("not_due");
   const { activeStaleAt, baselineStaleAt } = windows;
   const priorAudit = await tx.adminAuditLog.findUnique({
@@ -339,11 +332,9 @@ export async function refreshAmuxPortfolioScoreInTx(
       plan.taskAssessmentId !== prior.taskAssessmentId ||
       plan.score.version !== prior.scoreVersion ||
       plan.score.total !== prior.scoreTotal ||
-      plan.score.evidenceConfirmedAt !== prior.evidenceAsOf.toISOString() ||
-      // The evidence clock above is the input; a baseline an earlier refresh
-      // moved is not (2026-11-15). Legacy copies the baseline, so it must be
-      // the evidence's own one.
-      (legacy && plan.score.baselineStaleAt !== prior.baselineStaleAt.toISOString())) {
+      // The evidence clock is the input; a baseline an earlier refresh moved is
+      // not (2026-11-15).
+      plan.score.evidenceConfirmedAt !== prior.evidenceAsOf.toISOString()) {
     return skipped("input_changed");
   }
   const auditId = await writeSystemAuditLog({ tx,
@@ -382,11 +373,8 @@ export async function refreshAmuxPortfolioScoreInTx(
     baselineStaleAt: baselineStaleAt.toISOString() };
 }
 
-/** The 2026-11-14 per-tick limits, kept only for the legacy-limits switch.
- * Owner direction 2026-11-15: a tick refreshes every due Task its time
+/** Owner direction 2026-11-15: a tick refreshes every due Task its time
  * budget (`hasBudget`, the route's database-clock deadline) leaves room for. */
-export const AMUX_SCORE_REFRESH_MAX_PER_TICK = 4;
-const AMUX_SCORE_REFRESH_MAX_ATTEMPTS = 12;
 
 /** Backlog v4 Tasks whose newest score closes within a day and that the
  * refresh can actually extend: the same refusals as
@@ -394,11 +382,9 @@ const AMUX_SCORE_REFRESH_MAX_ATTEMPTS = 12;
  * consumed source approval) are applied here, so a Task the refresher would
  * skip never holds a place ahead of one it would extend. Owner direction
  * 2026-11-15: a score past its baseline is due too, and the list is not
- * cut; the legacy-limits switch keeps the 2026-11-14 baseline filter and
- * the first twelve. */
+ * cut. */
 export async function readDueAmuxPortfolioScoreTaskIds(
-  db: Pick<Prisma.TransactionClient, "$queryRaw">,
-  legacy: boolean = amuxIntakeLegacyLimits()): Promise<string[]> {
+  db: Pick<Prisma.TransactionClient, "$queryRaw">): Promise<string[]> {
   const due = await db.$queryRaw<Array<{ taskId: string }>>`
     WITH clock AS (SELECT clock_timestamp() AT TIME ZONE 'UTC' AS "now"),
     newest AS (
@@ -411,8 +397,6 @@ export async function readDueAmuxPortfolioScoreTaskIds(
     WHERE w."sourceSystem" = 'admin-idea-v4' AND w."cardType" = 'task'
       AND w."status" = 'backlog' AND w."archivedAt" IS NULL
       AND n."taskRevision" = w."revision"
-      AND (NOT ${legacy}::boolean OR (n."activeStaleAt" < n."baselineStaleAt"
-        AND n."baselineStaleAt" > c."now"))
       AND n."activeStaleAt" <=
         c."now" + ${AMUX_SCORE_REFRESH_LEAD_MS}::integer * INTERVAL '1 millisecond'
       -- An owner's newer assessment means the owner confirms the next score.
@@ -448,7 +432,6 @@ export async function readDueAmuxPortfolioScoreTaskIds(
         WHERE dep."taskId" = w."id" AND pre."archivedAt" IS NOT NULL
           AND (pre."status" <> 'done' OR pre."v4TerminalAt" IS NULL))
     ORDER BY n."activeStaleAt" ASC, n."taskId" ASC
-    LIMIT ${legacy ? AMUX_SCORE_REFRESH_MAX_ATTEMPTS : null}::bigint
   `;
   return due.map((row) => row.taskId);
 }
@@ -473,8 +456,7 @@ export async function readAmuxOrphanedBacklogTaskIds(
 }
 
 /** One pass inside the admitted auto-promotion tick, bounded by the tick's
- * time budget alone (owner direction 2026-11-15; the legacy-limits switch
- * restores four refreshes per tick). Each Task is its
+ * time budget alone (owner direction 2026-11-15). Each Task is its
  * own tick transaction (`withAutoTransaction`): it locks the orchestrator
  * admission, fences on the route's database-clock deadline and records a
  * `work_item` write receipt for the Task it extended, like every other write
@@ -496,14 +478,12 @@ export async function refreshDueAmuxPortfolioScores(input: {
     outcomes, orphaned,
   });
   if (input.hasBudget?.() === false) return summary();
-  const legacy = amuxIntakeLegacyLimits();
-  const perTick = legacy ? AMUX_SCORE_REFRESH_MAX_PER_TICK : Number.POSITIVE_INFINITY;
   let due: string[];
   try {
     // A read: it writes nothing and records no receipt, so any failure here,
     // a lost COMMIT included, leaves nothing to verify.
     ({ due, orphaned } = await withAutoTransaction(null, TICK_TRANSACTION_LIMITS,
-      async (tx) => ({ due: await readDueAmuxPortfolioScoreTaskIds(tx, legacy),
+      async (tx) => ({ due: await readDueAmuxPortfolioScoreTaskIds(tx),
         orphaned: await readAmuxOrphanedBacklogTaskIds(tx) })));
   } catch (error) {
     console.error(JSON.stringify({ event: "amux_score_refresh_read_failed",
@@ -512,8 +492,7 @@ export async function refreshDueAmuxPortfolioScores(input: {
     return summary();
   }
   for (const taskId of due) {
-    if (outcomes.filter((item) => item.state === "refreshed").length >= perTick ||
-        input.hasBudget?.() === false) break;
+    if (input.hasBudget?.() === false) break;
     try {
       outcomes.push(await withAutoTransaction(taskId, TICK_TRANSACTION_LIMITS,
         async (tx, _now, recordReceipt) => {

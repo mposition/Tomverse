@@ -132,7 +132,7 @@ test("both locales name every lane state", async () => {
   const { adminAmuxExecutionMessages } = await import("../lib/adminMessages/amuxExecution.ts");
   for (const locale of ["en", "ko"]) {
     const lane = adminAmuxExecutionMessages[locale].ideaLane;
-    assert.deepEqual(Object.keys(lane.state).sort(), ["failed", "merged", "pr_closed", "pr_open", "queued", "running"]);
+    assert.deepEqual(Object.keys(lane.state).sort(), ["merged", "pr_closed", "pr_open", "queued", "running"]);
     assert.equal(typeof lane.group(2), "string");
   }
 });

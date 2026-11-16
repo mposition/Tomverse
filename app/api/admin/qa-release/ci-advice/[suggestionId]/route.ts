@@ -11,7 +11,6 @@ import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib
 import { ideaSendPath } from "@/lib/amux/ideaSendPath";
 import { amuxIdeaSessionPrewriteStatus } from "@/lib/amux/ideaSessionSubmissionCore";
 import { AmuxIdeaSessionSubmissionError } from "@/lib/amux/ideaSessionSubmissionService";
-import { AMUX_V4_IDEA_READBACK_ENV, AMUX_V4_IDEA_SUBMISSION_ENV, ideaSubmissionReadBackPermitted, ideaSubmissionWritePermitted } from "@/lib/amux/ideaSubmissionCore";
 import { IdeaSubmissionError } from "@/lib/amux/ideaSubmissionService";
 import { authOptions } from "@/lib/auth";
 import { CI_ADVICE_ID, ciAdviceWorkBrief } from "@/lib/qaReleaseCiAdviceActionsCore";
@@ -42,8 +41,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ sug
       return updated ? json({ item: updated }) : json({ error: "suggestion_changed" }, 409);
     }
     if (item.status === "sent") return json({ item });
-    if (!ideaSubmissionWritePermitted(process.env[AMUX_V4_IDEA_SUBMISSION_ENV]) ||
-      !ideaSubmissionReadBackPermitted(process.env[AMUX_V4_IDEA_READBACK_ENV])) return json({ error: "amux_submission_disabled" }, 503);
     const path = await ideaSendPath({ session, request, requestId: suggestionSendRequestId(`qa-ci:${id}`),
       idea: ciAdviceWorkBrief(item), sessionDisplay: "CI improvement suggestion" });
     if (!path.ok) return json({ error: path.code }, path.status);

@@ -16,8 +16,6 @@ import { AmuxTrackedCheckoutReadManifestError,
   "@/lib/amux/ideaTrackedCheckoutReadManifestStore";
 import { prisma } from "@/lib/prisma";
 
-const WRITE_ENV = "TOMVERSE_AMUX_V19_READ_MANIFEST_WRITE";
-const READ_ENV = "TOMVERSE_AMUX_V19_READ_MANIFEST_READ";
 const id = z.string().uuid();
 const ordinal = z.number().int().min(0).max(2_147_483_647);
 const lookupSchema = z.object({ ideaId: id, referenceOrdinal: ordinal }).strict();
@@ -39,8 +37,7 @@ function authorized(request: Request): boolean {
  * host never retries a POST after an uncertain key-store write or COMMIT. */
 export async function POST(request: Request): Promise<Response> {
   if (!authorized(request)) return amuxJsonNoStore({ error: "Unauthorized" }, 401);
-  if (process.env[WRITE_ENV] !== "enabled" || process.env[READ_ENV] !== "enabled" ||
-      !amuxV19ReadManifestRetentionEnabled(
+  if (!amuxV19ReadManifestRetentionEnabled(
         process.env[AMUX_V19_READ_MANIFEST_RETENTION_ENV])) {
     return amuxJsonNoStore({ available: false,
       reason: "read_manifest_write_disabled" }, 409);
@@ -93,13 +90,9 @@ export async function POST(request: Request): Promise<Response> {
   }
 }
 
-/** Content-free recovery remains available after writes stop or paths expire. */
+/** Content-free recovery; it stays available after paths expire. */
 export async function GET(request: Request): Promise<Response> {
   if (!authorized(request)) return amuxJsonNoStore({ error: "Unauthorized" }, 401);
-  if (process.env[READ_ENV] !== "enabled") {
-    return amuxJsonNoStore({ available: false,
-      reason: "read_manifest_read_disabled" }, 409);
-  }
   const params = new URL(request.url).searchParams;
   if (params.size !== 2 || params.getAll("ideaId").length !== 1 ||
       params.getAll("referenceOrdinal").length !== 1) {

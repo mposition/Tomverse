@@ -609,7 +609,7 @@ Brief와 요청 전체는 catalog scanner(`amux-board-content-scan-v1`)를 통�
 
 대상 카드는 `backlog`이고 owner와 `claimedAt`과 `archivedAt`이 null이며, attempt, delivery, route decision이 0이고, 의존성이 있으면 그 의존성은 `done`이며 archive되지 않았다. source identity가 없거나 digest가 다르면 거절한다. 하나라도 거절이면 배치 전체를 쓰지 않는다.
 
-Apply는 환경 변수 `TOMVERSE_AMUX_BOARD_PROMOTE`가 정확히 `enabled`이고 코드 래치가 true일 때만 열린다. 버전 3이 출고한 코드 래치는 false였다. 버전 6이 출고하는 코드 래치는 true다. 요청 스키마의 `policyVersion`은 3으로 남는다. HTTP route는 래치를 인자로 받지 않는다. 승인 계약은 catalog import와 같다. 준비한 운영자가 최근 step-up 후 같은 행을 승인하고, 창은 15분이며, 소비는 한 번이다. 감사 metadata에는 brief 원문, 제목, source key를 넣지 않는다. 환경 값이 `enabled`가 아니면 코드 래치가 켜져 있어도 트랜잭션을 열지 않는다.
+Apply는 승인된 행에 대해서만 열린다. 2026-11-16 대화 결정으로 환경 변수 `TOMVERSE_AMUX_BOARD_PROMOTE`와 코드 래치를 없앴다(버전 6이 래치를 켜고 production 값이 enabled였으므로 동작은 같다). 요청 스키마의 `policyVersion`은 3으로 남는다. 승인 계약은 catalog import와 같다. 준비한 운영자가 최근 step-up 후 같은 행을 승인하고, 창은 15분이며, 소비는 한 번이다. 감사 metadata에는 brief 원문, 제목, source key를 넣지 않는다.
 
 성공한 apply는 그 카드의 status를 `todo`로 바꾸고, 요청의 kind, priority, classification, brief, brief digest를 기록하고, revision을 1 올린다. owner를 세팅하지 않고 attempt, delivery, route decision을 만들지 않는다. `TOMVERSE_AMUX_EXECUTE`를 바꾸지 않는다. queue는 계속 literal `todo`와 owner null만 읽는다. 승격된 카드는 그 조건에 들어가 선택 대상이 될 수 있으나, 선택은 실행이 아니다.
 
@@ -623,7 +623,7 @@ Apply는 환경 변수 `TOMVERSE_AMUX_BOARD_PROMOTE`가 정확히 `enabled`이�
 
 item drift인 source key마다 `accept_new_source_revision` 또는 `reject`가 정확히 하나 필요하다. 두 카드를 한 결정으로 묶지 않는다. no-op, missing, extra에는 revision을 만들지 않는다. 결정이 빠지거나 drift가 아닌 키를 결정하면 preview는 거절하고 writes는 0이다.
 
-Preview는 아무것도 쓰지 않는다. `applyPermitted`는 환경 변수 `TOMVERSE_AMUX_RECONCILIATION_APPLY`가 정확히 `enabled`이고 코드 래치가 true일 때만 true다. 버전 5가 출고하는 코드 래치는 true다. HTTP route는 래치를 인자로 받지 않는다. Apply는 그 판정이 false이면 트랜잭션을 열기 전에 `apply_disabled`로 거절한다. 환경 값이 `enabled`가 아니면 코드 래치가 켜져 있어도 트랜잭션을 열지 않는다.
+Preview는 아무것도 쓰지 않는다. `applyPermitted`는 계획이 유효할 때 true다. 2026-11-16 대화 결정으로 환경 변수 `TOMVERSE_AMUX_RECONCILIATION_APPLY`와 코드 래치를 없앴다(production 값은 enabled였다). Apply는 owner step-up과 감사 체인만으로 트랜잭션을 연다.
 
 래치가 열린 뒤의 한 트랜잭션은 consumed run, 사람 감사, revision insert, accept인 카드의 pointer 갱신만 한다. revision은 append-only다. accept는 새 accepted revision을 넣은 뒤에 pointer만 옮긴다. reject는 rejected revision만 추가하고 pointer를 유지한다. 어느 쪽도 `sourceVersion`, `sourceDigest`, `sourceSnapshot`, status, kind, priority, owner, `claimedAt`을 바꾸지 않는다. attempt, delivery, route decision, provider cost, 사용자 크레딧을 만들지 않는다. 감사 metadata에는 제목과 source key를 넣지 않고 digest와 개수만 남긴다.
 
@@ -671,7 +671,7 @@ score는 `scoreAmuxScheduler`와 `amux-global-priority-v2`다. capacity weight�
 
 preview는 아무것도 쓰지 않는다. 계산된 포함, 제외, `applyPermitted`만 반환한다.
 
-prepare와 승인, 보류, 거절은 환경 변수 `TOMVERSE_AMUX_BOARD_RECOMMEND`가 정확히 `enabled`이고 코드 래치가 true일 때만 쓴다. 버전 7이 출고하는 코드 래치는 false다. 래치가 꺼져 있거나 환경 값이 `enabled`가 아니면 그 네 쓰기 모두 트랜잭션을 열기 전에 `apply_disabled`로 거절한다. 이미 쓴 snapshot의 읽기는 남는다. 이 버전은 그 환경 변수를 설정하지 않는다. HTTP route는 래치를 인자로 받지 않는다. 용량 행의 insert와 update writer도 이 버전에 없다.
+prepare와 승인, 보류, 거절은 2026-11-16 대화 결정으로 환경 변수 `TOMVERSE_AMUX_BOARD_RECOMMEND`와 코드 래치 없이 owner step-up만으로 쓴다(버전 10이 래치를 켰고 production 값은 enabled였다). 이미 쓴 snapshot의 읽기는 남는다. 용량 행의 insert와 update writer도 이 버전에 없다.
 
 preview는 위 조건과 무관하게 아무것도 쓰지 않는다.
 
@@ -707,7 +707,7 @@ kill switch는 환경 값이 정확히 `enabled`가 아니거나 코드 래치�
 6. 새 자격증명은 없다. 로그와 감사에 brief, 제목, source key를 넣지 않는다.
 7. 테이블은 `AmuxRecommendationCapacity`, snapshot, snapshot 항목, decision이다. 용량 행의 insert와 update writer는 이 버전에 없다. 추천 서비스는 snapshot과 decision만 쓴다. 카드 status enum에 값을 추가하지 않는다. 보존 기간은 미정이고 삭제 job은 없다.
 8. 추천 비용 namespace는 열지 않는다. provider 호출이 없으므로 상한은 0건이다. 사용자 크레딧과 섞지 않는다.
-9. 스위치는 `TOMVERSE_AMUX_BOARD_RECOMMEND`가 정확히 `enabled`인 것과 코드 래치다. 출고 래치는 false다. 자동 정지는 환경 값이 더 이상 `enabled`가 아니거나 래치가 false일 때다. 환경 값의 해제는 사람의 조작이고, 래치를 다시 켜는 것은 별도 버전이다.
+9. 스위치. 2026-11-16 대화 결정으로 `TOMVERSE_AMUX_BOARD_RECOMMEND`와 코드 래치를 없앴다. 추천 풀은 owner step-up과 승인 기록만으로 쓰며, 환경 값으로 자동 정지하는 경로는 없다.
 10. 멱등 키는 decision id다. `outcome_unknown` 뒤에는 read-back만 한다.
 11. 외부 worker와 모델이 없으므로 S0 실측과 DPA 행은 없다.
 12. 위 감사 action은 전부 사람이다.
@@ -807,7 +807,7 @@ grant를 남기는 요청의 step-up 창은 15분이다. 그 15분은 grant의 7
 
 요청 스키마의 `policyVersion`은 7로 남는다. 버전 7의 포함 조건, 용량 판정, 승인, 보류, 거절은 바꾸지 않는다. 버전 9의 자동 승격 코드 래치는 true로 남는다.
 
-버전 10이 출고하는 `RECOMMENDATION_CODE_LATCH`는 true다. 환경 변수 `TOMVERSE_AMUX_BOARD_RECOMMEND`가 정확히 `enabled`일 때만 prepare와 승인, 보류, 거절이 트랜잭션을 연다. 이 버전은 그 환경 변수를 설정하지 않는다. HTTP route는 래치를 인자로 받지 않는다. 상수가 false이면 route는 서비스 전에 `apply_disabled`를 반환한다.
+버전 10이 켠 추천 풀 코드 래치와 환경 변수 `TOMVERSE_AMUX_BOARD_RECOMMEND`는 2026-11-16 대화 결정으로 없앴다. prepare와 승인, 보류, 거절은 owner step-up만으로 트랜잭션을 연다.
 
 이 버전은 사람 결정 20건을 만들지 않는다. 용량 행을 넣지 않는다. 그 행이 없는 동안 포함 행은 `capacity_unconfigured`다. `TOMVERSE_AMUX_EXECUTE`와 `TOMVERSE_AMUX_EXECUTION_API_ENABLED`를 읽거나 쓰지 않는다. worker를 시작하지 않는다.
 
@@ -819,7 +819,7 @@ grant를 남기는 요청의 step-up 창은 15분이다. 그 15분은 grant의 7
 
 용량 요청은 `canonicalizationVersion`, `policyVersion`, `active`, `wipLimit`만 가진다. `wipLimit`는 1 이상 10000 이하의 정수다. 카드 id, 기본 한도, 자동 경로의 전역 3은 이 요청에 없다. owner와 최근 step-up이 있어야 하고, 쓰기는 사람 감사 `amux.recommendation_capacity.updated` 뒤에 `id`가 `queue`인 행 하나를 upsert한다. 감사 metadata는 `active`와 `wipLimit`만 담는다. 같은 요청을 다시 보내면 감사를 다시 남긴다. 저장한 행을 읽어 요청과 다르면 거절한다.
 
-이 writer는 추천 풀 코드 래치와 `TOMVERSE_AMUX_BOARD_RECOMMEND`보다 앞에서 동작한다. 래치를 나중에 꺼도 용량 행을 비활성화하는 경로는 남는다. 카드 status를 바꾸지 않는다. 환경 변수를 읽거나 쓰지 않는다. `TOMVERSE_AMUX_EXECUTE`와 `TOMVERSE_AMUX_EXECUTION_API_ENABLED`를 읽거나 쓰지 않는다. worker를 시작하지 않는다. 사람 결정 20건을 만들지 않는다.
+이 writer는 추천 풀의 prepare·결정 writer와 독립으로 동작한다. 용량 행을 비활성화하는 경로는 항상 남는다. 카드 status를 바꾸지 않는다. 환경 변수를 읽거나 쓰지 않는다. `TOMVERSE_AMUX_EXECUTE`와 `TOMVERSE_AMUX_EXECUTION_API_ENABLED`를 읽거나 쓰지 않는다. worker를 시작하지 않는다. 사람 결정 20건을 만들지 않는다.
 
 행이 없거나 `active`가 아니거나 `wipLimit`이 비어 있으면 소비는 계속 `capacity_unconfigured`다.
 
@@ -881,7 +881,7 @@ Tomverse의 카드, 추천, 승격, 승인, 실행 원장, 감사는 정본이�
 
 ### backlog 카드 메타데이터 writer
 
-owner와 최근 step-up이 backlog 카드 하나의 `kind`, `priority`, `estimatedCostMicrousd`만 고친다. 대상은 `backlog`, owner null, brief 없음, 보관되지 않은 카드다. revision + 1과 사람 감사를 같은 트랜잭션에 쓴다. status는 바꾸지 않는다. `estimatedCostMicrousd`는 0 이상 5,000,000 이하다. 코드 래치 true, 환경 변수 `TOMVERSE_AMUX_BACKLOG_METADATA`가 정확히 `enabled`일 때만 연다.
+owner와 최근 step-up이 backlog 카드 하나의 `kind`, `priority`, `estimatedCostMicrousd`만 고친다. 대상은 `backlog`, owner null, brief 없음, 보관되지 않은 카드다. revision + 1과 사람 감사를 같은 트랜잭션에 쓴다. status는 바꾸지 않는다. `estimatedCostMicrousd`는 0 이상 5,000,000 이하다. 2026-11-16 대화 결정으로 코드 래치와 환경 변수 `TOMVERSE_AMUX_BACKLOG_METADATA`를 없앴고(production 값은 enabled였다), owner step-up만으로 연다.
 
 ### 자동 승격 개정
 

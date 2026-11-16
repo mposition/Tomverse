@@ -1,5 +1,4 @@
 import { amuxCanonicalJson } from "./boardImportCore.ts";
-import { amuxIntakeCap } from "./intakeLimitsCore.ts";
 import { amuxContentDigest, type AmuxDigestKey } from "./ideaCrypto.ts";
 import type { AmuxAnalysisNode } from "./ideaAnalysisChunkCore.ts";
 import { checkAmuxIdeaUnitConsume, type AmuxIdeaUnitConsumeContext,
@@ -54,9 +53,7 @@ export function inspectAmuxV4NodeCreation(input: {
       snapshot.draftShape.level !== proposal.level ||
       node.level !== proposal.level ||
       node.parentId !== (snapshot.hierarchy.at(-1)?.id ?? null) ||
-      // Former lengths, kept only under TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS.
-      proposal.title.length < 1 || proposal.title.length > amuxIntakeCap(200) ||
-      proposal.description.length > amuxIntakeCap(4_000)) {
+      proposal.title.length < 1) {
     return { ok: false, code: "proposal_mismatch" };
   }
   return { ok: true, plan: { id: node.id, parentId: node.parentId,

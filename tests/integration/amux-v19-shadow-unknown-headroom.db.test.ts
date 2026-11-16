@@ -99,10 +99,7 @@ async function rolledBack(fn: (tx: Prisma.TransactionClient) => Promise<void>) {
 }
 
 const ENV = ["TOMVERSE_AMUX_V19_SESSION_ANALYSIS_APP_ORIGIN",
-  "TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET",
-  "TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_WRITE",
-  "TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_READ",
-  "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_STOP_POLL_READ"] as const;
+  "TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET"] as const;
 const oldEnv = Object.fromEntries(ENV.map((name) => [name, process.env[name]]));
 
 let priceVersionId = "";
@@ -188,9 +185,6 @@ async function runnerClaim(queued: { ideaId: string; reservationId: string }) {
 before(async () => {
   process.env.TOMVERSE_AMUX_V19_SESSION_ANALYSIS_APP_ORIGIN = origin;
   process.env.TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET = launcherSecret;
-  process.env.TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_WRITE = "enabled";
-  process.env.TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_READ = "enabled";
-  process.env.TOMVERSE_AMUX_V19_SESSION_ANALYSIS_STOP_POLL_READ = "enabled";
   priorScope = await prisma.$transaction((tx) => readAmuxOperatingScopeAuthority(tx));
   const frontier = inspectFrontierCatalogWrite(JSON.stringify({
     schemaVersion: 1, action: "approve", approvalId: randomUUID(), provider: "anthropic",

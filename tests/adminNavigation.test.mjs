@@ -1180,7 +1180,7 @@ test("the legacy tools tab holds every panel the retired pages held, each behind
     page,
     /const LEGACY_SECTIONS = \[\s*"import",\s*"reconciliation",\s*"metadata",\s*"recommendation",\s*"promotion",\s*"auto-promotion",\s*\] as const;/
   );
-  assert.ok(page.includes("amuxSwitchedTabStatuses(LEGACY_SECTIONS)"));
+  assert.ok(page.includes("amuxSwitchedTabStatuses(SWITCHED_LEGACY_SECTIONS)"));
   // Each panel's step-up returns to the tab, not to a retired address.
   for (const file of [
     "AmuxBoardImportPanel",

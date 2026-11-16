@@ -22,13 +22,12 @@ export const DEVELOP_CI_REPAIR_SYSTEM_ACTOR = "develop-ci-repair" as const;
 export const DEVELOP_CI_REPAIR_IDEA_ACTION = "develop_ci_repair.idea_submitted" as const;
 export const DEVELOP_CI_REPAIR_IDEA_TARGET = "AmuxIdeaSubmission" as const;
 
-/** New repair ideas per UTC day. Each one is at most AMUX_IDEA_LANE_MAX_ATTEMPTS lane runs. */
+/** New repair ideas per UTC day. */
 export const DEVELOP_CI_REPAIR_PER_DAY = 3;
 /** Jobs whose log goes into one idea, and the tail kept from each, before owner
  * direction 2026-11-15. Every failed job's whole log now goes into the idea
- * (lib/developCiRepair.ts); these hold only under
- * TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS, or when the whole logs trip the idea's
- * secret and personal-data scan. */
+ * (lib/developCiRepair.ts); these are the fallback when the whole logs trip
+ * the idea's secret and personal-data scan. */
 export const DEVELOP_CI_REPAIR_MAX_JOBS = 3;
 export const DEVELOP_CI_REPAIR_LOG_TAIL_CHARS = 6_000;
 

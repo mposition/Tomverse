@@ -2,8 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  inspectIdeaTransferConfirmationRequest, transferConfirmReadPermitted,
-  transferConfirmWritePermitted,
+  inspectIdeaTransferConfirmationRequest,
 } from "../lib/amux/ideaTransferConfirmationCore.ts";
 import { readIdeaTransferBrowserNonce } from "../lib/amux/ideaTransferBrowserCore.ts";
 
@@ -25,10 +24,6 @@ test("transfer confirmation accepts only one exact reviewed digest", () => {
     { ok: false, code: "schema_rejected" });
   assert.deepEqual(inspectIdeaTransferConfirmationRequest("x".repeat(513)),
     { ok: false, code: "too_large" });
-  assert.equal(transferConfirmWritePermitted(undefined), false);
-  assert.equal(transferConfirmReadPermitted(undefined), false);
-  assert.equal(transferConfirmWritePermitted("enabled"), true);
-  assert.equal(transferConfirmReadPermitted("enabled"), true);
 });
 
 test("same-preview browser receipt is unique and cannot be taken from another cookie", () => {

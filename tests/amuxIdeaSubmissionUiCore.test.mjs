@@ -36,7 +36,7 @@ test("manual reopen uses only the existing audited receipt readback", () => {
   assert.doesNotMatch(reopen, /method:\s*["']POST/);
   assert.match(panel, /htmlFor="amux-saved-request-id"/);
   assert.match(panel, /const frozen = chainRunning \|\| readBackPending \|\|/);
-  assert.match(panel, /hasUnsavedInput = !!\(idea\.trim\(\) \|\| repositories\.trim\(\) \|\| pullRequests\.trim\(\)\)/);
+  assert.match(panel, /hasUnsavedInput = !!\(idea\.trim\(\) \|\| pullRequests\.trim\(\)\)/);
 });
 
 test("another idea starts only after a definitive save and no pending check", () => {
@@ -84,7 +84,7 @@ test("only an exact successful submission response confirms the idea", () => {
 });
 
 test("only documented pre-transaction refusals permit a fresh submission", () => {
-  for (const [code, status] of [["submission_disabled", 503], ["schema_rejected", 400],
+  for (const [code, status] of [["schema_rejected", 400],
     ["content_refused", 400], ["ADMIN_REAUTHENTICATION_REQUIRED", 428],
     ["audit_unavailable", 503]]) {
     assert.deepEqual(classifyIdeaSubmissionPost({ status, body: { error: code } }, requestId),
@@ -117,10 +117,9 @@ test("absent, partial, malformed and failed read-back all remain unknown", () =>
   }
 });
 
-test("write route requires the independent read-back gate before admission", () => {
+test("write route keeps the external-sources answer and the panel's declaration", () => {
   const route = readFileSync(path.join(root, "app/api/admin/amux/ideas/submissions/route.ts"), "utf8");
   const post = route.split("export async function POST")[1]?.split("export async function GET")[0] ?? "";
-  assert.match(post, /!ideaSubmissionWritePermitted\([\s\S]*?\) \|\|\s*!ideaSubmissionReadBackPermitted\(/);
   assert.match(post, /hasExternalSources: inspected\.counts\.repositoryCount \+ inspected\.counts\.pullRequestCount > 0/);
   const panel = readFileSync(path.join(root, "components/admin/AmuxIdeaInputPanel.tsx"), "utf8");
   assert.match(panel, /declaredExternalSources=\{submission\.kind === "submitted" && submission\.hasExternalSources\}/);

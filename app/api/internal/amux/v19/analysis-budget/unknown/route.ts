@@ -13,8 +13,6 @@ import { AmuxSessionBudgetSettlementError,
   "@/lib/amux/ideaSessionAnalysisBudgetSettlementService";
 import { prisma } from "@/lib/prisma";
 
-const WRITE_ENV = "TOMVERSE_AMUX_V19_SESSION_BUDGET_UNKNOWN_WRITE";
-const READ_ENV = "TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_READ";
 const uuid = z.string().uuid();
 const bodySchema = z.object({
   claimId: uuid, requestId: uuid, reservationId: uuid, ideaId: uuid,
@@ -38,11 +36,6 @@ export async function POST(request: Request): Promise<Response> {
     process.env.TOMVERSE_AMUX_SYNC_SECRET);
   if (!v4Authorized && !maxAuthorized) {
     return amuxJsonNoStore({ error: "Unauthorized" }, 401);
-  }
-  if (process.env[WRITE_ENV] !== "enabled" ||
-      process.env[READ_ENV] !== "enabled") {
-    return amuxJsonNoStore({ available: false,
-      reason: "session_budget_unknown_write_disabled" }, 409);
   }
   if (request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !==
       "application/json") {

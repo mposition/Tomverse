@@ -24,8 +24,6 @@ import { tickV22WorkerClaim } from "@/lib/amux/v22WorkerClaimService";
 import { amuxRouteHasBudgetForMs, withAmuxRouteBudget } from "@/lib/amux/dbBoundary";
 import { sweepAmuxStalledCards } from "@/lib/amux/stalledCardSweep";
 import { loadCurrentAmuxContentKeys } from "@/lib/amux/ideaKeyConfig";
-import { AMUX_SCORE_REFRESH_ENV, amuxScoreAutoRefreshEnabled } from
-  "@/lib/amux/portfolioScoreCore";
 import { refreshDueAmuxPortfolioScores } from "@/lib/amux/portfolioScoreService";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 import {
@@ -61,9 +59,8 @@ const requestSchema = z.object({}).strict();
 const OPERATION = "auto_promotion_tick";
 
 /** Owner decision 2026-11-14: before promotion reads its candidates, extend
- * the windows of scores whose confirmed inputs are unchanged (on by default
- * since 2026-11-15; `TOMVERSE_AMUX_V4_SCORE_AUTO_REFRESH=disabled` turns it
- * off, see amuxScoreAutoRefreshEnabled). Each refresh must leave
+ * the windows of scores whose confirmed inputs are unchanged (always on since
+ * 2026-11-16; no switch turns it off). Each refresh must leave
  * room for the claim and promotion transactions after it. A refusal never
  * fails the tick; a refresh whose COMMIT outcome is lost stops it, answered
  * like the promotion's own lost write, before any claim or promotion runs. */
@@ -144,8 +141,7 @@ export async function POST(request: Request) {
         { status: 409, headers: noStore });
     }
 
-    if (v22Enabled && identity.kind === "admitted" &&
-        amuxScoreAutoRefreshEnabled(process.env[AMUX_SCORE_REFRESH_ENV])) {
+    if (v22Enabled && identity.kind === "admitted") {
       const stopped = await refreshScoresBeforePromotion();
       if (stopped) return stopped;
     }

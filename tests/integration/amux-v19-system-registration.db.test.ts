@@ -1292,9 +1292,7 @@ test("the owner closes an idea waiting after analysis; none of its units can be 
   assert.equal(before.state, "awaiting_owner");
 
   // A rejection prepared before the close must not be consumable after it.
-  const previous = process.env.TOMVERSE_AMUX_V4_UNIT_WRITE;
-  process.env.TOMVERSE_AMUX_V4_UNIT_WRITE = "enabled";
-  try {
+  {
     const browserNonce = randomBytes(32).toString("base64url");
     const prepared = await prepareAmuxV4UnitRejection({ session, request, ideaId,
       draftUnitId: unitIds[3]!, prepareRequestId: randomUUID(),
@@ -1359,9 +1357,6 @@ test("the owner closes an idea waiting after analysis; none of its units can be 
       { code: "not_ready" }, "unattended registration refuses a closed idea");
     assert.equal(await prisma.amuxWorkItem.count({ where: {
       sourceSystem: "admin-idea-v4", sourceKey: { in: unitIds } } }), 0);
-  } finally {
-    if (previous === undefined) delete process.env.TOMVERSE_AMUX_V4_UNIT_WRITE;
-    else process.env.TOMVERSE_AMUX_V4_UNIT_WRITE = previous;
   }
 });
 

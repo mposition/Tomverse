@@ -454,14 +454,11 @@ test("session analysis queue lists the live reservation and advances past its DB
   assert.equal(after.candidates.some((candidate) =>
     candidate.reservationId === committedReservationId), false);
 
-  const switches = ["TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET",
-    "TOMVERSE_AMUX_V4_ANALYSIS_QUEUE_READ", "TOMVERSE_AMUX_SESSION_INTAKE",
-    "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_QUEUE_READ"];
+  const switches = ["TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET"];
   const previous = new Map(switches.map((key) => [key, process.env[key]]));
   const secret = "synthetic-amux-session-queue-secret-0123456789";
   try {
     process.env[switches[0]] = secret;
-    for (const key of switches.slice(1)) process.env[key] = "enabled";
     const { POST } = await import("@/app/api/internal/amux/v19/analysis-queue/route");
     const poll = (body: object) => POST(new Request(
       "https://tomverse.test/api/internal/amux/v19/analysis-queue", {
@@ -1090,14 +1087,10 @@ test("reservation store refuses duplicate and superseded-scope attempts", async 
   assert.equal(await prisma.amuxIdeaOperatingScopeSetting.count(), scopeCount);
 });
 
-test("a send from another Admin screen enters as a session idea while session intake is on", async () => {
-  const switches = ["TOMVERSE_AMUX_SESSION_INTAKE", "TOMVERSE_AMUX_SESSION_INTAKE_READBACK",
-    "TOMVERSE_AMUX_V4_IDEA_SUBMIT", "TOMVERSE_AMUX_V4_IDEA_READBACK"];
-  const saved = switches.map((name) => process.env[name]);
+test("a send from another Admin screen enters as a session idea", async () => {
   const send = (requestId: string) => ideaSendPath({ session, request, requestId,
     idea: "[Scout 제안] Synthetic suggestion", sessionDisplay: "Scout suggestion" });
-  try {
-    for (const name of switches) process.env[name] = "enabled";
+  {
     const path = await send(committedRequestId);
     assert.ok(path.ok);
     // A stored session idea reads back committed, so a second click makes no second idea.
@@ -1118,25 +1111,10 @@ test("a send from another Admin screen enters as a session idea while session in
     const refused = await ideaSendPath({ session, request, requestId: randomUUID(),
       idea: "Contact person@example.test", sessionDisplay: "Scout suggestion" });
     assert.deepEqual(refused, { ok: false, code: "content_refused", status: 400 });
-
-    // With session intake off the idea stays on the v4 path, and its read
-    // still finds the session idea rather than making another.
-    process.env.TOMVERSE_AMUX_SESSION_INTAKE = "disabled";
-    const off = await send(committedRequestId);
-    assert.ok(off.ok);
-    assert.equal((await off.readBack()).status, "committed");
-  } finally {
-    switches.forEach((name, index) => {
-      if (saved[index] === undefined) delete process.env[name];
-      else process.env[name] = saved[index];
-    });
   }
 });
 
 test("an auto-router recommendation sent again finds its session idea and makes no second one", async () => {
-  const switches = ["TOMVERSE_AMUX_SESSION_INTAKE", "TOMVERSE_AMUX_SESSION_INTAKE_READBACK",
-    "TOMVERSE_AMUX_V4_IDEA_SUBMIT", "TOMVERSE_AMUX_V4_IDEA_READBACK"];
-  const saved = switches.map((name) => process.env[name]);
   const cycle = await prisma.autoRouterOptimizerCycle.create({ data: {
     optimizerModelId: "optimizer-model", routerModelId: "router-model", incumbentGuidance: "guidance",
     reservedMicroUsd: 0, status: "passed",
@@ -1175,7 +1153,6 @@ test("an auto-router recommendation sent again finds its session idea and makes 
     return ideaId;
   };
   try {
-    for (const name of switches) process.env[name] = "enabled";
     const ideaId = await storeIdea(1);
     assert.deepEqual(await send(1), { kind: "sent", ideaId, closed: true });
     assert.equal(await statusOf(1), "sent_to_amux");
@@ -1186,17 +1163,11 @@ test("an auto-router recommendation sent again finds its session idea and makes 
     // Once sent, the recommendation is held: another send changes nothing.
     assert.equal(await reserveRecommendationForAmux(actor, { cycleId: cycle.id, index: 1 }), false);
 
-    // Session intake turned off between the idea and the retry: the v4 door
-    // still reads the session idea rather than making another.
-    process.env.TOMVERSE_AMUX_SESSION_INTAKE = "disabled";
+    // A second recommendation finds its own stored session idea the same way.
     const otherId = await storeIdea(2);
     assert.deepEqual(await send(2), { kind: "sent", ideaId: otherId, closed: true });
     assert.equal(await prisma.amuxIdeaSubmission.count({ where: { requestId: otherId } }), 1);
   } finally {
-    switches.forEach((name, index) => {
-      if (saved[index] === undefined) delete process.env[name];
-      else process.env[name] = saved[index];
-    });
     await prisma.autoRouterOptimizerCycle.delete({ where: { id: cycle.id } });
   }
 });
@@ -1806,10 +1777,8 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
   const priceVersionId = AMUX_V19_SUBSCRIPTION_NO_PRICE_ID;
   const priceReadSecret = "syntheticMaxLauncherSecret_0123456789abcdefgh";
   const oldPriceReadSecret = process.env.TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET;
-  const oldPriceReadSwitch = process.env.TOMVERSE_AMUX_V19_SESSION_MAX_PRICE_READ;
   try {
     process.env.TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET = priceReadSecret;
-    process.env.TOMVERSE_AMUX_V19_SESSION_MAX_PRICE_READ = "enabled";
     const headers = { authorization: `Bearer ${priceReadSecret}`,
       "x-amux-agent-id": AMUX_V19_MAX_LAUNCHER_ID };
     const endpoint = `https://test.invalid/api/internal/amux/v19/analysis-price?reservationId=${reservation.reservationId}&ideaId=${ideaId}`;
@@ -1824,9 +1793,6 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
     if (oldPriceReadSecret === undefined)
       delete process.env.TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET;
     else process.env.TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET = oldPriceReadSecret;
-    if (oldPriceReadSwitch === undefined)
-      delete process.env.TOMVERSE_AMUX_V19_SESSION_MAX_PRICE_READ;
-    else process.env.TOMVERSE_AMUX_V19_SESSION_MAX_PRICE_READ = oldPriceReadSwitch;
   }
   const maxLauncherIdentity = { ideaId, provider: "anthropic", modelId: maxModelId,
     reasoningEffort: "high",
@@ -1849,11 +1815,7 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
   })), (error: unknown) => error instanceof AmuxSessionBudgetClaimError &&
     error.code === "not_ready", "Max claim rejects a different idea");
   const launcherSecret = "syntheticMaxLauncherSecret_0123456789abcdefgh";
-  const envNames = ["TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET",
-    "TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_WRITE",
-    "TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_READ",
-    "TOMVERSE_AMUX_V19_SESSION_MAX_IDEA_READ",
-    "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_STOP_POLL_READ"] as const;
+  const envNames = ["TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET"] as const;
   const oldEnv = Object.fromEntries(envNames.map((name) =>
     [name, process.env[name]]));
   const claimRequestId = randomUUID();
@@ -1871,10 +1833,6 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
   let maxManifestId!: string;
   try {
     process.env.TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET = launcherSecret;
-    process.env.TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_WRITE = "enabled";
-    process.env.TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_READ = "enabled";
-    process.env.TOMVERSE_AMUX_V19_SESSION_MAX_IDEA_READ = "enabled";
-    process.env.TOMVERSE_AMUX_V19_SESSION_ANALYSIS_STOP_POLL_READ = "enabled";
     const headers = { authorization: `Bearer ${launcherSecret}`,
       "x-amux-agent-id": AMUX_V19_MAX_LAUNCHER_ID };
     const response = await postMaxClaimRoute(new Request(
@@ -1923,18 +1881,7 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
       readAmuxSessionAnalysisStopState(tx, claimId,
         reservation.reservationId, ideaId, "max_shadow")),
     { claimId, reservationId: reservation.reservationId, stop: false });
-    const checkoutSwitches = [
-      "TOMVERSE_AMUX_V19_MAX_CHECKOUT_EVIDENCE_WRITE",
-      "TOMVERSE_AMUX_V19_MAX_CHECKOUT_EVIDENCE_READ",
-      "TOMVERSE_AMUX_V19_CHECKOUT_EVIDENCE_WRITE",
-      "TOMVERSE_AMUX_V19_CHECKOUT_EVIDENCE_READ",
-      "TOMVERSE_AMUX_V19_MAX_READ_MANIFEST_READ",
-      "TOMVERSE_AMUX_V19_READ_MANIFEST_READ",
-    ] as const;
-    const oldCheckoutSwitches = Object.fromEntries(checkoutSwitches.map(
-      (name) => [name, process.env[name]]));
-    try {
-      for (const name of checkoutSwitches) process.env[name] = "enabled";
+    {
       const identity = { claimId, requestId: claimRequestId,
         reservationId: reservation.reservationId, ideaId,
         invocationOrdinal: 0, referenceOrdinal: 0 };
@@ -2056,12 +2003,6 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
         secondKeys.masterKey.fill(0);
         secondKeys.digestKey.fill(0);
       }
-    } finally {
-      for (const name of checkoutSwitches) {
-        const old = oldCheckoutSwitches[name];
-        if (old === undefined) delete process.env[name];
-        else process.env[name] = old;
-      }
     }
     await assert.rejects(prisma.$transaction((tx) =>
       readAmuxSessionAnalysisStopState(tx, claimId,
@@ -2165,18 +2106,12 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
       SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"`;
     return parkAmuxSessionIdeaInTx(tx, ideaId, clock[0]!.now);
   }), true);
-  const resultEnv = ["TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET",
-    "TOMVERSE_AMUX_V19_SESSION_BUDGET_MAX_RESULT_WRITE",
-    "TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_READ",
-    "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_STOP_POLL_READ"] as const;
+  const resultEnv = ["TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET"] as const;
   const resultOldEnv = Object.fromEntries(resultEnv.map((name) =>
     [name, process.env[name]]));
   let outcome!: { status: string; settledMicroUsd: string };
   try {
     process.env.TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET = launcherSecret;
-    process.env.TOMVERSE_AMUX_V19_SESSION_BUDGET_MAX_RESULT_WRITE = "enabled";
-    process.env.TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_READ = "enabled";
-    process.env.TOMVERSE_AMUX_V19_SESSION_ANALYSIS_STOP_POLL_READ = "enabled";
     const response = await postMaxResultRoute(new Request(
       "https://test.invalid/api/internal/amux/v19/analysis-budget/max-result", {
         method: "POST", headers: { authorization: `Bearer ${launcherSecret}`,
@@ -2272,16 +2207,12 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
       runner: { tokenCapsEnforceable: false, billableToolsDisabled: true,
         maxSubscriptionAuthenticated: true },
     }));
-  const unknownEnv = ["TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET",
-    "TOMVERSE_AMUX_V19_SESSION_BUDGET_UNKNOWN_WRITE",
-    "TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_READ"] as const;
+  const unknownEnv = ["TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET"] as const;
   const unknownOldEnv = Object.fromEntries(unknownEnv.map((name) =>
     [name, process.env[name]]));
   let unknown!: { status: string };
   try {
     process.env.TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET = launcherSecret;
-    process.env.TOMVERSE_AMUX_V19_SESSION_BUDGET_UNKNOWN_WRITE = "enabled";
-    process.env.TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_READ = "enabled";
     const response = await postMaxUnknownRoute(new Request(
       "https://test.invalid/api/internal/amux/v19/analysis-budget/unknown", {
         method: "POST", headers: { authorization: `Bearer ${launcherSecret}`,

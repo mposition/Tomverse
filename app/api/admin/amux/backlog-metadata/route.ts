@@ -18,7 +18,6 @@ import {
 import { BACKLOG_METADATA_RAW_BODY_MAX_BYTES, BacklogMetadataConflict } from "@/lib/amux/backlogMetadataCore";
 import {
   applyBacklogMetadata,
-  backlogMetadataApplyOpen,
   previewBacklogMetadata,
 } from "@/lib/amux/backlogMetadataService";
 
@@ -26,9 +25,8 @@ import {
  * Owner-only backlog card metadata writer.
  *
  * docs/policy/development-agent-orchestration.md (orchestration policy
- * version 15). Preview writes nothing. Apply is refused with `apply_disabled`
- * before any transaction unless the server reports that apply is open. This
- * route does not hold or pass the code latch.
+ * version 15). Preview writes nothing. Apply has no environment switch or
+ * code latch (owner direction 2026-11-16); the owner-only step-up guard stays.
  */
 
 const noStoreHeaders = { "Cache-Control": "private, no-store, max-age=0" };
@@ -83,9 +81,6 @@ export async function POST(request: Request) {
       minute: 10,
       day: 100,
     });
-    if (!backlogMetadataApplyOpen()) {
-      return NextResponse.json({ error: "apply_disabled" }, { status: 409, headers: noStoreHeaders });
-    }
     const raw = await readLimitedText(request, BACKLOG_METADATA_RAW_BODY_MAX_BYTES);
     return NextResponse.json(await applyBacklogMetadata({ session: auth.session, request, raw }), {
       headers: noStoreHeaders,

@@ -3,8 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { analysisBudgetUsdToMicroUsd, analysisBudgetMicroUsdToUsd,
   readPendingAnalysisBudgetSetting, analysisBudgetSavedMatches,
-  readAnalysisBudgetSnapshotReply, AMUX_ANALYSIS_BUDGET_READ_ENV,
-  AMUX_ANALYSIS_BUDGET_WRITE_ENV } from "../lib/amux/ideaAnalysisBudgetSettingCore.ts";
+  readAnalysisBudgetSnapshotReply, AMUX_ANALYSIS_BUDGET_WRITE_ENV } from "../lib/amux/ideaAnalysisBudgetSettingCore.ts";
 
 test("currency conversion is exact, with no exponent, rounding, sign or whitespace coercion", () => {
   for (const [input, expected] of [["1000", "1000000000"], ["0.01", "10000"],
@@ -43,8 +42,7 @@ test("display accepts only coherent server accounting, never unknown usage as ze
     remainingMicroUsd: "0" })?.spentMicroUsd, "50000000");
 });
 
-test("the monthly setting reuses the existing budget switches and never adds a call or user-credit capability", () => {
-  assert.equal(AMUX_ANALYSIS_BUDGET_READ_ENV, "TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_READ");
+test("the monthly setting reuses the existing budget write switch and never adds a call or user-credit capability", () => {
   assert.equal(AMUX_ANALYSIS_BUDGET_WRITE_ENV, "TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_RESERVE");
   const route = readFileSync(new URL("../app/api/admin/amux/ideas/analysis-budget-settings/route.ts", import.meta.url), "utf8");
   assert.match(route, /getAdminRole\(session\) !== "owner"/);

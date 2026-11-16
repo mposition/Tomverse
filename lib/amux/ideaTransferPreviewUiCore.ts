@@ -1,5 +1,4 @@
 import { isAmuxIdeaRequestId } from "./ideaRequestIdCore.ts";
-import { amuxIntakeCap } from "./intakeLimitsCore.ts";
 import type { AvailableFrontierModel } from "./ideaFrontierCatalogUiCore.ts";
 
 export type PreparedIdeaTransferPreview = {
@@ -40,7 +39,6 @@ export function readPreparedIdeaTransferPreview(
       record.ideaId !== expectedIdeaId ||
       record.templateVersion !== "amux-v4-analysis-prompt-v7" ||
       typeof record.prompt !== "string" || record.prompt.length === 0 ||
-      new TextEncoder().encode(record.prompt).length > amuxIntakeCap(65_536) ||
       model.provider !== selected.provider || model.modelId !== selected.modelId ||
       model.reasoningEffort !== effort || model.approvalId !== selected.approvalId ||
       model.approvalVersion !== selected.approvalVersion) return null;

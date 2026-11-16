@@ -4,7 +4,6 @@ import {
   AMUX_INTAKE_POLICY_VERSION,
   AMUX_INTAKE_SOURCE_SYSTEM,
   type AmuxIntakePriority,
-  amuxIntakeApplyPermitted,
   amuxIntakeDraftDigest,
   amuxIntakeStoredSourceKey,
   guardAmuxIntake,
@@ -51,7 +50,6 @@ export type AmuxIntakePreview = {
   outcome: "reject" | "approval_required" | "allow";
   code: string | null;
   unitCount: 0 | 1;
-  inactive: boolean;
   applyPermitted: boolean;
   writes: 0;
   reconfirmRequired: boolean;
@@ -121,12 +119,10 @@ export type AmuxIntakeDriftReport = {
 
 const emptyPreview = (
   code: string,
-  inactive = true,
 ): AmuxIntakePreview => ({
   outcome: "reject",
   code,
   unitCount: 0,
-  inactive,
   applyPermitted: false,
   writes: 0,
   reconfirmRequired: false,
@@ -144,20 +140,17 @@ const emptyPreview = (
 export const previewAmuxIntake = (
   raw: string,
   secret: string | null,
-  envValue: string | undefined,
 ): AmuxIntakePreview => {
   const parsed = parseAmuxIntakeDraft(raw);
-  if (!parsed.ok) return emptyPreview(parsed.code, !amuxIntakeApplyPermitted(envValue));
+  if (!parsed.ok) return emptyPreview(parsed.code);
   const guarded = guardAmuxIntake(raw);
   const draftDigest = amuxIntakeDraftDigest(parsed.draft);
   const sourceKey = secret === null ? null : amuxIntakeStoredSourceKey(secret, parsed.draft.sourceTaskId);
-  const latchOpen = amuxIntakeApplyPermitted(envValue);
   const shown: AmuxIntakePreview = {
     outcome: guarded.outcome,
     code: guarded.outcome === "reject" ? guarded.code : null,
     unitCount: 1,
-    inactive: !latchOpen,
-    applyPermitted: latchOpen && guarded.outcome === "allow" && sourceKey !== null,
+    applyPermitted: guarded.outcome === "allow" && sourceKey !== null,
     writes: 0,
     reconfirmRequired: guarded.outcome !== "allow",
     title: parsed.draft.proposal.title,
@@ -170,7 +163,7 @@ export const previewAmuxIntake = (
     sourceKey,
     workItem: parsed.draft.workItem,
   };
-  if (guarded.outcome === "reject" && guarded.code !== "digest_mismatch") return emptyPreview(guarded.code, !latchOpen);
+  if (guarded.outcome === "reject" && guarded.code !== "digest_mismatch") return emptyPreview(guarded.code);
   return shown;
 };
 
@@ -178,7 +171,7 @@ export const planAmuxIntakeRegistration = (
   raw: string,
   secret: string | null,
 ): { ok: true; plan: AmuxIntakeRegistrationPlan } | { ok: false; code: string; writes: 0 } => {
-  const preview = previewAmuxIntake(raw, secret, undefined);
+  const preview = previewAmuxIntake(raw, secret);
   if (preview.outcome !== "allow" || preview.sourceKey === null || preview.draftDigest === null) {
     return { ok: false, code: preview.code ?? "approval_required", writes: 0 };
   }

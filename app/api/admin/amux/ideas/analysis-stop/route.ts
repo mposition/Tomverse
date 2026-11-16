@@ -14,8 +14,6 @@ import { AmuxIdeaAnalysisStopError, commitAmuxIdeaAnalysisStop,
   "@/lib/amux/ideaAnalysisStopService";
 import { prisma } from "@/lib/prisma";
 
-const READ_ENV = "TOMVERSE_AMUX_V19_ANALYSIS_STOP_READ";
-const WRITE_ENV = "TOMVERSE_AMUX_V19_ANALYSIS_STOP_WRITE";
 const noStore = { "Cache-Control": "private, no-store, max-age=0" };
 const id = z.string().regex(/^[A-Za-z0-9:_-]{1,128}$/);
 const bodySchema = z.object({ stopRequestId: id, holdId: id,
@@ -56,10 +54,6 @@ export async function GET(request: Request): Promise<Response> {
       { status: 404, headers: noStore });
     if (session === "forbidden") return NextResponse.json({ error: "Forbidden." },
       { status: 403, headers: noStore });
-    if (process.env[READ_ENV] !== "enabled") {
-      return NextResponse.json({ error: "analysis_stop_read_disabled" },
-        { status: 409, headers: noStore });
-    }
     await consumeApiRateLimit(request, session.user!.id!,
       "admin-amux-v19-analysis-stop-read", { minute: 15, day: 100 });
     const params = new URL(request.url).searchParams;
@@ -80,7 +74,7 @@ export async function GET(request: Request): Promise<Response> {
 }
 
 /** Owner-confirmed DB fence. The worker observes it through the stop-poll
- * route; the read and write switches remain independently default-off. */
+ * route. */
 export async function POST(request: Request): Promise<Response> {
   try {
     const session = await owner();
@@ -88,11 +82,6 @@ export async function POST(request: Request): Promise<Response> {
       { status: 404, headers: noStore });
     if (session === "forbidden") return NextResponse.json({ error: "Forbidden." },
       { status: 403, headers: noStore });
-    if (process.env[READ_ENV] !== "enabled" ||
-        process.env[WRITE_ENV] !== "enabled") {
-      return NextResponse.json({ error: "analysis_stop_disabled" },
-        { status: 409, headers: noStore });
-    }
     if (request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !==
         "application/json") return NextResponse.json({ error: "Invalid content type." },
       { status: 415, headers: noStore });

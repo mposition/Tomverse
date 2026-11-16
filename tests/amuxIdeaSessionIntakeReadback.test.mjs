@@ -3,10 +3,7 @@ import test from "node:test";
 
 import {
   AMUX_SESSION_INTAKE_CLIENT_SECRET_ENV,
-  AMUX_SESSION_INTAKE_READBACK_CODE_LATCH,
-  AMUX_SESSION_INTAKE_READBACK_ENV,
   amuxSessionIntakeConflictingSecretValues,
-  amuxSessionIntakeReadbackEnabled,
   amuxSessionIntakeReadbackReply,
   amuxSessionIntakeReadbackRequestId,
   isAmuxSessionIntakeConflictingSecretEnvName,
@@ -23,17 +20,9 @@ const request = (query = `?requestId=${requestId}`, token = secret,
   { headers: { authorization: `Bearer ${token}`, ...headers } },
 );
 
-test("session readback has an independent credential and two exact off-by-default switches", () => {
+test("session readback has an independent credential", () => {
   assert.equal(AMUX_SESSION_INTAKE_CLIENT_SECRET_ENV,
     "TOMVERSE_AMUX_SESSION_INTAKE_CLIENT_SECRET");
-  assert.equal(AMUX_SESSION_INTAKE_READBACK_ENV,
-    "TOMVERSE_AMUX_SESSION_INTAKE_READBACK");
-  assert.equal(AMUX_SESSION_INTAKE_READBACK_CODE_LATCH, true);
-  assert.equal(amuxSessionIntakeReadbackEnabled(undefined, undefined), false);
-  assert.equal(amuxSessionIntakeReadbackEnabled("enabled", undefined), false);
-  assert.equal(amuxSessionIntakeReadbackEnabled(undefined, "enabled"), false);
-  assert.equal(amuxSessionIntakeReadbackEnabled("ENABLED", "enabled"), false);
-  assert.equal(amuxSessionIntakeReadbackEnabled("enabled", "enabled"), true);
 
   assert.equal(isAmuxSessionIntakeClientAuthorized(request(), secret, []), true);
   assert.equal(isAmuxSessionIntakeClientAuthorized(request("", secret), secret, []), true);
@@ -65,7 +54,6 @@ test("session readback rejects current and future secret-like environment collis
     AMUX_SESSION_INTAKE_CLIENT_SECRET_ENV,
     "PUBLIC_APP_URL",
     "RAILWAY_ENVIRONMENT",
-    "TOMVERSE_AMUX_SESSION_INTAKE_READBACK",
   ]) assert.equal(isAmuxSessionIntakeConflictingSecretEnvName(name), false, name);
 
   assert.deepEqual(amuxSessionIntakeConflictingSecretValues({

@@ -12,8 +12,6 @@ import { AmuxTrackedCheckoutEvidenceError,
   "@/lib/amux/ideaTrackedCheckoutEvidenceStore";
 import { prisma } from "@/lib/prisma";
 
-const WRITE_ENV = "TOMVERSE_AMUX_V19_CHECKOUT_EVIDENCE_WRITE";
-const READ_ENV = "TOMVERSE_AMUX_V19_CHECKOUT_EVIDENCE_READ";
 const id = z.string().regex(/^[A-Za-z0-9:_-]{1,128}$/);
 // These values land in PostgreSQL Int columns, not BigInt columns.
 const ordinal = z.number().int().min(0).max(2_147_483_647);
@@ -36,16 +34,10 @@ function authorized(request: Request): boolean {
 
 /** A content-free proof from the isolated analysis worker. Admission and the
  * CLI run have their own existing switches; this records an already prepared
- * checkout, even if admission has since stopped. Its dedicated write switch
- * can stop evidence writes. A lost reply is read back by idea/reference; the
- * worker never blindly repeats POST. */
+ * checkout, even if admission has since stopped. A lost reply is read back by
+ * idea/reference; the worker never blindly repeats POST. */
 export async function POST(request: Request): Promise<Response> {
   if (!authorized(request)) return amuxJsonNoStore({ error: "Unauthorized" }, 401);
-  // Readback must be available before a write can have an unknown outcome.
-  if (process.env[WRITE_ENV] !== "enabled" || process.env[READ_ENV] !== "enabled") {
-    return amuxJsonNoStore({ available: false,
-      reason: "checkout_evidence_write_disabled" }, 409);
-  }
   if (request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !==
       "application/json") {
     return amuxJsonNoStore({ error: "Invalid content type." }, 415);
@@ -74,13 +66,9 @@ export async function POST(request: Request): Promise<Response> {
   }
 }
 
-/** Exact-reference, content-free recovery stays available after writes stop. */
+/** Exact-reference, content-free recovery. */
 export async function GET(request: Request): Promise<Response> {
   if (!authorized(request)) return amuxJsonNoStore({ error: "Unauthorized" }, 401);
-  if (process.env[READ_ENV] !== "enabled") {
-    return amuxJsonNoStore({ available: false,
-      reason: "checkout_evidence_read_disabled" }, 409);
-  }
   const params = new URL(request.url).searchParams;
   if (params.size !== 2 || params.getAll("ideaId").length !== 1 ||
       params.getAll("referenceOrdinal").length !== 1) {

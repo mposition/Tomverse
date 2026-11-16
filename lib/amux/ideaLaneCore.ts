@@ -10,14 +10,10 @@
  *
  * Pure: the service (ideaLaneService.ts) reads the attempts, this decides.
  */
-import { amuxIntakeLegacyLimits } from "./intakeLimitsCore.ts";
 
 export const AMUX_IDEA_LANE_ENV = "AMUX_IDEA_LANE_ENABLED";
 export const AMUX_IDEA_LANE_SECRET_ENV = "AMUX_IDEA_LANE_SYNC_SECRET";
 export const AMUX_IDEA_LANE_DAILY_ENV = "AMUX_IDEA_LANE_MAX_ATTEMPTS_PER_DAY";
-/** With TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS only: runs one part of an idea may
- * use before the lane gives up on it, whatever their outcomes. */
-export const AMUX_IDEA_LANE_MAX_ATTEMPTS = 3;
 /**
  * Owner direction 2026-11-16: a part of an idea is never given up on for
  * failing. After a run that ended without a PR (a run that never reported
@@ -72,10 +68,9 @@ export type AmuxIdeaLaneState = {
   /**
    * running: a run holds its lease; queued: the next claim retries it (once
    * retryAtMs has passed); merged / pr_closed: its PR merged, or was closed
-   * without a merge; failed: only under TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS,
-   * after AMUX_IDEA_LANE_MAX_ATTEMPTS runs.
+   * without a merge.
    */
-  state: "running" | "queued" | "pr_open" | "merged" | "pr_closed" | "failed";
+  state: "running" | "queued" | "pr_open" | "merged" | "pr_closed";
   /** queued after failed runs: when the backoff ends; null when it has. */
   retryAtMs?: number | null;
   /** Runs of the current part (each part has its own attempt limit). */
@@ -95,18 +90,10 @@ export type AmuxIdeaLaneState = {
 const isPartBoundary = (item: AmuxIdeaLaneAttemptFact) =>
   item.outcome === "pr_open" && item.continues === true && !!item.mergedAtMs;
 
-/**
- * Whether the lane gives up on a part whose runs all finished without a PR:
- * only with the legacy switch, after AMUX_IDEA_LANE_MAX_ATTEMPTS runs. Without
- * it a failed part is queued again after a backoff (amuxIdeaLaneBackoffMs).
- */
-export function amuxIdeaLaneGivesUp(finished: readonly AmuxIdeaLaneAttemptFact[],
-  legacy: boolean = amuxIntakeLegacyLimits()): boolean {
-  return legacy && finished.length >= AMUX_IDEA_LANE_MAX_ATTEMPTS;
-}
-
-export function amuxIdeaLaneState(attempts: readonly AmuxIdeaLaneAttemptFact[], nowMs: number,
-  legacy: boolean = amuxIntakeLegacyLimits()): AmuxIdeaLaneState | null {
+/** A part is never given up on: a failed part is queued again after a backoff
+ * (amuxIdeaLaneBackoffMs). */
+export function amuxIdeaLaneState(attempts: readonly AmuxIdeaLaneAttemptFact[], nowMs: number):
+  AmuxIdeaLaneState | null {
   if (attempts.length === 0) return null;
   // A larger idea runs in parts, one PR each, a part only after the one before
   // it merged. Everything before the newest merged part is settled history.
@@ -133,7 +120,6 @@ export function amuxIdeaLaneState(attempts: readonly AmuxIdeaLaneAttemptFact[], 
       continues: opened.continues === true };
   }
   if (current.some(live)) return { ...base, state: "running", prNumber: null };
-  if (amuxIdeaLaneGivesUp(current, legacy)) return { ...base, state: "failed", prNumber: null };
   // Every run left is a failure (live and PR-opening ones returned above).
   // The next claim waits until the newest one's end plus the backoff.
   const lastEnd = Math.max(...current.map((item) => item.finishedAtMs ?? item.leaseUntilMs));
@@ -162,9 +148,8 @@ export type AmuxIdeaLaneCandidateFacts = {
  * conditions of the claim hold trivially with no attempts.
  */
 export function amuxIdeaLaneView(attempts: readonly AmuxIdeaLaneAttemptFact[], nowMs: number,
-  candidate: AmuxIdeaLaneCandidateFacts, enabled: boolean,
-  legacy: boolean = amuxIntakeLegacyLimits()): AmuxIdeaLaneState | null {
-  const state = amuxIdeaLaneState(attempts, nowMs, legacy);
+  candidate: AmuxIdeaLaneCandidateFacts, enabled: boolean): AmuxIdeaLaneState | null {
+  const state = amuxIdeaLaneState(attempts, nowMs);
   if (state || !enabled) return state;
   const takes = candidate.submissionOrigin === "owner" && candidate.state === "submitted" && !candidate.cancelled &&
     candidate.rawReadable && candidate.analysisDeadlineMs > nowMs && !candidate.sourcePlan && candidate.chunks === 0;

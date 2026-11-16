@@ -1,5 +1,4 @@
 import { amuxAnalysisAnswerJson } from "./ideaAnalysisChunkCore.ts";
-import { amuxIntakeLegacyLimits } from "./intakeLimitsCore.ts";
 
 /**
  * A session analysis has one source unit, the operator idea, and no owner to
@@ -79,9 +78,7 @@ export function amuxSessionAnswerUnitCount(raw: string): number {
     const parsed = amuxAnalysisAnswerJson(raw);
     const units = parsed && typeof parsed === "object" && !Array.isArray(parsed)
       ? (parsed as Record<string, unknown>).units : null;
-    // The former per-page cap of 40 units holds only under the legacy switch
-    // (owner direction 2026-11-15): a page has as many units as it proposes.
-    return Array.isArray(units) && (!amuxIntakeLegacyLimits() || units.length <= 40)
-      ? units.length : 0;
+    // Owner direction 2026-11-15: a page has as many units as it proposes.
+    return Array.isArray(units) ? units.length : 0;
   } catch { return 0; } // A non-JSON answer is a refused plan, not a failed write.
 }

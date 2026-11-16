@@ -6,7 +6,6 @@ import {
   BOARD_IMPORT_SCANNER_VERSION,
   amuxCanonicalJson,
   amuxCatalogTextRefused,
-  boardImportApplyPermitted,
 } from "./boardImportCore.ts";
 
 /**
@@ -17,8 +16,8 @@ import {
  *
  * Parsing and classification are pure. This module does not open a
  * transaction, write an audit row, or change a card. The service is the only
- * writer. Production apply needs both the environment latch and
- * `BOARD_PROMOTION_APPLY_CODE_LATCH`. Version 6 turns that constant on.
+ * writer. Apply is gated by the approval flow, not by a switch (owner
+ * direction 2026-11-16).
  * Nothing here selects a card, starts a worker, or spends credits.
  */
 
@@ -30,15 +29,6 @@ export const BOARD_PROMOTION_MIN_ITEMS = 1;
 export const BOARD_PROMOTION_MAX_ITEMS = 3;
 export const BOARD_PROMOTION_BRIEF_MAX_BYTES = 8_192;
 export const BOARD_PROMOTION_RAW_BODY_MAX_BYTES = 65_536;
-export const BOARD_PROMOTION_APPLY_ENV = "TOMVERSE_AMUX_BOARD_PROMOTE";
-
-/**
- * Second apply latch. One environment variable must not be enough to move a
- * card. The HTTP route passes this constant and never a literal `true`.
- * Version 6 arms it for the named E pilot. A caller cannot supply the latch.
- * This constant does not promote a card and does not read the environment.
- */
-export const BOARD_PROMOTION_APPLY_CODE_LATCH = true;
 
 export const BOARD_PROMOTION_APPROVAL_STATUSES = [
   "prepared",
@@ -154,11 +144,6 @@ const member = (value: string, allowed: readonly string[]): boolean => allowed.i
 
 const integerIn = (value: unknown, min: number, max: number): value is number =>
   typeof value === "number" && Number.isInteger(value) && value >= min && value <= max;
-
-export const boardPromotionApplyPermitted = (input: {
-  envValue: string | undefined;
-  codeLatch: boolean;
-}): boolean => boardImportApplyPermitted(input);
 
 export const boardPromotionExecutionBriefDigest = (brief: string): string =>
   createHash("sha256").update(brief, "utf8").digest("hex");

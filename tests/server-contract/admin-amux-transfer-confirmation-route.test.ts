@@ -15,7 +15,7 @@ class FakeConfirmationError extends Error {
 }
 const world = {
   session: { user: { id: "owner-1" } } as { user: { id: string } } | null,
-  role: "owner", recent: true, readOn: true, writeOn: true,
+  role: "owner", recent: true,
   writes: 0, reads: 0, unknown: false, body: JSON.stringify(choice),
 };
 let installed = false;
@@ -50,12 +50,8 @@ async function route(): Promise<{ POST: (request: Request) => Promise<Response>;
     } });
     mock.module(mod("lib/amux/ideaTransferConfirmationCore.ts"), { namedExports: {
       AMUX_V4_TRANSFER_CONFIRM_MAX_BYTES: 512,
-      AMUX_V4_TRANSFER_CONFIRM_READ_ENV: "TRANSFER_CONFIRM_READ_TEST",
-      AMUX_V4_TRANSFER_CONFIRM_WRITE_ENV: "TRANSFER_CONFIRM_WRITE_TEST",
       inspectIdeaTransferConfirmationRequest: (raw: string) => raw === JSON.stringify(choice)
         ? { ok: true, request: choice } : { ok: false, code: "schema_rejected" },
-      transferConfirmReadPermitted: () => world.readOn,
-      transferConfirmWritePermitted: () => world.writeOn,
     } });
     mock.module(mod("lib/amux/ideaTransferConfirmationService.ts"), { namedExports: {
       IdeaTransferConfirmationError: FakeConfirmationError,
@@ -87,18 +83,17 @@ const get = (query = `?previewId=${previewId}`) =>
   new Request(`https://tomverse.test/api/admin/amux/ideas/transfer-confirmation${query}`);
 const reset = () => {
   world.session = { user: { id: "owner-1" } }; world.role = "owner";
-  world.recent = true; world.readOn = true; world.writeOn = true;
+  world.recent = true;
   world.writes = 0; world.reads = 0; world.unknown = false;
   world.body = JSON.stringify(choice);
 };
 
-test("confirmation refuses unauthenticated, stale, and disabled callers", async () => {
+test("confirmation refuses unauthenticated and stale callers", async () => {
   const { POST, GET } = await route();
   for (const setup of [
     () => { world.session = null; },
     () => { world.role = "admin"; },
     () => { world.recent = false; },
-    () => { world.readOn = false; },
   ]) {
     reset(); setup();
     assert.notEqual((await POST(post())).status, 201);
@@ -106,9 +101,6 @@ test("confirmation refuses unauthenticated, stale, and disabled callers", async 
     assert.equal(world.writes, 0);
     assert.equal(world.reads, 0);
   }
-  reset(); world.writeOn = false;
-  assert.equal((await POST(post())).status, 503);
-  assert.equal(world.writes, 0);
 });
 
 test("confirmation requires one same-preview browser receipt and exact request", async () => {

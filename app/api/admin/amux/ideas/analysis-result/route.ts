@@ -8,10 +8,6 @@ import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { assertRecentAdminAuthentication, isAdminReauthenticationError } from "@/lib/adminReauthentication";
 import { apiSecurityResponse, consumeApiRateLimit } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
-import {
-  AMUX_V4_ANALYSIS_RESULT_READ_ENV,
-  amuxV4AnalysisResultReadEnabled,
-} from "@/lib/amux/ideaAnalysisResultReadCore";
 import { readOwnedAmuxIdeaAnalysisResult } from "@/lib/amux/ideaAnalysisResultOwnerRead";
 import { AmuxIdeaAnalysisResultReadError } from "@/lib/amux/ideaAnalysisResultReadService";
 import { isAmuxIdeaRequestId } from "@/lib/amux/ideaSubmissionCore";
@@ -41,10 +37,6 @@ export async function GET(request: Request): Promise<Response> {
   try {
     const session = await owner();
     if (session instanceof NextResponse) return session;
-    if (!amuxV4AnalysisResultReadEnabled(process.env[AMUX_V4_ANALYSIS_RESULT_READ_ENV])) {
-      return NextResponse.json({ error: "analysis_result_disabled" },
-        { status: 503, headers: noStore });
-    }
     await consumeApiRateLimit(request, session.user!.id!, "admin-amux-v4-analysis-result", {
       minute: 10, day: 100,
     });

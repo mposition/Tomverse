@@ -75,7 +75,7 @@ export function AmuxSessionBudgetResolutionPanel() {
   const m = useAdminMessages(adminAmuxSessionBudgetResolutionMessages);
   const common = useAdminMessages(adminCommonMessages).apiFailure;
   const [list, setList] = useState<SessionBudgetUnknownList | null>(null);
-  const [failure, setFailure] = useState<"unavailable" | "readDisabled" | null>(null);
+  const [failure, setFailure] = useState<"unavailable" | null>(null);
   const [requiresReauthentication, setRequiresReauthentication] = useState(false);
   const onStatus = useCallback((status: number) => {
     if (status === 428) setRequiresReauthentication(true);
@@ -90,8 +90,7 @@ export function AmuxSessionBudgetResolutionPanel() {
       // A failed refresh keeps the rows on screen: a row whose resolution
       // outcome is unknown must keep its read-back-only state, never remount.
       if (parsed) setList(parsed);
-      setFailure(parsed ? null : response.status === 409 &&
-        record(body)?.error === "session_budget_resolution_read_disabled" ? "readDisabled" : "unavailable");
+      setFailure(parsed ? null : "unavailable");
     } catch { setFailure("unavailable"); }
   }, [onStatus]);
 

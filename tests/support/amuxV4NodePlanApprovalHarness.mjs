@@ -72,9 +72,7 @@ mock.module(mod("lib/amux/ideaNodeRegistrationService.ts"), {
 });
 mock.module(mod("lib/amux/ideaUnitDecisionStore.ts"), {
   namedExports: {
-    AMUX_V4_UNIT_WRITE_ENV: "TOMVERSE_AMUX_V4_UNIT_WRITE",
     AmuxV4UnitDecisionError: DecisionError,
-    amuxV4UnitWriteEnabled: (value) => value === "enabled",
     commitAmuxV4NodeCreation: async (tx, input) => {
       calls.push(["consume", tx, input.context.draftUnitId, input.keys, input.context.recentOwnerStepUp,
         input.consumeRequestId !== undefined]);
@@ -90,7 +88,6 @@ const reset = () => {
   calls = []; failOn = null; commitFails = false;
   proposedUnits = [{ id: "unit-feat-01" }, { id: "unit-epic-01" }, { id: "unit-init-01" }];
   approvedUnits = [];
-  process.env.TOMVERSE_AMUX_V4_UNIT_WRITE = "enabled";
 };
 
 // Every node is prepared then consumed in one serializable transaction, parents first.
@@ -135,13 +132,10 @@ approvedUnits = [{ id: "unit-epic-00", localRef: "e1" }];
 await approveAmuxV4NodePlan(session, request, { ideaId: "idea-0001", reasons: {} });
 assert.equal(calls.find(([kind]) => kind === "prepare")[3], "node-existing-epic");
 
-// Gates: owner, write switch, something to approve, a sane reason.
+// Gates: owner, something to approve, a sane reason.
 reset();
 await assert.rejects(approveAmuxV4NodePlan({ ...session, role: "ops" }, request, { ideaId: "idea-0001", reasons: {} }),
   (error) => error.code === "forbidden");
-reset(); process.env.TOMVERSE_AMUX_V4_UNIT_WRITE = "disabled";
-await assert.rejects(approveAmuxV4NodePlan(session, request, { ideaId: "idea-0001", reasons: {} }),
-  (error) => error.code === "write_disabled");
 reset(); proposedUnits = [];
 await assert.rejects(approveAmuxV4NodePlan(session, request, { ideaId: "idea-0001", reasons: {} }),
   (error) => error.code === "nothing_to_approve");

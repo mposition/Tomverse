@@ -23,7 +23,7 @@ class ReauthError extends Error {}
 
 const world = {
   session: { user: { id: "owner-1" } } as { user: { id: string } } | null,
-  role: "owner", origin: true, writeOn: true, text: "{}",
+  role: "owner", origin: true, text: "{}",
   approve: async (): Promise<unknown> => ({ ideaId: "i" }),
   security: null as Response | null,
   recentError: null as Error | null,
@@ -55,10 +55,8 @@ async function route(): Promise<{ POST: (request: Request) => Promise<Response> 
       approveAmuxV4Plan: async () => world.approve(),
     } });
     mock.module(mod("lib/amux/ideaUnitDecisionStore.ts"), { namedExports: {
-      AMUX_V4_UNIT_WRITE_ENV: "UNIT_WRITE_TEST",
       AmuxV4DuplicateReasonRequired: FakeDuplicateReason,
       AmuxV4UnitDecisionError: FakeCodeError,
-      amuxV4UnitWriteEnabled: () => world.writeOn,
     } });
     mock.module(mod("lib/amux/portfolioAssessmentService.ts"), { namedExports: { AmuxPortfolioError: class PortfolioError extends Error {
       constructor(readonly code: string) { super(code); }
@@ -75,7 +73,7 @@ const post = (contentType = "application/json") => new Request("https://tomverse
   method: "POST", headers: { "content-type": contentType }, body: world.text,
 });
 const reset = () => {
-  world.session = { user: { id: "owner-1" } }; world.role = "owner"; world.origin = true; world.writeOn = true;
+  world.session = { user: { id: "owner-1" } }; world.role = "owner"; world.origin = true;
   world.text = validBody; world.approve = async () => ({ ideaId: "i" }); world.security = null; world.recentError = null;
 };
 
@@ -99,7 +97,6 @@ test("a 201 logs nothing, and every other answer logs one refusal line with its 
     ["no session", () => { world.session = null; }, 404, "not_found"],
     ["not the owner", () => { world.role = "ops"; }, 403, "forbidden"],
     ["bad origin", () => { world.origin = false; }, 403, "forbidden"],
-    ["write switch off", () => { world.writeOn = false; }, 503, "unit_write_disabled"],
     ["step-up needed", () => { world.recentError = new ReauthError("stale"); }, 428, "ADMIN_REAUTHENTICATION_REQUIRED"],
     ["not JSON", () => { world.text = "not json"; }, 400, "schema_rejected"],
     ["wrong schema", () => { world.text = "{}"; }, 400, "schema_rejected"],

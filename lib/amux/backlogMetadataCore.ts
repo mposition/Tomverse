@@ -2,7 +2,6 @@ import {
   AMUX_MANIFEST_CANONICALIZATION_VERSION,
   BoardImportError,
   amuxCatalogTextRefused,
-  boardImportApplyPermitted,
 } from "./boardImportCore.ts";
 import {
   BOARD_PROMOTION_KINDS,
@@ -27,15 +26,6 @@ import { AMUX_INTAKE_SAFETY_MAX_BYTES } from "./intakeLimitsCore.ts";
 
 export const BACKLOG_METADATA_POLICY_VERSION = 15;
 export const BACKLOG_METADATA_CANONICALIZATION_VERSION = AMUX_MANIFEST_CANONICALIZATION_VERSION;
-export const BACKLOG_METADATA_APPLY_ENV = "TOMVERSE_AMUX_BACKLOG_METADATA";
-
-/**
- * Second apply latch. One environment variable must not be enough to write a
- * card. The service reads this constant; the HTTP route never receives it and
- * never passes a literal `true`. Version 15 ships it on. Apply still needs the
- * environment value exactly `enabled`, which this constant does not set.
- */
-export const BACKLOG_METADATA_CODE_LATCH = true;
 
 export const BACKLOG_METADATA_COST_MIN_MICROUSD = 0;
 export const BACKLOG_METADATA_COST_MAX_MICROUSD = 5_000_000;
@@ -150,11 +140,6 @@ const member = (value: string, allowed: readonly string[]): boolean => allowed.i
 
 const integerIn = (value: unknown, min: number, max: number): value is number =>
   typeof value === "number" && Number.isSafeInteger(value) && value >= min && value <= max;
-
-export const backlogMetadataApplyPermitted = (input: {
-  envValue: string | undefined;
-  codeLatch: boolean;
-}): boolean => boardImportApplyPermitted(input);
 
 export const parseBacklogMetadataRequest = (raw: string): BacklogMetadataParseResult => {
   if (Buffer.byteLength(raw, "utf8") > BACKLOG_METADATA_RAW_BODY_MAX_BYTES) {

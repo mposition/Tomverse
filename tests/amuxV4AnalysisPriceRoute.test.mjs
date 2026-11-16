@@ -7,13 +7,13 @@ import { AMUX_V4_CLAUDE_OPUS_55_COST_PROFILE,
   amuxV4ApprovedCliPriceEvidenceDigest } from
   "../lib/amux/ideaAnalysisApprovedCostProfile.ts";
 
-test("analysis price approval is owner-only and independently switched", async () => {
+test("analysis price approval is owner-only and its write is switched", async () => {
   const route = await readFile(new URL(
     "../app/api/admin/amux/ideas/analysis-prices/route.ts", import.meta.url), "utf8");
   assert.match(route, /getAdminRole\(session\) !== "owner"/);
   assert.match(route, /assertRecentAdminAuthentication\(session\)/);
   assert.match(route, /const WRITE_ENV = "TOMVERSE_AMUX_V4_ANALYSIS_PRICE_WRITE"/);
-  assert.match(route, /const READ_ENV = "TOMVERSE_AMUX_V4_ANALYSIS_PRICE_READ"/);
+  assert.doesNotMatch(route, /TOMVERSE_AMUX_V4_ANALYSIS_PRICE_READ|CODE_LATCH/);
   assert.match(route, /commitAmuxIdeaAnalysisPriceApproval\(tx,/);
   assert.match(route, /export async function DELETE\(request: Request\)/);
   assert.match(route, /commitAmuxIdeaAnalysisPriceRevocation\(tx,/);

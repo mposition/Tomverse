@@ -7,15 +7,13 @@ import type { Session } from "next-auth";
 import {
   BOARD_IMPORT_SCANNER_RULESET_DIGEST,
   BOARD_IMPORT_SCANNER_VERSION,
-  BoardImportError,
 } from "@/lib/amux/boardImportCore";
-import { applyAmuxReconciliation, commitAmuxReconciliation } from "@/lib/amux/boardReconciliation";
+import { commitAmuxReconciliation } from "@/lib/amux/boardReconciliation";
 import { planAmuxReconciliation } from "@/lib/amux/boardReconciliationCore";
 import { prisma } from "@/lib/prisma";
 
 // Real PostgreSQL evidence for one accept and one reject.
-// apply stays closed unless TOMVERSE_AMUX_RECONCILIATION_APPLY is exactly
-// enabled. This file calls the transaction body directly. A missing
+// This file calls the transaction body directly. A missing
 // TEST_DATABASE_URL means this file was not executed, not that it passed.
 
 const actorUserId = `amux-reconciliation-${randomUUID()}`;
@@ -171,25 +169,6 @@ test("accept moves only the pointer and reject keeps the stored revision", async
   const planned = planAmuxReconciliation(bodyFor(accept.detailDigest, reject.detailDigest));
   assert.equal(planned.ok, true);
   if (!planned.ok) return;
-  const runsBefore = await prisma.$queryRaw<Array<{ count: number }>>`
-    SELECT count(*)::int AS count FROM "AmuxReconciliationRun"
-  `;
-  const applyEnv = "TOMVERSE_AMUX_RECONCILIATION_APPLY";
-  const previousApply = process.env[applyEnv];
-  delete process.env[applyEnv];
-  try {
-    await assert.rejects(
-      () => applyAmuxReconciliation({ session, request, plan: planned }),
-      (error: unknown) => error instanceof BoardImportError && error.code === "apply_disabled",
-    );
-  } finally {
-    if (previousApply === undefined) delete process.env[applyEnv];
-    else process.env[applyEnv] = previousApply;
-  }
-  const runsAfterRefusal = await prisma.$queryRaw<Array<{ count: number }>>`
-    SELECT count(*)::int AS count FROM "AmuxReconciliationRun"
-  `;
-  assert.equal(Number(runsAfterRefusal[0]?.count), Number(runsBefore[0]?.count));
   const before = await untouchedCounts();
   const result = await prisma.$transaction((tx) =>
     commitAmuxReconciliation(tx, {

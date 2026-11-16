@@ -38,7 +38,6 @@ const world = {
   closes: [] as Array<{ taskId: string; revision: number; ideaId: string | null }>,
   closeOutcome: "closed" as "closed" | "refused" | "busy",
   archived: false,
-  writeOn: "true",
 };
 const reset = () => {
   world.session = { user: { id: "owner-1" } }; world.role = "owner"; world.recent = true;
@@ -46,7 +45,7 @@ const reset = () => {
     description: JSON.stringify({ problem: "The renewal date is hidden. Users ask support.",
       completionCriteria: ["The date shows"] }), executionBrief: null, revision: 4 };
   world.refusal = null; world.kind = "workboard"; world.readBack = [{ status: "absent" }]; world.submits = []; world.sendPathIdeas = [];
-  world.closes = []; world.closeOutcome = "closed"; world.writeOn = "true"; world.archived = false;
+  world.closes = []; world.closeOutcome = "closed"; world.archived = false;
   world.completeRefusal = "not_completable"; world.completes = []; world.completeOutcome = "completed";
   world.engineeringClosedFor = []; world.engineeringFails = false;
 };
@@ -76,10 +75,6 @@ async function loadRoute(): Promise<{ POST: (request: Request) => Promise<Respon
       } } });
     mock.module(mod("lib/requestOrigin.ts"), { namedExports: {
       hasValidMutationOrigin: (request: Request) => request.headers.get("origin") === "https://tomverse.test" } });
-    mock.module(mod("lib/amux/ideaSubmissionCore.ts"), { namedExports: {
-      AMUX_V4_IDEA_SUBMISSION_ENV: "W", AMUX_V4_IDEA_READBACK_ENV: "R",
-      ideaSubmissionWritePermitted: () => world.writeOn === "true",
-      ideaSubmissionReadBackPermitted: () => true } });
     mock.module(mod("lib/amux/ideaSubmissionService.ts"), { namedExports: { IdeaSubmissionError: FakeSubmissionError } });
     mock.module(mod("lib/amux/ideaSessionSubmissionService.ts"), { namedExports: {
       AmuxIdeaSessionSubmissionError: class extends Error { code = "x"; } } });
@@ -192,9 +187,6 @@ test("an idea the input gate refuses is not saved and says why", async () => {
   assert.equal(response.status, 400);
   assert.deepEqual(await response.json(), { error: "idea_refused", reason: "content_refused" });
   assert.equal(world.sendPathIdeas.length + world.closes.length, 0);
-  reset(); world.writeOn = "false";
-  assert.equal((await POST(post(recreate))).status, 503);
-  assert.equal(world.sendPathIdeas.length, 0);
 });
 
 test("a recreate saves the idea under the card's derived request id, then closes the card naming it", async () => {

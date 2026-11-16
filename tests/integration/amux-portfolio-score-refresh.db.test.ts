@@ -69,17 +69,6 @@ const newest = async (tx: LifecycleTx, taskId: string) => (await tx.$queryRaw<Sc
     "approvedByUserId", "approvalAuditLogId" FROM "AmuxPortfolioScoreSnapshot"
   WHERE "taskId" = ${taskId} ORDER BY "computedAt" DESC, "id" DESC LIMIT 1`)[0];
 
-const LEGACY = "TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS";
-/** Runs `work` with the intake legacy-limits switch on (the 2026-11-14 rule). */
-async function withLegacyLimits(work: () => Promise<void>) {
-  const previous = process.env[LEGACY];
-  process.env[LEGACY] = "enabled";
-  try { await work(); } finally {
-    if (previous === undefined) delete process.env[LEGACY];
-    else process.env[LEGACY] = previous;
-  }
-}
-
 test("an unchanged score is extended by the system refresher, once, both windows forward", async () => {
   const { readDueAmuxPortfolioScoreTaskIds, refreshAmuxPortfolioScoreInTx } = await services();
   await lifecycle(async (tx) => {
@@ -173,27 +162,6 @@ test("the shape CHECK keeps the baseline between the evidence's 28 days and 28 d
       await tx.$executeRawUnsafe("SET LOCAL session_replication_role = origin");
     });
   });
-});
-
-test("with the legacy-limits switch, a score at its baseline, or whose assessment the owner replaced, waits for the owner", async () => {
-  const { readDueAmuxPortfolioScoreTaskIds, refreshAmuxPortfolioScoreInTx } = await services();
-  await withLegacyLimits(() => lifecycle(async (tx) => {
-    // Evidence 27.5 days old, its active window long closed (as on the
-    // stopped board): reopened, but only up to the 28-day baseline.
-    await dueTask(tx, 27.5 * DAY, async (taskId) => {
-      const before = await newest(tx, taskId);
-      assert.ok(before.activeStaleAt.getTime() < Date.now() - 20 * DAY);
-      assert.equal((await refreshAmuxPortfolioScoreInTx(tx, { taskId, digestKey })).state,
-        "refreshed");
-      const capped = await newest(tx, taskId);
-      assert.equal(capped.activeStaleAt.getTime(), before.baselineStaleAt.getTime());
-      assert.equal(capped.baselineStaleAt.getTime(), before.baselineStaleAt.getTime());
-      // Its window now ends at the baseline itself: nothing left to extend.
-      assert.deepEqual(await readDueAmuxPortfolioScoreTaskIds(tx), []);
-      assert.deepEqual(await refreshAmuxPortfolioScoreInTx(tx, { taskId, digestKey }),
-        { state: "skipped", taskId, reason: "not_due" });
-    });
-  }));
 });
 
 test("a score whose assessment the owner replaced, or whose subject was revised, waits for the owner", async () => {

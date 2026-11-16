@@ -5,18 +5,12 @@ import test from "node:test";
 import {
   AMUX_V4_SOURCE_SCOPE_PREVIEW_ENVELOPE_MAX_BYTES,
   inspectAmuxSourceScopePreviewRequest,
-  sourceScopePreviewPermitted,
 } from "../lib/amux/ideaSourceScopePreviewCore.ts";
 
 const ideaId = randomUUID();
 const scope = { version: 1, sources: [{ kind: "repository_file", repository: "mposition/Tomverse",
   commitSha: "a".repeat(40), path: "lib/amux/ideaSourceScopeCore.ts" }] };
 const scopeJson = JSON.stringify(scope);
-
-test("source scope preview requires its dedicated environment value", () => {
-  assert.equal(sourceScopePreviewPermitted("enabled"), true);
-  assert.equal(sourceScopePreviewPermitted(undefined), false);
-});
 
 test("source scope preview envelope retains only a typed idea id and untrusted scope JSON", () => {
   const result = inspectAmuxSourceScopePreviewRequest(JSON.stringify({ schemaVersion: 1, ideaId, scopeJson }));

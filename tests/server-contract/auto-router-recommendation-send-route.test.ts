@@ -93,12 +93,6 @@ before(async () => {
   ({ POST } = await import(mod("app/api/admin/auto-llm-router/optimizer/recommendations/send/route.ts")));
 });
 
-const SWITCHES = ["TOMVERSE_AMUX_SESSION_INTAKE", "TOMVERSE_AMUX_SESSION_INTAKE_READBACK",
-  "TOMVERSE_AMUX_V4_IDEA_SUBMIT", "TOMVERSE_AMUX_V4_IDEA_READBACK"];
-const setSwitches = (sessionIntake: "enabled" | "disabled") => {
-  for (const name of SWITCHES) process.env[name] = "enabled";
-  process.env.TOMVERSE_AMUX_SESSION_INTAKE = sessionIntake;
-};
 const send = () => POST(new Request("https://tomverse.test/api/admin/auto-llm-router/optimizer/recommendations/send", {
   method: "POST", headers: { "content-type": "application/json" },
   body: JSON.stringify({ cycleId: "cycle-1", index: 1 }),
@@ -107,10 +101,9 @@ const send = () => POST(new Request("https://tomverse.test/api/admin/auto-llm-ro
 beforeEach(() => {
   Object.assign(world, { status: "open", amuxIdeaId: null, reservations: 0, closes: [], sessionCalls: [],
     v4Calls: [], sessionError: null, sessionSeen: { status: "absent" }, sessionSeenNext: [], v4Seen: { status: "absent" } });
-  setSwitches("enabled");
 });
 
-test("with session intake on, a recommendation enters as a session idea naming this repository", async () => {
+test("a recommendation enters as a session idea naming this repository", async () => {
   const response = await send();
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { status: "sent", amuxIdeaId: "session-idea" });
@@ -142,16 +135,6 @@ test("behind the proxy the request names a private address; the idea links the p
   }
 });
 
-test("with session intake off, a recommendation stays a v4 idea", async () => {
-  setSwitches("disabled");
-  const response = await send();
-  assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), { status: "sent", amuxIdeaId: "v4-idea" });
-  assert.equal(world.sessionCalls.length, 0);
-  assert.deepEqual(world.v4Calls[0].inspected.input.repositories, []);
-  assert.deepEqual(world.closes, ["v4-idea"]);
-});
-
 test("sending again makes no second idea, whichever way the first one went", async () => {
   assert.equal((await send()).status, 200);
   const again = await send();
@@ -165,10 +148,6 @@ test("sending again makes no second idea, whichever way the first one went", asy
   assert.equal(world.sessionCalls.length, 1);
   assert.deepEqual(world.closes, ["session-idea"]);
 
-  // A session idea is still found once session intake has been turned off.
-  Object.assign(world, { status: "sending_to_amux", amuxIdeaId: null, closes: [] });
-  setSwitches("disabled");
-  assert.deepEqual(await (await send()).json(), { status: "sent", amuxIdeaId: "session-idea" });
   assert.equal(world.v4Calls.length, 0);
 });
 
@@ -217,10 +196,3 @@ test("a recommendation AMUX would refuse is not reserved", async () => {
   }
 });
 
-test("with idea submission off nothing is reserved or sent", async () => {
-  process.env.TOMVERSE_AMUX_V4_IDEA_SUBMIT = "disabled";
-  const response = await send();
-  assert.equal(response.status, 503);
-  assert.deepEqual(await response.json(), { error: "amux_submission_disabled" });
-  assert.equal(world.reservations, 0);
-});

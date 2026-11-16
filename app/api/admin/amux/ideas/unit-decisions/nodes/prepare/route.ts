@@ -10,9 +10,8 @@ import { assertRecentAdminAuthentication,
 import { apiSecurityResponse, consumeApiRateLimit,
   readLimitedText } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
-import { AMUX_V4_UNIT_WRITE_ENV, AmuxV4DuplicateReasonRequired,
-  AmuxV4UnitDecisionError,
-  amuxV4UnitWriteEnabled } from "@/lib/amux/ideaUnitDecisionStore";
+import { AmuxV4DuplicateReasonRequired,
+  AmuxV4UnitDecisionError } from "@/lib/amux/ideaUnitDecisionStore";
 import { amuxV4UnitBrowserCookieName,
   newAmuxV4UnitBrowserNonce } from "@/lib/amux/ideaUnitBrowserCore";
 import { prepareAmuxV4NodeCreation } from
@@ -25,8 +24,7 @@ const body = z.object({ ideaId: id, draftUnitId: id,
   parentNodeId: id.nullable(), prepareRequestId: z.uuid(),
   decisionReason: z.string().min(3).max(500).nullable() }).strict();
 
-/** One independently confirmed Initiative, Epic or Feature; the writer is
- * dark until its separate code and environment gates are opened. */
+/** One independently confirmed Initiative, Epic or Feature. */
 export async function POST(request: Request) {
   try {
     const session = await getServerSession(authOptions);
@@ -39,10 +37,6 @@ export async function POST(request: Request) {
         { status: 403, headers: noStore });
     }
     await assertRecentAdminAuthentication(session);
-    if (!amuxV4UnitWriteEnabled(process.env[AMUX_V4_UNIT_WRITE_ENV])) {
-      return NextResponse.json({ error: "unit_write_disabled", retryWrite: false },
-        { status: 503, headers: noStore });
-    }
     if (request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !==
         "application/json") {
       return NextResponse.json({ error: "content_type_refused", retryWrite: false },

@@ -1,16 +1,10 @@
 export const dynamic = "force-dynamic";
 
 import { amuxJsonNoStore } from "@/lib/amux/internalRoute";
-import {
-  AMUX_SESSION_INTAKE_ENV,
-  amuxSessionIntakeWritePermitted,
-  inspectAmuxIdeaSessionSubmission,
-} from "@/lib/amux/ideaSessionSubmissionCore";
+import { inspectAmuxIdeaSessionSubmission } from "@/lib/amux/ideaSessionSubmissionCore";
 import {
   AMUX_SESSION_INTAKE_CLIENT_SECRET_ENV,
-  AMUX_SESSION_INTAKE_READBACK_ENV,
   amuxSessionIntakeConflictingSecretValues,
-  amuxSessionIntakeReadbackEnabled,
   amuxSessionIntakeReadbackReply,
   amuxSessionIntakeReadbackRequestId,
   isAmuxSessionIntakeClientAuthorized,
@@ -20,10 +14,6 @@ import {
   readAmuxIdeaSessionSubmissionRequest,
   submitAmuxIdeaFromSession,
 } from "@/lib/amux/ideaSessionSubmissionService";
-import {
-  AMUX_V4_IDEA_READBACK_ENV,
-  AMUX_V4_IDEA_SUBMISSION_ENV,
-} from "@/lib/amux/ideaSubmissionCore";
 
 const authorized = (request: Request): boolean =>
   isAmuxSessionIntakeClientAuthorized(
@@ -40,7 +30,6 @@ const SUBMISSION_ERROR_STATUS: Record<
   AmuxIdeaSessionSubmissionError["code"],
   409 | 503
 > = {
-  submission_disabled: 503,
   audit_unavailable: 503,
   scope_unavailable: 409,
   outside_scope: 409,
@@ -81,17 +70,6 @@ export async function POST(request: Request): Promise<Response> {
   if (!authorized(request)) {
     return amuxJsonNoStore({ error: "Unauthorized" }, 401);
   }
-  // A write is never opened without the exact-ID recovery path needed after
-  // an interrupted response.
-  if (!amuxSessionIntakeWritePermitted(
-    process.env[AMUX_SESSION_INTAKE_ENV],
-    process.env[AMUX_V4_IDEA_SUBMISSION_ENV],
-  ) || !amuxSessionIntakeReadbackEnabled(
-    process.env[AMUX_SESSION_INTAKE_READBACK_ENV],
-    process.env[AMUX_V4_IDEA_READBACK_ENV],
-  )) {
-    return amuxJsonNoStore({ error: "submission_disabled", retryWrite: false }, 503);
-  }
   if (request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !==
       "application/json") {
     return amuxJsonNoStore({ error: "content_type_refused", retryWrite: false }, 415);
@@ -127,14 +105,6 @@ export async function POST(request: Request): Promise<Response> {
 /** Exact-ID, metadata-only recovery after an uncertain session intake reply. */
 export async function GET(request: Request): Promise<Response> {
   if (!authorized(request)) return amuxJsonNoStore({ error: "Unauthorized" }, 401);
-
-  if (!amuxSessionIntakeReadbackEnabled(
-    process.env[AMUX_SESSION_INTAKE_READBACK_ENV],
-    process.env[AMUX_V4_IDEA_READBACK_ENV],
-  )) {
-    return amuxJsonNoStore({ available: false,
-      reason: "session_intake_readback_disabled" }, 409);
-  }
 
   const requestId = amuxSessionIntakeReadbackRequestId(request);
   if (!requestId) return amuxJsonNoStore({ error: "Invalid request." }, 400);

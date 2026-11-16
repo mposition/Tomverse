@@ -16,10 +16,6 @@ import { AmuxSessionBudgetClaimError, commitAmuxSessionBudgetClaim,
   "@/lib/amux/ideaSessionAnalysisBudgetClaimService";
 import { prisma } from "@/lib/prisma";
 
-const CLAIM_CODE_LATCH = true;
-const WRITE_ENV = "TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_WRITE";
-const READ_ENV = "TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_READ";
-const STOP_READ_ENV = "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_STOP_POLL_READ";
 const uuid = z.string().uuid();
 const identity = z.object({ requestId: uuid, reservationId: uuid,
   invocationOrdinal: z.number().int().min(0).max(2_147_483_647) }).strict();
@@ -44,12 +40,6 @@ export async function POST(request: Request): Promise<Response> {
     process.env[AMUX_V4_ANALYSIS_AGENT_SECRET_ENV],
     process.env.TOMVERSE_AMUX_SYNC_SECRET)) {
     return amuxJsonNoStore({ error: "Unauthorized" }, 401);
-  }
-  if (!CLAIM_CODE_LATCH || process.env[WRITE_ENV] !== "enabled" ||
-      process.env[READ_ENV] !== "enabled" ||
-      process.env[STOP_READ_ENV] !== "enabled") {
-    return amuxJsonNoStore({ available: false,
-      reason: "session_budget_claim_disabled" }, 409);
   }
   if (request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !==
       "application/json") {
@@ -90,8 +80,7 @@ export async function POST(request: Request): Promise<Response> {
 }
 
 /** An unknown claim is checked once by exact request/reservation/ordinal.
- * Even an absent receipt never authorizes replay of its POST. Readback stays
- * available when claim writes are disabled for operator reconciliation. */
+ * Even an absent receipt never authorizes replay of its POST. */
 export async function GET(request: Request): Promise<Response> {
   if (!isAmuxV4AnalysisAgentAuthorized(request,
     process.env[AMUX_V4_ANALYSIS_AGENT_SECRET_ENV],
@@ -101,10 +90,6 @@ export async function GET(request: Request): Promise<Response> {
         process.env[AMUX_V4_ANALYSIS_AGENT_SECRET_ENV],
         process.env.TOMVERSE_AMUX_SYNC_SECRET)) {
     return amuxJsonNoStore({ error: "Unauthorized" }, 401);
-  }
-  if (process.env[READ_ENV] !== "enabled") {
-    return amuxJsonNoStore({ available: false,
-      reason: "session_budget_claim_read_disabled" }, 409);
   }
   const url = new URL(request.url);
   if ([...url.searchParams.keys()].length !== 3 ||

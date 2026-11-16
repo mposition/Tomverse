@@ -24,10 +24,6 @@ const conflictingEnvNames = [
 ] as const;
 const envNames = [
   "TOMVERSE_AMUX_SESSION_INTAKE_CLIENT_SECRET",
-  "TOMVERSE_AMUX_SESSION_INTAKE",
-  "TOMVERSE_AMUX_SESSION_INTAKE_READBACK",
-  "TOMVERSE_AMUX_V4_IDEA_SUBMIT",
-  "TOMVERSE_AMUX_V4_IDEA_READBACK",
   ...conflictingEnvNames,
 ] as const;
 const previousEnv = Object.fromEntries(envNames.map((name) => [name, process.env[name]]));
@@ -87,17 +83,9 @@ const reset = () => {
   written = undefined;
   committedRequestId = requestId;
   process.env.TOMVERSE_AMUX_SESSION_INTAKE_CLIENT_SECRET = secret;
-  delete process.env.TOMVERSE_AMUX_SESSION_INTAKE;
-  delete process.env.TOMVERSE_AMUX_V4_IDEA_SUBMIT;
-  process.env.TOMVERSE_AMUX_SESSION_INTAKE_READBACK = "enabled";
-  process.env.TOMVERSE_AMUX_V4_IDEA_READBACK = "enabled";
   for (const name of conflictingEnvNames) {
     delete process.env[name];
   }
-};
-const enableWrite = () => {
-  process.env.TOMVERSE_AMUX_SESSION_INTAKE = "enabled";
-  process.env.TOMVERSE_AMUX_V4_IDEA_SUBMIT = "enabled";
 };
 const get = (query = `?requestId=${requestId}`, token = secret,
   headers: Record<string, string> = {}) => new Request(
@@ -142,28 +130,10 @@ test("session readback accepts only its bearer and never falls back to an owner 
   assert.equal(reads, 0);
 });
 
-test("session readback stays available after intake stops and requires both read switches", async () => {
+test("session readback answers an exact request id", async () => {
   reset();
-  assert.equal(process.env.TOMVERSE_AMUX_SESSION_INTAKE, undefined);
   assert.equal((await route.GET(get())).status, 404);
   assert.equal(reads, 1);
-
-  reset();
-  delete process.env.TOMVERSE_AMUX_SESSION_INTAKE_READBACK;
-  const sessionOff = await route.GET(get());
-  assert.equal(sessionOff.status, 409);
-  assert.deepEqual(await sessionOff.json(), {
-    available: false, reason: "session_intake_readback_disabled",
-  });
-  reset();
-  process.env.TOMVERSE_AMUX_SESSION_INTAKE_READBACK = "ENABLED";
-  assert.equal((await route.GET(get())).status, 409);
-  assert.equal(reads, 0);
-
-  reset();
-  delete process.env.TOMVERSE_AMUX_V4_IDEA_READBACK;
-  assert.equal((await route.GET(get())).status, 409);
-  assert.equal(reads, 0);
 });
 
 test("session readback rejects malformed or expanded lookups before the database", async () => {
@@ -233,7 +203,6 @@ test("session readback refuses a service result for a different request ID", asy
 
 test("session POST accepts only the intake bearer and never an owner cookie", async () => {
   reset();
-  enableWrite();
   const cookieOnly = post();
   cookieOnly.headers.delete("authorization");
   cookieOnly.headers.set("cookie", "authjs.session-token=synthetic-owner-cookie");
@@ -245,28 +214,8 @@ test("session POST accepts only the intake bearer and never an owner cookie", as
   assert.equal(writes, 0);
 });
 
-test("session POST requires both default-off write and readback switch pairs", async () => {
-  reset();
-  assert.deepEqual(await (await route.POST(post())).json(), {
-    error: "submission_disabled", retryWrite: false,
-  });
-  process.env.TOMVERSE_AMUX_SESSION_INTAKE = "enabled";
-  assert.equal((await route.POST(post())).status, 503);
-  delete process.env.TOMVERSE_AMUX_SESSION_INTAKE;
-  process.env.TOMVERSE_AMUX_V4_IDEA_SUBMIT = "enabled";
-  assert.equal((await route.POST(post())).status, 503);
-  enableWrite();
-  delete process.env.TOMVERSE_AMUX_SESSION_INTAKE_READBACK;
-  assert.equal((await route.POST(post())).status, 503);
-  process.env.TOMVERSE_AMUX_SESSION_INTAKE_READBACK = "enabled";
-  delete process.env.TOMVERSE_AMUX_V4_IDEA_READBACK;
-  assert.equal((await route.POST(post())).status, 503);
-  assert.equal(writes, 0);
-});
-
 test("session POST validates its media type and sensitive content before the writer", async () => {
   reset();
-  enableWrite();
   assert.equal((await route.POST(post(JSON.stringify(submission), secret,
     "text/plain"))).status, 415);
   assert.equal((await route.POST(post("{", secret))).status, 400);
@@ -278,7 +227,6 @@ test("session POST validates its media type and sensitive content before the wri
 
 test("session POST keeps v19 idea intake free of the former one-MiB ceiling", async () => {
   reset();
-  enableWrite();
   const idea = "i".repeat(1_048_577);
   const response = await route.POST(post(JSON.stringify({
     ...submission,
@@ -295,7 +243,6 @@ test("session POST keeps v19 idea intake free of the former one-MiB ceiling", as
 
 test("session POST returns only committed metadata from the atomic service", async () => {
   reset();
-  enableWrite();
   const response = await route.POST(post());
   assert.equal(response.status, 201);
   assert.match(response.headers.get("cache-control") ?? "", /no-store/);
@@ -318,12 +265,11 @@ test("session POST returns only committed metadata from the atomic service", asy
 
 test("session POST exposes closed refusal codes and sends ambiguous writes to exact readback", async () => {
   for (const [code, status] of [
-    ["submission_disabled", 503], ["audit_unavailable", 503],
+    ["audit_unavailable", 503],
     ["scope_unavailable", 409], ["outside_scope", 409],
     ["model_not_approved", 409], ["key_store_unavailable", 503],
   ] as const) {
     reset();
-    enableWrite();
     writeError = new FakeAmuxIdeaSessionSubmissionError(code, "committed", ideaId);
     const response = await route.POST(post());
     assert.equal(response.status, status, code);
@@ -339,7 +285,6 @@ test("session POST exposes closed refusal codes and sends ambiguous writes to ex
     ["outcome_unknown", 503, "unavailable"],
   ] as const) {
     reset();
-    enableWrite();
     writeError = new FakeAmuxIdeaSessionSubmissionError(code, readBack, ideaId);
     const response = await route.POST(post());
     assert.equal(response.status, status, code);
@@ -353,7 +298,6 @@ test("session POST exposes closed refusal codes and sends ambiguous writes to ex
 
 test("session POST hides unexpected writer failures and forbids blind retry", async () => {
   reset();
-  enableWrite();
   writeError = new Error("synthetic failure contains private idea and source labels");
   const response = await route.POST(post());
   assert.equal(response.status, 500);
@@ -365,7 +309,6 @@ test("session POST hides unexpected writer failures and forbids blind retry", as
   assert.doesNotMatch(body, /synthetic|private idea|source labels/);
 
   reset();
-  enableWrite();
   committedRequestId = "a2e13249-c51b-4256-b77f-44b863d58690";
   const mismatched = await route.POST(post());
   assert.equal(mismatched.status, 500);

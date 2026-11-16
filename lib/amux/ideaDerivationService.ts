@@ -9,14 +9,11 @@ import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import { prisma } from "@/lib/prisma";
 import { amuxCanonicalJson } from "./boardImportCore.ts";
-import { amuxIntakeCap } from "./intakeLimitsCore.ts";
 import { undecidedDraftExpiresAt } from "./ideaRetentionCore.ts";
 import { inspectAmuxStoredAnalysisUnit, amuxAnalysisTextSafe,
   type AmuxAnalysisCard } from "./ideaAnalysisChunkCore.ts";
 import { amuxContentDigest, openAmuxContent, sealAmuxContent,
   verifyAmuxContentDigest, type AmuxContentKeys } from "./ideaCrypto.ts";
-import { AMUX_V4_UNIT_WRITE_ENV, amuxV4UnitWriteEnabled } from
-  "./ideaUnitDecisionStore.ts";
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const ID = /^[A-Za-z0-9:_-]{8,80}$/;
@@ -59,8 +56,6 @@ function assertShape(input: AmuxDerivationInput): void {
       !UUID.test(input.requestId) || !["split", "merge"].includes(input.operation) ||
       !Array.isArray(input.sourceUnitIds) || !Array.isArray(input.targetUnitIds) ||
       !Array.isArray(input.cards) || input.targetUnitIds.length !== input.cards.length ||
-      input.sourceUnitIds.length > amuxIntakeCap(40) ||
-      input.targetUnitIds.length > amuxIntakeCap(40) ||
       (input.operation === "split" ?
         input.sourceUnitIds.length !== 1 || input.cards.length < 2 :
         input.sourceUnitIds.length < 2 || input.cards.length !== 1) ||
@@ -310,9 +305,6 @@ export async function commitAmuxV4Derivation(input: {
 export async function approveAmuxV4Derivation(
   input: Parameters<typeof commitAmuxV4Derivation>[0],
 ) {
-  if (!amuxV4UnitWriteEnabled(process.env[AMUX_V4_UNIT_WRITE_ENV])) {
-    throw new AmuxIdeaDerivationError("write_disabled");
-  }
   return commitAmuxV4Derivation(input);
 }
 

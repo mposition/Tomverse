@@ -12,11 +12,9 @@ import {
   boardImportFailureIsAmbiguous,
 } from "@/lib/amux/boardImportCore";
 import {
-  AMUX_RECONCILIATION_APPLY_ENV,
   AMUX_RECONCILIATION_PRESERVED_CARD,
   AMUX_RECONCILIATION_SOURCE_SYSTEM,
   type AmuxReconciliationPlan,
-  amuxReconciliationApplyPermitted,
 } from "@/lib/amux/boardReconciliationCore";
 import { prisma } from "@/lib/prisma";
 
@@ -251,9 +249,6 @@ export async function applyAmuxReconciliation(input: {
   request: Request;
   plan: AmuxReconciliationPlan;
 }): Promise<AmuxReconciliationCommitResult> {
-  if (!amuxReconciliationApplyPermitted(process.env[AMUX_RECONCILIATION_APPLY_ENV])) {
-    throw new BoardImportError("apply_disabled", 409);
-  }
   const runId = randomUUID();
   try {
     return await prisma.$transaction(

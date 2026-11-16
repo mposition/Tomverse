@@ -8,17 +8,13 @@ import {
   readStaleAmuxDmOwnerSettlementRemake, recordAmuxDmOwnerSettlementHandoff,
   recordAmuxDmOwnerSettlementRemakeIdea, type AmuxDmOwnerSettlementApplied,
 } from "./dmOwnerSettlementService.ts";
-import { AMUX_SESSION_INTAKE_READBACK_ENV, amuxSessionIntakeReadbackEnabled } from
-  "./ideaSessionIntakeReadbackCore.ts";
 import {
-  AMUX_SESSION_INTAKE_ENV, amuxIdeaSessionPrewriteStatus, amuxSessionIntakeWritePermitted,
-  inspectAmuxIdeaSessionSubmission,
+  amuxIdeaSessionPrewriteStatus, inspectAmuxIdeaSessionSubmission,
 } from "./ideaSessionSubmissionCore.ts";
 import {
   AmuxIdeaSessionGuardRefused, AmuxIdeaSessionSubmissionError, readAmuxIdeaSessionSubmissionRequest,
   submitAmuxIdeaFromSession, type AmuxIdeaSessionSubmissionGuard,
 } from "./ideaSessionSubmissionService.ts";
-import { AMUX_V4_IDEA_READBACK_ENV, AMUX_V4_IDEA_SUBMISSION_ENV } from "./ideaSubmissionCore.ts";
 
 /**
  * A remake's new idea (owner decision 2026-11-13), in three steps:
@@ -52,10 +48,6 @@ const REPOSITORY = "mposition/Tomverse";
 export type AmuxDmOwnerSettlementRemakeFiling =
   | { ideaId: string } | { refused: string } | { unknown: true } | { guarded: string };
 
-const intakeOn = () =>
-  amuxSessionIntakeWritePermitted(process.env[AMUX_SESSION_INTAKE_ENV], process.env[AMUX_V4_IDEA_SUBMISSION_ENV]) &&
-  amuxSessionIntakeReadbackEnabled(process.env[AMUX_SESSION_INTAKE_READBACK_ENV], process.env[AMUX_V4_IDEA_READBACK_ENV]);
-
 /** The idea a request id committed, read back; null when it is not there, or only partly. */
 export async function readBackAmuxDmOwnerSettlementRemakeIdea(requestId: string) {
   const seen = await readAmuxIdeaSessionSubmissionRequest(requestId);
@@ -74,7 +66,6 @@ export const amuxDmOwnerSettlementRemakeSubmission = (requestId: string, ideaTex
 export async function fileAmuxDmOwnerSettlementRemakeIdea(input: {
   requestId: string; ideaText: string; guard: AmuxIdeaSessionSubmissionGuard;
 }): Promise<AmuxDmOwnerSettlementRemakeFiling> {
-  if (!intakeOn()) return { refused: "intake_disabled" };
   const seen = await readAmuxIdeaSessionSubmissionRequest(input.requestId);
   if (seen.status === "committed") return { ideaId: seen.ideaId };
   if (seen.status === "partial") return { unknown: true };

@@ -3,8 +3,6 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
-  AMUX_INTAKE_APPLY_CODE_LATCH,
-  amuxIntakeApplyPermitted,
   amuxIntakeDraftDigest,
   amuxIntakeNormalizedDraft,
   amuxIntakeSourceKey,
@@ -34,11 +32,11 @@ const draft = (overrides = {}) => ({
 
 const body = (value) => JSON.stringify(value);
 
-test("stage 8 arms the code latch and still requires the environment value", () => {
-  assert.equal(AMUX_INTAKE_APPLY_CODE_LATCH, true);
-  assert.equal(amuxIntakeApplyPermitted("enabled"), true);
-  assert.equal(amuxIntakeApplyPermitted("true"), false);
-  assert.equal(amuxIntakeApplyPermitted(undefined), false);
+test("owner direction 2026-11-16: intake apply has no environment switch or code latch", () => {
+  const source = read("lib/amux/intakeCore.ts");
+  assert.equal(source.includes("TOMVERSE_AMUX_INTAKE_APPLY"), false);
+  assert.equal(source.includes("AMUX_INTAKE_APPLY_CODE_LATCH"), false);
+  assert.equal(source.includes("amuxIntakeApplyPermitted"), false);
 });
 
 test("a conversation that is not an explicit registration produces no card", () => {
@@ -124,8 +122,6 @@ test("the source key is an hmac and a short secret produces none", () => {
 
 test("the pure module does not open a writer", () => {
   const source = read("lib/amux/intakeCore.ts");
-  assert.equal(source.includes("AMUX_INTAKE_APPLY_CODE_LATCH = true"), true);
-  assert.equal(source.includes("codeLatch: AMUX_INTAKE_APPLY_CODE_LATCH"), true);
   assert.equal(source.includes("@prisma/client"), false);
   assert.equal(source.includes("lib/credit"), false);
   assert.equal(source.includes("TOMVERSE_AMUX_EXECUTE"), false);

@@ -10,10 +10,7 @@ import { signAmuxV19MaxClaimAttestation,
 
 const secret = "v19MaxLauncherSecret_0123456789abcdefgh";
 const keys = ["TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET",
-  "TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET", "TOMVERSE_AMUX_SYNC_SECRET",
-  "TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_WRITE",
-  "TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_READ",
-  "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_STOP_POLL_READ"] as const;
+  "TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET", "TOMVERSE_AMUX_SYNC_SECRET"] as const;
 
 async function withEnvironment(values: Record<string, string>,
   check: () => Promise<void>) {
@@ -49,18 +46,13 @@ test("only a distinct fixed Max launcher credential reaches claim admission", as
   });
   await withEnvironment({ TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET: secret },
     async () => {
-      const response = await POST(request({}));
-      assert.equal(response.status, 409);
-      assert.deepEqual(await response.json(), { available: false,
-        reason: "session_budget_claim_disabled" });
+      // Past authentication an empty body is refused by the strict schema.
+      assert.equal((await POST(request({}))).status, 400);
     });
 });
 
 test("claim body cannot supply its own Max authentication assertion", async () => {
-  await withEnvironment({ TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET: secret,
-    TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_WRITE: "enabled",
-    TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_READ: "enabled",
-    TOMVERSE_AMUX_V19_SESSION_ANALYSIS_STOP_POLL_READ: "enabled" },
+  await withEnvironment({ TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET: secret },
   async () => {
     const identity = { claimId: "06b23730-7a7f-488c-a879-145d540d8794",
       requestId: "44c72436-c011-4cfc-b52f-e3345c22fc80",
@@ -99,7 +91,7 @@ test("claim body cannot supply its own Max authentication assertion", async () =
   });
 });
 
-test("dedicated Max credential reaches the independently gated readback", async () => {
+test("dedicated Max credential reaches the claim readback", async () => {
   await withEnvironment({ TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET: secret },
     async () => {
       const response = await GET(new Request(
@@ -107,8 +99,7 @@ test("dedicated Max credential reaches the independently gated readback", async 
           headers: { authorization: `Bearer ${secret}`,
             "x-amux-agent-id": AMUX_V19_MAX_LAUNCHER_ID },
         }));
-      assert.equal(response.status, 409);
-      assert.equal((await response.json()).reason,
-        "session_budget_claim_read_disabled");
+      // Past authentication the readback needs its exact identity query.
+      assert.equal(response.status, 400);
     });
 });

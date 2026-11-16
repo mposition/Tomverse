@@ -48,24 +48,17 @@ function descendants(node) {
 }
 
 test("actual owner page renders exact hold recovery without a transfer preview", async () => {
-  const previous = process.env.TOMVERSE_AMUX_V4_ANALYSIS_CLAIM_RESOLUTION_READ;
-  process.env.TOMVERSE_AMUX_V4_ANALYSIS_CLAIM_RESOLUTION_READ = "enabled";
-  try {
-    const Page = await pageFixture("owner", "ideas");
-    const id = "12345678-1234-4123-8123-123456789abc";
-    const tree = await Page({ searchParams: Promise.resolve({ tab: "ideas", analysisHoldId: id }) });
-    const panels = descendants(tree).filter(node => node.type?.name === "AmuxAnalysisClaimResolutionPanel");
-    assert.equal(panels.length, 1);
-    assert.equal(panels[0].props.holdId, id);
-    assert.equal(panels[0].key, id);
-    assert.equal(panels[0].props.onResolved, undefined);
-    const otherTab = await pageFixture("owner", "metadata");
-    const hidden = await otherTab({ searchParams: Promise.resolve({ tab: "metadata", analysisHoldId: id }) });
-    assert.equal(descendants(hidden).filter(node => node.type?.name === "AmuxAnalysisClaimResolutionPanel").length, 0);
-  } finally {
-    if (previous === undefined) delete process.env.TOMVERSE_AMUX_V4_ANALYSIS_CLAIM_RESOLUTION_READ;
-    else process.env.TOMVERSE_AMUX_V4_ANALYSIS_CLAIM_RESOLUTION_READ = previous;
-  }
+  const Page = await pageFixture("owner", "ideas");
+  const id = "12345678-1234-4123-8123-123456789abc";
+  const tree = await Page({ searchParams: Promise.resolve({ tab: "ideas", analysisHoldId: id }) });
+  const panels = descendants(tree).filter(node => node.type?.name === "AmuxAnalysisClaimResolutionPanel");
+  assert.equal(panels.length, 1);
+  assert.equal(panels[0].props.holdId, id);
+  assert.equal(panels[0].key, id);
+  assert.equal(panels[0].props.onResolved, undefined);
+  const otherTab = await pageFixture("owner", "metadata");
+  const hidden = await otherTab({ searchParams: Promise.resolve({ tab: "metadata", analysisHoldId: id }) });
+  assert.equal(descendants(hidden).filter(node => node.type?.name === "AmuxAnalysisClaimResolutionPanel").length, 0);
 });
 
 test("actual non-owner page refuses recovery before rendering its claim", async () => {

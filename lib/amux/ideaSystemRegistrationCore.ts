@@ -16,12 +16,10 @@ import type { AmuxDigestKey } from "./ideaCrypto.ts";
 /**
  * Intake v19 autonomous registration: the owner approved it in chat on
  * 2026-10-21, after the first unattended staging analysis produced a plan.
- * This code latch is open; each environment still decides with the
- * dedicated switch below (set on staging, absent in production) and the
- * existing intake, analysis and budget switches, which this helper never
- * changes.
+ * Each environment decides with the dedicated switch below (set on staging,
+ * absent in production); it is the one operator decision for automatic
+ * registration.
  */
-export const AMUX_V19_SYSTEM_REGISTRATION_CODE_ENABLED = true;
 export const AMUX_V19_SYSTEM_REGISTRATION_ENV =
   "TOMVERSE_AMUX_V19_SYSTEM_REGISTRATION";
 
@@ -121,16 +119,7 @@ export function deriveAmuxV19RegistrationRefusalRequestId(input: {
 }
 
 export function amuxV19SystemRegistrationEnabled(env: NodeJS.ProcessEnv): boolean {
-  return AMUX_V19_SYSTEM_REGISTRATION_CODE_ENABLED &&
-    env[AMUX_V19_SYSTEM_REGISTRATION_ENV] === "enabled" &&
-    env.TOMVERSE_AMUX_SESSION_INTAKE === "enabled" &&
-    env.TOMVERSE_AMUX_V4_ANALYSIS_QUEUE_READ === "enabled" &&
-    env.TOMVERSE_AMUX_V4_ANALYSIS_RESULT_READ === "enabled" &&
-    env.TOMVERSE_AMUX_V4_ANALYSIS_RESULT_WRITE === "enabled" &&
-    env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_RESERVE === "enabled" &&
-    env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_READ === "enabled" &&
-    env.TOMVERSE_AMUX_V4_UNIT_WRITE === "enabled" &&
-    env.TOMVERSE_AMUX_V4_PORTFOLIO_WRITE === "enabled";
+  return env[AMUX_V19_SYSTEM_REGISTRATION_ENV] === "enabled";
 }
 
 export type AmuxUnitDecisionAuditRow = {

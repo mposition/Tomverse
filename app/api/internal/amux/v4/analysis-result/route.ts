@@ -19,14 +19,8 @@ import { createAmuxContentKeyRing,
   type AmuxContentKeyIdentity } from "@/lib/amux/ideaKeyStore";
 import { prisma } from "@/lib/prisma";
 
-// The v15 code latch does not bypass the verified isolated runner, agent-wide
-// failure latch, S0 evidence or the two independent environment switches.
-const RESULT_CODE_LATCH = true;
-const RESULT_WRITE_ENV = "TOMVERSE_AMUX_V4_ANALYSIS_RESULT_WRITE";
-// Read-back remains available under its own authenticated, default-off gate
-// after result writes are killed. It returns only the content-free receipt.
-const RESULT_RECEIPT_READ_CODE_LATCH = true;
-const RESULT_RECEIPT_READ_ENV = "TOMVERSE_AMUX_V4_ANALYSIS_RESULT_READ";
+// The result write does not bypass the verified isolated runner or the
+// agent-wide failure latch. Read-back returns only the content-free receipt.
 const id = z.string().regex(/^[A-Za-z0-9:_-]{1,128}$/);
 const bodySchema = z.object({ requestId: id, ideaId: id, previewId: id,
   holdId: id, leaseGeneration: z.literal(1),
@@ -44,18 +38,13 @@ function authorized(request: Request): boolean {
 
 export async function POST(request: Request): Promise<Response> {
   if (!authorized(request)) return amuxJsonNoStore({ error: "Unauthorized" }, 401);
-  if (!RESULT_CODE_LATCH || process.env[RESULT_WRITE_ENV] !== "enabled" ||
-      !RESULT_RECEIPT_READ_CODE_LATCH ||
-      process.env[RESULT_RECEIPT_READ_ENV] !== "enabled") {
-    return amuxJsonNoStore({ available: false, reason: "analysis_result_disabled" }, 409);
-  }
   if (request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !==
       "application/json") {
     return amuxJsonNoStore({ error: "Invalid content type." }, 415);
   }
   let body: z.infer<typeof bodySchema>;
   try {
-    body = await readLimitedJson(request, amuxAnalysisAnswerRequestMaxBytes(70 * 1024),
+    body = await readLimitedJson(request, amuxAnalysisAnswerRequestMaxBytes(),
       bodySchema);
   }
   catch { return amuxJsonNoStore({ error: "Invalid request." }, 400); }
@@ -141,11 +130,6 @@ export async function POST(request: Request): Promise<Response> {
 
 export async function GET(request: Request): Promise<Response> {
   if (!authorized(request)) return amuxJsonNoStore({ error: "Unauthorized" }, 401);
-  if (!RESULT_RECEIPT_READ_CODE_LATCH ||
-      process.env[RESULT_RECEIPT_READ_ENV] !== "enabled") {
-    return amuxJsonNoStore({ available: false,
-      reason: "analysis_result_read_disabled" }, 409);
-  }
   const url = new URL(request.url);
   if (url.searchParams.getAll("requestId").length !== 1 ||
       url.searchParams.getAll("previewId").length !== 1 ||
