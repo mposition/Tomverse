@@ -7,6 +7,7 @@ import { openAmuxContent, verifyAmuxContentDigest } from "./ideaCrypto.ts";
 import { loadAmuxContentUnitKeys } from "./ideaKeyStore.ts";
 import { readAmuxV22TaskResultForOwner } from "./v22TaskResultStore.ts";
 import { readAmuxLegacyCardView } from "./legacyCardOwnerService.ts";
+import { readAmuxV4TaskCeilingReapprovalView } from "./v4TaskCeilingReapprovalService.ts";
 import { amuxFeedbackTaskWhere, projectAmuxTaskFeedback, readAmuxV4ApprovedCeiling,
   rollupAmuxTaskFeedback } from
   "./v22TaskFeedbackCore.ts";
@@ -547,8 +548,12 @@ export async function readAmuxExecutionTaskDetail(taskId: string) {
     .catch(() => null);
   const currentDecision = feedbackDecisions.find((decision) =>
     decision.proposal.taskRevision + 1 === card.revision);
+  // The owner re-approves a waiting Task's ceiling at the current price
+  // (v4TaskCeilingReapprovalCore.ts); a failed read shows no offer.
+  const ceilingReapproval = card.sourceSystem === "admin-idea-v4" && card.cardType === "task" ?
+    await readAmuxV4TaskCeilingReapprovalView(taskId) : null;
   return { ...summary, revision: card.revision, body, brief,
-    legacyCard,
+    legacyCard, ceilingReapproval,
     outcomeWriteEnabled: amuxV22OutcomeWriteEnabled(
       process.env[AMUX_V22_OUTCOME_WRITE_ENV]) &&
       card.sourceSystem === "admin-idea-v4" &&
@@ -560,10 +565,12 @@ export async function readAmuxExecutionTaskDetail(taskId: string) {
       createdAt: card.createdAt,
       effortPoints: card.effortPoints,
       estimatedCostMicrousd: card.estimatedCostMicrousd,
+      // The ceiling in force: an owner re-approval replaces the registration's.
       approvedCeilingMicrousd: sourceApproval?.state === "consumed" &&
         sourceApproval.action === "register_card" &&
         sourceApproval.registeredWorkItemId === card.id ?
-        readAmuxV4ApprovedCeiling(sourceApproval.confirmationSnapshot) : null,
+        (ceilingReapproval?.approvedCeilingMicroUsd ? BigInt(ceilingReapproval.approvedCeilingMicroUsd) :
+          readAmuxV4ApprovedCeiling(sourceApproval.confirmationSnapshot)) : null,
       attempts: feedbackAttempts, usage: feedbackUsage,
       decisions: feedbackDecisions.map((decision) => ({ id: decision.id,
         outcome: decision.outcome, decidedAt: decision.decidedAt })),

@@ -80,6 +80,8 @@ const tx = {
     groupBy: async () => [],
     create: async () => { assignmentWrites += 1; },
   },
+  // No owner ceiling re-approval stands for this Task.
+  adminAuditLog: { findMany: async () => [] },
   amuxIdeaUnitDecision: { findUnique: async () => ({
     confirmationSnapshot: { card: { task: { costReceipt: receipt } } },
   }) },

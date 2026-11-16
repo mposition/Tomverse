@@ -84,6 +84,8 @@ const tx = {
   amuxWorkerRuntime: { findMany: async () => workers.map((worker) =>
     runtime(worker.worker_name)) },
   amuxV22WorkerAssignment: { findMany: async () => [], groupBy: async () => [], create: async () => undefined },
+  // No owner ceiling re-approval stands for this Task.
+  adminAuditLog: { findMany: async () => [] },
   amuxIdeaUnitDecision: { findUnique: async () => ({
     confirmationSnapshot: { card: { task: { costReceipt: receipt } } },
   }) },

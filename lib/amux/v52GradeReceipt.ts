@@ -2,24 +2,31 @@ import type { Prisma } from "@prisma/client";
 import { AMUX_SYSTEM_AUDIT_ACTOR } from "../adminAuditSystemActors.ts";
 
 import {
-  checkV4TaskApprovedCeiling,
-  type V4TaskCostCeilingReceipt } from "./v4TaskCostCeilingCore.ts";
+  AMUX_V4_TASK_CEILING_REAPPROVED_ACTION, readAmuxV4TaskCeilingReapproval,
+  validV4TaskReceipt } from "./v4TaskCeilingReapprovalCore.ts";
+import type { V4TaskCostCeilingReceipt } from "./v4TaskCostCeilingCore.ts";
 
 export const AMUX_GRADE_ESCALATED_ACTION = "amux.grade.escalated";
 
-const receipt = (value: unknown): V4TaskCostCeilingReceipt | null => {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const candidate = value as V4TaskCostCeilingReceipt;
-  return checkV4TaskApprovedCeiling(candidate, { ok: true,
-    receipt: candidate }).decision === "allow" ? candidate : null;
-};
+const receipt = validV4TaskReceipt;
 
-/** The owner-approved receipt stays in the confirmation; a one-time, audited
- * frontier receipt is the only permitted replacement after a path mismatch. */
+/** The owner-approved receipt stays in the confirmation. Two audited entries
+ * replace it: the owner's latest ceiling re-approval
+ * (v4TaskCeilingReapprovalCore.ts), and a one-time frontier receipt after a
+ * path mismatch, bound to whichever of the two was in force. */
 export async function readAmuxV52TaskReceipt(tx: Prisma.TransactionClient,
   taskId: string, original: unknown, currentGrade: string):
   Promise<V4TaskCostCeilingReceipt | null> {
-  const approved = receipt(original);
+  const confirmed = receipt(original);
+  if (!confirmed) return null;
+  const [latest] = await tx.adminAuditLog.findMany({ where: {
+    action: AMUX_V4_TASK_CEILING_REAPPROVED_ACTION,
+    targetType: "AmuxWorkItem", targetId: taskId,
+  }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 1,
+  select: { entryHash: true, actorUserId: true, metadata: true } });
+  // An entry that does not read holds the Task rather than falling back to
+  // an older, lower ceiling the owner already replaced.
+  const approved = latest ? readAmuxV4TaskCeilingReapproval(latest, confirmed) : confirmed;
   if (!approved) return null;
   if (approved.grade === currentGrade) return approved;
   if (currentGrade !== "frontier" || approved.grade === "frontier") return null;
