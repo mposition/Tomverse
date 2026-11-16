@@ -77,6 +77,8 @@ import { commitAmuxSessionBudgetClaim, readAmuxSessionBudgetClaimReceipt,
   "@/lib/amux/ideaSessionAnalysisBudgetClaimService";
 import { GET as readMaxClaimRoute, POST as postMaxClaimRoute } from
   "@/app/api/internal/amux/v19/analysis-budget/claim/route";
+import { GET as listMaxInFlightRoute } from
+  "@/app/api/internal/amux/v19/analysis-budget/in-flight/route";
 import { POST as postMaxResultRoute } from
   "@/app/api/internal/amux/v19/analysis-budget/max-result/route";
 import { POST as postMaxUnknownRoute } from
@@ -2211,8 +2213,36 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
   const unknownOldEnv = Object.fromEntries(unknownEnv.map((name) =>
     [name, process.env[name]]));
   let unknown!: { status: string };
+  // The in-flight list a marker that names no claim is reconciled against: the
+  // open subscription claim is listed for any time after it was written, the
+  // settled one never, and the time bound is exclusive.
+  const listInFlight = async (before: Date) => {
+    const response = await listMaxInFlightRoute(new Request(
+      `https://test.invalid/api/internal/amux/v19/analysis-budget/in-flight?before=${
+        encodeURIComponent(before.toISOString())}`, { headers: {
+        authorization: `Bearer ${launcherSecret}`,
+        "x-amux-agent-id": AMUX_V19_MAX_LAUNCHER_ID } }));
+    assert.equal(response.status, 200);
+    // This file's other tests share the database; only this test's two claims
+    // (the settled one and the open one) are looked at.
+    return (await response.json() as { claims: Array<Record<string, unknown>> })
+      .claims.filter((listed) => listed.claimId === unknownClaim.claimId ||
+        listed.claimId === claim.claimId);
+  };
+  const unknownIdentity = { claimId: unknownClaim.claimId,
+    requestId: unknownClaim.requestId,
+    reservationId: unknownClaim.reservationId, ideaId: unknownIdeaId,
+    invocationOrdinal: 0 };
   try {
     process.env.TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET = launcherSecret;
+    const openRow = await prisma.amuxIdeaSessionAnalysisBudgetClaim
+      .findUniqueOrThrow({ where: { id: unknownClaim.claimId } });
+    assert.equal(openRow.status, "in_flight");
+    assert.deepEqual(await listInFlight(new Date()), [unknownIdentity]);
+    assert.deepEqual(await listInFlight(openRow.createdAt), [],
+      "a claim written at the marker's own time is not before it");
+    assert.deepEqual(await listInFlight(new Date(openRow.createdAt.getTime() - 1)),
+      []);
     const response = await postMaxUnknownRoute(new Request(
       "https://test.invalid/api/internal/amux/v19/analysis-budget/unknown", {
         method: "POST", headers: { authorization: `Bearer ${launcherSecret}`,
@@ -2226,6 +2256,8 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
       }));
     assert.equal(response.status, 200);
     unknown = await response.json();
+    assert.deepEqual(await listInFlight(new Date()), [],
+      "a claim reported unknown and closed at zero is no longer in flight");
   } finally {
     for (const name of unknownEnv) {
       if (unknownOldEnv[name] === undefined) delete process.env[name];

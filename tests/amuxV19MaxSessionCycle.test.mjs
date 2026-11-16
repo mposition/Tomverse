@@ -669,13 +669,141 @@ test("a marker an earlier tick left is reconciled before any new claim", () =>
     assert.equal(kept.kind, "outcome_unknown");
     assert.equal(kept.haltReleased, false);
     assert.equal(lost.released(), 0);
-    // A marker naming no claim (from before 2026-11-16) is only removed.
-    const legacy = steps({ claim: async () => ({ kind: "recover", identity: null }) });
+  }));
+
+const inFlight = (ordinal) => ({ claimId: identity.claimId,
+  requestId: identity.requestId, reservationId: identity.reservationId,
+  ideaId: identity.ideaId, invocationOrdinal: ordinal });
+
+// A runner from before 2026-11-16 could stop with its claim still in flight on
+// the app and leave a marker that names none (review r-20261116-185015-9d7a60).
+test("a marker naming no claim reports every in-flight claim written before it, then is removed", () =>
+  withSwitches(async () => {
+    const written = Date.now() - 60_000;
+    const listings = [];
+    const fake = steps({
+      listInFlight: async (input) => { listings.push(input);
+        return { kind: "listed", claims: [inFlight(0), inFlight(1)] }; },
+    }, { identity: null, writtenAtMs: written });
+    const result = await runAmuxV19MaxSessionCycleOnce({ origin,
+      stateDirectory: "/state" }, fake.steps);
+    assert.deepEqual(result, { kind: "recovered", stage: "recover",
+      reason: "unnamed_marker", haltReleased: true, claims: 2 });
+    assert.deepEqual(listings, [{ origin, fetchImpl: undefined,
+      beforeMs: written }]);
+    assert.deepEqual(fake.reports.map((report) => report.input),
+      [0, 1].map((ordinal) => ({ ...unknownBody, invocationOrdinal: ordinal })));
+    assert.deepEqual(fake.calls, ["reportUnknown", "reportUnknown"]);
+    assert.equal(fake.released(), 1);
+    assert.equal(amuxV19MaxSessionCycleStatus(result).line,
+      "AMUX_V19_MAX_SESSION_CYCLE_recovered stage=recover reason=unnamed_marker claims=2 haltReleased=true\n");
+    // A report the app answered by reading the claim back counts too.
+    const readBack = steps({
+      listInFlight: async () => ({ kind: "listed", claims: [inFlight(0)] }),
+      reportUnknown: async () => ({ kind: "recorded", status: "owner_consumed",
+        settledMicroUsd: null, recovered: true, retryWrite: false }),
+    }, { identity: null, writtenAtMs: written });
+    assert.equal((await runAmuxV19MaxSessionCycleOnce({ origin,
+      stateDirectory: "/state" }, readBack.steps)).kind, "recovered");
+    assert.equal(readBack.released(), 1);
+  }));
+
+test("a marker naming no claim is removed when the app holds none in flight before it", () =>
+  withSwitches(async () => {
+    const fake = steps({ listInFlight: async () => ({ kind: "listed", claims: [] }) },
+      { identity: null, writtenAtMs: Date.now() - 1_000 });
     assert.deepEqual(await runAmuxV19MaxSessionCycleOnce({ origin,
-      stateDirectory: "/state" }, legacy.steps), { kind: "recovered",
-      stage: "recover", reason: "unnamed_marker", haltReleased: true });
-    assert.deepEqual(legacy.reports, []);
-    assert.equal(legacy.released(), 1);
+      stateDirectory: "/state" }, fake.steps), { kind: "recovered",
+      stage: "recover", reason: "unnamed_marker", haltReleased: true, claims: 0 });
+    assert.deepEqual(fake.calls, []);
+    assert.equal(fake.released(), 1);
+    // The claim step's own recover answer carries the same time.
+    const viaClaim = steps({ listInFlight: async () => ({ kind: "listed", claims: [] }),
+      claim: async () => ({ kind: "recover", identity: null,
+        writtenAtMs: Date.now() - 1_000 }) });
+    assert.equal((await runAmuxV19MaxSessionCycleOnce({ origin,
+      stateDirectory: "/state" }, viaClaim.steps)).kind, "recovered");
+    assert.equal(viaClaim.released(), 1);
+  }));
+
+test("a marker naming no claim stays while any in-flight claim is unconfirmed, and the others are still reported", () =>
+  withSwitches(async () => {
+    const answers = [{ kind: "outcome_unknown", receiptStatus: "in_flight",
+      retryWrite: false, reason: "write_unconfirmed" },
+    { kind: "recorded", status: "owner_consumed", settledMicroUsd: "0",
+      recovered: false, retryWrite: false }];
+    const fake = steps({
+      listInFlight: async () => ({ kind: "listed",
+        claims: [inFlight(0), inFlight(1)] }),
+      reportUnknown: async () => answers.shift(),
+    }, { identity: null, writtenAtMs: Date.now() - 60_000 });
+    const result = await runAmuxV19MaxSessionCycleOnce({ origin,
+      stateDirectory: "/state" }, fake.steps);
+    assert.deepEqual(result, { kind: "outcome_unknown", stage: "recover",
+      reason: "unnamed_marker", haltReleased: false,
+      reportReason: "write_unconfirmed", claims: 2,
+      unknownReport: "unconfirmed", receipt: "in_flight" });
+    assert.equal(answers.length, 0, "the second claim was reported too");
+    assert.equal(fake.released(), 0);
+    assert.equal(amuxV19MaxSessionCycleStatus(result).exitCode, 1);
+    // A report that throws is unconfirmed too.
+    const thrown = steps({
+      listInFlight: async () => ({ kind: "listed", claims: [inFlight(0)] }),
+      reportUnknown: async () => { throw new Error("lost"); },
+    }, { identity: null, writtenAtMs: Date.now() - 60_000 });
+    const kept = await runAmuxV19MaxSessionCycleOnce({ origin,
+      stateDirectory: "/state" }, thrown.steps);
+    assert.equal(kept.kind, "outcome_unknown");
+    assert.equal(kept.reportReason, "report_threw");
+    assert.equal(thrown.released(), 0);
+  }));
+
+test("a marker naming no claim stays when the in-flight list cannot be read or its time is unknown", () =>
+  withSwitches(async () => {
+    const written = Date.now() - 60_000;
+    for (const [listInFlight, reportReason] of [
+      [async () => ({ kind: "unavailable", reason: "readback_unreachable" }),
+        "readback_unreachable"],
+      [async () => ({ kind: "unavailable", reason: "response_invalid" }),
+        "response_invalid"],
+      [async () => ({ kind: "refused" }), "list_refused"],
+      [async () => { throw new Error("lost"); }, "list_unavailable"],
+    ]) {
+      const fake = steps({ listInFlight },
+        { identity: null, writtenAtMs: written });
+      assert.deepEqual(await runAmuxV19MaxSessionCycleOnce({ origin,
+        stateDirectory: "/state" }, fake.steps), { kind: "outcome_unknown",
+        stage: "recover", reason: "unnamed_marker", haltReleased: false,
+        reportReason }, reportReason);
+      assert.deepEqual(fake.calls, [], "nothing is reported without a list");
+      assert.equal(fake.released(), 0, reportReason);
+    }
+    // No time to ask by, or no way to ask: the marker is never dropped on a guess.
+    for (const [overrides, pending] of [
+      [{ listInFlight: async () => { throw new Error("must not ask"); } },
+        { identity: null }],
+      [{ listInFlight: undefined }, { identity: null, writtenAtMs: written }],
+    ]) {
+      const fake = steps(overrides, pending);
+      const result = await runAmuxV19MaxSessionCycleOnce({ origin,
+        stateDirectory: "/state" }, fake.steps);
+      assert.equal(result.kind, "outcome_unknown");
+      assert.equal(result.reportReason, "marker_time_unreadable");
+      assert.equal(fake.released(), 0);
+    }
+  }));
+
+test("a marker that cannot be removed after its claims were settled halts the next tick", () =>
+  withSwitches(async () => {
+    const fake = steps({
+      listInFlight: async () => ({ kind: "listed", claims: [] }),
+      marker: () => ({ read: async () => ({ identity: null,
+        writtenAtMs: Date.now() - 1_000 }),
+      release: async () => { throw new Error("local_state_unavailable"); } }),
+    });
+    assert.deepEqual(await runAmuxV19MaxSessionCycleOnce({ origin,
+      stateDirectory: "/state" }, fake.steps),
+    { kind: "halt_unavailable", stage: "recover" });
   }));
 
 test("a pending marker is reconciled before the queue is read, even with no other candidate", () =>

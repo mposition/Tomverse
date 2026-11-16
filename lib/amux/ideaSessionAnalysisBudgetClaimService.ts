@@ -79,6 +79,37 @@ export async function readAmuxSessionBudgetClaimReceipt(tx: Tx, input: {
     claimStatus: claim.status };
 }
 
+/** Read-only: the subscription (max_shadow) claims still in flight that were
+ * written before `before`. A runner that finds a marker naming no claim (left
+ * by a runner from before 2026-11-16) asks for the claims its stopped runs may
+ * have left open, then reports each one's outcome unknown through the existing
+ * unknown route. Identity only: no prompt, result or token count. Every match
+ * is returned, oldest first, with no count limit. */
+export async function listAmuxSessionInFlightShadowClaims(tx: Tx, input: {
+  before: Date;
+}): Promise<Array<{ claimId: string; requestId: string; reservationId: string;
+  ideaId: string; invocationOrdinal: number }>> {
+  if (!(input.before instanceof Date) || !Number.isFinite(input.before.getTime())) {
+    throw new AmuxSessionBudgetClaimError("not_ready");
+  }
+  await tx.$queryRaw`
+    SELECT set_config('statement_timeout', '5000', true) AS statement_limit,
+           set_config('idle_in_transaction_session_timeout', '10000', true) AS idle_limit,
+           set_config('TimeZone', 'UTC', true) AS transaction_zone
+  `;
+  const rows = await tx.amuxIdeaSessionAnalysisBudgetClaim.findMany({
+    where: { namespace: AMUX_V4_ANALYSIS_NAMESPACE, budgetMode: "max_shadow",
+      status: "in_flight", closedAt: null, resolutionAuditLogId: null,
+      createdAt: { lt: input.before } },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    select: { id: true, requestId: true, reservationId: true,
+      invocationOrdinal: true, reservation: { select: { ideaId: true } } },
+  });
+  return rows.map((row) => ({ claimId: row.id, requestId: row.requestId,
+    reservationId: row.reservationId, ideaId: row.reservation.ideaId,
+    invocationOrdinal: row.invocationOrdinal }));
+}
+
 /** One invocation of a session reservation becomes one priced claim. This is a dark transaction
  * body: only the eventual trusted app dispatch writer may supply measured
  * runner capabilities. It does not start the CLI or accept model output. A

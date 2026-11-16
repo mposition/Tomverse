@@ -708,6 +708,7 @@ test("only the named AMUX receipt and admission routes open direct transactions"
     "app/api/internal/amux/cli-usage/route.ts",
     "app/api/internal/amux/tasks/route.ts",
     "app/api/internal/amux/v19/analysis-budget/claim/route.ts",
+    "app/api/internal/amux/v19/analysis-budget/in-flight/route.ts",
     "app/api/internal/amux/v19/analysis-budget/max-result/route.ts",
     "app/api/internal/amux/v19/analysis-budget/unknown/route.ts",
     "app/api/internal/amux/v19/analysis-price/route.ts",
@@ -725,6 +726,7 @@ test("only the named AMUX receipt and admission routes open direct transactions"
   // The v19 Max launcher routes own bounded receipt transactions too; each
   // authenticates the dedicated launcher before any transaction opens.
   for (const path of [
+    "app/api/internal/amux/v19/analysis-budget/in-flight/route.ts",
     "app/api/internal/amux/v19/analysis-budget/max-result/route.ts",
     "app/api/internal/amux/v19/analysis-price/route.ts",
     "app/api/internal/amux/v19/max-checkout-evidence/route.ts",

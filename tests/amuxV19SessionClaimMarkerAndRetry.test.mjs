@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, readFile, rmdir, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rmdir, stat, utimes, writeFile } from
+  "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -47,19 +48,37 @@ test("Linux marker records the claim, is read back by a new instance and removed
     } finally { await rmdir(directory); }
   });
 
-test("Linux marker from before 2026-11-16 and the legacy marker name no claim and are removed",
+test("Linux marker from before 2026-11-16 and the legacy marker name no claim, say when they were written, and are removed",
   { skip: process.platform !== "linux" }, async () => {
     const directory = await mkdtemp(join(tmpdir(), "amux-v19-marker-"));
     await chmod(directory, 0o700);
     try {
       const marker = localAmuxSessionClaimMarker(directory);
+      const hourAgo = new Date(Date.now() - 3_600_000);
       for (const name of ["analysis-outcome-unknown.halt", "outcome-unknown.halt"]) {
-        await writeFile(join(directory, name), "analysis_outcome_unverified\n",
-          { mode: 0o600 });
-        assert.equal((await marker.read()).identity, null, name);
+        const file = join(directory, name);
+        await writeFile(file, "analysis_outcome_unverified\n", { mode: 0o600 });
+        await utimes(file, hourAgo, hourAgo);
+        const pending = await marker.read();
+        assert.equal(pending.identity, null, name);
+        // The time the cycle asks the app about: the file's own mtime, also
+        // for the legacy one-file marker.
+        assert.equal(pending.writtenAtMs, hourAgo.getTime(), name);
         await marker.release();
         assert.equal(await marker.read(), null, name);
       }
+      // Both unnamed markers there: the later write bounds the claims.
+      const newer = new Date(Date.now() - 600_000);
+      const older = new Date(Date.now() - 7_200_000);
+      for (const [name, when] of [["analysis-outcome-unknown.halt", older],
+        ["outcome-unknown.halt", newer]]) {
+        const file = join(directory, name);
+        await writeFile(file, "analysis_outcome_unverified\n", { mode: 0o600 });
+        await utimes(file, when, when);
+      }
+      assert.equal((await marker.read()).writtenAtMs, newer.getTime());
+      await marker.release();
+      assert.equal(await marker.read(), null);
     } finally { await rmdir(directory); }
   });
 

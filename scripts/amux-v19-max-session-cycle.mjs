@@ -103,6 +103,9 @@ export function amuxV19MaxSessionCycleStatus(result) {
         parts.push(`${key}=${value}`);
       }
     }
+    // How many in-flight claims a marker that named none had settled.
+    if (Number.isSafeInteger(result?.claims) && result.claims >= 0 &&
+        result.claims <= 1_000_000) parts.push(`claims=${result.claims}`);
     if (typeof result?.haltReleased === "boolean") {
       parts.push(`haltReleased=${result.haltReleased}`);
     }
