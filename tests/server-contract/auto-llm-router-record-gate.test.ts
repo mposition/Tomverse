@@ -809,6 +809,31 @@ test("the parallel precheck switch overlaps the guidance read and still refuses 
   assert.equal(readCount, 0, "no eligible choice still skips the check");
 });
 
+test("parallel precheck rejections stay handled when guidance fails and still precede billing", async t => {
+  const oldGuidance = readGuidance;
+  const oldFlag = process.env.CHAT_ROUTER_PARALLEL_CONTEXT_PRECHECK_ENABLED;
+  t.after(() => {
+    readGuidance = oldGuidance;
+    if (oldFlag === undefined) delete process.env.CHAT_ROUTER_PARALLEL_CONTEXT_PRECHECK_ENABLED;
+    else process.env.CHAT_ROUTER_PARALLEL_CONTEXT_PRECHECK_ENABLED = oldFlag;
+  });
+  process.env.CHAT_ROUTER_PARALLEL_CONTEXT_PRECHECK_ENABLED = "true";
+  const holdsBefore = holds.length;
+  const callsBefore = routerRequests.length;
+  const contextError = new Error("context verification failed");
+  const guidanceError = new Error("guidance read failed");
+  const verifyPreparedContext = async () => { throw contextError; };
+
+  readGuidance = async () => { throw guidanceError; };
+  await assert.rejects(pick(undefined, false, { verifyPreparedContext }), error => error === guidanceError);
+  await new Promise(resolve => setImmediate(resolve));
+
+  readGuidance = async () => ({ guidance: "", cycleId: null });
+  await assert.rejects(pick(undefined, false, { verifyPreparedContext }), error => error === contextError);
+  assert.equal(holds.length, holdsBefore);
+  assert.equal(routerRequests.length, callsBefore);
+});
+
 test("fresh location prices the authored 8k and reuses its dated search decision across UTC midnight", async t => {
   const original = generateRouterResult;
   const text = "a".repeat(7_992) + "near me?overflow";
