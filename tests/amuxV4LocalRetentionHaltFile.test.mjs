@@ -4,23 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { localAmuxHaltFile, localRetentionHaltFile } from
-  "../lib/amux/ideaLocalRetentionHaltFile.mjs";
+import { localAmuxHaltFile } from "../lib/amux/ideaLocalRetentionHaltFile.mjs";
 
-test("Linux retention halt survives a new process instance until verified clearance",
-  { skip: process.platform !== "linux" }, async () => {
-    const directory = await mkdtemp(join(tmpdir(), "amux-v4-retention-"));
-    await chmod(directory, 0o700);
-    try {
-      const first = localRetentionHaltFile(directory);
-      assert.equal(await first.claim(), true);
-      assert.equal(await localRetentionHaltFile(directory).claim(), false);
-      await first.release();
-      assert.equal(await localRetentionHaltFile(directory).claim(), true);
-      await first.release();
-    } finally { await rmdir(directory); }
-  });
-
+// The paid API analysis path's (v4) blocking marker is unchanged (operator,
+// 2026-11-16); retention no longer keeps a marker.
 test("Linux analysis halt remains set across a new process instance",
   { skip: process.platform !== "linux" }, async () => {
     const directory = await mkdtemp(join(tmpdir(), "amux-v4-analysis-"));
@@ -33,22 +20,19 @@ test("Linux analysis halt remains set across a new process instance",
     } finally { await rmdir(directory); }
   });
 
-test("Linux analysis cannot release retention halt in a shared state directory",
+test("Linux analysis halt still refuses while the legacy marker exists",
   { skip: process.platform !== "linux" }, async () => {
     const directory = await mkdtemp(join(tmpdir(), "amux-v4-shared-"));
     await chmod(directory, 0o700);
     try {
-      const analysis = localAmuxHaltFile(directory, "analysis");
-      const retention = localRetentionHaltFile(directory);
-      assert.equal(await analysis.claim(), true);
-      assert.equal(await retention.claim(), true);
-      await analysis.release();
-      assert.equal(await retention.claim(), false);
-      await retention.release();
       await writeFile(join(directory, "outcome-unknown.halt"),
         "retention_outcome_unverified\n", { mode: 0o600 });
-      assert.equal(await analysis.claim(), false);
-      assert.equal(await retention.claim(), false);
+      assert.equal(await localAmuxHaltFile(directory, "analysis").claim(), false);
       await unlink(join(directory, "outcome-unknown.halt"));
     } finally { await rmdir(directory); }
   });
+
+test("the marker module serves only the analysis capability", () => {
+  assert.throws(() => localAmuxHaltFile("/state", "retention"),
+    /local_state_unavailable/);
+});

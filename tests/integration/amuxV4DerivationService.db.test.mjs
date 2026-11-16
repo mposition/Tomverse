@@ -160,7 +160,7 @@ test("owner split and merge preserve originals and append complete audited linea
       bodyDigestKeyId: laterSealed.digestKeyId,
     } });
     const clocks = await prisma.$queryRaw`
-      SELECT later."expiresAt" = first."analysisCompletedAt" + INTERVAL '30 days'
+      SELECT later."expiresAt" = first."analysisCompletedAt" + INTERVAL '36500 days'
         AS "firstClock" FROM public."AmuxIdeaDraftUnit" later
         JOIN public."AmuxIdeaAnalysisChunk" first ON first."ideaId" = later."ideaId"
           AND first."chunkIndex" = 0 WHERE later."id" = ${laterId}`;

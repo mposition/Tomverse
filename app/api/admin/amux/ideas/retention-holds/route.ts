@@ -24,7 +24,8 @@ const noStore = { "Cache-Control": "private, no-store, max-age=0" };
 const uuid = z.string().uuid();
 const createSchema = z.object({ id: uuid, ideaId: uuid,
   reasonCode: z.enum(["legal_request", "dispute", "incident", "other"]),
-  days: z.number().int().min(1).max(90),
+  // Up to the open horizon (AMUX_HOLD_MAX_MS, operator 2026-11-16).
+  days: z.number().int().min(1).max(36_500),
   expectedRemainingBodies: z.number().int().positive(),
   expectedAlreadyPurgedBodies: z.number().int().nonnegative(),
   replacesHoldId: uuid.optional(),

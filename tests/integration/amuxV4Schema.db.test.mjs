@@ -393,7 +393,8 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
        ("ideaId", "actorUserId", "chunkIndex", "state", "attempt",
         "leaseGeneration", "analysisCompletedAt", "updatedAt")
        VALUES ($1, 'synthetic-owner', 0, 'draft_ready', 0, 0,
-               (clock_timestamp() AT TIME ZONE 'UTC') - INTERVAL '30 days' + INTERVAL '5 seconds',
+               -- An undecided draft's open clock (operator, 2026-11-16).
+               (clock_timestamp() AT TIME ZONE 'UTC') - INTERVAL '36500 days' + INTERVAL '5 seconds',
                CURRENT_TIMESTAMP)`,
       [expiryIdeaId],
     );
@@ -521,7 +522,7 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
     assert.ok(first?.bodyPurgedAt);
     assert.equal(first?.bodyPurgeAfter?.getTime(), first?.expiresAt?.getTime());
     const expiryClock = await client.query(
-      `SELECT u."expiresAt" = c."analysisCompletedAt" + INTERVAL '30 days' AS "clockOk"
+      `SELECT u."expiresAt" = c."analysisCompletedAt" + INTERVAL '36500 days' AS "clockOk"
        FROM public."AmuxIdeaDraftUnit" u
        JOIN public."AmuxIdeaAnalysisChunk" c
          ON c."ideaId" = u."ideaId" AND c."chunkIndex" = 0

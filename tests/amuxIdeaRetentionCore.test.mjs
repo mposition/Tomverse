@@ -101,32 +101,37 @@ test("session content is kept ninety days after intake, and never while its anal
     { analysisDeadlineAt: { lte: at(5) } }] });
 });
 
-test("undecided draft expires after thirty days and its body is due within twenty-four hours", () => {
-  assert.equal(undecidedDraftExpiresAt(base).toISOString(), at(30).toISOString());
-  assert.equal(shouldExpireUndecidedDraft({ analysisCompletedAt: base, finalDecisionAt: null, alreadyExpired: false, dbNow: new Date(at(30).getTime() - 1) }), false);
-  assert.equal(shouldExpireUndecidedDraft({ analysisCompletedAt: base, finalDecisionAt: null, alreadyExpired: false, dbNow: at(30) }), true);
-  assert.equal(shouldExpireUndecidedDraft({ analysisCompletedAt: base, finalDecisionAt: at(29), alreadyExpired: false, dbNow: at(31) }), false);
-  assert.equal(shouldExpireUndecidedDraft({ analysisCompletedAt: base, finalDecisionAt: at(30), alreadyExpired: false, dbNow: at(31) }), true);
-  assert.equal(shouldExpireUndecidedDraft({ analysisCompletedAt: base, finalDecisionAt: null, alreadyExpired: true, dbNow: at(31) }), false);
-  assert.equal(draftDecisionAllowed({ analysisCompletedAt: base, finalDecisionAt: null, alreadyExpired: false, dbNow: new Date(at(30).getTime() - 1) }), true);
-  assert.equal(draftDecisionAllowed({ analysisCompletedAt: base, finalDecisionAt: null, alreadyExpired: false, dbNow: at(30) }), false);
-  assert.equal(draftDecisionAllowed({ analysisCompletedAt: base, finalDecisionAt: at(29), alreadyExpired: false, dbNow: at(29) }), false);
+// Operator, 2026-11-16: an undecided draft keeps the open 36,500-day clock.
+test("undecided draft expires only at the open horizon and its body is due within twenty-four hours", () => {
+  const D = 36_500;
+  assert.equal(undecidedDraftExpiresAt(base).toISOString(), at(D).toISOString());
+  assert.equal(shouldExpireUndecidedDraft({ analysisCompletedAt: base, finalDecisionAt: null, alreadyExpired: false, dbNow: new Date(at(D).getTime() - 1) }), false);
+  assert.equal(shouldExpireUndecidedDraft({ analysisCompletedAt: base, finalDecisionAt: null, alreadyExpired: false, dbNow: at(D) }), true);
+  assert.equal(shouldExpireUndecidedDraft({ analysisCompletedAt: base, finalDecisionAt: at(D - 1), alreadyExpired: false, dbNow: at(D + 1) }), false);
+  assert.equal(shouldExpireUndecidedDraft({ analysisCompletedAt: base, finalDecisionAt: at(D), alreadyExpired: false, dbNow: at(D + 1) }), true);
+  assert.equal(shouldExpireUndecidedDraft({ analysisCompletedAt: base, finalDecisionAt: null, alreadyExpired: true, dbNow: at(D + 1) }), false);
+  assert.equal(draftDecisionAllowed({ analysisCompletedAt: base, finalDecisionAt: null, alreadyExpired: false, dbNow: new Date(at(D).getTime() - 1) }), true);
+  assert.equal(draftDecisionAllowed({ analysisCompletedAt: base, finalDecisionAt: null, alreadyExpired: false, dbNow: at(D) }), false);
+  assert.equal(draftDecisionAllowed({ analysisCompletedAt: base, finalDecisionAt: at(D - 1), alreadyExpired: false, dbNow: at(D - 1) }), false);
   assert.equal(draftDecisionAllowed({ analysisCompletedAt: base, finalDecisionAt: null, alreadyExpired: true, dbNow: at(10) }), false);
   const purge = expiredUndecidedDraftPurgeWindow({ analysisCompletedAt: base, bodyFinalDecisionAt: null });
-  assert.equal(purge?.eligibleAt.toISOString(), at(30).toISOString());
-  assert.equal(purge?.purgeBy.toISOString(), at(31).toISOString());
-  assert.equal(purgeDisposition({ purgeAt: purge?.eligibleAt ?? null, purgedAt: null, activeHoldExpiresAt: null, dbNow: at(30) }), "due");
-  assert.equal(expiredUndecidedDraftPurgeWindow({ analysisCompletedAt: base, bodyFinalDecisionAt: at(29) }), null);
-  assert.equal(expiredUndecidedDraftPurgeWindow({ analysisCompletedAt: base, bodyFinalDecisionAt: at(30) })?.purgeBy.toISOString(), at(31).toISOString());
-  assert.equal(expiredUndecidedDraftPurgeWindow({ analysisCompletedAt: base, bodyFinalDecisionAt: at(40) })?.purgeBy.toISOString(), at(31).toISOString());
+  assert.equal(purge?.eligibleAt.toISOString(), at(D).toISOString());
+  assert.equal(purge?.purgeBy.toISOString(), at(D + 1).toISOString());
+  assert.equal(purgeDisposition({ purgeAt: purge?.eligibleAt ?? null, purgedAt: null, activeHoldExpiresAt: null, dbNow: at(D) }), "due");
+  assert.equal(expiredUndecidedDraftPurgeWindow({ analysisCompletedAt: base, bodyFinalDecisionAt: at(D - 1) }), null);
+  assert.equal(expiredUndecidedDraftPurgeWindow({ analysisCompletedAt: base, bodyFinalDecisionAt: at(D) })?.purgeBy.toISOString(), at(D + 1).toISOString());
+  assert.equal(expiredUndecidedDraftPurgeWindow({ analysisCompletedAt: base, bodyFinalDecisionAt: at(D + 10) })?.purgeBy.toISOString(), at(D + 1).toISOString());
+  // A decided body still purges 30 days after its decision.
   assert.equal(decidedDraftPurgeAt(at(2)).toISOString(), at(32).toISOString());
   assert.equal(executionBriefPurgeAt(at(2)).toISOString(), at(92).toISOString());
 });
 
-test("hold is at most ninety days and notice is seven days before or immediate", () => {
+test("a hold runs up to the open horizon and notice is seven days before or immediate", () => {
   assert.equal(holdTimeWindow({ createdAt: base, expiresAt: at(90) }).notifyAt?.toISOString(), at(83).toISOString());
+  assert.equal(holdTimeWindow({ createdAt: base, expiresAt: at(365) }).valid, true);
+  assert.equal(holdTimeWindow({ createdAt: base, expiresAt: at(36_500) }).notifyAt?.toISOString(), at(36_493).toISOString());
   assert.equal(holdTimeWindow({ createdAt: base, expiresAt: at(2) }).notifyAt?.toISOString(), base.toISOString());
-  assert.equal(holdTimeWindow({ createdAt: base, expiresAt: at(90, 1) }).valid, false);
+  assert.equal(holdTimeWindow({ createdAt: base, expiresAt: at(36_500, 1) }).valid, false);
   assert.equal(holdTimeWindow({ createdAt: base, expiresAt: base }).valid, false);
 });
 

@@ -19,11 +19,16 @@ export const AMUX_ANALYSIS_OPEN_MAX_AGE_MS = AMUX_ANALYSIS_OPEN_MAX_AGE_DAYS * D
 export const amuxAnalysisMaxAgeMs = (legacy: boolean = amuxIntakeLegacyLimits()): number =>
   legacy ? AMUX_ANALYSIS_MAX_AGE_MS : AMUX_ANALYSIS_OPEN_MAX_AGE_MS;
 export const AMUX_RAW_PURGE_WINDOW_MS = 24 * HOUR_MS;
-export const AMUX_UNDECIDED_DRAFT_WINDOW_MS = 30 * DAY_MS;
+/** Operator, 2026-11-16: an undecided draft is never expired by its age. The
+ * column stays (the draft unit guards set it from the first completed chunk),
+ * but the clock is the open 36,500-day horizon, so a late look finds it. */
+export const AMUX_UNDECIDED_DRAFT_WINDOW_MS = AMUX_ANALYSIS_OPEN_MAX_AGE_MS;
 export const AMUX_EXPIRED_DRAFT_PURGE_WINDOW_MS = 24 * HOUR_MS;
 export const AMUX_DECIDED_DRAFT_RETENTION_MS = 30 * DAY_MS;
 export const AMUX_BRIEF_RETENTION_MS = 90 * DAY_MS;
-export const AMUX_HOLD_MAX_MS = 90 * DAY_MS;
+/** A retention hold runs as long as the owner sets it, up to the same open
+ * horizon (operator, 2026-11-16; AmuxIdeaRetentionHold_clock_check). */
+export const AMUX_HOLD_MAX_MS = AMUX_ANALYSIS_OPEN_MAX_AGE_MS;
 export const AMUX_HOLD_NOTICE_LEAD_MS = 7 * DAY_MS;
 
 const timestamp = (value: Date): number => {
