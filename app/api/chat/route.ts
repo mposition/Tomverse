@@ -231,7 +231,13 @@ import {
 } from "@/lib/perplexityDeepResearch";
 import { assertModelRuntimeAvailable } from "@/lib/modelAvailability";
 import { OfficeTextOverflowError, parseOfficeSafely } from "@/lib/officeSecurity";
-import { MAX_EXTRACTED_ATTACHMENT_CHARACTERS } from "@/lib/chatAttachmentLimits";
+import {
+    CHAT_ATTACHMENT_PARSE_CHARACTERS,
+    PAST_ATTACHMENT_OMITTED_KIND,
+    PAST_ATTACHMENT_OMITTED_TEXT,
+    pastTurnAttachmentTokenBudget,
+} from "@/lib/chatAttachmentLimits";
+import { chatUserMaxInputTokens } from "@/lib/chatInputLimits";
 import { extractLegacyOfficeText, type LegacyOfficeFormatId } from "@/lib/legacyOfficeText";
 import { legacyOfficeValidationCode } from "@/lib/chatAttachmentValidation";
 import {
@@ -3298,6 +3304,13 @@ async function handleChatPost(
         let estimatedInputTokens = 0;
         let totalAttachmentBytes = 0;
         let totalExtractedCharacters = 0;
+        // Earlier messages' files share half the input allowance; past it they
+        // are left out of the turn rather than failing it. See
+        // lib/chatAttachmentLimits.ts.
+        const pastAttachmentTokenBudget = pastTurnAttachmentTokenBudget(
+            access.kind === "guest" ? guestChatMaxInputTokens() : chatUserMaxInputTokens()
+        );
+        let pastAttachmentTokens = 0;
         let totalImageCount = 0;
         let totalBase64ImagePayloadBytes = 0;
         // Paid OCR reached from inside an archive, and how much of it this
@@ -4005,11 +4018,26 @@ async function handleChatPost(
                     return "ok";
                 }
 
+                // An earlier message's file past its share of the allowance is
+                // named to the model and left out; it never fails the turn.
+                const omitPastAttachment = () => {
+                    textAttachments.push({
+                        name,
+                        kind: PAST_ATTACHMENT_OMITTED_KIND,
+                        text: PAST_ATTACHMENT_OMITTED_TEXT,
+                    });
+                    return "ok" as const;
+                };
+                if (!isLatestMessage && pastAttachmentTokens >= pastAttachmentTokenBudget) {
+                    return omitPastAttachment();
+                }
+
                 const remainingCharacters =
-                    MAX_EXTRACTED_ATTACHMENT_CHARACTERS - totalExtractedCharacters;
+                    CHAT_ATTACHMENT_PARSE_CHARACTERS - totalExtractedCharacters;
                 const strictLatestText = isLatestMessage &&
                     (format.category === "office" || format.category === "text");
                 if (remainingCharacters <= (strictLatestText ? 0 : 64)) {
+                    if (!isLatestMessage) return omitPastAttachment();
                     throw new ChatAccessError(
                         413,
                         "ATTACHMENT_TEXT_TOO_LARGE",
@@ -4018,9 +4046,17 @@ async function handleChatPost(
                 }
 
                 const addExtractedText = (kind: string, text: string) => {
+                    if (!isLatestMessage) {
+                        const tokens = estimatePromptTokens(text);
+                        if (pastAttachmentTokens + tokens > pastAttachmentTokenBudget) {
+                            omitPastAttachment();
+                            return;
+                        }
+                        pastAttachmentTokens += tokens;
+                    }
                     totalExtractedCharacters += text.length;
                     if (
-                        totalExtractedCharacters > MAX_EXTRACTED_ATTACHMENT_CHARACTERS
+                        totalExtractedCharacters > CHAT_ATTACHMENT_PARSE_CHARACTERS
                     ) {
                         throw new ChatAccessError(
                             413,
@@ -4553,8 +4589,17 @@ async function handleChatPost(
                         if (!workbook) throw new ChatAccessError(400, "ATTACHMENT_UNREADABLE",
                             "The attached workbook revision source cannot be read completely.");
                         const structured = JSON.stringify(workbook.spec);
+                        if (!isLatestMessage) {
+                            const tokens = estimatePromptTokens(structured);
+                            if (pastAttachmentTokens + tokens > pastAttachmentTokenBudget) {
+                                textAttachments.push({ name: attachment.name,
+                                    kind: PAST_ATTACHMENT_OMITTED_KIND, text: PAST_ATTACHMENT_OMITTED_TEXT });
+                                continue;
+                            }
+                            pastAttachmentTokens += tokens;
+                        }
                         totalExtractedCharacters += structured.length;
-                        if (totalExtractedCharacters > MAX_EXTRACTED_ATTACHMENT_CHARACTERS) {
+                        if (totalExtractedCharacters > CHAT_ATTACHMENT_PARSE_CHARACTERS) {
                             throw new ChatAccessError(413, "ATTACHMENT_TEXT_TOO_LARGE",
                                 "Extracted attachment text exceeds the request limit.");
                         }
@@ -8743,7 +8788,15 @@ async function handleChatPost(
                                 storageStatus: 404,
                                 retryable: false,
                             }
-                          : {}),
+                          : error.code === "ATTACHMENT_TEXT_TOO_LARGE" ||
+                              error.code === "CHAT_INPUT_TOKEN_LIMIT"
+                            ? {
+                                  // Ours, and the same request is refused again.
+                                  phase: "request_size",
+                                  failureLayer: "application",
+                                  retryable: false,
+                              }
+                            : {}),
                 });
                 if (grant.errorReportToken) {
                     accessError.headers.set(
