@@ -179,6 +179,7 @@ export function ImportCompletedStep({
                                 <div className="journey-actions">
                                     {loaded.enabled && (
                                         <ContinuationQuickAction
+                                            journeyEntry="import_complete"
                                             externalConversationId={row.id}
                                             sourceTitle={title}
                                             primaryLabel={t("journey.again")}

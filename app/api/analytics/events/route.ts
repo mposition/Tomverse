@@ -1,6 +1,7 @@
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+import { connectedJourneyDedupeKey, connectedJourneyPropertiesSchema } from "@/lib/connectedJourneyShared";
 import { randomUUID } from "node:crypto";
 import { getServerSession } from "next-auth/next";
 import { after, NextResponse } from "next/server";
@@ -56,6 +57,9 @@ export async function POST(req: Request) {
       analyticsClientEventSchema
     );
     eventName = body.event_name;
+    if (body.event_name === "connected_journey_step" && !userId) {
+      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+    }
     stage = "user-plan";
     const user = userId
       ? await prisma.user.findUnique({
@@ -79,7 +83,11 @@ export async function POST(req: Request) {
         ? occurredAtCandidate
         : now;
     const actorKey = userId || body.client_id;
-    const dedupeKey = singletonEvents.has(body.event_name)
+    const dedupeKey = body.event_name === "connected_journey_step"
+      ? connectedJourneyDedupeKey(userId!, connectedJourneyPropertiesSchema.parse(
+          Object.fromEntries(Object.entries(body.properties).filter(([key]) => key.startsWith("journey_") || key === "continuation_kind"))
+        ))
+      : singletonEvents.has(body.event_name)
       ? `singleton:${body.event_name}:${actorKey}`
       : `client:${body.event_id}`;
 
@@ -133,7 +141,7 @@ export async function POST(req: Request) {
         ? "PRODUCT_ANALYTICS_DATABASE_TRANSIENT"
         : "PRODUCT_ANALYTICS_EVENT_FAILED",
       title: "Product analytics event failed",
-      error: diagnostic.message,
+      error: eventName === "connected_journey_step" ? "Connected journey write failed." : diagnostic.message,
       severity: retryable ? "warning" : "error",
       context: {
         component: "product-analytics",
@@ -149,7 +157,7 @@ export async function POST(req: Request) {
       },
     }).catch(() => undefined));
     console.error("Product analytics event failed.", {
-      ...diagnostic,
+      ...(eventName === "connected_journey_step" ? { errorName: diagnostic.errorName, errorCode: diagnostic.errorCode } : diagnostic),
       stage,
       eventName: eventName || "unknown",
       traceId,
