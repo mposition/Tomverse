@@ -41,7 +41,6 @@ mock.module(mod("lib/amux/store.ts"), {
   namedExports: {
     AMUX_QUEUE_MAX_ITEMS: 512,
     AMUX_OWNED_QUEUE_MAX_ITEMS: 512,
-    AmuxQueueCapacityError: class extends Error {},
     listDispatchable: async () => selectionRows,
     listOwnedTodos: async () => ownedRows,
   },

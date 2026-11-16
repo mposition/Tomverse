@@ -72,6 +72,23 @@ const compareCandidates = (load) => (a, b) => {
 };
 
 /**
+ * A soft preference (owner decision 2026-11-15): when the same reviewer vendor
+ * rejected a Task's last two reviews, the next review should be read by
+ * another vendor. The providers of an avoided vendor are set aside only while
+ * a provider of another vendor could still take the slot -- one that exists,
+ * is enabled and is not blocked by an unmeasured quota; busy ones count, the
+ * slot waits for them. With no such provider the avoided vendor reviews as it
+ * would have, so the preference never makes a review impossible or stuck. A
+ * provider an operator pinned is never set aside.
+ */
+function preferOtherVendors(eligible, avoidVendors, blockedProviders, requestedProvider) {
+  if (requestedProvider !== undefined || avoidVendors.length === 0) return eligible;
+  const avoid = new Set(avoidVendors);
+  const others = eligible.filter((provider) => !avoid.has(provider.vendor));
+  return others.some((provider) => !blockedProviders.has(provider.id)) ? others : eligible;
+}
+
+/**
  * One reviewer for one slot.
  *
  * - `impossible`: no enabled provider of an allowed vendor exists, so waiting
@@ -79,12 +96,13 @@ const compareCandidates = (load) => (a, b) => {
  * - `wait`: an allowed provider exists but every one is at its concurrency cap.
  * - `assign`: the least-loaded allowed provider.
  */
-export function pickReviewer({ providers, authorVendor, excludeVendors = [], load, blockedProviders = new Set(), requestedProvider }) {
+export function pickReviewer({ providers, authorVendor, excludeVendors = [], avoidVendors = [], load, blockedProviders = new Set(), requestedProvider }) {
   const excluded = new Set([authorVendor, ...excludeVendors]);
-  const allowed = eligibleProviders(providers, authorVendor).filter(
+  const eligible = eligibleProviders(providers, authorVendor).filter(
     (provider) => !excluded.has(provider.vendor) &&
       (requestedProvider === undefined || provider.id === requestedProvider),
   );
+  const allowed = preferOtherVendors(eligible, avoidVendors, blockedProviders, requestedProvider);
   if (allowed.length === 0) return { kind: "impossible" };
   const free = allowed.filter(
     (provider) => !blockedProviders.has(provider.id) &&
@@ -116,7 +134,9 @@ export function planAssignments({ jobs, providers, load, now, blockedProviders =
       const pick = pickReviewer({
         providers,
         authorVendor: job.authorVendor,
-        excludeVendors: requestedProvider === undefined ? [...taken, ...reserved] : taken,
+        avoidVendors: job.avoidVendors ?? [],
+        excludeVendors: requestedProvider === undefined ?
+          [...taken, ...reserved, ...(slot.excludeVendors ?? [])] : taken,
         load: working,
         blockedProviders: blocked,
         requestedProvider,

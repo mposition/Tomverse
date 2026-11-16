@@ -15,6 +15,10 @@ import { seedAmuxV4PortfolioRecoveryPrerequisites } from
 // reaches the same worker, the next run carries the latest findings, and its
 // first rejection returns to the same grade once more.
 
+// The CLI usage gate this suite proves is the one
+// TOMVERSE_AMUX_V22_READ_BACK_PROCEED=disabled restores; since 2026-11-15 the
+// switch is on by default and only a paid route's unknown usage holds a worker.
+process.env.TOMVERSE_AMUX_V22_READ_BACK_PROCEED = "disabled";
 const raw = process.env.TEST_DATABASE_URL;
 const allowed = (() => {
   if (!raw || process.env.DATABASE_URL !== raw) return false;
@@ -223,11 +227,20 @@ test("a used-up attempt budget refuses the retry at the DB edge", {
   await inRollback(async (tx, db) => {
     // The same budget the review snapshot reads (decideAmuxAttemptBudget):
     // the greatest attempt number counts as attempts used.
+    // Owner direction 2026-11-15: no fixed five; the runaway guard is thirty,
+    // here and in the review proposal guard.
     const { taskId, priorAttemptId } = await seedRejected(db, { attemptNumber: 5 });
     const { decideAmuxAttemptBudget } =
       await import("../../lib/amux/executionBudgetCore.ts");
     assert.equal(decideAmuxAttemptBudget({ historical_rows: 1,
-      greatest_attempt_number: 5 }).allowed, false);
+      greatest_attempt_number: 30 }).allowed, false);
+    assert.equal(decideAmuxAttemptBudget({ historical_rows: 1,
+      greatest_attempt_number: 5 }).allowed, true);
+    // The settled run's number placed at the guard, past its insert triggers.
+    await tx.$executeRawUnsafe("SET LOCAL session_replication_role = replica");
+    await tx.$executeRaw`UPDATE "AmuxExecutionAttempt" SET "attemptNumber" = 30
+      WHERE "id" = ${priorAttemptId}`;
+    await tx.$executeRawUnsafe("SET LOCAL session_replication_role = origin");
     await assert.rejects(ownerRetries(db, taskId, priorAttemptId),
       /AMUX review retry attempt budget exhausted/);
   });

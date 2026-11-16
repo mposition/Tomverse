@@ -13,7 +13,8 @@ import "server-only";
 import { ENGINEERING_AGENT_PR_APPROVER_IDS } from "./engineeringAgentPrApprovalCore.ts";
 import { PULL_DIFF_DIGEST_MAX_BYTES, pullDiffDigest } from "./pullDiffDigestCore.ts";
 
-import { checkListing, gitObjectId, type TreeEntry } from
+import { AMUX_V22_FILE_MAX_BYTES } from "@/lib/amux/v22PatchLimit";
+import { TREE_LIMITS, checkListing, gitObjectId, type TreeEntry } from
   "@/lib/engineeringAgentTreeVerify";
 
 /** One fixed repository. A caller supplies a commit id or a PR number, never a URL. */
@@ -21,8 +22,12 @@ const REPOSITORY = "mposition/Tomverse";
 const API_ORIGIN = "https://api.github.com";
 const API_VERSION = "2022-11-28";
 const TIMEOUT_MS = 8_000;
+/** A blob up to GitHub's file limit streams in about a minute even slowly. */
+const BLOB_TIMEOUT_MS = 90_000;
 const MAX_JSON_BYTES = 1024 * 1024;
-const MAX_TREE_JSON_BYTES = 5 * 1024 * 1024;
+/** GitHub lists at most 100,000 entries for one recursive tree (then says
+ * `truncated`); a listing that size is well under GitHub's file limit. */
+const MAX_TREE_JSON_BYTES = AMUX_V22_FILE_MAX_BYTES;
 const MAX_CHECK_RUNS = 100;
 const SHA = /^[0-9a-f]{40}$/;
 
@@ -192,24 +197,44 @@ export async function readEngineeringAgentDevelopHead(deps: Deps = {}): Promise<
   return sha;
 }
 
-/** One content-addressed Git blob, never an arbitrary URL or branch path. */
+/**
+ * One content-addressed Git blob, never an arbitrary URL or branch path. It
+ * is read raw (`application/vnd.github.raw+json`) and streamed with its
+ * bound, so a large file costs its own size once rather than a base64 copy
+ * in JSON (until 2026-11-15 a 200 KiB default and a 2 MiB ceiling kept any
+ * larger file out of a candidate). GitHub serves blobs up to 100 MiB, its
+ * own file limit. The bytes must hash to the id asked for.
+ */
 export async function readEngineeringAgentGitBlob(oid: string,
-  deps: Deps = {}, maxBytes = 200 * 1024): Promise<Uint8Array> {
+  deps: Deps = {}, maxBytes = AMUX_V22_FILE_MAX_BYTES): Promise<Uint8Array> {
   if (!SHA.test(oid) || !Number.isSafeInteger(maxBytes) ||
-      maxBytes < 1 || maxBytes > 2 * 1024 * 1024)
+      maxBytes < 0 || maxBytes > AMUX_V22_FILE_MAX_BYTES)
     throw new EngineeringAgentGitHubReadError("invalid_input");
-  const blob = record(await githubJson(`/git/blobs/${oid}`,
-    withDefaults(deps), Math.min(MAX_TREE_JSON_BYTES,
-      4 * Math.ceil(maxBytes / 3) + 4_096)));
-  if (!blob || blob.sha !== oid || blob.encoding !== "base64" ||
-      typeof blob.content !== "string" ||
-      typeof blob.size !== "number" || blob.size > maxBytes ||
-      blob.size < 0)
-    throw new EngineeringAgentGitHubReadError("invalid_response");
-  const compact = blob.content.replace(/\n/g, "");
-  const bytes = Buffer.from(compact, "base64");
-  if (bytes.length !== blob.size || bytes.toString("base64") !== compact ||
-      gitObjectId("blob", bytes) !== oid) {
+  const resolved = withDefaults(deps);
+  const token = tokenFrom(resolved.env);
+  let response: Response;
+  try {
+    response = await resolved.fetchImpl(
+      `${API_ORIGIN}/repos/${REPOSITORY}/git/blobs/${oid}`, {
+        method: "GET",
+        redirect: "error",
+        cache: "no-store",
+        signal: AbortSignal.timeout(BLOB_TIMEOUT_MS),
+        headers: {
+          Accept: "application/vnd.github.raw+json",
+          Authorization: `Bearer ${token}`,
+          "X-GitHub-Api-Version": API_VERSION,
+        },
+      });
+  } catch {
+    throw new EngineeringAgentGitHubReadError("transport_error");
+  }
+  if (!response.ok) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new EngineeringAgentGitHubReadError("http_error");
+  }
+  const bytes = Buffer.from(await readBounded(response, maxBytes));
+  if (gitObjectId("blob", bytes) !== oid) {
     bytes.fill(0);
     throw new EngineeringAgentGitHubReadError("invalid_response");
   }
@@ -264,7 +289,7 @@ export async function readEngineeringAgentPinnedBaseTree(baseSha: string,
   const tree = record(await githubJson(`/git/trees/${rootTreeId}?recursive=1`,
     resolved, MAX_TREE_JSON_BYTES));
   if (!tree || tree.sha !== rootTreeId || tree.truncated !== false ||
-      !Array.isArray(tree.tree) || tree.tree.length > 20_000)
+      !Array.isArray(tree.tree) || tree.tree.length > TREE_LIMITS.maxEntries)
     throw new EngineeringAgentGitHubReadError("invalid_response");
   const base: TreeEntry[] = tree.tree.map((item: unknown) => {
     const entry = record(item);

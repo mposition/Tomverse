@@ -59,6 +59,12 @@ const ESCALATION_REASON_CODES = new Set([
   // Owner decision 2026-11-14 (AMUXFLOW/B2): a Task behind a dependency
   // archived without being done (lib/amux/stalledCardSweep.ts).
   "dependency_closed",
+  // Owner decision 2026-11-15: a card that failed on the platform (never on
+  // its own work) more often than lib/amux/infraFailureCore.ts allows.
+  "infra_attempts_exhausted",
+  // Owner direction 2026-11-15: no fixed count; the worker's own result
+  // failed the same way three runs in a row (executionBudgetCore.ts).
+  "repeated_failure",
   "operational_cost_blocked",
   "canonical_deadline_review_required",
   // Policy version 15: why the WSL runner blocked an attempt.

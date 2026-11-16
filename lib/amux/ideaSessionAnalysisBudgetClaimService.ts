@@ -225,7 +225,9 @@ export async function commitAmuxSessionBudgetClaim(tx: Tx, input: {
   if (v4Active || sessionActive) {
     throw new AmuxSessionBudgetClaimError("not_ready");
   }
-  const failureStreak = await readAmuxIdeaAnalysisFailureStreak(tx);
+  // A subscription session is never stopped by a failure streak (owner
+  // direction 2026-11-15); only the paid path is.
+  const failureStreak = await readAmuxIdeaAnalysisFailureStreak(tx, "session");
   if (failureStreak !== "ready") {
     throw new AmuxSessionBudgetClaimError(failureStreak === "stopped"
       ? "not_ready" : "integrity_unavailable");

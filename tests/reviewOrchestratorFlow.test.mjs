@@ -330,8 +330,10 @@ test("a base that is not on the remote is refused and leaves no job", () => {
   }
 });
 
-test("a reviewer past its timeout is killed and recorded as unknown", async () => {
-  const f = fixture({ claude: "sleep", cursor: "sleep" }, { cursor: { timeoutSeconds: 1 } });
+// Owner decision 2026-11-15: a reviewer that runs out of time is not the
+// answer. Its slot goes back to the queue for another vendor.
+test("a reviewer past its timeout is killed and another vendor reviews instead", async () => {
+  const f = fixture({ claude: "sleep", cursor: "accept" }, { cursor: { priority: 1 } });
   try {
     f.config.providers.find((p) => p.id === "claude").timeoutSeconds = 1;
     f.commit("a.txt", "five\n");
@@ -339,15 +341,39 @@ test("a reviewer past its timeout is killed and recorded as unknown", async () =
     const orchestrator = new Orchestrator(f.config);
     orchestrator.tick(allAvailable(f.config));
     await orchestrator.idle();
+    const queued = new Store(f.config.stateDir).readSlot(jobId, 0);
+    assert.deepEqual([queued.status, queued.excludeVendors, queued.retriedAfter], ["queued", ["anthropic"], "timeout"]);
+    orchestrator.tick(allAvailable(f.config));
+    await orchestrator.idle();
     const summary = JSON.parse(f.client("wait", jobId).stdout);
-    assert.equal(summary.status, "unknown");
-    assert.equal(summary.reviews[0].reason, "timeout");
+    assert.equal(summary.status, "accept");
+    assert.equal(summary.reviews[0].vendor, "xai");
   } finally {
     f.cleanup();
   }
 });
 
-test("the reviewer sees the diff and the scope note, and none of the daemon's secrets", async () => {
+test("a job ends unknown on a timeout only once every other vendor has timed out too", async () => {
+  const f = fixture({ claude: "sleep", cursor: "sleep" }, { cursor: { timeoutSeconds: 1, priority: 1 } });
+  try {
+    f.config.providers.find((p) => p.id === "claude").timeoutSeconds = 1;
+    f.commit("a.txt", "five again\n");
+    const { jobId } = JSON.parse(f.client("submit", "--author", "codex", "--repo", "demo").stdout);
+    const orchestrator = new Orchestrator(f.config);
+    for (let round = 0; round < 3; round += 1) {
+      orchestrator.tick(allAvailable(f.config));
+      await orchestrator.idle();
+    }
+    const summary = JSON.parse(f.client("wait", jobId).stdout);
+    assert.equal(summary.status, "unknown");
+    assert.equal(summary.reviews[0].reason, "timeout");
+    assert.equal(summary.reviews[0].vendor, "xai", "the second vendor was tried before giving up");
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("the reviewer reads the whole diff from its checkout, sees the whole scope note, and none of the daemon's secrets", async () => {
   const f = fixture({ claude: "env" });
   const promptOut = join(tmpdir(), `review-orch-prompt-${process.pid}.txt`);
   process.env.REVIEW_ORCH_SECRET_PROBE = "secret";
@@ -355,7 +381,8 @@ test("the reviewer sees the diff and the scope note, and none of the daemon's se
   try {
     f.config.providers.find((p) => p.id === "claude").passEnv = ["FAKE_REVIEWER_PROMPT_OUT"];
     f.commit("a.txt", "six\n");
-    const scope = `scope-marker-${"x".repeat(5_000)}-scope-end`;
+    // The Windows command line the fixture spawns allows about 32,000 characters; the RPC token bound itself is tested in reviewOrchestratorCore.
+    const scope = `scope-marker-${"x".repeat(20_000)}-scope-end`;
     const { jobId } = JSON.parse(f.client("submit", "--author", "codex", "--repo", "demo", "--scope", scope).stdout);
     const orchestrator = new Orchestrator(f.config);
     orchestrator.tick(allAvailable(f.config));
@@ -364,8 +391,11 @@ test("the reviewer sees the diff and the scope note, and none of the daemon's se
     assert.equal(summary.reviews[0].findings[0].summary, "leak=none");
     const prompt = readFileSync(promptOut, "utf8");
     assert.match(prompt, /scope-marker/);
-    assert.match(prompt, /scope-end/);
-    assert.match(prompt, /\+six/);
+    assert.match(prompt, /scope-end/, "the scope note is not cut");
+    // The diff is read from the checkout, so no size limit applies to it.
+    assert.match(prompt, /git diff [0-9a-f]{40} [0-9a-f]{40}/);
+    assert.doesNotMatch(prompt, /<<<DIFF/);
+    assert.match(prompt, /- a\.txt/);
   } finally {
     delete process.env.REVIEW_ORCH_SECRET_PROBE;
     delete process.env.FAKE_REVIEWER_PROMPT_OUT;

@@ -259,6 +259,10 @@ test("codex: the planned command runs with the fixed environment and the questio
     PATH: "/usr/bin:/bin",
     LANG: "C.UTF-8",
     LC_ALL: "C.UTF-8",
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_CONFIG_PARAMETERS: "'safe.directory=*'",
+    GIT_OPTIONAL_LOCKS: "0",
   });
   assert.deepEqual(result.observed("stdin"), PAYLOAD);
   assert.equal(result.observed("cwd").toString().endsWith(`/var/lib/amux-dm/requests/${REQUEST_ID}`), true);

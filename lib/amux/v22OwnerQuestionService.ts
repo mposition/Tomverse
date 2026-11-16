@@ -17,6 +17,7 @@ import { AMUX_V22_WORKER_AUTHORITY_NOTICE, AMUX_V22_WORKSPACE_NOTICE_IMPLEMENT }
   "./v22ExternalAuthorityCore.ts";
 import { openAmuxV22TaskPatchRow, openAmuxV22TaskResultRow } from
   "./v22TaskResultStore.ts";
+import { amuxV22LocalCliFlowEnabled } from "./v22LocalCliFlowCore.ts";
 
 /** What a resumed prompt holds beside its resume section and its brief: the
  * Task and attempt lines (bounded), the notice twice, the workspace notice
@@ -91,8 +92,9 @@ export async function answerAmuxV22OwnerQuestionInTransaction(
       task.parkedReason !== "owner_question")
     throw new BoardImportError("task_not_waiting", 409);
   // The answer goes whole into the resumed prompt; one that cannot fit beside
-  // the brief is refused now, to be shortened, never cut at delivery.
-  if (PROMPT_FIXED_BYTES + Number(task.briefBytes ?? 0) +
+  // the brief is refused now, to be shortened, never cut at delivery. The
+  // local CLI flow carries it in a context file with no prompt bound.
+  if (!amuxV22LocalCliFlowEnabled() && PROMPT_FIXED_BYTES + Number(task.briefBytes ?? 0) +
       amuxV22ResumeMinimumBytes(answer, input.source) + 2 >
       AMUX_V22_RESUME_PROMPT_MAX_BYTES)
     throw new BoardImportError("answer_too_long_for_prompt", 409);

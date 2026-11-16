@@ -24,7 +24,11 @@ export const DEVELOP_CI_REPAIR_IDEA_TARGET = "AmuxIdeaSubmission" as const;
 
 /** New repair ideas per UTC day. Each one is at most AMUX_IDEA_LANE_MAX_ATTEMPTS lane runs. */
 export const DEVELOP_CI_REPAIR_PER_DAY = 3;
-/** Jobs whose log goes into one idea, and the tail kept from each. */
+/** Jobs whose log goes into one idea, and the tail kept from each, before owner
+ * direction 2026-11-15. Every failed job's whole log now goes into the idea
+ * (lib/developCiRepair.ts); these hold only under
+ * TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS, or when the whole logs trip the idea's
+ * secret and personal-data scan. */
 export const DEVELOP_CI_REPAIR_MAX_JOBS = 3;
 export const DEVELOP_CI_REPAIR_LOG_TAIL_CHARS = 6_000;
 
@@ -166,8 +170,11 @@ export const developCiLogTail = (log: string, limit = DEVELOP_CI_REPAIR_LOG_TAIL
 export const developCiRepairIdea = (input: {
   headSha: string;
   checks: readonly { name: string; id: number; conclusion: string | null; logTail: string | null }[];
-  /** The idea input limit (AMUX_IDEA_INPUT_MAX_BYTES). */
+  /** The idea input limit (amuxIdeaInputMaxBytes). */
   maxBytes: number;
+  /** The longest tail to start from: the former 6,000 characters by default,
+   * every log whole when the caller passes the longest log's length. */
+  tailChars?: number;
 }) => {
   const { maxBytes } = input;
   const head = [
@@ -189,7 +196,7 @@ export const developCiRepairIdea = (input: {
         return section.join("\n");
       }),
     ].join("\n\n");
-  let tailChars = DEVELOP_CI_REPAIR_LOG_TAIL_CHARS;
+  let tailChars = input.tailChars ?? DEVELOP_CI_REPAIR_LOG_TAIL_CHARS;
   let idea = render(tailChars);
   while (Buffer.byteLength(idea, "utf8") > maxBytes && tailChars > 0) {
     tailChars = Math.floor(tailChars * 0.8);

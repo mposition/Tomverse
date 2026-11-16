@@ -24,7 +24,7 @@ import {
   writeDispatchRequest,
 } from "../tools/review-orchestrator/lib/ci-fix.mjs";
 import { validateConfig } from "../tools/review-orchestrator/lib/config.mjs";
-import { createDispatchSender, dispatchInputs, normaliseDispatchRequest } from "../tools/review-orchestrator/bin/pr-ci-auto-fix-sender.mjs";
+import { MAX_SENDS_PER_HEAD, createDispatchSender, dispatchInputs, normaliseDispatchRequest } from "../tools/review-orchestrator/bin/pr-ci-auto-fix-sender.mjs";
 import {
   PR_CI_AUTO_FIX_CONFLICT_PREFIX,
   judgePrCiAutoFixConflict,
@@ -448,11 +448,11 @@ test("the sender sends each request once, honours an older sender's record, and 
     request(now - 6000);
     await sender().scanOnce();
     assert.equal(posts, 0, "that request was sent already");
-    for (const createdAt of [now - 4000, now - 3000, now - 2000, now - 1000]) {
-      request(createdAt);
+    for (let index = 0; index < 24; index += 1) {
+      request(now - 4000 + index * 100);
       await sender().scanOnce();
     }
-    assert.equal(posts, 3, "with the older record, four requests in all for the head");
+    assert.equal(posts, MAX_SENDS_PER_HEAD - 1, "with the older record, the cap in all for the head");
   } finally {
     rmSync(outbox, { recursive: true, force: true });
     rmSync(stateDir, { recursive: true, force: true });

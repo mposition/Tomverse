@@ -9,6 +9,7 @@ import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import { prisma } from "@/lib/prisma";
 
 import { BoardImportError } from "./boardImportCore.ts";
+import { AMUX_INFRA_FAILURE_REASONS, amuxInfraFailureRoutingEnabled } from "./infraFailureCore.ts";
 
 /**
  * Owner decision 2026-11-10: the owner may accept that one ended v22 attempt's
@@ -27,15 +28,19 @@ export const AMUX_V22_USAGE_ACCEPTED_ACTION = "amux.v22.attempt_usage.unknown_ac
 export type AmuxV22UsageAcceptanceSource = "owner_accept" | "recovery_approval" | "review_retry";
 
 /** The ended attempts of a v4 Task whose CLI usage is absent or partial and
- * not yet accepted: the same unknown-usage rule the worker gate applies. */
+ * not yet accepted: the same unknown-usage rule the worker gate applies. An
+ * infrastructure failure is left out, as the gate leaves it out (owner
+ * decision 2026-11-15): it holds no worker, so there is nothing to accept. */
 export async function amuxV22TaskUnknownUsageAttemptIds(tx: Prisma.TransactionClient,
   taskId: string): Promise<string[]> {
+  const infraReasons = amuxInfraFailureRoutingEnabled() ? [...AMUX_INFRA_FAILURE_REASONS] : [];
   const rows = await tx.$queryRaw<Array<{ id: string }>>`
     SELECT a."id" FROM "AmuxExecutionAttempt" a
     JOIN "AmuxWorkItem" w ON w."id" = a."taskId"
     WHERE a."taskId" = ${taskId}
       AND a."endedAt" IS NOT NULL
       AND w."sourceSystem" = 'admin-idea-v4'
+      AND COALESCE(a."reason", '') <> ALL(${infraReasons}::text[])
       AND (NOT EXISTS (SELECT 1 FROM "AmuxCliUsageEvent" u
            WHERE u."attemptId" = a."id")
         OR EXISTS (SELECT 1 FROM "AmuxCliUsageEvent" u

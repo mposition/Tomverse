@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { after, test } from "node:test";
 
 // First: the harness puts the shared client inside one rollback-only
@@ -22,9 +23,10 @@ async function spentTodoCard(tx: LifecycleTx) {
     { taskRole: "implement", settlementReason: "review_server_accepted" }) as {
     taskId: string; priorAttemptId: string };
   // The fixture leaves the card after one settled run; the budget is spent
-  // as production's was: five attempts, the card back in todo, unassigned.
+  // the way it still can be since 2026-11-15: the runaway guard's thirty
+  // attempts, the card back in todo, unassigned.
   await withoutTriggers(tx, async () => {
-    await tx.$executeRaw`UPDATE "AmuxExecutionAttempt" SET "attemptNumber" = 5
+    await tx.$executeRaw`UPDATE "AmuxExecutionAttempt" SET "attemptNumber" = 30
       WHERE "id" = ${seed.priorAttemptId}`;
     await tx.$executeRaw`UPDATE "AmuxWorkItem" SET "status" = 'todo', "owner" = NULL,
       "v22AssignmentId" = NULL WHERE "id" = ${seed.taskId}`;
@@ -35,16 +37,70 @@ async function spentTodoCard(tx: LifecycleTx) {
   return seed.taskId;
 }
 
+test("twelve platform failures stop a todo card until a person sends it back with retry", async () => {
+  await lifecycle(async (tx) => {
+    const seed = await seedAmuxV4PortfolioRecoveryPrerequisites(queryAdapter(tx),
+      { taskRole: "implement", settlementReason: "review_server_accepted" }) as {
+      taskId: string; priorAttemptId: string };
+    // A copy of the seed's card under its own identity and promotion receipt:
+    // the seed's own card is the FIRST Task, which allows two attempts.
+    const taskId = randomUUID();
+    const receiptId = randomUUID();
+    await withoutTriggers(tx, async () => {
+      await tx.$executeRaw`INSERT INTO "AmuxWorkItem"
+        SELECT (jsonb_populate_record(NULL::"AmuxWorkItem", to_jsonb(w) || jsonb_build_object(
+          'id', ${taskId}::text, 'sourceKey', ${`SWEEP-${taskId.slice(0, 8).toUpperCase()}`}::text,
+          'displayKey', NULL, 'status', 'todo', 'owner', NULL, 'claimedAt', NULL,
+          'v22AssignmentId', NULL, 'v22ReceiptId', ${receiptId}::text))).*
+        FROM "AmuxWorkItem" w WHERE w."id" = ${seed.taskId}`;
+      await tx.$executeRaw`INSERT INTO "AmuxV22PromotionReceipt"
+        SELECT (jsonb_populate_record(NULL::"AmuxV22PromotionReceipt", to_jsonb(r) || jsonb_build_object(
+          'id', ${receiptId}::text, 'workItemId', ${taskId}::text,
+          'authorizationAuditLogId', ${randomUUID()}::text))).*
+        FROM "AmuxV22PromotionReceipt" r
+        WHERE r."id" = (SELECT "v22ReceiptId" FROM "AmuxWorkItem" WHERE "id" = ${seed.taskId})`;
+      // One settled run of the card's own, then twelve that never did its work.
+      await tx.$executeRaw`INSERT INTO "AmuxExecutionAttempt"
+        ("id", "taskId", "worker", "workerInstanceId", "workerGeneration", "taskRevision",
+         "attemptNumber", "reservedCostMicrousd", "heartbeatAt", "startedAt", "endedAt",
+         "outcome", "toStatus", "endedBy", "reason", "updatedAt")
+        SELECT gen_random_uuid()::text, ${taskId}, p."worker", p."workerInstanceId",
+          p."workerGeneration", p."taskRevision", n, 1000, now(),
+          now() - make_interval(mins => 30 - n), now() - make_interval(mins => 29 - n),
+          CASE WHEN n = 1 THEN 'failed' ELSE 'blocked' END, 'todo', p."worker",
+          CASE WHEN n = 1 THEN 'reported_result' ELSE 'infra_early_exit' END, now()
+        FROM "AmuxExecutionAttempt" p CROSS JOIN generate_series(1, 13) n
+        WHERE p."id" = ${seed.priorAttemptId}`;
+    });
+    await fixtureCommitted(tx);
+    const { readAmuxStalledCards } = await import("@/lib/amux/stalledCardSweep");
+    assert.deepEqual((await readAmuxStalledCards(tx, 5, taskId)).map((row) => row.id),
+      [taskId], "the platform bound is spent");
+    // A person's retry after them starts the bound over (infraFailureStore.ts).
+    await withoutTriggers(tx, async () => {
+      await tx.$executeRaw`INSERT INTO "AmuxHumanEscalation"
+        ("id", "taskId", "specialty", "reason", "status", "openedBy", "resolvedById",
+         "resolvedAt", "resolution", "resolutionOutcome", "updatedAt")
+        VALUES (${randomUUID()}, ${taskId}, 'execution-recovery',
+          'infra_attempts_exhausted', 'resolved', 'system:amux-v22-settlement',
+          'synthetic-owner', now(), 'Signed the worker in again.', 'retry', now())`;
+    });
+    assert.deepEqual(await readAmuxStalledCards(tx, 5, taskId), []);
+  });
+});
+
 test("a todo Task with its budget spent joins the owner queue once, with its reason", async () => {
   await lifecycle(async (tx) => {
     const taskId = await spentTodoCard(tx);
     const { readAmuxStalledCards, sweepAmuxStalledCards, AMUX_STALLED_CARD_SWEEP_ENV } =
       await import("@/lib/amux/stalledCardSweep");
-    assert.deepEqual(await sweepAmuxStalledCards(), [], "off by default");
+    process.env[AMUX_STALLED_CARD_SWEEP_ENV] = "disabled";
+    assert.deepEqual(await sweepAmuxStalledCards(), [], "off only when disabled");
     const found = await readAmuxStalledCards(tx, 20);
     assert.ok(found.some((row) => row.id === taskId && row.reason === "attempt_budget_exhausted"));
 
-    process.env[AMUX_STALLED_CARD_SWEEP_ENV] = "enabled";
+    // Owner direction 2026-11-15: on by default.
+    delete process.env[AMUX_STALLED_CARD_SWEEP_ENV];
     try {
       const moved = await sweepAmuxStalledCards(20);
       assert.ok(moved.includes(taskId), JSON.stringify(moved));

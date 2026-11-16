@@ -140,6 +140,13 @@ test("a PR-less review retry is still refused once the attempt budget is spent",
   await inRollback(async (tx, db) => {
     const { taskId, priorAttemptId } =
       await seedAmuxV4PortfolioRecoveryPrerequisites(db, { attemptNumber: 5 });
+    // Owner direction 2026-11-15: no fixed five; the review proposal guard
+    // stops at the runaway guard of thirty. The run's number placed there,
+    // past its insert triggers.
+    await tx.$executeRawUnsafe("SET LOCAL session_replication_role = replica");
+    await tx.$executeRaw`UPDATE "AmuxExecutionAttempt" SET "attemptNumber" = 30
+      WHERE "id" = ${priorAttemptId}`;
+    await tx.$executeRawUnsafe("SET LOCAL session_replication_role = origin");
     const escalationId = await openEscalation(db, taskId);
     await refused(tx, db, () => insertProposal(db, { taskId,
       attemptId: priorAttemptId, escalationId, outcome: "retry",

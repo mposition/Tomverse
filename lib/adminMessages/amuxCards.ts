@@ -8,6 +8,7 @@ export const adminAmuxCardsMessages = defineAdminMessages({
       "Read-only list of the AMUX cards stored in Tomverse, which is where their status lives. The local AMUX board does not show these cards. The only change this screen makes is answering a worker's question, which sends its Task back to that worker.",
     shown: (shown: number, total: number, limit: number) =>
       `Showing ${shown} of ${total} cards, the ${limit} most recently updated, ordered by status.`,
+    showMore: (count: number) => `Show ${count} more`,
     columnCard: "Card",
     sourceKey: "Source key",
     columnStatus: "Status",
@@ -99,6 +100,7 @@ export const adminAmuxCardsMessages = defineAdminMessages({
       "Tomverse에 저장된 AMUX 카드의 읽기 전용 목록입니다. 카드 상태의 정본은 여기입니다. 로컬 AMUX Board에는 이 카드가 보이지 않습니다. 이 화면이 바꾸는 것은 워커 질문에 답하는 것 하나이고, 답하면 그 Task가 같은 워커에게 돌아갑니다.",
     shown: (shown: number, total: number, limit: number) =>
       `카드 ${total}장 가운데 최근 갱신된 ${limit}장 한도에서 ${shown}장을 상태 순으로 보여 줍니다.`,
+    showMore: (count: number) => `${count}장 더 보기`,
     columnCard: "카드",
     sourceKey: "원본 키",
     columnStatus: "상태",

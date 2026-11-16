@@ -6,13 +6,14 @@ import {
   DM_ALLOWED_ASK_TYPES,
   DM_CARD_TEXT_FORMAT,
   DM_CARD_TEXT_KEYS,
+  DM_ANSWER_MAX_BYTES,
   DM_CARD_TEXT_MAX_BYTES,
-  DM_CONTEXT_PATHS_MAX,
+  DM_ESCALATION_MAX_BYTES,
   DM_INSTANCE_FOR_PROVIDER,
+  DM_OUTPUT_TEXT_MAX_BYTES,
   DM_POLICY_VERSION,
+  DM_RATIONALE_MAX_BYTES,
   DM_RESOLUTIONS,
-  DM_THROUGHPUT_PER_DAY,
-  DM_THROUGHPUT_PER_HOUR,
   dmCardText,
   dmCardTextBytes,
   dmRunUnavailableIncident,
@@ -128,7 +129,7 @@ test("every check runs: all refusals are recorded, not only the first", () => {
       killSwitch: true,
       askingProvider: "gemini",
       card: card({ askType: "customer_outbound", question: "Deploy to production now?" }),
-      throughput: { lastHour: DM_THROUGHPUT_PER_HOUR, lastDay: 0 },
+      throughput: { lastHour: 1_000_000, lastDay: 1_000_000 },
     }),
   );
   assert.equal(decision.route, "operator");
@@ -137,7 +138,6 @@ test("every check runs: all refusals are recorded, not only the first", () => {
     "ask_type_not_allowed",
     "irreversible_term",
     "provider_unverified",
-    "throughput_exceeded",
   ]);
   assert.deepEqual(decision.termCategories, ["release"]);
 });
@@ -217,21 +217,23 @@ test("the term check reads every card text field, including options and context"
   }
 });
 
-test("throughput refuses at the twentieth hour and the hundredth day", () => {
-  assert.equal(routeDmQuestion(input({ throughput: { lastHour: DM_THROUGHPUT_PER_HOUR - 1, lastDay: 0 } })).route, "dm_proposal");
-  assert.deepEqual(routeDmQuestion(input({ throughput: { lastHour: DM_THROUGHPUT_PER_HOUR, lastDay: 0 } })).refusals, ["throughput_exceeded"]);
-  assert.deepEqual(routeDmQuestion(input({ throughput: { lastHour: 0, lastDay: DM_THROUGHPUT_PER_DAY } })).refusals, ["throughput_exceeded"]);
+test("there is no throughput cap: any count of recent questions still routes", () => {
+  // Owner decision 2026-11-15: the 20 an hour and 100 a day caps are gone.
+  // The counts stay in the input for the record and no refusal is made from them.
+  for (const throughput of [{ lastHour: 0, lastDay: 0 }, { lastHour: 20, lastDay: 100 }, { lastHour: 21, lastDay: 101 }, { lastHour: 1_000_000, lastDay: 1_000_000 }]) {
+    assert.deepEqual(routeDmQuestion(input({ throughput })), { route: "dm_proposal", instance: "decision-maker-openai", refusals: [] }, JSON.stringify(throughput));
+  }
 });
 
-test("input limits: card bytes, context path count and path grammar", () => {
+test("input limits: the card bytes are the one cap; the path count has none; path grammar still holds", () => {
   const big = "가".repeat(Math.ceil(DM_CARD_TEXT_MAX_BYTES / 3) + 1);
   assert.deepEqual(routeDmQuestion(input({ card: card({ context: big }) })).refusals, ["input_limit_exceeded"]);
-  const paths = Array.from({ length: DM_CONTEXT_PATHS_MAX + 1 }, (_, i) => `lib/f${i}.ts`);
-  assert.deepEqual(routeDmQuestion(input({ card: card({ contextPaths: paths }) })).refusals, ["input_limit_exceeded"]);
-  assert.equal(routeDmQuestion(input({ card: card({ contextPaths: paths.slice(1) }) })).route, "dm_proposal");
+  // No count cap on the context paths (it was 64): a few hundred route.
+  const paths = Array.from({ length: 500 }, (_, i) => `lib/f${i}.ts`);
+  assert.deepEqual(routeDmQuestion(input({ card: card({ contextPaths: paths }) })), { route: "dm_proposal", instance: "decision-maker-openai", refusals: [] });
   assert.deepEqual(routeDmQuestion(input({ card: card({ contextPaths: ["../etc/passwd"] }) })).refusals, ["input_limit_exceeded"]);
-  // Context paths count towards the 16 KiB card total.
-  const longPaths = Array.from({ length: DM_CONTEXT_PATHS_MAX }, (_, i) => `${"d".repeat(190)}/${i}`);
+  // Context paths count towards the one card total.
+  const longPaths = Array.from({ length: 64 }, (_, i) => `${"d".repeat(190)}/${i}`);
   const nearlyFull = "x".repeat(DM_CARD_TEXT_MAX_BYTES - 64 * 190);
   assert.deepEqual(routeDmQuestion(input({ card: card({ context: nearlyFull, contextPaths: longPaths }) })).refusals, ["input_limit_exceeded"]);
 });
@@ -254,7 +256,7 @@ test("a secret in the card is never sent", () => {
 // ---------------------------------------------------------------------------
 // The card text (added 2026-10-09): the one serialization the body store keeps
 // as `card_text` (docs/policy/amux-decision-maker.md §10), and the bytes §5's
-// 16 KiB is measured on.
+// card cap (256 KiB) is measured on.
 // ---------------------------------------------------------------------------
 
 test("the card text is one JSON object, format first and every card field in a fixed order", () => {
@@ -375,7 +377,7 @@ test("a stored card text reads back only as the exact text the serializer writes
   for (const value of [null, undefined, 1, {}, Buffer.from(text)]) assert.equal(parseDmCardText(value), null);
 });
 
-test("§5's 16 KiB is measured on the card text: a card exactly at it goes to a DM, one byte over does not", () => {
+test("§5's one card cap is measured on the card text: a card exactly at it goes to a DM, one byte over does not", () => {
   const padTo = (bytes) => {
     const base = card({ context: "" });
     return card({ context: "x".repeat(bytes - dmCardTextBytes(base)) });
@@ -396,8 +398,8 @@ test("§5's 16 KiB is measured on the card text: a card exactly at it goes to a 
   assert.deepEqual(routeDmQuestion(input({ card: korean(fits + 1) })).refusals, ["input_limit_exceeded"]);
   // The card text's own bytes count: fields whose plain sum is well under the cap, written as
   // text that escapes past it, are over it.
-  const escaped = card({ context: "\n".repeat(9_000) });
-  const plainSum = ["task", "needs:you", card().title, card().question, card().unblocks, "\n".repeat(9_000), "a", "Model id only", "choice_only", "b", "Model id and locale", "branch_code_change", "lib/cache.ts", "lib/cache.ts"]
+  const escaped = card({ context: "\n".repeat(140_000) });
+  const plainSum = ["task", "needs:you", card().title, card().question, card().unblocks, "\n".repeat(140_000), "a", "Model id only", "choice_only", "b", "Model id and locale", "branch_code_change", "lib/cache.ts", "lib/cache.ts"]
     .reduce((sum, value) => sum + Buffer.byteLength(value, "utf8"), 0);
   assert.ok(plainSum < DM_CARD_TEXT_MAX_BYTES);
   assert.ok(dmCardTextBytes(escaped) > DM_CARD_TEXT_MAX_BYTES);
@@ -501,8 +503,8 @@ test("DM output validation failures: schema, unknown option, secret", () => {
     { kind: "select", optionId: "a", rationale: "r", irreversible: false, extra: 1 },
     { kind: "select", optionId: "a", rationale: "", irreversible: false },
     { kind: "select", optionId: "a", rationale: "r" },
-    { kind: "free_text", answer: "x".repeat(8 * 1024 + 1), rationale: "r", irreversible: false },
-    { kind: "escalate", reason: "x".repeat(1025) },
+    { kind: "free_text", answer: "x".repeat(DM_ANSWER_MAX_BYTES + 1), rationale: "r", irreversible: false },
+    { kind: "escalate", reason: "x".repeat(DM_ESCALATION_MAX_BYTES + 1) },
     { kind: "escalate", reason: "r", irreversible: true },
   ]) {
     assert.deepEqual(failure(raw), { outcome: "validation_failure", failure: "schema" }, JSON.stringify(raw)?.slice(0, 60));
@@ -511,6 +513,20 @@ test("DM output validation failures: schema, unknown option, secret", () => {
   const key = `sk-ant-${"a".repeat(30)}`;
   assert.deepEqual(failure({ kind: "escalate", reason: key }), { outcome: "validation_failure", failure: "secret_detected" });
   assert.deepEqual(failure({ kind: "free_text", answer: "ok", rationale: key, irreversible: false }), { outcome: "validation_failure", failure: "secret_detected" });
+});
+
+test("the DM's answer fields share one 256 KiB cap, and a long answer at it validates", () => {
+  assert.equal(DM_OUTPUT_TEXT_MAX_BYTES, 256 * 1024);
+  assert.equal(DM_ANSWER_MAX_BYTES, DM_OUTPUT_TEXT_MAX_BYTES);
+  assert.equal(DM_RATIONALE_MAX_BYTES, DM_OUTPUT_TEXT_MAX_BYTES);
+  assert.equal(DM_ESCALATION_MAX_BYTES, DM_OUTPUT_TEXT_MAX_BYTES);
+  // Far past the 8 KiB answer and 1 KiB reason the fields once had.
+  const answer = { kind: "free_text", answer: "x".repeat(100_000), rationale: "r".repeat(100_000), irreversible: false };
+  assert.deepEqual(validateDmOutput(answer, []), { outcome: "proposal", output: answer, irreversible: false });
+  const reason = { kind: "escalate", reason: "y".repeat(100_000) };
+  assert.deepEqual(validateDmOutput(reason, []), { outcome: "escalate", output: reason });
+  const atCap = { kind: "escalate", reason: "z".repeat(DM_ESCALATION_MAX_BYTES) };
+  assert.equal(validateDmOutput(atCap, []).outcome, "escalate");
 });
 
 // 2026-10-08, the S1d review: an option id is a short token, so the stored

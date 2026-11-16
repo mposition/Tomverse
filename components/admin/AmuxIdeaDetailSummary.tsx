@@ -68,7 +68,7 @@ export function AmuxIdeaDetailSummary({ row, reservationReleaseAvailable = false
       aria-labelledby="amux-idea-detail-heading" data-testid="amux-idea-detail" data-stage={row.stage}
       data-activity={row.activity ?? undefined}>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 id="amux-idea-detail-heading" className="text-lg font-semibold text-zinc-100">
+        <h2 id="amux-idea-detail-heading" className="min-w-0 text-lg font-semibold text-zinc-100 [overflow-wrap:anywhere]">
           <AmuxIdeaName row={row} untitled={m.untitled} />
         </h2>
         <Link href="/admin/amux-backlog?tab=ideas" onClick={(event) => {

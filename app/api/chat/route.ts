@@ -216,6 +216,7 @@ import { splitProviderInstructions } from "@/lib/chatProviderPrompt";
 import { resolveChatCompletionOutcome } from "@tomverse/chat-core";
 import { ERROR_REPORT_TOKEN_HEADER } from "@/lib/errorReportContract";
 import { issueChatErrorReportGrant } from "@/lib/traceErrorEvidence";
+import { streamFailureGrantInput } from "@/lib/chatStreamErrorReport";
 import {
     consumePerplexityResponseCapture,
     consumePerplexityUsage,
@@ -231,7 +232,13 @@ import {
 } from "@/lib/perplexityDeepResearch";
 import { assertModelRuntimeAvailable } from "@/lib/modelAvailability";
 import { OfficeTextOverflowError, parseOfficeSafely } from "@/lib/officeSecurity";
-import { MAX_EXTRACTED_ATTACHMENT_CHARACTERS } from "@/lib/chatAttachmentLimits";
+import {
+    CHAT_ATTACHMENT_PARSE_CHARACTERS,
+    PAST_ATTACHMENT_OMITTED_KIND,
+    PAST_ATTACHMENT_OMITTED_TEXT,
+    pastTurnAttachmentTokenBudget,
+} from "@/lib/chatAttachmentLimits";
+import { chatUserMaxInputTokens } from "@/lib/chatInputLimits";
 import { extractLegacyOfficeText, type LegacyOfficeFormatId } from "@/lib/legacyOfficeText";
 import { legacyOfficeValidationCode } from "@/lib/chatAttachmentValidation";
 import {
@@ -3312,6 +3319,13 @@ async function handleChatPost(
         let estimatedInputTokens = 0;
         let totalAttachmentBytes = 0;
         let totalExtractedCharacters = 0;
+        // Earlier messages' files share half the input allowance; past it they
+        // are left out of the turn rather than failing it. See
+        // lib/chatAttachmentLimits.ts.
+        const pastAttachmentTokenBudget = pastTurnAttachmentTokenBudget(
+            access.kind === "guest" ? guestChatMaxInputTokens() : chatUserMaxInputTokens()
+        );
+        let pastAttachmentTokens = 0;
         let totalImageCount = 0;
         let totalBase64ImagePayloadBytes = 0;
         // Paid OCR reached from inside an archive, and how much of it this
@@ -4019,11 +4033,26 @@ async function handleChatPost(
                     return "ok";
                 }
 
+                // An earlier message's file past its share of the allowance is
+                // named to the model and left out; it never fails the turn.
+                const omitPastAttachment = () => {
+                    textAttachments.push({
+                        name,
+                        kind: PAST_ATTACHMENT_OMITTED_KIND,
+                        text: PAST_ATTACHMENT_OMITTED_TEXT,
+                    });
+                    return "ok" as const;
+                };
+                if (!isLatestMessage && pastAttachmentTokens >= pastAttachmentTokenBudget) {
+                    return omitPastAttachment();
+                }
+
                 const remainingCharacters =
-                    MAX_EXTRACTED_ATTACHMENT_CHARACTERS - totalExtractedCharacters;
+                    CHAT_ATTACHMENT_PARSE_CHARACTERS - totalExtractedCharacters;
                 const strictLatestText = isLatestMessage &&
                     (format.category === "office" || format.category === "text");
                 if (remainingCharacters <= (strictLatestText ? 0 : 64)) {
+                    if (!isLatestMessage) return omitPastAttachment();
                     throw new ChatAccessError(
                         413,
                         "ATTACHMENT_TEXT_TOO_LARGE",
@@ -4032,9 +4061,17 @@ async function handleChatPost(
                 }
 
                 const addExtractedText = (kind: string, text: string) => {
+                    if (!isLatestMessage) {
+                        const tokens = estimatePromptTokens(text);
+                        if (pastAttachmentTokens + tokens > pastAttachmentTokenBudget) {
+                            omitPastAttachment();
+                            return;
+                        }
+                        pastAttachmentTokens += tokens;
+                    }
                     totalExtractedCharacters += text.length;
                     if (
-                        totalExtractedCharacters > MAX_EXTRACTED_ATTACHMENT_CHARACTERS
+                        totalExtractedCharacters > CHAT_ATTACHMENT_PARSE_CHARACTERS
                     ) {
                         throw new ChatAccessError(
                             413,
@@ -4567,8 +4604,17 @@ async function handleChatPost(
                         if (!workbook) throw new ChatAccessError(400, "ATTACHMENT_UNREADABLE",
                             "The attached workbook revision source cannot be read completely.");
                         const structured = JSON.stringify(workbook.spec);
+                        if (!isLatestMessage) {
+                            const tokens = estimatePromptTokens(structured);
+                            if (pastAttachmentTokens + tokens > pastAttachmentTokenBudget) {
+                                textAttachments.push({ name: attachment.name,
+                                    kind: PAST_ATTACHMENT_OMITTED_KIND, text: PAST_ATTACHMENT_OMITTED_TEXT });
+                                continue;
+                            }
+                            pastAttachmentTokens += tokens;
+                        }
                         totalExtractedCharacters += structured.length;
-                        if (totalExtractedCharacters > MAX_EXTRACTED_ATTACHMENT_CHARACTERS) {
+                        if (totalExtractedCharacters > CHAT_ATTACHMENT_PARSE_CHARACTERS) {
                             throw new ChatAccessError(413, "ATTACHMENT_TEXT_TOO_LARGE",
                                 "Extracted attachment text exceeds the request limit.");
                         }
@@ -5772,6 +5818,17 @@ async function handleChatPost(
         }
         if (hasContinuation) recordAutoSelection();
         const initialAttemptAbortController = new AbortController();
+        // The last error the active provider stream reported through `onError`.
+        // Read only by the in-stream error report: an empty answer settles as
+        // the SDK's "no output" error, and this is what caused it.
+        let observedStreamError: unknown = null;
+        const observeStreamError = (context: { traceId: string; modelId: string }) => {
+            const log = logStreamErrorWithoutContent(context);
+            return (event: { error: unknown }) => {
+                observedStreamError = event.error;
+                log(event);
+            };
+        };
         await recordDispatchStarted(dispatchRecord);
         if (hasContinuation) void recordContinuationSeedOutcome(finalContinuation.outcome);
         latency.provider();
@@ -5819,7 +5876,7 @@ async function handleChatPost(
                         stopWhen: stepCountIs(MCP_CHAT_MAX_STEPS),
                         prepareStep: mcpConnector.prepareStep,
                     } : {}),
-                    onError: logStreamErrorWithoutContent({
+                    onError: observeStreamError({
                         traceId,
                         modelId: modelConfig.id,
                     }),
@@ -6510,6 +6567,48 @@ async function handleChatPost(
                 return false;
             }
         };
+        /*
+          The error report for a turn the server judged failed after its 200
+          stream had started (docs/policy/trace-feedback-automation.md §3.3).
+
+          The JSON error builders put this grant in a response header. Here the
+          headers left with the first byte, so the token rides in the stream
+          trailer instead. Called only from the two settlement branches that
+          decide the turn failed -- never for an answer that completed, and
+          never for a turn the user stopped, which leave through
+          `cancelTurnSafely` and reach neither.
+        */
+        const issueStreamErrorReport = (
+            root: "AI_EMPTY_RESPONSE" | "AI_STREAM_FAILED",
+            diagnosticCode: string,
+            error: unknown,
+            localLayer: "storage" | "application" | null = null
+        ) => {
+            const grantInput = streamFailureGrantInput({
+                traceId,
+                root,
+                diagnosticCode,
+                provider: dispatched.provider,
+                modelId: dispatched.modelId,
+                error,
+                observedStreamError,
+                localLayer,
+            });
+            const grant = issueChatErrorReportGrant(grantInput);
+            return grant.errorReportToken
+                ? { token: grant.errorReportToken, code: grantInput.errorCode }
+                : null;
+        };
+        /*
+          A stream failure waiting to be raised on the next pull.
+
+          `controller.error()` discards whatever is still queued, so a trailer
+          enqueued in the same turn as the error would never be read. The
+          failure branch enqueues the trailer and returns; the stream asks for
+          more only once that chunk has been taken, and that pull raises the
+          error the client was always going to get.
+        */
+        let pendingStreamError: { error: unknown } | null = null;
         const closeSafely = (
             controller: ReadableStreamDefaultController<string>
         ) => {
@@ -6985,6 +7084,8 @@ async function handleChatPost(
                 await recordDispatchStarted(nextRecord);
                 if (continuation.receipt && continuationSeed) continuation.receipt = { ...continuation.receipt,
                     attempt: dispatched.attemptIndex + 1, status: "unknown" };
+                // What the primary reported is not the fallback's failure.
+                observedStreamError = null;
                 nextStream = await streamText({
                     model: plan.activeModel,
                     messages: fallbackSdkMessages,
@@ -6994,7 +7095,7 @@ async function handleChatPost(
                         nextAttemptAbortController.signal,
                     ]),
                     ...attemptDispatchOptions(plan),
-                    onError: logStreamErrorWithoutContent({
+                    onError: observeStreamError({
                         traceId,
                         modelId: plan.modelId,
                     }),
@@ -7296,6 +7397,14 @@ async function handleChatPost(
             },
             async pull(controller) {
                 if (streamState !== "open") return;
+                if (pendingStreamError) {
+                    // The turn is already settled and released; only the
+                    // error itself was held back. See `pendingStreamError`.
+                    const { error } = pendingStreamError;
+                    pendingStreamError = null;
+                    errorSafely(controller, error);
+                    return;
+                }
                 streamController = controller;
                 // Armed on the first pull rather than at construction: pull
                 // is only ever called once the Response has been published,
@@ -7866,6 +7975,9 @@ async function handleChatPost(
                             artifactsForTrailer = [];
                         }
                         const isEmptyResponse = !generatedText.trim();
+                        let streamErrorReport: ReturnType<
+                            typeof issueStreamErrorReport
+                        > = null;
                         if (
                             isEmptyResponse &&
                             durableAttempt &&
@@ -7905,6 +8017,14 @@ async function handleChatPost(
                                       completionError
                                   )
                                 : `AI_EMPTY_RESPONSE.${finishReasonCode}`;
+                            // The server has just judged this turn failed, so a
+                            // report of it can be verified like any other
+                            // server error (operator decision 2026-11-16).
+                            streamErrorReport = issueStreamErrorReport(
+                                "AI_EMPTY_RESPONSE",
+                                diagnosticCode,
+                                completionError
+                            );
                             try {
                                 await recordProviderFailure(
                                     dispatched.provider,
@@ -7970,6 +8090,9 @@ async function handleChatPost(
                                 // that made nothing says nothing.
                                 ...(artifactsForTrailer.length
                                     ? { artifacts: artifactsForTrailer }
+                                    : {}),
+                                ...(streamErrorReport
+                                    ? { errorReport: streamErrorReport }
                                     : {}),
                             })
                         );
@@ -8182,6 +8305,38 @@ async function handleChatPost(
                               }
                             : undefined
                     );
+                    // The failed turn's error report, on the same terms as the
+                    // empty answer's. A Research Preview stop is a limit doing
+                    // its job, not a failure to report.
+                    const streamErrorReport = researchStopReason
+                        ? null
+                        : issueStreamErrorReport(
+                              "AI_STREAM_FAILED",
+                              diagnosticCode,
+                              error,
+                              streamFailureIsLocal
+                                  ? isStorageError(error)
+                                      ? "storage"
+                                      : "application"
+                                  : null
+                          );
+                    if (
+                        streamErrorReport &&
+                        enqueueSafely(
+                            controller,
+                            buildChatStreamTrailerChunk({
+                                searchMetadata: null,
+                                errorReport: streamErrorReport,
+                            })
+                        )
+                    ) {
+                        // Nothing may write after the trailer, and the error
+                        // waits for the pull that follows it.
+                        stopFirstTokenWatch();
+                        pendingStreamError = { error };
+                        await releaseSafely();
+                        return;
+                    }
                     errorSafely(controller, error);
                     await releaseSafely();
                 }
@@ -8648,7 +8803,15 @@ async function handleChatPost(
                                 storageStatus: 404,
                                 retryable: false,
                             }
-                          : {}),
+                          : error.code === "ATTACHMENT_TEXT_TOO_LARGE" ||
+                              error.code === "CHAT_INPUT_TOKEN_LIMIT"
+                            ? {
+                                  // Ours, and the same request is refused again.
+                                  phase: "request_size",
+                                  failureLayer: "application",
+                                  retryable: false,
+                              }
+                            : {}),
                 });
                 if (grant.errorReportToken) {
                     accessError.headers.set(

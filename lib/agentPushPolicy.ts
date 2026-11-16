@@ -57,17 +57,15 @@ export type ChangedEntry = {
   newText: string;
 };
 
-/** Proposed values (policy §9-5); fixed by revision before shadow. */
-export const PUSH_LIMITS = {
-  maxFiles: 5,
-  maxChangedLines: 300,
-  maxFileBytes: 200 * 1024,
-} as const;
-
-export const T1_EXTENSIONS = [".ts", ".tsx", ".mjs", ".js", ".css", ".md", ".json"] as const;
-
-/** `.json` is text data the agent may write only for locales and fixtures. */
-const JSON_ALLOWED_PREFIXES = ["locales/", "tests/fixtures/"];
+/*
+ * No size, count or extension rule (owner decision 2026-11-15: an internal
+ * development flow, limited only by what it must protect). Until then T1 took
+ * at most five files, 300 changed lines and 200 KiB a file, of seven
+ * extensions, with `.json` only under locales/ and tests/fixtures/. What a
+ * change may reach is judged by its paths -- control plane, credential
+ * reachability, the control-plane slice, policy tests, framework entry
+ * points -- and by what it contains, not by how big it is.
+ */
 
 /** Next's file-based entry points, and files named as configuration. */
 const ENTRY_CONVENTION_NAMES = [
@@ -108,7 +106,7 @@ const RUNTIME_DISCOVERY_PATTERNS: ReadonlyArray<readonly [RegExp, string]> = [
  * control-plane files they are an alarm: the rule never narrows the path list,
  * it only adds T2 to changes the list would have let through.
  */
-const DECISION_VALUE_ALARMS: readonly RegExp[] = [
+export const DECISION_VALUE_ALARMS: readonly RegExp[] = [
   /\bcreditWeight\b/,
   /\bmaxOutputTokens\b/,
   /\breservationOutputTokens\b/,
@@ -131,22 +129,18 @@ export type T2Reason =
   | "gitlink"
   | "executable_bit"
   | "not_a_blob"
-  | "extension_not_allowed"
-  | "json_outside_data_paths"
   | "policy_named_test"
   | "policy_test_name"
   | "entry_convention"
   | "runtime_discovery"
   | "decision_value_alarm"
-  | "too_many_files"
-  | "too_many_lines"
-  | "file_too_large"
   | "empty_change"
   | "credential_reachable"
   | "credential_analysis_failed"
   | "control_plane_slice"
   | "slice_analysis_failed"
-  | "convention_version_mismatch";
+  | "convention_version_mismatch"
+  | "unsupported_tree_change";
 
 export type PushFinding = { reason: T2Reason; path: string | null; detail?: string };
 
@@ -167,17 +161,18 @@ export type TierInput = {
    * reads. Checked against both sides of every change.
    */
   slice: { status: "analysed"; slicePaths: ReadonlySet<string> } | { status: "failed" };
+  /**
+   * What tree verification reports it does not support (a path
+   * `.gitattributes` applies to, a nested `.gitattributes`, a submodule):
+   * a person reads such a change, so each is a T2 finding rather than a
+   * refusal (owner decision 2026-11-15).
+   */
+  unsupported?: ReadonlyArray<{ reason: string; path: string | null }>;
 };
 
 export type TierVerdict =
   | { tier: "T1"; findings: [] }
   | { tier: "T2"; findings: PushFinding[] };
-
-const extensionOf = (path: string) => {
-  const base = path.slice(path.lastIndexOf("/") + 1);
-  const dot = base.lastIndexOf(".");
-  return dot <= 0 ? "" : base.slice(dot).toLowerCase();
-};
 
 const basenameOf = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 
@@ -237,19 +232,6 @@ const entryChecks = (entry: ChangedEntry, input: TierInput): PushFinding[] => {
   if (entry.status !== "deleted") {
     if (entry.newType !== "blob") findings.push({ reason: "not_a_blob", path: entry.path });
     if (!entry.isText) findings.push({ reason: "not_text", path: entry.path });
-    if (entry.sizeBytes > PUSH_LIMITS.maxFileBytes) {
-      findings.push({ reason: "file_too_large", path: entry.path });
-    }
-
-    const extension = extensionOf(entry.path);
-    if (!(T1_EXTENSIONS as readonly string[]).includes(extension)) {
-      findings.push({ reason: "extension_not_allowed", path: entry.path, detail: extension });
-    } else if (
-      extension === ".json" &&
-      !JSON_ALLOWED_PREFIXES.some((prefix) => entry.path.startsWith(prefix))
-    ) {
-      findings.push({ reason: "json_outside_data_paths", path: entry.path });
-    }
 
     // A new file at a framework convention runs without anything importing it.
     if (
@@ -303,16 +285,6 @@ export const decideTier = (input: TierInput): TierVerdict => {
   const findings: PushFinding[] = [];
 
   if (input.changes.length === 0) findings.push({ reason: "empty_change", path: null });
-  if (input.changes.length > PUSH_LIMITS.maxFiles) {
-    findings.push({ reason: "too_many_files", path: null, detail: String(input.changes.length) });
-  }
-  const changedLines = input.changes.reduce(
-    (sum, entry) => sum + entry.addedLines + entry.removedLines,
-    0,
-  );
-  if (changedLines > PUSH_LIMITS.maxChangedLines) {
-    findings.push({ reason: "too_many_lines", path: null, detail: String(changedLines) });
-  }
 
   for (const [name, recorded] of Object.entries(CONVENTION_VERSIONS)) {
     const installed = input.installedVersions[name as keyof typeof CONVENTION_VERSIONS];
@@ -336,6 +308,9 @@ export const decideTier = (input: TierInput): TierVerdict => {
   }
 
   for (const entry of input.changes) findings.push(...entryChecks(entry, input));
+  for (const item of input.unsupported ?? []) {
+    findings.push({ reason: "unsupported_tree_change", path: item.path, detail: item.reason });
+  }
 
   return findings.length === 0 ? { tier: "T1", findings: [] } : { tier: "T2", findings };
 };

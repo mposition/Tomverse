@@ -8,7 +8,7 @@ import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { assertRecentAdminAuthentication, isAdminReauthenticationError } from "@/lib/adminReauthentication";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedText } from "@/lib/apiSecurity";
-import { inspectAmuxIdeaInput, AMUX_IDEA_INPUT_ENVELOPE_MAX_BYTES } from "@/lib/amux/ideaInputCore";
+import { inspectAmuxIdeaInput, amuxIdeaInputEnvelopeMaxBytes } from "@/lib/amux/ideaInputCore";
 import { authOptions } from "@/lib/auth";
 
 const noStore = { "Cache-Control": "private, no-store, max-age=0" };
@@ -46,7 +46,7 @@ export async function POST(request: Request) {
       minute: 10,
       day: 100,
     });
-    const raw = await readLimitedText(request, AMUX_IDEA_INPUT_ENVELOPE_MAX_BYTES);
+    const raw = await readLimitedText(request, amuxIdeaInputEnvelopeMaxBytes());
     const inspected = inspectAmuxIdeaInput(raw);
     const auditOutcome = inspected.ok
       ? "accepted"

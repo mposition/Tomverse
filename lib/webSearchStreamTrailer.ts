@@ -58,7 +58,22 @@ export type ChatStreamTrailer = {
    */
   artifacts?: ChatStreamArtifact[];
   fileGenerationRetry?: { modelId: string };
+  /**
+   * The signed error report token for a turn the server itself judged failed
+   * after the 200 stream had started (an empty answer, a stream that broke),
+   * and the server's own code for it
+   * (docs/policy/trace-feedback-automation.md section 3.3).
+   *
+   * Here because the response headers were sent before the failure existed.
+   * The client keeps it in memory for the one feedback submission it
+   * authenticates and nowhere else; it is never part of a stored message.
+   * Absent on every turn that completed or that the user stopped.
+   */
+  errorReport?: { token: string; code: string };
 };
+
+const ERROR_REPORT_TOKEN_MAX_LENGTH = 2_048;
+const ERROR_REPORT_CODE_PATTERN = /^[A-Za-z0-9_.-]{1,160}$/;
 
 export function buildChatStreamTrailerChunk(trailer: ChatStreamTrailer): string {
   return buildSearchMetadataTrailerChunk(trailer);
@@ -90,7 +105,8 @@ export function parseChatStreamTrailer(
     !("searchMetadata" in record) &&
     !("completion" in record) &&
     !("artifacts" in record) &&
-    !("fileGenerationRetry" in record)
+    !("fileGenerationRetry" in record) &&
+    !("errorReport" in record)
   ) {
     return { searchMetadata: projectResearchSearchMetadata(parsed) };
   }
@@ -105,7 +121,25 @@ export function parseChatStreamTrailer(
     fileGenerationRetry && typeof fileGenerationRetry === "object"
       ? (fileGenerationRetry as Record<string, unknown>)
       : null;
+  const errorReport = record.errorReport;
+  const errorReportRecord =
+    errorReport && typeof errorReport === "object"
+      ? (errorReport as Record<string, unknown>)
+      : null;
   return {
+    ...(errorReportRecord &&
+    typeof errorReportRecord.token === "string" &&
+    errorReportRecord.token.length > 0 &&
+    errorReportRecord.token.length <= ERROR_REPORT_TOKEN_MAX_LENGTH &&
+    typeof errorReportRecord.code === "string" &&
+    ERROR_REPORT_CODE_PATTERN.test(errorReportRecord.code)
+      ? {
+          errorReport: {
+            token: errorReportRecord.token,
+            code: errorReportRecord.code,
+          },
+        }
+      : {}),
     searchMetadata: projectResearchSearchMetadata(record.searchMetadata ?? null),
     ...(parseContinuationReceipt(record.continuationReceipt) ? { continuationReceipt: parseContinuationReceipt(record.continuationReceipt) } : {}),
     ...(completionRecord && isChatCompletionStatus(completionRecord.status)

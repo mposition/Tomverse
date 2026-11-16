@@ -9,6 +9,7 @@ import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
 import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
+import { DM_OPERATOR_ANSWER_MAX_BYTES } from "@/lib/amux/decisionMakerBodyCore";
 import {
   AMUX_DB_BOUNDARIES,
   AmuxDbBoundaryError,
@@ -84,11 +85,12 @@ const bodySchema = z
       })
       .strict()
       .optional(),
-    operatorAnswer: z.string().max(8192).optional(),
+    // The body store's cap (DM_OPERATOR_ANSWER_MAX_BYTES, 256 KiB of UTF-8) decides; this only bounds the read.
+    operatorAnswer: z.string().max(DM_OPERATOR_ANSWER_MAX_BYTES).optional(),
   })
   .strict();
 
-const BODY_LIMIT_BYTES = 40 * 1024;
+const BODY_LIMIT_BYTES = 2 * DM_OPERATOR_ANSWER_MAX_BYTES;
 
 export async function POST(request: Request) {
   return withAmuxRouteBudget(async () => {

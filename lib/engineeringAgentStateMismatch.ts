@@ -161,8 +161,11 @@ const ALLOWED_ACTIONS: Readonly<Record<MismatchKind, readonly MismatchAction[]>>
   D: ["retry_lookup", "close_domain_after_verified_no_write", "escalate_incident"],
 };
 
-/** Recurrences of the same target and combination before only escalation is left (proposed). */
-export const MISMATCH_RECURRENCE_LIMIT = 2;
+// There is no recurrence limit (owner decision 2026-11-15: "내부 개발용 Flow
+// 입니다. 제한을 줄 이유가 없습니다"). The proposed limit of two, after which
+// only an incident escalation was left, was never counted -- the store passed
+// zero -- and a mismatch now holds only its own card, so a recurring one
+// costs that card, not the agent.
 
 export type ActionInput = {
   kind: MismatchKind;
@@ -188,7 +191,6 @@ export type ActionInput = {
    * number of the item's own current binding for the card's latest attempt.
    */
   boundReviewPrRecorded: boolean;
-  recurrences: number;
 };
 
 export type ActionVerdict =
@@ -204,9 +206,6 @@ const deny = (reason: string): ActionVerdict => ({ allowed: false, reason });
  */
 export const decideMismatchAction = (input: ActionInput): ActionVerdict => {
   if (!input.reReadMatchesDetection) return deny("state_changed_since_detection");
-  if (input.recurrences >= MISMATCH_RECURRENCE_LIMIT && input.action !== "escalate_incident") {
-    return deny("recurred_only_escalation_left");
-  }
   if (!ALLOWED_ACTIONS[input.kind].includes(input.action)) return deny("action_not_allowed_for_kind");
 
   switch (input.kind) {

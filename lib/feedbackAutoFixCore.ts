@@ -97,6 +97,16 @@ export type AutoFixClassification =
  * application defect -- observed, never auto-fixed. */
 const PROVIDER_SIDE_CODE_PREFIXES = ["AI_EMPTY_RESPONSE", "DEEP_RESEARCH_JOB"];
 
+/**
+ * Evidence layers that say the failure was raised on this side of the
+ * provider boundary (lib/chatFailureLayer.ts). An empty answer is usually the
+ * provider's, but one caused by this process -- a write to a stream controller
+ * it had already closed -- carries the same code root and is exactly the case
+ * worth a fix. The layer the server recorded tells the two apart; the code
+ * alone cannot.
+ */
+const LOCAL_FAILURE_LAYERS = ["application", "storage"];
+
 export type AutoFixClassificationInput = {
   errorReportVerification: string | null;
   errorClassificationSource: string | null;
@@ -106,6 +116,8 @@ export type AutoFixClassificationInput = {
     errorCode: string | null;
     retryable: boolean | null;
     httpStatus: number | null;
+    /** One of CHAT_FAILURE_LAYERS, when the server recorded one. */
+    failureLayer?: string | null;
   } | null;
 };
 
@@ -156,9 +168,13 @@ export const classifyAutoFixCase = (
     };
   }
   const code = input.evidence.errorCode || "";
+  const raisedLocally = LOCAL_FAILURE_LAYERS.includes(
+    input.evidence.failureLayer || ""
+  );
   if (
-    input.evidence.retryable === true ||
-    PROVIDER_SIDE_CODE_PREFIXES.some((prefix) => code.startsWith(prefix))
+    !raisedLocally &&
+    (input.evidence.retryable === true ||
+      PROVIDER_SIDE_CODE_PREFIXES.some((prefix) => code.startsWith(prefix)))
   ) {
     return {
       classification: AUTOFIX_CLASSIFICATION.providerTransient,

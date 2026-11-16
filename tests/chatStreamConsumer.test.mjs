@@ -573,3 +573,49 @@ test("a settled turn leaves no timer armed, on every path", async () => {
   // `finally` is then a no-op rather than the thing that saves it.
   assert.equal(timedOut.pendingCount(), 0);
 });
+
+/* ------------------------------------------- a stream the server failed ---- */
+
+test("a stream that breaks after its error-report trailer hands the trailer over before rethrowing", async () => {
+  const stream = scriptedStream();
+  const interrupted = [];
+  const run = consumeChatStream({
+    reader: stream.reader,
+    liveness: { noteKeepalive: () => undefined, noteVisibleChunk: () => undefined },
+    onProgress: () => undefined,
+    onInterrupted: (json) => interrupted.push(json),
+  });
+  stream.push("Half an answer");
+  stream.push(
+    buildChatStreamTrailerChunk({
+      searchMetadata: null,
+      errorReport: { token: "terr1.payload.signature", code: "AI_STREAM_FAILED.ECONNRESET" },
+    })
+  );
+  await flush();
+  stream.fail(new TypeError("network error"));
+  await assert.rejects(run, /network error/);
+
+  assert.equal(interrupted.length, 1);
+  assert.deepEqual(parseChatStreamTrailer(interrupted[0]).errorReport, {
+    token: "terr1.payload.signature",
+    code: "AI_STREAM_FAILED.ECONNRESET",
+  });
+});
+
+test("a connection that simply drops has no trailer to hand over", async () => {
+  const stream = scriptedStream();
+  const interrupted = [];
+  const run = consumeChatStream({
+    reader: stream.reader,
+    liveness: { noteKeepalive: () => undefined, noteVisibleChunk: () => undefined },
+    onProgress: () => undefined,
+    onInterrupted: (json) => interrupted.push(json),
+  });
+  stream.push("Half an answer");
+  await flush();
+  stream.fail(new TypeError("network error"));
+  await assert.rejects(run, /network error/);
+  // Unverified, exactly as before: nothing the server signed ever arrived.
+  assert.deepEqual(interrupted, [null]);
+});

@@ -34,6 +34,7 @@ import { commitAmuxDueSessionAnalysisResultPurge,
   "@/lib/amux/ideaSessionAnalysisResultRetention";
 import { purgeDueAmuxOrphanSessionResultKeys } from
   "@/lib/amux/ideaSessionAnalysisResultOrphanRetention";
+import { amuxSessionContentRetentionDays } from "@/lib/amux/ideaRetentionCore";
 import { readAmuxIdeaProgressForOwner } from "@/lib/amux/ideaProgressRead";
 import { commitAmuxIdeaSessionCancellation,
   readAmuxIdeaSessionCancellationReceipt,
@@ -311,8 +312,8 @@ test("session submission encrypts idea and provenance under the scope owner with
   assert.equal(row.sessionOperatingScopeSettingId, authority.settingId);
   assert.equal(row.submissionAuditLogId, audit.id);
   // The session path stores the same plaintext list title as the owner path.
-  assert.ok(row.title?.startsWith("Synthetic session idea " + committedIdeaId));
-  assert.ok(Array.from(row.title ?? "").length <= 80);
+  // Owner direction 2026-11-15: the whole first line, with no 80-character cut.
+  assert.equal(row.title, "Synthetic session idea " + committedIdeaId + oversizedIdeaTail);
   assert.equal(row.sourceProvenanceKeyId, row.rawKeyId);
   assert.equal(row.sourceProvenanceKeyVersion, row.rawKeyVersion);
   assert.notEqual(row.sourceProvenanceDigest, row.rawDigest);
@@ -1600,7 +1601,7 @@ test("a verified first chunk remains eligible for a second budgeted invocation",
   }), (error: unknown) => error === rollback);
 });
 
-test("three session CLI failures stop the shared Agent-wide claim breaker", async () => {
+test("three session CLI failures do not stop the next session claim", async () => {
   const price = await prisma.amuxIdeaAnalysisPriceVersion.findFirstOrThrow({
     where: { modelId, mode: "subscription_cli", status: "approved" },
     select: { id: true },
@@ -1632,14 +1633,17 @@ test("three session CLI failures stop the shared Agent-wide claim breaker", asyn
       });
       assert.equal(outcome.status, "failed");
     }
-    assert.equal(await readAmuxIdeaAnalysisFailureStreak(tx), "stopped");
-    await assert.rejects(commitAmuxSessionBudgetClaim(tx, {
+    // Owner direction 2026-11-15: a failure streak stops only the paid path;
+    // the subscription session's next claim simply runs.
+    assert.equal(await readAmuxIdeaAnalysisFailureStreak(tx), "ready");
+    assert.equal(await readAmuxIdeaAnalysisFailureStreak(tx, "session"), "ready");
+    const next = await commitAmuxSessionBudgetClaim(tx, {
       claimId: randomUUID(), requestId: randomUUID(),
       reservationId: reservations[3]!, invocationOrdinal: 0,
       priceVersionId: price.id,
       runner: { tokenCapsEnforceable: true, billableToolsDisabled: true },
-    }), (error: unknown) => error instanceof AmuxSessionBudgetClaimError &&
-      error.code === "not_ready");
+    });
+    assert.ok(next.claimId);
     throw rollback;
   }), (error: unknown) => error === rollback);
 });
@@ -2079,6 +2083,20 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
       else process.env[name] = oldEnv[name];
     }
   }
+  // Owner direction 2026-11-15: the result arrives eight days after intake. A
+  // new idea's hundred-year deadline keeps it open, so the result guard, which
+  // also refused a fixed seven days after submission, admits it now.
+  await prisma.$transaction(async (tx) => {
+    const row = await tx.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: ideaId },
+      select: { submittedAt: true, analysisDeadlineAt: true } });
+    const eightDaysAgo = new Date(row.submittedAt.getTime() - 8 * 24 * 60 * 60_000);
+    const shifted = new Date(row.analysisDeadlineAt.getTime() - 8 * 24 * 60 * 60_000);
+    assert.ok(shifted.getTime() - eightDaysAgo.getTime() > 365 * 24 * 60 * 60_000);
+    await tx.$executeRawUnsafe('ALTER TABLE "AmuxIdeaSubmission" DISABLE TRIGGER "AmuxIdeaSubmission_identity_guard"');
+    await tx.amuxIdeaSubmission.update({ where: { id: ideaId }, data: {
+      submittedAt: eightDaysAgo, analysisDeadlineAt: shifted, rawPurgeAfter: shifted } });
+    await tx.$executeRawUnsafe('ALTER TABLE "AmuxIdeaSubmission" ENABLE TRIGGER "AmuxIdeaSubmission_identity_guard"');
+  });
   const before = await prisma.$transaction((tx) => readAnalysisBudgetSnapshot(tx));
   assert.equal(BigInt(before.spentMicroUsd) + BigInt(before.reservedMicroUsd),
     BigInt(before.limitMicroUsd));
@@ -2301,7 +2319,10 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
   assert.deepEqual(await purgeDueAmuxOrphanSessionResultKeys(async () => {
     throw new Error("premature orphan retirement");
   }), { keysDeleted: 0, scanned: 0, batchLimit: 8 });
-  const oldSubmission = new Date(Date.now() - 8 * 24 * 60 * 60_000);
+  // Past the ninety-day content retention (owner direction 2026-11-15), with
+  // the seven-day deadline of a row written before it: the analysis has ended.
+  const oldSubmission = new Date(Date.now() -
+    (amuxSessionContentRetentionDays() + 1) * 24 * 60 * 60_000);
   const oldDeadline = new Date(oldSubmission.getTime() + 7 * 24 * 60 * 60_000);
   // Synthetic clock advancement only in this disposable test DB. The real
   // identity trigger is restored before exercising the retention guards.

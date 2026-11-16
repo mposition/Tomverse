@@ -8,6 +8,7 @@ import { ENGINEERING_AGENT_POLICY_VERSION,
 import { EngineeringAgentStoreRefusedError,
   expireEngineeringAgentV22LapsedPublish,
   readEngineeringAgentOwnerQueues,
+  rejudgeEngineeringAgentV22DraftsAfterDeploy,
   runEngineeringAgentTransaction } from "@/lib/engineeringAgentStore";
 import { loadEngineeringAgentV22Candidate } from
   "@/lib/engineeringAgentV22CandidateLoad";
@@ -33,8 +34,10 @@ type Ports = {
   prQueueFull: () => Promise<boolean>;
   loadStored: (item: Pending, still: () => Promise<boolean>,
     onStage: (stage: Stage) => void) => Promise<Stored>;
-  /** Evidence reads that threw, by pending draft, in this process. */
-  failures: Map<string, number>;
+  /** Evidence reads that threw, by pending draft, in this process: how many
+   * in a row, and when the draft may be read again. */
+  failures: Map<string, { attempt: number; retryAt: number }>;
+  now?: () => number;
   stillLapsed: (item: Lapsed) => Promise<boolean>;
   stillPending: (item: Pending) => Promise<boolean>;
   reissue: (input: Parameters<typeof reissueEngineeringAgentV22Capability>[1]) =>
@@ -43,14 +46,27 @@ type Ports = {
   resolve: (input: Parameters<typeof resolveEngineeringAgentV22Product>[1]) =>
     ReturnType<typeof resolveEngineeringAgentV22Product>;
   reviewPrEnabled: () => boolean;
+  /** Once per process, before its first round: drafts kept private by the
+   * code that ran before it go back to `tier_pending` (the count, or null
+   * when already done). */
+  rejudgeAfterDeploy?: () => Promise<number | null>;
 };
 
 const REASON = /^[a-z_]{1,64}$/;
-/** Rounds a pending draft's evidence read may throw before the draft is kept
- * private as `tier_evidence_unavailable`. A throw (GitHub or the database
- * unreachable, say) is not a verdict; one that repeats every round is. */
-export const ENGINEERING_AGENT_V22_TIER_EVIDENCE_ATTEMPTS = 3;
-/** Drafts whose failures are remembered at once; the oldest is forgotten. */
+/** A pending draft whose evidence read throws (GitHub or the database
+ * unreachable, its rate limit, say) is never kept private for it: a throw is
+ * not a verdict. It waits this long after its first failure, twice as long
+ * after each next one, up to the ceiling, and is read again (owner decision
+ * 2026-11-15; until then a third failure kept it as
+ * `tier_evidence_unavailable`). */
+export const ENGINEERING_AGENT_V22_TIER_EVIDENCE_BACKOFF_MS = 5 * 60_000;
+export const ENGINEERING_AGENT_V22_TIER_EVIDENCE_BACKOFF_MAX_MS = 6 * 60 * 60_000;
+const backoff = (attempt: number) => Math.min(
+  ENGINEERING_AGENT_V22_TIER_EVIDENCE_BACKOFF_MS * 2 ** Math.min(attempt - 1, 20),
+  ENGINEERING_AGENT_V22_TIER_EVIDENCE_BACKOFF_MAX_MS);
+/** Drafts whose failures are remembered at once; the oldest is forgotten
+ * (it is then read as if it had not failed: a memory bound, not a limit on
+ * attempts). */
 const FAILURES_REMEMBERED = 32;
 const SAFE = /^[A-Za-z0-9_.:-]{1,64}$/;
 
@@ -136,8 +152,27 @@ const loadStored = (item: Pending, still: () => Promise<boolean>,
       loadEngineeringAgentV22Candidate({ ...input, onDevelop: true }),
   });
 
+const PROCESS_STARTED_AT = new Date();
+const REJUDGE_BATCH = 100;
+let rejudgedAfterDeploy = false;
+
+/** The drafts an earlier deploy kept private without a verdict, judged
+ * again by this one (owner decision 2026-11-15). A batch that comes back
+ * full leaves the rest for the next round. */
+async function rejudgeAfterDeploy(): Promise<number | null> {
+  if (rejudgedAfterDeploy) return null;
+  const { workItemIds } = await runEngineeringAgentTransaction(prisma,
+    (tx) => rejudgeEngineeringAgentV22DraftsAfterDeploy(tx,
+      { before: PROCESS_STARTED_AT, limit: REJUDGE_BATCH }));
+  rejudgedAfterDeploy = workItemIds.length < REJUDGE_BATCH;
+  if (workItemIds.length > 0) console.info(JSON.stringify({
+    subsystem: "engineering_agent", event: "v22_tier_rejudge_after_deploy",
+    count: workItemIds.length }));
+  return workItemIds.length;
+}
+
 const livePorts: Ports = {
-  readLapsed, readPending, loadStored, failures: new Map(),
+  readLapsed, readPending, loadStored, failures: new Map(), rejudgeAfterDeploy,
   stillLapsed: async (item) => (await prisma.engineeringAgentWorkItem.count({
     where: { id: item.workItemId, ...lapsedWhere() } })) === 1,
   stillPending: async (item) => (await prisma.engineeringAgentWorkItem.count({
@@ -195,15 +230,16 @@ const reviewCandidate = (item: Pending, stored: Stored | null) =>
  * database still refuses becomes an ordinary draft, so no draft is read
  * again and again. A failure to reach the database leaves it pending. A
  * draft whose evidence read throws stays pending, behind the other drafts,
- * for `ENGINEERING_AGENT_V22_TIER_EVIDENCE_ATTEMPTS` rounds of this process,
- * and is then kept private as `tier_evidence_unavailable`; each round names
- * the failure's class, code and step. */
+ * and is read again after its backoff, however many times it fails; each
+ * round names the failure's class, code and step. */
 export async function promoteEngineeringAgentV22Draft(
   ports: Ports = livePorts,
 ): Promise<{ outcome: "none" | "waiting" | "promoted" | "review_promoted" |
-  "kept" | "stale" | "reissued" | "reissue_refused" | "retry";
+  "kept" | "stale" | "reissued" | "reissue_refused" | "retry" | "backoff";
   reason?: string; workItemId?: string; attempt?: number;
   stage?: Stage; error?: string; code?: string | null }> {
+  // A failure here leaves the drafts as they are for the next round.
+  await ports.rejudgeAfterDeploy?.().catch(() => null);
   const lapsed = await ports.readLapsed();
   if (lapsed) {
     const { stored, failure } = await readStored(ports, lapsed,
@@ -227,16 +263,24 @@ export async function promoteEngineeringAgentV22Draft(
       baseSha: lapsed.baseSha, candidate });
     return { outcome: "reissued" };
   }
-  const pending = await ports.readPending(new Set(ports.failures.keys()));
+  const now = ports.now?.() ?? Date.now();
+  // Only a draft still waiting out its backoff goes behind the others.
+  const pending = await ports.readPending(new Set([...ports.failures]
+    .filter(([, failed]) => failed.retryAt > now).map(([id]) => id)));
   if (!pending) return { outcome: "none" };
+  const waiting = ports.failures.get(pending.workItemId);
+  // Every pending draft is waiting out a failure: none is read this round.
+  if (waiting && waiting.retryAt > now) return { outcome: "backoff",
+    workItemId: pending.workItemId, attempt: waiting.attempt };
   if (await ports.prQueueFull()) return { outcome: "waiting" };
   const { stored, failure } = await readStored(ports, pending,
     () => ports.stillPending(pending));
-  const attempt = (ports.failures.get(pending.workItemId) ?? 0) + 1;
+  const attempt = (waiting?.attempt ?? 0) + 1;
   ports.failures.delete(pending.workItemId);
-  if (failure && attempt < ENGINEERING_AGENT_V22_TIER_EVIDENCE_ATTEMPTS) {
+  if (failure) {
     // Re-set last, so the oldest remembered failure is the one forgotten.
-    ports.failures.set(pending.workItemId, attempt);
+    ports.failures.set(pending.workItemId,
+      { attempt, retryAt: now + backoff(attempt) });
     for (const id of ports.failures.keys()) {
       if (ports.failures.size <= FAILURES_REMEMBERED) break;
       ports.failures.delete(id);
@@ -258,8 +302,7 @@ export async function promoteEngineeringAgentV22Draft(
     baseSha: pending.baseSha };
   const keep = async (why: string) => {
     const kept = await ports.resolve({ ...draft, reason: why, candidate: null });
-    return "kept" in kept && kept.kept ? { outcome: "kept" as const, reason: why,
-      ...(failure ? { workItemId: pending.workItemId, attempt, ...failure } : {}) } :
+    return "kept" in kept && kept.kept ? { outcome: "kept" as const, reason: why } :
       { outcome: "stale" as const };
   };
   if (!candidate) return keep(reason);

@@ -1,4 +1,5 @@
 import type { AmuxAnalysisCard, AmuxAnalysisNode } from "./ideaAnalysisChunkCore.ts";
+import { amuxIntakeCap } from "./intakeLimitsCore.ts";
 import { inspectAmuxHierarchyChoices, type AmuxHierarchyChoice,
   type AmuxHierarchySnapshotNode } from "./ideaHierarchyDecisionCore.ts";
 
@@ -79,9 +80,11 @@ export function inspectAmuxResolutionChoices(input: {
   if (!input || !Array.isArray(input.nodes) || !Array.isArray(input.cards) ||
       !Array.isArray(input.nodeChoices) || !Array.isArray(input.cardChoices) ||
       !Array.isArray(input.existingNodes) || !Array.isArray(input.existingCards) ||
-      input.nodes.length > 40 || input.cards.length > 40 ||
-      input.nodeChoices.length > 40 || input.cardChoices.length > 40 ||
-      input.existingNodes.length > 1_000 || input.existingCards.length > 1_000) {
+      // Former counts, kept only under TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS.
+      input.nodes.length > amuxIntakeCap(40) || input.cards.length > amuxIntakeCap(40) ||
+      input.nodeChoices.length > amuxIntakeCap(40) || input.cardChoices.length > amuxIntakeCap(40) ||
+      input.existingNodes.length > amuxIntakeCap(1_000) ||
+      input.existingCards.length > amuxIntakeCap(1_000)) {
     return { ok: false, code: "invalid_input" };
   }
   const nodeIds = new Set<string>();
@@ -156,7 +159,7 @@ export function inspectAmuxResolutionChoices(input: {
     if (!choice || !validRef(choice.proposalLocalId) ||
         !cards.has(choice.proposalLocalId) || choices.has(choice.proposalLocalId) ||
         !["register", "link_existing", "split", "merge", "reject"].includes(choice.action) ||
-        !Array.isArray(choice.relatedLocalRefs) || choice.relatedLocalRefs.length > 40 ||
+        !Array.isArray(choice.relatedLocalRefs) || choice.relatedLocalRefs.length > amuxIntakeCap(40) ||
         choice.relatedLocalRefs.some((ref: unknown) => !validRef(ref)) ||
         new Set(choice.relatedLocalRefs).size !== choice.relatedLocalRefs.length ||
         (choice.reason !== null && !validReason(choice.reason)) ||

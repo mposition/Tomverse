@@ -3,18 +3,23 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { openAmuxContent, verifyAmuxContentDigest } from "./ideaCrypto.ts";
 import { loadAmuxContentUnitKeys } from "./ideaKeyStore.ts";
+import { amuxSessionContentRetentionDays } from "./ideaRetentionCore.ts";
 import { classifyAmuxSessionReviewAnswer, type AmuxSessionReview } from
   "./ideaSessionReviewCore.ts";
 import { amuxSessionReviewFirstPageDetail } from "./ideaSessionReviewDetailCore.ts";
 
-/** The answer stays readable for seven days after intake, or while an active
- * legal hold covers the idea; the retention worker's lag never extends it. */
+/** The answer stays readable until its purge is due -- its retention after
+ * intake has passed and the analysis has ended (ideaRetentionCore.ts) -- or
+ * while an active legal hold covers the idea; the retention worker's lag
+ * never extends it. */
 async function ownerMayReadAnswer(actorUserId: string, ideaId: string,
   claimId: string): Promise<boolean> {
   const rows = await prisma.$queryRaw<Array<{ allowed: boolean }>>`
     WITH clock AS (SELECT (clock_timestamp() AT TIME ZONE 'UTC') AS "now")
     SELECT (r."bodyPurgedAt" IS NULL AND r."ciphertext" IS NOT NULL AND
-      (i."submittedAt" + INTERVAL '7 days' > clock."now" OR
+      (i."submittedAt" + ${amuxSessionContentRetentionDays()}::integer * INTERVAL '1 day' > clock."now" OR
+        (i."analysisCompletedAt" IS NULL AND i."cancelledAt" IS NULL AND
+          i."analysisDeadlineAt" > clock."now") OR
         EXISTS (SELECT 1 FROM "AmuxIdeaRetentionHold" h
           WHERE h."ideaId" = i."id" AND h."releasedAt" IS NULL
             AND h."expiresAt" > clock."now"))) AS "allowed"
