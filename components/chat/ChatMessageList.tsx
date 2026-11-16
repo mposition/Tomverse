@@ -1763,9 +1763,11 @@ export function ChatMessageList({
                             picker here, so the "try another model" hint below
                             is an action rather than only advice. Nothing is
                             sent: the next turn stays the user's submission.
+                            When the transcript wires onChooseAnotherModel, that
+                            button below is the one picker, so this one stays out.
                           */}
                           {(errorCategory === "generic" || errorCategory === "attachment") &&
-                            !onRetryLast && onRestoreQuestion && onRequestCloseModel && (
+                            !onRetryLast && !onChooseAnotherModel && onRestoreQuestion && onRequestCloseModel && (
                               <button
                                 type="button"
                                 data-testid="chat-error-choose-model"
