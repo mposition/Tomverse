@@ -16,9 +16,7 @@ import { AMUX_SESSION_SYSTEM_CLOSURE } from "./ideaSessionLateResult.ts";
  * 없습니다."): three failures in a row stop only the paid API path, counted on
  * that path's own settlements. A subscription session is never stopped by a
  * failure streak; its next claim simply runs. A malformed recent audit row
- * still stops both (integrity, not a limit). With
- * (The TOMVERSE_AMUX_INFRA_FAILURE_ROUTING switch that restored the shared
- * breaker was removed, owner decision 2026-11-16.) */
+ * still stops both (integrity, not a limit). */
 export async function readAmuxIdeaAnalysisFailureStreak(
   tx: Prisma.TransactionClient,
   path: "paid" | "session" = "paid",
