@@ -1881,7 +1881,16 @@ export function ChatMessageList({
                           </p>
                         )}
                         {errorAuxiliaryLines.length > 0 && (
-                          <div data-testid="chat-error-auxiliary-info" className="mt-2 space-y-0.5">
+                          // The trace ID already travels with "Report error"
+                          // (msg.errorReport), so it stays folded away until
+                          // someone asks for the diagnostic details.
+                          <details data-testid="chat-error-auxiliary-info" className="mt-2 space-y-0.5">
+                            <summary
+                              data-testid="chat-error-auxiliary-toggle"
+                              className="cursor-pointer text-[11px] leading-4 text-zinc-600 dark:text-zinc-400"
+                            >
+                              {t("chat.errorDiagnostics")}
+                            </summary>
                             {errorAuxiliaryLines.map((line, lineIndex) => (
                               <p
                                 key={lineIndex}
@@ -1898,7 +1907,7 @@ export function ChatMessageList({
                                 {line}
                               </p>
                             ))}
-                          </div>
+                          </details>
                         )}
                       </div>
                     );

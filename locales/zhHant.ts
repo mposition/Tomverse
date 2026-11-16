@@ -409,6 +409,7 @@ export const zhHant = {
         responseIncompleteNotice: "回覆因輸出長度上限而中斷。你可以透過追問繼續。",
         responseFailed: "請求失敗。",
         traceId: "追蹤 ID",
+        errorDiagnostics: "診斷資訊",
         retry: "重試",
         reduceModelCount: "減少模型數量",
         chooseAnotherModel: "選擇其他模型",
