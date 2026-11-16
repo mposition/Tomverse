@@ -168,6 +168,7 @@ const MIN_CONVERSATION_AREA_REM = 4;
 
 type MobileChatShellProps = {
   workspaceNotice?: import("react").ReactNode;
+  continuationNotice?: import("react").ReactNode;
   review?: ReviewWorkspaceControls;
   chatWorkspace?: WorkspaceAppearanceControls;
   /** Current product chrome; switching routes never rewrites this conversation. */
@@ -178,6 +179,7 @@ type MobileChatShellProps = {
   onRestorePrompt?: (prompt: { text: string; attachments: ChatAttachment[]; targetChatId: string }) => void;
   onRetryPrompt?: (prompt: { text: string; attachments: ChatAttachment[]; targetChatId: string }) => void;
   onCompareInReview?: (seed: string) => void;
+  onCompareContinuationInReview?: (assistantMessageId: string) => void;
   conversations: Conversation[];
   currentChatId: string | null;
   selectedModels: string[];
@@ -480,6 +482,7 @@ const mobileModelTabPanelId = (modelId: string) =>
 
 export function MobileChatShell({
   workspaceNotice,
+  continuationNotice,
   review,
   chatWorkspace,
   currentProduct,
@@ -489,6 +492,7 @@ export function MobileChatShell({
   onRestorePrompt,
   onRetryPrompt,
   onCompareInReview,
+  onCompareContinuationInReview,
   conversations,
   currentChatId,
   selectedModels,
@@ -1503,6 +1507,7 @@ export function MobileChatShell({
         </div>
         )}
         {workspaceNotice}
+        {continuationNotice}
       </header>
 
       {/*
@@ -1761,6 +1766,7 @@ export function MobileChatShell({
                   onRestorePrompt={onRestorePrompt}
                   onRetryPrompt={onRetryPrompt}
                   onCompareInReview={onCompareInReview}
+                  onCompareContinuationInReview={onCompareContinuationInReview}
                   hasImportedTranscript={hasImportedTranscript}
                   importedMessages={importedMessages}
                   importedTranscript={importedTranscript}

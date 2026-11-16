@@ -248,6 +248,7 @@ type ChatAppProps = {
   onRetryPrompt?: (prompt: ChatRecoveryPrompt) => void;
   /** Chat: open a Review draft prefilled from one answer's question. */
   onCompareInReview?: (seed: string) => void;
+  onCompareContinuationInReview?: (assistantMessageId: string) => void;
   initialConversationId?: string | null;
   /**
    * The question a composer send is still preparing, drawn at the bottom of
@@ -493,6 +494,7 @@ function ChatAppComponent({
   onRestorePrompt,
   onRetryPrompt,
   onCompareInReview,
+  onCompareContinuationInReview,
   initialConversationId = null,
   sendEcho = null,
   promptPayload,
@@ -3414,12 +3416,14 @@ function ChatAppComponent({
         // In Chat the shell's close-model handler opens the model picker.
         onChooseAnotherModel={transcriptScope === "conversation" ? onRequestCloseModel : undefined}
         // Built from this transcript, which is the one on screen.
-        onCompareInReview={transcriptScope === "conversation" && onCompareInReview
+        onCompareInReview={transcriptScope === "conversation" && (onCompareContinuationInReview || onCompareInReview)
           ? (messageId) => {
+              if (onCompareContinuationInReview) { onCompareContinuationInReview(messageId); return; }
               const seed = reviewSeedFromChat(messages, messageId, t("chat.compareInReviewContext"));
-              if (seed) onCompareInReview(seed);
+              if (seed) onCompareInReview?.(seed);
             }
           : undefined}
+        compareRequiresCompleted={Boolean(onCompareContinuationInReview)}
         // Both scopes: a concurrency refusal is the one failure Chat may
         // resend, since nothing of the refused turn ever ran (see the handler).
         // Without a held retry prompt (after a reload) Chat falls back to

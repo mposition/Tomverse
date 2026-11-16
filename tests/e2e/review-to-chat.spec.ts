@@ -1,10 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
+import { mockReviewHandoffBackground } from "./support/review-handoff-background-fixtures";
 import { mockAuthenticatedApi, prepareGuestPage, expectNoHorizontalOverflow } from "./support/app-fixtures";
 import { mockComparisonReview, mockConversationHistory, reviewModels } from "./support/comparison-review-fixtures";
 
 test.setTimeout(90000);
 
 async function setup(page: Page, baseURL: string, appearance: "studio" | "classic" = "studio") {
+  await mockReviewHandoffBackground(page);
   await prepareGuestPage(page, "ko", appearance, "studio");
   await mockAuthenticatedApi(page, { selectedModels: reviewModels, productKey: "review", extraConversations: [
     { id: "previous-chat", title: "Previous Chat", productKey: "chat", selectedModels: [reviewModels[0]] },

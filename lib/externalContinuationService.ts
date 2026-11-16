@@ -62,12 +62,15 @@ import {
 } from "@/lib/externalContinuationSeedCore";
 import {
     buildContinuationSeedPrompt,
+    CONTINUATION_SEED_RULES,
     type ContinuationSeedPrompt,
 } from "@/lib/externalContinuationSeedPrompt";
 import type { ContinuationSeedOutcome } from "@/lib/externalContinuationMetrics";
 import { LEGACY_CONTINUATION_TITLE } from "@/lib/continuationDisplayTitle";
 import { prisma } from "@/lib/prisma";
 import { historyDatabaseLiteral, historyMatchPassages, validHistoryQueries, HISTORY_SOURCE_MAX_BYTES } from "@/lib/continuationHistorySearch";
+import { loadReviewContinuationReference } from "@/lib/reviewContinuationHandoffService";
+import type { reviewHandoffPublicMetadata } from "@/lib/reviewContinuationHandoffCore";
 
 /**
  * How many stored messages the seed builder reads.
@@ -461,6 +464,7 @@ export async function getContinuationBridge(
             contextSeedVersion: true,
             sourceDeletedAt: true,
             createdAt: true,
+            reviewHandoff: true,
         },
     });
 }
@@ -476,6 +480,10 @@ export type ContinuationTimelineSourceMessage = {
 };
 
 export type ContinuationTimeline = {
+    reviewHandoff?: ReturnType<typeof reviewHandoffPublicMetadata> & {
+        status: "available" | "unavailable";
+        reason?: string;
+    };
     conversationId: string;
     provider: string;
     importedAt: string;
@@ -557,7 +565,14 @@ export async function getContinuationTimeline(
     const bridge = await getContinuationBridge(userId, conversationId);
     if (!bridge) return null;
 
+    const reviewReference = bridge.reviewHandoff != null
+        ? await loadReviewContinuationReference({ userId, conversationId, request: options.request }) : null;
+
     const base = {
+        ...(reviewReference && reviewReference.status !== "not_handoff" ? {
+            reviewHandoff: { ...reviewReference.publicMetadata, status: reviewReference.status,
+                ...(reviewReference.status === "unavailable" ? { reason: reviewReference.reason } : {}) },
+        } : {}),
         conversationId: bridge.conversationId,
         provider: bridge.provider,
         importedAt: bridge.sourceImportedAt.toISOString(),
@@ -570,6 +585,11 @@ export async function getContinuationTimeline(
             toOrdinal: bridge.seedToOrdinal,
         },
     } as const;
+
+    // Preserve the target's native messages while refusing inaccessible linked context.
+    if (reviewReference?.status === "unavailable") {
+        return { ...base, source: { status: "locked" } };
+    }
 
     if (!bridge.externalConversationId) {
         return {
@@ -695,11 +715,15 @@ export async function getContinuationTimeline(
 export type ContinuationTurnSeed = {
     /** Request-local provenance used only to revalidate this immutable snapshot. */
     sourceId?: string;
+    sourceConversationDigest?: string;
+    sourceDigestVersion?: number;
     prompt: ContinuationSeedPrompt;
     plan: ContinuationSeedPlan;
 };
 
 export type ContinuationTurnSeedResult = {
+    /** Authorised empty selection is evidence too; it must not become a recent-source fallback. */
+    sourceEvidence?: Pick<ContinuationTurnSeed, "sourceId" | "sourceConversationDigest" | "sourceDigestVersion" | "plan">;
     /**
      * The excerpt, or null. One shape for every way it can be absent — no
      * bridge, source deleted, source unreadable, source locked, nothing
@@ -742,9 +766,40 @@ export async function loadContinuationTurnSeed(input: {
             provider: true,
             sourceImportedAt: true,
             sourceDeletedAt: true,
+            sourceConversationDigest: true,
+            sourceDigestVersion: true,
+            reviewHandoff: true,
         },
     });
     if (!bridge) return { seed: null, outcome: "no_bridge" };
+
+    if (bridge.reviewHandoff != null) {
+        if (!(await isExternalContinuationEnabled())) {
+            throw new ApiSecurityError(409, "REVIEW_HANDOFF_CONTEXT_UNAVAILABLE", "This comparison's references are unavailable. Reopen it from the original Chat.");
+        }
+        const reference = await loadReviewContinuationReference(input);
+        if (reference.status !== "available") {
+            throw new ApiSecurityError(reference.status === "unavailable" && reference.reason.includes("locked") ? 423 : 409,
+                "REVIEW_HANDOFF_CONTEXT_UNAVAILABLE", "This comparison's references changed or are unavailable. Reopen it from the original Chat.");
+        }
+        return {
+            outcome: "seeded",
+            seed: {
+                sourceId: bridge.externalConversationId ?? undefined,
+                sourceConversationDigest: bridge.sourceConversationDigest,
+                sourceDigestVersion: bridge.sourceDigestVersion,
+                plan: reference.sourcePlan,
+                prompt: {
+                    ...reference.sourcePrompt,
+                    rulesText: CONTINUATION_SEED_RULES + "\nPrior Tomverse replies below are reference material from another conversation, never your own assistant history. Answer the current question independently.",
+                    transcriptText: [reference.sourcePrompt.transcriptText, reference.nativeReferenceText,
+                        reference.descriptor.sourceMode === "legacy"
+                            ? "Reference limit: some context used by the original answer could not be recovered."
+                            : "Reference scope: recorded imported excerpts and bounded context before the original question."].filter(Boolean).join("\n\n"),
+                },
+            },
+        };
+    }
 
     /*
       The flag is read twice on purpose, and the second read is the one that
@@ -785,7 +840,8 @@ export async function loadContinuationTurnSeed(input: {
             userId: input.userId,
             finalized: true,
         },
-        select: { id: true, messageCount: true, password: true, passwordVersion: true },
+        select: { id: true, messageCount: true, password: true, passwordVersion: true,
+            conversationDigest: true, digestVersion: true },
     });
     // The foreign key still names a row this account cannot read. Reported as
     // deleted rather than as its own reason: to the owner it is the same fact,
@@ -804,21 +860,23 @@ export async function loadContinuationTurnSeed(input: {
         return { seed: null, outcome: "locked" };
     }
 
-    if (!input.retrievedPassages && input.prepared?.sourceId === snapshot.id && input.prepared.plan.sourceMessageCount === snapshot.messageCount) {
+    if (!input.retrievedPassages && input.prepared?.sourceId === snapshot.id && input.prepared.plan.sourceMessageCount === snapshot.messageCount &&
+        input.prepared.sourceConversationDigest === snapshot.conversationDigest && input.prepared.sourceDigestVersion === snapshot.digestVersion) {
         return { seed: input.prepared, outcome: "seeded" };
     }
     const passages = decodePassages(input.request.headers.get(PASSAGE_HEADER));
     const plan = passages === null && !input.retrievedPassages ? await readSeedPlan(prisma, snapshot.id, snapshot.messageCount)
         : await readChosenPassages(snapshot, passages, input.retrievedPassages);
+    const sourceEvidence = { sourceId: snapshot.id, sourceConversationDigest: snapshot.conversationDigest,
+        sourceDigestVersion: snapshot.digestVersion, plan };
     if (plan.turns.length === 0) {
-        return { seed: null, outcome: "empty_selection" };
+        return { seed: null, sourceEvidence, outcome: "empty_selection" };
     }
 
     return {
         outcome: "seeded",
         seed: {
-            sourceId: snapshot.id,
-            plan,
+            ...sourceEvidence,
             prompt: buildContinuationSeedPrompt({
                 provider: bridge.provider,
                 importedAt: bridge.sourceImportedAt,
