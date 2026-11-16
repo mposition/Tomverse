@@ -39,3 +39,16 @@ test("English mobile card summary does not repeat access plan and base credits",
   assert.match(desktop, /hidden sm:inline/);
   assert.match(desktop, /Access from: .* Short request: /);
 });
+
+test("model cards fold the technical model ID into details while search still matches it", () => {
+  const start = source.indexOf('data-testid="model-id-details"');
+  assert.ok(start > 0, "model ID details are rendered");
+  const block = source.slice(start, source.indexOf("</details>", start));
+  assert.match(block, /<summary[^>]*>\{filters\.modelId\}<\/summary>/);
+  assert.match(block, /\{model\.id\}/);
+  assert.doesNotMatch(source, /<p[^>]*>\{model\.id\}<\/p>/, "the ID is not shown as a plain line under the name");
+  assert.match(source, /model\.id\.toLowerCase\(\)\.includes\(search\)/);
+  for (const lang of ["en", "ko", "zh", '"zh-Hant"', "fr", "de", "es", "pt"]) {
+    assert.match(source, new RegExp(`  ${lang}: \\{ modelId: "[^"]+", search: `), `${lang} has a model ID label`);
+  }
+});
