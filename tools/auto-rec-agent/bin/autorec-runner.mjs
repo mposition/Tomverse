@@ -163,7 +163,7 @@ function reviewDiagnostic(result) {
     .replace(/\b(?:Bearer|Basic)\s+\S+/gi, "[authorization redacted]")
     .replace(/\b(?:sk-|gh[pousr]_|github_pat_|xox[baprs]-)[A-Za-z0-9_-]+/g, "[credential redacted]")
     .replace(/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, "[access key redacted]")
-    .replace(/((?:token|secret|password|authorization|api[_-]?key)\s*["']?\s*[:=]\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;}]+)/gi, "$1[redacted]")
+    .replace(/((?:token|secret|password|authorization|api[_-]?key)\s*["']?\s*[:=]\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\S+)/gi, "$1[redacted]")
     .replace(/(?:https?|postgres(?:ql)?):\/\/[^\s/@]+:[^\s/@]+@[^\s]+/gi, "[credential URL redacted]")
     .slice(-12_000);
 }
