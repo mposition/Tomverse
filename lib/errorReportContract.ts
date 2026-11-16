@@ -115,6 +115,12 @@ const RECORDABLE_ERROR_CODES = new Set([
   "ATTACHMENT_UNAVAILABLE",
   "ATTACHMENT_STORAGE_UNAVAILABLE",
   "CHAT_APPLICATION_ERROR",
+  // Size refusals of a whole turn. Without a row, trace analysis of a report
+  // of one could only answer "evidence missing" and never tell an intended
+  // limit from a defect (the 2026-11-16 report, a conversation stuck on
+  // ATTACHMENT_TEXT_TOO_LARGE). Operator decision 2026-11-16.
+  "ATTACHMENT_TEXT_TOO_LARGE",
+  "CHAT_INPUT_TOKEN_LIMIT",
 ]);
 
 /**

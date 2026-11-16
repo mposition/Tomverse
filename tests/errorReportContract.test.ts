@@ -78,6 +78,12 @@ test("routine request rejections record nothing new", () => {
   assert.equal(unlisted.record, false);
 });
 
+test("a turn refused for its size leaves evidence trace analysis can read", () => {
+  for (const code of ["ATTACHMENT_TEXT_TOO_LARGE", "CHAT_INPUT_TOKEN_LIMIT"]) {
+    assert.deepEqual(traceEvidenceRecordability(code, 413), { record: true }, code);
+  }
+});
+
 test("the stored vocabulary is stable", () => {
   assert.equal(TRACE_PROVENANCE.serverGenerated, "server_generated");
   assert.equal(TRACE_PROVENANCE.clientSupplied, "client_supplied");
