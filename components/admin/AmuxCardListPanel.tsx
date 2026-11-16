@@ -25,16 +25,29 @@ import type { AmuxExecutionListRow } from "@/lib/amux/adminExecutionCardList";
  * question and its answer form, the attempts and the technical values (Task ID,
  * source key, brief) are; this table shows none of them and writes nothing.
  */
-export function AmuxCardListPanel({ rows, total, limit, nowMs, workerChannels, onOpen }: {
+export function AmuxCardListPanel({ rows, total, limit, nextLimit = null, nowMs, workerChannels, onOpen }: {
   rows: AmuxExecutionListRow[];
   total: number;
   limit: number;
+  /**
+   * The next page's size while the list holds only part of the board (owner
+   * decision 2026-11-15: no display cap, as the owner queue's "show more").
+   */
+  nextLimit?: number | null;
   /** The clock the "ago" text is counted against, read when the board was read. */
   nowMs: number | null;
   workerChannels?: Record<string, AmuxWorkerChannel> | null;
   onOpen: (taskId: string, opener: HTMLElement) => void;
 }) {
   const messages = useAdminMessages(adminAmuxCardsMessages);
+  // The page reads `cardLimit` again and opens on this view (`cardView=list`).
+  const showMore = () => {
+    if (nextLimit === null) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set("cardLimit", String(nextLimit));
+    url.searchParams.set("cardView", "list");
+    window.location.assign(url.pathname + url.search);
+  };
   const x = useAdminMessages(adminAmuxExecutionMessages);
   const v = useAdminMessages(adminAmuxBoardViewsMessages);
   const l = v.list;
@@ -124,7 +137,13 @@ export function AmuxCardListPanel({ rows, total, limit, nowMs, workerChannels, o
         cardAside={() => <ChevronRight className="h-4 w-4 text-zinc-500" aria-hidden="true" />}
         emptyState={<AdminStateBlock kind="empty" title={rows.length === 0 ? l.empty : l.noMatches} />}
         footer={<p className="text-xs text-zinc-400">
-          <span data-testid="amux-card-list-count">{messages.shown(rows.length, total, limit)}</span> · {l.hint}</p>} />
+          <span data-testid="amux-card-list-count">{messages.shown(rows.length, total, limit)}</span> · {l.hint}
+          {nextLimit !== null ? (
+            <button type="button" data-testid="amux-card-list-show-more" onClick={showMore}
+              className="ml-2 inline-flex min-h-8 items-center rounded-lg border border-zinc-700 px-3 font-bold hover:bg-zinc-800">
+              {messages.showMore(nextLimit - limit)}
+            </button>
+          ) : null}</p>} />
     </section>
   );
 }

@@ -35,6 +35,21 @@ test("application and provider failures are evidence-worthy", () => {
   });
 });
 
+test("an in-stream failure is recordable under its diagnostic code", () => {
+  // Settled inside a 200 stream, so the status never decides and the code
+  // carries a suffix. The root is what makes it recordable.
+  for (const code of [
+    "AI_EMPTY_RESPONSE.STOP",
+    "AI_EMPTY_RESPONSE.ERR_INVALID_STATE",
+    "AI_STREAM_FAILED.AI_APICallError.HTTP_503.RETRYABLE",
+  ]) {
+    assert.deepEqual(traceEvidenceRecordability(code, 200), { record: true }, code);
+  }
+  // A suffix does not turn a limit refusal or a routine rejection into one.
+  assert.equal(traceEvidenceRecordability("CHAT_RATE_LIMITED", 200).record, false);
+  assert.equal(traceEvidenceRecordability("SOME_UNLISTED.AI_EMPTY_RESPONSE", 200).record, false);
+});
+
 test("limit and entitlement rejections defer to their existing records", () => {
   for (const code of [
     "CHAT_RATE_LIMITED",

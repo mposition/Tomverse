@@ -328,7 +328,9 @@ export const SEMANTIC_RETRIEVAL_LIMITS = {
     maxRerankDocuments: 100,
     maxQueryCharacters: 2_000,
     /**
-     * The question as sent for reranking, in UTF-8 bytes. The provider splits
+     * The legacy Knowledge and Memory-v2 question bound, in UTF-8 bytes.
+     * Memory-v3 prepares its query from the configured model and billing
+     * contracts instead. The provider splits
      * a document into pieces of about 500 tokens *including the query*, so the
      * query's length is part of what is billed; bounding it in bytes bounds
      * it in tokens, and keeps every piece at least 100 tokens of document.
@@ -361,9 +363,18 @@ const RERANK_BILLING_WINDOW_TOKENS = 500;
 
 const utf8Bytes = (text: string) => Buffer.byteLength(text, "utf8");
 
+export type RerankQueryPolicy = "legacy" | "memory-v3";
+
+/** Memory v3 is already prepared against a model contract and must not be clipped again. */
+export const effectiveRerankQuery = (
+    query: string,
+    policy: RerankQueryPolicy = "legacy"
+) => policy === "memory-v3" ? query.normalize("NFC") : boundRerankQuery(query);
+
 /**
- * The question exactly as a rerank request sends it: NFC, and cut at
- * `rerankMaxQueryBytes` without splitting a character.
+ * The legacy question exactly as a rerank request sends it: NFC, and cut at
+ * `rerankMaxQueryBytes` without splitting a character. Memory-v3 does not call
+ * this helper after its effective query has been prepared.
  */
 export const boundRerankQuery = (query: string): string => {
     const limit = SEMANTIC_RETRIEVAL_LIMITS.rerankMaxQueryBytes;
@@ -384,15 +395,21 @@ export const boundRerankQuery = (query: string): string => {
  * Every quantity is an upper bound: a token is at least one byte, so the
  * query's tokens are at most its bytes and a document's at most its bytes or
  * the per-document cap; each piece holds at least the window minus the
- * query. The query is bounded the way the request bounds it, so the figure
- * reserved is never below the figure billed.
+ * query. Memory-v3 may supply a tighter exact token count from a trusted local
+ * tokenizer; otherwise its UTF-8 bytes remain the conservative upper bound.
  */
 export const rerankWorstCaseSearchUnits = (
     query: string,
-    documents: readonly string[]
-): number => {
-    const queryTokens = utf8Bytes(boundRerankQuery(query));
+    documents: readonly string[],
+    options: { queryPolicy?: RerankQueryPolicy; queryTokensUpperBound?: number } = {}
+): number | null => {
+    const effectiveQuery = effectiveRerankQuery(query, options.queryPolicy);
+    const queryTokens = options.queryTokensUpperBound ?? utf8Bytes(effectiveQuery);
+    if (!Number.isSafeInteger(queryTokens) || queryTokens < 0) return null;
     const documentRoom = RERANK_BILLING_WINDOW_TOKENS - queryTokens;
+    // The public search-unit contract gives no finite chunk calculation when
+    // the query alone consumes the 500-token billing window.
+    if (documentRoom <= 0) return null;
     let pieces = 0;
     for (const document of documents) {
         const tokens = Math.min(
@@ -400,12 +417,19 @@ export const rerankWorstCaseSearchUnits = (
             SEMANTIC_RETRIEVAL_LIMITS.rerankMaxTokensPerDocument
         );
         pieces += Math.max(1, Math.ceil(tokens / documentRoom));
+        if (!Number.isSafeInteger(pieces)) return null;
     }
-    return Math.max(1, Math.ceil(pieces / SEMANTIC_RETRIEVAL_LIMITS.maxRerankDocuments));
+    const units = Math.max(1, Math.ceil(pieces / SEMANTIC_RETRIEVAL_LIMITS.maxRerankDocuments));
+    return Number.isSafeInteger(units) ? units : null;
 };
 
-export const rerankCostMicroUsd = (searchUnits: number, microUsdPerSearchUnit: number) =>
-    Math.ceil(searchUnits * microUsdPerSearchUnit);
+export const rerankCostMicroUsd = (
+    searchUnits: number,
+    microUsdPerSearchUnit: number
+): number | null => {
+    const cost = Math.ceil(searchUnits * microUsdPerSearchUnit);
+    return Number.isSafeInteger(cost) && cost >= 0 ? cost : null;
+};
 
 /**
  * The most tokens one rerank request can be billed, for a model billed per
@@ -413,13 +437,20 @@ export const rerankCostMicroUsd = (searchUnits: number, microUsdPerSearchUnit: n
  * the question were billed once per document: an over-count when it is billed
  * once, and the point of an upper bound when nothing published says which.
  */
-export const rerankWorstCaseTokens = (query: string, documents: readonly string[]): number => {
-    const queryTokens = utf8Bytes(boundRerankQuery(query));
+export const rerankWorstCaseTokens = (
+    query: string,
+    documents: readonly string[],
+    options: { queryPolicy?: RerankQueryPolicy; queryTokensUpperBound?: number } = {}
+): number | null => {
+    const effectiveQuery = effectiveRerankQuery(query, options.queryPolicy);
+    const queryTokens = options.queryTokensUpperBound ?? utf8Bytes(effectiveQuery);
+    if (!Number.isSafeInteger(queryTokens) || queryTokens < 0) return null;
     let tokens = queryTokens;
     for (const document of documents) {
         tokens +=
             queryTokens +
             Math.min(utf8Bytes(document), SEMANTIC_RETRIEVAL_LIMITS.rerankMaxTokensPerDocument);
+        if (!Number.isSafeInteger(tokens)) return null;
     }
     return Math.max(1, tokens);
 };
@@ -428,11 +459,18 @@ export const rerankWorstCaseTokens = (query: string, documents: readonly string[
 export const rerankWorstCaseMicroUsd = (
     billing: RerankBilling,
     query: string,
-    documents: readonly string[]
-): number =>
-    billing.unit === "search_unit"
-        ? rerankCostMicroUsd(rerankWorstCaseSearchUnits(query, documents), billing.microUsdPerSearchUnit)
-        : embedCostMicroUsd(rerankWorstCaseTokens(query, documents), billing.microUsdPerMillionTokens);
+    documents: readonly string[],
+    options: { queryPolicy?: RerankQueryPolicy; queryTokensUpperBound?: number } = {}
+): number | null => {
+    if (billing.unit === "search_unit") {
+        const units = rerankWorstCaseSearchUnits(query, documents, options);
+        return units === null ? null : rerankCostMicroUsd(units, billing.microUsdPerSearchUnit);
+    }
+    const tokens = rerankWorstCaseTokens(query, documents, options);
+    if (tokens === null) return null;
+    const cost = embedCostMicroUsd(tokens, billing.microUsdPerMillionTokens);
+    return Number.isSafeInteger(cost) && cost >= 0 ? cost : null;
+};
 
 /**
  * What a rerank response says it billed, in the configured unit, or null when
@@ -475,9 +513,10 @@ export const rerankRequestBody = (input: {
     model: string;
     query: string;
     documents: readonly string[];
+    queryPolicy?: RerankQueryPolicy;
 }) => ({
     model: input.model,
-    query: boundRerankQuery(input.query),
+    query: effectiveRerankQuery(input.query, input.queryPolicy),
     documents: [...input.documents],
     max_tokens_per_doc: SEMANTIC_RETRIEVAL_LIMITS.rerankMaxTokensPerDocument,
 });
@@ -670,16 +709,19 @@ export const rerankCacheKey = (input: {
     userId: string;
     model: string;
     query: string;
+    queryPolicy?: RerankQueryPolicy;
     documents: ReadonlyArray<{ id: string; text: string }>;
 }) =>
     sha256(
         JSON.stringify([
             // Memory's query budget/pool contract changed; knowledge keeps its cache domain.
-            input.feature === "memoryRerank" ? "memory-rerank-v2" : "rerank-v1",
+            input.feature === "memoryRerank" && input.queryPolicy === "memory-v3"
+                ? "memory-rerank-v3"
+                : input.feature === "memoryRerank" ? "memory-rerank-v2" : "rerank-v1",
             input.feature,
             input.userId,
             input.model,
-            boundRerankQuery(input.query),
+            effectiveRerankQuery(input.query, input.queryPolicy),
             input.documents.map((document) => [document.id, sha256(document.text)]),
         ])
     );

@@ -36,6 +36,7 @@ export const adminAmuxOwnerQueueMessages = defineAdminMessages({
       partial: (shown: number, total: number) =>
         `Showing the newest ${shown} of ${total} cards. The rest appear as you finish these.`,
       listLabel: "Cards waiting on you",
+      showMore: (count: number) => `Show ${count} more`,
     },
     empty: {
       title: "Nothing is waiting on you",
@@ -109,7 +110,7 @@ export const adminAmuxOwnerQueueMessages = defineAdminMessages({
         local_card_closed: "The local card for this work was closed, so a person confirms how to settle it.",
         local_card_unlinked: "The local card for this work is no longer linked, so a person confirms how to settle it.",
         local_card_ambiguous: "More than one local card matches this work, so a person confirms which one counts.",
-        review_server_rejected_twice: "The code review rejected this work twice. Decide whether to retry or stop.",
+        review_server_rejected_twice: "The code review rejected the same finding again. Decide whether to retry or stop.",
         attempt_budget_exhausted: "This card used every attempt it was allowed. Decide whether to stop it or start a new card.",
         dependency_closed: "A card this one depends on was archived without finishing, so it can never start. Close it or start a new card.",
         analysis_stop: "The analysis concluded this work should stop. Confirm or send it back.",
@@ -121,6 +122,8 @@ export const adminAmuxOwnerQueueMessages = defineAdminMessages({
         cli_turn_limit: "The worker hit its turn limit and stopped.",
         cli_execution_error: "The worker's command line tool failed.",
         cli_budget_limit: "The worker hit its budget limit and stopped.",
+        infra_attempts_exhausted: "This card kept failing on the platform, never on its own work, on every worker that tried it. Check the workers' sign-ins, then retry or stop it.",
+        repeated_failure: "The worker's result failed the same way three runs in a row, so another run would likely fail again. Decide whether to change the card, retry or stop it.",
       } as Record<string, string>,
     },
     recovery: {
@@ -256,6 +259,7 @@ export const adminAmuxOwnerQueueMessages = defineAdminMessages({
       partial: (shown: number, total: number) =>
         `전체 ${total}장 중 최근 ${shown}장만 보여 드려요. 이 카드를 처리하면 나머지가 이어서 나와요.`,
       listLabel: "내 확인을 기다리는 카드",
+      showMore: (count: number) => `${count}장 더 보기`,
     },
     empty: {
       title: "내 확인을 기다리는 카드가 없어요",
@@ -327,7 +331,7 @@ export const adminAmuxOwnerQueueMessages = defineAdminMessages({
         local_card_closed: "이 작업의 로컬 카드가 닫혀서, 어떻게 마무리할지 사람이 확인해야 해요.",
         local_card_unlinked: "이 작업의 로컬 카드 연결이 끊겨서, 어떻게 마무리할지 사람이 확인해야 해요.",
         local_card_ambiguous: "이 작업과 맞는 로컬 카드가 여러 장이라, 어느 것이 맞는지 사람이 확인해야 해요.",
-        review_server_rejected_twice: "코드 검토에서 이 작업을 두 번 거절했어요. 다시 시도할지 멈출지 정해 주세요.",
+        review_server_rejected_twice: "코드 검토가 같은 지적을 다시 거절했어요. 다시 시도할지 멈출지 정해 주세요.",
         attempt_budget_exhausted: "이 카드가 쓸 수 있는 시도를 모두 썼어요. 멈출지, 새 카드로 이어 갈지 정해 주세요.",
         dependency_closed: "이 카드가 기다리던 카드가 끝나지 않은 채 보관되어, 이 카드는 시작할 수 없어요. 닫거나 새 카드로 이어 가 주세요.",
         analysis_stop: "분석 결과 이 작업은 멈추는 게 맞다고 나왔어요. 확인하거나 되돌려 주세요.",
@@ -339,6 +343,8 @@ export const adminAmuxOwnerQueueMessages = defineAdminMessages({
         cli_turn_limit: "워커가 턴 한도에 도달해서 멈췄어요.",
         cli_execution_error: "워커의 명령줄 도구가 실패했어요.",
         cli_budget_limit: "워커가 비용 한도에 도달해서 멈췄어요.",
+        infra_attempts_exhausted: "이 카드는 맡은 워커마다 카드 자체가 아니라 플랫폼에서 실패했어요. 워커 로그인을 확인한 뒤 다시 시도하거나 멈춰 주세요.",
+        repeated_failure: "워커의 결과가 세 번 연달아 같은 방식으로 실패해서, 다시 돌려도 같을 가능성이 커요. 카드를 고칠지, 다시 시도할지, 멈출지 정해 주세요.",
       } as Record<string, string>,
     },
     recovery: {

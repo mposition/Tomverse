@@ -6,18 +6,19 @@ import { STATUS_REPORT_SECRET_ENV } from "./status-report.mjs";
 const DEFAULT_CONFIG_PATH = "/etc/review-orchestrator/config.json";
 
 const DEFAULTS = {
-  timeoutSeconds: 2400,
+  // Internal development flow (owner decision 2026-11-15): generous bounds, and a
+  // review that times out is tried again by another reviewer, not ended as unknown.
+  timeoutSeconds: 7200,
   waitMaxSeconds: 540,
   maxBundleBytes: 50 * 1024 * 1024,
-  maxPromptDiffBytes: 300 * 1024,
   maxOutputBytes: 8 * 1024 * 1024,
   maxStderrBytes: 1024 * 1024,
   // Bytes of objects the change introduces, after decompression: a small
   // bundle can carry a blob that inflates to gigabytes in the worktree.
   maxChangeBytes: 200 * 1024 * 1024,
   // Jobs with any review not yet done. A forced-command key cannot queue more.
-  maxPendingJobs: 20,
-  retentionDays: 30,
+  maxPendingJobs: 200,
+  retentionDays: 365,
   // A base must be in the history of one of these protected branches: the
   // reviewer's instruction files come from the base, so a base the submitter
   // pushed to any other branch could carry instructions of its own.

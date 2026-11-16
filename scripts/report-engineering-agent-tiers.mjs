@@ -187,7 +187,6 @@ for (const commit of commits) {
   const refused =
     baseEntries.length > TREE_LIMITS.maxEntries ||
     resultEntries.length > TREE_LIMITS.maxEntries ||
-    introduced.length > TREE_LIMITS.maxChangedBlobs ||
     introduced.some((d) => (newBlobs.get(d.newOid)?.length ?? 0) > TREE_LIMITS.maxChangedBlobBytes);
 
   // What tree verification does not support sends the patch to T2, as in the app.

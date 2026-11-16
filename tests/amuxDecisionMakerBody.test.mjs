@@ -109,6 +109,11 @@ const CORE = "lib/amux/decisionMakerBodyCore.ts";
 const KEYS = "lib/amux/decisionMakerDigestKeys.ts";
 const AUDIT_MODULE = "lib/amux/decisionMakerBodySystemAudit.ts";
 const MIGRATION = "prisma/migrations/20261008120000_amux_decision_maker_body_store/migration.sql";
+// The body store's caps and its request-total guard, as the latest migration leaves them (owner
+// decision 2026-11-15: one real cap per body); the original is MIGRATION, the guard before it
+// is the delivery-gaps one.
+const CAP_MIGRATION = "prisma/migrations/20261115140000_amux_dm_card_text_cap/migration.sql";
+const GUARD_BEFORE_CAP_MIGRATION = "prisma/migrations/20261018120000_amux_decision_maker_delivery_gaps/migration.sql";
 const LEDGER_MIGRATION = "prisma/migrations/20261008090100_amux_decision_maker_request_ledger/migration.sql";
 
 const withoutSqlComments = (sql) =>
@@ -146,14 +151,14 @@ const DAY = 24 * 60 * 60 * 1000;
 // Vocabularies and caps
 // ---------------------------------------------------------------------------
 
-test("section 10's five body fields, their caps, and the 40 KiB a request can never reach", () => {
+test("section 10's five body fields, their caps, and the total a request can never reach", () => {
   assert.deepEqual([...DM_BODY_FIELDS], ["card_text", "dm_answer", "dm_rationale", "dm_escalation_reason", "operator_answer"]);
   assert.deepEqual(DM_BODY_FIELD_MAX_BYTES, {
-    card_text: 16 * 1024,
-    dm_answer: 8 * 1024,
-    dm_rationale: 4 * 1024,
-    dm_escalation_reason: 1024,
-    operator_answer: 8 * 1024,
+    card_text: 256 * 1024,
+    dm_answer: 256 * 1024,
+    dm_rationale: 256 * 1024,
+    dm_escalation_reason: 256 * 1024,
+    operator_answer: 256 * 1024,
   });
   // The DM output caps are S1a's and the card cap is section 5's: one number each.
   assert.equal(DM_BODY_FIELD_MAX_BYTES.card_text, DM_CARD_TEXT_MAX_BYTES);
@@ -161,11 +166,14 @@ test("section 10's five body fields, their caps, and the 40 KiB a request can ne
   assert.equal(DM_BODY_FIELD_MAX_BYTES.dm_rationale, DM_RATIONALE_MAX_BYTES);
   assert.equal(DM_BODY_FIELD_MAX_BYTES.dm_escalation_reason, DM_ESCALATION_MAX_BYTES);
   assert.equal(DM_BODY_FIELD_MAX_BYTES.operator_answer, DM_OPERATOR_ANSWER_MAX_BYTES);
-  assert.equal(DM_BODY_REQUEST_MAX_BYTES, 40 * 1024);
-  // One row per field per request: the five caps together stay under section 10's total.
+  // One real cap per body: no field is capped below the whole output's or the whole card's.
+  assert.equal(DM_OPERATOR_ANSWER_MAX_BYTES, 256 * 1024);
+  assert.equal(DM_BODY_REQUEST_MAX_BYTES, 1310720);
+  // One row per field per request: the request total is exactly the five caps together, so it
+  // refuses nothing a field's own cap lets through.
   const sum = Object.values(DM_BODY_FIELD_MAX_BYTES).reduce((total, cap) => total + cap, 0);
-  assert.equal(sum, 37 * 1024);
-  assert.ok(sum <= DM_BODY_REQUEST_MAX_BYTES);
+  assert.equal(sum, 5 * 256 * 1024);
+  assert.equal(DM_BODY_REQUEST_MAX_BYTES, sum);
 });
 
 test("the retention, hold and key vocabularies are section 10's", () => {
@@ -192,14 +200,20 @@ test("the retention, hold and key vocabularies are section 10's", () => {
 // The migration holds the same numbers and lists
 // ---------------------------------------------------------------------------
 
-test("the migration's CHECKs hold the core's lists and caps", () => {
+test("the migrations' CHECKs hold the core's lists and caps", () => {
   const sql = read(MIGRATION);
   assert.deepEqual(quoted(checkBody(sql, "AmuxDecisionMakerBody_field_check")), [...DM_BODY_FIELDS]);
-  const sizes = checkBody(sql, "AmuxDecisionMakerBody_text_size_check");
-  const caps = Object.fromEntries([...sizes.matchAll(/WHEN '([a-z_]+)' THEN (\d+)/g)].map((match) => [match[1], Number(match[2])]));
+  // The size CHECK is the cap migration's, which drops and recreates the original.
+  const capCaps = (text) => Object.fromEntries([...text.matchAll(/WHEN '([a-z_]+)' THEN (\d+)/g)].map((match) => [match[1], Number(match[2])]));
+  const sizes = checkBody(read(CAP_MIGRATION), "AmuxDecisionMakerBody_text_size_check");
+  const caps = capCaps(sizes);
   assert.deepEqual(caps, DM_BODY_FIELD_MAX_BYTES);
   assert.match(sizes, /octet_length\("text"\) >= 1/);
   assert.match(sizes, /ELSE 0/);
+  assert.match(sizes.replace(/\s+/g, " "), /^CHECK \(\(.*\) IS TRUE\)$/);
+  // The original CHECK is the one it replaces: every cap it had is smaller than the new one.
+  const originalCaps = capCaps(checkBody(sql, "AmuxDecisionMakerBody_text_size_check"));
+  for (const field of DM_BODY_FIELDS) assert.ok(originalCaps[field] < caps[field], field);
   assert.deepEqual(quoted(checkBody(sql, "AmuxDecisionMakerRetentionEvent_kind_check")), [...DM_RETENTION_EVENT_KINDS]);
   assert.deepEqual(quoted(checkBody(sql, "AmuxDecisionMakerRetentionEvent_actor_kind_check")), [...DM_RETENTION_ACTOR_KINDS]);
   assert.deepEqual(quoted(checkBody(sql, "AmuxDecisionMakerDigestKeyEvent_kind_check")), [...DM_DIGEST_KEY_EVENT_KINDS]);
@@ -264,7 +278,14 @@ test("the triggers use the core's period, retention, total and actions, and the 
   const retention = [...sql.matchAll(/INTERVAL '{1,2}(\d+) hours'{1,2}/g)].map((match) => Number(match[1]) * 3_600_000);
   assert.deepEqual(retention, [DM_RETENTION_AFTER_CLOSE_MS, DM_RETENTION_AFTER_CLOSE_MS]);
   assert.doesNotMatch(sql, /INTERVAL '{1,2}[^']*\b(day|days|month|months|year|years|mon|mons)\b/i);
-  assert.match(functionBody(sql, "amux_decision_maker_body_guard"), new RegExp(`> ${DM_BODY_REQUEST_MAX_BYTES} THEN`));
+  // The request total is in the guard as the cap migration leaves it, and that guard is the one
+  // before it with only that number changed.
+  const capGuard = functionBody(read(CAP_MIGRATION), "amux_decision_maker_body_guard");
+  assert.match(capGuard, new RegExp(`> ${DM_BODY_REQUEST_MAX_BYTES} THEN`));
+  assert.equal(
+    capGuard.replace(`> ${DM_BODY_REQUEST_MAX_BYTES} THEN`, "> 40960 THEN"),
+    functionBody(read(GUARD_BEFORE_CAP_MIGRATION), "amux_decision_maker_body_guard"),
+  );
   for (const action of Object.values(DM_BODY_AUDIT_ACTIONS)) {
     if (action.startsWith("amux.decision.digest_key_")) continue;
     assert.ok(sql.includes(`'${action}'`), action);
@@ -494,9 +515,9 @@ test("a body is refused for an unknown field, no text, malformed text, its cap i
   assert.equal(dmBodyRefusal("dm_answer", 42), "empty");
   assert.equal(dmBodyRefusal("dm_answer", "a\u0000b"), "not_well_formed");
   assert.equal(dmBodyRefusal("dm_answer", "a\ud800b"), "not_well_formed");
-  // Bytes, not characters: 1,024 three-byte characters are 3,072 bytes.
-  assert.equal(dmBodyRefusal("dm_escalation_reason", "가".repeat(341)), null);
-  assert.equal(dmBodyRefusal("dm_escalation_reason", "가".repeat(342)), "too_long");
+  // Bytes, not characters: 87,381 three-byte characters are 262,143 bytes, and one more is over.
+  assert.equal(dmBodyRefusal("dm_escalation_reason", "가".repeat(87_381)), null);
+  assert.equal(dmBodyRefusal("dm_escalation_reason", "가".repeat(87_382)), "too_long");
   for (const field of DM_BODY_FIELDS) {
     const cap = DM_BODY_FIELD_MAX_BYTES[field];
     assert.equal(dmBodyRefusal(field, "x".repeat(cap)), null, field);
@@ -1276,8 +1297,8 @@ for (const [label, integrityKey] of [
         ["an irreversible term", {}, { ...ROUTED_CARD, question: "Deploy the cache to production?" }, ROUTING_BINDING, 8 + extra, ["irreversible_term"]],
         // Section 3-8: a secret in the card is never sent, and never stored.
         ["a secret in the card", {}, { ...ROUTED_CARD, context: `see ${pat}` }, ROUTING_BINDING, 8 + extra, ["card_secret_detected"]],
-        // Section 5: over 16 KiB of card text is not a body the store could keep.
-        ["a card over 16 KiB", {}, overCap, ROUTING_BINDING, 8 + extra, ["input_limit_exceeded"]],
+        // Section 5: card text over the one card cap is not a body the store could keep.
+        ["a card over the card cap", {}, overCap, ROUTING_BINDING, 8 + extra, ["input_limit_exceeded"]],
       ];
       for (const [name, options, card, routingBinding, statements, refusals] of cases) {
         const { tx, sent } = recordingTx(options);

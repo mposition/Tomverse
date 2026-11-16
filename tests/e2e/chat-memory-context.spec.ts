@@ -77,9 +77,10 @@ const panel = (page: Page, index: number) =>
  * path the flag will one day open.
  */
 async function mockContextPreparation(page: Page, options: { bundle?: string | null } = {}) {
-  const state = { calls: 0 };
+  const state = { calls: 0, requests: [] as Array<Record<string, unknown>> };
   await page.route("**/api/chat/context", async (route) => {
     state.calls += 1;
+    state.requests.push(route.request().postDataJSON());
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -240,6 +241,8 @@ test.describe("chat memory context", () => {
     // re-presented the same bundle would be refused again -- and would be a
     // replay, not a recovery.
     expect(preparation.calls).toBeGreaterThanOrEqual(2);
+    expect(preparation.requests[0].previousContextBundle).toBeUndefined();
+    expect(preparation.requests[1].previousContextBundle).toBe("qa-bundle-1");
   });
 
   test("a second stale refusal is surfaced instead of retried again", async ({
@@ -308,6 +311,10 @@ test.describe("chat memory context", () => {
       },
     });
     await page.setViewportSize(DESKTOP_VIEWPORT);
+    await page.route("**/api/chat/preflight", route => route.fulfill({
+      status: 200, contentType: "application/json",
+      body: JSON.stringify({ ok: true, admissionToken: "qa-comparison-admission", contextBundle: "qa-original-comparison-context" }),
+    }));
     await submitComposer(page, "Compare three models.", DESKTOP_VIEWPORT.width);
 
     // The run recovers, and it recovers together: every panel answers, and
@@ -322,5 +329,29 @@ test.describe("chat memory context", () => {
     // recovery's clothes. The send itself takes its bundle from the aggregate
     // preflight, so this count is the re-preparation and nothing else.
     expect(preparation.calls).toBe(1);
+    expect(preparation.requests[0].previousContextBundle).toBe("qa-original-comparison-context");
+    expect(preparation.requests[0].modelIds).toEqual(THREE_MODELS);
+  });
+
+  test("nonce recovery keeps the prior snapshot and replaces only the refused assistant", async ({ page }) => {
+    const preparation = await mockContextPreparation(page);
+    await enterConversation(page, {
+      theme: "light", lang: "en", viewport: DESKTOP_VIEWPORT, selectedModels: [MODEL_A],
+      modelStub: { [MODEL_A]: [
+        { ...STALE, details: { requiresPreflight: true, refusalReason: "already_consumed" } },
+        { kind: "success", chunks: [RETRIED_ANSWER], intervalMs: 5 },
+      ] },
+    });
+    await submitComposer(page, "Keep the original source messages.", DESKTOP_VIEWPORT.width);
+    await expect(panel(page, 0)).toContainText(RETRIED_ANSWER);
+    expect(preparation.calls).toBe(2);
+    expect(preparation.requests[1].previousContextBundle).toBe("qa-bundle-1");
+    const requests = await page.evaluate(() => (window as typeof window & {
+      __chatModelStubRequests?: Array<Record<string, unknown>>;
+    }).__chatModelStubRequests ?? []);
+    expect(requests).toHaveLength(2);
+    expect(requests[0].assistantMessageId).not.toBe(requests[1].assistantMessageId);
+    expect(requests[0].sourceUserMessageId).toBe(requests[1].sourceUserMessageId);
+    expect(requests.map(request => request.contextBundle)).toEqual(["qa-bundle-1", "qa-bundle-2"]);
   });
 });

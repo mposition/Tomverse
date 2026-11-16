@@ -14,6 +14,7 @@ import { parse as parseYaml } from "yaml";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { gunzipSync } from "node:zlib";
+import { resolveBashCommand } from "./support/gitBash.mjs";
 import {
   CI_FIX_ADMISSION_CORE_URL,
   CI_FIX_ADMISSION_MANIFEST_PATH,
@@ -154,13 +155,15 @@ test("a head is ready only when every workflow's newest run has finished", () =>
 
 test("every run block of the workflow parses as bash", () => {
   // Review r-20261103-040829-46fc42: an unterminated quote broke the push step.
+  const bash = resolveBashCommand();
+  assert.ok(bash, "a usable Bash is required to validate workflow scripts");
   const workflow = parseYaml(read("../.github/workflows/pr-ci-auto-fix.yml"));
   let blocks = 0;
   for (const job of Object.values(workflow.jobs)) {
     for (const step of job.steps ?? []) {
       if (typeof step.run !== "string") continue;
       blocks += 1;
-      const checked = spawnSync("bash", ["-n"], { input: step.run, encoding: "utf8" });
+      const checked = spawnSync(bash, ["-n"], { input: step.run, encoding: "utf8" });
       assert.equal(checked.status, 0, `${step.name}: ${checked.stderr}`);
     }
   }
@@ -183,9 +186,9 @@ test("a patch is gzip+base64 and refused when it would not fit in a dispatch", (
   assert.ok(read("../tools/review-orchestrator/bin/pr-ci-auto-fix-sender.mjs").includes(`const MAX_RUN_IDS = ${CI_FIX_MAX_RUN_IDS};`));
 });
 
-test("the ledger forgets heads after 14 days and starts empty", () => {
-  const now = 20 * 86_400_000;
-  assert.deepEqual(Object.keys(pruneLedger({ [SHA_A]: { at: now - 86_400_000 }, [SHA_B]: { at: now - 15 * 86_400_000 } }, now)), [SHA_A]);
+test("the ledger forgets heads after 90 days and starts empty", () => {
+  const now = 200 * 86_400_000;
+  assert.deepEqual(Object.keys(pruneLedger({ [SHA_A]: { at: now - 86_400_000 }, [SHA_B]: { at: now - 91 * 86_400_000 } }, now)), [SHA_A]);
   assert.deepEqual(readLedger(join(tmpdir(), `missing-${process.pid}`, "ledger.json")), {});
 });
 
@@ -515,12 +518,12 @@ test("the review account holds no dispatch token: the units and the code keep th
   assert.doesNotMatch(sender, /loadConfig|REVIEW_ORCH_CONFIG|spawn|child_process/);
 });
 
-test("the outbox keeps a day of requests", () => {
+test("the outbox keeps a month of requests", () => {
   const dir = mkdtempSync(join(tmpdir(), "ci-fix-prune-"));
   try {
     writeFileSync(join(dir, `${SHA_A}.json`), "{}");
     writeFileSync(join(dir, `${SHA_B}.json`), "{}");
-    const old = new Date(Date.now() - 2 * 86_400_000);
+    const old = new Date(Date.now() - 31 * 86_400_000);
     utimesSync(join(dir, `${SHA_A}.json`), old, old);
     assert.equal(pruneOutbox(dir, Date.now()), 1);
     assert.deepEqual(readdirSync(dir), [`${SHA_B}.json`]);
@@ -793,7 +796,7 @@ test("an unreadable log costs no attempt, and a refused patch is recorded and no
 });
 
 test("an expired request is logged once and not sent", async () => {
-  const now = 10 * 60 * 60_000;
+  const now = REQUEST_MAX_AGE_MS + 10 * 60 * 60_000;
   const h = senderHarness({ now, files: { [`${SHA_A}.json`]: requestFile(SHA_A, now - REQUEST_MAX_AGE_MS - 1) } });
   try {
     await h.sender.scanOnce();

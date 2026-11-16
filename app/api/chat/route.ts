@@ -1,3 +1,4 @@
+import { replayMemoryHistoryContext } from "@/lib/memoryHistorySnapshot";
 import { appendRouterSearchEvidence, prepareRouterSearch, withGroundedSourceGuidance } from "@/lib/chatRouterPresearch";
 import { createGroundedCitationStream } from "@/lib/groundedCitationLinks";
 import { createChatSearchObservation, type ChatSearchObservation } from "@/lib/chatSearchObservation";
@@ -193,6 +194,7 @@ import {
 } from "@/lib/chatTurnSystemBlocks";
 import { continuationReceipt, deliveryReceipt, CONTINUATION_RECEIPT_HEADER, type ContinuationReceipt } from "@/lib/continuationReceipt";
 import { PASSAGE_HEADER } from "@/lib/continuationPassages";
+import { serializeContinuationSourcePlan } from "@/lib/continuationSourceManifest";
 import { continuationAutoSourceEnabledFromValue } from "@/lib/externalContinuationAccess";
 import { loadContinuationTurnSeed, searchContinuationHistory, type ContinuationTurnSeedResult } from "@/lib/externalContinuationService";
 import { continuationHistorySearchEnabledFromValue, HISTORY_SOURCE_MAX_BYTES } from "@/lib/continuationHistorySearch";
@@ -215,6 +217,7 @@ import { splitProviderInstructions } from "@/lib/chatProviderPrompt";
 import { resolveChatCompletionOutcome } from "@tomverse/chat-core";
 import { ERROR_REPORT_TOKEN_HEADER } from "@/lib/errorReportContract";
 import { issueChatErrorReportGrant } from "@/lib/traceErrorEvidence";
+import { streamFailureGrantInput } from "@/lib/chatStreamErrorReport";
 import {
     consumePerplexityResponseCapture,
     consumePerplexityUsage,
@@ -460,7 +463,6 @@ import { verifyingSemanticModes } from "@/lib/semanticRetrievalCore";
 import { latestUserPromptText } from "@/lib/chatMemoryContextCore";
 import {
     consumeContextBundle,
-    readChatContextBundleSemanticSteps,
     verifyChatContextBundle,
 } from "@/lib/chatContextBundleService";
 import {
@@ -2075,7 +2077,7 @@ async function handleChatPost(
                           routerModelId: true,
                           routerChallengerTurns: true,
                           productKey: true,
-                          continuationBridge: { select: { id: true } },
+                          continuationBridge: { select: { id: true, reviewHandoff: true } },
                       },
                   })
                 : null;
@@ -2499,9 +2501,23 @@ async function handleChatPost(
         // A user can revoke memory or change the profile while the Router runs:
         // only the later, freshly rebuilt context may reach the answer model.
         const checkPricedContext = async (token: string, userId: string, profileVersionId: string | null, memoryMode: string | null) => {
+            const envelope = verifyChatContextBundle(token, {
+                subjectKey: userId, conversationId: conversationId ?? null, modelId: requestedModelId,
+            });
+            if (!envelope.ok) return { turnContext: null, verification: envelope };
+            const query = latestUserPromptText(messages);
+            let historyStale = false;
+            const memorySemanticContext = async () => {
+                const replay = conversationId ? await replayMemoryHistoryContext({
+                    request: req, userId, conversationId, query, payload: envelope.payload,
+                }) : { queryPolicy: envelope.payload.memoryQueryPolicy ?? "legacy", history: [] } as const;
+                historyStale = replay === null;
+                return replay ?? { queryPolicy: "full" as const, history: [] };
+            };
             const turnContext = await buildChatTurnContext({
                 userId,
-                query: latestUserPromptText(messages),
+                query,
+                memorySemanticContext,
                 profileVersionId,
                 plan: accountPlan?.tier ?? null,
                 conversationMode: memoryMode,
@@ -2509,8 +2525,9 @@ async function handleChatPost(
                 // asks the retrieval provider. The bundle says which semantic
                 // steps shaped its selection; those are rebuilt from what the
                 // issuing route stored and every other step is off.
-                semantic: verifyingSemanticModes(readChatContextBundleSemanticSteps(token)),
+                semantic: verifyingSemanticModes(envelope.payload.semanticSteps),
             });
+            if (historyStale) return { turnContext: null, verification: { ok: false as const, reason: "stale" as const } };
             const verification = verifyChatContextBundle(token, {
                 subjectKey: userId, conversationId: conversationId ?? null, modelId: requestedModelId,
                 currentFingerprint: turnContext.fingerprint,
@@ -2645,15 +2662,21 @@ async function handleChatPost(
         let historySearchActive = false;
         let preparedContinuation: ContinuationTurnSeedResult = { seed: null, outcome: "no_bridge" };
         const hasContinuation = Boolean(conversationRouting?.continuationBridge);
+        const hasReviewHandoff = conversationRouting?.continuationBridge?.reviewHandoff != null;
+        if (hasReviewHandoff && (isResearchPreview || deepResearchDepth || requestedModelConfig.usageClass === "deep-research" ||
+            turnCarriesAttachments(messages))) {
+            throw new ChatAccessError(400, "REVIEW_HANDOFF_TEXT_ONLY", "This comparison supports text questions and text models only.");
+        }
         const readContinuation = async (): Promise<ContinuationTurnSeedResult> => {
             if (!session?.user?.id || !conversationId || !hasContinuation) return { seed: null, outcome: "no_bridge" };
             if (isResearchPreview || deepResearchDepth || requestedModelConfig.usageClass === "deep-research") return { seed: null, outcome: "no_bridge" };
             try {
                 if (historySearchActive && !continuationHistorySearchEnabledFromValue(process.env.CHAT_CONTINUATION_HISTORY_SEARCH_ENABLED))
                     return { seed: null, outcome: "flag_off" };
-                if (!(await isExternalContinuationEnabledCached())) return { seed: null, outcome: "flag_off" };
+                if (!hasReviewHandoff && !(await isExternalContinuationEnabledCached())) return { seed: null, outcome: "flag_off" };
                 return await loadContinuationTurnSeed({ userId: session.user.id, conversationId, request: req, prepared: preparedContinuation.seed });
             } catch (error) {
+                if (hasReviewHandoff) throw error;
                 logRequestError("chat_continuation_seed_failed", traceId, error);
                 return { seed: null, outcome: "read_failed" };
             }
@@ -3479,7 +3502,7 @@ async function handleChatPost(
             const { turnContext, verification } = await checkPricedContext(contextBundle, session.user.id,
                 conversationProfileVersionId, conversationMemoryMode);
             finishContextTiming();
-            if (!verification.ok) return await refuseContext(verification.reason, Boolean(fusion && !fusion.resume));
+            if (!verification.ok || !turnContext) return await refuseContext(!verification.ok ? verification.reason : "stale", Boolean(fusion && !fusion.resume));
             verifiedContext = {
                 bundleId: verification.payload.bundleId,
                 expiresAt: new Date(verification.payload.expiresAtMs),
@@ -5773,10 +5796,29 @@ async function handleChatPost(
             );
         }
         if (continuationSeed && !replanned) {
-            let checked = await readContinuation();
+            let checked: ContinuationTurnSeedResult;
+            try {
+                checked = await readContinuation();
+            } catch (error) {
+                // A handoff cannot shed its references. This request has not crossed
+                // the provider boundary, so close its prepared dispatch as unused.
+                if (hasReviewHandoff && dispatchRecord) {
+                    await recordNotDispatched(dispatchRecord, "continuation_source_revoked", "application");
+                    dispatchRecord = null;
+                }
+                throw error;
+            }
             if (importedSource && !continuationAutoSourceEnabledFromValue(process.env.CHAT_CONTINUATION_AUTO_SOURCE_ENABLED))
                 checked = { seed: null, outcome: "flag_off" };
             if (!checked.seed || checked.seed.prompt.transcriptText !== continuationSeed.transcriptText) {
+                if (hasReviewHandoff) {
+                    if (dispatchRecord) {
+                        await recordNotDispatched(dispatchRecord, "continuation_source_revoked", "application");
+                        dispatchRecord = null;
+                    }
+                    throw new ChatAccessError(409, "REVIEW_HANDOFF_CONTEXT_UNAVAILABLE",
+                        "This comparison's references changed. Reopen it from the original Chat.");
+                }
                 // No answer provider has run. Close this unused plan and rerun the ordinary
                 // model/capability/token/price/admission path, without another Router call.
                 if (dispatchRecord) {
@@ -5802,6 +5844,17 @@ async function handleChatPost(
         }
         if (hasContinuation) recordAutoSelection();
         const initialAttemptAbortController = new AbortController();
+        // The last error the active provider stream reported through `onError`.
+        // Read only by the in-stream error report: an empty answer settles as
+        // the SDK's "no output" error, and this is what caused it.
+        let observedStreamError: unknown = null;
+        const observeStreamError = (context: { traceId: string; modelId: string }) => {
+            const log = logStreamErrorWithoutContent(context);
+            return (event: { error: unknown }) => {
+                observedStreamError = event.error;
+                log(event);
+            };
+        };
         await recordDispatchStarted(dispatchRecord);
         if (hasContinuation) void recordContinuationSeedOutcome(finalContinuation.outcome);
         latency.provider();
@@ -5849,7 +5902,7 @@ async function handleChatPost(
                         stopWhen: stepCountIs(MCP_CHAT_MAX_STEPS),
                         prepareStep: mcpConnector.prepareStep,
                     } : {}),
-                    onError: logStreamErrorWithoutContent({
+                    onError: observeStreamError({
                         traceId,
                         modelId: modelConfig.id,
                     }),
@@ -5895,6 +5948,8 @@ async function handleChatPost(
         // have made it two models wrong instead of one.
         const dispatched = {
             attemptIndex: 0,
+            // Carried by the execution that produced the saved answer, not by preflight.
+            continuationSource: finalContinuation.seed ?? finalContinuation.sourceEvidence,
             modelId: modelConfig.id,
             provider: modelConfig.provider,
             reasoning: modelConfig.reasoning,
@@ -6540,6 +6595,48 @@ async function handleChatPost(
                 return false;
             }
         };
+        /*
+          The error report for a turn the server judged failed after its 200
+          stream had started (docs/policy/trace-feedback-automation.md §3.3).
+
+          The JSON error builders put this grant in a response header. Here the
+          headers left with the first byte, so the token rides in the stream
+          trailer instead. Called only from the two settlement branches that
+          decide the turn failed -- never for an answer that completed, and
+          never for a turn the user stopped, which leave through
+          `cancelTurnSafely` and reach neither.
+        */
+        const issueStreamErrorReport = (
+            root: "AI_EMPTY_RESPONSE" | "AI_STREAM_FAILED",
+            diagnosticCode: string,
+            error: unknown,
+            localLayer: "storage" | "application" | null = null
+        ) => {
+            const grantInput = streamFailureGrantInput({
+                traceId,
+                root,
+                diagnosticCode,
+                provider: dispatched.provider,
+                modelId: dispatched.modelId,
+                error,
+                observedStreamError,
+                localLayer,
+            });
+            const grant = issueChatErrorReportGrant(grantInput);
+            return grant.errorReportToken
+                ? { token: grant.errorReportToken, code: grantInput.errorCode }
+                : null;
+        };
+        /*
+          A stream failure waiting to be raised on the next pull.
+
+          `controller.error()` discards whatever is still queued, so a trailer
+          enqueued in the same turn as the error would never be read. The
+          failure branch enqueues the trailer and returns; the stream asks for
+          more only once that chunk has been taken, and that pull raises the
+          error the client was always going to get.
+        */
+        let pendingStreamError: { error: unknown } | null = null;
         const closeSafely = (
             controller: ReadableStreamDefaultController<string>
         ) => {
@@ -7015,6 +7112,8 @@ async function handleChatPost(
                 await recordDispatchStarted(nextRecord);
                 if (continuation.receipt && continuationSeed) continuation.receipt = { ...continuation.receipt,
                     attempt: dispatched.attemptIndex + 1, status: "unknown" };
+                // What the primary reported is not the fallback's failure.
+                observedStreamError = null;
                 nextStream = await streamText({
                     model: plan.activeModel,
                     messages: fallbackSdkMessages,
@@ -7024,7 +7123,7 @@ async function handleChatPost(
                         nextAttemptAbortController.signal,
                     ]),
                     ...attemptDispatchOptions(plan),
-                    onError: logStreamErrorWithoutContent({
+                    onError: observeStreamError({
                         traceId,
                         modelId: plan.modelId,
                     }),
@@ -7310,6 +7409,14 @@ async function handleChatPost(
             },
             async pull(controller) {
                 if (streamState !== "open") return;
+                if (pendingStreamError) {
+                    // The turn is already settled and released; only the
+                    // error itself was held back. See `pendingStreamError`.
+                    const { error } = pendingStreamError;
+                    pendingStreamError = null;
+                    errorSafely(controller, error);
+                    return;
+                }
                 streamController = controller;
                 // Armed on the first pull rather than at construction: pull
                 // is only ever called once the Response has been published,
@@ -7778,6 +7885,23 @@ async function handleChatPost(
                                                 actualModelId: dispatched.modelId,
                                                 provider: dispatched.provider,
                                                 finishReason: normalizedFinishReason,
+                                                ...(completionOutcome.status === "normal" && dispatched.continuationSource?.sourceId &&
+                                                    dispatched.continuationSource.sourceConversationDigest &&
+                                                    dispatched.continuationSource.sourceDigestVersion !== undefined ? {
+                                                    continuationSourcePlan: serializeContinuationSourcePlan({
+                                                        plan: dispatched.continuationSource.plan,
+                                                        sourceId: dispatched.continuationSource.sourceId,
+                                                        sourceConversationDigest: dispatched.continuationSource.sourceConversationDigest,
+                                                        sourceDigestVersion: dispatched.continuationSource.sourceDigestVersion,
+                                                        attempt: {
+                                                            assistantMessageId: durableAttempt.assistantMessageId,
+                                                            sourceUserMessageId: durableAttempt.sourceUserMessageId,
+                                                            attemptIndex: dispatched.attemptIndex,
+                                                            actualModelId: dispatched.modelId,
+                                                            provider: dispatched.provider,
+                                                        },
+                                                    }),
+                                                } : {}),
                                             },
                                             tx
                                         );
@@ -7880,6 +8004,9 @@ async function handleChatPost(
                             artifactsForTrailer = [];
                         }
                         const isEmptyResponse = !generatedText.trim();
+                        let streamErrorReport: ReturnType<
+                            typeof issueStreamErrorReport
+                        > = null;
                         if (
                             isEmptyResponse &&
                             durableAttempt &&
@@ -7919,6 +8046,14 @@ async function handleChatPost(
                                       completionError
                                   )
                                 : `AI_EMPTY_RESPONSE.${finishReasonCode}`;
+                            // The server has just judged this turn failed, so a
+                            // report of it can be verified like any other
+                            // server error (operator decision 2026-11-16).
+                            streamErrorReport = issueStreamErrorReport(
+                                "AI_EMPTY_RESPONSE",
+                                diagnosticCode,
+                                completionError
+                            );
                             try {
                                 await recordProviderFailure(
                                     dispatched.provider,
@@ -7984,6 +8119,9 @@ async function handleChatPost(
                                 // that made nothing says nothing.
                                 ...(artifactsForTrailer.length
                                     ? { artifacts: artifactsForTrailer }
+                                    : {}),
+                                ...(streamErrorReport
+                                    ? { errorReport: streamErrorReport }
                                     : {}),
                             })
                         );
@@ -8196,6 +8334,38 @@ async function handleChatPost(
                               }
                             : undefined
                     );
+                    // The failed turn's error report, on the same terms as the
+                    // empty answer's. A Research Preview stop is a limit doing
+                    // its job, not a failure to report.
+                    const streamErrorReport = researchStopReason
+                        ? null
+                        : issueStreamErrorReport(
+                              "AI_STREAM_FAILED",
+                              diagnosticCode,
+                              error,
+                              streamFailureIsLocal
+                                  ? isStorageError(error)
+                                      ? "storage"
+                                      : "application"
+                                  : null
+                          );
+                    if (
+                        streamErrorReport &&
+                        enqueueSafely(
+                            controller,
+                            buildChatStreamTrailerChunk({
+                                searchMetadata: null,
+                                errorReport: streamErrorReport,
+                            })
+                        )
+                    ) {
+                        // Nothing may write after the trailer, and the error
+                        // waits for the pull that follows it.
+                        stopFirstTokenWatch();
+                        pendingStreamError = { error };
+                        await releaseSafely();
+                        return;
+                    }
                     errorSafely(controller, error);
                     await releaseSafely();
                 }

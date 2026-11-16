@@ -68,6 +68,10 @@ const tx = {
       reviewSpecialty: null, executionBrief: "sealed",
       executionBriefDigest: "b".repeat(64),
     }];
+    // readAmuxAttemptBudgetFacts (2026-11-15): the aggregate below, in one statement.
+    if (sql.includes('COUNT(*)::int AS "rows"')) return recoveryAuthority ?
+      [{ rows: 1, greatest: 1, infra: 0, reserved: BigInt("3400000") }] :
+      [{ rows: 0, greatest: null, infra: 0, reserved: null }];
     throw new Error(`unexpected SQL: ${sql}`);
   },
   amuxWorkItem: {
@@ -92,6 +96,8 @@ const tx = {
     updateMany: async () => { taskWrites += 1; return { count: 1 }; },
   },
   amuxV22TaskQuestion: { findFirst: async () => null },
+  // A retried run reads its Task's earlier review rejections (none here).
+  amuxV52ReviewRecord: { findMany: async () => [] },
   amuxV22WorkerAssignment: { findUnique: async () => ({
     id: assignmentId, authorizationAuditLogId: "assignment-audit",
     workItemId: taskId, taskRevision: 5, workerName: worker,
@@ -103,7 +109,8 @@ const tx = {
     recoveryApprovalId: assignmentRecoveryApprovalId,
     perAttemptMicroUsd: BigInt("3400000"),
   }) },
-  adminAuditLog: { findUnique: async () => ({
+  // No owner ceiling re-approval stands for this Task.
+  adminAuditLog: { findMany: async () => [], findUnique: async () => ({
     action: "amux.v22.worker.assigned", targetId: assignmentId,
     metadata: { v52GradeRouting: false },
   }) },

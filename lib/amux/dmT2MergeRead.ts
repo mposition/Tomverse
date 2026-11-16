@@ -2,6 +2,8 @@ import "server-only";
 
 import type { Prisma } from "@prisma/client";
 
+import { ENGINEERING_AGENT_V22_REVIEW_CAUSE_PREFIX } from "@/lib/engineeringAgentCore";
+
 /**
  * The reads of the Decision Maker's develop merge (owner decision 2026-11-13,
  * lib/amux/dmT2MergeCore.ts) that look at the engineering agent's and the
@@ -23,6 +25,8 @@ export type AmuxDmT2MergeApprovalRow = {
   approvedHeadSha: string;
   approvedDiffDigest: string;
   decidedAt: Date;
+  /** The patch the publisher applied for the run (its review publish item); null when there is none. */
+  patchBody: string | null;
 };
 
 /**
@@ -34,19 +38,24 @@ export type AmuxDmT2MergeApprovalRow = {
  * review, not archived, its newest run the settled one, nothing running. The
  * least recently visited first, so one that cannot move never hides the rest.
  * Narrowed to one settlement, or to some pull request numbers, when given.
+ * Each carries the patch its run published, which the block list merge scope
+ * judges line by line (lib/amux/dmT2MergeCore.ts amuxDmT2MergePatchGate).
  */
 export async function readAmuxDmT2MergeApprovals(db: Reader, input: {
   limit: number; settlementId?: string | null; prNumbers?: readonly number[] | null;
 }) {
   const settlementId = input.settlementId ?? null;
   const prNumbers = input.prNumbers ? [...input.prNumbers] : null;
+  const reviewPrefix = ENGINEERING_AGENT_V22_REVIEW_CAUSE_PREFIX;
   return db.$queryRaw<AmuxDmT2MergeApprovalRow[]>`
     SELECT s."id" AS "settlementId", s."taskId", s."attemptId", s."bindingId", b."prNumber",
-      b."ref" AS "headRef", s."approvedHeadSha", s."approvedDiffDigest", s."decidedAt"
+      b."ref" AS "headRef", s."approvedHeadSha", s."approvedDiffDigest", s."decidedAt", i."patchBody"
     FROM "AmuxDmOwnerSettlement" s
     JOIN "EngineeringAgentBinding" b ON b."id" = s."bindingId"
     JOIN "EngineeringAgentRun" r ON r."id" = b."runId"
     JOIN "AmuxWorkItem" w ON w."id" = s."taskId"
+    LEFT JOIN "EngineeringAgentWorkItem" i
+      ON i."causeKey" = (${reviewPrefix}::text || r."id") AND i."kind" = 'publish'
     WHERE s."kind" = 't2_pr' AND s."state" = 'applied' AND s."decision" = 'approve'
       AND (${settlementId}::text IS NULL OR s."id" = ${settlementId}::text)
       AND (${prNumbers}::int[] IS NULL OR b."prNumber" = ANY(${prNumbers}::int[]))
@@ -58,8 +67,11 @@ export async function readAmuxDmT2MergeApprovals(db: Reader, input: {
       AND r."cardId" = s."taskId" AND r."amuxAttemptId" = s."attemptId"
       AND w."status" = 'review' AND w."archivedAt" IS NULL
       AND w."sourceSystem" = 'admin-idea-v4' AND w."cardType" = 'task'
+      -- The card's review attempt is still the settled one (amuxV22ReviewAttempt): the
+      -- newest that ended succeeded into review, and nothing is running.
       AND (SELECT x."id" FROM "AmuxExecutionAttempt" x WHERE x."taskId" = w."id"
-        ORDER BY x."taskRevision" DESC, x."startedAt" DESC, x."id" DESC LIMIT 1) = s."attemptId"
+          AND x."outcome" = 'succeeded' AND x."toStatus" = 'review'
+        ORDER BY x."attemptNumber" DESC NULLS LAST, x."startedAt" DESC, x."id" DESC LIMIT 1) = s."attemptId"
       AND NOT EXISTS (SELECT 1 FROM "AmuxExecutionAttempt" x
         WHERE x."taskId" = w."id" AND x."endedAt" IS NULL)
     ORDER BY s."updatedAt", s."id"

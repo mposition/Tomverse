@@ -32,7 +32,7 @@ import {
   rotateDecisionMakerDigestKey,
   submitDecisionMakerOutput,
 } from "@/lib/amux/decisionMakerBodyStore";
-import { dmCardText } from "@/lib/amux/decisionMakerCore";
+import { DM_CARD_TEXT_MAX_BYTES, dmCardText } from "@/lib/amux/decisionMakerCore";
 import {
   decisionMakerRetentionSweepDeps,
   runDecisionMakerRetentionSweep,
@@ -293,9 +293,9 @@ test("a body holds one of the five fields, within its cap in bytes, once per fie
     // Not one of the five: the guard finds nothing it could belong to before the CHECK is reached.
     [{ field: "dm_verdict", text: "x", auditLogId: "" }, /AMUX_DM_BODY_UNAUDITED|AmuxDecisionMakerBody_field_check/],
     [{ field: "card_text", text: "", auditLogId: "" }, /AmuxDecisionMakerBody_text_size_check/],
-    [{ field: "card_text", text: "x".repeat(16 * 1024 + 1), auditLogId: "" }, /AmuxDecisionMakerBody_text_size_check/],
-    // Bytes, not characters: 5,462 three-byte characters are 16,386 bytes.
-    [{ field: "card_text", text: "가".repeat(5_462), auditLogId: "" }, /AmuxDecisionMakerBody_text_size_check/],
+    [{ field: "card_text", text: "x".repeat(DM_CARD_TEXT_MAX_BYTES + 1), auditLogId: "" }, /AmuxDecisionMakerBody_text_size_check/],
+    // Bytes, not characters: 87,382 three-byte characters are 262,146 bytes.
+    [{ field: "card_text", text: "가".repeat(87_382), auditLogId: "" }, /AmuxDecisionMakerBody_text_size_check/],
     [{ field: "card_text", text: "x", digest: "A".repeat(64), auditLogId: "" }, /AmuxDecisionMakerBody_digest_format_check/],
     // Not the registered key check value: the guard's refusal comes first.
     [{ field: "card_text", text: "x", keyCheck: "short", auditLogId: "" }, /AMUX_DM_BODY_KEY|AmuxDecisionMakerBody_digest_format_check/],
@@ -312,7 +312,7 @@ test("a body holds one of the five fields, within its cap in bytes, once per fie
   // At the cap exactly it is stored; a second card text for the request is not.
   const stored = await prisma.$transaction(async (tx) => {
     const created = await backdatedRequestIn(tx);
-    await insertBodyRow(tx, created.id, period, { field: "card_text", text: "가".repeat(5_461) + "x", auditLogId: created.auditLogId });
+    await insertBodyRow(tx, created.id, period, { field: "card_text", text: "가".repeat(87_381) + "x", auditLogId: created.auditLogId });
     return created.id;
   });
   assert.deepEqual(await bodyFields(stored), ["card_text"]);
@@ -490,8 +490,8 @@ test("a question routed to a DM keeps its card text from its own routing, and Ad
   const binding = routingBindingFor();
   // A card at §5's cap exactly, so the stored text is the largest the router sends.
   const card = { ...ROUTED_CARD, context: "" };
-  card.context = "x".repeat(16 * 1024 - Buffer.byteLength(dmCardText(card), "utf8"));
-  assert.equal(Buffer.byteLength(dmCardText(card), "utf8"), 16 * 1024);
+  card.context = "x".repeat(DM_CARD_TEXT_MAX_BYTES - Buffer.byteLength(dmCardText(card), "utf8"));
+  assert.equal(Buffer.byteLength(dmCardText(card), "utf8"), DM_CARD_TEXT_MAX_BYTES);
   for (const routedCard of [ROUTED_CARD, card]) {
     const routedBinding = routedCard === ROUTED_CARD ? binding : routingBindingFor();
     const routed = await withAmuxDbBoundary(ROUTE_BOUNDARY, (tx) =>
@@ -717,8 +717,8 @@ test("a question routed to the operator stores no card text, and one the registr
     [routingBindingFor(), { ...ROUTED_CARD, question: "Deploy the cache to production?" }, "irreversible_term"],
     // Section 3-8: a card with a secret is never sent to a DM, and never stored.
     [routingBindingFor(), { ...ROUTED_CARD, context: `see ${pat}` }, "card_secret_detected"],
-    // Section 5: over 16 KiB of card text.
-    [routingBindingFor(), { ...ROUTED_CARD, context: "x".repeat(16 * 1024) }, "input_limit_exceeded"],
+    // Section 5: over the card text's cap.
+    [routingBindingFor(), { ...ROUTED_CARD, context: "x".repeat(DM_CARD_TEXT_MAX_BYTES) }, "input_limit_exceeded"],
   ];
   for (const [binding, card, refusal] of operatorCases) {
     const routed = await prisma.$transaction((tx) => recordDecisionMakerRequestWithCardText(tx, { binding, card, keyRing: ring }));

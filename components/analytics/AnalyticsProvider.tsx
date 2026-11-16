@@ -3,7 +3,7 @@
 import Script from "next/script";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { createContext, Suspense, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { createContext, Suspense, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
 import { useSession } from "next-auth/react";
@@ -15,6 +15,8 @@ import {
 import {
   analyticsConsent,
   configureAnalyticsClient,
+  syncAnalyticsJourneyIdentity,
+  flushConnectedJourneyEvents,
   consumeSignupStarted,
   disableAnalyticsClient,
   observeMarketingTouch,
@@ -25,6 +27,7 @@ import {
 } from "@/lib/productAnalyticsClient";
 import {
   normalizeAnalyticsCountry,
+  isProductAnalyticsAllowed,
   type AnalyticsConsentMode,
   type ResolvedAnalyticsConsentPolicy,
 } from "@/lib/analyticsConsentPolicy";
@@ -638,11 +641,29 @@ export function AnalyticsProvider({
     };
   }, [disabled, openPreferencesFrom]);
 
-  const analyticsEnabled = Boolean(
-    resolvedPolicy &&
-      (consent === "accepted" ||
-        (consent === "unset" && resolvedPolicy.mode === "notice_opt_out"))
-  );
+  const analyticsEnabled = isProductAnalyticsAllowed(consent, resolvedPolicy);
+  const { data: sessionData, status: sessionStatus } = useSession();
+  const sessionUserId = sessionStatus === "authenticated" ? sessionData?.user?.id ?? null : null;
+  // Layout synchronization precedes every configure/queue flush, including an
+  // account change in the same commit. Unresolved auth suspends only journeys.
+  useLayoutEffect(() => {
+    syncAnalyticsJourneyIdentity(
+      sessionStatus === "loading" ? undefined : sessionUserId ? `account:${sessionUserId}` : null,
+      disabled ? false : consent === "loading" || !resolvedPolicy ? null : analyticsEnabled,
+    );
+  }, [sessionStatus, sessionUserId, disabled, consent, resolvedPolicy, analyticsEnabled]);
+  useEffect(() => {
+    const changed = (event: StorageEvent) => {
+      if (event.key !== "tomverse_analytics_consent_v1" && event.key !== null) return;
+      const stored = analyticsConsent();
+      const next = stored === "accepted" || stored === "declined" ? stored : "unset";
+      syncAnalyticsJourneyIdentity(sessionStatus === "loading" ? undefined : sessionUserId ? `account:${sessionUserId}` : null,
+        disabled ? false : resolvedPolicy ? isProductAnalyticsAllowed(next, resolvedPolicy) : null);
+      setConsent(next);
+    };
+    window.addEventListener("storage", changed);
+    return () => window.removeEventListener("storage", changed);
+  }, [sessionStatus, sessionUserId, disabled, resolvedPolicy]);
 
   useEffect(() => {
     if (disabled || !analyticsEnabled || !resolvedPolicy) return;
@@ -697,13 +718,14 @@ export function AnalyticsProvider({
     };
   }, [analyticsEnabled, disabled, initialPlan, lang, measurementId, resolvedPolicy, userCreatedAt]);
 
+  useEffect(() => {
+    if (!disabled && analyticsEnabled && analyticsClientReady) flushConnectedJourneyEvents();
+  }, [sessionStatus, sessionUserId, disabled, analyticsEnabled, analyticsClientReady]);
+
   // GA4 User-ID (docs/policy/marketing-automation.md §10.2): asked for only
   // when the notice is published, the switch is on, the visitor explicitly
   // accepted analytics and is signed in. Any of those going away -- signing
   // out included -- clears it on the tag.
-  const { data: sessionData, status: sessionStatus } = useSession();
-  const sessionUserId =
-    sessionStatus === "authenticated" ? sessionData?.user?.id ?? null : null;
   const ga4UserIdAllowed =
     !disabled &&
     analyticsClientReady &&

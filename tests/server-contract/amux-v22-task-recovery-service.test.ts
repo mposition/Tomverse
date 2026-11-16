@@ -173,6 +173,9 @@ const tx = {
       return [world.runtime, world.retryRuntime].filter((row) =>
         workerNames.includes(row.workerName));
     }
+    // readAmuxAttemptBudgetFacts (2026-11-15): the aggregate below, in one statement.
+    if (sql.includes('COUNT(*)::int AS "rows"'))
+      return [{ rows: 1, greatest: 1, infra: 0, reserved: BigInt(3_400_000) }];
     if (sql.includes('FROM "AmuxExecutionAttempt"') && /FOR (NO KEY UPDATE|UPDATE|SHARE)/.test(sql)) lockLog.push(`attempt:${String(values[0])}`);
     if (sql.includes('FROM "AmuxExecutionAttempt"')) return [{ id: attemptId }];
     if (sql.includes("unnest(request")) return Array.isArray(values[0]) &&

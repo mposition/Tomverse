@@ -38,7 +38,8 @@ test("every authoritative routing, claim, and execution-start path consults the 
 
   const claim = source("lib/amux/v22WorkerClaimService.ts");
   assert.match(claim, /amuxV22SafeStopFencedWorkers/);
-  assert.match(claim, /!safeStopFenced\.has\(route\.workerName\)/);
+  // Since 2026-11-15 each route names its first exclusion (the card says why it waits).
+  assert.match(claim, /if \(safeStopFenced\.has\(route\.workerName\)\) return "safe_stop_fenced";/);
   assert.match(claim, /BoardImportError\("worker_safe_stop_fenced", 409\)/);
 
   const execution = source("lib/amux/execution.ts");

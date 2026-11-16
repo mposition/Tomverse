@@ -627,6 +627,32 @@ test("a raw-query statement timeout inside recovery is a known rollback", async 
   });
 });
 
+test("a deadlock or an ended idle session inside a running mutation is a known rollback the caller asks again after", async () => {
+  const { amuxInternalErrorResponse, withAmuxRouteBudget } = await modules();
+  await quietly(async () => {
+    for (const code of ["40P01", "40001", "25P03"]) {
+      reset({ callbackError: databaseError(code, "rolled back by the database") });
+      const error = await caught(withAmuxRouteBudget(() => run(MUTATION)));
+      assert.equal(
+        await reasonOf(amuxInternalErrorResponse("execution_settle", error)),
+        "amux_database_deadline_exceeded",
+        code,
+      );
+    }
+  });
+});
+
+test("the same codes at COMMIT stay an unknown outcome", async () => {
+  const { amuxInternalErrorResponse, withAmuxRouteBudget } = await modules();
+  await quietly(async () => {
+    for (const code of ["40P01", "25P03"]) {
+      reset({ commitError: databaseError(code, "rolled back by the database") });
+      const error = await caught(withAmuxRouteBudget(() => run(MUTATION)));
+      assert.equal(await reasonOf(amuxInternalErrorResponse("execution_settle", error)), "amux_outcome_unknown", code);
+    }
+  });
+});
+
 test("a running transaction timeout remains unknown even with a nested statement timeout", async () => {
   const { amuxInternalErrorResponse } = await modules();
   const timeout = Object.assign(new Error("transaction timed out"), {

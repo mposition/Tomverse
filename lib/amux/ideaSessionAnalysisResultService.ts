@@ -8,6 +8,7 @@ import { AMUX_V4_IDEA_SYSTEM_ACTOR,
   AMUX_V19_SESSION_ANALYSIS_RESULT_ACTION,
   AMUX_V19_SESSION_ANALYSIS_RESULT_TARGET,
   auditRowActorKind } from "@/lib/adminAuditSystemActors";
+import { amuxAnalysisChunkMaxBytes } from "./ideaAnalysisChunkCore.ts";
 import { amuxContentKeyCoordinate, sealAmuxContent,
   type AmuxContentKeys } from "./ideaCrypto.ts";
 import { amuxContentUnitKeyId } from "./ideaKeyStore.ts";
@@ -145,8 +146,10 @@ export async function commitAmuxMaxSessionResult(tx: Tx,
       { state: "plan_refused"; reason: AmuxSessionPlanRefusal } }> {
   const bytes = typeof input?.rawModelOutput === "string"
     ? Buffer.from(input.rawModelOutput, "utf8") : null;
+  // One answer up to the switch's ceiling (owner direction 2026-11-15); the
+  // table's ciphertext CHECK leaves room for the seal around it.
   if (!validIdentity(input) || !bytes || bytes.length < 1 ||
-      bytes.length > 65_536 ||
+      bytes.length > amuxAnalysisChunkMaxBytes() ||
       ![input.inputTokens, input.outputTokens].every((value) =>
         Number.isSafeInteger(value) && value >= 0 &&
         value <= 2_147_483_647) ||

@@ -22,7 +22,7 @@ const world = {
   role: "owner", reauth: false, origin: true,
   view: readyView as unknown, reads: [] as unknown[][], translated: [] as unknown[],
   audits: [] as Array<Record<string, unknown>>,
-  outcome: { state: "translated", translations: { covered: "목록" }, cached: false } as unknown,
+  outcome: { state: "translated", translations: { covered: "목록" }, cached: false, calls: 2 } as unknown,
 };
 
 let installed = false;
@@ -67,7 +67,7 @@ const reset = () => {
   process.env.TOMVERSE_AMUX_V4_ANALYSIS_RESULT_READ = "enabled";
   Object.assign(world, { role: "owner", reauth: false, origin: true, view: readyView,
     reads: [], translated: [], audits: [],
-    outcome: { state: "translated", translations: { covered: "목록" }, cached: false } });
+    outcome: { state: "translated", translations: { covered: "목록" }, cached: false, calls: 2 } });
 };
 
 test("the owner gets the translation of the text the server read itself", async () => {
@@ -88,7 +88,7 @@ test("the owner gets the translation of the text the server read itself", async 
   assert.equal(world.audits.length, 1);
   assert.equal(world.audits[0].action, "amux.idea.analysis_translation");
   assert.equal(world.audits[0].targetId, ideaId);
-  assert.deepEqual(world.audits[0].metadata, { chunkIndex: 0, itemCount: 3, outcome: "translated", cached: false });
+  assert.deepEqual(world.audits[0].metadata, { chunkIndex: 0, itemCount: 3, outcome: "translated", cached: false, calls: 2 });
   assert.equal(JSON.stringify(world.audits[0]).includes("Covers the list"), false);
   assert.equal(JSON.stringify(world.audits[0]).includes("목록"), false);
 });

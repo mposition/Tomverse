@@ -61,7 +61,7 @@ export type CommittedIdeaSubmission = { ideaId: string; requestId: string; audit
 
 /**
  * The owner and session intake paths share the exact encrypted idea body and
- * seven-day clock. Actor authority and audit evidence stay in their separate
+ * analysis deadline. Actor authority and audit evidence stay in their separate
  * writers so a system submission can never manufacture a human session.
  */
 export function prepareIdeaSubmissionStorage(input: {

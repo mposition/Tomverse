@@ -28,7 +28,8 @@ import {
   type AmuxReviewOutcome,
   type AmuxReviewSubject,
 } from "@/lib/amux/reviewApprovalCore";
-import { AMUX_MAX_EXECUTION_ATTEMPTS, decideAmuxAttemptBudget } from "@/lib/amux/executionBudgetCore";
+import { amuxDefaultMaxAttempts, decideAmuxAttemptBudget } from "@/lib/amux/executionBudgetCore";
+import { readAmuxAttemptBudgetFacts } from "@/lib/amux/infraFailureStore";
 import { amuxV52RejectedTwiceReviewAttemptId } from "@/lib/amux/v52ReviewRejections";
 import { normalizeAmuxUntrustedReason, openAmuxHumanEscalation, publicAmuxEscalationReasonCode } from "@/lib/amux/escalation";
 import { readAmuxReviewPullRequest, type AmuxReviewPullRequest } from "@/lib/amux/reviewGitHub";
@@ -164,16 +165,15 @@ async function snapshot(
   const task = escalation.task;
   const artifact = task.status === "review" &&
     task.reviewPrNumber === fetchedArtifact?.prNumber ? fetchedArtifact : null;
-  const [lastAttempt, attemptCount, activeDelivery, previousBlock, latestV4Result] = await Promise.all([
+  const [lastAttempt, attemptFacts, activeDelivery, previousBlock, latestV4Result] = await Promise.all([
     tx.amuxExecutionAttempt.findFirst({
       where: { taskId: task.id },
       orderBy: [{ taskRevision: "desc" }, { startedAt: "desc" }, { id: "desc" }],
     }),
-    tx.amuxExecutionAttempt.aggregate({
-      where: { taskId: task.id },
-      _count: { _all: true },
-      _max: { attemptNumber: true },
-    }),
+    // The claim's own count (owner decision 2026-11-15): infrastructure
+    // failures keep their number but use none of the card's attempts, as the
+    // review proposal guard counts them (20261116011400_amux_review_retry_no_fixed_count).
+    readAmuxAttemptBudgetFacts(tx, task.id),
     tx.amuxWorkDelivery.findFirst({
       where: { taskId: task.id, status: { in: ["queued", "leased"] } },
       select: { attemptId: true },
@@ -189,11 +189,16 @@ async function snapshot(
         select: { attemptId: true, sourceSha256: true, bodyPurgedAt: true } }) :
       Promise.resolve(null),
   ]);
+  // A person's decision is not refused by the infrastructure bound; their
+  // retry starts it over (lib/amux/infraFailureStore.ts).
   const budget = decideAmuxAttemptBudget({
-    historical_rows: attemptCount._count._all,
-    greatest_attempt_number: attemptCount._max.attemptNumber,
+    historical_rows: attemptFacts.historicalRows,
+    greatest_attempt_number: attemptFacts.greatestAttemptNumber,
+    infra_rows: attemptFacts.infraRows,
+    infra_window_rows: 0,
   });
-  const used = budget.allowed ? budget.next_attempt_number - 1 : budget.attempts_used;
+  const used = Math.max(0, Math.max(attemptFacts.historicalRows,
+    attemptFacts.greatestAttemptNumber ?? 0) - attemptFacts.infraRows);
   const lastTerminal = !lastAttempt ||
     (lastAttempt.endedAt !== null && lastAttempt.outcome !== null && lastAttempt.toStatus !== null);
   const reviewAttempt = task.status === "review" && lastAttempt !== null &&
@@ -450,7 +455,7 @@ export async function getAmuxReviewDetail(escalationId: string) {
     publication_hold: publicationHold,
     // Why no decision is open at all; null while the server offers one.
     decision_hold: decisionHold,
-    retry: { used, limit: AMUX_MAX_EXECUTION_ATTEMPTS, remaining: Math.max(0, AMUX_MAX_EXECUTION_ATTEMPTS - used) },
+    retry: { used, limit: amuxDefaultMaxAttempts(), remaining: Math.max(0, amuxDefaultMaxAttempts() - used) },
     proposed_transitions: {
       approve: outcomes.includes("approve") ? "done" : null,
       retry: outcomes.includes("retry") ? "todo" : null,

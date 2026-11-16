@@ -370,6 +370,54 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // constraints only; no commit-deadline marker, classifier or deferred
   // trigger changes.
   "20261114160000_amux_process_audit_report",
+  // Owner decision 2026-11-15: the card wait reason and worker health signal
+  // tables (CHECK constraints only), and the attempt-number bounds of the
+  // review proposal, v22 attempt and recovery guards and the recovery
+  // approval CHECK; no commit-deadline marker, classifier or deferred
+  // trigger changes.
+  "20261116011300_amux_wait_reasons_worker_health",
+  "20261116011400_amux_review_retry_no_fixed_count",
+  "20261116011500_amux_v22_attempt_number_bound",
+  "20261116011600_amux_v22_recovery_attempt_bound",
+  "20261116011700_amux_v22_recovery_approval_attempt_bound",
+  // Owner decision 2026-11-15: the Decision Maker body store's caps grow, a CHECK
+  // and one number of the body guard; no commit-deadline marker, classifier or
+  // deferred trigger changes.
+  "20261115140000_amux_dm_card_text_cap",
+  // Owner decision 2026-11-15: the sealed review findings table with its own
+  // row trigger, and one more content-key purpose; no commit-deadline marker,
+  // classifier or deferred trigger changes.
+  "20261116010000_amux_v52_review_findings_body",
+  // Owner decision 2026-11-15: a lower grade's contract change is judged at
+  // frontier in place; one guard body (the task approval binding) accepts that
+  // escalation into review or blocked. No commit-deadline marker, classifier or
+  // deferred trigger changes.
+  "20261116010100_amux_v52_in_place_grade_escalation",
+  // Owner direction 2026-11-15: one session analysis answer may be up to
+  // 4 MiB; one CHECK on the result table, no commit-deadline marker,
+  // classifier or deferred trigger changes.
+  "20261116010400_amux_session_result_answer_size",
+  // Owner direction 2026-11-15: the rolling score baseline relaxes one CHECK
+  // and replaces the score guard body on the score table only; no
+  // commit-deadline marker, classifier or deferred trigger changes.
+  "20261116010500_amux_portfolio_score_rolling_baseline_check",
+  "20261116010600_amux_portfolio_score_rolling_baseline_guard",
+  // Owner direction 2026-11-15: the idea title CHECK loses its 80-character
+  // cap; one CHECK on the submission table, no commit-deadline marker,
+  // classifier or deferred trigger changes.
+  "20261116010700_amux_idea_title_no_length_cap",
+  // Owner direction 2026-11-15: a new idea's analysis has a 36,500-day
+  // deadline; one CHECK on the submission table and two guard bodies that
+  // compare the stored deadline instead of submittedAt + 7 days. No
+  // commit-deadline marker, classifier or deferred trigger changes.
+  "20261116010800_amux_idea_analysis_open_deadline",
+  "20261116010900_amux_v19_session_result_open_deadline",
+  "20261116011000_amux_v19_read_manifest_intent_open_deadline",
+  // Owner decision 2026-11-15: a v22 report up to the transport backstop and an
+  // answer up to its one cap; one CHECK each on the result and question
+  // tables, no commit-deadline marker, classifier or deferred trigger changes.
+  "20261116011100_amux_v22_task_result_report_size",
+  "20261116011200_amux_v22_owner_answer_size",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {

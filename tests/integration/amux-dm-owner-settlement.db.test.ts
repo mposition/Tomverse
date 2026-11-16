@@ -9,6 +9,7 @@ import { closeLifecycleHarness, fixtureCommitted, lifecycle, queryAdapter, witho
   "./helpers/amuxLifecycleHarness";
 import { seedAmuxV4PortfolioRecoveryPrerequisites } from "./helpers/amuxV4PortfolioSeedFixture.mjs";
 import { amuxContentUnitKeyId } from "@/lib/amux/ideaKeyStore";
+import { AMUX_MAX_EXECUTION_ATTEMPTS } from "@/lib/amux/executionBudgetCore";
 
 // The AMUX owner queue through the Decision Maker (owner decision 2026-11-13),
 // on PostgreSQL with every migration trigger on: a stopped v22 Task is filed
@@ -658,9 +659,12 @@ test("a Task that moved, a resolved escalation or a spent budget never takes the
     assert.equal(row?.cancelReason, "escalation_resolved");
   });
   await lifecycle(async (tx) => {
-    // The fixture's Task allows two ordered attempts; its one run is placed as the budget's last.
+    // Its one run is placed as the runaway guard's last counted attempt (no
+    // fixed count stops a card since 2026-11-15; the DM's retry follows the
+    // claim's own budget rule).
     const card = await stoppedTask(tx, { afterSettlement: (inner, taskId) => withoutTriggers(inner,
-      () => inner.$executeRaw`UPDATE "AmuxExecutionAttempt" SET "attemptNumber" = 5 WHERE "taskId" = ${taskId}`) });
+      () => inner.$executeRaw`UPDATE "AmuxExecutionAttempt" SET "attemptNumber" = ${AMUX_MAX_EXECUTION_ATTEMPTS}
+        WHERE "taskId" = ${taskId}`) });
     await sync(true);
     assert.deepEqual(await apply(card.settlementId, { decision: "retry" }), { applied: false, outcome: "handed_off" });
     assert.equal((await settlementRow(tx, card.settlementId))?.handoffReason, "attempt_budget_spent");
@@ -782,7 +786,8 @@ test("the owner queue names, per card, where the Decision Maker stands and what 
     const card = await stoppedTask(tx);
     const saved = { routing: process.env.TOMVERSE_AMUX_DM_ROUTING, settlement: process.env.TOMVERSE_AMUX_DM_OWNER_SETTLEMENT };
     process.env.TOMVERSE_AMUX_DM_ROUTING = "enabled";
-    delete process.env.TOMVERSE_AMUX_DM_OWNER_SETTLEMENT;
+    // On unless exactly `disabled` (owner decision 2026-11-15).
+    process.env.TOMVERSE_AMUX_DM_OWNER_SETTLEMENT = "disabled";
     try {
       const { readAmuxOwnerQueueDmStatus } = await import("@/lib/amux/ownerQueueDmStatusRead");
       const { recordAmuxDmRelaySync } = await import("@/lib/amux/dmRelayHeartbeat");

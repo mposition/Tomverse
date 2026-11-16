@@ -4,6 +4,8 @@ import test from "node:test";
 import {
   AMUX_SESSION_REVIEW_DETAILS, classifyAmuxSessionReviewAnswer, readAmuxSessionReviewReply,
 } from "../lib/amux/ideaSessionReviewCore.ts";
+import { DM_CARD_TEXT_MAX_BYTES } from "../lib/amux/decisionMakerCore.ts";
+import { AMUX_INTAKE_SAFETY_MAX_BYTES } from "../lib/amux/intakeLimitsCore.ts";
 import { amuxSessionReviewFirstPageDetail } from "../lib/amux/ideaSessionReviewDetailCore.ts";
 import { amuxV19SessionPromptForClaim } from "../lib/amux/ideaSessionAnalysisPromptCore.ts";
 
@@ -25,7 +27,7 @@ test("anything else is the closed not-a-plan word, never model text", () => {
   for (const raw of ["not json", "[]", "null",
     answer({ outcome: "propose", coverageStatus: "complete", units: [{ kind: "card" }] }),
     answer({ ownerQuestion: null }), answer({ ownerQuestion: "   " }),
-    answer({ ownerQuestion: "x".repeat(2_001) }), answer({ ownerQuestion: "ask ‮ me" })]) {
+    answer({ ownerQuestion: "x".repeat(DM_CARD_TEXT_MAX_BYTES + 1) }), answer({ ownerQuestion: "ask ‮ me" })]) {
     assert.deepEqual(classifyAmuxSessionReviewAnswer(raw), { reason: "not_a_plan" }, raw.slice(0, 40));
   }
 });
@@ -36,7 +38,7 @@ test("the Admin screen trusts only an exact review reply", () => {
     { reason: "owner_question", question: "Which?" });
   for (const body of [null, {}, { review: null }, { review: { reason: "not_a_plan", extra: 1 } },
     { review: { reason: "owner_question" } }, { review: { reason: "owner_question", question: "" } },
-    { review: { reason: "owner_question", question: "x".repeat(2_001) } },
+    { review: { reason: "owner_question", question: "x".repeat(DM_CARD_TEXT_MAX_BYTES + 1) } },
     { review: { reason: "invalid_result" } }]) {
     assert.equal(readAmuxSessionReviewReply(body), null, JSON.stringify(body)?.slice(0, 60));
   }
@@ -94,7 +96,10 @@ test("a refused first page names the plan writer's own failed check, never answe
   assert.deepEqual(detailOf(firstPage({ extra: true })),
     { detail: "chunk_schema_rejected", at: { rule: "key_extra", field: "chunk" } });
   assert.deepEqual(detailOf(firstPage({ coveredScope: "" })), { detail: "chunk_metadata_incomplete" });
-  assert.deepEqual(detailOf("x".repeat(65_537)), { detail: "chunk_too_large" });
+  // The former 64 KiB answer is no limit (owner direction 2026-11-15): only the
+  // 4 MiB safety ceiling is too large.
+  assert.deepEqual(detailOf("x".repeat(65_537)), { detail: "chunk_schema_rejected", at: { rule: "json_unparsable" } });
+  assert.deepEqual(detailOf("x".repeat(AMUX_INTAKE_SAFETY_MAX_BYTES + 1)), { detail: "chunk_too_large" });
   for (const raw of [firstPage(), "not json", firstPage({ units: [] })]) {
     assert.ok(AMUX_SESSION_REVIEW_DETAILS.includes(detailOf(raw).detail));
   }

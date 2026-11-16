@@ -16,15 +16,18 @@
  *   round (review helper plus sleep) does not end a live run.
  *
  * The attempt budget still bounds every repeat, and a card that spends it is
- * blocked as before. A paid API route keeps every gate. Off unless
- * TOMVERSE_AMUX_V22_READ_BACK_PROCEED=enabled.
+ * blocked as before. A paid API route keeps every gate.
+ *
+ * On unless TOMVERSE_AMUX_V22_READ_BACK_PROCEED=disabled (owner direction
+ * 2026-11-15: "내부 개발용 Flow입니다. 제한을 줄 이유가 없습니다."; it was off
+ * unless `enabled` from 2026-11-14).
  */
 export const AMUX_V22_READ_BACK_PROCEED_ENV = "TOMVERSE_AMUX_V22_READ_BACK_PROCEED";
 
 export function amuxV22ReadBackProceedEnabled(
   value: string | undefined = process.env[AMUX_V22_READ_BACK_PROCEED_ENV],
 ): boolean {
-  return value?.trim() === "enabled";
+  return value?.trim() !== "disabled";
 }
 
 /** A CLI run that ended with no complete usage receipt, retried in budget. */

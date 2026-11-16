@@ -655,6 +655,34 @@ Tomverse 밖으로 나가기 때문입니다.
 | `memoryRerank` | 관련도로 걸러지는 memory를 질문과의 관련도로 선택. lexical 조회의 400개 상한을 유지하고, 반환된 ID 밖의 최근 eligible memory를 더합니다. max100 안에서 extra에 최대50개를 확보하고 남는 자리는 다른 pool이 사용합니다(실패 시 extra는 버림) | 질문, 해당 memory statement(최대 100개) |
 | `memoryDuplicates` | 추출 후보가 기존 memory의 다른 표현인지 판정. 관련도로 걸러지는 종류만 대상이며 core·고정·style memory는 후보로도, 색인으로도 보내지 않습니다 | 해당 후보 statement, 계정의 해당 active memory statement |
 
+**Memory relevance 구현(기본 꺼짐).** `MEMORY_RELEVANCE_CONTEXT_ENABLED=true`는
+기존 privacy/readiness·모델·단가·일/월 예산을 통과한 Memory rerank에서만 새 query 정책을
+고릅니다. Knowledge와 embedding의 query 계약은 유지합니다. 현재 질문의 고정 400-byte
+절단을 없애며, 지원이 확인된 모델의 입력·과금 계약을 적용합니다. 정확한 tokenizer가 없으면
+UTF-8 bytes를 token의 보수적 상한으로만 사용하고, 상한으로 검증할 수 없는 입력과 실제
+초과를 구분해 lexical로 돌아갑니다. 비용 계약을 확인할 수 없는 조합도 provider를 호출하지
+않습니다. 모델·단가·예산은 이 스위치로 추가하거나 변경하지 않습니다.
+
+같은 Conversation의 현재 owner·passwordVersion 잠금 검증을 통과한 저장 user 본문 최대
+2개를 보조 query data로 사용할 수 있습니다. assistant/system/tool, 첨부·OCR, 별도
+External/Review 원문은 조회하지 않습니다. user 본문 안에 사용자가 붙여넣은 외부·Review
+자료는 포함될 수 있습니다. 이력은 주입 prompt에 다시 붙이지 않습니다.
+현재 질문의 lexical 결과에 관련 후보가 있는데, 이력을 사용한 rerank가 그 후보들을 모두
+제외하고 현재 질문과 term overlap이 없는 ordinary memory만 선택하면 기존 lexical 결과로
+복귀합니다(`history_displaced_current_query`). 점수를 혼합하거나 provider를 다시 부르지
+않으며 거절한 이력 anchor는 서명하지 않습니다. 빈 선택(기권), 현재 질문과 직접 일치가
+없는 참조, 현재-only/legacy 경로는 이 검사를 적용하지 않습니다. 이는 무관한 이력의
+전면 대체를 막는 보수적 검사이며 의미상의 모든 주제 전환을 판별하는 것은 아닙니다.
+현재 질문·이력의 query 문자열과 전송 범위는 유지합니다. 준비 때 실제 채택한
+source ID·content digest와 query 정책만 기존 bundle에 서명하고 원문을 token·로그·새 DB에
+넣지 않습니다. 전송은 envelope 검증 뒤 같은 subset과 cache만 재사용합니다. 빈/없는
+anchor는 current-only이며 새 이력을 채우지 않습니다. source 변경·삭제는 stale이고, 정상
+append는 snapshot을 바꾸지 않습니다. 재준비는 이전 bundle을 검증해 subset을 재사용하거나
+현재 접근을 확인한 current-only로 복구하며, 잠금·타 계정·서명 오류를 fallback으로 우회하지
+않습니다. Web Chat/Review와 Native 다중모델 Review의 bundle 경로에 적용하고 Native 단일
+Chat/단일모델 Review의 no-bundle 경로는 확장하지 않습니다. 이 구현은 외부 전송 활성화나
+유료 평가 승인이 아니며, 공개 고지의 미확인 처리 국가·학습·보관 사실은 계속 미확인입니다.
+
 **켜기 전 조건** (스위치를 켜는 승인이 확인하는 것):
 
 1. 환경 변수: `COHERE_API_KEY`, 모델(`COHERE_RERANK_MODEL`, `COHERE_EMBED_MODEL`),
@@ -835,11 +863,18 @@ memory·knowledge·imported content는 untrusted data입니다. 고정 system ru
 주장하지 않음, factual uncertainty 유지, 외부 provider identity 사칭 금지.
 
 구현: memory 블록(3·4번 구획)은 `lib/memoryContextPrompt.ts`가 만들며
-`promptVersion`은 `mem-context-v2`입니다. 앱 작성 `rules`만 system 블록에 두고,
+`promptVersion`은 `mem-context-v3`입니다. 앱 작성 `rules`만 system 블록에 두고,
 factual/style statement와 fence인 `data`는 별도 user-role prelude로 한 번 보냅니다.
 Profile instructions·knowledge의 기존 역할은 유지합니다. Memory data는 continuation와
 독립이며 Deep Research에도 유지됩니다. rules와 data의 실제 비용을 각각 더하고
 두 내용·query plan을 retrieval hash/context bundle에 결속합니다.
+
+프로젝트 항목은 각 항목에 명시된 프로젝트의 사실로 구분합니다. 기존 답변 모델은 현재
+질문과 대화의 최신 명시적 전환·정정을 기준으로 프로젝트를 해석하고 다른 프로젝트의
+업무·역할·마감을 가져와 빈칸을 채우지 않습니다. 비교 요청은 프로젝트별로 구분하고,
+참조가 모호하면 프로젝트를 확인합니다. rerank 점수·항목 순서나 붙여넣은 자료 자체가
+프로젝트를 선택하지 않습니다. 이 규칙은 기존 답변 호출에서 적용하며 검색 후보를
+임의로 하나로 줄이거나 별도 selector 호출을 추가하지 않습니다.
 
 - **statement는 기계적으로 무해화합니다.** 개행·제어문자·zero-width·bidi
   override를 제거해 한 줄로 만들고, fence marker가 statement 안에 있으면

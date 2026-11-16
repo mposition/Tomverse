@@ -37,14 +37,17 @@ const callBlocks = (source, name) => {
 };
 
 test("the send route rebuilds from the steps its bundle signed", () => {
-    const blocks = callBlocks(readFileSync("app/api/chat/route.ts", "utf8"), "buildChatTurnContext").filter(
+    const source = readFileSync("app/api/chat/route.ts", "utf8");
+    assert.ok(source.indexOf("const envelope = verifyChatContextBundle(token") < source.indexOf("await replayMemoryHistoryContext({"));
+    assert.match(source, /if \(!envelope\.ok\) return/);
+    const blocks = callBlocks(source, "buildChatTurnContext").filter(
         (block) => block.startsWith("buildChatTurnContext({")
     );
     assert.ok(blocks.length > 0, "the send route builds a turn context");
     for (const block of blocks) {
         assert.match(
             block,
-            /semantic:\s*verifyingSemanticModes\(readChatContextBundleSemanticSteps\(token\)\)/
+            /semantic:\s*verifyingSemanticModes\(envelope\.payload\.semanticSteps\)/
         );
     }
 });

@@ -23,7 +23,8 @@ import {
     type MemoryInjectionDecision,
 } from "@/lib/memoryInjectionGate";
 import { MEMORY_RETRIEVAL_ALGORITHM_VERSION } from "@/lib/memoryRetrievalScoring";
-import { buildMemoryQueryPlan } from "@/lib/memoryQueryPlan";
+import type { MemoryQueryPolicy, MemorySemanticContextInput } from "@/lib/memoryQueryPlan";
+import { memoryCurrentQueryDigest } from "@/lib/memoryHistorySnapshotCore";
 import { retrieveMemoryContext } from "@/lib/memoryRetrievalService";
 import { getMemorySettings } from "@/lib/memoryService";
 import { STYLE_MEMORY_KINDS } from "@/lib/memoryValidatorCore";
@@ -78,6 +79,10 @@ export type ChatMemoryContext = {
     truncatedByBudget: boolean;
     /** Whether an external ranking shaped the selection (§9a), for the bundle. */
     semanticRerank: boolean;
+    memoryQueryPolicy?: MemoryQueryPolicy;
+    /** Only sources that shaped a cache-confirmed semantic result. No source text. */
+    memoryHistorySources?: { id: string; digest: string }[];
+    memoryQueryDigest?: string;
 };
 
 /**
@@ -172,6 +177,7 @@ export async function buildChatMemoryContext(input: {
     profileMemoryPolicy?: AssistantMemoryPolicy | null;
     /** See `buildChatTurnContext`. */
     semantic?: SemanticCallMode;
+    memorySemanticContext?: MemorySemanticContextInput;
     now?: Date;
 }): Promise<ChatMemoryContext> {
     if (!input.userId) {
@@ -214,6 +220,9 @@ export async function buildChatMemoryContext(input: {
     // gate open, and this list — the query's actual filter — still admitted
     // the revoked pair's memories. §12.4 revokes a pair, not an account.
     const approvedPairs = injectableExtractionPairs(revokedPairs);
+    // Source reads happen only after account, conversation and profile gates.
+    const memorySemanticContext = typeof input.memorySemanticContext === "function"
+        ? await input.memorySemanticContext() : input.memorySemanticContext;
 
     const [retrieval, memoryVersion, styleVersion] = await Promise.all([
         retrieveMemoryContext({
@@ -222,6 +231,7 @@ export async function buildChatMemoryContext(input: {
             now: input.now,
             approvedPairs,
             semantic: input.semantic,
+            memorySemanticContext,
         }),
         stateVersion(input.userId),
         stateVersion(input.userId, STYLE_MEMORY_KINDS),
@@ -240,7 +250,7 @@ export async function buildChatMemoryContext(input: {
         retrievalHash: pricedMemoryRetrievalHash(
             retrieval.selected.map(({ memory }) => memory.id),
             JSON.stringify({ rules: prompt.rules, data: prompt.data }),
-            JSON.stringify(buildMemoryQueryPlan(input.query))),
+            JSON.stringify(retrieval.effectiveQueryPlan)),
         retrievalVersion: retrieval.algorithmVersion,
         promptVersion: prompt.promptVersion,
         knowledgeHash: "none",
@@ -259,5 +269,8 @@ export async function buildChatMemoryContext(input: {
         truncatedByBudget:
             retrieval.omitted.token_budget + retrieval.omitted.item_cap > 0,
         semanticRerank: retrieval.semanticRerank,
+        memoryQueryPolicy: retrieval.memoryQueryPolicy,
+        memoryHistorySources: retrieval.memoryHistorySources,
+        memoryQueryDigest: retrieval.memoryQueryPolicy === "full" ? memoryCurrentQueryDigest(input.query) : undefined,
     };
 }

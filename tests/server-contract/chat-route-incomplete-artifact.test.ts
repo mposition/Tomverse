@@ -100,6 +100,8 @@ type StreamScript = {
   finishReason: string;
   rawFinishReason: string;
   text: string;
+  /** The provider stream breaks with this after `text`, instead of closing. */
+  failAfterText?: unknown;
 };
 
 let script: StreamScript = {
@@ -208,7 +210,13 @@ mock.module("ai", {
           async start(controller) {
             await driven;
             controller.enqueue(script.text);
+            // Erroring here would discard the text just queued. A provider
+            // stream that breaks does so after its last chunk was read.
+            if (script.failAfterText) return;
             controller.close();
+          },
+          pull(controller) {
+            if (script.failAfterText) controller.error(script.failAfterText);
           },
         }),
         response: Promise.resolve({
@@ -699,8 +707,24 @@ const ask = async (
     throw new Error(`status ${response.status}: ${await response.text()}`);
   }
   const mode = response.headers.get("X-Chat-Response-Mode");
-  const body = await response.text();
-  return { body, mode, trailer: response.status === 200 ? readTrailer(body) : null };
+  // Read chunk by chunk rather than with `text()`: a stream the route fails
+  // part way still delivered what came before the break, and one test below
+  // is about exactly those bytes.
+  let body = "";
+  let streamError: unknown = null;
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      body += decoder.decode(value, { stream: true });
+    }
+  } catch (error) {
+    if (!script.failAfterText) throw error;
+    streamError = error;
+  }
+  return { body, mode, trailer: response.status === 200 ? readTrailer(body) : null, streamError };
 };
 
 /**
@@ -1546,5 +1570,132 @@ test("XLSX revision Send refuses missing canonical data and copies from another 
     clearInputFixtures();
     if (previous === undefined) delete process.env.GENERATED_ARTIFACT_REVISION_ENABLED;
     else process.env.GENERATED_ARTIFACT_REVISION_ENABLED = previous;
+  }
+});
+
+/* -------------------------------------------------------------------------- */
+/* The error report for a turn that failed inside its 200 stream                */
+/* -------------------------------------------------------------------------- */
+
+/*
+  docs/policy/trace-feedback-automation.md §3.3 (operator decision 2026-11-16).
+
+  An empty answer is settled inside a stream whose headers left long ago, so
+  the signed error-report token cannot ride in one. It rides in the trailer.
+  Driven through the real route and read back with the real parser and the
+  real verifier: this is the token the feedback endpoint will be handed.
+*/
+const withErrorReportSigning = async <T,>(run: () => Promise<T>): Promise<T> => {
+  const previous = process.env.ERROR_REPORT_SIGNING_SECRET;
+  process.env.ERROR_REPORT_SIGNING_SECRET = "an-error-report-secret-of-32-chars!!";
+  try {
+    return await run();
+  } finally {
+    if (previous === undefined) delete process.env.ERROR_REPORT_SIGNING_SECRET;
+    else process.env.ERROR_REPORT_SIGNING_SECRET = previous;
+  }
+};
+
+type ErrorReportTrailer = { errorReport?: { token: string; code: string } } | null;
+
+test("an empty answer's trailer carries a signed error report for the turn's own trace", async () => {
+  const evidence: Array<Record<string, unknown>> = [];
+  OVERRIDES.traceErrorEvidence = {
+    create: ((args: { data: Record<string, unknown> }) => {
+      evidence.push(args.data);
+      return args.data;
+    }) as (args: never) => unknown,
+  };
+  try {
+    await withErrorReportSigning(async () => {
+      const { trailer } = await ask({ text: "" });
+      const report = (trailer as ErrorReportTrailer)?.errorReport;
+      assert.ok(report, "the empty answer's trailer carried no error report");
+      assert.equal(report.code, "AI_EMPTY_RESPONSE.END_TURN");
+
+      const { verifyErrorReportToken } = require(
+        resolve(ROOT, "lib/errorReportToken.ts")
+      ) as typeof import("../../lib/errorReportToken");
+      const outcome = verifyErrorReportToken(report.token);
+      assert.equal(outcome.status, "verified");
+      assert.equal(outcome.payload?.errorCode, report.code);
+      assert.equal(outcome.payload?.routeClass, "chat");
+      assert.match(outcome.payload?.traceId ?? "", /^[0-9a-f-]{36}$/);
+
+      // The evidence row the token points at: the server's facts, recorded
+      // against the same trace and occurrence, on a response that was a 200.
+      await new Promise((settle) => setImmediate(settle));
+      assert.equal(evidence.length, 1);
+      assert.equal(evidence[0].occurrenceId, outcome.payload?.occurrenceId);
+      assert.equal(evidence[0].traceId, outcome.payload?.traceId);
+      assert.equal(evidence[0].errorCode, report.code);
+      assert.equal(evidence[0].httpStatus, 200);
+      assert.equal(evidence[0].phase, "stream");
+      assert.equal(evidence[0].failureLayer, "provider_stream");
+      assert.equal(evidence[0].modelId, MODEL_ID);
+    });
+  } finally {
+    delete OVERRIDES.traceErrorEvidence;
+  }
+});
+
+test("an answer that completed gets no error report, signing configured or not", async () => {
+  await withErrorReportSigning(async () => {
+    const { trailer } = await ask({});
+    assert.equal((trailer as ErrorReportTrailer)?.errorReport, undefined);
+  });
+});
+
+test("without a signing secret an empty answer still closes normally, with no report", async () => {
+  const previous = process.env.ERROR_REPORT_SIGNING_SECRET;
+  delete process.env.ERROR_REPORT_SIGNING_SECRET;
+  try {
+    const { trailer } = await ask({ text: "" });
+    assert.ok(trailer, "the trailer itself still arrives");
+    assert.equal((trailer as ErrorReportTrailer)?.errorReport, undefined);
+  } finally {
+    if (previous !== undefined) process.env.ERROR_REPORT_SIGNING_SECRET = previous;
+  }
+});
+
+test("a stream that breaks mid-answer delivers its error report, then the error it always raised", async () => {
+  const providerFailure = Object.assign(new Error("upstream overloaded"), {
+    name: "AI_APICallError",
+    statusCode: 503,
+    isRetryable: true,
+  });
+  await withErrorReportSigning(async () => {
+    const { body, trailer, streamError } = await ask({
+      text: "Half an answer",
+      failAfterText: providerFailure,
+    });
+    // The client still sees a broken stream -- an older one behaves exactly
+    // as before -- but the trailer was read first.
+    assert.equal(streamError, providerFailure);
+    assert.ok(body.startsWith("Half an answer"));
+    const report = (trailer as ErrorReportTrailer)?.errorReport;
+    assert.ok(report, "the failed stream delivered no error report before breaking");
+    assert.equal(report.code, "AI_STREAM_FAILED.AI_APICallError.HTTP_503.RETRYABLE");
+
+    const { verifyErrorReportToken } = require(
+      resolve(ROOT, "lib/errorReportToken.ts")
+    ) as typeof import("../../lib/errorReportToken");
+    const outcome = verifyErrorReportToken(report.token);
+    assert.equal(outcome.status, "verified");
+    assert.equal(outcome.payload?.errorCode, report.code);
+  });
+});
+
+test("a broken stream with signing off raises the same error and sends no trailer", async () => {
+  const previous = process.env.ERROR_REPORT_SIGNING_SECRET;
+  delete process.env.ERROR_REPORT_SIGNING_SECRET;
+  try {
+    const failure = new Error("upstream closed");
+    const { body, trailer, streamError } = await ask({ text: "Half", failAfterText: failure });
+    assert.equal(streamError, failure);
+    assert.equal(trailer, null);
+    assert.equal(body, "Half");
+  } finally {
+    if (previous !== undefined) process.env.ERROR_REPORT_SIGNING_SECRET = previous;
   }
 });

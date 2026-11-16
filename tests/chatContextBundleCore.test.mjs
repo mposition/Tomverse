@@ -531,3 +531,29 @@ test("steps are read only from a token whose signature verifies", () => {
     assert.equal(readContextBundleSemanticSteps(`${token}x`, SECRET), null);
     assert.equal(readContextBundleSemanticSteps("", SECRET), null);
 });
+
+
+test("contextual history anchors are compact, signed and strictly bounded", () => {
+    const anchor = { version: 1, queryDigest: "a".repeat(64), sources: [
+        { id: "message-1", digest: "b".repeat(64) }, { id: "message-2", digest: "c".repeat(64) },
+    ] };
+    const token = issueContextBundle(payload({ memoryQueryPolicy: "full", memoryHistory: anchor,
+        semanticSteps: { memoryRerank: true, knowledgeNeighbours: false, knowledgeRerank: false } }), SECRET);
+    const verified = verifyContextBundle(token, verifyOptions());
+    assert.equal(verified.ok, true);
+    assert.deepEqual(verified.payload.memoryHistory, anchor);
+    const body = JSON.parse(Buffer.from(token.split(".")[0], "base64url").toString("utf8"));
+    body.mh.sources[0].id = "another-source";
+    const forged = `${Buffer.from(JSON.stringify(body)).toString("base64url")}.${token.split(".")[1]}`;
+    assert.equal(verifyContextBundle(forged, verifyOptions()).reason, "invalid_signature");
+    for (const memoryHistory of [null, {}, { ...anchor, version: 2 }, { ...anchor, sources: [] },
+        { ...anchor, sources: [...anchor.sources, { id: "third", digest: "d".repeat(64) }] },
+        { ...anchor, sources: [anchor.sources[0], anchor.sources[0]] },
+        { ...anchor, sources: [{ id: "one", digest: "invalid" }] }]) {
+        assert.equal(verifyContextBundle(issueContextBundle(payload({ memoryQueryPolicy: "full", memoryHistory }), SECRET),
+            verifyOptions()).reason, "malformed");
+    }
+    const legacy = verifyContextBundle(issueContextBundle(payload(), SECRET), verifyOptions());
+    assert.equal(legacy.payload.memoryQueryPolicy, undefined);
+    assert.equal(legacy.payload.memoryHistory, undefined);
+});

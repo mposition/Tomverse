@@ -192,3 +192,31 @@ test("only Prisma's own P2024 and P2028, at the top, name a transaction that did
     assert.equal(amuxTransactionNotStartedCode(error), null, String(error?.message ?? JSON.stringify(error)));
   }
 });
+
+test("a deadlock, a serialization failure and an idle session end are rollbacks a write may ask again after", async () => {
+  const { amuxRolledBackWriteCode } = await import("../lib/amux/readFailureCore.ts");
+  for (const [error, code] of [
+    [postgres("40P01"), "40P01"],
+    [postgres("40001"), "40001"],
+    [postgres("25P03"), "25P03"],
+    [{ code: "P2034" }, "P2034"],
+    [{ code: "P2010", meta: { driverAdapterError: postgres("40P01") } }, "40P01"],
+    [new Error("outer", { cause: postgres("25P03") }), "25P03"],
+  ]) {
+    assert.equal(amuxRolledBackWriteCode(error), code, JSON.stringify(error?.code ?? code));
+  }
+  for (const error of [
+    undefined,
+    null,
+    "40P01",
+    new Error("40P01 deadlock detected"),
+    // A lost connection may have lost the answer to a COMMIT: not a proven rollback.
+    postgres("08006"),
+    postgres("57014"),
+    postgres("AX001"),
+    { code: "P2028" },
+    { code: "P1017" },
+  ]) {
+    assert.equal(amuxRolledBackWriteCode(error), null, String(error?.message ?? JSON.stringify(error)));
+  }
+});

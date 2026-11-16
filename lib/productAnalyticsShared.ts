@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CONNECTED_JOURNEY_FIELDS, connectedJourneyFields, connectedJourneyPropertiesSchema } from "./connectedJourneyShared";
 import { BILLING_CURRENCIES, type BillingCurrency } from "@/lib/billingMarkets";
 import { ANALYTICS_LANGUAGES, SUPPORTED_LANGUAGES } from "@/lib/language";
 import { EXTERNAL_IMPORT_PROVIDERS } from "@/lib/externalImportProviders";
@@ -257,6 +258,7 @@ export const PRODUCT_ANALYTICS_EVENT_NAMES = [
   // event -- GA4 attributes its own sessions, and this exists to be the
   // first-party record a sign-up is attributed against.
   "marketing_touch",
+  "connected_journey_step",
 ] as const;
 
 /**
@@ -273,7 +275,7 @@ export type ProductAnalyticsEventName =
 
 export const shouldSendCustomProductEventToGa4 = (
   eventName: ProductAnalyticsEventName
-) => eventName !== "purchase_completed" && eventName !== "marketing_touch";
+) => eventName !== "purchase_completed" && eventName !== "marketing_touch" && eventName !== "connected_journey_step";
 
 export const isGa4DebugModeEnabled = (value: unknown) =>
   typeof value === "string" && value.trim().toLowerCase() === "true";
@@ -303,6 +305,12 @@ export const normalizePurchaseAnalyticsTrigger = (
 
 export const analyticsPropertiesSchema = z
   .object({
+    journey_key: connectedJourneyFields.journey_key.optional(),
+    journey_kind: connectedJourneyFields.journey_kind.optional(),
+    journey_entry: connectedJourneyFields.journey_entry.optional(),
+    journey_stage: connectedJourneyFields.journey_stage.optional(),
+    continuation_kind: connectedJourneyFields.continuation_kind,
+    journey_reason: connectedJourneyFields.journey_reason,
     cta_location: z.string().trim().min(1).max(64).optional(),
     // Where an assistant-profile create began. A closed enum rather than a
     // free string: the two entry points are the whole question, and a free
@@ -602,6 +610,16 @@ export type ProductAnalyticsProperties = z.infer<
   typeof analyticsPropertiesSchema
 >;
 
+export const analyticsPropertiesForGa4 = (properties: ProductAnalyticsProperties) =>
+  Object.fromEntries(Object.entries(properties).filter(([key]) => !CONNECTED_JOURNEY_FIELDS.includes(key)));
+
+export const validProductEventProperties = (eventName: ProductAnalyticsEventName, properties: ProductAnalyticsProperties) => {
+  if (eventName !== "connected_journey_step") return !CONNECTED_JOURNEY_FIELDS.some(key => key in properties);
+  // The existing closed locale envelope is permitted; no unrelated free text.
+  const journey = Object.fromEntries(Object.entries(properties).filter(([key]) => key !== "market_tier" && key !== "paid_marketing_eligible"));
+  return connectedJourneyPropertiesSchema.safeParse(journey).success;
+};
+
 export type Ga4EcommerceEvent = {
   name: "begin_checkout" | "purchase";
   params: {
@@ -727,7 +745,12 @@ export const analyticsClientEventSchema = analyticsAttributionSchema
     model_count: z.number().int().min(0).max(3),
     properties: analyticsPropertiesSchema,
   })
-  .strict();
+  .strict().superRefine((event, ctx) => {
+    if (!validProductEventProperties(event.event_name, event.properties) ||
+      (event.event_name === "connected_journey_step" && event.model_count !== 0)) {
+      ctx.addIssue({ code: "custom", path: ["properties"], message: "Invalid event properties." });
+    }
+  });
 
 export type AnalyticsClientEvent = z.infer<typeof analyticsClientEventSchema>;
 

@@ -82,3 +82,7 @@ export const resolveAnalyticsConsentPolicy = (
   };
 };
 
+
+/** Shared regional allowance; unresolved policy/choice never enables collection. */
+export const isProductAnalyticsAllowed = (consent: string | null, policy: ResolvedAnalyticsConsentPolicy | null) =>
+  Boolean(policy && (consent === "accepted" || (consent === "unset" && policy.mode === "notice_opt_out")));

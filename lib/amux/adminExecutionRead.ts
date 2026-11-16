@@ -7,7 +7,12 @@ import { openAmuxContent, verifyAmuxContentDigest } from "./ideaCrypto.ts";
 import { loadAmuxContentUnitKeys } from "./ideaKeyStore.ts";
 import { readAmuxV22TaskResultForOwner } from "./v22TaskResultStore.ts";
 import { readAmuxLegacyCardView } from "./legacyCardOwnerService.ts";
-import { amuxFeedbackTaskWhere, projectAmuxTaskFeedback, readAmuxV4ApprovedCeiling,
+import { readAmuxV4TaskCeilingReapprovalView } from "./v4TaskCeilingReapprovalService.ts";
+import { AMUX_V4_TASK_CEILING_REAPPROVED_ACTION } from "./v4TaskCeilingReapprovalCore.ts";
+import { AMUX_GRADE_ESCALATED_ACTION, AMUX_V52_ESCALATION_SELECT, AMUX_V52_REAPPROVAL_SELECT,
+  amuxV52ApprovedCeilingInForce, type AmuxV52EscalationRow,
+  type AmuxV52ReapprovalRow } from "./v52GradeReceipt.ts";
+import { amuxFeedbackTaskWhere, projectAmuxTaskFeedback,
   rollupAmuxTaskFeedback } from
   "./v22TaskFeedbackCore.ts";
 import { AMUX_V22_OUTCOME_ACTION, AMUX_V22_OUTCOME_TARGET,
@@ -21,6 +26,10 @@ import {
   amuxExecutionLaneWhere, type AmuxExecutionLane,
 } from "./adminExecutionViewCore.ts";
 import type { AmuxV52AttemptReviewView } from "./v52ReviewFindingsCore.ts";
+import { openAmuxV52ReviewFindingsRow } from "./v52ReviewFindingsStore.ts";
+import { amuxCardWaitFromState, amuxCardWaitVisible } from "./cardWaitReasonCore.ts";
+import { readAmuxCardWaitReasons } from "./cardWaitReasonStore.ts";
+import { amuxInfraFailureKindOfReason, amuxInfraFailureRoutingEnabled } from "./infraFailureCore.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -76,7 +85,7 @@ async function cardSummaries(rows: CardRow[]) {
   const ids = rows.map((row) => row.id);
   const storyIds = rows.filter((row) => row.cardType === "story").map((row) => row.id);
   const [titles, scores, dependencies, lanes, progress, openEscalations,
-    waitingQuestions] = await Promise.all([
+    waitingQuestions, storedWaits, openDependencyRows] = await Promise.all([
     Promise.all(rows.map(readAmuxCardTitle)),
     ids.length ? prisma.$queryRaw<Array<{ taskId: string;
       taskRevision: number; scoreTotal: number; activeStaleAt: Date }>>`
@@ -113,7 +122,29 @@ async function cardSummaries(rows: CardRow[]) {
       orderBy: [{ taskId: "asc" }, { sequence: "desc" }], distinct: ["taskId"],
       select: { taskId: true, state: true },
     }) : [],
+    // Why a card waits (owner decision 2026-11-15): what the last promotion or
+    // claim pass stored for it. A failed read shows no reason, never a guess.
+    readAmuxCardWaitReasons(ids).catch(() => new Map()),
+    ids.length ? prisma.amuxWorkDependency.findMany({
+      where: { taskId: { in: ids }, dependency: { OR: [{ status: { not: "done" } },
+        { v4TerminalAt: null }] } }, select: { taskId: true } }) : [],
   ]);
+  const openDependencies = new Map<string, number>();
+  for (const row of openDependencyRows)
+    openDependencies.set(row.taskId, (openDependencies.get(row.taskId) ?? 0) + 1);
+  const nowMs = Date.now();
+  const waitReasonOf = (row: CardRow, scoreFresh: boolean) => {
+    const stored = storedWaits.get(row.id);
+    if (stored && amuxCardWaitVisible({ stage: stored.stage,
+      lastSeenAtMs: stored.lastSeenAt.getTime(), cardStatus: row.status,
+      assigned: row.v22AssignmentId !== null, nowMs }))
+      return { stage: stored.stage, code: stored.code, detail: stored.detail,
+        since: stored.firstSeenAt.toISOString(), seenAt: stored.lastSeenAt.toISOString() };
+    const derived = amuxCardWaitFromState({ sourceSystem: row.sourceSystem,
+      cardType: row.cardType, status: row.status, assigned: row.v22AssignmentId !== null,
+      scoreFresh, openDependencies: openDependencies.get(row.id) ?? 0 });
+    return derived ? { ...derived, detail: {}, since: null, seenAt: null } : null;
+  };
   const ownerQuestion = new Map(waitingQuestions.map((row) =>
     [row.taskId, row.state === "open" ? "open" as const : "answered" as const]));
   const attentionReason = new Map(openEscalations.map((row) =>
@@ -156,6 +187,9 @@ async function cardSummaries(rows: CardRow[]) {
     briefPresent: Boolean(row.executionBriefDigest || row.v4BriefDigest),
     attentionReason: attentionReason.get(row.id) ?? null,
     ownerQuestion: ownerQuestion.get(row.id) ?? null,
+    /** Why the card is not running: a code with structured detail, or null. */
+    waitReason: waitReasonOf(row, latestScore.get(row.id)?.taskRevision === row.revision &&
+      latestScore.get(row.id)!.activeStaleAt.getTime() > nowMs),
     /** In the archive drawer; the archive lane also holds finished cards that were never archived. */
     archived: row.archivedAt !== null,
     updatedAt: row.updatedAt.toISOString(),
@@ -398,7 +432,10 @@ export async function readAmuxExecutionTaskDetail(taskId: string) {
           reason: true, reservedCostMicrousd: true,
           settledCostMicrousd: true, costConfirmed: true,
           v52ReviewRecord: { select: { verdict: true, jobId: true,
-            reviewerVendors: true, findingsSummary: true } } } },
+            reviewerVendors: true, findingsSummary: true,
+            findings: { select: { ideaId: true, ciphertext: true, keyId: true,
+              keyVersion: true, digest: true, digestKeyId: true,
+              bodyPurgedAt: true } } } } } },
       humanEscalations: { where: { status: { in: ["open", "acknowledged"] } },
         orderBy: { createdAt: "desc" as const }, take: 10,
         select: { id: true, reason: true, specialty: true,
@@ -462,6 +499,14 @@ export async function readAmuxExecutionTaskDetail(taskId: string) {
       prisma.amuxV22AttemptUsageAcceptance.findMany({ where: { taskId },
         select: { attemptId: true, source: true, acceptedAt: true } }) : [],
   ]);
+  // A rejected review's sealed findings, opened here (outside any transaction):
+  // an unreadable or purged body shows as such, never as an error.
+  const openedFindings = new Map(await Promise.all(card.executionAttempts.flatMap((attempt) => {
+    const record = attempt.v52ReviewRecord;
+    return record?.verdict === "reject" && record.findings ? [
+      openAmuxV52ReviewFindingsRow(attempt.id, record.findings)
+        .then((opened) => [attempt.id, opened] as const)] : [];
+  })));
   // An ended v4 attempt with no complete usage report holds its worker in the
   // v22 usage gate until the owner accepts it (owner decision 2026-11-10).
   const acceptanceByAttempt = new Map(usageAcceptances.map((row) => [row.attemptId, row]));
@@ -507,8 +552,15 @@ export async function readAmuxExecutionTaskDetail(taskId: string) {
     .catch(() => null);
   const currentDecision = feedbackDecisions.find((decision) =>
     decision.proposal.taskRevision + 1 === card.revision);
+  // The owner re-approves a waiting Task's ceiling at the current price
+  // (v4TaskCeilingReapprovalCore.ts); a failed read shows no offer.
+  const v4Task = card.sourceSystem === "admin-idea-v4" && card.cardType === "task";
+  const [ceilingReapproval, ceilingEntries] = await Promise.all([
+    v4Task ? readAmuxV4TaskCeilingReapprovalView(taskId) : null,
+    readCeilingEntries(v4Task ? [taskId] : []),
+  ]);
   return { ...summary, revision: card.revision, body, brief,
-    legacyCard,
+    legacyCard, ceilingReapproval,
     outcomeWriteEnabled: amuxV22OutcomeWriteEnabled(
       process.env[AMUX_V22_OUTCOME_WRITE_ENV]) &&
       card.sourceSystem === "admin-idea-v4" &&
@@ -520,10 +572,12 @@ export async function readAmuxExecutionTaskDetail(taskId: string) {
       createdAt: card.createdAt,
       effortPoints: card.effortPoints,
       estimatedCostMicrousd: card.estimatedCostMicrousd,
+      // The ceiling in force, by the rule execution reads (v52GradeReceipt.ts).
       approvedCeilingMicrousd: sourceApproval?.state === "consumed" &&
         sourceApproval.action === "register_card" &&
         sourceApproval.registeredWorkItemId === card.id ?
-        readAmuxV4ApprovedCeiling(sourceApproval.confirmationSnapshot) : null,
+        ceilingInForce(sourceApproval.confirmationSnapshot, card.executionGrade,
+          ceilingEntries, card.id) : null,
       attempts: feedbackAttempts, usage: feedbackUsage,
       decisions: feedbackDecisions.map((decision) => ({ id: decision.id,
         outcome: decision.outcome, decidedAt: decision.decidedAt })),
@@ -548,12 +602,26 @@ export async function readAmuxExecutionTaskDetail(taskId: string) {
     dependencies: card.dependencies.map((edge) => edge.dependency),
     dependents: card.dependents.map((edge) => edge.task),
     attempts: card.executionAttempts.map(({ v52ReviewRecord, ...attempt }) => ({ ...attempt,
-      // The v52 review of this run; a reject carries its reasons for the owner.
-      v52Review: v52ReviewRecord satisfies AmuxV52AttemptReviewView | null,
+      // The v52 review of this run; a reject carries its findings for the owner.
+      v52Review: v52ReviewRecord ? (() => {
+        const opened = openedFindings.get(attempt.id) ?? null;
+        return { verdict: v52ReviewRecord.verdict, jobId: v52ReviewRecord.jobId,
+          reviewerVendors: v52ReviewRecord.reviewerVendors,
+          findingsSummary: v52ReviewRecord.findingsSummary,
+          findings: opened?.doc ?? null,
+          findingsState: opened ? opened.state : "none" as const,
+        } satisfies AmuxV52AttemptReviewView;
+      })() : null,
       usageUnknown: usageUnknown(attempt),
+      // An infrastructure failure uses no attempt and holds no worker; its
+      // usage stays unknown, released without a person (2026-11-15).
+      infraFailure: amuxInfraFailureKindOfReason(attempt.reason),
       usageAcceptance: (() => {
         const row = acceptanceByAttempt.get(attempt.id);
-        return row ? { source: row.source, acceptedAt: row.acceptedAt.toISOString() } : null;
+        if (row) return { source: row.source, acceptedAt: row.acceptedAt.toISOString() };
+        return amuxInfraFailureRoutingEnabled() &&
+          amuxInfraFailureKindOfReason(attempt.reason) && attempt.endedAt ?
+          { source: "infra_failure", acceptedAt: attempt.endedAt.toISOString() } : null;
       })(),
       reason: normalizeAmuxUntrustedReason(attempt.reason),
       startedAt: attempt.startedAt.toISOString(),
@@ -623,11 +691,11 @@ export async function readAmuxExecutionFeedback(parent: {
     take: 501, orderBy: { id: "asc" }, select: { id: true, revision: true,
       status: true,
       createdAt: true, effortPoints: true, estimatedCostMicrousd: true,
-      v4SourceApprovalId: true } });
+      executionGrade: true, v4SourceApprovalId: true } });
   if (cards.length > 500) return { parent, complete: false,
     reason: "task_limit", rollup: null };
   const ids = cards.map((card) => card.id);
-  const [attempts, usage, decisions, observations, approvals] = ids.length ? await Promise.all([
+  const [attempts, usage, decisions, observations, approvals, ceilingEntries] = ids.length ? await Promise.all([
     prisma.amuxExecutionAttempt.findMany({ where: { taskId: { in: ids } },
       select: { taskId: true, id: true, startedAt: true, endedAt: true,
         outcome: true, settledCostMicrousd: true, costConfirmed: true } }),
@@ -649,11 +717,13 @@ export async function readAmuxExecutionFeedback(parent: {
       action: "register_card",
     }, select: { id: true, registeredWorkItemId: true,
       confirmationSnapshot: true } }),
-  ]) : [[], [], [], [], []];
-  const feedback = cards.map((card) => projectAmuxTaskFeedback({
-    ...card, approvedCeilingMicrousd: readAmuxV4ApprovedCeiling(
+    readCeilingEntries(ids),
+  ]) : [[], [], [], [], [], await readCeilingEntries([])];
+  const feedback = cards.map(({ executionGrade, ...card }) => projectAmuxTaskFeedback({
+    ...card, approvedCeilingMicrousd: ceilingInForce(
       approvals.find((row) => row.id === card.v4SourceApprovalId &&
-        row.registeredWorkItemId === card.id)?.confirmationSnapshot),
+        row.registeredWorkItemId === card.id)?.confirmationSnapshot,
+      executionGrade, ceilingEntries, card.id),
     attempts: attempts.filter((row) => row.taskId === card.id),
     usage: usage.filter((row) => row.taskId === card.id),
     decisions: decisions.filter((row) => row.proposal.taskId === card.id),
@@ -665,6 +735,41 @@ export async function readAmuxExecutionFeedback(parent: {
   }));
   return { parent, complete: true, reason: null,
     rollup: rollupAmuxTaskFeedback(feedback) };
+}
+
+type CeilingEntries = {
+  reapproval: Map<string, AmuxV52ReapprovalRow>;
+  escalations: Map<string, AmuxV52EscalationRow[]>;
+};
+
+/** The audit entries that replace a Task's registration receipt, per Task. */
+async function readCeilingEntries(ids: string[]): Promise<CeilingEntries> {
+  const entries: CeilingEntries = { reapproval: new Map(), escalations: new Map() };
+  if (!ids.length) return entries;
+  const [reapprovals, escalations] = await Promise.all([
+    // Newest first: the first per Task is in force.
+    prisma.adminAuditLog.findMany({ where: {
+      action: AMUX_V4_TASK_CEILING_REAPPROVED_ACTION, targetType: "AmuxWorkItem",
+      targetId: { in: ids },
+    }, orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      select: { targetId: true, ...AMUX_V52_REAPPROVAL_SELECT } }),
+    prisma.adminAuditLog.findMany({ where: {
+      action: AMUX_GRADE_ESCALATED_ACTION, targetType: "AmuxWorkItem",
+      targetId: { in: ids },
+    }, select: { targetId: true, ...AMUX_V52_ESCALATION_SELECT } }),
+  ]);
+  for (const { targetId, ...row } of reapprovals)
+    if (targetId && !entries.reapproval.has(targetId)) entries.reapproval.set(targetId, row);
+  for (const { targetId, ...row } of escalations)
+    if (targetId) entries.escalations.set(targetId, [...entries.escalations.get(targetId) ?? [], row]);
+  return entries;
+}
+
+function ceilingInForce(snapshot: unknown, grade: string | null,
+  entries: CeilingEntries, taskId: string) {
+  return amuxV52ApprovedCeilingInForce({ confirmationSnapshot: snapshot, currentGrade: grade,
+    latestReapproval: entries.reapproval.get(taskId) ?? null,
+    escalations: entries.escalations.get(taskId) ?? [] });
 }
 
 /** The digest-verified title reader the card number backfill shares (docs/policy/amux-card-display-key.md §5). */

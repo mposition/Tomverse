@@ -1,5 +1,7 @@
 "use client";
 
+import { hasJourneySource, journeyObservationEpoch, observeJourneyDispatch, observeJourneyReply } from "@/lib/connectedJourneyAnalytics";
+
 import { CONTINUATION_RECEIPT_HEADER, receiptForAttempt, type ContinuationReceipt } from "@/lib/continuationReceipt";
 
 import { PASSAGE_HEADER } from "@/lib/continuationPassages";
@@ -248,6 +250,7 @@ type ChatAppProps = {
   onRetryPrompt?: (prompt: ChatRecoveryPrompt) => void;
   /** Chat: open a Review draft prefilled from one answer's question. */
   onCompareInReview?: (seed: string) => void;
+  onCompareContinuationInReview?: (assistantMessageId: string) => void;
   initialConversationId?: string | null;
   /**
    * The question a composer send is still preparing, drawn at the bottom of
@@ -493,6 +496,7 @@ function ChatAppComponent({
   onRestorePrompt,
   onRetryPrompt,
   onCompareInReview,
+  onCompareContinuationInReview,
   initialConversationId = null,
   sendEcho = null,
   promptPayload,
@@ -1041,6 +1045,7 @@ function ChatAppComponent({
           const modelQuery = transcriptScope === "conversation" || reviewProvider
             ? "answers=all"
             : `modelId=${encodeURIComponent(modelId)}&answers=all`;
+          const hydrationJourneyEpoch = journeyObservationEpoch();
           const response = await fetch(`/api/conversations/${initialConversationId}?${modelQuery}`, {
             cache: "no-store",
             headers: { 'Cache-Control': 'no-cache' }
@@ -1121,6 +1126,16 @@ function ChatAppComponent({
                   .map(parsePublicChatResponseAttempt)
                   .filter((attempt: PublicChatResponseAttempt | null): attempt is PublicChatResponseAttempt => Boolean(attempt))
               : [];
+            // Only a canonical completed Message for this exact first source.
+            // No nearest-turn inference and no additional history scan.
+            for (const attempt of parsedAttempts) {
+              if (attempt.conversationId !== initialConversationId || !hasJourneySource(panelIdentityKey, initialConversationId, attempt.sourceUserMessageId) ||
+                !data.messages.some((message: Message) => message.role === "user" && message.id === attempt.sourceUserMessageId)) continue;
+              const completed = parseCompletedChatResponseMessage(data.messages.find((message: Message) => message.id === attempt.assistantMessageId), attempt);
+              if (completed) observeJourneyReply({ owner: panelIdentityKey, epoch: hydrationJourneyEpoch,
+                conversationId: initialConversationId, sourceUserMessageId: attempt.sourceUserMessageId,
+                status: completed.status === "incomplete" ? "incomplete" : "normal", nonempty: Boolean(completed.content.trim()) });
+            }
             const merged = mergeChatResponseAttempts(
               filteredMessages,
               parsedAttempts,
@@ -1223,6 +1238,7 @@ function ChatAppComponent({
     runtimeKey,
     transcriptScope,
     historyLoadRetry,
+    panelIdentityKey,
     reviewProvider,
     getModel,
   ]);
@@ -1300,6 +1316,7 @@ function ChatAppComponent({
         return;
       }
       try {
+        const pollingJourneyEpoch = journeyObservationEpoch();
         const response = await fetch(
           `/api/products/chat/attempts/${encodeURIComponent(assistantMessageId)}`,
           { cache: "no-store", signal: controller.signal }
@@ -1377,6 +1394,9 @@ function ChatAppComponent({
               message.id === assistantMessageId ? completedMessage : message
             );
           });
+          if (!controller.signal.aborted) observeJourneyReply({ owner: panelIdentityKey, epoch: pollingJourneyEpoch,
+            conversationId: attempt.conversationId, sourceUserMessageId: attempt.sourceUserMessageId,
+            status: completedMessage.status === "incomplete" ? "incomplete" : "normal", nonempty: Boolean(completedMessage.content.trim()) });
           onResponseCompleteRef.current?.(
             expectedIdentity.analyticsPromptId,
             attempt.actualModelId ?? attempt.requestedModelId,
@@ -1438,7 +1458,7 @@ function ChatAppComponent({
     };
     void loop();
     return () => controller.abort();
-  }, [durableAttemptIds, isGuestMode, runtimeKey, t, transcriptScope]);
+  }, [durableAttemptIds, isGuestMode, runtimeKey, t, transcriptScope, panelIdentityKey]);
   
   /**
    * Writes a guest's transcript back to localStorage.
@@ -1545,6 +1565,7 @@ function ChatAppComponent({
     // conversation the send was made in, and every write below names this key
     // rather than the panel's current view: the user may open another
     // conversation a chunk later, and the answer still belongs here.
+    const observedJourneyEpoch = journeyObservationEpoch();
     const runKey = chatRuntimeKey({
       identityKey: chatRuntimeIdentityKey(
         isGuestMode ? { kind: "guest" } : { kind: "account", userId: sessionUserId }
@@ -1718,6 +1739,18 @@ function ChatAppComponent({
     // server issued one. Lives only in this closure and in the error
     // message's runtime `errorReport` context -- never persisted.
     let requestErrorReportToken: string | null = null;
+    // The server's own code for a turn it judged failed after the 200 stream
+    // had started. Arrives with the token in the stream trailer, and the
+    // token signs it -- so a report carrying both is a server classification
+    // (docs/policy/trace-feedback-automation.md section 3.3).
+    let streamErrorReportCode: string | null = null;
+    const adoptStreamErrorReport = (
+      trailer: ReturnType<typeof parseChatStreamTrailer>
+    ) => {
+      if (!trailer?.errorReport) return;
+      requestErrorReportToken = trailer.errorReport.token;
+      streamErrorReportCode = trailer.errorReport.code;
+    };
     // Declared here (not inside the try block below) so a stop mid-stream
     // can still show whatever was generated before the abort, instead of
     // discarding it -- the catch block needs to read it too.
@@ -1737,8 +1770,13 @@ function ChatAppComponent({
             ...(requestErrorReportToken
               ? { errorReportToken: requestErrorReportToken }
               : {}),
-            errorCode,
-            errorClassificationSource: classificationSource,
+            // What the panel calls the failure (`EMPTY_RESPONSE`) is this
+            // client's word for it. When the server signed its own code for
+            // the same turn, the report says that one.
+            errorCode: streamErrorReportCode ?? errorCode,
+            errorClassificationSource: streamErrorReportCode
+              ? ERROR_CLASSIFICATION_SOURCE.server
+              : classificationSource,
             occurredAt: new Date().toISOString(),
           }
         : undefined;
@@ -2048,11 +2086,16 @@ function ChatAppComponent({
             ? { guestAutoCapability, guestClientTurnId: sourceUserMessageId }
             : {}),
         };
-        const post = (path: string, fields: Record<string, unknown>) => fetch(path, {
+        const post = (path: string, fields: Record<string, unknown>) => {
+          const body = JSON.stringify({ ...requestBody, ...fields });
+          controller.signal.throwIfAborted();
+          if (!isGuestMode && !researchMode) observeJourneyDispatch(panelIdentityKey, targetChatId, sourceUserMessageId);
+          return fetch(path, {
           method: "POST", headers: { "Content-Type": "application/json", ...(researchMode ? { "Accept-Language": lang } : {}), ...(turnPassages ? {[PASSAGE_HEADER]:turnPassages} : {}) },
-          body: JSON.stringify({ ...requestBody, ...fields }),
+          body,
           signal: controller.signal,
         });
+        };
         const fusionFields = { routerLocationFusion: true, ...(routerLocationTurn?.scope === "existing" ? { routerLocationScope: "existing" } : {}) };
         let res = fuseLocation
           ? await post(ROUTER_LOCATION_ROUTE, fusionFields)
@@ -2119,6 +2162,7 @@ function ChatAppComponent({
         routedReason = res.headers.get("X-Chat-Routed-Reason");
         autoRewrite = decodeAutoRewriteHeader(res.headers.get("X-Chat-Auto-Rewrite"));
         requestErrorReportToken = res.headers.get(ERROR_REPORT_TOKEN_HEADER);
+        streamErrorReportCode = null;
 
         if (!res.ok) {
           const errorBody = await res.json().catch(() => null);
@@ -2208,6 +2252,7 @@ function ChatAppComponent({
                   conversationId: isGuestMode ? null : targetChatId,
                   modelIds: [modelId],
                   prompt: text,
+                  ...(activeContextBundle ? { previousContextBundle: activeContextBundle } : {}),
                 })
               : null;
           // Nothing to retry with. Re-sending the bundle that was just
@@ -2243,6 +2288,7 @@ function ChatAppComponent({
                   conversationId: targetChatId,
                   modelIds: [modelId],
                   prompt: text,
+                  ...(activeContextBundle ? { previousContextBundle: activeContextBundle } : {}),
                 })
               : null;
           if (!refreshed) throw error;
@@ -2363,6 +2409,8 @@ function ChatAppComponent({
           );
         }
         if (completedMessage) {
+          observeJourneyReply({ owner: panelIdentityKey, epoch: observedJourneyEpoch, conversationId: attempt.conversationId,
+            sourceUserMessageId: attempt.sourceUserMessageId, status: completedMessage.status === "incomplete" ? "incomplete" : "normal", nonempty: Boolean(completedMessage.content.trim()) });
           onResponseComplete?.(
             analyticsPromptId,
             attempt.actualModelId ?? attempt.requestedModelId,
@@ -2389,6 +2437,11 @@ function ChatAppComponent({
       const streamed = await consumeChatStream({
         reader: response.body.getReader(),
         liveness,
+        // A stream the server failed part way carries its error report in a
+        // trailer written just before the break. A connection that simply
+        // dropped has none, and that report stays unverified.
+        onInterrupted: (json) =>
+          adoptStreamErrorReport(parseChatStreamTrailer(json)),
         onProgress: (progress) => {
           if (progress.displayText.trim() && sourceReceipt?.status === "unknown") sourceReceipt = { ...sourceReceipt, status: "dispatched" };
           if (progress.retryingWithModelId && sourceReceipt?.attempt === 0) sourceReceipt = { ...sourceReceipt, attempt: 1, status: "unknown" };
@@ -2430,6 +2483,7 @@ function ChatAppComponent({
       latencyCompleted = !serverStallCode && Boolean(assistantText.trim());
       const searchMetadataJson = streamed.searchMetadataJson;
       const trailer = parseChatStreamTrailer(searchMetadataJson);
+      adoptStreamErrorReport(trailer);
       sourceReceipt = receiptForAttempt(trailer?.continuationReceipt, requestTraceId, assistantMessageId, sourceReceipt) ?? sourceReceipt;
       const searchMetadata =
         (trailer?.searchMetadata as WebSearchExecution | null | undefined) ??
@@ -2456,12 +2510,16 @@ function ChatAppComponent({
       // two are different events with different copy, different codes and
       // different counters.
       if (serverStallCode) {
+        if (targetChatId) observeJourneyReply({ owner: panelIdentityKey, epoch: observedJourneyEpoch,
+          conversationId: targetChatId, sourceUserMessageId, status: "timeout", nonempty: false });
         endAsTimeout(
           serverStallCode,
           ERROR_CLASSIFICATION_SOURCE.server,
           assistantText
         );
       } else if (!assistantText.trim()) {
+        if (targetChatId) observeJourneyReply({ owner: panelIdentityKey, epoch: observedJourneyEpoch,
+          conversationId: targetChatId, sourceUserMessageId, status: "normal", nonempty: false });
         if (requestTraceId && typeof window !== "undefined") {
           window.localStorage.setItem(
             "tomverse_last_error_trace_id",
@@ -2479,10 +2537,13 @@ function ChatAppComponent({
           {
             errorCode: "EMPTY_RESPONSE",
             errorHadAttachments: attachments.length > 0,
-            // EMPTY_RESPONSE is a *client* classification: the stream ended
-            // normally (HTTP 200) with no text, so no server error was
-            // emitted and no token exists. The report stays unverified by
-            // design -- see docs/policy/trace-feedback-automation.md.
+            // EMPTY_RESPONSE is this client's name for a 200 stream that
+            // ended with no text. The server judges the same turn itself and
+            // signs its own code into the trailer (operator decision
+            // 2026-11-16), which `buildErrorReport` then reports in place of
+            // this one. Without that trailer -- an older server, signing not
+            // configured -- the report is client-classified and unverified.
+            // See docs/policy/trace-feedback-automation.md section 3.3.
             errorReport: buildErrorReport(
               requestTraceId,
               "EMPTY_RESPONSE",
@@ -2519,6 +2580,8 @@ function ChatAppComponent({
             modelId: answeringModelId({ requestedModelId: modelId, routedModelId, retryingWithModelId }),
           }
         );
+        if (targetChatId) observeJourneyReply({ owner: panelIdentityKey, epoch: observedJourneyEpoch,
+          conversationId: targetChatId, sourceUserMessageId, status: completionStatus, nonempty: Boolean(assistantText.trim()) });
         onResponseComplete?.(
           analyticsPromptId,
           answeringModelId({ requestedModelId: modelId, routedModelId, retryingWithModelId }),
@@ -2537,6 +2600,9 @@ function ChatAppComponent({
               details?: unknown;
             })
           : {};
+      if (targetChatId) observeJourneyReply({ owner: panelIdentityKey, epoch: observedJourneyEpoch,
+        conversationId: targetChatId, sourceUserMessageId,
+        status: requestError.name === "AbortError" ? "cancelled" : "error", nonempty: false });
       const reportedErrorCode =
         typeof requestError.code === "string" ? requestError.code : "";
       const guestAutoTransportOutcomeUnknown =
@@ -3390,12 +3456,14 @@ function ChatAppComponent({
         // In Chat the shell's close-model handler opens the model picker.
         onChooseAnotherModel={transcriptScope === "conversation" ? onRequestCloseModel : undefined}
         // Built from this transcript, which is the one on screen.
-        onCompareInReview={transcriptScope === "conversation" && onCompareInReview
+        onCompareInReview={transcriptScope === "conversation" && (onCompareContinuationInReview || onCompareInReview)
           ? (messageId) => {
+              if (onCompareContinuationInReview) { onCompareContinuationInReview(messageId); return; }
               const seed = reviewSeedFromChat(messages, messageId, t("chat.compareInReviewContext"));
-              if (seed) onCompareInReview(seed);
+              if (seed) onCompareInReview?.(seed);
             }
           : undefined}
+        compareRequiresCompleted={Boolean(onCompareContinuationInReview)}
         // Both scopes: a concurrency refusal is the one failure Chat may
         // resend, since nothing of the refused turn ever ran (see the handler).
         // Without a held retry prompt (after a reload) Chat falls back to

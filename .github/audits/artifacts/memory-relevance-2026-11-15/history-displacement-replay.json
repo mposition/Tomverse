@@ -1,0 +1,169 @@
+{
+  "kind": "offline_saved_provider_score_reprocessing",
+  "sourceCommit": "bff86e3936daa7749b52729c5f50750a45fe377b",
+  "sourceArtifact": ".github/audits/artifacts/memory-relevance-2026-11-15/scores-full-query+history.json",
+  "sourceArtifactSha256": "b2db10d3cbd2202b58c0a4aa5436547ff73d60a348e6155f8c817d9ee0aec941",
+  "sourceQueryPolicy": "memory-query-v3",
+  "selectionQueryPolicy": "memory-query-v4",
+  "provider": "cohere",
+  "model": "rerank-v5.0-fast",
+  "cases": 10,
+  "inputIdentitiesVerified": 10,
+  "inputOrCandidatesChanged": false,
+  "providerCalls": 0,
+  "additionalSpendUsd": 0,
+  "decisionGrade": false,
+  "freshProviderEvaluation": false,
+  "finalAnswerEvaluation": false,
+  "before": {
+    "recallAt5": 0.8571428571428571,
+    "recalled": 6,
+    "relevant": 7,
+    "irrelevant": 7,
+    "selected": 13,
+    "irrelevantInjectionRate": 0.5384615384615384
+  },
+  "after": {
+    "recallAt5": 1,
+    "recalled": 7,
+    "relevant": 7,
+    "irrelevant": 6,
+    "selected": 13,
+    "irrelevantInjectionRate": 0.46153846153846156
+  },
+  "rejectedCases": [
+    "irrelevant_history"
+  ],
+  "rows": [
+    {
+      "caseId": "project_omission",
+      "relevantIds": [
+        "atlas"
+      ],
+      "before": [
+        "atlas",
+        "vega"
+      ],
+      "after": [
+        "atlas",
+        "vega"
+      ],
+      "historyDisplacedCurrentQuery": false
+    },
+    {
+      "caseId": "project_switch",
+      "relevantIds": [
+        "vega"
+      ],
+      "before": [
+        "atlas",
+        "vega"
+      ],
+      "after": [
+        "atlas",
+        "vega"
+      ],
+      "historyDisplacedCurrentQuery": false
+    },
+    {
+      "caseId": "latest_correction",
+      "relevantIds": [
+        "atlas"
+      ],
+      "before": [
+        "atlas",
+        "vega"
+      ],
+      "after": [
+        "atlas",
+        "vega"
+      ],
+      "historyDisplacedCurrentQuery": false
+    },
+    {
+      "caseId": "long_middle_ko",
+      "relevantIds": [
+        "atlas"
+      ],
+      "before": [
+        "atlas"
+      ],
+      "after": [
+        "atlas"
+      ],
+      "historyDisplacedCurrentQuery": false
+    },
+    {
+      "caseId": "mixed_script",
+      "relevantIds": [
+        "atlas"
+      ],
+      "before": [
+        "atlas",
+        "vega"
+      ],
+      "after": [
+        "atlas",
+        "vega"
+      ],
+      "historyDisplacedCurrentQuery": false
+    },
+    {
+      "caseId": "irrelevant_history",
+      "relevantIds": [
+        "coffee"
+      ],
+      "before": [
+        "atlas"
+      ],
+      "after": [
+        "coffee"
+      ],
+      "historyDisplacedCurrentQuery": true
+    },
+    {
+      "caseId": "no_relevant_memory",
+      "relevantIds": [],
+      "before": [],
+      "after": [],
+      "historyDisplacedCurrentQuery": false
+    },
+    {
+      "caseId": "candidate_absent",
+      "relevantIds": [],
+      "before": [],
+      "after": [],
+      "historyDisplacedCurrentQuery": false
+    },
+    {
+      "caseId": "assistant_reference",
+      "relevantIds": [],
+      "before": [
+        "vega",
+        "atlas"
+      ],
+      "after": [
+        "vega",
+        "atlas"
+      ],
+      "historyDisplacedCurrentQuery": false
+    },
+    {
+      "caseId": "copied_user_material",
+      "relevantIds": [
+        "atlas"
+      ],
+      "before": [
+        "atlas"
+      ],
+      "after": [
+        "atlas"
+      ],
+      "historyDisplacedCurrentQuery": false
+    }
+  ],
+  "limits": [
+    "Same authored ten-case corpus and old provider responses; not fresh model output or an independent holdout.",
+    "Only wholesale zero-overlap replacement is rejected. Partial contamination, ambiguous references and model abstention remain outside this fix."
+  ]
+}

@@ -105,6 +105,12 @@ export function issueChatContextBundle(input: {
             profileTokens: input.context.profileTokens,
             expiresAtMs,
             semanticSteps: input.context.semanticSteps,
+            memoryQueryPolicy: input.context.memory.memoryQueryPolicy,
+            memoryHistory: input.context.memory.memoryHistorySources?.length ? {
+                version: 1,
+                queryDigest: input.context.memory.memoryQueryDigest!,
+                sources: input.context.memory.memoryHistorySources,
+            } : undefined,
             ...input.context.fingerprintInput,
         },
         bundleSecret()
@@ -130,7 +136,7 @@ export function verifyChatContextBundle(
         subjectKey: string;
         conversationId: string | null;
         modelId: string;
-        currentFingerprint: string;
+        currentFingerprint?: string;
         now?: Date;
     }
 ): ContextBundleVerification {

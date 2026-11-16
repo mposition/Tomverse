@@ -181,15 +181,39 @@ for (const approval of [null, { verdict: "approved", reviewId: 9, observedAt: "2
   for (const cause of [ENGINEERING_AGENT_UNAPPROVED_MERGE_CAUSE, ENGINEERING_AGENT_PR_FILE_MISMATCH_CAUSE])
     assert.match(cause, /^[a-z0-9_]{1,20}$/);
   const moved = "f".repeat(40);
-  for (const overrides of [{ mergedByApprover: false }, { baseRef: "main" },
+  const movedCases = [
     // A moved head whose pull request diff changed, or could not be read.
-    { headSha: moved, diffDigest: "9".repeat(64) }, { headSha: moved, diffDigest: null }]) {
+    { headSha: moved, diffDigest: "9".repeat(64) }, { headSha: moved, diffDigest: null }];
+  for (const overrides of [{ mergedByApprover: false }, { baseRef: "main" }]) {
     assert.deepEqual(await run([binding()], async () => pull({ ...ownMerge, ...overrides })),
       [{ bindingId: "binding", outcome: "merged_without_approval" }]);
     assert.equal(recorded().at(-1)[2].reason, "merged_without_approval");
     assert.equal(recorded().at(-1)[2].causeKey, "unapproved_merge:binding");
     assert.equal(recorded().some(([kind]) => kind === "complete"), false);
   }
+
+  // Owner decision 2026-11-15: the approver's develop merge approves the diff
+  // it merged, whatever moved the head (the CI auto-fix's develop merge on
+  // #3942 and #3944). The merged head and diff ride the merge's audit entry.
+  for (const overrides of movedCases) {
+    completeResult = { completed: true, taskRevision: 9 };
+    assert.deepEqual(await run([binding()], async () => pull({ ...ownMerge, ...overrides })),
+      [{ bindingId: "binding", outcome: "completed" }], JSON.stringify(overrides));
+    assert.equal(recorded()[0][1].approvalReviewId, null);
+    assert.deepEqual(recorded()[1][2].mergedChange, { headSha: moved, diffDigest: overrides.diffDigest, headVerified: false });
+    assert.equal(recorded()[1][2].approvedByMerge, true);
+    assert.equal(recorded().some(([kind]) => kind === "mismatch"), false);
+  }
+  // ENGINEERING_AGENT_LEGACY_HALTS: the moved head is not verified, as before.
+  process.env.ENGINEERING_AGENT_LEGACY_HALTS = "enabled";
+  for (const overrides of movedCases) {
+    assert.deepEqual(await run([binding()], async () => pull({ ...ownMerge, ...overrides })),
+      [{ bindingId: "binding", outcome: "merged_without_approval" }]);
+    assert.equal(recorded().at(-1)[2].causeKey, "unapproved_merge:binding");
+  }
+  assert.deepEqual(await run([binding({ snapshot: { baseSha: BASE } })], async () => pull({ ...ownMerge, headSha: moved })),
+    [{ bindingId: "binding", outcome: "merged_without_approval" }], "without a readable bound diff, a moved head is not verified");
+  delete process.env.ENGINEERING_AGENT_LEGACY_HALTS;
 
   // #3828 (2026-11-13): develop merged into the branch moved the head, but the
   // pull request's diff is byte for byte the verified one, so the approver's
@@ -198,9 +222,13 @@ for (const approval of [null, { verdict: "approved", reviewId: 9, observedAt: "2
   assert.deepEqual(await run([binding()], async () => pull({ ...ownMerge, headSha: moved })),
     [{ bindingId: "binding", outcome: "completed" }]);
   assert.equal(recorded()[0][1].approvalReviewId, null);
+  assert.equal(recorded()[1][2].mergedChange.headVerified, true);
   assert.equal(recorded().some(([kind]) => kind === "mismatch"), false);
-  // Without a readable bound diff to compare, a moved head is not verified.
-  assert.deepEqual(await run([binding({ snapshot: { baseSha: BASE } })], async () => pull({ ...ownMerge, headSha: moved })),
+
+  // A review recorded before the merge no longer stands for someone else's
+  // merge of a head that moved after it: that diff was never approved.
+  assert.deepEqual(await run([binding({ approvalObservation: approved })],
+    async () => pull({ ...merged, mergedByKind: "bot", headSha: moved, diffDigest: "9".repeat(64) })),
     [{ bindingId: "binding", outcome: "merged_without_approval" }]);
 }
 

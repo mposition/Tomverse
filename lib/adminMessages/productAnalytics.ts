@@ -3,6 +3,13 @@ import { defineAdminMessages } from "@/lib/adminLocale";
 /** Copy for the product analytics tab. Event names are identifiers and stay as sent. */
 export const adminProductAnalyticsMessages = defineAdminMessages({
   en: {
+    journeys: {
+      title: "Connected journeys", description: "Observed CTA starts in the last 30 days, signed-in web users with analytics allowed, in the same tab. Main rates include only starts at least 24 hours old and exact first-question dispatch and normal nonempty reply observed within 24 hours. This measures client observation, not adoption, retention, answer quality or server persistence.",
+      entry: "Journey / entry", variant: "Continuation", mature: "Mature starts", preview: "Preview", ready: "Ready", sent: "First dispatch", replied: "Normal reply", rate: "Reply / mature starts", pending: "Pending (<24h)", pendingReplied: "Early replies", none: "No observed starts", unavailable: "Connected journey query unavailable", new: "New", existing: "Existing",
+      review_studio: "Review → Chat · Studio", review_classic: "Review → Chat · Classic", review_quick_summary: "Review → Chat · Quick Summary", import_complete: "Import → Continue · Completed list", import_viewer: "Import → Continue · Source viewer",
+      diagnostic: "Diagnostics", cancelled: "Explicit cancellation", invalidated: "Invalidated", issue: "Observed issue", unobserved: "Mature starts without reply or diagnostic", invalidProperties: "Invalid properties", orphan: "Stage without start", mismatchedProperties: "Property mismatch", outsideWindow: "Outside window", reversed: "Reversed stages", missingReady: "Missing ready", missingSend: "Missing dispatch", duplicates: "Duplicate stages",
+      note: "Stage reach uses the same mature cohort. Pending starts and their early replies are separate. Diagnostics cover all starts and may overlap; an issue can be followed by success. Unobserved does not mean abandoned or failed. Consent changes, pre-send reload, tab close and delivery loss limit observation. The 24-hour window is not an execution or cost limit.",
+    },
     eyebrow: "Product analytics",
     title: "Go-live funnel and activation",
     description:
@@ -89,6 +96,13 @@ export const adminProductAnalyticsMessages = defineAdminMessages({
     touchNoChannels: "No attributed sign-ups yet.",
   },
   ko: {
+    journeys: {
+      title: "Connected journeys", description: "최근 30일, 분석 수집이 허용된 로그인 사용자가 웹의 같은 탭에서 시작한 CTA 시도입니다. 주 비율은 시작 후 24시간이 지난 시도 중 첫 질문 전송과 비어 있지 않은 정상 답변을 24시간 안에 관측한 경우만 포함합니다. 클라이언트 관측 지표이며 채택률·유지율·답변 품질·서버 저장 성공률이 아닙니다.",
+      entry: "여정 / 진입면", variant: "이어가기 종류", mature: "성숙한 시작", preview: "미리보기", ready: "준비", sent: "첫 전송", replied: "정상 답변", rate: "답변 / 성숙한 시작", pending: "대기 (<24시간)", pendingReplied: "조기 답변", none: "관측된 시작 없음", unavailable: "연결 여정 조회 불가", new: "신규", existing: "기존",
+      review_studio: "Review → Chat · Studio", review_classic: "Review → Chat · Classic", review_quick_summary: "Review → Chat · Quick Summary", import_complete: "Import → 이어가기 · 완료 목록", import_viewer: "Import → 이어가기 · 원본 viewer",
+      diagnostic: "진단", cancelled: "명시 취소", invalidated: "무효화", issue: "관측된 문제", unobserved: "답변·진단 없는 성숙한 시작", invalidProperties: "속성 오류", orphan: "시작 없는 단계", mismatchedProperties: "속성 불일치", outsideWindow: "관측 창 밖", reversed: "순서 역전", missingReady: "준비 누락", missingSend: "전송 누락", duplicates: "중복 단계",
+      note: "단계 도달은 같은 성숙한 cohort 기준입니다. 최근 시작과 조기 답변은 별도 표시합니다. 진단은 전체 시작을 대상으로 서로 겹칠 수 있고 문제 관측 뒤에도 성공할 수 있습니다. 미관측은 포기·실패를 뜻하지 않습니다. 동의 변경·전송 전 새로고침·탭 종료·전송 유실에 따른 한계가 있으며 24시간은 실행·비용 제한이 아닙니다.",
+    },
     eyebrow: "제품 분석",
     title: "출시 퍼널과 활성화",
     description:

@@ -94,6 +94,7 @@ type ChatMessageListProps = {
    * (lib/chatReviewHandoff.ts). Never sends, never changes this conversation.
    */
   onCompareInReview?: (messageId: string) => void;
+  compareRequiresCompleted?: boolean;
   onRetryWithoutAttachments?: () => void;
   /**
    * Re-sends the last prompt with a set of already-missing stored files
@@ -592,6 +593,7 @@ export function ChatMessageList({
   onRetryQuestion,
   onChooseAnotherModel,
   onCompareInReview,
+  compareRequiresCompleted = false,
   onRetryWithoutAttachments,
   onContinueWithoutUnavailableAttachments,
   onRetryConcurrency,
@@ -1931,7 +1933,8 @@ export function ChatMessageList({
                     </div>
                   )}
                   {onCompareInReview && !isUser && !imported && !isActivelyGenerating &&
-                    msg.content.trim() && (msg.status === undefined || msg.status === "normal" || msg.status === "incomplete") && (
+                    (!compareRequiresCompleted || (!msg.imageTurn && !msg.researchRunId && !msg.pendingJobId)) &&
+                    msg.content.trim() && (msg.status === undefined || msg.status === "normal" || (!compareRequiresCompleted && msg.status === "incomplete")) && (
                     /*
                       A second opinion on this answer: its question opens as a
                       new Review draft. Light, in the answer's own flow, and

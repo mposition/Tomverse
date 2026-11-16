@@ -3,6 +3,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { PRODUCT_ANALYTICS_EVENT_NAMES } from "../lib/productAnalyticsShared.ts";
+import { supplementalProofIn } from "../scripts/baseline-presence-core.mjs";
 
 const migrationsDirectory = join(process.cwd(), "prisma", "migrations");
 const constraintPattern =
@@ -68,4 +69,43 @@ test("the union rebuild allows every name either earlier rebuild allows", () => 
   ]) {
     assert.deepEqual([...constraintNamesIn(directory)].filter((name) => !union.has(name)), [], directory);
   }
+});
+
+test("the connected journey rebuild is additive", () => {
+  const previous = constraintNamesIn(
+    "20261101100000_marketing_touch_analytics_event"
+  );
+  const connectedJourney = constraintNamesIn(
+    "20261115160000_connected_journey_analytics_event"
+  );
+
+  assert.deepEqual(
+    [...previous].filter((name) => !connectedJourney.has(name)),
+    []
+  );
+  assert.deepEqual(
+    [...connectedJourney].filter((name) => !previous.has(name)),
+    ["connected_journey_step"]
+  );
+});
+
+test("the connected journey rebuild binds its production CHECK predecessor", () => {
+  const directory = join(
+    migrationsDirectory,
+    "20261115160000_connected_journey_analytics_event"
+  );
+  const sql = readFileSync(join(directory, "migration.sql"), "utf8");
+  const proof = readFileSync(join(directory, "baseline-check.json"), "utf8");
+
+  assert.deepEqual(supplementalProofIn(sql, proof), {
+    kind: "check-replacement",
+    checks: [
+      {
+        table: "ProductAnalyticsEvent",
+        constraint: "ProductAnalyticsEvent_name_check",
+        previousDefinitionSha256:
+          "7c39aba2544dd539635a5b3019f1094831a831c0e3a1d65d623b04e679113123",
+      },
+    ],
+  });
 });

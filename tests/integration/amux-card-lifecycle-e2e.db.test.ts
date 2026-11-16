@@ -169,9 +169,12 @@ test("a review recorded before the merge completes the card on that review", asy
   });
 });
 
-test("a merge by anyone else with no review still stops the agent and leaves the card for a person", async () => {
+test("a merge by anyone else with no review holds that card for a person, and only that card", async () => {
+  const { readEngineeringAgentHaltState, currentEngineeringAgentHalt, engineeringAgentHalted } =
+    await import("@/lib/engineeringAgentStore");
   await lifecycle(async (tx) => {
     const card = await publishedCard(tx);
+    const before = await readEngineeringAgentHaltState(tx);
     const outcome = await observe(card, () => mergedPull({ mergedByApprover: false }));
     assert.equal(outcome?.outcome, "merged_without_approval");
     assert.equal((await cardRow(tx, card)).status, "review");
@@ -180,18 +183,151 @@ test("a merge by anyone else with no review still stops the agent and leaves the
     // the store admits, so this write failed and the whole round with it.
     assert.equal(await openMismatches(tx, card), 1);
     assert.equal(((await bindingRow(tx, card)).mergeObservation as { merged: boolean }).merged, true);
+    // Owner decision 2026-11-15: it is that card's decision; the agent goes on.
+    // Compared with the reading before it, so another suite's rows decide nothing here.
+    const state = await readEngineeringAgentHaltState(tx);
+    assert.equal(state.cardScoped, true);
+    assert.equal(state.openStateMismatches, before.openStateMismatches + 1);
+    assert.equal(state.unscopedStateMismatches, before.unscopedStateMismatches, "the mismatch is the card's");
+    assert.equal(engineeringAgentHalted(state), engineeringAgentHalted(before));
+    assert.equal(currentEngineeringAgentHalt(state), currentEngineeringAgentHalt(before));
   });
-  // An approver's merge of a change the app did not verify is not that
-  // approval either: another head whose pull request diff is not the verified
-  // one, or whose diff could not be read.
+});
+
+test("the CI auto-fix merged develop into the agent's pull request, then the owner merged it: done, nothing stops", async () => {
+  // #3942 and #3944 (2026-11-14): `auto-fix(conflict): merge develop into #N`
+  // moved the head and the diff after verification, the owner merged on
+  // GitHub, and the agent stopped for nine hours. The owner's merge approves
+  // the diff it merged, and the audit entry names it.
+  const MOVED = "a".repeat(40);
   for (const diffDigest of ["e".repeat(64), null]) {
     await lifecycle(async (tx) => {
       const card = await publishedCard(tx);
       const outcome = await observe(card, () =>
-        mergedPull({ mergedByApprover: true, headSha: "a".repeat(40), diffDigest }));
+        mergedPull({ mergedByApprover: true, headSha: MOVED, diffDigest }));
+      assert.equal(outcome?.outcome, "completed");
+      assert.equal((await cardRow(tx, card)).status, "done");
+      assert.equal(await openMismatches(tx, card), 0);
+      const observed = await tx.adminAuditLog.findMany({
+        where: { targetType: "engineering_agent_binding", targetId: card.bindingId } });
+      const merge = observed.map((entry) => entry.metadata as Record<string, unknown> | null)
+        .find((metadata) => metadata?.kind === "merge");
+      assert.equal(merge?.approvedByMerge, true);
+      assert.equal(merge?.mergedHeadSha, MOVED);
+      assert.equal(merge?.mergedDiffDigest, diffDigest);
+      assert.equal(merge?.mergedHeadVerified, false);
+    });
+  }
+  // ENGINEERING_AGENT_LEGACY_HALTS: the rule before it.
+  process.env.ENGINEERING_AGENT_LEGACY_HALTS = "enabled";
+  try {
+    await lifecycle(async (tx) => {
+      const card = await publishedCard(tx);
+      const outcome = await observe(card, () =>
+        mergedPull({ mergedByApprover: true, headSha: MOVED, diffDigest: "e".repeat(64) }));
       assert.equal(outcome?.outcome, "merged_without_approval");
       assert.equal((await cardRow(tx, card)).status, "review");
     });
+  } finally {
+    delete process.env.ENGINEERING_AGENT_LEGACY_HALTS;
+  }
+});
+
+/**
+ * A card whose reviewed result was stored while its publication could not
+ * open (`v22_publication_skipped`): settled in review with a patch, and no
+ * engineering run for that attempt.
+ */
+async function keptCard(tx: LifecycleTx) {
+  const seed = await seedAmuxV4PortfolioRecoveryPrerequisites(queryAdapter(tx),
+    { taskRole: "implement", settlementReason: "review_server_accepted" }) as {
+    taskId: string; priorAttemptId: string; ideaId: string };
+  const escalationId = randomUUID();
+  await tx.$executeRaw`INSERT INTO "AmuxHumanEscalation"
+    ("id", "taskId", "specialty", "reason", "status", "openedBy", "openedTaskRevision", "updatedAt")
+    VALUES (${escalationId}, ${seed.taskId}, 'code-review', 'human_review_required', 'open',
+      'system:amux-v22-settlement', 4, CURRENT_TIMESTAMP)`;
+  await tx.$executeRaw`INSERT INTO "AmuxV22TaskResult"
+    ("attemptId", "taskId", "ideaId", "ciphertext", "keyId", "keyVersion",
+     "digest", "digestKeyId", "sourceSha256", "byteLength", "createdAt")
+    VALUES (${seed.priorAttemptId}, ${seed.taskId}, ${seed.ideaId}, convert_to('synthetic-only', 'UTF8'),
+      'synthetic', 1, ${"d".repeat(64)}, 'synthetic', ${"d".repeat(64)}, 14, CURRENT_TIMESTAMP)`;
+  await tx.$executeRaw`INSERT INTO "AmuxV22TaskPatch"
+    ("attemptId", "taskId", "ideaId", "ciphertext", "keyId", "keyVersion",
+     "digest", "digestKeyId", "patchSha256", "baseSha", "byteLength", "createdAt")
+    VALUES (${seed.priorAttemptId}, ${seed.taskId}, ${seed.ideaId}, convert_to('synthetic-patch', 'UTF8'),
+      'synthetic', 1, ${"e".repeat(64)}, 'synthetic', ${"e".repeat(64)}, ${BASE}, 15, CURRENT_TIMESTAMP)`;
+  await fixtureCommitted(tx);
+  return { taskId: seed.taskId, attemptId: seed.priorAttemptId, escalationId };
+}
+
+test("a reviewed result whose publication never opened is kept for publication, and nothing runs it again", async () => {
+  // AMUX-IMGOUT-003 (2026-11-14): the agent was halted, so two results that
+  // passed review stayed private; the Decision Maker's owner settlement then
+  // chose "run again" each time, until all five attempts were spent.
+  const { readAmuxV22KeptResultCandidates } = await import("@/lib/amux/v22KeptResultRead");
+  const { scanAmuxDmOwnerSettlementCandidates } = await import("@/lib/amux/dmOwnerSettlementRead");
+  // Kept results are published, and so left out of the DM, only while v22 publication is on.
+  const publicationBefore = process.env.TOMVERSE_AMUX_V22_ENGINEERING_PUBLICATION;
+  process.env.TOMVERSE_AMUX_V22_ENGINEERING_PUBLICATION = "enabled";
+  try {
+  await lifecycle(async (tx) => {
+    const card = await keptCard(tx);
+    const kept = await readAmuxV22KeptResultCandidates(tx, 10, card.taskId);
+    assert.deepEqual(kept.map((row) => [row.taskId, row.attemptId, row.taskStatus, row.baseSha]),
+      [[card.taskId, card.attemptId, "review", BASE]], "the publication round will take it");
+    // The round's own read finds it, and leaves it out while the round defers it.
+    assert.ok((await readAmuxV22KeptResultCandidates(tx, 50)).some((row) => row.taskId === card.taskId));
+    assert.equal((await readAmuxV22KeptResultCandidates(tx, 50, null, [card.taskId]))
+      .some((row) => row.taskId === card.taskId), false);
+    // The Decision Maker, whose answers include a retry, is never asked about
+    // it; with the kill switch it is filed as before.
+    assert.deepEqual(await scanAmuxDmOwnerSettlementCandidates(tx, 10, [card.escalationId]), []);
+    process.env.ENGINEERING_AGENT_LEGACY_HALTS = "enabled";
+    try {
+      assert.deepEqual((await scanAmuxDmOwnerSettlementCandidates(tx, 10, [card.escalationId]))
+        .map((row) => row.taskId), [card.taskId]);
+    } finally {
+      delete process.env.ENGINEERING_AGENT_LEGACY_HALTS;
+    }
+    // With v22 publication off nothing would publish it, so it is filed as before.
+    delete process.env.TOMVERSE_AMUX_V22_ENGINEERING_PUBLICATION;
+    try {
+      assert.deepEqual((await scanAmuxDmOwnerSettlementCandidates(tx, 10, [card.escalationId]))
+        .map((row) => row.taskId), [card.taskId]);
+    } finally {
+      process.env.TOMVERSE_AMUX_V22_ENGINEERING_PUBLICATION = "enabled";
+    }
+
+    // Its budget spent on later failures, it is still the card's result to publish.
+    await withoutTriggers(tx, async () => {
+      await tx.$executeRaw`UPDATE "AmuxWorkItem" SET "status" = 'blocked' WHERE "id" = ${card.taskId}`;
+    });
+    const blocked = await readAmuxV22KeptResultCandidates(tx, 10, card.taskId);
+    assert.deepEqual(blocked.map((row) => row.taskStatus), ["blocked"]);
+
+    // Once a publication run exists for that attempt, it is no longer kept.
+    await withoutTriggers(tx, async () => {
+      await tx.$executeRaw`INSERT INTO "EngineeringAgentRun"
+        ("id", "amuxAttemptId", "cardId", "cardKind", "baseSha", "status", "outcome", "halt", "modeAtStart",
+         "startedAt", "endedAt", "leaseExpiresAt")
+        VALUES (${String(830_000_000 + Math.floor(Math.random() * 90_000_000))}, ${card.attemptId},
+          ${card.taskId}, 'task', ${BASE}, 'finished', 't2_draft', 'none', 't1',
+          CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`;
+    });
+    assert.deepEqual(await readAmuxV22KeptResultCandidates(tx, 10, card.taskId), []);
+  });
+  // A person who sent the result back rejected it: it is not kept.
+  await lifecycle(async (tx) => {
+    const card = await keptCard(tx);
+    await tx.$executeRaw`UPDATE "AmuxHumanEscalation" SET "status" = 'resolved', "resolutionOutcome" = 'retry',
+      "resolution" = 'Run it again.', "resolvedById" = 'lifecycle-person', "resolvedAt" = CURRENT_TIMESTAMP
+      WHERE "id" = ${card.escalationId}`;
+    assert.deepEqual(await readAmuxV22KeptResultCandidates(tx, 10, card.taskId), []);
+  });
+  } finally {
+    if (publicationBefore === undefined) delete process.env.TOMVERSE_AMUX_V22_ENGINEERING_PUBLICATION;
+    else process.env.TOMVERSE_AMUX_V22_ENGINEERING_PUBLICATION = publicationBefore;
   }
 });
 

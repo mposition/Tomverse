@@ -46,7 +46,7 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
   const run = async (path: string, init?: MobileRequestInit): Promise<Response> => {
     try {
       for (const [id, token] of unlockGrants) if (Number(token.split(".")[0]) <= Date.now() / 1000) unlockGrants.delete(id);
-      if (unlockGrants.size && (/^\/api\/(?:conversations|artifacts)(?:\/|\?)/.test(path) || path.startsWith("/api/chat/research-preview/") || path === "/api/chat")) {
+      if (unlockGrants.size && (/^\/api\/(?:conversations|artifacts)(?:\/|\?)/.test(path) || path.startsWith("/api/chat/research-preview/") || path === "/api/chat" || path === "/api/chat/preflight")) {
         const grantHeaders = (value?: RequestInit) => {
           const headers = new Headers(value?.headers);
           headers.set("X-Tomverse-Conversation-Unlocks", [...unlockGrants].map(([id, token]) => `${id}=${token}`).join("; "));
@@ -140,27 +140,27 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     // A continuation carries its imported original; an unreadable source is
     // drawn as the divider alone rather than as an ordinary empty chat.
     const imported = item.surface === "continuation" ? await continuationSource(id).catch(() => undefined) : undefined;
-    return { ...item, ...(imported ? { imported } : {}), messages: withRouting, assistantProfileId: item.assistantProfile?.profileId ?? item.assistantProfileId ?? null, activeAttempt: messages.some(message => Boolean(message.pendingJobId) && message.status === "pending") || Boolean(item.responseAttempts?.some((attempt) => ["claimed", "streaming"].includes(attempt.status))) };
+    return { ...item, ...(imported ? { imported, ...(imported.reviewHandoff ? { reviewHandoff: imported.reviewHandoff } : {}) } : {}), messages: withRouting, assistantProfileId: item.assistantProfile?.profileId ?? item.assistantProfileId ?? null, activeAttempt: messages.some(message => Boolean(message.pendingJobId) && message.status === "pending") || Boolean(item.responseAttempts?.some((attempt) => ["claimed", "streaming"].includes(attempt.status))) };
   }
   // The imported original of a continuation, one page at a time; `offset`
   // omitted asks for the page that ends at the divider (policy §8.2 of
   // docs/policy/external-conversation-continuation.md).
   async function continuationSource(id: string, offset?: number): Promise<ImportedTranscript> {
-    const value = await request<{ provider: string; importedAt: string; source: { status: string; messageTotal?: number; offset?: number; limit?: number; messages?: Array<{ id: string; role: string; content: string; ordinal?: number; sourceModelLabel?: string | null }> } }>(
+    const value = await request<{ provider: string; importedAt: string; reviewHandoff?: import("./chatTransport").ReviewHandoffSummary; source: { status: string; messageTotal?: number; offset?: number; limit?: number; messages?: Array<{ id: string; role: string; content: string; ordinal?: number; sourceModelLabel?: string | null }> } }>(
       `${pathFor(id)}/continuation?offset=${offset === undefined ? "end" : Math.max(0, Math.trunc(offset))}`, { cache: "no-store" });
     const status = value.source.status === "deleted" || value.source.status === "locked" ? value.source.status : "available";
     const messages = status === "available" ? (value.source.messages ?? []).filter(message => message.role === "user" || message.role === "assistant")
       .map(message => ({ id: message.id, role: message.role as "user" | "assistant", content: message.content, ordinal: message.ordinal, sourceModelLabel: message.sourceModelLabel ?? null })) : [];
-    return { provider: value.provider, importedAt: value.importedAt, status, messages, messageTotal: value.source.messageTotal, offset: value.source.offset ?? 0, pageSize: value.source.limit ?? 100 };
+    return { provider: value.provider, importedAt: value.importedAt, status, messages, messageTotal: value.source.messageTotal, offset: value.source.offset ?? 0, pageSize: value.source.limit ?? 100, ...(value.reviewHandoff ? { reviewHandoff: value.reviewHandoff } : {}) };
   }
   async function configure(id: string, modelId: string, auto: boolean) {
     await request(pathFor(id), json("PATCH", { selectionMode: auto ? "auto" : "manual", ...(!auto ? { selectedModels: [modelId] } : {}) }));
     return load(id);
   }
-  async function persistQuestion(conversation: Conversation, text: string, files: MobileAttachment[], signal: AbortSignal) {
+  async function persistQuestion(conversation: Conversation, text: string, files: MobileAttachment[], signal: AbortSignal, draft?: { revision: number }) {
     const requestId = crypto.randomUUID();
     const saved = await request<{ messageMappings: Array<{ requestId: string; messageId: string }> }>(`${pathFor(conversation.id)}/messages`, {
-      ...json("POST", { messages: [{ clientRequestId: requestId, role: "user", content: text,
+      ...json("POST", { ...(draft ? { draftConsume: { scopeKey: conversation.id, expectedRevision: draft.revision, requestId } } : {}), messages: [{ clientRequestId: requestId, role: "user", content: text,
         ...(files.length ? { attachmentUploadIds: files.map(file => file.uploadId) } : {}) }] }), signal,
     });
     const sourceId = saved.messageMappings.find(mapping => mapping.requestId === requestId)?.messageId;
@@ -200,7 +200,12 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       : null;
   }
   async function streamModel(persisted: Conversation, sourceId: string, modelId: string, signal: AbortSignal, progress: (text: string) => void, review = false, admission?: { admissionToken: string; contextBundle?: string }, continuation?: ContinuationTurnContext, research?: { locale: string }) {
-    const messages = research ? persisted.messages.filter(message => message.id === sourceId && message.role === "user").map(message => ({ id: message.id, role: "user" as const, content: message.content })) : fitChatRequestTranscript(persisted.messages.filter(message =>
+    // A prepared Review binds the saved authored question. Concurrent appends
+    // cannot become its current query or alter the transcript being verified.
+    const sourceIndex = admission?.contextBundle ? persisted.messages.findIndex(message => message.id === sourceId) : -1;
+    if (admission?.contextBundle && sourceIndex < 0) throw Error("SAVED_MESSAGE_MISSING");
+    const transcript = admission?.contextBundle ? persisted.messages.slice(0, sourceIndex + 1) : persisted.messages;
+    const messages = research ? persisted.messages.filter(message => message.id === sourceId && message.role === "user").map(message => ({ id: message.id, role: "user" as const, content: message.content })) : fitChatRequestTranscript(transcript.filter(message =>
       (message.role === "user" || !review || message.modelId === modelId) &&
       (message.role === "user" || message.status === "normal" || message.status === "incomplete" || !message.status))
       .map(message => toChatRequestMessage({ id: message.id, role: message.role, content: message.content, attachments: message.attachments })));
@@ -426,6 +431,25 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     // A Review continuation is listed with Review (owner request 2026-10-26).
     listReview: async () => (await request<Array<import("./chatTransport").ChatSummary & { surface: string; kind: string }>>("/api/conversations", { headers: displayTimeZoneHeaders() })).filter(row => (row.surface === "workspace" && ["chat", "image"].includes(row.kind)) || (row.surface === "continuation" && row.productKey === "review")),
     createReview: async (models, assistantProfileId) => { await requireParity(); const value = await request<{ id: string }>("/api/products/review/conversations", json("POST", { selectedModels: models, webSearchMode: "always", ...(assistantProfileId ? { assistantProfileId } : {}) })); return load(value.id); },
+    prepareReviewHandoff: async (id, input, signal) => {
+      const revision = sessionRevision;
+      const result = await request<import("./chatTransport").ReviewHandoffResult>(`${pathFor(id)}/continuation/review-handoff`, { ...json("POST", input), signal });
+      if (revision !== sessionRevision) throw new DOMException("Session changed", "AbortError");
+      if (!/^[A-Za-z0-9_-]{1,64}$/.test(result.conversationId) || !result.reviewHandoff) throw Error("REVIEW_HANDOFF_INVALID");
+      return result;
+    },
+    reviewHandoffDraft: {
+      get: id => request(`${pathFor(id)}/continuation/review-handoff/draft`),
+      put: async (id, input) => {
+        const result = await request<{ draft: import("./chatTransport").ReviewHandoffDraft }>(`${pathFor(id)}/continuation/review-handoff/draft`, json("PUT", input));
+        return { scopeKey: id, draft: result.draft };
+      },
+      remove: async (id, expectedRevision) => {
+        const response = await client.response(`${pathFor(id)}/continuation/review-handoff/draft`, json("DELETE", { expectedRevision }));
+        if (!response.ok) { const body = await response.json().catch(() => ({})); throw new ApiClientError(response.status, body.code ?? "REVIEW_HANDOFF_DRAFT_DELETE_FAILED"); }
+        return { scopeKey: id, draft: null };
+      },
+    },
     configureReview: async (id, models) => { await request(pathFor(id), json("PATCH", { selectedModels: models, selectionMode: "manual" })); return load(id); },
     routeReview: async (input) => { await requireParity(); const result = await askReviewRoute(input, (path, init) => { if (typeof path !== "string" || path !== "/api/review/route") throw Error("INVALID_REVIEW_ROUTE"); return run(path, init); }); if (!result || result.kind === "blocked") throw Error("REVIEW_ROUTE_UNAVAILABLE"); return result; },
     reviewPreview: async (id, mode = "balanced", synthesis = false) => { await requireParity(); return request(`${pathFor(id)}/comparison-reviews?reviewMode=${encodeURIComponent(mode)}&includeSynthesis=${synthesis}`); },
@@ -523,11 +547,20 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       }
       await streamModel(persisted, sourceId, persisted.selectedModels[0], signal, onProgress, false, undefined, continuation);
     },
-    sendReview: async (conversation, text, files, signal, progress) => {
+    sendReview: async (conversation, text, files, signal, progress, draft) => {
       // Match the ordinary message persistence route before pricing its query.
-      const prompt = text.trim();
+      const prompt = draft ? text : text.trim();
+      const handoffTarget = conversation.productKey === "review" && Boolean(conversation.reviewHandoff ?? conversation.imported?.reviewHandoff);
+      const handoffSessionRevision = handoffTarget ? sessionRevision : null;
       let admission: { admissionToken: string; contextBundle?: string } | undefined;
-      try { if (conversation.selectedModels.length > 1) {
+      try {
+        if (handoffTarget && conversation.selectedModels.length === 1) {
+          // The existing source loader validates both resources and every linked
+          // reference before a single-model send can consume its editable draft.
+          const context = await request<{ reviewHandoff?: { status?: string } }>(`${pathFor(conversation.id)}/continuation?limit=1&offset=end`, { signal });
+          if (context.reviewHandoff?.status !== "available") throw new ApiClientError(409, "REVIEW_HANDOFF_UNAVAILABLE");
+        }
+        if (conversation.selectedModels.length > 1) {
         await requireParity();
         const input = { comparisonId: Date.now().toString(), conversationId: conversation.id, modelIds: conversation.selectedModels, prompt, attachments: files.map(file => ({ mediaType: file.mediaType, size: file.size })), webSearchMode: conversation.webSearchMode ?? "off" };
         for (let attempt = 0; attempt < 2; attempt++) {
@@ -552,8 +585,11 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
           }
         }
       } } catch (error) { throw Object.assign(error instanceof Error ? error : new Error("COMPARISON_PREFLIGHT_FAILED"), { questionPersisted: false }); }
+      if (handoffTarget && handoffSessionRevision !== sessionRevision) {
+        throw Object.assign(new DOMException("Session changed", "AbortError"), { questionPersisted: false });
+      }
       if (signal.aborted) throw new DOMException("Stopped", "AbortError");
-      const { persisted, sourceId } = await persistQuestion(conversation, prompt, files, signal);
+      const { persisted, sourceId } = await persistQuestion(conversation, prompt, files, signal, draft);
       const outcomes = await Promise.allSettled(persisted.selectedModels.map(modelId =>
         streamModel(persisted, sourceId, modelId, signal, value => progress(modelId, value), true, admission)));
       return { failedModelIds: persisted.selectedModels.filter((_, index) => outcomes[index].status === "rejected") };

@@ -5,10 +5,12 @@ import test from "node:test";
 import {
   AMUX_IDEA_LANE_FAILURES,
   AMUX_IDEA_LANE_MAX_ATTEMPTS,
+  AMUX_IDEA_LANE_REPEATED_FAILURE_STOP,
   amuxIdeaLaneBranch,
   amuxIdeaLaneClaimable,
   amuxIdeaLaneDailyAttempts,
   amuxIdeaLaneEnabled,
+  amuxIdeaLaneGivesUp,
   amuxIdeaLaneState,
   amuxIdeaLaneView,
   inspectAmuxIdeaLaneFence,
@@ -35,13 +37,68 @@ test("an idea's runs decide whether the lane runs it again", () => {
   assert.equal(amuxIdeaLaneClaimable(vanished), true);
   assert.deepEqual(amuxIdeaLaneState([failed(30), failed(10, "no_change")], NOW),
     { ...PART1, state: "queued", attempts: 2, prNumber: null, lastOutcome: "no_change" });
-  const spent = amuxIdeaLaneState(Array.from({ length: AMUX_IDEA_LANE_MAX_ATTEMPTS }, (_, i) => failed(i + 1)), NOW);
-  assert.equal(spent.state, "failed", "the attempt limit stops it");
+  const spent = amuxIdeaLaneState(Array.from({ length: AMUX_IDEA_LANE_REPEATED_FAILURE_STOP },
+    (_, i) => failed(i + 1)), NOW);
+  assert.equal(spent.state, "failed", "the same failure three times in a row stops it");
   assert.equal(amuxIdeaLaneClaimable(spent), false);
   const opened = amuxIdeaLaneState([failed(30), run({ outcome: "pr_open", prNumber: 42, leaseUntilMs: NOW - 1 })], NOW);
   assert.deepEqual(opened, { ...PART1, state: "pr_open", attempts: 2, prNumber: 42, lastOutcome: "pr_open" });
   assert.equal(amuxIdeaLaneClaimable(opened), false, "an opened PR ends the lane's work");
   assert.equal(amuxIdeaLaneClaimable(amuxIdeaLaneState([run()], NOW)), false, "never two runs at once");
+});
+
+test("the lane stops a part only when the same failure repeats (owner direction 2026-11-15)", () => {
+  assert.equal(AMUX_IDEA_LANE_REPEATED_FAILURE_STOP, 3);
+  const expired = (minutesAgo) => run({ claimedAtMs: NOW - minutesAgo * 60_000, leaseUntilMs: NOW - 1 });
+  // Different failures are new problems: the part keeps its turn, however many runs it took.
+  const varied = [failed(9), failed(8, "no_change"), failed(7), failed(6, "push_failed"), failed(5),
+    expired(4), failed(3, "no_change")];
+  assert.deepEqual(amuxIdeaLaneState(varied, NOW, false),
+    { ...PART1, state: "queued", attempts: 7, prNumber: null, lastOutcome: "no_change" });
+  assert.equal(amuxIdeaLaneClaimable(amuxIdeaLaneState(varied, NOW, false)), true);
+  // The newest three ended the same way: it stops, whatever came before.
+  const repeated = [...varied, failed(2, "no_change"), failed(1, "no_change")];
+  assert.equal(amuxIdeaLaneState(repeated, NOW, false).state, "failed");
+  assert.equal(amuxIdeaLaneGivesUp(repeated.slice(0, -1), false), false, "two in a row is not three");
+  // A run that never reported counts as lease_expired, so a run that keeps vanishing stops too.
+  assert.equal(amuxIdeaLaneState([expired(3), expired(2), expired(1)], NOW, false).state, "failed");
+  assert.equal(amuxIdeaLaneState([expired(3), failed(2), expired(1)], NOW, false).state, "queued");
+  // Order is by claim time, not by the order the rows arrive in.
+  assert.equal(amuxIdeaLaneState([failed(1), failed(9, "no_change"), failed(2), failed(3)], NOW, false).state, "failed");
+  assert.equal(amuxIdeaLaneState([failed(3), failed(1, "no_change"), failed(2)], NOW, false).state, "queued");
+  // With the legacy switch, the former rule: three runs of any outcome.
+  assert.equal(AMUX_IDEA_LANE_MAX_ATTEMPTS, 3);
+  assert.equal(amuxIdeaLaneState(varied.slice(0, 3), NOW, true).state, "failed");
+  assert.equal(amuxIdeaLaneState(varied.slice(0, 2), NOW, true).state, "queued");
+  const previous = process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS;
+  try {
+    process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS = "enabled";
+    assert.equal(amuxIdeaLaneState(varied.slice(0, 3), NOW).state, "failed", "the switch is read from the environment");
+    delete process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS;
+    assert.equal(amuxIdeaLaneState(varied.slice(0, 3), NOW).state, "queued", "the new rule is the default");
+  } finally {
+    if (previous === undefined) delete process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS;
+    else process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS = previous;
+  }
+  // The claim query repeats the rule in SQL, under the same switch.
+  const service = readFileSync("lib/amux/ideaLaneService.ts", "utf8");
+  assert.match(service, /CASE WHEN \$\{legacy\}::boolean THEN/);
+  assert.match(service, /LIMIT \$\{AMUX_IDEA_LANE_REPEATED_FAILURE_STOP\}\) newest/);
+  assert.match(service, /count\(DISTINCT newest\."outcome"\) = 1/);
+  // The daily limit is a spending bound and stays.
+  assert.match(service, /if \(today >= amuxIdeaLaneDailyAttempts\(\)\) return null;/);
+});
+
+test("the published PR body is cut only at GitHub's 65,536-character limit, remaining work first", () => {
+  const workflow = readFileSync(".github/workflows/amux-idea-lane.yml", "utf8");
+  assert.doesNotMatch(workflow, /head -c 40000|head -c 20000|head -c 60000/, "the former per-part caps are gone");
+  assert.match(workflow, /room=\$\(\(65536 - /);
+  assert.match(workflow, /next_keep=\$\(\( next_size < room \? next_size : room \)\)/, "the remaining work is kept first");
+  assert.match(workflow, /iconv -f UTF-8 -t UTF-8 -c/, "a cut never splits a character");
+  // The guards around the change are unchanged.
+  assert.match(workflow, /echo "failure=workflow_edit"/);
+  assert.match(workflow, /timeout-minutes: 150/);
+  assert.match(workflow, /--max-turns 300/);
 });
 
 test("an observed merge of the lane's PR settles the idea as done", () => {

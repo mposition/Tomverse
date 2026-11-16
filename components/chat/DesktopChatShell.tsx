@@ -126,6 +126,7 @@ export type DesktopChatShellProps = {
   getGuestReviewSource?: () => GuestReviewSource | null;
   onAnalysisCompleted?: () => void;
   workspaceNotice?: import("react").ReactNode;
+  continuationNotice?: import("react").ReactNode;
   review?: ReviewWorkspaceControls;
   chatWorkspace?: WorkspaceAppearanceControls;
   studioStarterCards?: readonly VisibleStarterCard[];
@@ -138,6 +139,7 @@ export type DesktopChatShellProps = {
   onRestorePrompt?: (prompt: { text: string; attachments: ChatAttachment[]; targetChatId: string }) => void;
   onRetryPrompt?: (prompt: { text: string; attachments: ChatAttachment[]; targetChatId: string }) => void;
   onCompareInReview?: (seed: string) => void;
+  onCompareContinuationInReview?: (assistantMessageId: string) => void;
   conversations: Conversation[];
   currentChatId: string | null;
   selectedModels: string[];
@@ -441,6 +443,7 @@ export type DesktopChatShellProps = {
 
 export function DesktopChatShell({
   workspaceNotice,
+  continuationNotice,
   review,
   chatWorkspace,
   studioStarterCards,
@@ -452,6 +455,7 @@ export function DesktopChatShell({
   onRestorePrompt,
   onRetryPrompt,
   onCompareInReview,
+  onCompareContinuationInReview,
   conversations,
   currentChatId,
   selectedModels,
@@ -1034,6 +1038,7 @@ export function DesktopChatShell({
         {review && <ReviewCommandBar review={review} showModeSwitcher={false} locked={productSwitchDisabled || isAnyModelResponding}
           view={studioView} setView={studio ? setStudioView : undefined} />}
         {chatWorkspace && <ChatCommandBar workspace={chatWorkspace} locked={productSwitchDisabled || isAnyModelResponding || durableDraftLocked} />}
+        {continuationNotice}
         <div className={studio ? "review-studio-body" : "contents"}>
 
         {/*
@@ -1445,6 +1450,7 @@ export function DesktopChatShell({
                   onRestorePrompt={onRestorePrompt}
                   onRetryPrompt={onRetryPrompt}
                   onCompareInReview={onCompareInReview}
+                  onCompareContinuationInReview={onCompareContinuationInReview}
                   hasImportedTranscript={hasImportedTranscript}
                   importedMessages={importedMessages}
                   importedTranscript={importedTranscript}

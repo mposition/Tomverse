@@ -244,3 +244,32 @@ test("v22 settlement maps the strict read-only API receipt echo", async () => {
       apiExecutionReceipt },
   });
 });
+
+test("an unverified v22 settlement carries what the sidecar said; codes only, never on a verified one", async () => {
+  // Owner decision 2026-11-15: the app keeps an infrastructure failure off the card's attempts.
+  const { call } = (await routes).find(({ name }) => name === "settle")!;
+  authorized = true;
+  const body = (over: Record<string, unknown>) => JSON.stringify({
+    attempt_id: "00000000-0000-4000-8000-000000000003", worker: "worker-one",
+    instance_id: "00000000-0000-4000-8000-000000000002", generation: 1, task_revision: 2,
+    outcome: "blocked", invocation_ids: [], ...over });
+  const post = (over: Record<string, unknown>) => call(new Request(
+    "https://tomverse.test/api/internal/amux/v22/execution/settle", { method: "POST", body: body(over) }));
+  settleInput = null;
+  assert.equal((await post({ failure: { code: "invalid_result", cli_started: true, exit_code: 1,
+    elapsed_ms: 4200 } })).status, 409);
+  assert.deepEqual((settleInput as { failure?: unknown }).failure,
+    { code: "invalid_result", cliStarted: true, exitCode: 1, elapsedMs: 4200 });
+  settleInput = null;
+  await post({ outcome: "failed", invocation_ids: ["00000000-0000-4000-8000-000000000003"],
+    failure: { code: "invalid_result" } });
+  assert.equal("failure" in (settleInput as object), false, "a verified settlement is judged on its receipt");
+  // A malformed report never reaches the service (this suite's input-error
+  // mock turns the schema refusal into a thrown error).
+  for (const failure of [{ code: "Invalid Result" }, { code: "x".repeat(65) },
+    { code: "invalid_result", text: "worker output" }]) {
+    settleInput = null;
+    await assert.rejects(post({ failure }), JSON.stringify(failure));
+    assert.equal(settleInput, null);
+  }
+});

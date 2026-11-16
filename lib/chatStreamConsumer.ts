@@ -72,6 +72,14 @@ export const consumeChatStream = async (input: {
   liveness: ChatStreamLivenessSink;
   /** Called after every chunk that changed anything the user can see. */
   onProgress: (progress: ChatStreamProgress) => void;
+  /**
+   * Called once, just before the read error is rethrown, when the stream
+   * broke instead of closing. Handed the trailer JSON if one had already
+   * arrived: a server that fails a turn mid-stream writes its error report
+   * there and only then errors the stream, so the report is in hand by the
+   * time the read rejects (lib/webSearchStreamTrailer.ts, `errorReport`).
+   */
+  onInterrupted?: (searchMetadataJson: string | null) => void;
 }): Promise<ChatStreamResult> => {
   const { reader, liveness, onProgress } = input;
   const decoder = new TextDecoder();
@@ -92,7 +100,16 @@ export const consumeChatStream = async (input: {
   let serverStallCode: ChatTimeoutErrorCode | null = null;
 
   for (;;) {
-    const { done, value } = await reader.read();
+    let read: ReadableStreamReadResult<Uint8Array>;
+    try {
+      read = await reader.read();
+    } catch (error) {
+      input.onInterrupted?.(
+        splitSearchMetadataTrailer(rawStreamText).searchMetadataJson
+      );
+      throw error;
+    }
+    const { done, value } = read;
     if (done) break;
 
     rawStreamText += decoder.decode(value, { stream: true });

@@ -129,7 +129,6 @@ const SWITCHED = [
   "openEngineeringAgentWorkItem",
   "claimEngineeringAgentWorkItem",
   "markEngineeringAgentWorkItemLeaseExpired",
-  "expireEngineeringAgentWorkItem",
   "issueEngineeringAgentCapability",
   "resolveEngineeringAgentV22TierPendingDraft",
   "expireEngineeringAgentV22LapsedPublish",
@@ -148,6 +147,7 @@ const RECORDS_WHAT_HAPPENED = [
   "lockEngineeringAgentV22Run",
   "resolveEngineeringAgentStateMismatch",
   "recordEngineeringAgentObservedHalt",
+  "clearEngineeringAgentObservedHalt",
   "openEngineeringAgentRunMismatches",
   "recordEngineeringAgentPublishResult",
   "acknowledgeEngineeringAgentHalt",
@@ -160,6 +160,8 @@ const RECORDS_WHAT_HAPPENED = [
   "settleEngineeringAgentWorkItem",
   "decideEngineeringAgentT2Draft",
   "rejudgeEngineeringAgentV22Draft",
+  // The same, by the system once after a deploy; the next round reads the switches.
+  "rejudgeEngineeringAgentV22DraftsAfterDeploy",
   "acknowledgeEngineeringAgentDecision",
   // A person's approval; the claim that carries it reads the switches.
   "approveEngineeringAgentPullRequestResume",

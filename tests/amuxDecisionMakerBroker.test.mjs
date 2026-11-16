@@ -14,8 +14,23 @@
 // process (the stand-in CLI) and owners and modes need POSIX.
 
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
+
+import {
+  DM_WORKSPACE_GIT_FLAGS,
+  buildDmWorkspace,
+  dmWorkspaceHttpClient,
+  dmWorkspaceSystemGitEnvironment,
+} from "../lib/amux/decisionMakerWorkspaceBuild.ts";
+import { dmEncodeLaunchWorkspace, dmWorkspacePayloadLines, gitBlobId } from "../lib/amux/decisionMakerWorkspaceCore.ts";
+import { DM_SYSTEM_HOST } from "../lib/amux/decisionMakerLauncherFs.ts";
+
+const makeTempRoot = () => mkdtempSync(join(tmpdir(), "amux-dm-workspace-"));
 
 import { createDecisionMakerBroker, dmSystemdListenFd } from "../lib/amux/decisionMakerBroker.ts";
 import { dmEncodeLauncherLaunched, dmEncodeLauncherReady } from "../lib/amux/decisionMakerBrokerCore.ts";
@@ -416,32 +431,201 @@ test("the broker listens only on the one socket systemd passed this process", ()
   assert.equal(dmSystemdListenFd({}, 42), null);
 });
 
-test("stage S2b: a snapshot request is answered from the public reads alone -- no directory, no launcher", async () => {
-  const sha = "0123456789abcdef0123456789abcdef01234567";
-  const text = "SQLite is the store.\n";
-  const { gitBlobId } = await import("../lib/amux/decisionMakerSnapshot.ts");
-  const enc = (value) => new TextEncoder().encode(value);
+// ---------------------------------------------------------------------------
+// The workspace (owner decision 2026-11-15; it replaced stage S2b's snapshot)
+// ---------------------------------------------------------------------------
+
+const enc = (value) => new TextEncoder().encode(value);
+const WORKSPACE_SHA = "0123456789abcdef0123456789abcdef01234567";
+/** A patch far past the 4,000 characters a card's context once held. */
+const BIG_PATCH = `diff --git a/docs/store.md b/docs/store.md\n--- a/docs/store.md\n+++ b/docs/store.md\n@@ -1 +1,20001 @@\n SQLite is the store.\n${"+line of a long patch\n".repeat(20_000)}`;
+
+const publicReads = (reads) => async (url) => {
+  reads.push(url);
+  if (url.endsWith("/commits/develop") || url.endsWith(`/commits/${WORKSPACE_SHA}`)) {
+    return { status: 200, body: enc(JSON.stringify({ sha: WORKSPACE_SHA })) };
+  }
+  return { status: 404, body: enc("") };
+};
+
+test("a workspace request is answered from the public reads alone -- no directory, no launcher -- and a secret file is left out", async () => {
   const reads = [];
-  const snapshotHttp = async (url) => {
-    reads.push(url);
-    if (url.endsWith("/commits/develop") || url.endsWith(`/commits/${sha}`)) return { status: 200, body: enc(JSON.stringify({ sha })) };
-    if (url.includes("/git/trees/")) return { status: 200, body: enc(JSON.stringify({ truncated: false, tree: [{ path: "docs/store.md", mode: "100644", type: "blob", sha: gitBlobId(enc(text)) }] })) };
-    if (url.endsWith("/docs/store.md")) return { status: 200, body: enc(text) };
-    return { status: 404, body: enc("") };
-  };
-  await withBroker(OPENAI, { launcher: "absent", snapshotHttp }, async (broker) => {
-    const answer = await broker.call({ v: 1, type: "snapshot", requestId: REQUEST_ID, paths: ["docs/store.md", ".env"] });
-    assert.equal(answer.type, "snapshot");
+  await withBroker(OPENAI, { launcher: "absent", workspaceHttp: publicReads(reads) }, async (broker) => {
+    const files = [
+      { name: "PATCH.diff", content: Buffer.from(BIG_PATCH).toString("base64") },
+      { name: "FINDINGS.md", content: Buffer.from(`token ghp_${"a".repeat(36)}\n`).toString("base64") },
+    ];
+    const answer = await broker.call({ v: 1, type: "workspace", requestId: REQUEST_ID, targetSha: null, files });
+    assert.equal(answer.type, "workspace");
     assert.equal(answer.requestId, REQUEST_ID);
-    assert.equal(answer.state, "develop");
-    assert.equal(answer.targetSha, sha);
-    assert.deepEqual(answer.excluded, { secret_path: 1 });
+    assert.deepEqual([answer.state, answer.targetSha, answer.reason], ["develop", WORKSPACE_SHA, null]);
+    assert.deepEqual(answer.files, ["PATCH.diff"]);
+    assert.deepEqual(answer.excluded, { secret_content: 1 });
     const lines = Buffer.from(answer.lines, "base64").toString("utf8").trim().split("\n").map((line) => JSON.parse(line));
-    assert.deepEqual(lines[1], { file: "docs/store.md", blob: gitBlobId(enc(text)), text });
+    assert.deepEqual(lines[0], { workspace: { repository: "github.com/mposition/Tomverse", commit: WORKSPACE_SHA, state: "develop", patch: true, files: 1 } });
+    // The patch is named by its blob id and size; its text is never in the lines.
+    assert.deepEqual(lines[1], { file: "evidence/PATCH.diff", blob: gitBlobId(enc(BIG_PATCH)), bytes: Buffer.byteLength(BIG_PATCH) });
+    assert.ok(Buffer.from(answer.lines, "base64").length < 1024);
+    // Only the public API's commit lookups, nothing else.
+    assert.ok(reads.every((url) => url.startsWith("https://api.github.com/repos/mposition/Tomverse/commits/")), reads.join());
     assert.equal(broker.launcherConnections.length, 0);
     assert.equal(existsSync(broker.requestDirectory()), false);
-    // A malformed snapshot request is answered with no snapshot, not a launch.
-    const malformed = await broker.call({ v: 1, type: "snapshot", requestId: "nope", paths: [] });
+    // A malformed request is answered with no workspace, not a launch.
+    const malformed = await broker.call({ v: 1, type: "workspace", requestId: "nope", targetSha: null, files: [] });
     assert.deepEqual([malformed.state, malformed.reason, malformed.lines], ["none", "request_malformed", ""]);
   });
+});
+
+/** A launch whose payload ends with the workspace's lines, and the intent for those bytes. */
+const workspaceLaunch = (broker, workspace) => {
+  const payload = Buffer.concat([PAYLOAD, Buffer.from(dmWorkspacePayloadLines(workspace), "utf8")]);
+  return launchLine(broker.fixture, {
+    payload: payload.toString("base64"),
+    transmitIntent: { ...broker.fixture.evidence, inputPayloadDigest: dmPayloadDigest(REQUEST_KEY, payload) },
+    workspace: dmEncodeLaunchWorkspace(workspace),
+  });
+};
+
+const gitExecutable = (() => {
+  try {
+    // The workspace keeps the system host's Linux PATH even on a test host.
+    const executable = process.platform === "win32"
+      ? execFileSync("where.exe", ["git"], { encoding: "utf8" }).trim().split(/\r?\n/)[0]
+      : "git";
+    execFileSync(executable, ["--version"], { stdio: "ignore" });
+    return executable;
+  } catch {
+    return null;
+  }
+})();
+
+/** A local repository with one commit, standing in for GitHub; fetched over file:// like the real one over https. */
+const localRepository = (root) => {
+  const repo = join(root, "origin");
+  mkdirSync(repo, { recursive: true });
+  const git = (...args) => execFileSync(gitExecutable, ["-C", repo, ...args], { encoding: "utf8" }).trim();
+  git("init", "-q");
+  git("config", "user.email", "test@example.invalid");
+  git("config", "user.name", "test");
+  git("config", "uploadpack.allowAnySHA1InWant", "true");
+  mkdirSync(join(repo, "docs"));
+  writeFileSync(join(repo, "docs", "store.md"), "SQLite is the store.\n");
+  git("add", ".");
+  git("commit", "-q", "-m", "store");
+  return { url: pathToFileURL(repo).href, sha: git("rev-parse", "HEAD") };
+};
+
+test("a launch builds the workspace: the checkout, the patch applied, every evidence byte, read by the launcher, then deleted", { skip: !gitExecutable && "git is not installed" }, async () => {
+  const seen = [];
+  const launcher = scripted(OPENAI, async (socket, request, fixture) => {
+    const base = fixture.at(fixture.paths.requestDirectory);
+    seen.push({
+      entries: readdirSync(base).sort(),
+      patch: readFileSync(join(base, "evidence", "PATCH.diff"), "utf8"),
+      before: readFileSync(join(base, "repo", "docs", "store.md"), "utf8"),
+      after: readFileSync(join(base, "repo-patched", "docs", "store.md"), "utf8"),
+      guide: readFileSync(join(base, "WORKSPACE.md"), "utf8"),
+      request,
+    });
+    await dmWriteLine(socket, dmEncodeLauncherLaunched(request, { outcome: "timeout" }, VERIFIED), 2_000);
+    socket.end();
+  });
+  const probe = makeTempRoot();
+  const origin = localRepository(probe);
+  try {
+    await withBroker(OPENAI, { launcher, workspaceGit: { executable: gitExecutable, cloneUrl: origin.url } }, async (broker) => {
+      const workspace = { state: "worker_head", targetSha: origin.sha, files: [{ name: "PATCH.diff", text: BIG_PATCH }] };
+      const answer = await broker.call(workspaceLaunch(broker, workspace));
+      assert.equal(answer.transmission, "process_ended", JSON.stringify(broker.logs.at(-1)));
+      assert.equal(seen.length, 1);
+      assert.deepEqual(seen[0].entries, ["WORKSPACE.md", "evidence", "repo", "repo-patched"]);
+      // The whole patch, not a card's worth of it.
+      assert.equal(seen[0].patch, BIG_PATCH);
+      assert.equal(seen[0].before, "SQLite is the store.\n");
+      // The one line it had, the 20,000 the patch adds, and the end.
+      assert.equal(seen[0].after.split("\n").length, 20_002);
+      assert.match(seen[0].guide, new RegExp(`repo/ is a checkout of commit ${origin.sha}`));
+      assert.match(seen[0].guide, /repo-patched\/ is the same commit with evidence\/PATCH\.diff applied/);
+      // The launcher gets the seven keys: never the workspace's evidence.
+      assert.equal(Object.hasOwn(seen[0].request, "workspace"), false);
+      // §5: deleted on the way out, whatever the tree held.
+      assert.deepEqual(answer.cleanup, VERIFIED);
+      assert.equal(existsSync(broker.requestDirectory()), false);
+      assert.match(broker.logs.at(-1).workspace, /^built:applied$/);
+    });
+  } finally {
+    rmSync(probe, { recursive: true, force: true });
+  }
+});
+
+test("a launch whose workspace is not the one its payload names is refused before anything is made", async () => {
+  await withBroker(OPENAI, {}, async (broker) => {
+    const workspace = { state: "develop", targetSha: WORKSPACE_SHA, files: [{ name: "PATCH.diff", text: "diff --git a/x b/x\n+x\n" }] };
+    const named = workspaceLaunch(broker, workspace);
+    const other = { ...named, workspace: dmEncodeLaunchWorkspace({ ...workspace, files: [{ name: "PATCH.diff", text: "diff --git a/y b/y\n+y\n" }] }) };
+    for (const line of [other, { ...named, workspace: null }]) {
+      const answer = await broker.call(line);
+      assert.deepEqual(answer.launch, { outcome: "broker_refused", reasons: ["workspace_mismatch"] });
+      assert.equal(answer.transmission, "not_started");
+    }
+    // A payload with no workspace line and a workspace in the launch.
+    const card = launchLine(broker.fixture, { workspace: dmEncodeLaunchWorkspace(workspace) });
+    assert.deepEqual((await broker.call(card)).launch, { outcome: "broker_refused", reasons: ["workspace_mismatch"] });
+    assert.equal(broker.launcherConnections.length, 0);
+    assert.equal(existsSync(broker.requestDirectory()), false);
+  });
+});
+
+test("a workspace that cannot be fetched is refused: nothing is sent, and the directory is gone", { skip: !gitExecutable && "git is not installed" }, async () => {
+  const probe = makeTempRoot();
+  try {
+    await withBroker(OPENAI, { workspaceGit: { executable: gitExecutable, cloneUrl: pathToFileURL(join(probe, "missing")).href } }, async (broker) => {
+      const workspace = { state: "develop", targetSha: WORKSPACE_SHA, files: [] };
+      const answer = await broker.call(workspaceLaunch(broker, workspace));
+      assert.deepEqual(answer.launch, { outcome: "broker_refused", reasons: ["workspace_unavailable"] });
+      assert.equal(answer.transmission, "not_started");
+      assert.deepEqual(answer.cleanup, VERIFIED);
+      assert.equal(broker.launcherConnections.length, 0);
+      assert.equal(existsSync(broker.requestDirectory()), false);
+      assert.equal(broker.logs.at(-1).workspace, "failed:git_failed:fetch");
+    });
+  } finally {
+    rmSync(probe, { recursive: true, force: true });
+  }
+});
+
+test("the workspace's git runs with no credential, no config file and https only; the public reads go to the API alone", async () => {
+  const environment = dmWorkspaceSystemGitEnvironment("/var/lib/amux-dm/requests/x");
+  assert.deepEqual(Object.keys(environment).sort(),
+    ["GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM", "GIT_TERMINAL_PROMPT", "HOME", "LANG", "LC_ALL", "PATH"]);
+  assert.ok(!Object.keys(environment).some((name) => /TOKEN|SECRET|KEY|PASSWORD|GH_|GITHUB|ASKPASS|SSH|PROXY/i.test(name)));
+  assert.equal(environment.PATH, "/usr/bin:/bin");
+  for (const flag of ["credential.helper=", "core.askPass=", "protocol.allow=never", "protocol.https.allow=always", "http.followRedirects=false", "core.symlinks=false"]) {
+    assert.ok(DM_WORKSPACE_GIT_FLAGS.includes(flag), flag);
+  }
+  assert.ok(!DM_WORKSPACE_GIT_FLAGS.some((flag) => flag.startsWith("protocol.file")), "file:// is a test host's only");
+  // Only https to api.github.com: anything else is refused without a request.
+  for (const url of ["https://raw.githubusercontent.com/mposition/Tomverse/x", "http://api.github.com/repos/mposition/Tomverse/commits/develop", "https://example.invalid/"]) {
+    assert.equal(await dmWorkspaceHttpClient(url), null, url);
+  }
+  // A system host never takes another git or repository.
+  await assert.rejects(
+    buildDmWorkspace(DM_SYSTEM_HOST, { instance: OPENAI, requestId: REQUEST_ID, groupId: null,
+      workspace: { state: "none", targetSha: null, files: [] } }, { git: { executable: "git", cloneUrl: "file:///x" } }),
+    /fixed on the system host/);
+});
+
+test("the build measures the directory as git writes into it: every regular file's bytes, nothing else", async () => {
+  const { dmWorkspaceBytes, DM_WORKSPACE_DISK_CHECK_MS } = await import("../lib/amux/decisionMakerWorkspaceBuild.ts");
+  const probe = makeTempRoot();
+  try {
+    mkdirSync(join(probe, "a", "b"), { recursive: true });
+    writeFileSync(join(probe, "a", "one"), "x".repeat(1000));
+    writeFileSync(join(probe, "a", "b", "two"), "y".repeat(24));
+    assert.equal(dmWorkspaceBytes(probe), 1024);
+    assert.equal(dmWorkspaceBytes(join(probe, "missing")), 0, "a directory that is gone counts nothing and never throws");
+    assert.ok(DM_WORKSPACE_DISK_CHECK_MS <= 1_000, "checked at least every second while git runs");
+  } finally {
+    rmSync(probe, { recursive: true, force: true });
+  }
 });
