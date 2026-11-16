@@ -18,7 +18,7 @@ test("file analysis lists actual supported extensions and model input caveats", 
       await expect(group.locator("p")).toBeVisible();
     }
   } else {
-    await expect(section.getByRole("listitem")).toHaveCount(6);
+    await expect(section.getByTestId("attachment-format-groups").getByRole("listitem")).toHaveCount(6);
   }
   const text = await section.innerText();
   for (const extension of Object.values(chatAttachmentExtensionsByGroup()).flat()) expect(text).toContain(`.${extension}`);
