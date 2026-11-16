@@ -588,17 +588,21 @@ where
 {
     // The outcome and the pause are both kept, and the file written, before
     // either is sent: a restart in between must still hold the session back.
-    let outcome = book.keep(OwedRecord::DeliveryOutcome {
-        request_id: delivery.request_id().to_owned(),
-        outcome: "unknown".to_owned(),
-        reason: None,
-    });
-    let pause = book.keep(OwedRecord::Pause {
-        card_id: delivery.card_id.clone(),
-        question_revision: delivery.question_revision,
-        request_id: delivery.request_id().to_owned(),
-        session: delivery.session.clone(),
-    });
+    // One write for both: the outcome never reaches the file without the pause.
+    let ids = book.keep_all(vec![
+        OwedRecord::DeliveryOutcome {
+            request_id: delivery.request_id().to_owned(),
+            outcome: "unknown".to_owned(),
+            reason: None,
+        },
+        OwedRecord::Pause {
+            card_id: delivery.card_id.clone(),
+            question_revision: delivery.question_revision,
+            request_id: delivery.request_id().to_owned(),
+            session: delivery.session.clone(),
+        },
+    ]);
+    let (outcome, pause) = (ids[0], ids[1]);
     let mut run = DeliveryRun::about(delivery, "delivery_unknown");
     if !book.settle_new(app, local, outcome).await {
         run = run.missing("delivery_unknown_record_owed");

@@ -519,6 +519,25 @@ impl OwedBook {
         id
     }
 
+    /// Keeps every record of `records` and writes the file once, so a stop
+    /// can never leave one of them on disk without the others (a delivery's
+    /// outcome without the pause that holds its session back; review
+    /// r-20261116-201403-765f49). Returns their handles in order.
+    pub fn keep_all(&self, records: Vec<OwedRecord>) -> Vec<u64> {
+        let mut state = self.lock();
+        let ids = records
+            .into_iter()
+            .map(|record| {
+                let id = state.next_id;
+                state.next_id += 1;
+                state.entries.push(Entry { id, record });
+                id
+            })
+            .collect();
+        state.save();
+        ids
+    }
+
     /// Replaces a kept record, or removes it (`None`: the app has it), and
     /// writes the file.
     pub fn update(&self, id: u64, record: Option<OwedRecord>) {
@@ -1175,6 +1194,39 @@ mod tests {
         }
         assert!(store.save(&before).is_err());
         assert!(!blocked.path().join("state").join(OWED_STATE_TMP).exists());
+    }
+
+    /// Records that hold each other's meaning are written in one go: a stop
+    /// never leaves a delivery's outcome on disk without the pause that holds
+    /// its session back (review r-20261116-201403-765f49).
+    #[test]
+    fn records_kept_together_reach_the_file_together() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = OwedStore::new(dir.path().join("state"));
+        let book = OwedBook::with_store(store.clone());
+        assert!(book.load());
+        let outcome = OwedRecord::DeliveryOutcome {
+            request_id: "req".into(),
+            outcome: "unknown".into(),
+            reason: None,
+        };
+        let pause = OwedRecord::Pause {
+            card_id: "card".into(),
+            question_revision: 1,
+            request_id: "req".into(),
+            session: "session".into(),
+        };
+        let ids = book.keep_all(vec![outcome.clone(), pause.clone()]);
+        assert_eq!(ids.len(), 2);
+        assert_eq!(store.load().unwrap(), vec![outcome, pause]);
+        // The paths that keep such records together use the one write.
+        for (file, text) in [
+            ("delivery.rs", include_str!("delivery.rs")),
+            ("flow.rs", include_str!("flow.rs")),
+        ] {
+            let body = text.split("#[cfg(test)]").next().unwrap();
+            assert!(body.contains("book.keep_all("), "{file} keeps records one at a time");
+        }
     }
 
     /// A file the relay cannot read is an error, never "nothing owed".

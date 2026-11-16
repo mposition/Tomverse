@@ -939,30 +939,33 @@ where
     // settles.
     let result_digest = dm_result_digest(key, &outcome.result);
     let submission = submission_of(&outcome.result);
-    let result_id = book.keep(OwedRecord::Result {
+    // §5: a cleanup nobody confirmed latches the instance off. Until the app
+    // has the report it is owed, and nothing more is sent to the instance
+    // (`relay_candidate_holding`). §10's receipt: only the app's recorded
+    // answer is a record (stage S2-2b4); anything short of it is owed. The
+    // three are written in one go, so a stop never keeps one without the rest.
+    let mut records = vec![OwedRecord::Result {
         request_id: request_id.to_owned(),
         instance: instance.to_owned(),
         submission: submission.clone(),
         result_digest: result_digest.clone(),
         unknown_settled: false,
-    });
-    // §5: a cleanup nobody confirmed latches the instance off. Until the app
-    // has the report it is owed, and nothing more is sent to the instance
-    // (`relay_candidate_holding`).
-    let cleanup_id = outcome.cleanup_unknown.then(|| {
-        book.keep(OwedRecord::CleanupUnknown {
+    }];
+    if outcome.cleanup_unknown {
+        records.push(OwedRecord::CleanupUnknown {
             request_id: request_id.to_owned(),
             instance: instance.to_owned(),
-        })
-    });
-    // §10's receipt. Only the app's recorded answer is a record (stage
-    // S2-2b4); an outcome the ledger already holds is one. Anything short of
-    // it is owed.
-    let outcome_id = book.keep(OwedRecord::TransmitOutcome {
+        });
+    }
+    records.push(OwedRecord::TransmitOutcome {
         request_id: request_id.to_owned(),
         instance: instance.to_owned(),
         outcome: transmit_outcome(outcome.transmission).to_owned(),
     });
+    let ids = book.keep_all(records);
+    let result_id = ids[0];
+    let cleanup_id = outcome.cleanup_unknown.then(|| ids[1]);
+    let outcome_id = *ids.last().expect("the receipt is kept");
 
     // 7. The result first.
     let run = submit_result(app, book, result_id, submission, request_id, &result_digest).await;
@@ -996,8 +999,8 @@ where
     A: DmApp + ?Sized,
     L: DmLocal + ?Sized,
 {
-    // All three are kept, and the file written, before any is sent.
-    let ids: Vec<u64> = [
+    // All three are kept, and the file written once, before any is sent.
+    let ids = book.keep_all(vec![
         OwedRecord::TransmitOutcome {
             request_id: request_id.to_owned(),
             instance: instance.to_owned(),
@@ -1013,10 +1016,7 @@ where
         OwedRecord::Discard {
             request_id: request_id.to_owned(),
         },
-    ]
-    .into_iter()
-    .map(|record| book.keep(record))
-    .collect();
+    ]);
     for id in ids {
         book.settle_new(app, local, id).await;
     }
