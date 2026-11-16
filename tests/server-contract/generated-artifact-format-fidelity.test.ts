@@ -164,7 +164,8 @@ test("tool descriptions explicitly route plain txt/md to create_document", { tod
     modelId: "gpt-5-6-luna", traceId: "trace_1",
   });
   const { tools } = buildGeneratedArtifactToolConfig(collector);
-  assert.match(tools.create_text_file.description ?? "", /create_document/);
-  assert.match(tools.create_text_file.description ?? "", /\.txt/);
-  assert.match(tools.create_text_file.description ?? "", /\.md/);
+  const description = String(tools.create_text_file.description ?? "");
+  assert.match(description, /create_document/);
+  assert.match(description, /\.txt/);
+  assert.match(description, /\.md/);
 });
