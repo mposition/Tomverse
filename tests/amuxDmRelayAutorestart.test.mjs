@@ -164,13 +164,11 @@ const FORMER_CAUSES = [
   "assignment_outcome_unknown",
   "transmit_intent_answer_unreadable",
   "transmit_intent_outcome_unknown",
-  "cleanup_unknown_report_unconfirmed",
   "transmit_outcome_record_refused",
   "transmit_outcome_unknown",
   "result_unknown_record_refused",
   "result_unknown_outcome_unknown",
   "delivery_decision_outcome_unknown",
-  "delivery_unknown_pause_unconfirmed",
   "delivery_not_sent_record_refused",
   "delivery_not_sent_outcome_unknown",
   "delivery_card_record_failed",
@@ -184,6 +182,20 @@ for (const cause of FORMER_CAUSES) {
       assert.equal(result.status, 0, result.output);
       assert.deepEqual(result.restarts, [`restart --no-block ${RELAY}`]);
       assert.match(result.output, new RegExp(`halted with cause=${cause}; restarted$`, "m"));
+    }
+  });
+}
+
+// A duty the old process held in memory: the session still to be paused, the
+// instance whose cleanup is unknown. A restart would lose it.
+for (const cause of ["delivery_unknown_pause_unconfirmed", "cleanup_unknown",
+  "cleanup_unknown_report_unconfirmed"]) {
+  test(`a relay halted with ${cause} is left halted for Admin`, { skip: noBash }, () => {
+    for (const halt of [deliveryHalt(cause), questionHalt(cause)]) {
+      const result = run({ lines: [...BEFORE, halt, V22] });
+      assert.equal(result.status, 0, result.output);
+      assert.deepEqual(result.restarts, []);
+      assert.ok(result.output.includes(`halted with cause=${cause}, a duty the restarted relay cannot read back; left halted for Admin`), result.output);
     }
   });
 }

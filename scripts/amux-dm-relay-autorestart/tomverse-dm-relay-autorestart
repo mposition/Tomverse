@@ -1,6 +1,6 @@
 #!/bin/bash
-# Restarts the AMUX Decision Maker relay when it halted, whatever the cause,
-# and starts it when a reboot left it stopped.
+# Restarts the AMUX Decision Maker relay when it halted (but for the three
+# causes in hold_causes below), and starts it when a reboot left it stopped.
 #
 # docs/ops/amux/bridge-monitoring.md §6 is the runbook. Off until the operator
 # installs it (install.sh beside this file); a systemd timer then runs it every
@@ -53,12 +53,26 @@ log() { echo "tomverse-dm-relay-autorestart: $*"; }
 # As a relay built before 2026-11-16 printed it (dm_relay/io.rs).
 halt_line='^amux dm relay halt: ([a-z0-9_]+); .* until the bridge restarts\. Read the request in Admin first\.$'
 
-# Prints "restart <cause>" for a run that halted, "running" for one that did not.
+# The halts of a relay built before 2026-11-16 whose duty lived only in that
+# process: a session still to be paused after an unknown delivery, an
+# instance whose cleanup is unknown. The new relay keeps such duties in its
+# owed-record file, but it cannot read the old process's back, so a restart
+# would let the next answer reach that session or instance. These stay halted
+# for a person to settle in Admin; the new relay never prints a halt line, so
+# this only ever meets a run of the old binary.
+hold_causes=' delivery_unknown_pause_unconfirmed cleanup_unknown cleanup_unknown_report_unconfirmed '
+
+# Prints "restart <cause>" for a run that halted, "hold <cause>" for one whose
+# halt is one of hold_causes, "running" for one that did not halt.
 decide() {
   local lines=$1 line
   while IFS= read -r line; do
     if [[ "$line" =~ $halt_line ]]; then
-      echo "restart ${BASH_REMATCH[1]}"
+      if [[ "$hold_causes" == *" ${BASH_REMATCH[1]} "* ]]; then
+        echo "hold ${BASH_REMATCH[1]}"
+      else
+        echo "restart ${BASH_REMATCH[1]}"
+      fi
       return
     fi
   done <<<"$lines"
@@ -110,6 +124,10 @@ elif [[ "$state" == active && "$sub" == running ]]; then
     exit 0
   fi
   read -r verdict reason <<<"$(decide "$lines")"
+  if [[ "$verdict" == hold ]]; then
+    log "$unit halted with cause=$reason, a duty the restarted relay cannot read back; left halted for Admin"
+    exit 0
+  fi
   [[ "$verdict" == restart ]] || exit 0
   what=halted
   cause=$reason
