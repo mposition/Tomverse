@@ -84,7 +84,7 @@ function ownerAcceptAudit(db, taskId, attemptId, overrides = {}) {
 
 async function settledFor(tx, worker, taskId) {
   const { amuxV22RoutesWithSettledUsage } = await import("../../lib/amux/v22WorkerUsageGate.ts");
-  return (await amuxV22RoutesWithSettledUsage(tx, [{ workerName: worker }], null, taskId)).unsettled === false;
+  return (await amuxV22RoutesWithSettledUsage(tx, [{ workerName: worker }], null, taskId, false)).unsettled === false;
 }
 
 /** Fires the deferred guard now; returns its refusal, or null. */

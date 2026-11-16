@@ -117,11 +117,11 @@ export async function amuxV22WorkerUsageUnverified(tx: Prisma.TransactionClient,
  */
 export async function amuxV22RoutesWithSettledUsage<T extends { workerName: string }>(
   tx: Prisma.TransactionClient, routes: readonly T[], priorAttemptId: string | null,
-  taskId: string,
+  taskId: string, paidOnly = true,
 ): Promise<{ routes: T[]; unsettled: boolean }> {
   const unsettled = new Set<string>();
   for (const workerName of new Set(routes.map((route) => route.workerName))) {
-    if (await amuxV22WorkerUsageUnverified(tx, workerName, priorAttemptId, taskId)) {
+    if (await amuxV22WorkerUsageUnverified(tx, workerName, priorAttemptId, taskId, paidOnly)) {
       unsettled.add(workerName);
     }
   }

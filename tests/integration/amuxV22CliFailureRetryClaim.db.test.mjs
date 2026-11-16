@@ -119,18 +119,18 @@ test("an owner retry of a named Claude CLI failure reaches the claim; other Task
     assert.equal(amuxV22ReviewRetryHasVerifiedOutcome({
       sourceSystem: "admin-idea-v4", attempt }), true);
     // Before the owner decides, the failed run holds its worker for every Task.
-    assert.deepEqual(await amuxV22RoutesWithSettledUsage(tx, routes, null, taskId),
+    assert.deepEqual(await amuxV22RoutesWithSettledUsage(tx, routes, null, taskId, false),
       { routes: [], unsettled: true });
 
     // 2. The owner retries from review.
     await ownerRetries(db, taskId, priorAttemptId);
 
     // 3. Reassignment: the same worker may take the retried Task ...
-    assert.deepEqual(await amuxV22RoutesWithSettledUsage(tx, routes, null, taskId),
+    assert.deepEqual(await amuxV22RoutesWithSettledUsage(tx, routes, null, taskId, false),
       { routes, unsettled: false });
     // ... but not any other Task, and the receipt is still partial.
     assert.deepEqual(await amuxV22RoutesWithSettledUsage(tx, routes, null,
-      `other-${randomUUID()}`), { routes: [], unsettled: true });
+      `other-${randomUUID()}`, false), { routes: [], unsettled: true });
     const usage = await tx.$queryRaw`SELECT "completeness", "cliFailure"
       FROM "AmuxCliUsageEvent" WHERE "attemptId" = ${priorAttemptId}`;
     assert.deepEqual(usage, [{ completeness: "reported_partial", cliFailure: "turn_limit" }]);
@@ -151,7 +151,7 @@ test("a retry decision does not release a failure whose cause is unknown", {
     });
     await ownerRetries(db, seed.taskId, seed.priorAttemptId);
     assert.deepEqual(await amuxV22RoutesWithSettledUsage(tx, routes, null,
-      seed.taskId), { routes: [], unsettled: true });
+      seed.taskId, false), { routes: [], unsettled: true });
   });
 });
 
@@ -223,17 +223,17 @@ test("an owner retry of an expired attempt with a stored result reaches the clai
     assert.equal(amuxV22ReviewRetryHasVerifiedOutcome({ sourceSystem: "admin-idea-v4",
       attempt, storedResultAttemptId: await latestResultAttemptId(tx, taskId) }), true);
     // No decision yet: the worker is refused for every Task, this one included.
-    assert.deepEqual(await amuxV22RoutesWithSettledUsage(tx, routes, null, taskId),
+    assert.deepEqual(await amuxV22RoutesWithSettledUsage(tx, routes, null, taskId, false),
       { routes: [], unsettled: true });
 
     // 2. The owner retries from review.
     await ownerRetries(db, taskId, priorAttemptId, "outcome_unknown");
 
     // 3. Reassignment to the same worker for the retried Task only.
-    assert.deepEqual(await amuxV22RoutesWithSettledUsage(tx, routes, null, taskId),
+    assert.deepEqual(await amuxV22RoutesWithSettledUsage(tx, routes, null, taskId, false),
       { routes, unsettled: false });
     assert.deepEqual(await amuxV22RoutesWithSettledUsage(tx, routes, null,
-      `other-${randomUUID()}`), { routes: [], unsettled: true });
+      `other-${randomUUID()}`, false), { routes: [], unsettled: true });
     // Nothing was written for the attempt's usage.
     assert.deepEqual(await tx.$queryRaw`SELECT "id" FROM "AmuxCliUsageEvent"
       WHERE "attemptId" = ${priorAttemptId}`, []);
@@ -252,7 +252,7 @@ test("a retry decision bound to another attempt does not release an expired atte
     const otherAttemptId = await otherAttemptOnTask(db, seed, "1 minute");
     await ownerRetries(db, seed.taskId, otherAttemptId, "outcome_unknown");
     assert.deepEqual(await amuxV22RoutesWithSettledUsage(tx, routes, null,
-      seed.taskId), { routes: [], unsettled: true });
+      seed.taskId, false), { routes: [], unsettled: true });
   });
 });
 
@@ -268,15 +268,15 @@ test("an expired attempt whose Task's latest stored result is another attempt's 
     await ownerRetries(db, seed.taskId, seed.priorAttemptId, "outcome_unknown");
     // No result at all: an expired attempt is an unknown outcome.
     assert.deepEqual(await amuxV22RoutesWithSettledUsage(tx, routes, null,
-      seed.taskId), { routes: [], unsettled: true });
+      seed.taskId, false), { routes: [], unsettled: true });
     // A result stored for another attempt is not this attempt's evidence.
     await storeResult(db, seed, otherAttemptId);
     assert.deepEqual(await amuxV22RoutesWithSettledUsage(tx, routes, null,
-      seed.taskId), { routes: [], unsettled: true });
+      seed.taskId, false), { routes: [], unsettled: true });
     // Nor is an older result of its own when the latest one is another's.
     await storeResult(db, seed, seed.priorAttemptId, "1 minute");
     assert.equal(await latestResultAttemptId(tx, seed.taskId), otherAttemptId);
     assert.deepEqual(await amuxV22RoutesWithSettledUsage(tx, routes, null,
-      seed.taskId), { routes: [], unsettled: true });
+      seed.taskId, false), { routes: [], unsettled: true });
   });
 });
