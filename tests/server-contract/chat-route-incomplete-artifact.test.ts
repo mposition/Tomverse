@@ -424,7 +424,6 @@ const { ROUTER_VERSIONS } = require(resolve(ROOT, "lib/routerDecision.ts")) as {
 };
 
 let forcedAutoRoute: string | null = null;
-let autoSelectionCalls = 0;
 let forcedRouterOutput: Record<string, unknown> | null = null;
 let forcedImageIntent = false;
 let imageIntentCalls = 0;
@@ -530,7 +529,6 @@ mock.module(mod("lib/autoModelSelection.ts"), {
   namedExports: {
     ...realAutoSelection,
     selectAutoModel: (input: unknown) => {
-      autoSelectionCalls += 1;
       return forcedAutoRoute
         ? routedSelection(forcedAutoRoute)
         : realAutoSelection.selectAutoModel(input);
@@ -665,7 +663,6 @@ const ask = async (
   forcedImageIntent = imageIntent;
   imageIntentCalls = 0;
   routerDecisionKept = null;
-  autoSelectionCalls = 0;
   script = {
     begins: [],
     executes: [],
