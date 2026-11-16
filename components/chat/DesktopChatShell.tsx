@@ -9,6 +9,7 @@ import type { PendingSendEcho } from "@/components/chat/ChatMessageList";
 import type { VisibleStarterCard } from "@/lib/chatStarterAvailability";
 import type { ReviewWorkspaceControls, WorkspaceAppearanceControls } from "./useReviewWorkspace";
 import { ChatCommandBar, ReviewCommandBar, ReviewNavigation, ReviewStudioWelcome, ReviewUnsupportedProviders } from "./ReviewStudioChrome";
+import { useConversationDocumentTitle } from "./useConversationDocumentTitle";
 import { reviewFocusHint, reviewReorderHint, reviewWorkspaceCopy } from "@/lib/reviewWorkspaceCopy";
 import "./review-studio.css";
 import type { ConversationSurface } from "@/lib/continuationRoutes";
@@ -604,6 +605,8 @@ export function DesktopChatShell({
   // Identity of the conversation currently on screen, used to scope
   // per-conversation UI state (the active tab below).
   const conversationStateKey = currentChatId || "new";
+  const conversationTitle = conversations.find((conversation) => conversation.id === currentChatId)?.title?.trim() || null;
+  useConversationDocumentTitle(conversationTitle);
   const [studioPanelOrder, setStudioPanelOrder] = useState<{ chatKey: string; slots: number[] } | null>(null);
   // Keep each panel's original slot key so moving it preserves its live ChatApp.
   const panelEntries = useMemo(() => {
@@ -1035,9 +1038,9 @@ export function DesktopChatShell({
         onReview={() => onProductSwitch?.("review") ?? false} /> : sidebarElement}
 
       <section className="review-workspace-section flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        {review && <ReviewCommandBar review={review} showModeSwitcher={false} locked={productSwitchDisabled || isAnyModelResponding}
+        {review && <ReviewCommandBar review={review} showModeSwitcher={false} conversationTitle={conversationTitle} locked={productSwitchDisabled || isAnyModelResponding}
           view={studioView} setView={studio ? setStudioView : undefined} />}
-        {chatWorkspace && <ChatCommandBar workspace={chatWorkspace} locked={productSwitchDisabled || isAnyModelResponding || durableDraftLocked} />}
+        {chatWorkspace && <ChatCommandBar workspace={chatWorkspace} conversationTitle={conversationTitle} locked={productSwitchDisabled || isAnyModelResponding || durableDraftLocked} />}
         {continuationNotice}
         <div className={studio ? "review-studio-body" : "contents"}>
 
