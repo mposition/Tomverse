@@ -174,13 +174,13 @@ test("anything the stores would not accept makes the catalog absent, never short
   assert.equal(await readAmuxDerivedWorkerCatalog(fakeClient(undefined)), null);
 });
 
-test("an open stop latch takes the worker and its v22 profile out of both lists", async () => {
+test("a recorded stop latch no longer takes the worker out of either list (2026-11-16)", async () => {
   const catalogs = await readAmuxAssignmentCatalogs(
     fakeClient(statement(REGISTRY_ROWS, [{ workerName: "claude-impl", eventKind: "opened" }])),
   );
-  assert.equal(catalogs.workers.some((worker) => worker.worker_name === "claude-impl"), false);
-  assert.equal(catalogs.v22.some((worker) => worker.worker_name === "claude-impl"), false);
-  assert.equal(catalogs.workers.length, 7);
+  assert.equal(catalogs.workers.some((worker) => worker.worker_name === "claude-impl"), true);
+  assert.equal(catalogs.v22.some((worker) => worker.worker_name === "claude-impl"), true);
+  assert.equal(catalogs.workers.length, 8);
 });
 
 test("the configured shape keeps the conservative runtime defaults", () => {

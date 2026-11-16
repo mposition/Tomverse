@@ -22,8 +22,6 @@ import { detectSecrets } from "../engineeringAgentSecretPatterns.ts";
  * relay stay as they were. An older launcher sends plain lines, which this
  * module accepts as a note.
  */
-export const AMUX_V52_FINDINGS_SUMMARY_MAX_CHARS = 2_000;
-export const AMUX_V52_FINDINGS_SUMMARY_MAX_LINES = 12;
 /** What the record route accepts before normalising; anything longer is refused. */
 export const AMUX_V52_FINDINGS_SUMMARY_INPUT_MAX_CHARS = 4_000_000;
 
@@ -64,7 +62,6 @@ const FILE_MAX = 1_000;
 const NOTE_MAX_CHARS = 200_000;
 const NOTE_MAX_LINES = 5_000;
 const LINE_MAX_CHARS = 200_000;
-const LEGACY_LINE_MAX_CHARS = 320;
 const SECRET_LINE = "- [redacted: looked like a credential]";
 const SECRET_TEXT = "[redacted: looked like a credential]";
 const VENDOR = /^[a-z][a-z0-9-]{0,63}$/;
@@ -92,11 +89,11 @@ function boundedLines(value: string, maxChars: number, maxLines: number, lineMax
   return lines.length ? lines.join("\n") : null;
 }
 
-/** The legacy plain-line summary (owner decision 2026-11-14), still read for records that have one. */
+/** The legacy plain-line summary (owner decision 2026-11-14), still read for records that have one.
+ * It was held to 2,000 characters and 12 lines until 2026-11-16; it now has the notes' bounds. */
 export function normalizeAmuxV52FindingsSummary(value: unknown): string | null {
   if (typeof value !== "string") return null;
-  return boundedLines(value, AMUX_V52_FINDINGS_SUMMARY_MAX_CHARS,
-    AMUX_V52_FINDINGS_SUMMARY_MAX_LINES, LEGACY_LINE_MAX_CHARS, SECRET_LINE);
+  return boundedLines(value, NOTE_MAX_CHARS, NOTE_MAX_LINES, LINE_MAX_CHARS, SECRET_LINE);
 }
 
 /** One line of one field: no control characters or breaks, secrets and links hidden, bounded. */

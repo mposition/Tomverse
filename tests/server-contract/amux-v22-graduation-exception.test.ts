@@ -75,21 +75,21 @@ test("bootstrap requires explicit owner intent, records it, and ticks enforce re
     process.env.TOMVERSE_AMUX_BOARD_AUTO_PROMOTE = "disabled";
     process.env.TOMVERSE_AMUX_V22_AUTO_PROMOTE = "enabled";
     const service = await load();
-    await assert.rejects(service.configureV22AutoPromotion(input), { code: "graduation_unmet" });
-    assert.equal(world.writes, 0);
+    // No count of decisions gates activation any more (2026-11-16), so it
+    // needs no exception: the exception only still records its own audit.
     await service.configureV22AutoPromotion({ ...input, graduationExceptionId: exceptionId });
     assert.equal(world.writes, 1);
     assert.equal((world.audit?.metadata as Record<string, unknown>).graduationExceptionId, exceptionId);
     const status = await service.readV22AutoPromotionControl();
-    assert.equal(status.graduation.ok, false);
+    assert.equal(status.graduation.ok, true);
     assert.equal(status.graduation.count, 0);
     assert.equal(status.graduationExceptionApplied, true);
     assert.equal((await service.tickV22AutoPromotion()).reason, "no_ready_candidate");
     assert.equal(world.readyChecks, 1);
 
     delete process.env[flag];
-    assert.equal((await service.tickV22AutoPromotion()).reason, "graduation_unmet");
-    assert.equal(world.readyChecks, 1);
+    assert.equal((await service.tickV22AutoPromotion()).reason, "no_ready_candidate");
+    assert.equal(world.readyChecks, 2);
     process.env[flag] = exceptionId;
     world.audit!.actorUserId = "another-owner";
     assert.equal((await service.tickV22AutoPromotion()).reason, "v22_not_activated");
@@ -97,7 +97,7 @@ test("bootstrap requires explicit owner intent, records it, and ticks enforce re
     world.audit!.actorUserId = "owner-1";
     world.halted = true;
     assert.equal((await service.tickV22AutoPromotion()).reason, "auto_halted");
-    assert.equal(world.readyChecks, 1);
+    assert.equal(world.readyChecks, 2);
     await service.configureV22AutoPromotion({ ...input, active: false,
       expectedAuditLogId: world.control!.authorizationAuditLogId as string });
     assert.equal(world.control!.active, false);

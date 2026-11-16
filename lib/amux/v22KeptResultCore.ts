@@ -32,9 +32,6 @@
 import { AMUX_V22_ENGINEERING_PUBLICATION_ENV, amuxV22EngineeringPublicationEnabled } from "./v22TaskExecutionCore.ts";
 import { ENGINEERING_AGENT_LEGACY_HALTS_ENV, engineeringAgentLegacyHalts } from "../engineeringAgentCore.ts";
 
-/** Read newest first; more attempts than this are never a card's review (the budget is 5). */
-export const AMUX_V22_REVIEW_ATTEMPT_SCAN = 20;
-
 export type AmuxV22ReviewAttemptRow = {
   id: string;
   endedAt: Date | string | null;

@@ -121,10 +121,9 @@ test("with no capability recorded only the runner is derived", () => {
   assert.deepEqual(derived.v22, []);
 });
 
-test("an open stop latch, a desired state other than active, or a ceiling that leaves nothing removes the worker", () => {
+test("a desired state other than active, or a ceiling that leaves nothing removes the worker; a recorded latch does not", () => {
   const latched = derive({ latches: new Map([["claude-impl", "opened"]]) });
-  assert.equal(names(latched.legacy).includes("claude-impl"), false);
-  assert.equal(names(latched.v22).includes("claude-impl"), false);
+  assert.deepEqual(latched, derive());
   const released = derive({ latches: new Map([["claude-impl", "released"]]) });
   assert.deepEqual(released, derive());
   const paused = REGISTRY.map((row) => (row.workerName === "codex-impl" ? { ...row, desiredState: "paused" } : row));

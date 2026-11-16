@@ -102,7 +102,8 @@ export function amuxCardWaitFromState(input: { sourceSystem: string | null;
 
 /** Waits that clear by themselves and are never raised: the workers are all
  * busy, another pass just took the card, or a dependency is still running. */
-const ORDINARY = new Set(["global_capacity_full", "conflict", "not_unassigned_todo"]);
+const ORDINARY = new Set(["global_capacity_full", "conflict", "not_unassigned_todo",
+  "infra_retry_backoff"]);
 const ORDINARY_READINESS = new Set(["dependency_incomplete", "already_assigned", "not_backlog"]);
 
 export function amuxCardWaitOrdinary(code: string, detail: AmuxCardWaitDetail): boolean {

@@ -344,11 +344,15 @@ test("a v22 result in review with no pull request may be run again", () => {
     { ...prlessImplement.attempt, v22AssignmentId: null },
     { ...prlessImplement.attempt, outcome: "expired" },
     { ...prlessImplement.attempt, toStatus: "blocked" },
-    // Its usage was never reported (AMUX-AGENTOPS-001): block only.
-    { ...prlessImplement.attempt, reason: "usage_outcome_unknown" },
   ]) {
     assert.equal(amuxV22PrlessReviewRetryAllowed({ ...prlessImplement, attempt }), false);
   }
+  // Its usage was never reported (AMUX-AGENTOPS-001): the retry is allowed
+  // (2026-11-16; an unknown subscription run holds no worker), but the "no
+  // change needed" approval still needs a known run.
+  const unknownUsage = { ...prlessImplement, attempt: { ...prlessImplement.attempt, reason: "usage_outcome_unknown" } };
+  assert.equal(amuxV22PrlessReviewRetryAllowed(unknownUsage), true);
+  assert.equal(amuxV22NoChangeCompletionAllowed({ ...unknownUsage, taskRole: "implement", patchStored: false }), false);
 });
 
 test("publication that has opened or may still open the PR holds the retry", () => {

@@ -203,7 +203,7 @@ What a worker gets:
   implement), prior conclusions and review findings are files under
   `.amux/context/` in the checkout, kept out of Git by `.git/info/exclude`.
 - No time limit: a run stops only at the operator's stop, or when it shows no
-  sign of life for 30 minutes: no new output, no checkout change and no CPU
+  sign of life for 3 hours: no new output, no checkout change and no CPU
   time used by the CLI's process tree (children and its process group
   included, read from `/proc/<pid>/stat`). A quiet test or build that uses CPU
   is never stopped; where `/proc` cannot be read, the first two signals

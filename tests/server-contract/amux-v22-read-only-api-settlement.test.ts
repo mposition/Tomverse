@@ -988,11 +988,10 @@ test("with both switches disabled the same failure stays unknown", () =>
     }
   })));
 
-test("the twelfth platform failure blocks the card but is still counted as one", () =>
+test("the twelfth platform failure goes back to todo, counted as one, with no bound (2026-11-16)", () =>
   withInfraRouting(undefined, async () => {
-    // Review r-20261115-120153-60193b: the bound is named by the escalation;
-    // the attempt keeps its own reason so the budget and the worker's
-    // quarantine still count it.
+    // The attempt keeps its own reason so the wait and the worker's
+    // quarantine still count it; no bound hands the card to a person.
     world = makeWorld("failed");
     world.taskId = "00000000-0000-4000-8000-000000000099";
     world.recoveryApprovalId = null;
@@ -1002,9 +1001,9 @@ test("the twelfth platform failure blocks the card but is still counted as one",
       attemptId, worker, instanceId, generation: 1, taskRevision: 5,
       outcome: "blocked", invocationIds: [] });
     assert.equal(result.settled, true);
-    assert.equal(world.taskUpdateData?.status, "blocked");
+    assert.equal(world.taskUpdateData?.status, "todo");
     assert.equal(world.attemptUpdateData?.reason, "infra_no_result");
-    assert.equal(world.escalations.at(-1)?.reason, "infra_attempts_exhausted");
+    assert.equal(world.escalations.length, 0);
   }));
 
 test("after a person's retry the platform failures before it do not count toward the bound", () =>

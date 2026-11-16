@@ -42,7 +42,7 @@ import { loadEngineeringAgentV22SettlementPatch } from "@/lib/engineeringAgentV2
  * the Publisher publishes the product as it does every other.
  */
 
-export const AMUX_V22_KEPT_RESULT_ROUND_LIMIT = 3;
+export const AMUX_V22_KEPT_RESULT_ROUND_LIMIT = 10;
 export const AMUX_V22_KEPT_RESULT_PUBLISHED_ACTION = "amux.v22.kept_result.published";
 const RUN_LEASE_MS = 10 * 60 * 1000;
 /**
@@ -53,13 +53,10 @@ const RUN_LEASE_MS = 10 * 60 * 1000;
  * It is read again after it; nothing about it is decided by the wait.
  */
 export const AMUX_V22_KEPT_RESULT_DEFER_MS = 10 * 60 * 1000;
-/** The most Tasks one process keeps deferred; past it the oldest deferral is dropped. */
-const DEFERRED_MAX = 500;
 const deferredUntil = new Map<string, number>();
 const defer = (taskId: string, now: number) => {
   deferredUntil.delete(taskId);
   deferredUntil.set(taskId, now + AMUX_V22_KEPT_RESULT_DEFER_MS);
-  if (deferredUntil.size > DEFERRED_MAX) deferredUntil.delete(deferredUntil.keys().next().value!);
 };
 
 export type AmuxV22KeptResultOutcome = {
@@ -174,7 +171,7 @@ export async function publishAmuxV22KeptResults(
   let read: AmuxV22KeptResultCandidate[];
   try {
     read = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.executionRecoveryRead,
-      (tx) => readAmuxV22KeptResultCandidates(tx, Math.min(Math.max(limit, 1), 10), null, [...deferredUntil.keys()]));
+      (tx) => readAmuxV22KeptResultCandidates(tx, Math.max(limit, 1), null, [...deferredUntil.keys()]));
   } catch (error) {
     // The round that carries it goes on; the next one reads again.
     console.warn(JSON.stringify({ subsystem: "amux", event: "v22_kept_result_read_failed",

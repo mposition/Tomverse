@@ -15,8 +15,7 @@ import { AMUX_INCIDENT_SETTING_KEY, parseAmuxIncidentSetting } from
 import { readAmuxAssignmentCatalogs } from "./workerAssignmentCatalog.ts";
 import { amuxDependencyUnpublishedPatchSql } from "./v4DependencyPublication.ts";
 import { AUTO_PROMOTION_APPLY_ENV, AUTO_PROMOTION_CODE_LATCH,
-  AUTO_UNKNOWN_BURST_COUNT, AUTO_UNKNOWN_BURST_MS,
-  autoCostAccepted, autoGraduationAccepted, autoUnknownEvents,
+  autoCostAccepted, autoGraduationAccepted,
   autoPromotionApplyPermitted } from
   "./autoPromotionCore.ts";
 import { OWNER_TRANSACTION_LIMITS, TICK_TRANSACTION_LIMITS,
@@ -691,40 +690,8 @@ async function readBackLostPromotion(receiptId: string, taskId: string,
         workItemId: taskId, receiptFound: receipt !== null,
         authorizationAuditLogId: auditId, recordedAt: now } });
       recordReceipt("v22_promotion_unknown", receiptId, 1);
-      const since = new Date(now.getTime() - AUTO_UNKNOWN_BURST_MS);
-      const [v22Unknowns, oldUnknowns, oldConsumptions, openHalt] = await Promise.all([
-        tx.amuxV22PromotionUnknown.count({ where: {
-          recordedAt: { gte: since, lte: now },
-        } }),
-        tx.amuxRecommendationAutoUnknown.findMany({
-          where: { recordedAt: { gte: since, lte: now } },
-          select: { id: true, recordedAt: true },
-        }),
-        tx.amuxRecommendationAutoConsumption.findMany({
-          where: { outcomeUnknownAt: { gte: since, lte: now } },
-          select: { id: true, outcomeUnknownAt: true },
-        }),
-        tx.amuxRecommendationAutoHalt.findFirst({
-          where: { clearedAt: null }, select: { id: true },
-        }),
-      ]);
-      if (v22Unknowns + autoUnknownEvents({ unknowns: oldUnknowns,
-        consumptions: oldConsumptions }).length >= AUTO_UNKNOWN_BURST_COUNT &&
-          !openHalt) {
-        const haltId = randomUUID();
-        const haltAuditId = await writeV22AutoPromotionAudit(tx, {
-          action: "amux.auto_promotion.halted",
-          targetType: "AmuxRecommendationAutoHalt", targetId: haltId,
-          summary: "Halted AMUX promotion after two unknown outcomes.",
-          metadata: { violationCode: null },
-        });
-        await tx.amuxRecommendationAutoHalt.create({ data: { id: haltId,
-          reason: "outcome_unknown_burst",
-          violationCode: null,
-          actorUserId: "system:amux-v22-auto-admit",
-          authorizationAuditLogId: haltAuditId, openedAt: now } });
-        recordReceipt("v22_promotion_halt", haltId, 1);
-      }
+      // Unknown outcomes park their own card and never halt promotion (owner
+      // decision 2026-11-16: two in fifteen minutes used to).
       return { promoted: false as const, reason: "outcome_unknown",
         receiptId, taskId };
     });
@@ -828,30 +795,19 @@ export async function requestV22ExecutionMove(input: OwnerMoveCommand) {
 }
 
 /**
- * Clears an open promotion halt that only unknown outcomes opened, once every
- * unknown in its window was read back as never committed (owner direction
- * 2026-11-15: "다시 읽어 확인되면 자동 해제"). A halt for a critical violation,
- * or one with an unknown whose receipt was found, or one of the older
- * recommendation path's unknowns, stays for the owner. One system audit.
+ * Clears an open promotion halt that unknown outcomes opened. Unknown outcomes
+ * no longer halt promotion (owner decision 2026-11-16), so a halt of that
+ * reason, whether opened by this path or the older recommendation path, is
+ * cleared by the system, once, with one system audit. A halt for a critical
+ * violation stays for the owner.
  */
 async function clearReadBackPromotionHalt() {
-  if (!amuxInfraFailureRoutingEnabled()) return;
   try {
     await withAutoTransaction(null, TICK_TRANSACTION_LIMITS, async (tx, now) => {
       const halt = await tx.amuxRecommendationAutoHalt.findFirst({
         where: { clearedAt: null, reason: "outcome_unknown_burst" },
-        orderBy: { openedAt: "desc" }, select: { id: true, openedAt: true } });
+        orderBy: { openedAt: "desc" }, select: { id: true } });
       if (!halt) return;
-      const since = new Date(halt.openedAt.getTime() - AUTO_UNKNOWN_BURST_MS);
-      const [found, oldUnknowns, oldConsumptions] = await Promise.all([
-        tx.amuxV22PromotionUnknown.count({ where: { receiptFound: true,
-          recordedAt: { gte: since, lte: halt.openedAt } } }),
-        tx.amuxRecommendationAutoUnknown.count({ where: {
-          recordedAt: { gte: since, lte: halt.openedAt } } }),
-        tx.amuxRecommendationAutoConsumption.count({ where: {
-          outcomeUnknownAt: { gte: since, lte: halt.openedAt } } }),
-      ]);
-      if (found + oldUnknowns + oldConsumptions > 0) return;
       await takeAuditChainLock(tx);
       const cleared = await tx.amuxRecommendationAutoHalt.updateMany({
         where: { id: halt.id, clearedAt: null }, data: { clearedAt: now } });
@@ -859,7 +815,7 @@ async function clearReadBackPromotionHalt() {
       await writeV22AutoPromotionAudit(tx, {
         action: "amux.auto_promotion.resumed_by_readback",
         targetType: "AmuxRecommendationAutoHalt", targetId: halt.id,
-        summary: "Cleared an AMUX promotion halt whose unknown outcomes were read back as never committed.",
+        summary: "Cleared an AMUX promotion halt that unknown outcomes had opened.",
         metadata: { policyVersion: AMUX_V22_AUTO_PROMOTION_POLICY_VERSION },
       });
     });

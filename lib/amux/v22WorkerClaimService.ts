@@ -38,6 +38,7 @@ import { amuxV22SafeStopFencedWorkers } from "./v22LegacySafeStopFence.ts";
 import { amuxWorkerRuntimeUsesReadOnlyApi } from "./workerRuntime.ts";
 import { amuxV22RoutesWithSettledUsage } from "./v22WorkerUsageGate.ts";
 import { amuxApprovedCeilingOverrun, decideAmuxAttemptBudget } from "./executionBudgetCore.ts";
+import { amuxInfraRetryDelayMs } from "./infraFailureCore.ts";
 import { readAmuxAttemptBudgetFacts, recentAmuxInfraFailureWorkers } from "./infraFailureStore.ts";
 import { type AmuxWorkerCircuit, amuxWorkerCircuitAdmits } from "./workerCircuitCore.ts";
 import { readAmuxWorkerCircuits, reportOpenAmuxWorkerCircuits } from "./workerHealthStore.ts";
@@ -192,12 +193,20 @@ async function claimCandidate(taskId: string, assignmentId: string,
       const prior = await readAmuxAttemptBudgetFacts(tx, taskId);
       const priorReserved = prior.reservedMicrousd;
       const attemptBudget = decideAmuxAttemptBudget({ historical_rows: prior.historicalRows,
-        greatest_attempt_number: prior.greatestAttemptNumber, infra_rows: prior.infraRows,
-        infra_window_rows: prior.infraWindowRows });
+        greatest_attempt_number: prior.greatestAttemptNumber, infra_rows: prior.infraRows });
       if (!attemptBudget.allowed) {
         throw new AmuxClaimSkipError("attempt_budget_exhausted", {
           limit: attemptBudget.exhausted_limit, attemptsUsed: attemptBudget.attempts_used,
           maxAttempts: attemptBudget.max_attempts });
+      }
+      // A card whose newest run was a platform failure waits before a worker
+      // takes it again (infraFailureCore.ts amuxInfraRetryDelayMs); it is never
+      // parked for a person.
+      const infraWaitMs = amuxInfraRetryDelayMs(prior.infraWindowRows);
+      if (infraWaitMs > 0 && prior.lastEndedIsInfra && prior.lastEndedAt &&
+          now.getTime() - prior.lastEndedAt.getTime() < infraWaitMs) {
+        throw new AmuxClaimSkipError("infra_retry_backoff", {
+          attemptsUsed: prior.infraWindowRows });
       }
       const lane = await currentLane(tx, taskId);
       // Orchestration policy version 35, section 3: the variables while R2c is

@@ -42,8 +42,10 @@ export function amuxV22LocalCliFlowEnabled(
 
 /** No sign of life for this long reads as a hung run: no output, no checkout
  * change and no CPU time in the CLI's process tree (where /proc can be read;
- * elsewhere the first two signals decide). There is no other time limit. */
-export const AMUX_V22_RUN_STALL_MS = 30 * 60_000;
+ * elsewhere the first two signals decide). There is no other time limit. The
+ * window is long enough for a build, a download or a model call that is only
+ * waiting; it is a hang guard, not a work limit. */
+export const AMUX_V22_RUN_STALL_MS = 3 * 60 * 60_000;
 export const AMUX_V22_RUN_PROGRESS_POLL_MS = 60_000;
 
 /** Why a run the flow stopped ended; the checkout and output are kept. */

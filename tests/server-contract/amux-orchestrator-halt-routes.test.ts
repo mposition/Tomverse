@@ -208,7 +208,7 @@ test("the halt state reports open halts, undecided and human-confirm writes, and
     "?halt_key=x",
     `?halt_key=${REQUEST}&halt_key=${REQUEST}`,
     `?other=${REQUEST}`,
-    `?${Array.from({ length: 17 }, (_, index) => `halt_key=${REQUEST.slice(0, -2)}${String(index).padStart(2, "0")}`).join("&")}`,
+    `?${Array.from({ length: 65 }, (_, index) => `halt_key=${REQUEST.slice(0, -2)}${String(index).padStart(2, "0")}`).join("&")}`,
   ]) {
     reset();
     const refused = await halt.GET(

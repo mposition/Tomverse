@@ -31,7 +31,9 @@ const SHA = /^[0-9a-f]{40}$/;
 const JOB_ID = /^r-[0-9]{8}-[0-9]{6}-[0-9a-f]{6}$/;
 const VENDOR = /^[a-z][a-z0-9-]{0,63}$/;
 
-/** A request failure has no reliable job id and must be blocked, never resent. */
+/** An accept or reject names its job; an unknown verdict may have none (the
+ * launcher sends a request that returned no job again, see
+ * scripts/amux-v52-review-runner.mjs). */
 export function validAmuxV52ReviewEvidence(value: AmuxV52ReviewEvidence) {
   if (!SHA.test(value.baseSha) || !SHA.test(value.commitSha) ||
       value.baseSha === value.commitSha ||
