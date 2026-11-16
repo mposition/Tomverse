@@ -387,6 +387,7 @@ export const ko = {
         responseFailed: "요청이 실패했습니다.",
         traceId: "추적 ID",
         showDiagnostics: "진단 정보 보기",
+        errorDiagnostics: "진단 정보",
         retry: "다시 시도",
         reduceModelCount: "모델 수 줄이기",
         chooseAnotherModel: "다른 모델 선택",

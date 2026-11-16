@@ -11,7 +11,10 @@ export async function POST(request: Request) {
     const body = await readLimitedJson(request, 4_096, clientLatencyBodySchema);
     const proof = verifyResponseLatencyToken(body.token);
     if (!proof) return new Response(null, { status: 403 });
-    await consumeApiRateLimit(request, proof.id, "response-latency", { minute: 6, day: 12 });
+    // Keyed on the signed sample, not the caller: a shared per-IP leg dropped
+    // every client sample after a few dozen turns from one address/NAT, so
+    // server presearch attempts lost their browser pair. Replays are no-ops.
+    await consumeApiRateLimit(request, proof.id, "response-latency", { minute: 6, day: 12 }, { skipIpBucket: true });
     await recordResponseLatency(`${proof.id}:client`, {
       product: proof.product, mode: proof.mode, modelId: null, provider: null,
       source: "client", outcome: body.outcome,

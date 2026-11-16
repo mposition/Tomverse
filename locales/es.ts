@@ -406,6 +406,7 @@ export const es = {
         responseFailed: "La solicitud falló.",
         traceId: "ID de seguimiento",
         showDiagnostics: "Ver información de diagnóstico",
+        errorDiagnostics: "Detalles de diagnóstico",
         retry: "Reintentar",
         reduceModelCount: "Reducir el número de modelos",
         chooseAnotherModel: "Elegir otro modelo",

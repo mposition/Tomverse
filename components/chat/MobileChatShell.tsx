@@ -7,6 +7,7 @@ import type { ChatPanelLocationIntent, RouterLocationTurn } from "@/lib/chatLoca
 import type { PendingSendEcho } from "@/components/chat/ChatMessageList";
 import type { ReviewWorkspaceControls, WorkspaceAppearanceControls } from "./useReviewWorkspace";
 import { ChatCommandBar, ReviewCommandBar } from "./ReviewStudioChrome";
+import { useConversationDocumentTitle } from "./useConversationDocumentTitle";
 import "./review-studio.css";
 import type { ConversationSurface } from "@/lib/continuationRoutes";
 import {
@@ -1010,6 +1011,7 @@ export function MobileChatShell({
   const currentConversation = conversations.find(
     (conversation) => conversation.id === currentChatId
   );
+  useConversationDocumentTitle(currentConversation?.title);
   // The answer canvas, handed to the composer as a drop target. State rather
   // than a ref so the composer re-registers its listeners when the section
   // mounts, and loses them when an image conversation replaces it
@@ -2104,8 +2106,8 @@ export function MobileChatShell({
                     disabled={productSwitchDisabled || isAnyModelResponding || durableDraftLocked}
                     onProductSwitch={onProductSwitch}
                   />
-                  {review && <ReviewCommandBar review={review} locked={productSwitchDisabled || isAnyModelResponding || durableDraftLocked} />}
-                  {chatWorkspace && <ChatCommandBar workspace={chatWorkspace} locked={productSwitchDisabled || isAnyModelResponding || durableDraftLocked} />}
+                  {review && <ReviewCommandBar review={review} conversationTitle={currentConversation?.title} locked={productSwitchDisabled || isAnyModelResponding || durableDraftLocked} />}
+                  {chatWorkspace && <ChatCommandBar workspace={chatWorkspace} conversationTitle={currentConversation?.title} locked={productSwitchDisabled || isAnyModelResponding || durableDraftLocked} />}
                 </>
               ) : undefined}
             />

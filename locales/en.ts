@@ -388,6 +388,7 @@ export const en = {
         responseFailed: "The request failed.",
         traceId: "Trace ID",
         showDiagnostics: "Show diagnostic info",
+        errorDiagnostics: "Diagnostic details",
         retry: "Retry",
         reduceModelCount: "Reduce the number of models",
         chooseAnotherModel: "Choose another model",

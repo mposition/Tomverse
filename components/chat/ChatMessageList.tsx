@@ -1761,25 +1761,6 @@ export function ChatMessageList({
                                 {t("chat.retry")}
                               </button>
                             )}
-                          {/*
-                            Chat (the single transcript, which restores the
-                            question instead of resending it) opens its model
-                            picker here, so the "try another model" hint below
-                            is an action rather than only advice. Nothing is
-                            sent: the next turn stays the user's submission.
-                          */}
-                          {(errorCategory === "generic" || errorCategory === "attachment") &&
-                            !onRetryLast && onRestoreQuestion && onRequestCloseModel && (
-                              <button
-                                type="button"
-                                data-testid="chat-error-choose-model"
-                                onClick={onRequestCloseModel}
-                                className={secondaryButtonClass}
-                              >
-                                <RotateCcw className="h-3.5 w-3.5" />
-                                {t("chat.chooseAnotherModel")}
-                              </button>
-                            )}
                           {errorCategory === "concurrency" &&
                             msg.id === concurrencyRetryMessageId &&
                             onRetryConcurrency && (
@@ -1848,6 +1829,10 @@ export function ChatMessageList({
                             triggerTestId="report-error-button"
                           />
                           )}
+                          {/*
+                            Chat opens its model picker here, once per card;
+                            nothing is sent, the next turn stays the user's.
+                          */}
                           {(errorCategory === "generic" || errorCategory === "attachment") &&
                             (onChooseAnotherModel ? (
                               <button
@@ -1885,7 +1870,16 @@ export function ChatMessageList({
                           </p>
                         )}
                         {errorAuxiliaryLines.length > 0 && (
-                          <div data-testid="chat-error-auxiliary-info" className="mt-2 space-y-0.5">
+                          // The trace ID already travels with "Report error"
+                          // (msg.errorReport), so it stays folded away until
+                          // someone asks for the diagnostic details.
+                          <details data-testid="chat-error-auxiliary-info" className="mt-2 space-y-0.5">
+                            <summary
+                              data-testid="chat-error-auxiliary-toggle"
+                              className="cursor-pointer text-[11px] leading-4 text-zinc-600 dark:text-zinc-400"
+                            >
+                              {t("chat.errorDiagnostics")}
+                            </summary>
                             {errorDetailLines.map((line, lineIndex) => (
                               <p
                                 key={lineIndex}
@@ -1902,24 +1896,15 @@ export function ChatMessageList({
                                 {line}
                               </p>
                             ))}
-                            {/* The error report already attaches the trace ID;
-                                the raw UUID stays one click away for support. */}
-                            {errorTraceLines.length > 0 && (
-                              <details data-testid="chat-error-diagnostics">
-                                <summary className="cursor-pointer text-[11px] leading-4 text-zinc-600 dark:text-zinc-400">
-                                  {t("chat.showDiagnostics")}
-                                </summary>
-                                {errorTraceLines.map((line, lineIndex) => (
-                                  <p
-                                    key={lineIndex}
-                                    className="select-all break-all text-[11px] leading-4 text-zinc-600 dark:text-zinc-400"
-                                  >
-                                    {line}
-                                  </p>
-                                ))}
-                              </details>
-                            )}
-                          </div>
+                            {errorTraceLines.map((line, lineIndex) => (
+                              <p
+                                key={`trace-${lineIndex}`}
+                                className="select-all break-all text-[11px] leading-4 text-zinc-600 dark:text-zinc-400"
+                              >
+                                {line}
+                              </p>
+                            ))}
+                          </details>
                         )}
                       </div>
                     );

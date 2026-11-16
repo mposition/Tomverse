@@ -21,7 +21,7 @@ test("only providers with an image adapter can be added at runtime", () => {
 });
 
 test("qwen has an image adapter, so a discovered Qwen image model gets a catalogue draft", () => {
-  assert.deepEqual([...RUNTIME_IMAGE_PROVIDERS], ["openai", "google", "xai", "fal", "qwen"]);
+  assert.deepEqual([...RUNTIME_IMAGE_PROVIDERS], ["openai", "google", "xai", "fal", "qwen", "bfl"]);
   assert.equal(isRuntimeImageProvider("qwen"), true);
   const parsed = imageFullProfileSchema.safeParse(runtimeImageProfileTemplate("qwen", "qwen-image-2.0"));
   assert.equal(parsed.success, true);
