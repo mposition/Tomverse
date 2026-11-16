@@ -418,6 +418,18 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // tables, no commit-deadline marker, classifier or deferred trigger changes.
   "20261116011100_amux_v22_task_result_report_size",
   "20261116011200_amux_v22_owner_answer_size",
+  // Owner decision 2026-11-16: card execution report, detail and scope bounds
+  // go to 1 MiB, and the legacy review findings summary loses its 2,000
+  // character bound; CHECK-only changes, no commit-deadline marker,
+  // classifier or deferred trigger changes.
+  "20261116130000_amux_card_exec_report_sizes",
+  "20261116130100_amux_v52_review_findings_summary_unbounded",
+  // Owner decision 2026-11-16: a card's attempt number has no bound of ours;
+  // two guard bodies and one CHECK, no commit-deadline marker, classifier or
+  // deferred trigger changes.
+  "20261116130200_amux_v22_attempt_number_unbounded",
+  "20261116130300_amux_v22_recovery_attempt_unbounded",
+  "20261116130400_amux_v22_recovery_approval_attempt_unbounded",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {
