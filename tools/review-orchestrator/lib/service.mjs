@@ -428,8 +428,14 @@ export class Orchestrator {
     let delayMs = retryDelayMs(attempts);
     if (!local && job.reviewerProviders?.[slot.index] === undefined) {
       const tried = [...new Set([...excludeVendors, slot.vendor].filter(Boolean))];
-      const usedElsewhere = entry.slots.filter((other) => other.index !== slot.index && other.vendor)
-        .map((other) => other.vendor);
+      // Another slot's vendor, and the vendor an operator-pinned slot holds
+      // even before it runs (planAssignments reserves it): neither is an
+      // alternative for this slot (review r-20261116-215201-35d854).
+      const pinned = (job.reviewerProviders ?? []).flatMap((id, index) => index === slot.index ||
+        id === undefined ? [] : [this.config.providers.find((provider) => provider.id === id)?.vendor])
+        .filter(Boolean);
+      const usedElsewhere = [...entry.slots.filter((other) => other.index !== slot.index && other.vendor)
+        .map((other) => other.vendor), ...pinned];
       const untried = eligibleProviders(this.config.providers, job.authorVendor)
         .some((provider) => !tried.includes(provider.vendor) && !usedElsewhere.includes(provider.vendor));
       if (untried) {

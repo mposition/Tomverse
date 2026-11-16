@@ -353,6 +353,36 @@ test("a reviewer past its timeout is killed and another vendor reviews instead",
   }
 });
 
+// Review r-20261116-215201-35d854: a vendor an operator-pinned slot holds is
+// not an alternative for another slot, even while the pinned slot waits.
+// Counting it made the failed automatic slot exclude its vendor for good.
+test("a failed automatic slot does not count the vendor a waiting pinned slot holds as untried", async () => {
+  const f = fixture({ claude: "sleep", cursor: "accept" });
+  try {
+    f.config.providers.find((p) => p.id === "claude").timeoutSeconds = 1;
+    f.commit("a.txt", "pinned and waiting\n");
+    const submitted = f.client("submit", "--author", "codex", "--repo", "demo",
+      "--reviewers", "2", "--reviewer", "cursor");
+    const { jobId } = JSON.parse(submitted.stdout);
+    const store = new Store(f.config.stateDir);
+    const orchestrator = new Orchestrator(f.config);
+    // The pinned reviewer's quota is spent, so its slot waits; the automatic
+    // slot goes to Anthropic and times out.
+    const quotas = { ...allAvailable(f.config), cursor: { state: "exhausted" } };
+    orchestrator.tick(quotas);
+    await orchestrator.idle();
+    const slots = store.listSlots ? store.listSlots(jobId) : [store.readSlot(jobId, 0), store.readSlot(jobId, 1)];
+    const failed = slots.find((slot) => slot.retriedAfter === "timeout");
+    assert.ok(failed, JSON.stringify(slots));
+    // No vendor is left for it (Anthropic failed, xAI is the pinned slot's,
+    // OpenAI is the author's): its exclusions are dropped and it waits.
+    assert.deepEqual(failed.excludeVendors, []);
+    assert.ok(failed.notBefore > Date.now(), "it waits instead of being retried at once");
+  } finally {
+    f.cleanup();
+  }
+});
+
 // Owner decision 2026-11-16: a job never ends unknown because reviewers failed.
 // Once every vendor has timed out, the slot waits (longer each time) and goes
 // round the vendors again.
