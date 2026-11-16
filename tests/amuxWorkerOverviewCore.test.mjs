@@ -35,10 +35,10 @@ const reg = (workerName, desiredState, roleCeiling = "implementation", revision 
 });
 
 const registryOf = (registrations, { latches = new Map(), observations = new Map() } = {}) =>
-  buildAmuxWorkerRegistryAdminView({ registrations, latches, observations, writesLatch: true });
+  buildAmuxWorkerRegistryAdminView({ registrations, latches, observations });
 
 const capabilitiesOf = (registrations, current = new Map()) =>
-  buildAmuxWorkerCapabilityAdminView({ registrations, current, writesLatch: true });
+  buildAmuxWorkerCapabilityAdminView({ registrations, current });
 
 const liveOf = (workers) => ({ kind: "observed", catalogConfigured: true, workers });
 const seat = (name, state, secondsAgo = 12) => ({

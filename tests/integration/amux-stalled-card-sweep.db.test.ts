@@ -92,16 +92,12 @@ test("platform failures never stop a todo card, however many there are", async (
 test("a todo Task with its budget spent joins the owner queue once, with its reason", async () => {
   await lifecycle(async (tx) => {
     const taskId = await spentTodoCard(tx);
-    const { readAmuxStalledCards, sweepAmuxStalledCards, AMUX_STALLED_CARD_SWEEP_ENV } =
+    const { readAmuxStalledCards, sweepAmuxStalledCards } =
       await import("@/lib/amux/stalledCardSweep");
-    process.env[AMUX_STALLED_CARD_SWEEP_ENV] = "disabled";
-    assert.deepEqual(await sweepAmuxStalledCards(), [], "off only when disabled");
     const found = await readAmuxStalledCards(tx, 20);
     assert.ok(found.some((row) => row.id === taskId && row.reason === "attempt_budget_exhausted"));
 
-    // Owner direction 2026-11-15: on by default.
-    delete process.env[AMUX_STALLED_CARD_SWEEP_ENV];
-    try {
+    {
       const moved = await sweepAmuxStalledCards(20);
       assert.ok(moved.includes(taskId), JSON.stringify(moved));
       const card = await tx.amuxWorkItem.findUniqueOrThrow({ where: { id: taskId },
@@ -115,8 +111,6 @@ test("a todo Task with its budget spent joins the owner queue once, with its rea
         where: { action: "amux.v22.stalled_card.blocked", targetId: taskId } });
       assert.equal((audit.metadata as { reason?: string }).reason, "attempt_budget_exhausted");
       assert.ok(!(await sweepAmuxStalledCards(20)).includes(taskId), "a card in the queue is left alone");
-    } finally {
-      delete process.env[AMUX_STALLED_CARD_SWEEP_ENV];
     }
   });
 });

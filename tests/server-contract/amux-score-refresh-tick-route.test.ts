@@ -48,8 +48,7 @@ const load = async () => ({
 let loaded: ReturnType<typeof load> | undefined;
 const modules = () => (loaded ??= load());
 
-const ENV = ["TOMVERSE_AMUX_V22_AUTO_PROMOTE", "TOMVERSE_AMUX_V22_WORKER_CLAIM",
-  "TOMVERSE_AMUX_BOARD_AUTO_PROMOTE"] as const;
+const ENV = ["TOMVERSE_AMUX_BOARD_AUTO_PROMOTE"] as const;
 const previous = Object.fromEntries(ENV.map((key) => [key, process.env[key]]));
 after(() => {
   for (const key of ENV) {
@@ -60,8 +59,6 @@ after(() => {
 
 const tick = async () => {
   calls.length = 0;
-  process.env.TOMVERSE_AMUX_V22_AUTO_PROMOTE = "enabled";
-  process.env.TOMVERSE_AMUX_V22_WORKER_CLAIM = "enabled";
   delete process.env.TOMVERSE_AMUX_BOARD_AUTO_PROMOTE;
   return (await modules()).POST(new Request("http://localhost/api/internal/amux/auto-promotion/tick", {
     method: "POST", body: "{}", headers: { "content-type": "application/json",

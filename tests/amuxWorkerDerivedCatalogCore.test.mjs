@@ -196,7 +196,7 @@ test("version 45 records the selection rule the code applies", () => {
   assert.ok(policy.includes("| `review` | `contract` (검토 대상 카드의 수준을 모르므로 가장 높게) |"));
 });
 
-test("a non-Claude v22 profile joins the catalog only behind the multi-provider switch", () => {
+test("a non-Claude v22 profile joins the catalog under its own provider and model", () => {
   const registrations = [registration("claude-impl", "implementation"),
     registration("codex-impl", "implementation"), registration("cursor-impl", "implementation")];
   const v22 = (model, roles = ["implement"], tools = ["repo_write"]) => ({ model, roles, tools });
@@ -208,14 +208,10 @@ test("a non-Claude v22 profile joins the catalog only behind the multi-provider 
     ["cursor-impl", { capability: { model: null, routingTags: ["implementation"],
       toolCapabilities: [], v22: v22("composer-2.5", ["investigate"], ["repo_read"]) } }],
   ]);
-  const derive = (multiProvider) => deriveAmuxWorkerCatalog({ registrations, capabilities,
-    latches: new Map(), multiProvider });
-  // Off (the default): only Claude runs v22; the others stay session workers.
-  assert.deepEqual(derive(undefined).v22.map((row) => [row.worker_name, row.provider]),
-    [["claude-impl", "anthropic"]]);
-  assert.deepEqual(derive(false).v22.map((row) => row.worker_name), ["claude-impl"]);
-  // On: each runs v22 under its own provider and model.
-  assert.deepEqual(derive(true).v22.map((row) => [row.worker_name, row.provider, row.model]), [
+  const derive = () => deriveAmuxWorkerCatalog({ registrations, capabilities,
+    latches: new Map() });
+  // Each runs v22 under its own provider and model.
+  assert.deepEqual(derive().v22.map((row) => [row.worker_name, row.provider, row.model]), [
     ["claude-impl", "anthropic", "claude-sonnet-5-5"],
     ["codex-impl", "openai", "gpt-6-luna"],
     ["cursor-impl", "cursor", "composer-2.5"],

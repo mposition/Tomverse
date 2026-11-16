@@ -98,7 +98,6 @@ const RESULT_BINDING = {
 
 type World = {
   authorized: boolean;
-  env: string | undefined;
   budgetDepth: number;
   boundaries: Array<{ operation: string; inBudget: boolean }>;
   calls: Array<{ store: string; input: Record<string, unknown> }>;
@@ -121,7 +120,6 @@ let world: World;
 const reset = (changes: Partial<World> = {}) => {
   world = {
     authorized: true,
-    env: "enabled",
     budgetDepth: 0,
     boundaries: [],
     calls: [],
@@ -138,8 +136,6 @@ const reset = (changes: Partial<World> = {}) => {
     incidents: [],
     ...changes,
   };
-  if (world.env === undefined) delete process.env.TOMVERSE_AMUX_DM_ROUTING;
-  else process.env.TOMVERSE_AMUX_DM_ROUTING = world.env;
 };
 reset();
 
@@ -528,7 +524,7 @@ const post = (route: Route, body: unknown) =>
     body: typeof body === "string" ? body : JSON.stringify(body),
   });
 
-test("only the sync token reaches each route, and each stays closed until the operator enables it", async () => {
+test("only the sync token reaches each route", async () => {
   for (const route of ROUTES) {
     const { POST } = await loadRoute(route);
 
@@ -538,17 +534,6 @@ test("only the sync token reaches each route, and each stays closed until the op
     assert.deepEqual(world.calls, [], route.name);
     assert.deepEqual(world.boundaries, [], route.name);
 
-    for (const env of [undefined, "", "true", "ENABLED", "enabled ", "on"]) {
-      reset({ env });
-      const closed = await POST(post(route, route.body));
-      assert.equal(closed.status, 409, `${route.name} ${String(env)}`);
-      assert.deepEqual(await closed.json(), { [route.envelope]: false, reason: "dm_routing_disabled" }, route.name);
-      assert.equal(closed.headers.get("cache-control"), "no-store", route.name);
-      // Closed means no database at all: no boundary, no store, not even the key ring.
-      assert.deepEqual(world.boundaries, [], route.name);
-      assert.deepEqual(world.calls, [], route.name);
-      assert.equal(world.keyRingLoads, 0, route.name);
-    }
   }
 });
 

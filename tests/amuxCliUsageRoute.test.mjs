@@ -16,25 +16,14 @@ const request = (method, secret, agentId, body) => new Request(endpoint, {
   ...(body ? { body: JSON.stringify(body) } : {}),
 });
 
-test("usage writes stay env-closed and reject invalid receipts when enabled", async () => {
+test("usage writes reject invalid receipts and wrong bindings", async () => {
   const beforeSync = process.env.TOMVERSE_AMUX_SYNC_SECRET;
   const beforeAgent = process.env.TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET;
-  const beforeSwitch = process.env.TOMVERSE_AMUX_CLI_USAGE_WRITE;
   try {
     process.env.TOMVERSE_AMUX_SYNC_SECRET = syncSecret;
     process.env.TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET = agentSecret;
-    delete process.env.TOMVERSE_AMUX_CLI_USAGE_WRITE;
     const unauthorized = await POST(request("POST", "wrong-secret"));
     assert.equal(unauthorized.status, 401);
-    for (const [secret, id] of [[syncSecret, undefined],
-      [agentSecret, "amux-intake"]]) {
-      const response = await POST(request("POST", secret, id, { prompt: "private" }));
-      assert.equal(response.status, 409);
-      assert.deepEqual(await response.json(), { available: false,
-        reason: "cli_usage_write_disabled" });
-      assert.equal(response.headers.get("Cache-Control"), "no-store");
-    }
-    process.env.TOMVERSE_AMUX_CLI_USAGE_WRITE = "enabled";
     const invalid = await POST(request("POST", syncSecret, undefined,
       { prompt: "private" }));
     assert.equal(invalid.status, 400);
@@ -79,7 +68,6 @@ test("usage writes stay env-closed and reject invalid receipts when enabled", as
     for (const [name, value] of [
       ["TOMVERSE_AMUX_SYNC_SECRET", beforeSync],
       ["TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET", beforeAgent],
-      ["TOMVERSE_AMUX_CLI_USAGE_WRITE", beforeSwitch],
     ]) {
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;

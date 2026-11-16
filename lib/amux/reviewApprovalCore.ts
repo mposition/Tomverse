@@ -48,8 +48,9 @@ export const amuxV4ReviewReportProjection = (input: {
     input.evidence.workerReport !== null && input.workerReportVerified,
 } : null;
 
+/** `enabled` is the documented value; `true` is what production already holds. */
 export const isAmuxAgentApprovalEnabled = (value: string | undefined) =>
-  value === "true";
+  value === "enabled" || value === "true";
 
 export const amuxReviewApprovalReadiness = (env: {
   TOMVERSE_AMUX_AGENT_APPROVAL_ENABLED?: string;

@@ -17,34 +17,25 @@ import {
   parseAmuxV22Conclusion,
 } from "../lib/amux/v22ConclusionCore.ts";
 
-// The earlier, strict reading (TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW=disabled);
-// amuxV22LocalCliFlow.test.mjs covers the local CLI flow's lenient one.
-process.env.TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW = "disabled";
-
 const line = (value) => `${AMUX_V22_CONCLUSION_MARKER} ${JSON.stringify(value)}`;
 const valid = { verdict: "proceed", findings: "The router fails on empty input.",
   handoff: [{ task: "AMUX-ROUTERFAIL-004", note: "Guard the empty case first." }],
   evidence: ["lib/autoRouter.ts"] };
 
-test("the conclusion is the last line, strictly shaped", () => {
+test("the conclusion is the last marker line, read leniently", () => {
   assert.deepEqual(parseAmuxV22Conclusion(`work done\n\n${line(valid)}\n`), valid);
   assert.deepEqual(parseAmuxV22Conclusion(line({ verdict: "stop", findings: "x" })),
     { verdict: "stop", findings: "x", handoff: [], evidence: [] }, "handoff and evidence default empty");
-  assert.equal(parseAmuxV22Conclusion(`${line(valid)}\nmore text`), null, "only the last line counts");
   assert.equal(parseAmuxV22Conclusion("no conclusion"), null);
   assert.equal(parseAmuxV22Conclusion(`${AMUX_V22_CONCLUSION_MARKER} {not json`), null);
-  for (const bad of [
-    { ...valid, verdict: "approve" },
-    { ...valid, findings: "" },
-    { ...valid, findings: "x".repeat(4_001) },
-    { ...valid, extra: true },
-    { ...valid, handoff: [{ task: "bad key with spaces", note: "n" }] },
-    { ...valid, handoff: [{ task: "A-1", note: "n", more: 1 }] },
-    { ...valid, handoff: Array.from({ length: 13 }, () => ({ task: "A-1", note: "n" })) },
-    { ...valid, evidence: ["two words"] },
-    { ...valid, evidence: Array.from({ length: 21 }, () => "a") },
-    { ...valid, findings: "bell\u0007" },
-  ]) assert.equal(parseAmuxV22Conclusion(line(bad)), null, JSON.stringify(bad).slice(0, 80));
+  // No length or count bound, and unknown keys are ignored.
+  assert.equal(parseAmuxV22Conclusion(line({ ...valid, findings: "x".repeat(20_000), extra: true }))
+    ?.findings.length, 20_000);
+  assert.equal(parseAmuxV22Conclusion(line({ ...valid, handoff: Array.from({ length: 30 },
+    () => ({ task: "A-1", note: "n" })) }))?.handoff.length, 30);
+  // An unusable verdict is no conclusion; a missing finding is not a reason to lose one.
+  assert.equal(parseAmuxV22Conclusion(line({ ...valid, verdict: "approve" })), null);
+  assert.equal(parseAmuxV22Conclusion(line({ verdict: "stop" }))?.findings, "(no findings given)");
 });
 
 test("the digest binds every field and is stable", () => {

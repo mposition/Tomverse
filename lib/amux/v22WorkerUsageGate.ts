@@ -2,7 +2,7 @@ import type { Prisma } from "@prisma/client";
 
 import { AMUX_V22_CLI_FAILURE_REASON_CODES } from "./v22TaskExecutionCore.ts";
 import { AMUX_V52_REVIEW_REJECTED_TWICE_REASON } from "./v52ReviewCore.ts";
-import { AMUX_INFRA_FAILURE_REASONS, amuxInfraFailureRoutingEnabled } from "./infraFailureCore.ts";
+import { AMUX_INFRA_FAILURE_REASONS } from "./infraFailureCore.ts";
 
 /**
  * Whether a worker has an ended v4 attempt whose CLI usage was never reported
@@ -59,13 +59,12 @@ import { AMUX_INFRA_FAILURE_REASONS, amuxInfraFailureRoutingEnabled } from "./in
  * lib/amux/infraFailureCore.ts) holds no worker either, with no person's
  * acceptance: the run never did the card's work, its usage stays unknown in
  * the ledger, and only a route that spends no money is ever classified so.
- * TOMVERSE_AMUX_INFRA_FAILURE_ROUTING=disabled counts it again.
  */
 export async function amuxV22WorkerUsageUnverified(tx: Prisma.TransactionClient,
   workerName: string, priorAttemptId: string | null, taskId: string,
   paidOnly: boolean = true): Promise<boolean> {
   const retryableReasons = [...AMUX_V22_CLI_FAILURE_REASON_CODES];
-  const infraReasons = amuxInfraFailureRoutingEnabled() ? [...AMUX_INFRA_FAILURE_REASONS] : [];
+  const infraReasons = [...AMUX_INFRA_FAILURE_REASONS];
   const rows = await tx.$queryRaw<Array<{ id: string }>>`
     SELECT a."id" FROM "AmuxExecutionAttempt" a
     JOIN "AmuxWorkItem" w ON w."id" = a."taskId"

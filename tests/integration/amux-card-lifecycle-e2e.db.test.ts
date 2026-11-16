@@ -186,7 +186,6 @@ test("a merge by anyone else with no review holds that card for a person, and on
     // Owner decision 2026-11-15: it is that card's decision; the agent goes on.
     // Compared with the reading before it, so another suite's rows decide nothing here.
     const state = await readEngineeringAgentHaltState(tx);
-    assert.equal(state.cardScoped, true);
     assert.equal(state.openStateMismatches, before.openStateMismatches + 1);
     assert.equal(state.unscopedStateMismatches, before.unscopedStateMismatches, "the mismatch is the card's");
     assert.equal(engineeringAgentHalted(state), engineeringAgentHalted(before));
@@ -217,19 +216,6 @@ test("the CI auto-fix merged develop into the agent's pull request, then the own
       assert.equal(merge?.mergedDiffDigest, diffDigest);
       assert.equal(merge?.mergedHeadVerified, false);
     });
-  }
-  // ENGINEERING_AGENT_LEGACY_HALTS: the rule before it.
-  process.env.ENGINEERING_AGENT_LEGACY_HALTS = "enabled";
-  try {
-    await lifecycle(async (tx) => {
-      const card = await publishedCard(tx);
-      const outcome = await observe(card, () =>
-        mergedPull({ mergedByApprover: true, headSha: MOVED, diffDigest: "e".repeat(64) }));
-      assert.equal(outcome?.outcome, "merged_without_approval");
-      assert.equal((await cardRow(tx, card)).status, "review");
-    });
-  } finally {
-    delete process.env.ENGINEERING_AGENT_LEGACY_HALTS;
   }
 });
 
@@ -280,16 +266,8 @@ test("a reviewed result whose publication never opened is kept for publication, 
     assert.ok((await readAmuxV22KeptResultCandidates(tx, 50)).some((row) => row.taskId === card.taskId));
     assert.equal((await readAmuxV22KeptResultCandidates(tx, 50, null, [card.taskId]))
       .some((row) => row.taskId === card.taskId), false);
-    // The Decision Maker, whose answers include a retry, is never asked about
-    // it; with the kill switch it is filed as before.
+    // The Decision Maker, whose answers include a retry, is never asked about it.
     assert.deepEqual(await scanAmuxDmOwnerSettlementCandidates(tx, 10, [card.escalationId]), []);
-    process.env.ENGINEERING_AGENT_LEGACY_HALTS = "enabled";
-    try {
-      assert.deepEqual((await scanAmuxDmOwnerSettlementCandidates(tx, 10, [card.escalationId]))
-        .map((row) => row.taskId), [card.taskId]);
-    } finally {
-      delete process.env.ENGINEERING_AGENT_LEGACY_HALTS;
-    }
     // With v22 publication off nothing would publish it, so it is filed as before.
     delete process.env.TOMVERSE_AMUX_V22_ENGINEERING_PUBLICATION;
     try {
@@ -400,7 +378,7 @@ test("the Decision Maker approves the review draft from the owner queue: recorde
     const { amuxDmOwnerSettlementId } = await import("@/lib/amux/dmOwnerSettlementCore");
     const settlementId = amuxDmOwnerSettlementId(card.escalationId);
     const rows = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerOwnerSettlementSync,
-      (inner) => readAmuxDmOwnerSettlementSyncRows(inner, { enabled: true }));
+      (inner) => readAmuxDmOwnerSettlementSyncRows(inner));
     const filed = rows.pending.find((row) => row.settlementId === settlementId);
     assert.equal(filed?.kind, "t2_pr");
     assert.equal(filed?.bindingId, card.bindingId);
@@ -417,7 +395,7 @@ test("the Decision Maker approves the review draft from the owner queue: recorde
     assert.equal((await observe(card, () => mergedPull({ mergedByApprover: true })))?.outcome, "completed");
     assert.equal((await cardRow(tx, card)).status, "done");
     const after = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerOwnerSettlementSync,
-      (inner) => readAmuxDmOwnerSettlementSyncRows(inner, { enabled: true }));
+      (inner) => readAmuxDmOwnerSettlementSyncRows(inner));
     assert.ok(!after.pending.some((row) => row.taskId === card.taskId), "a done card is not filed again");
     assert.equal(await openMismatches(tx, card), 0);
   });
@@ -454,7 +432,7 @@ test("the Decision Maker's approval, readied by the app and merged by the merge 
     await fixtureCommitted(tx);
     const settlementId = amuxDmOwnerSettlementId(card.escalationId);
     await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerOwnerSettlementSync,
-      (inner) => readAmuxDmOwnerSettlementSyncRows(inner, { enabled: true }));
+      (inner) => readAmuxDmOwnerSettlementSyncRows(inner));
     assert.deepEqual(await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerOwnerSettlementApply,
       (inner, context) => applyAmuxDmOwnerSettlementDecision(inner, { settlementId, answer: { decision: "approve" },
         source: "dm", requestId: "req-lifecycle-dm-merge", now: context.dbNow, env: ON })),

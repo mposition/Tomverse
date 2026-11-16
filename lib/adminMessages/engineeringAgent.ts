@@ -27,7 +27,7 @@ export const adminEngineeringAgentMessages = defineAdminMessages({
     contextNoCrossReview: "Not recorded for this run.",
     contextDm: "Decision Maker",
     contextDmNotFiled:
-      "Not reviewed. The Decision Maker reviews results without a patch; a T2 draft is put to it for advice only while TOMVERSE_ENGINEERING_AGENT_T2_DM_REVIEW is on, on the relay's next tick.",
+      "Not reviewed. The Decision Maker reviews results without a patch; a T2 draft is put to it for advice on the relay's next tick.",
     contextDmFiled: "Filed as {kind} · {state} · decision {decision}",
     contextDmAdviceFiled: "Asked for advice on this patch · card {state}",
     contextDmAdviceOpen: "open",
@@ -63,7 +63,7 @@ export const adminEngineeringAgentMessages = defineAdminMessages({
       patch_unavailable:
         "The tier round could not read the run's patch evidence in AMUX again, or that evidence names another base. The tier was never judged. The patch below is this app's own stored copy.",
       publication_not_authorized:
-        "Not judged: the publish switch, the v22 publication latch or the card's public PR consent is off.",
+        "Not judged: the publish switch or the card's public PR consent is off.",
       publication_state_changed: "Not judged: the run, a switch or the consent changed while it was being read.",
       publish_refused: "Promotion was refused: a switch, the consent or the PR queue changed just before it.",
       patch_unreadable:
@@ -185,7 +185,7 @@ export const adminEngineeringAgentMessages = defineAdminMessages({
       "T1 publishing is not set from here. The policy requires person-only approval evidence before T1, and the switch waits for it.",
     prQueue: "Pull request queue: {occupied}{limit}",
     decisionQueue: "Decision queue: {occupied}{limit}",
-    queueNote: "Active runs count in both, for what they may still produce. The queues have no cap and nothing in them expires; they show what waits on you. A cap appears only while ENGINEERING_AGENT_LEGACY_HALTS is on.",
+    queueNote: "Active runs count in both, for what they may still produce. The queues have no cap and nothing in them expires; they show what waits on you.",
     done: "Done.",
     failed: "That did not go through.",
     refused: "Refused: {code}. The row may have changed; reload and look again.",
@@ -221,7 +221,7 @@ export const adminEngineeringAgentMessages = defineAdminMessages({
     contextNoCrossReview: "이 run에는 기록이 없습니다.",
     contextDm: "DM(Decision Maker)",
     contextDmNotFiled:
-      "검토하지 않았습니다. DM은 patch가 없는 결과를 검토하고, T2 초안은 TOMVERSE_ENGINEERING_AGENT_T2_DM_REVIEW 스위치가 켜져 있을 때만 relay의 다음 차례에 조언을 구합니다.",
+      "검토하지 않았습니다. DM은 patch가 없는 결과를 검토하고, T2 초안은 relay의 다음 차례에 조언을 구합니다.",
     contextDmFiled: "{kind}로 보냄 · {state} · 결정 {decision}",
     contextDmAdviceFiled: "이 patch에 대해 DM 조언을 구함 · 카드 {state}",
     contextDmAdviceOpen: "열림",
@@ -257,7 +257,7 @@ export const adminEngineeringAgentMessages = defineAdminMessages({
       patch_unavailable:
         "tier 판정 라운드가 AMUX에 저장된 이 run의 patch 증거를 다시 읽지 못했거나, 그 증거의 base가 이 초안과 다릅니다. tier 판정 자체를 하지 못했습니다. 아래 patch는 이 앱이 따로 저장한 사본입니다.",
       publication_not_authorized:
-        "판정하지 않음: 게시 스위치, v22 게시 latch, 카드의 공개 PR 동의 중 하나가 꺼져 있습니다.",
+        "판정하지 않음: 게시 스위치나 카드의 공개 PR 동의가 꺼져 있습니다.",
       publication_state_changed: "판정하지 않음: 읽는 도중 run·스위치·동의가 바뀌었습니다.",
       publish_refused: "승격 거절: 직전에 스위치·동의·PR 대기열이 바뀌었습니다.",
       patch_unreadable:
@@ -376,7 +376,7 @@ export const adminEngineeringAgentMessages = defineAdminMessages({
       "T1 게시는 여기서 켜지 않습니다. 정책이 T1 전에 사람 전용 승인 증거를 요구하며, 이 스위치는 그것을 기다립니다.",
     prQueue: "Pull request 대기열: {occupied}{limit}",
     decisionQueue: "결정 대기열: {occupied}{limit}",
-    queueNote: "활성 run은 아직 만들 수 있는 산출물 때문에 두 대기열 모두에 셉니다. 대기열에는 상한도 만료도 없고, 기다리는 양만 보여 줍니다. 상한은 ENGINEERING_AGENT_LEGACY_HALTS가 켜져 있을 때만 생깁니다.",
+    queueNote: "활성 run은 아직 만들 수 있는 산출물 때문에 두 대기열 모두에 셉니다. 대기열에는 상한도 만료도 없고, 기다리는 양만 보여 줍니다.",
     done: "처리했습니다.",
     failed: "처리되지 않았습니다.",
     refused: "거절됨: {code}. 행이 바뀌었을 수 있으니 새로 고쳐 다시 확인하세요.",

@@ -9,7 +9,6 @@ import {
   withAmuxRouteBudget,
 } from "@/lib/amux/dbBoundary";
 import {
-  dmInternalRoutesEnabled,
   dmRouteErrorResponse,
   dmRouteRefusal,
 } from "@/lib/amux/decisionMakerInternalRoute";
@@ -33,7 +32,6 @@ import { amuxJsonNoStore } from "@/lib/amux/internalRoute";
  * to open. The workspace is always on (owner direction 2026-11-16: its kill
  * switch is gone). Files are base64, so the answer's
  * size is the evidence's (at most DM_WORKSPACE_EVIDENCE_MAX_BYTES and a third).
- * Closed until TOMVERSE_AMUX_DM_ROUTING=enabled.
  */
 
 const MAX_BODY_BYTES = 1_024;
@@ -45,7 +43,6 @@ export async function POST(request: Request) {
   if (!isAmuxSyncAuthorized(request)) {
     return amuxJsonNoStore({ error: "Unauthorized" }, 401);
   }
-  if (!dmInternalRoutesEnabled()) return refused(409, "dm_routing_disabled");
   return withAmuxRouteBudget(async () => {
     try {
       const body = await readLimitedJson(request, MAX_BODY_BYTES, requestSchema);

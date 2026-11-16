@@ -2,12 +2,9 @@ import "server-only";
 
 import { prisma } from "@/lib/prisma";
 import { readNewestDecisionMakerRequestPerCard } from "@/lib/amux/decisionMakerRequestStore";
-import { dmInternalRoutesEnabled } from "@/lib/amux/decisionMakerInternalRoute";
 import { readDecisionMakerSwitches } from "@/lib/amux/decisionMakerSwitchStore";
-import { engineeringAgentT2DmReviewEnabled } from "@/lib/engineeringAgentT2DmReviewCore";
-import { amuxDmOwnerSettlementEnabled } from "./dmOwnerSettlementCore.ts";
 import {
-  readAmuxDmOwnerSettlementRequestedAmong, scanAmuxDmOwnerSettlementCandidates,
+  scanAmuxDmOwnerSettlementCandidates,
 } from "./dmOwnerSettlementRead.ts";
 import { readAmuxDmRelayLastQuestionAt, readAmuxDmRelayLastSyncAt } from "./dmRelayHeartbeat.ts";
 import { judgeAmuxDmRelayLiveness } from "./dmRelayHeartbeatCore.ts";
@@ -16,7 +13,6 @@ import {
   type AmuxDmRelayView, type AmuxOwnerQueueDmFacts, type AmuxOwnerQueueDmRequestFact,
   type AmuxOwnerQueueDmSwitches, type AmuxOwnerQueueDmView,
 } from "./ownerQueueDmRequestCore.ts";
-import { amuxV22ResultReviewDmEnabled } from "./v22ResultReviewCore.ts";
 import { amuxV22Provider } from "./v22WorkerClaimCore.ts";
 
 /**
@@ -84,9 +80,8 @@ export async function readAmuxOwnerQueueDmStatus(items: ReadonlyArray<{ taskId: 
       FROM "AmuxDmOwnerSettlement" s WHERE s."escalationId" = ANY(${escalationIds}::text[])`,
     escalationIds.length === 0 ? Promise.resolve([]) :
       scanAmuxDmOwnerSettlementCandidates(prisma, escalationIds.length, escalationIds),
-    dmInternalRoutesEnabled() ? readDecisionMakerSwitches(prisma) : Promise.resolve(null),
+    readDecisionMakerSwitches(prisma),
   ]);
-  const requested = await readAmuxDmOwnerSettlementRequestedAmong(prisma, settlements.map((row) => row.id));
 
   const cardIds = [...questions, ...reviews, ...t2s, ...settlements]
     .flatMap((row) => row.localCardId ? [row.localCardId] : []);
@@ -102,11 +97,7 @@ export async function readAmuxOwnerQueueDmStatus(items: ReadonlyArray<{ taskId: 
   const requestOf = (cardId: string | null) => (cardId ? requests.get(cardId) : undefined) ?? null;
 
   const switches: AmuxOwnerQueueDmSwitches = {
-    routing: dmInternalRoutesEnabled(),
     killSwitch: dmSwitches?.killSwitch ?? null,
-    resultReview: amuxV22ResultReviewDmEnabled(),
-    t2: engineeringAgentT2DmReviewEnabled(),
-    settlement: amuxDmOwnerSettlementEnabled(),
   };
   const byKey = <T,>(rows: T[], key: (row: T) => string) => new Map(rows.map((row) => [key(row), row]));
   const questionBy = byKey(questions, (row) => row.taskId);
@@ -132,7 +123,7 @@ export async function readAmuxOwnerQueueDmStatus(items: ReadonlyArray<{ taskId: 
         unfilable: t2.unfilable } : null,
       settlement: settlement ? { id: settlement.id, state: settlement.state, localCardId: settlement.localCardId,
         request: requestOf(settlement.localCardId), handoffReason: settlement.handoffReason,
-        cancelReason: settlement.cancelReason, requested: requested.has(settlement.id) } : null,
+        cancelReason: settlement.cancelReason } : null,
       escalationId: item.escalationId,
       settlementEligible: item.escalationId !== null && eligibleSet.has(item.escalationId),
     };

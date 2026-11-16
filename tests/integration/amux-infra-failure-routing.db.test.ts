@@ -18,7 +18,6 @@ import { seedAmuxV4PortfolioRecoveryPrerequisites } from "./helpers/amuxV4Portfo
 
 process.env.ADMIN_AUDIT_INTEGRITY_KEY = "synthetic-amux-infra-failure-audit-key-2026";
 Object.assign(process.env, { NODE_ENV: "test" });
-delete process.env.TOMVERSE_AMUX_INFRA_FAILURE_ROUTING;
 
 const services = async () => ({
   ...(await import("@/lib/amux/infraFailureStore")),
@@ -99,7 +98,7 @@ test("a worker that exits right after start: attempts kept, other worker first, 
     assert.equal(budget.allowed, true);
     assert.equal((budget as { next_attempt_number: number }).next_attempt_number, 5,
       "the number stays unique; the count is the card's own");
-    assert.deepEqual(await s.countAmuxInfraAttemptsBefore(tx, taskId, randomUUID(), true),
+    assert.deepEqual(await s.countAmuxInfraAttemptsBefore(tx, taskId, randomUUID()),
       { total: 3, window: 3 });
     assert.deepEqual(await s.readAmuxRecentResultSignatures(tx, taskId, randomUUID(), 2),
       ["failed:reported_result"], "an infrastructure failure is never a repeat of the card's own result");
@@ -183,7 +182,7 @@ test("platform failures have no bound: the card stays claimable and only waits l
     assert.equal(after.infraRows, 12);
     assert.equal(after.infraWindowRows, 0);
     assert.equal(amuxInfraRetryDelayMs(after.infraWindowRows), 0);
-    assert.deepEqual(await s.countAmuxInfraAttemptsBefore(tx, taskId, randomUUID(), true),
+    assert.deepEqual(await s.countAmuxInfraAttemptsBefore(tx, taskId, randomUUID()),
       { total: 12, window: 0 });
   });
 });

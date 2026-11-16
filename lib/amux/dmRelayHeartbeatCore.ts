@@ -45,14 +45,10 @@ export const AMUX_DM_RELAY_QUESTION_MS = 190 * 60_000;
 export const AMUX_DM_RELAY_REMINDER_MS = 3 * 60 * 60_000;
 
 /**
- * The Ubuntu relay serves production, and is only expected to call while
- * that deployment's routes are open
- * (`TOMVERSE_AMUX_DM_ROUTING=enabled`, lib/amux/decisionMakerInternalRoute.ts
- * `AMUX_DM_ROUTING_ENV`). Read here by name, not imported, so the monitor does
- * not load the Decision Maker route module.
+ * The Ubuntu relay serves production, so it is expected to call only for the
+ * production deployment.
  */
 export const amuxDmRelayExpected = (env: NodeJS.ProcessEnv = process.env): boolean =>
-  env.TOMVERSE_AMUX_DM_ROUTING === "enabled" &&
   resolveDeploymentEnvironment(env) === "production";
 
 /** A stored value, or null when it is missing or not a time. */

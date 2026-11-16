@@ -11,9 +11,7 @@ import {
   AMUX_DB_MAX_WAIT_MS,
   AMUX_DB_STATEMENT_TIMEOUT_MS,
 } from "../lib/amux/dbBoundary.ts";
-import { isAmuxExecutionApiEnabled } from "../lib/amux/executionGate.ts";
 import {
-  ENGINEERING_AGENT_AMUX_ADAPTER_CODE_LATCH,
   ENGINEERING_AGENT_AMUX_ROUTE_BUDGET_MS,
   ENGINEERING_AGENT_AMUX_WORKER,
   amuxSettlementForRunOutcome,
@@ -22,7 +20,6 @@ import {
   engineeringRunEndAttachment,
   engineeringRunHeartbeatAttachment,
   engineeringRunStartAttachment,
-  isEngineeringAgentAmuxAdapterOpen,
   mintEngineeringAgentRunId,
 } from "../lib/engineeringAgentAmuxAdapter.ts";
 import {
@@ -45,18 +42,12 @@ import {
 // docs/policy/development-agent-orchestration.md, Authority, version 12) and
 // the round-5 review fixes that sit beside it.
 
-test("the latch ships on, and the adapter opens only with it, the execution API and a mode that is not off", () => {
-  assert.equal(ENGINEERING_AGENT_AMUX_ADAPTER_CODE_LATCH, true, "version 25 turns the latch on");
-  // With the latch on, the fast check is exactly the execution API gate.
-  assert.equal(isEngineeringAgentAmuxAdapterOpen(), isAmuxExecutionApiEnabled());
+test("the adapter opens for every mode except off", () => {
   for (const mode of ["shadow", "t1"]) {
-    assert.equal(engineeringAgentAmuxAdapterPermitted({ codeLatch: true, executionApiEnabled: true, mode }), true, mode);
-    assert.equal(engineeringAgentAmuxAdapterPermitted({ codeLatch: true, executionApiEnabled: false, mode }), false, mode);
-    assert.equal(engineeringAgentAmuxAdapterPermitted({ codeLatch: false, executionApiEnabled: true, mode }), false, mode);
+    assert.equal(engineeringAgentAmuxAdapterPermitted({ mode }), true, mode);
   }
-  // Authority: the writer path runs only when the latch and the operating mode
-  // are both open. Mode off closes every adapter call, not only a new run.
-  assert.equal(engineeringAgentAmuxAdapterPermitted({ codeLatch: true, executionApiEnabled: true, mode: "off" }), false);
+  // Mode off closes every adapter call, not only a new run.
+  assert.equal(engineeringAgentAmuxAdapterPermitted({ mode: "off" }), false);
 });
 
 test("every adapter operation checks the whole gate, mode included, before it touches AMUX", () => {
@@ -182,7 +173,6 @@ test("the adapter reaches only the AMUX writers version 12 allows it", () => {
     "dbBoundary",
     "delivery",
     "execution",
-    "executionGate",
     "reviewPullRequest",
     "store",
     // Orchestration policy version 35, section 3 names the adapter among the

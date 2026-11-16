@@ -3,7 +3,7 @@ import { AMUX_V22_RECOVERY_CHECKER_ENV, AMUX_V22_RECOVERY_INSPECTOR_SECRET_ENV,
 
 // Separate from the bridge/sidecar switches. Shipping this file never starts
 // a host check; deployment and activation remain distinct owner decisions.
-if (process.env[AMUX_V22_RECOVERY_CHECKER_ENV] !== "1") process.exit(0);
+if (!["enabled", "1"].includes(process.env[AMUX_V22_RECOVERY_CHECKER_ENV] ?? "")) process.exit(0);
 if (process.platform !== "linux") throw new Error("recovery checker requires Ubuntu");
 for (const name of ["DATABASE_URL", "DIRECT_URL", "GITHUB_TOKEN", "GH_TOKEN",
   "TOMVERSE_AMUX_SYNC_SECRET", "TOMVERSE_AMUX_V22_RECOVERY_CONTROLLER_SECRET",

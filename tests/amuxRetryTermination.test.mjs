@@ -33,7 +33,7 @@ const runReviewed = (verdicts, { repeatsPrior = () => false } = {}) => {
   const signatures = [];
   let rejections = 0;
   for (const [index, verdict] of verdicts.entries()) {
-    const disposition = decideAmuxV52ReviewDisposition(verdict, rejections, true, repeatsPrior(index));
+    const disposition = decideAmuxV52ReviewDisposition(verdict, rejections, repeatsPrior(index));
     if (disposition.status !== "todo") return { run: index + 1, status: disposition.status, why: disposition.reason };
     const signature = amuxResultFailureSignature("succeeded", disposition.reason);
     const repeated = amuxRepeatedResultFailure([signature, ...signatures.slice(0, AMUX_REPEATED_FAILURE_RUNS - 1)]);

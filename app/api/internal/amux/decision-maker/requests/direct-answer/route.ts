@@ -9,7 +9,6 @@ import {
   withAmuxRouteBudget,
 } from "@/lib/amux/dbBoundary";
 import {
-  dmInternalRoutesEnabled,
   dmReturnedRefusalStatus,
   dmRouteErrorResponse,
   dmRouteRefusal,
@@ -34,8 +33,6 @@ import { amuxJsonNoStore } from "@/lib/amux/internalRoute";
  * write nothing, so a report sent again is a read. Allowed under the kill
  * switch (§6's table: the operator's direct answer). It carries no answer text:
  * the card and the question revision only.
- *
- * Closed until the operator sets `TOMVERSE_AMUX_DM_ROUTING=enabled`.
  */
 
 const MAX_BODY_BYTES = 1_024;
@@ -55,7 +52,6 @@ export async function POST(request: Request) {
   if (!isAmuxSyncAuthorized(request)) {
     return amuxJsonNoStore({ error: "Unauthorized" }, 401);
   }
-  if (!dmInternalRoutesEnabled()) return refused(409, "dm_routing_disabled");
 
   return withAmuxRouteBudget(async () => {
     try {

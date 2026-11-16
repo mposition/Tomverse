@@ -49,8 +49,9 @@ export const observeUnbound = async (input) => (await readNamespace(input)).verd
  * (a push, develop merged in, a rebase, a conflict resolved -- #3942 and #3944
  * halted the agent for nine hours). It is not unbound: the approval observer
  * judges its merge, and only an approver's merge approves a diff the app did
- * not verify. `known.legacyHalts` (ENGINEERING_AGENT_LEGACY_HALTS) restores the
- * reading before it, where any move was unbound.
+ * not verify. (The ENGINEERING_AGENT_LEGACY_HALTS switch that restored the
+ * reading before it, where any move was unbound, was removed, owner decision
+ * 2026-11-16.)
  */
 export const readNamespace = async ({ refs, pulls, known, commitDigestAt, refsComplete = true, pullsComplete = true }) => {
   // A list GitHub did not give whole -- no body (null) or a first page of more
@@ -59,7 +60,6 @@ export const readNamespace = async ({ refs, pulls, known, commitDigestAt, refsCo
   let undetermined = refs === null || pulls === null || !refsComplete || !pullsComplete;
   refs = refs ?? [];
   pulls = pulls ?? [];
-  const cardScoped = known.legacyHalts !== true;
   const byNumber = new Map(known.bindings.map((binding) => [binding.prNumber, binding]));
   const boundRuns = new Set(known.bindings.map((binding) => binding.runId));
   let moved = 0;
@@ -92,10 +92,10 @@ export const readNamespace = async ({ refs, pulls, known, commitDigestAt, refsCo
     const runId = parseEngineeringBranchName(pull.headRef ?? "");
     const binding = byNumber.get(pull.number);
     if (binding !== undefined) {
-      // A bound pull request stays at the head it was verified at -- or, by
-      // default, is its card's own pull request moved by someone else.
+      // A bound pull request stays at the head it was verified at -- or
+      // is its card's own pull request moved by someone else.
       if (binding.runId === runId && pull.headSha === binding.verifiedHeadSha) continue;
-      if (cardScoped && binding.runId === runId) {
+      if (binding.runId === runId) {
         moved += 1;
         continue;
       }
@@ -122,7 +122,7 @@ export const readNamespace = async ({ refs, pulls, known, commitDigestAt, refsCo
       continue;
     }
     if (known.bindings.some((binding) => binding.runId === runId && binding.verifiedHeadSha === sha)) continue;
-    if (cardScoped && boundRuns.has(runId)) {
+    if (boundRuns.has(runId)) {
       moved += 1;
       continue;
     }
@@ -221,17 +221,7 @@ export async function runRunnerCycle(ports) {
   }
   const reading = await readNamespace({ ...namespace, known: known.json, commitDigestAt: ports.commitDigestAt });
   const observed = reading.verdict;
-  if (known.json.legacyHalts === true) {
-    // ENGINEERING_AGENT_LEGACY_HALTS: the cycle before owner decision
-    // 2026-11-15, where an unbound or undetermined reading ends the round.
-    if (observed === "undetermined") {
-      return { finishedNormally: false, halt: "unknown", reason: "observation_undetermined" };
-    }
-    if (observed !== "none") {
-      const recorded = await ports.app("observe/halt", { halt: observed });
-      return { finishedNormally: recorded.status === 200, halt: observed, reason: "observed_unbound" };
-    }
-  } else if (observed === "unbound_app_pr" || observed === "unbound_app_ref") {
+  if (observed === "unbound_app_pr" || observed === "unbound_app_ref") {
     // Recorded before anything else, naming its pull request or branch; the
     // round goes on, since the observer only reads and records what GitHub
     // already shows, and a merge it records may be what explains the reading.

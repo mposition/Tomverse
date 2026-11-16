@@ -91,7 +91,6 @@ async function publishOne(candidate: AmuxV22KeptResultCandidate, patch: Patch): 
       publicationEnabled: amuxV22KeptResultPublicationEnabled() && v22PublishPreflightEligible({
         policyVersion: ENGINEERING_AGENT_POLICY_VERSION, patchPresent: true,
         publicationEnabled: amuxV22EngineeringPublicationEnabled(process.env[AMUX_V22_ENGINEERING_PUBLICATION_ENV]) }),
-      legacy: false,
       orchestratorHalted: (await findOpenAmuxOrchestratorHalt(tx)) !== null,
       claimAllowed: switches.claimAllowed,
       publishAllowed: switches.publishAllowed,
@@ -158,8 +157,7 @@ async function publishOne(candidate: AmuxV22KeptResultCandidate, patch: Patch): 
  * first, each on its own so one that cannot be published never holds the
  * rest. One that waits (the agent off or frozen, AMUX halted, its card held)
  * or fails is deferred, so the next round reads the ones behind it
- * instead of the same few again. Off with ENGINEERING_AGENT_LEGACY_HALTS or
- * with v22 publication off.
+ * instead of the same few again. Off with v22 publication off.
  */
 export async function publishAmuxV22KeptResults(
   limit = AMUX_V22_KEPT_RESULT_ROUND_LIMIT,

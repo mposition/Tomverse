@@ -13,13 +13,10 @@ import {
 } from "@/lib/amux/autoPromotionCore";
 import { tickAutoPromotion } from "@/lib/amux/autoPromotionService";
 import { BoardImportError } from "@/lib/amux/boardImportCore";
-import { AMUX_V22_AUTO_PROMOTION_ENV, AMUX_V22_PROMOTIONS_PER_TICK,
-  amuxV22AutoPromotionEnabled, amuxV22PromotionFlowEnabled } from "@/lib/amux/v22AutoPromotionCore";
+import { AMUX_V22_PROMOTIONS_PER_TICK } from "@/lib/amux/v22AutoPromotionCore";
 import { tickV22AutoPromotion } from "@/lib/amux/v22AutoPromotionService";
 import { v22PromotionTickWire, v22WorkerClaimTickWire } from
   "@/lib/amux/v22TickWire";
-import { AMUX_V22_WORKER_CLAIM_ENV, amuxV22WorkerClaimEnabled } from
-  "@/lib/amux/v22WorkerClaimCore";
 import { tickV22WorkerClaim } from "@/lib/amux/v22WorkerClaimService";
 import { amuxRouteHasBudgetForMs, withAmuxRouteBudget } from "@/lib/amux/dbBoundary";
 import { sweepAmuxStalledCards } from "@/lib/amux/stalledCardSweep";
@@ -125,23 +122,12 @@ export async function POST(request: Request) {
         envValue: process.env[AUTO_PROMOTION_APPLY_ENV],
         codeLatch: AUTO_PROMOTION_CODE_LATCH,
       });
-    const v22Enabled = amuxV22AutoPromotionEnabled(
-      process.env[AMUX_V22_AUTO_PROMOTION_ENV]);
-    const claimEnabled = amuxV22WorkerClaimEnabled(
-      process.env[AMUX_V22_WORKER_CLAIM_ENV]);
-    if (!legacyEnabled && !v22Enabled && !claimEnabled) {
-      return Response.json(
-        { promoted: false, reason: "apply_disabled", expired: 0 },
-        { status: 409, headers: noStore },
-      );
-    }
-    if ((v22Enabled || claimEnabled) && identity.kind !== "admitted" &&
-        !legacyEnabled) {
+    if (identity.kind !== "admitted" && !legacyEnabled) {
       return Response.json({ promoted: false, reason: "apply_disabled", expired: 0 },
         { status: 409, headers: noStore });
     }
 
-    if (v22Enabled && identity.kind === "admitted") {
+    if (identity.kind === "admitted") {
       const stopped = await refreshScoresBeforePromotion();
       if (stopped) return stopped;
     }
@@ -156,10 +142,9 @@ export async function POST(request: Request) {
 
     async function claimAndPromote(): Promise<Response> {
     try {
-      if (claimEnabled && identity.kind === "admitted") {
+      if (identity.kind === "admitted") {
         const result = await tickV22WorkerClaim();
-        if (result.claimed || result.reason === "outcome_unknown" ||
-            (!v22Enabled && !legacyEnabled)) {
+        if (result.claimed || result.reason === "outcome_unknown") {
           return Response.json(v22WorkerClaimTickWire(result), {
             status: result.claimed ? 200 : autoTickHttpStatus(result.reason),
             headers: noStore,
@@ -171,7 +156,7 @@ export async function POST(request: Request) {
       // first, so no promotion write ever turns a later transient claim error
       // into an unknown outcome (review r-20261114-073121-cf0260). An unknown
       // promotion still stops the tick as before.
-      if (amuxV22PromotionFlowEnabled() && v22Enabled && identity.kind === "admitted") {
+      if (identity.kind === "admitted") {
         let last: Awaited<ReturnType<typeof tickV22AutoPromotion>> | null = null;
         for (let index = 0; index < AMUX_V22_PROMOTIONS_PER_TICK; index += 1) {
           const promoted = await tickV22AutoPromotion();
@@ -186,16 +171,6 @@ export async function POST(request: Request) {
         if (last && (last.promoted || !legacyEnabled)) {
           return Response.json(v22PromotionTickWire(last), {
             status: last.promoted ? 200 : autoTickHttpStatus(last.reason), headers: noStore });
-        }
-      }
-      if (v22Enabled && identity.kind === "admitted" && !amuxV22PromotionFlowEnabled()) {
-        const result = await tickV22AutoPromotion();
-        if (result.promoted || (!result.promoted && result.reason === "outcome_unknown") ||
-            !legacyEnabled) {
-          return Response.json(v22PromotionTickWire(result), {
-            status: result.promoted ? 200 : autoTickHttpStatus(result.reason),
-            headers: noStore,
-          });
         }
       }
       const result = await tickAutoPromotion();

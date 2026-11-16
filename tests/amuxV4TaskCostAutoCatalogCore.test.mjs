@@ -233,7 +233,7 @@ test("a chore worker's v22 implement profile prices routine implement Tasks (v52
   const derived = deriveAmuxWorkerCatalog({ registrations,
     capabilities: new Map([["claude-chore", profile("claude-haiku-4-5")],
       ["codex-chore", profile("gpt-6-luna")]]),
-    latches: new Map(), multiProvider: true });
+    latches: new Map() });
   assert.deepEqual(derived.v22.map((entry) => [entry.worker_name, entry.routing_roles]), [
     ["claude-chore", ["implement", "investigate"]],
     ["codex-chore", ["implement", "investigate"]]]);

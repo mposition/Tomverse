@@ -7,7 +7,7 @@
 //   node scripts/amux-cli-models-refresh.mjs             # send each list
 //
 // Sending needs TOMVERSE_INTERNAL_URL and the CLI monitor's credential
-// (TOMVERSE_AMUX_CLI_MONITOR=1, TOMVERSE_AMUX_CLI_MONITOR_SECRET). No list,
+// (TOMVERSE_AMUX_CLI_MONITOR=enabled, TOMVERSE_AMUX_CLI_MONITOR_SECRET). No list,
 // URL or credential enters the logs; a CLI that is missing is skipped.
 
 import { execFile } from "node:child_process";
@@ -18,6 +18,7 @@ import { promisify } from "node:util";
 
 import { readAntigravityModelList, readCodexModelsCache, readCopilotHelpConfig, readCursorModelList } from
   "../lib/amux/cliModelListReader.mjs";
+import { agentOfficeCliMonitorSwitchOn } from "../lib/agentOfficeCliMonitorCore.ts";
 
 const run = promisify(execFile);
 const flags = process.argv.slice(2);
@@ -38,7 +39,7 @@ const sources = {
 };
 
 function destination() {
-  if (process.env.TOMVERSE_AMUX_CLI_MONITOR !== "1" || (process.env.TOMVERSE_AMUX_CLI_MONITOR_SECRET ?? "").length < 32) {
+  if (!agentOfficeCliMonitorSwitchOn(process.env.TOMVERSE_AMUX_CLI_MONITOR) || (process.env.TOMVERSE_AMUX_CLI_MONITOR_SECRET ?? "").length < 32) {
     throw new Error("credential_missing");
   }
   const url = new URL(process.env.TOMVERSE_INTERNAL_URL ?? "");

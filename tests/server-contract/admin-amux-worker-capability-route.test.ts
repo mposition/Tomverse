@@ -5,8 +5,7 @@ import { pathToFileURL } from "node:url";
 import { mock, test } from "node:test";
 
 // Orchestration policy version 35, section 2: the worker capability route. Reading is open to any administrator. A change needs the owner role,
-// the stage's code latch and a recent step-up, all checked before the body is
-// read; with the latch off (as R1 ships) nothing reaches the store. The store,
+// a recent step-up, all checked before the body is read. The store,
 // the reader and the DB boundary are faked; the boundary around the real store
 // is the agents lane's (tests/integration/amux-worker-capability.db.test.ts).
 
@@ -30,7 +29,6 @@ type World = {
   session: { user: { id: string; authenticatedAt?: string } } | null;
   admin: boolean;
   role: string | null;
-  latch: boolean;
   boundaries: string[];
   changes: unknown[];
   reads: number;
@@ -45,7 +43,6 @@ const reset = (changes: Partial<World> = {}) => {
     session: { user: { id: "owner-1", authenticatedAt: new Date().toISOString() } },
     admin: true,
     role: "owner",
-    latch: true,
     boundaries: [],
     changes: [],
     reads: 0,
@@ -58,7 +55,7 @@ const reset = (changes: Partial<World> = {}) => {
 };
 reset();
 
-const VIEW = { writesLatch: false, catalogReadable: true, rows: [] };
+const VIEW = { catalogReadable: true, rows: [] };
 
 type Route = {
   GET: (request: Request) => Promise<Response>;
@@ -108,9 +105,6 @@ async function loadRoute(): Promise<Route> {
           return work({ fake: "tx" });
         },
       },
-    });
-    mock.module(mod("lib/amux/workerCapabilityCore.ts"), {
-      namedExports: { amuxWorkerCapabilityWritesOpen: () => world.latch },
     });
     mock.module(mod("lib/amux/workerCapabilityAdminRead.ts"), {
       namedExports: {
@@ -172,8 +166,8 @@ test("any administrator reads the capabilities; nobody else learns they exist", 
   assert.equal((await GET(get())).status, 404);
   assert.equal(world.reads, 0);
 
-  // No owner role, no latch and no step-up are needed to read.
-  reset({ role: "readonly", latch: false, ...stale() });
+  // No owner role and no step-up are needed to read.
+  reset({ role: "readonly", ...stale() });
   const read = await GET(get());
   assert.equal(read.status, 200);
   assert.deepEqual(await read.json(), VIEW);
@@ -185,7 +179,7 @@ test("any administrator reads the capabilities; nobody else learns they exist", 
   assert.deepEqual(await busy.json(), { error: "capabilities_unavailable" });
 });
 
-test("only the owner reaches a change; with the code latch off nothing does, before any step-up or body", async () => {
+test("only the owner reaches a change, after a recent step-up and before the body", async () => {
   const { POST } = await loadRoute();
 
   reset({ session: null });
@@ -197,15 +191,7 @@ test("only the owner reaches a change; with the code latch off nothing does, bef
     assert.equal((await POST(post(VALID))).status, 403, String(role));
   }
 
-  // R2a ships with the latch off: 409, even with a stale step-up and a bad body.
-  reset({ latch: false, ...stale() });
-  const off = await POST(post({ anything: true }));
-  assert.equal(off.status, 409);
-  assert.deepEqual(await off.json(), { error: "capability_writes_off" });
-  assert.deepEqual(world.boundaries, []);
-  assert.deepEqual(world.changes, []);
-
-  // With the latch on, a stale step-up is 428 with the way back, before the body.
+  // A stale step-up is 428 with the way back, before the body.
   reset(stale());
   const staleAnswer = await POST(post({ workerName: "x", extra: 1 }));
   assert.equal(staleAnswer.status, 428);

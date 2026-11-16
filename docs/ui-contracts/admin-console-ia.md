@@ -433,10 +433,10 @@ request and writes nothing; Assignment reads "Read only" to a role without
 
 Promotion's **Auto-promotion** section remains the legacy v8 grant, halt and
 resume surface. The separate owner-only v22 control lives in **Operations
-settings › Automatic admission**. Its chip reads only the v22 server switch;
-the legacy chip reads only the v8 switch, so enabling either path never labels
-the other as open. The v22 control reads actual graduation counts separately
-from the approved bootstrap exception, requires explicit confirmation and
+settings › Automatic admission**. It carries no chip (its server switch was
+removed 2026-11-16; the owner's activation row is the only setting) and the
+legacy chip reads only the v8 switch. The v22 control reads the measured
+graduation counts, requires explicit confirmation and
 recent authentication for writes, and preserves the read-only Cards surface.
 Unknown writes are not retried. The first-tab placement means the canonical
 step-up callback `/admin/amux-settings` returns an owner to this control, while

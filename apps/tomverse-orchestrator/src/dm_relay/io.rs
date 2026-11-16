@@ -21,8 +21,7 @@ use super::flow::{
 use super::owed::{held_instances, held_sessions, settle_all, OwedRecord};
 use super::wire::{BrokerExchange, HttpAnswer, DM_RESULT_LINE_MAX_BYTES};
 
-/// Off unless exactly `enabled`. The app's `TOMVERSE_AMUX_DM_ROUTING` is a
-/// separate switch; with either off nothing is routed.
+/// Off unless exactly `enabled`.
 pub const DM_RELAY_ENV: &str = "TOMVERSE_AMUX_DM_RELAY";
 
 /// The token the local AMUX's relay routes require (`x-amux-dm-relay-token`).

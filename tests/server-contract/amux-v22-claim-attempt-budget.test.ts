@@ -148,8 +148,6 @@ mock.module(mod("lib/amux/v4TaskReadyService.ts"), { namedExports: {
 const service = import(mod("lib/amux/v22WorkerClaimService.ts"));
 
 test("a Task with its attempts spent is skipped and the next Task is assigned", async () => {
-  const previous = process.env.TOMVERSE_AMUX_V22_WORKER_CLAIM;
-  process.env.TOMVERSE_AMUX_V22_WORKER_CLAIM = "enabled";
   try {
     const result = await (await service).tickV22WorkerClaim();
     assert.equal(result.claimed, true);
@@ -188,7 +186,6 @@ test("a Task with its attempts spent is skipped and the next Task is assigned", 
     assert.equal(logged[0].taskId, freshTask);
     assert.equal(logged[0].projectedMicroUsd, overrun.projectedMicroUsd);
   } finally {
-    if (previous === undefined) delete process.env.TOMVERSE_AMUX_V22_WORKER_CLAIM;
-    else process.env.TOMVERSE_AMUX_V22_WORKER_CLAIM = previous;
+    // nothing to restore
   }
 });

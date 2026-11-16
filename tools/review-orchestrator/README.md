@@ -34,7 +34,7 @@
   (바빠도 기다립니다) 피하고, 없으면 원래대로 배정하므로 검토가 불가능해지거나 멈추지
   않습니다. 서버는 capabilities에 `reviewer-avoid-vendors-v1`을 보이고, 오래된 서버는 이
   필드를 무시합니다. AMUX는 같은 vendor가 한 Task의 최근 두 검토를 연달아 거절하면 이
-  선호를 보냅니다(`TOMVERSE_AMUX_V52_REVIEW_AVOID_VENDORS`, 기본 꺼짐).
+  선호를 보냅니다(늘 보냅니다).
 
 ## 배정 규칙
 
@@ -639,7 +639,7 @@ workflow는 그 커밋을 직접 merge한 뒤 다음을 검사하고 `auto-fix(c
   베이스 하나로는 충돌하고 git이 합친 베이스로는 충돌하지 않습니다. 이때도 모델이 남는 변경의 필요성을 확인한 뒤 빈 해결안을 보내며,
   workflow가 자기가 만든 merge를 그대로 커밋합니다. 그 뒤로는 베이스가 하나가 되어 GitHub도 충돌로 보지 않습니다.
   head에 base가 이미 들어 있어 merge할 것이 없으면 전처럼 `no_change`입니다.
-켜는 방법(둘 다 필요): 이 서버의 `/etc/pr-ci-auto-fix/read.env`에 `PR_CI_AUTO_FIX_CONFLICTS=on`,
+켜는 방법(둘 다 필요): 이 서버의 `/etc/pr-ci-auto-fix/read.env`에 `PR_CI_AUTO_FIX_CONFLICTS=enabled`(기존 `on`도 같은 뜻),
 그리고 GitHub 저장소 변수 `PR_AUTO_FIX_CONFLICTS_ENABLED=true`. workflow는 main의 것이 돌므로 이 변경이
 main에 들어간 뒤에 켭니다. base 쪽에서 workflow 파일이 바뀐 merge는 `GH_AUTOMATION_PAT`에
 workflow 권한이 없으면 push가 거절됩니다.
@@ -652,7 +652,7 @@ head)이면 ledger를 `pushed`로, 다른 무엇이 브랜치를 옮겼으면 `s
 
 **marketing admission manifest 재생성(기본 꺼짐, 켜려면 운영자 승인).** 모델은 명령을 실행할 수 없어
 `config/marketing-admission-code-manifest.json`의 digest를 만들 수 없습니다. 목록의 파일을 고친 PR은 그래서 `not_found`로 멈췄습니다(#3328).
-`read.env`에 `PR_CI_AUTO_FIX_REGENERATE=on`을 두면 모델이 끝난 뒤 이 서버의 코드가 작업 checkout의 파일을 읽어 manifest를 다시 씁니다. 브랜치의 코드는 실행하지 않습니다.
+`read.env`에 `PR_CI_AUTO_FIX_REGENERATE=enabled`(기존 `on`도 같은 뜻)을 두면 모델이 끝난 뒤 이 서버의 코드가 작업 checkout의 파일을 읽어 manifest를 다시 씁니다. 브랜치의 코드는 실행하지 않습니다.
 - 파일 내용만 바뀐 경우에만 씁니다. 목록에 파일이 들어오거나 빠지면(`paths_changed`) 스스로 나가는 게시를 결정하는 코드가 바뀐 것이므로 그대로 두어 사람이 읽게 합니다.
 - 스키마나 root가 다른 manifest(`other_schema`), 찾지 못한 import(`unresolved`)도 쓰지 않습니다. checkout 밖이나 일반 파일이 아닌 곳을 가리키는 import는 읽기 전에 `unresolved`가 됩니다.
 - 결과는 ledger의 `manifest`와 서버 로그에 남습니다. 병합은 여전히 운영자가 하고, 그 diff에 manifest 변경이 보입니다.
@@ -668,7 +668,7 @@ head)이면 ledger를 `pushed`로, 다른 무엇이 브랜치를 옮겼으면 `s
   쓰면 자동 수정 커밋은 지워집니다.
 - merge lane은 `dependabot/**`를 병합하지 않으므로, 수정된 Dependabot PR의 병합은 사람이 합니다.
 - **패키지 설치(기본 꺼짐).** 메이저 업데이트는 새 API를 봐야 고칠 수 있습니다(#2969: 모델이 v11의
-  `.d.ts`를 볼 수 없어 `not_found`). `read.env`에 `PR_CI_AUTO_FIX_INSTALL=on`을 두면 모든 head에서(2026-11-03부터,
+  `.d.ts`를 볼 수 없어 `not_found`). `read.env`에 `PR_CI_AUTO_FIX_INSTALL=enabled`(기존 `on`도 같은 뜻)을 두면 모든 head에서(2026-11-03부터,
   그 전에는 Dependabot head만) 모델을 부르기 전에 작업 checkout에 `npm ci`를 돌립니다. 설치는 다음 조건으로 돌고, 막히면 모델은 패키지 없이 돕니다.
   - 패키지 코드는 실행하지 않습니다(`--ignore-scripts`).
   - lockfile은 허용 목록으로 검사합니다. npm은 git이나 로컬 경로에서 패키지를 받을 때 `--ignore-scripts`와

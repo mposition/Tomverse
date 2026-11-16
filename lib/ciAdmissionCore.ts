@@ -38,8 +38,9 @@
  * - A draft the slots reach that is behind its base has its branch brought up
  *   to date (GitHub's update-branch: develop merged into it), once per head,
  *   so an operator never has to (owner, 2026-10-25). The new head is checked
- *   and released like any other on a later round. CI_ADMISSION_UPDATE_BRANCH=off
- *   turns this off; it needs the App's Contents write permission.
+ *   and released like any other on a later round. It needs the App's Contents
+ *   write permission. (The CI_ADMISSION_UPDATE_BRANCH switch was removed, owner
+ *   decision 2026-11-16.)
  * - A draft with a run queued or in progress is a replayed event: cancelled.
  * - Stacked pull requests (base other than develop or main), forks, and pull
  *   requests labelled ci:hold are not handled: they are not in the line
@@ -499,8 +500,6 @@ export function evaluateCiAdmission(input: {
   personReady?: ReadonlySet<number> | null;
   nowMs: number;
   shadow: boolean;
-  /** Whether a draft behind its base has its branch updated (CI_ADMISSION_UPDATE_BRANCH); on unless false. */
-  updateBranches?: boolean;
 }): CiAdmissionEvaluation {
   const { nowMs, shadow, state } = input;
   const at = new Date(nowMs).toISOString();
@@ -620,7 +619,7 @@ export function evaluateCiAdmission(input: {
     }
     if (check.behind === true && !ciAdmissionReleasesBehind(pull)) {
       const asked = updating.some((entry) => entry.number === pull.number && entry.headSha === pull.headSha);
-      const updates = input.updateBranches !== false && ciAdmissionUpdatesBranchOf(pull);
+      const updates = ciAdmissionUpdatesBranchOf(pull);
       if (updates && !asked) {
         actions.push({ kind: "update_branch", pull });
         updating.push({ number: pull.number, headSha: pull.headSha, atMs: nowMs });

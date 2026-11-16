@@ -5,7 +5,8 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
-import { amuxV22RecoveryDigest, amuxV22SafeStopEvidenceSchema } from "../lib/amux/v22TaskRecoveryCore.ts";
+import { amuxV22LegacySafeStopEnabled, amuxV22RecoveryDigest, amuxV22SafeStopEvidenceSchema,
+  amuxV22TaskRecoveryEnabled } from "../lib/amux/v22TaskRecoveryCore.ts";
 import { AMUX_V22_RECOVERY_INTENT_DIR, bindAmuxV22StopIntent,
   bindAmuxV22ReadOnlyLaunchProof,
   executeAmuxV22ReadOnlyLaunchCheck, executeAmuxV22SafeStop,
@@ -544,6 +545,24 @@ test("stale proof, changed identity and unverified restart policy fail closed", 
   assert.equal(bad.reason, "safe_stop_config_unverified");
 });
 
+test("the recovery switches read enabled, and the earlier true that production already holds", async () => {
+  for (const read of [amuxV22TaskRecoveryEnabled, amuxV22LegacySafeStopEnabled]) {
+    assert.equal(read("enabled"), true);
+    assert.equal(read("true"), true);
+    for (const value of [undefined, "", "false", "disabled", "1", " enabled", "ENABLED"])
+      assert.equal(read(value), false, String(value));
+  }
+  for (const value of ["enabled", "true"]) {
+    const result = await runAmuxV22RecoveryControllerOnce({ recoveryEnabled: value,
+      safeStopEnabled: value, internalUrl: "https://internal.test/", controllerSecret: "s".repeat(32) },
+    { platform: "linux", uid: 1000 });
+    assert.deepEqual(result, { state: "unavailable" }, `${value} passes the switch gate`);
+  }
+  assert.deepEqual(await runAmuxV22RecoveryControllerOnce({ recoveryEnabled: "disabled",
+    safeStopEnabled: "enabled", internalUrl: "https://internal.test/", controllerSecret: "s".repeat(32) },
+  { platform: "linux", uid: 0 }), { state: "disabled" });
+});
+
 test("root controller is default-off, refuses non-root, and rejects a multi-task queue without stopping", async () => {
   let fetches = 0, stops = 0;
   const config = { recoveryEnabled: "false", safeStopEnabled: "false", internalUrl: "https://internal.test/",
@@ -785,7 +804,7 @@ test("install preparation remains manual, disabled and without start/restart/ena
   assert.equal(JSON.parse(packageSource).scripts["build:amux-v22-recovery-controller"],
     "esbuild scripts/amux-v22-recovery-controller.mjs --bundle --platform=node --format=esm " +
     "--outfile=.next/recovery-controller.mjs");
-  assert.match(env, /TASK_RECOVERY_ENABLED=false/); assert.match(env, /LEGACY_SAFE_STOP_ENABLED=false/);
+  assert.match(env, /TASK_RECOVERY_ENABLED=disabled/); assert.match(env, /LEGACY_SAFE_STOP_ENABLED=disabled/);
   assert.doesNotMatch(env, /DATABASE_URL|GITHUB_TOKEN|AMUX_SYNC_SECRET|API_KEY/);
 });
 

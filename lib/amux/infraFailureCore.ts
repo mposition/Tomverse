@@ -19,19 +19,11 @@
  * it is never read as zero (lib/amux/v22WorkerUsageGate.ts only stops counting
  * it against the worker).
  *
- * On unless TOMVERSE_AMUX_INFRA_FAILURE_ROUTING is `disabled`, which restores
- * the earlier behaviour: every attempt counts, no worker is quarantined.
+ * Always on (the TOMVERSE_AMUX_INFRA_FAILURE_ROUTING kill switch that restored
+ * the earlier behaviour was removed, owner decision 2026-11-16).
  *
  * Pure and dependency-free.
  */
-
-export const AMUX_INFRA_FAILURE_ROUTING_ENV = "TOMVERSE_AMUX_INFRA_FAILURE_ROUTING";
-
-export function amuxInfraFailureRoutingEnabled(
-  value: string | undefined = process.env[AMUX_INFRA_FAILURE_ROUTING_ENV],
-): boolean {
-  return value?.trim() !== "disabled";
-}
 
 export const AMUX_INFRA_FAILURE_KINDS = [
   "no_result",
@@ -146,7 +138,6 @@ export function classifyAmuxSidecarFailure(report: AmuxSidecarFailureReport):
  * partial one is a run whose usage was never reported.
  */
 export function amuxV22InfraFailureKind(input: {
-  enabled: boolean;
   outcome: "succeeded" | "failed" | "blocked";
   budgetBound: boolean;
   apiReceipt: boolean;
@@ -157,7 +148,7 @@ export function amuxV22InfraFailureKind(input: {
   usageEventCount: number;
   failure?: AmuxSidecarFailureReport | null;
 }): AmuxInfraFailureKind | null {
-  if (!input.enabled || input.outcome !== "blocked" || input.budgetBound ||
+  if (input.outcome !== "blocked" || input.budgetBound ||
       input.apiReceipt || input.receiptsComplete || input.knownCliFailure ||
       input.resultStored || input.patchStored) return null;
   if (input.failure) {

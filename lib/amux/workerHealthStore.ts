@@ -3,7 +3,6 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 
-import { amuxInfraFailureRoutingEnabled } from "./infraFailureCore.ts";
 import {
   AMUX_WORKER_CIRCUIT_HISTORY,
   type AmuxWorkerCircuit,
@@ -46,10 +45,8 @@ async function latestUsage(db: Db, names: readonly string[]) {
 
 /** Every named worker's quarantine state; all workers with a runtime when `names` is null. */
 export async function readAmuxWorkerCircuits(db: Db = prisma,
-  names: readonly string[] | null = null, now = new Date(),
-  enabled = amuxInfraFailureRoutingEnabled()): Promise<Map<string, AmuxWorkerCircuit>> {
+  names: readonly string[] | null = null, now = new Date()): Promise<Map<string, AmuxWorkerCircuit>> {
   const result = new Map<string, AmuxWorkerCircuit>();
-  if (!enabled) return result;
   const workers = await workerNames(db, names);
   if (workers.length === 0) return result;
   const [attempts, usage] = await Promise.all([
@@ -72,7 +69,7 @@ export async function readAmuxWorkerCircuits(db: Db = prisma,
   }
   for (const worker of workers) {
     const reading = usage.get(worker);
-    result.set(worker, amuxWorkerCircuit({ enabled, recent: recentByWorker.get(worker) ?? [],
+    result.set(worker, amuxWorkerCircuit({ recent: recentByWorker.get(worker) ?? [],
       usageObservedAtMs: reading && !reading.exhausted ? reading.observedAt.getTime() : null,
       nowMs: now.getTime() }));
   }

@@ -13,10 +13,6 @@ import { AmuxCliUsageLedgerError, recordAmuxCliUsage } from
 import { purgeExpiredAmuxCliUsage } from "@/lib/amux/cliUsageRetention";
 import { prisma } from "@/lib/prisma";
 
-// The environment switch remains off by default. Deployment and activation
-// require separate approval after Ubuntu receipt/read-back verification.
-const WRITE_CODE_LATCH = true;
-const WRITE_ENV = "TOMVERSE_AMUX_CLI_USAGE_WRITE";
 const id = z.string().regex(/^[A-Za-z0-9:_-]{1,128}$/);
 
 function ideaAuthorized(request: Request): boolean {
@@ -31,8 +27,6 @@ function authorized(request: Request): boolean {
 
 export async function POST(request: Request): Promise<Response> {
   if (!authorized(request)) return amuxJsonNoStore({ error: "Unauthorized" }, 401);
-  if (!WRITE_CODE_LATCH || process.env[WRITE_ENV] !== "enabled") return amuxJsonNoStore(
-    { available: false, reason: "cli_usage_write_disabled" }, 409);
   if (request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !==
       "application/json") return amuxJsonNoStore({ error: "Invalid content type." }, 415);
   let body: z.infer<typeof amuxCliUsageReceiptSchema>;

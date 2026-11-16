@@ -11,8 +11,7 @@
 //! machine, `wire` its pure values, `io` the sockets and the loop.
 //!
 //! Off by default: nothing here runs unless `TOMVERSE_AMUX_DM_RELAY` is
-//! exactly `enabled` (and the app's own `TOMVERSE_AMUX_DM_ROUTING` is a
-//! separate switch, off on develop). The relay runs in the bridge process
+//! exactly `enabled`. The relay runs in the bridge process
 //! (the `tomverse-bridge` service) as one task beside the worker loop and
 //! never halts that loop. Nothing stops the relay itself: a write whose
 //! answer was lost or refused for now is owed and sent again by its key on

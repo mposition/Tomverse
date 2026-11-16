@@ -1,12 +1,10 @@
 # AMUX v52 review launcher staging 준비
 
 v52의 검토 호출은 worker의 모델이나 sidecar가 아니라 worker별 v22 bridge의
-결정적 코드가 수행한다. `AMUX_EXECUTION_GRADE_CODE_LATCH`는 true다.
-래치가 켜지면 운영 스위치와 별개로 비용 catalog 승인 때 route와 worker의
-단일 등급 일치 검사가 적용된다. 실행의 같은 등급 배정·contract 경로 검사·
-검토 서버 호출은 `TOMVERSE_AMUX_EXECUTION_GRADE`가 정확히 `enabled`일 때만
-열린다. 운영자가 staging에서 스위치를 켜기 전에는 실행 경로가 닫혀 있다.
-이 문서는 배치 준비이며 스위치 활성화 승인이 아니다.
+결정적 코드가 수행한다. 등급 검사의 코드 래치와 운영 스위치(`TOMVERSE_AMUX_EXECUTION_GRADE`)는
+2026-11-16에 없앴다. 비용 catalog 승인 때 route와 worker의 단일 등급 일치 검사,
+실행의 같은 등급 배정·contract 경로 검사·검토 서버 호출은 늘 적용된다.
+이 문서는 배치 준비다.
 
 worker별 bridge system unit의 전용 계정에 다음을 준비한다.
 
@@ -59,8 +57,8 @@ bridge와 helper다. 앱은 JSON 문서와 이전 helper의 줄 텍스트를 모
 같은 reviewer 공급사가 한 Task의 최근 두 검토를 연달아 거절하면 앱은 다음 시도의 delivery에
 `review_avoid_vendors`를 싣고, bridge는 helper 입력의 `avoidReviewerVendors`로, helper는 review client에
 `--avoid-vendor`로 넘긴다. bridge의 delivery profile은 모르는 필드를 거절하므로 앱은
-`TOMVERSE_AMUX_V52_REVIEW_AVOID_VENDORS=enabled`일 때만 이 필드를 보낸다(기본 꺼짐). 새 bridge와 helper,
-review client·서버를 모두 배치한 뒤에만 켠다.
+이 필드를 늘 보낸다(`TOMVERSE_AMUX_V52_REVIEW_AVOID_VENDORS` 스위치는 2026-11-16에 없앴다). 새 bridge와 helper,
+review client·서버가 배치돼 있어야 한다.
 
 검증할 때는 staging의 한 v4 Task에서 Task 등록, 같은 등급 배정, 정상 종료 후
 로컬 commit과 검토 job, 앱의 `amux.review.recorded` 감사, 판정에 따른 상태 전이,

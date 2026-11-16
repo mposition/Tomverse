@@ -13,8 +13,7 @@
  * - the worker quarantine (lib/amux/workerCircuitCore.ts);
  * - the usage reading: an Anthropic route needs one no older than an hour
  *   (lib/amux/planningCore.ts evaluateAmuxQuotaTelemetry); another
- *   provider's exhausted reading holds it only while
- *   TOMVERSE_AMUX_V22_NON_CLAUDE_QUOTA_GATE is enabled;
+ *   provider's fresh exhausted reading holds it too;
  * - the box health signals the bridge forwards (login keepalive, sign-in
  *   stage, sidecar), the newest per source.
  *
@@ -73,14 +72,13 @@ export type AmuxWorkerHealthHold =
   | "usage_exhausted";
 
 export function amuxWorkerHealthHold(view: AmuxWorkerHealthView | null | undefined,
-  input: { provider: string; nonClaudeQuotaGate: boolean }): AmuxWorkerHealthHold | null {
+  input: { provider: string }): AmuxWorkerHealthHold | null {
   if (!view) return null;
   if (view.circuit.state === "open") return "infra_quarantined";
   const anthropic = input.provider.trim().toLowerCase() === "anthropic" ||
     input.provider.trim().toLowerCase() === "claude";
   if (anthropic && view.usage.state !== "fresh") return "usage_unobserved";
-  if ((anthropic || input.nonClaudeQuotaGate) && view.usage.state === "fresh" &&
-      view.usage.exhausted) return "usage_exhausted";
+  if (view.usage.state === "fresh" && view.usage.exhausted) return "usage_exhausted";
   return null;
 }
 

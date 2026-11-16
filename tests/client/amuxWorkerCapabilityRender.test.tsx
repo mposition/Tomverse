@@ -74,7 +74,7 @@ const REGISTRY = AMUX_WORKER_REGISTRY_V31_SEED.map((entry) => ({
   desiredState: entry.desiredState,
   revision: 1,
 }));
-const VIEW = buildAmuxWorkerCapabilityAdminView({ registrations: REGISTRY, current: new Map(), writesLatch: true });
+const VIEW = buildAmuxWorkerCapabilityAdminView({ registrations: REGISTRY, current: new Map() });
 
 const FAILURE = { kind: "failure", message: "failed" } as unknown as AdminApiFailure;
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -132,7 +132,7 @@ for (const [label, answer] of [
 }
 
 test("a refusal by the ceiling rule, the latch or a stale revision stops on that worker", async () => {
-  for (const code of ["tag_above_ceiling", "capability_writes_off", "stale_revision"]) {
+  for (const code of ["tag_above_ceiling", "stale_revision"]) {
     const { posted, last } = await runWith([() => Promise.resolve(json(409, { error: code }))], VIEW);
     assert.equal(posted.length, 1, code);
     assert.equal(last("notice"), "stopped", code);
@@ -158,7 +158,7 @@ const CATALOG = buildAmuxCliModelCatalogAdminView({
 const renderEditor = (form: AmuxWorkerCapabilityForm, row = IMPL_ROW, cliModels: typeof CATALOG | null = CATALOG) => {
   const saved: AmuxWorkerCapabilityForm[] = [];
   const tree = AmuxWorkerCapabilityEditor({
-    m, row, form, busy: false, writesLatch: true, cliModels,
+    m, row, form, busy: false, cliModels,
     onChange: () => {}, onCancel: () => {}, onSave: (sent) => saved.push(sent),
   });
   return { tree, saved };
@@ -203,7 +203,6 @@ test("an edit is one change against the recorded revision, receipt-checked and r
   const recorded = buildAmuxWorkerCapabilityAdminView({
     registrations: REGISTRY,
     current: new Map([["codex-impl", { revision: 3, capability: { model: null, routingTags: ["implementation"], toolCapabilities: [], v22: null }, changedAt: "2026-10-13T00:00:00.000Z" }]]),
-    writesLatch: true,
   });
   const row = recorded.rows.find((candidate) => candidate.workerName === "codex-impl")!;
   const form = { ...amuxWorkerCapabilityFormFromRow(row), model: "gpt-6.1-sol", oneShot: true };
@@ -265,12 +264,12 @@ const renderLink = (
   cliModels: ReturnType<typeof cursorCatalog>,
   cliModel: string,
   choice: string | null = null,
-  extra: Partial<{ busy: boolean; writesLatch: boolean }> = {},
+  extra: Partial<{ busy: boolean }> = {},
 ) => {
   const saved: AmuxCliModelLinkChange[] = [];
   const tree = AmuxCliModelLinkForm({
     m, cliModels, cli: "cursor", cliModel, choice,
-    busy: extra.busy ?? false, writesLatch: extra.writesLatch ?? true,
+    busy: extra.busy ?? false,
     onChoose: () => {}, onSave: (change) => saved.push(change),
   });
   const submit = () => {
@@ -306,8 +305,8 @@ test("linking grok-4.7-high to Grok 4.7 sends one change, and once recorded the 
   assert.equal(byTestId(tree, "amux-cli-model-link-save")[0]!.disabled, false);
   submit();
   assert.deepEqual(saved, [{ cli: "cursor", cliModel: "grok-4.7-high", pricedModelId: "grok-4-7" }]);
-  // Held while busy or with writes off.
-  for (const extra of [{ busy: true }, { writesLatch: false }]) {
+  // Held while busy.
+  for (const extra of [{ busy: true }]) {
     const held = renderLink(cursorCatalog(), "grok-4.7-high", "grok-4-7", extra);
     assert.equal(byTestId(held.tree, "amux-cli-model-link-save")[0]!.disabled, true);
     held.submit();
@@ -391,7 +390,7 @@ for (const [label, answer] of [
 }
 
 test("a refused link says why; a stale step-up or a failed write is a failure that wrote nothing", async () => {
-  for (const code of ["model_not_found", "no_change", "capability_writes_off"] as const) {
+  for (const code of ["model_not_found", "no_change"] as const) {
     const { saved, posted, last } = await runLink(() => Promise.resolve(json(409, { error: code })));
     assert.equal(saved, false, code);
     assert.equal(posted.length, 1, code);

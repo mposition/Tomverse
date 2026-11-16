@@ -18,28 +18,19 @@
  * The attempt budget still bounds every repeat, and a card that spends it is
  * blocked as before. A paid API route keeps every gate.
  *
- * On unless TOMVERSE_AMUX_V22_READ_BACK_PROCEED=disabled (owner direction
- * 2026-11-15: "내부 개발용 Flow입니다. 제한을 줄 이유가 없습니다."; it was off
- * unless `enabled` from 2026-11-14).
+ * Always on (owner direction 2026-11-15: "내부 개발용 Flow입니다. 제한을 줄 이유가
+ * 없습니다."); its switch was removed 2026-11-16.
  */
-export const AMUX_V22_READ_BACK_PROCEED_ENV = "TOMVERSE_AMUX_V22_READ_BACK_PROCEED";
-
-export function amuxV22ReadBackProceedEnabled(
-  value: string | undefined = process.env[AMUX_V22_READ_BACK_PROCEED_ENV],
-): boolean {
-  return value?.trim() !== "disabled";
-}
 
 /** A CLI run that ended with no complete usage receipt, retried in budget. */
 export const AMUX_V22_CLI_USAGE_UNREPORTED_REASON = "cli_usage_unreported";
 /** A CLI run whose lease expired, retried in budget. */
 export const AMUX_V22_LEASE_EXPIRED_RETRY_REASON = "lease_expired_retry";
 
-export const AMUX_EXECUTION_DEFAULT_LEASE_MS = 90_000;
 export const AMUX_EXECUTION_READ_BACK_LEASE_MS = 180_000;
 
-export function amuxExecutionLeaseMs(enabled = amuxV22ReadBackProceedEnabled()): number {
-  return enabled ? AMUX_EXECUTION_READ_BACK_LEASE_MS : AMUX_EXECUTION_DEFAULT_LEASE_MS;
+export function amuxExecutionLeaseMs(): number {
+  return AMUX_EXECUTION_READ_BACK_LEASE_MS;
 }
 
 /**
@@ -48,9 +39,8 @@ export function amuxExecutionLeaseMs(enabled = amuxV22ReadBackProceedEnabled()):
  * execution receipt; every other v22 route is a subscription CLI.
  */
 export function amuxV22CliUsageRecordOnly(input: {
-  enabled: boolean;
   budgetBound: boolean;
   apiReceipt: boolean;
 }): boolean {
-  return input.enabled && !input.budgetBound && !input.apiReceipt;
+  return !input.budgetBound && !input.apiReceipt;
 }

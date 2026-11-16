@@ -8,8 +8,7 @@ import { AMUX_V22_WORKER_CLAIM_AUDIT_ACTOR } from
   "@/lib/adminAuditSystemActors";
 import { prisma } from "@/lib/prisma";
 import { BoardImportError } from "./boardImportCore.ts";
-import { AMUX_EXECUTION_GRADE_ENV,
-  amuxExecutionGradeRoutingEnabled, amuxWorkerMatchesExecutionGrade,
+import { amuxWorkerMatchesExecutionGrade,
   isAmuxV52TaskConfirmation } from "./executionGradeCore.ts";
 import { type AmuxOrchestratorReceiptRecorder, amuxRouteHasBudgetForMs } from "./dbBoundary.ts";
 import { AUTO_TICK_TRANSACTION_MAX_MS } from "./autoPromotionCore.ts";
@@ -49,8 +48,8 @@ import { evaluateAmuxV4TaskReadyInTransaction,
   loadAmuxV4TaskReadyContext } from "./v4TaskReadyService.ts";
 import { amuxV22ClaimCapacity, amuxV22ExecutionRole, amuxV22RequiredTool,
   amuxV22TaskRoleSupported, amuxV22OneShotRouteSupported, amuxV22Provider,
-  amuxV22ResumeRoutes, amuxV22WorkerClaimEnabled, chooseAmuxV22WorkerRoute,
-  AMUX_V22_WORKER_CLAIM_ENV, type AmuxV22ClaimLane } from
+  amuxV22ResumeRoutes, chooseAmuxV22WorkerRoute,
+  type AmuxV22ClaimLane } from
   "./v22WorkerClaimCore.ts";
 
 type Candidate = { id: string };
@@ -278,8 +277,7 @@ async function claimCandidate(taskId: string, assignmentId: string,
       const sourceGrade = sourceApprovedCost && typeof sourceApprovedCost === "object" &&
         !Array.isArray(sourceApprovedCost) && "grade" in sourceApprovedCost ?
         sourceApprovedCost.grade : null;
-      const exactGradeRouting = amuxExecutionGradeRoutingEnabled(
-        process.env[AMUX_EXECUTION_GRADE_ENV]) &&
+      const exactGradeRouting =
         isAmuxV52TaskConfirmation(snapshot, sourceGrade) &&
         approvedCost !== null;
       if (exactGradeRouting &&
@@ -366,9 +364,8 @@ async function claimCandidate(taskId: string, assignmentId: string,
           return apiModelAccessCurrent ? null : "api_model_access_stale";
         const quota = telemetry.get(route.workerName);
         // Another provider's limit shows up as a failed attempt, not a
-        // blocked claim: its reading reaches this check only while
-        // TOMVERSE_AMUX_V22_NON_CLAUDE_QUOTA_GATE is enabled (telemetry.ts),
-        // and then only a fresh exhausted one holds the route.
+        // blocked claim: its reading reaches this check from telemetry.ts,
+        // and only a fresh exhausted one holds the route.
         if (amuxV22Provider(route.provider) !== "anthropic")
           return quota?.scoring.provider_exhausted ? "quota_exhausted" : null;
         // An Anthropic route needs a fresh reading: a sign-in whose usage
@@ -596,9 +593,6 @@ const SKIPPED_CODES = new Set(["not_unassigned_todo", "task_not_ready",
  * of log names how many were made and why the others were passed over.
  */
 export async function tickV22WorkerClaim(): Promise<ClaimTickResult> {
-  if (!amuxV22WorkerClaimEnabled(process.env[AMUX_V22_WORKER_CLAIM_ENV])) {
-    return { claimed: false as const, reason: "apply_disabled" as const };
-  }
   const rows = await prisma.$transaction((tx) => candidates(tx));
   // Read once per tick, before any claim: which workers wait out a quarantine
   // after repeated infrastructure failures (owner decision 2026-11-15). A

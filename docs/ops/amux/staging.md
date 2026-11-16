@@ -38,6 +38,5 @@ pre-deploy/start 명령의 실행 로그가 없었다. 재배포 성공만으로
 - 실패와 rollback 절차: `recovery.md`
 
 현재 source가 저장소에 존재하거나 CI가 green이라는 사실만으로 activation을
-승인하지 않는다. 특히 `TOMVERSE_AMUX_ENABLED`, `TOMVERSE_AMUX_EXECUTE`,
-`TOMVERSE_AMUX_EXECUTION_API_ENABLED`는 명시적인 staging 단계와 승인 없이
-켜지 않는다.
+승인하지 않는다. 특히 `TOMVERSE_AMUX_ENABLED`와 `TOMVERSE_AMUX_EXECUTE`는 명시적인 staging 단계와
+승인 없이 켜지 않는다. (`TOMVERSE_AMUX_EXECUTION_API_ENABLED`는 2026-11-16에 없앴다. 실행 API는 늘 열려 있다.)

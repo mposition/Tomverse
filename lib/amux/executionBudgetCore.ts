@@ -1,4 +1,3 @@
-import { amuxInfraFailureRoutingEnabled } from "./infraFailureCore.ts";
 
 /**
  * No fixed number of attempts stops an ordinary card (owner direction
@@ -17,13 +16,8 @@ import { amuxInfraFailureRoutingEnabled } from "./infraFailureCore.ts";
  */
 export const AMUX_MAX_EXECUTION_ATTEMPTS = 30;
 
-/** The fixed count before 2026-11-15, restored by
- * TOMVERSE_AMUX_INFRA_FAILURE_ROUTING=disabled. */
-export const AMUX_LEGACY_MAX_EXECUTION_ATTEMPTS = 5;
-
 /** The bound a caller that names none gets. */
-export const amuxDefaultMaxAttempts = () =>
-  amuxInfraFailureRoutingEnabled() ? AMUX_MAX_EXECUTION_ATTEMPTS : AMUX_LEGACY_MAX_EXECUTION_ATTEMPTS;
+export const amuxDefaultMaxAttempts = () => AMUX_MAX_EXECUTION_ATTEMPTS;
 
 /** The same result failure this many runs in a row hands the card over. */
 export const AMUX_REPEATED_FAILURE_RUNS = 3;

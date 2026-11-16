@@ -48,10 +48,11 @@ const subject = {
   review_diff_digest: null,
 };
 
-test("approval flag is enabled by one exact value only", () => {
-  for (const value of [undefined, "", "TRUE", "1", "true ", "false"]) {
+test("approval flag is enabled by `enabled` or the earlier `true` only", () => {
+  for (const value of [undefined, "", "TRUE", "ENABLED", "1", "true ", "false", "disabled"]) {
     assert.equal(isAmuxAgentApprovalEnabled(value), false);
   }
+  assert.equal(isAmuxAgentApprovalEnabled("enabled"), true);
   assert.equal(isAmuxAgentApprovalEnabled("true"), true);
 });
 

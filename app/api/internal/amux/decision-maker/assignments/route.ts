@@ -11,7 +11,6 @@ import {
 import { assignDecisionMakerRequestWithDigestKey } from "@/lib/amux/decisionMakerBodyStore";
 import { loadDecisionMakerDigestKeyRing } from "@/lib/amux/decisionMakerDigestKeys";
 import {
-  dmInternalRoutesEnabled,
   dmReturnedRefusalStatus,
   dmRouteErrorResponse,
   dmRouteRefusal,
@@ -36,8 +35,6 @@ import { amuxJsonNoStore } from "@/lib/amux/internalRoute";
  * is in this one answer, `no-store`, and in no log line. A second assignment
  * is refused (`already_assigned`), so an answer that was lost is not handed
  * out again: the question stays with the operator.
- *
- * Closed until the operator sets `TOMVERSE_AMUX_DM_ROUTING=enabled`.
  */
 
 const MAX_BODY_BYTES = 1_024;
@@ -52,7 +49,6 @@ export async function POST(request: Request) {
   if (!isAmuxSyncAuthorized(request)) {
     return amuxJsonNoStore({ error: "Unauthorized" }, 401);
   }
-  if (!dmInternalRoutesEnabled()) return refused(409, "dm_routing_disabled");
 
   return withAmuxRouteBudget(async () => {
     try {

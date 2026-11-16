@@ -62,40 +62,25 @@ export const AMUX_V52_REVIEW_REJECTED_TWICE_REASON =
  * budget blocks the Task for the owner queue and the Decision Maker.
  *
  * Owner decision 2026-11-15 (an internal development flow has no reason for a
- * fixed limit): this is now on by default; TOMVERSE_AMUX_V52_REJECT_RETRY_IN_BUDGET
- * set to `disabled` brings back the old rule (a second rejection blocks).
+ * fixed limit): every rejection returns the Task to `todo`; the old rule (a
+ * second rejection blocks) and its switch are gone (2026-11-16).
  * Neither a second rejection nor an `unknown` review blocks a Task by count: an
  * unknown review runs again (the next run is reviewed anew), and a rejection
  * goes to a person or the Decision Maker, with the reason, only when the same
  * reviewer rejects for the same blocking finding again.
- */
-export const AMUX_V52_REJECT_RETRY_IN_BUDGET_ENV = "TOMVERSE_AMUX_V52_REJECT_RETRY_IN_BUDGET";
-export const amuxV52RejectRetryInBudgetEnabled = (
-  value: string | undefined = process.env[AMUX_V52_REJECT_RETRY_IN_BUDGET_ENV],
-) => value?.trim() !== "disabled";
-
-/**
+ *
  * Owner decision 2026-11-15: when the same reviewer vendor rejected a Task's
  * two newest reviews, the next review prefers another vendor. The delivery
- * names the vendors to avoid in `review_avoid_vendors`, a field only a
- * bridge built after this change reads (its profile refuses unknown fields),
- * so it is sent only when TOMVERSE_AMUX_V52_REVIEW_AVOID_VENDORS is exactly
- * `enabled`, which the operator sets once the bridge and the review launcher
- * are deployed. Default off.
- */
-export const AMUX_V52_REVIEW_AVOID_VENDORS_ENV = "TOMVERSE_AMUX_V52_REVIEW_AVOID_VENDORS";
-export const amuxV52ReviewAvoidVendorsEnabled = (
-  value: string | undefined = process.env[AMUX_V52_REVIEW_AVOID_VENDORS_ENV],
-) => value?.trim() === "enabled";
-
-/** A first rejection returns to the same grade; a second needs a person.
+ * names the vendors to avoid in `review_avoid_vendors` (always sent; the box
+ * bridge and review launcher must read it, its profile refuses unknown fields).
+ *
+ * A rejection returns to the same grade; the same finding rejected again needs a person.
  * `priorRejections` counts the Task's other rejected attempts since the
  * owner last retried a twice-rejected run (lib/amux/execution.ts), so an
  * owner retry gets one automatic return again rather than blocking on its
  * first rejection. */
 export function decideAmuxV52ReviewDisposition(
   verdict: AmuxV52ReviewVerdict, priorRejections: number,
-  rejectRetryInBudget: boolean = amuxV52RejectRetryInBudgetEnabled(),
   /** The rejection repeats the previous one (same reviewer, same blocking finding). */
   repeatedFinding: boolean = false,
 ): { status: "review" | "todo" | "blocked"; reason: string } {
@@ -108,13 +93,9 @@ export function decideAmuxV52ReviewDisposition(
   // whether there is an earlier rejection at all).
   if (verdict === "reject" && repeatedFinding && priorRejections > 0)
     return { status: "blocked", reason: AMUX_V52_REVIEW_REJECTED_TWICE_REASON };
-  if (verdict === "reject" && (priorRejections === 0 || rejectRetryInBudget))
-    return { status: "todo", reason: "review_server_rejected" };
   if (verdict === "reject")
-    return { status: "blocked", reason: AMUX_V52_REVIEW_REJECTED_TWICE_REASON };
+    return { status: "todo", reason: "review_server_rejected" };
   // An unknown review is asked for again by running the Task again: the next
   // run is submitted to the review server anew.
-  if (verdict === "unknown" && rejectRetryInBudget)
-    return { status: "todo", reason: "review_server_unknown" };
-  return { status: "blocked", reason: "review_server_unknown" };
+  return { status: "todo", reason: "review_server_unknown" };
 }

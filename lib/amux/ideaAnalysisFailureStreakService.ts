@@ -7,7 +7,6 @@ import { auditRowActorKind,
   AMUX_V4_ANALYSIS_BUDGET_SETTLE_ACTION,
   AMUX_V4_ANALYSIS_BUDGET_SETTLE_TARGET } from "@/lib/adminAuditSystemActors";
 import { AMUX_V4_ANALYSIS_NAMESPACE } from "./ideaAnalysisBudgetCore.ts";
-import { amuxInfraFailureRoutingEnabled } from "./infraFailureCore.ts";
 import { AMUX_SESSION_SYSTEM_CLOSURE } from "./ideaSessionLateResult.ts";
 
 /** One Agent-wide breaker across preview and direct-read CLI invocations.
@@ -18,13 +17,13 @@ import { AMUX_SESSION_SYSTEM_CLOSURE } from "./ideaSessionLateResult.ts";
  * that path's own settlements. A subscription session is never stopped by a
  * failure streak; its next claim simply runs. A malformed recent audit row
  * still stops both (integrity, not a limit). With
- * TOMVERSE_AMUX_INFRA_FAILURE_ROUTING=disabled both paths share the old
- * breaker. */
+ * (The TOMVERSE_AMUX_INFRA_FAILURE_ROUTING switch that restored the shared
+ * breaker was removed, owner decision 2026-11-16.) */
 export async function readAmuxIdeaAnalysisFailureStreak(
   tx: Prisma.TransactionClient,
   path: "paid" | "session" = "paid",
 ): Promise<"ready" | "stopped" | "integrity_unavailable"> {
-  const pathOnly = amuxInfraFailureRoutingEnabled();
+  const pathOnly = true;
   // Preserve the v4 fail-closed check: filtering terminal outcomes below must
   // not hide a malformed recent v4 settlement behind older audit entries.
   const recentV4 = await tx.adminAuditLog.findMany({

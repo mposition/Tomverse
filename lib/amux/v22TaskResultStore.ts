@@ -16,18 +16,16 @@ import { loadAmuxContentUnitKeys } from "@/lib/amux/ideaKeyStore";
 import { amuxV22ConclusionSha256, parseAmuxV22Conclusion } from
   "@/lib/amux/v22ConclusionCore";
 import { AMUX_V22_PATCH_MAX_BYTES } from "@/lib/amux/v22PatchLimit";
-import { AMUX_V22_TRANSPORT_MAX_BYTES, amuxV22LocalCliFlowEnabled } from
+import { AMUX_V22_TRANSPORT_MAX_BYTES } from
   "@/lib/amux/v22LocalCliFlowCore";
 import { amuxV22OwnerQuestionSettlement, amuxV22OwnerQuestionSha256,
   parseAmuxV22OwnerQuestion } from "@/lib/amux/v22OwnerQuestionCore";
 import { prisma } from "@/lib/prisma";
 
-/** The earlier flow's report bound. The local CLI flow (v22LocalCliFlowCore.ts)
- * takes a report up to the transport backstop; the sidecar shortens a longer
- * one in the middle, never drops it. A patch keeps its own bound. */
-export const AMUX_V22_RESULT_MAX_BYTES = 65_536;
-export const amuxV22ResultMaxBytes = (flow = amuxV22LocalCliFlowEnabled()) =>
-  flow ? AMUX_V22_TRANSPORT_MAX_BYTES : AMUX_V22_RESULT_MAX_BYTES;
+/** The local CLI flow (v22LocalCliFlowCore.ts) takes a report up to the
+ * transport backstop; the sidecar shortens a longer one in the middle, never
+ * drops it. A patch keeps its own bound. */
+export const amuxV22ResultMaxBytes = () => AMUX_V22_TRANSPORT_MAX_BYTES;
 const IDEA_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[0-9a-f]{12}$/;
 
 export class AmuxV22TaskResultError extends Error {

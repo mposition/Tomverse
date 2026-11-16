@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { amuxV22ClaimCapacity, amuxV22ExecutionRole, amuxV22RequiredTool,
-  amuxV22ResumeRoutes, amuxV22WorkerClaimEnabled, amuxV22OneShotRoleSupported, amuxV22OneShotRouteSupported,
+  amuxV22ResumeRoutes, amuxV22OneShotRoleSupported, amuxV22OneShotRouteSupported,
   amuxV22TaskRoleSupported, amuxV22TaskWritesPatch, chooseAmuxV22WorkerRoute } from
   "../lib/amux/v22WorkerClaimCore.ts";
 import { v22PromotionTickWire, v22WorkerClaimTickWire } from
@@ -11,13 +11,6 @@ import { v22PromotionTickWire, v22WorkerClaimTickWire } from
 import { autoTickHttpStatus } from "../lib/amux/autoPromotionCore.ts";
 import { parseAmuxV22OneShotRequest } from
   "../lib/amux/v22OneShotSidecar.mjs";
-
-test("v22 claim requires its own exact environment switch", () => {
-  assert.equal(amuxV22WorkerClaimEnabled("enabled"), true);
-  for (const flag of [undefined, "", "disabled", "true", "1", " enabled", "ENABLED"]) {
-    assert.equal(amuxV22WorkerClaimEnabled(flag), false);
-  }
-});
 
 test("Tasks run in parallel on every verified worker and never past them", () => {
   // Owner direction 2026-11-15: the global six is gone; the workers are the bound.
@@ -207,10 +200,10 @@ test("v22 tick wire never disguises a receipt as a v8 grant", () => {
     task_id: "task-1", assignment_id: "assignment-1",
     worker_name: "worker-1" });
   const route = readFileSync("app/api/internal/amux/auto-promotion/tick/route.ts", "utf8");
-  assert.match(route, /Response\.json\(v22PromotionTickWire\(result\)/);
+  assert.match(route, /Response\.json\(v22PromotionTickWire\(last\)/);
   assert.match(route, /Response\.json\(v22WorkerClaimTickWire\(result\)/);
   assert.match(route, /status: result\.claimed \? 200 : autoTickHttpStatus\(result\.reason\)/);
-  assert.match(route, /status: result\.promoted \? 200 : autoTickHttpStatus\(result\.reason\)/);
+  assert.match(route, /status: last\.promoted \? 200 : autoTickHttpStatus\(last\.reason\)/);
   assert.match(route, /reason: "apply_disabled", expired: 0/);
   assert.doesNotMatch(route, /orchestrator_identity_required/);
   for (const [reason, status] of [
@@ -222,13 +215,13 @@ test("v22 tick wire never disguises a receipt as a v8 grant", () => {
   }
 });
 
-test("assigned v4 Todo stays out of the legacy owned queue and execution start", () => {
+test("the owned queue lists v4 Todo and execution start admits it", () => {
   const store = readFileSync("lib/amux/store.ts", "utf8");
   const execution = readFileSync("lib/amux/execution.ts", "utf8");
   const owned = store.slice(store.indexOf("export async function listOwnedTodos"),
     store.indexOf("export async function ",
       store.indexOf("export async function listOwnedTodos") + 1));
-  assert.match(owned, /legacyDispatchSourceFilter\(\)/);
+  assert.doesNotMatch(owned, /legacyDispatchSourceFilter\(\)/);
   assert.match(execution, /planning\.sourceSystem === "admin-idea-v4"/);
   assert.match(execution, /lockedTask\.sourceSystem === "admin-idea-v4"/);
 });

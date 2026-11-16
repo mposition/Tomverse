@@ -3,7 +3,7 @@ import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/amux/auditContract";
 import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import { openAmuxHumanEscalation } from "@/lib/amux/escalation";
 import { amuxDefaultMaxAttempts } from "@/lib/amux/executionBudgetCore";
-import { AMUX_INFRA_FAILURE_REASONS, amuxInfraFailureRoutingEnabled } from
+import { AMUX_INFRA_FAILURE_REASONS } from
   "@/lib/amux/infraFailureCore";
 
 /**
@@ -24,16 +24,11 @@ import { AMUX_INFRA_FAILURE_REASONS, amuxInfraFailureRoutingEnabled } from
  * where retry, done, close or remake settles it. It only moves a card's state
  * the way settlement already does; it deletes nothing and runs nothing.
  *
- * On unless TOMVERSE_AMUX_STALLED_CARD_SWEEP=disabled (owner direction
- * 2026-11-15: a card no screen shows is never acceptable; it was off unless
- * `enabled`). The budget it reads is the claim's own (executionBudgetCore.ts):
+ * Always on (owner direction 2026-11-15: a card no screen shows is never
+ * acceptable; the TOMVERSE_AMUX_STALLED_CARD_SWEEP switch was removed, owner
+ * decision 2026-11-16). The budget it reads is the claim's own (executionBudgetCore.ts):
  * infrastructure failures do not count and have no bound of their own.
  */
-export const AMUX_STALLED_CARD_SWEEP_ENV = "TOMVERSE_AMUX_STALLED_CARD_SWEEP";
-export const amuxStalledCardSweepEnabled = (
-  value: string | undefined = process.env[AMUX_STALLED_CARD_SWEEP_ENV],
-) => value?.trim() !== "disabled";
-
 export const AMUX_STALLED_BUDGET_REASON = "attempt_budget_exhausted";
 export const AMUX_STALLED_CARD_SWEPT_ACTION = "amux.v22.stalled_card.blocked";
 const SWEEPER = "system:amux-stalled-card-sweep";
@@ -48,7 +43,7 @@ export async function readAmuxStalledCards(
   tx: { $queryRaw: <T>(strings: TemplateStringsArray, ...values: unknown[]) => Promise<T> },
   limit: number, taskId: string | null = null,
 ): Promise<AmuxStalledCardCandidate[]> {
-  const infra = amuxInfraFailureRoutingEnabled() ? [...AMUX_INFRA_FAILURE_REASONS] : [];
+  const infra = [...AMUX_INFRA_FAILURE_REASONS];
   const max = amuxDefaultMaxAttempts();
   return tx.$queryRaw<AmuxStalledCardCandidate[]>`
     SELECT w."id", ${AMUX_STALLED_BUDGET_REASON}::text AS "reason"
@@ -74,7 +69,6 @@ export async function readAmuxStalledCards(
  * transaction so one card never holds the rest. Returns the ids it moved.
  */
 export async function sweepAmuxStalledCards(limit = 5): Promise<string[]> {
-  if (!amuxStalledCardSweepEnabled()) return [];
   const candidates = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.executionRecoveryRead,
     (tx) => readAmuxStalledCards(tx, Math.min(Math.max(limit, 1), 20)));
   const moved: string[] = [];

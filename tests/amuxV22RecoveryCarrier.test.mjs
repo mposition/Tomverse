@@ -31,8 +31,8 @@ test("controller timer is an inert non-overlap 60 second carrier", async () => {
   assert.doesNotMatch(installer,
     /\/usr\/bin\/systemctl\s+(?:enable|disable|start|restart|stop|try-restart|reload)\b/);
   assert.doesNotMatch(installer, /tomverse-bridge-watchdog/);
-  assert.match(env, /^TOMVERSE_AMUX_V22_TASK_RECOVERY_ENABLED=false$/m);
-  assert.match(env, /^TOMVERSE_AMUX_V22_LEGACY_SAFE_STOP_ENABLED=false$/m);
+  assert.match(env, /^TOMVERSE_AMUX_V22_TASK_RECOVERY_ENABLED=disabled$/m);
+  assert.match(env, /^TOMVERSE_AMUX_V22_LEGACY_SAFE_STOP_ENABLED=disabled$/m);
 });
 
 test("inspector timer stays non-root, instance-fixed, inspect-only and off by default", async () => {
@@ -61,7 +61,7 @@ test("inspector timer stays non-root, instance-fixed, inspect-only and off by de
   assert.doesNotMatch(service, /^\[Install\]$/m);
   assert.match(service, /^InaccessiblePaths=\/etc\/tomverse-amux-v22\/recovery-controller\.env$/m);
   assert.match(service, /^InaccessiblePaths=\/var\/lib\/tomverse-amux-v22\/recovery-stop-intents$/m);
-  assert.match(env, /^TOMVERSE_AMUX_V22_RECOVERY_CHECKER=0$/m);
+  assert.match(env, /^TOMVERSE_AMUX_V22_RECOVERY_CHECKER=disabled$/m);
   assert.match(env, /^TOMVERSE_AMUX_V22_RECOVERY_INSPECTOR_SECRET=/m);
   assert.doesNotMatch(env, /SYNC_SECRET|CONTROLLER_SECRET|DATABASE_URL|GITHUB_TOKEN|API_KEY/);
   assert.match(entry, /AMUX_V22_RECOVERY_INSPECTOR_SECRET_ENV/);

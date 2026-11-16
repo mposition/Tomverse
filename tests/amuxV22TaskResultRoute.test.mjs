@@ -27,17 +27,11 @@ test("POST preserves a private result when publication evidence is rejected", ()
   assert.match(child.stdout, /AMUX_V22_RESULT_ROUTE_POST_OK/);
 });
 
-test("v22 result write remains env-closed and validates body before DB access", async () => {
+test("v22 result write validates the body before DB access", async () => {
   const oldSecret = process.env.TOMVERSE_AMUX_SYNC_SECRET;
-  const oldSwitch = process.env.TOMVERSE_AMUX_V22_TASK_RESULT_WRITE;
   try {
     process.env.TOMVERSE_AMUX_SYNC_SECRET = secret;
-    delete process.env.TOMVERSE_AMUX_V22_TASK_RESULT_WRITE;
     assert.equal((await POST(request({ prompt: "private" }, "wrong"))).status, 401);
-    const closed = await POST(request({ prompt: "private" }));
-    assert.equal(closed.status, 409);
-    assert.equal(closed.headers.get("Cache-Control"), "no-store");
-    process.env.TOMVERSE_AMUX_V22_TASK_RESULT_WRITE = "enabled";
     assert.equal((await POST(request({ prompt: "private" }))).status, 400);
     const patchText = "diff --git a/components/chat/X.tsx b/components/chat/X.tsx\n";
     const invalidEvidence = normalizeV22OptionalPatch({ text: patchText,
@@ -69,8 +63,5 @@ test("v22 result write remains env-closed and validates body before DB access", 
   } finally {
     if (oldSecret === undefined) delete process.env.TOMVERSE_AMUX_SYNC_SECRET;
     else process.env.TOMVERSE_AMUX_SYNC_SECRET = oldSecret;
-    if (oldSwitch === undefined)
-      delete process.env.TOMVERSE_AMUX_V22_TASK_RESULT_WRITE;
-    else process.env.TOMVERSE_AMUX_V22_TASK_RESULT_WRITE = oldSwitch;
   }
 });

@@ -21,8 +21,6 @@ import {
   AMUX_WORKER_ROLE_CEILINGS,
   AMUX_WORKER_TRIAL_CARD_COUNT,
   AMUX_WORKER_TRIAL_COST_CAP_MICRO_USD,
-  AMUX_WORKER_REGISTRY_WRITES_LATCH,
-  amuxWorkerRegistryWritesOpen,
   amuxWorkerSeedEntriesToRegister,
   buildAmuxWorkerRegistryAdminView,
   amuxWorkerEffectiveState,
@@ -284,19 +282,6 @@ test("a worker is assigned only when active, unlatched and last observed ok -- e
   );
 });
 
-test("version 32 turns R1's registry writes on, and the policy records it", () => {
-  // Version 31 section 8: R1 shipped latched off; version 32 is the operator's
-  // activation record. The latch and its record move together.
-  assert.equal(AMUX_WORKER_REGISTRY_WRITES_LATCH, true);
-  assert.equal(amuxWorkerRegistryWritesOpen(), true);
-  const policy = readFileSync(new URL("../docs/policy/development-agent-orchestration.md", import.meta.url), "utf8");
-  const normalized = policy.split(String.fromCharCode(13)).join("");
-  const heading = "## 버전 32 — worker 등록부 R1 코드 래치";
-  const record = "승인 기록: `approvedBy: mposition`, `approvedAt: 2026-10-12`";
-  assert.ok(normalized.includes([heading, "", record].join(String.fromCharCode(10))));
-  assert.ok(normalized.includes("`AMUX_WORKER_REGISTRY_WRITES_LATCH`(`lib/amux/workerRegistryCore.ts`)를 false로 둔 채 출고됐고, 이 버전이 그 래치를 true로 바꾼다"));
-});
-
 test("the Admin view shows desired and effective state apart, and offers only unregistered seed entries", () => {
   const view = buildAmuxWorkerRegistryAdminView({
     registrations: [
@@ -306,8 +291,6 @@ test("the Admin view shows desired and effective state apart, and offers only un
     latches: new Map([["claude-impl", "opened"]]),
     observations: new Map([["claude-impl", "ok"]]),
   });
-  // Defaults to the code latch (true since version 32).
-  assert.equal(view.writesLatch, AMUX_WORKER_REGISTRY_WRITES_LATCH);
   assert.equal(view.registryReadable, true);
   assert.deepEqual(view.rows.map((row) => row.workerName), ["claude-impl", "cursor-impl"]);
   const claude = view.rows[0];
@@ -328,10 +311,8 @@ test("an unreadable registry offers nothing to register", () => {
     registrations: null,
     latches: new Map(),
     observations: new Map(),
-    writesLatch: true,
   });
   assert.deepEqual(view, {
-    writesLatch: true,
     registryReadable: false,
     rows: [],
     seed: null,

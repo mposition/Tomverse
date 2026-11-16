@@ -16,7 +16,6 @@ export const adminAmuxWorkersMessages = defineAdminMessages({
     liveUnread: "The live connection could not be read, so no worker is shown as connected. Reload to try again.",
     capabilitiesUnread: "What each worker can do could not be read, so it cannot be edited right now.",
     readOnly: "Read only. Only the owner can change workers.",
-    writesOff: "Changing workers is switched off in this build.",
     summary: {
       assignable: "Can take work",
       attention: "Needs a look",
@@ -140,7 +139,6 @@ export const adminAmuxWorkersMessages = defineAdminMessages({
       unread: "The change ended, but the list could not be read again. Read it again before changing anything else.",
       failed: "The change failed.",
       refusal: {
-        registry_writes_off: "Changing workers is switched off.",
         stale_revision: "Someone changed this worker first. The list was read again.",
         retired: "This worker is kept and cannot be changed.",
         role_above_class: "This role is above what this kind of worker may hold.",
@@ -229,7 +227,6 @@ export const adminAmuxWorkersMessages = defineAdminMessages({
     liveUnread: "실시간 연결 상태를 읽지 못해 연결된 worker를 표시하지 않습니다. 새로고침해 다시 시도하세요.",
     capabilitiesUnread: "worker별로 할 수 있는 일을 읽지 못해 지금은 편집할 수 없습니다.",
     readOnly: "읽기 전용입니다. owner만 worker를 바꿀 수 있습니다.",
-    writesOff: "이 빌드에서는 worker 변경이 꺼져 있습니다.",
     summary: {
       assignable: "배정 가능",
       attention: "확인 필요",
@@ -351,7 +348,6 @@ export const adminAmuxWorkersMessages = defineAdminMessages({
       unread: "변경은 끝났지만 목록을 다시 읽지 못했습니다. 다른 것을 바꾸기 전에 다시 읽으세요.",
       failed: "변경에 실패했습니다.",
       refusal: {
-        registry_writes_off: "worker 변경이 꺼져 있습니다.",
         stale_revision: "다른 곳에서 이 worker를 먼저 바꿨습니다. 목록을 다시 읽었습니다.",
         retired: "보관된 worker는 바꿀 수 없습니다.",
         role_above_class: "이 종류의 worker가 가질 수 있는 역할보다 높습니다.",

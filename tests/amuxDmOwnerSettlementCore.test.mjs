@@ -8,7 +8,6 @@ import {
   AMUX_DM_OWNER_SETTLEMENT_REASON_TEXT,
   amuxDmOwnerSettlementAnswerOf,
   amuxDmOwnerSettlementCard,
-  amuxDmOwnerSettlementEnabled,
   amuxDmOwnerSettlementFindingsText,
   amuxDmOwnerSettlementId,
   amuxDmOwnerSettlementKind,
@@ -54,15 +53,6 @@ const base = {
   siblingTotal: 2,
   pull: null,
 };
-
-test("the switch is on unless it says disabled", () => {
-  // Owner decision 2026-11-15: the switches that make the Decision Maker work default on.
-  assert.equal(amuxDmOwnerSettlementEnabled({}), true);
-  assert.equal(amuxDmOwnerSettlementEnabled({ TOMVERSE_AMUX_DM_OWNER_SETTLEMENT: undefined }), true);
-  assert.equal(amuxDmOwnerSettlementEnabled({ TOMVERSE_AMUX_DM_OWNER_SETTLEMENT: "enabled" }), true);
-  assert.equal(amuxDmOwnerSettlementEnabled({ TOMVERSE_AMUX_DM_OWNER_SETTLEMENT: "disabled" }), false);
-  assert.equal(amuxDmOwnerSettlementEnabled({ TOMVERSE_AMUX_DM_OWNER_SETTLEMENT: "false" }), true);
-});
 
 test("a settlement id is a version 8 UUID of its escalation; every other question id is version 4", () => {
   const id = amuxDmOwnerSettlementId("cmw-escalation");
@@ -373,14 +363,9 @@ test("the approver and the walk apply it; the card never reaches a session", () 
   assert.match(dm, /if \(isAmuxDmOwnerSettlementId\(input\.questionId\)\) \{\s+const recorded = await recordAmuxDmOwnerSettlementLocalCard\(tx, input\);/);
   assert.match(dm, /source: "dm_confirmed", requestId: step\.requestId/);
   const route = read("app/api/internal/amux/decision-maker/v22-questions/sync/route.ts");
-  assert.match(route, /readAmuxDmOwnerSettlementSyncRows\(tx, \{ enabled: settlementOn \}\)/);
-  // Off files nothing on its own; the read returns only what the owner asked
-  // for from the owner queue (owner decision 2026-11-14), and the open ones still close.
-  assert.doesNotMatch(route, /if \(!settlementOn\) return \{ pending: \[\]/);
-  assert.match(read("lib/amux/dmOwnerSettlementService.ts"),
-    /const requested = input\.enabled \? null :\s+await readAmuxDmOwnerSettlementRequestedIds/);
+  assert.match(route, /readAmuxDmOwnerSettlementSyncRows\(tx\)/);
+  assert.doesNotMatch(route, /settlementOn|amuxDmOwnerSettlementEnabled/);
   const policy = read("docs/policy/amux-decision-maker.md");
-  assert.match(policy, /TOMVERSE_AMUX_DM_OWNER_SETTLEMENT=enabled/);
   assert.match(policy, /\*\*운영자 확인 대기의 정리 \(운영자 결정 2026-11-13\)\.\*\*/);
   assert.match(policy, /11\. \*\*운영자 확인 대기의 멈춘 Task \(운영자 결정 2026-11-13, §0a-5\)\.\*\*/);
 });

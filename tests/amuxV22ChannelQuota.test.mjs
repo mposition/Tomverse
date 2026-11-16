@@ -7,7 +7,6 @@ import { normalizeAmuxV22AntigravityQuota, normalizeAmuxV22CodexQuota,
   normalizeAmuxV22CopilotQuota, normalizeAmuxV22CursorQuota, probeAmuxV22ChannelQuota } from
   "../lib/amux/v22ChannelQuota.mjs";
 import { createAmuxV22SidecarHandler } from "../lib/amux/v22OneShotSidecar.mjs";
-import { amuxQuotaObservationFeedsDispatch } from "../lib/amux/v22WorkerClaimCore.ts";
 
 const at = "2026-11-08T00:00:00.000Z";
 const now = Date.parse(at);
@@ -407,13 +406,3 @@ test("the sidecar answers a reading only for its own provider", async () => {
   }
 });
 
-test("non-Claude readings feed dispatch only behind their exact switch", () => {
-  for (const provider of ["anthropic", "Anthropic", " anthropic "])
-    for (const gate of [undefined, "", "enabled", "disabled"])
-      assert.equal(amuxQuotaObservationFeedsDispatch(provider, gate), true);
-  for (const provider of ["openai", "github-copilot", "cursor"]) {
-    assert.equal(amuxQuotaObservationFeedsDispatch(provider, "enabled"), true);
-    for (const gate of [undefined, "", "1", "true", "ENABLED", " enabled"])
-      assert.equal(amuxQuotaObservationFeedsDispatch(provider, gate), false, `${provider}/${gate}`);
-  }
-});
