@@ -27,13 +27,12 @@
 
 import { execFileSync, spawnSync } from "node:child_process";
 
-import { CONVENTION_VERSIONS } from "../lib/agentAuthorityFiles.ts";
 import { cacheIsolationRecordSignature } from "../lib/agentCacheIsolationRecord.ts";
 import { analyseCredentialReachability, credentialForbiddenPaths } from "../lib/agentCredentialReachability.ts";
 import { AGENT_CREDENTIAL_REVIEWED_EXCLUSIONS } from "../lib/agentCredentialReviewedExclusions.ts";
 import { computeControlPlaneSlice } from "../lib/agentControlPlaneSlice.ts";
 import { decideTier, policyNamedTestPaths } from "../lib/agentPushPolicy.ts";
-import { TREE_LIMITS, decodeText, diffLines, unsupportedTreeChanges } from "../lib/engineeringAgentTreeVerify.ts";
+import { DIFF_EDIT_BUDGET, TREE_LIMITS, decodeText, diffLines, unsupportedTreeChanges } from "../lib/engineeringAgentTreeVerify.ts";
 import { engineeringAgentV22UnreadText } from "../lib/engineeringAgentV22BaseEvidence.ts";
 
 import { judgeAgentPrCacheIsolation } from "./agent-pr-cache-isolation-policy.mjs";
@@ -142,7 +141,7 @@ for (const commit of commits) {
     const before = zero.test(d.oldOid) ? "" : decodeText(oldBlobs.get(d.oldOid) ?? new Uint8Array());
     const after = zero.test(d.newOid) ? "" : decodeText(newBlobs.get(d.newOid) ?? new Uint8Array());
     const lines =
-      before !== null && after !== null ? diffLines(before, after, 301) : { exceeded: false, addedLines: 0, removedLines: 0, addedText: "" };
+      before !== null && after !== null ? diffLines(before, after, DIFF_EDIT_BUDGET) : { exceeded: false, addedLines: 0, removedLines: 0, addedText: "" };
     return {
       path: d.path,
       status,
@@ -151,9 +150,10 @@ for (const commit of commits) {
       newType: status === "deleted" ? null : d.newMode === "160000" ? "commit" : "blob",
       sizeBytes: newBlobs.get(d.newOid)?.length ?? 0,
       isText: status === "deleted" ? before !== null : after !== null,
-      addedLines: lines.exceeded ? 301 : lines.addedLines,
-      removedLines: lines.exceeded ? 0 : lines.removedLines,
-      addedText: lines.exceeded ? "" : lines.addedText,
+      // Past the budget the app reads every line of the new file as added.
+      addedLines: lines.exceeded ? after.split("\n").length : lines.addedLines,
+      removedLines: lines.exceeded ? before.split("\n").length : lines.removedLines,
+      addedText: lines.exceeded ? after : lines.addedText,
       newText: status === "deleted" ? "" : (after ?? ""),
     };
   });
@@ -181,10 +181,6 @@ for (const commit of commits) {
   const slice = unreadOrNull === null
     ? { status: "failed", problems: [{ path: ".dockerignore", specifier: null, problem: "dockerignore_unreadable" }] }
     : computeControlPlaneSlice({ baseFiles, changes });
-  const lock = JSON.parse(text(listing.find((entry) => entry.path === "package-lock.json")?.oid ?? "") || "{}");
-  const installedVersions = Object.fromEntries(
-    Object.keys(CONVENTION_VERSIONS).map((name) => [name, lock.packages?.[`node_modules/${name}`]?.version ?? null]),
-  );
   const documents = baseFiles
     .filter((file) => file.path === "AGENTS.md" || file.path === "docs/agents/machine-index.md" || /^docs\/(?:policy|ui-contracts)\//.test(file.path))
     .map((file) => file.text);
@@ -192,7 +188,6 @@ for (const commit of commits) {
   const input = (credentialView) => ({
     changes,
     policyNamedTests: policyNamedTestPaths(documents),
-    installedVersions,
     credential: credentialView,
     slice: slice.status === "analysed" ? { status: "analysed", slicePaths: slice.slicePaths } : { status: "failed" },
   });

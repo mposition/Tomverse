@@ -13,12 +13,7 @@
  * T1 is to be refused by none of them.
  */
 
-import {
-  CONVENTION_VERSIONS,
-  classifyPath,
-  isCanonicalRepoPath,
-  isKnownTopLevel,
-} from "./agentAuthorityFiles.ts";
+import { classifyPath, isCanonicalRepoPath } from "./agentAuthorityFiles.ts";
 
 export const GIT_MODES = {
   file: "100644",
@@ -49,57 +44,28 @@ export type ChangedEntry = {
   removedLines: number;
   /** Lines added by the change, for the decision-value alarms. Empty for a deletion. */
   addedText: string;
-  /**
-   * The whole file after the change, for the runtime-discovery rule. Empty for
-   * a deletion or non-text. Added lines alone are not enough: a construct can
-   * be completed by an added line whose other half was already there.
-   */
+  /** The whole file after the change. Empty for a deletion or non-text. */
   newText: string;
 };
 
 /*
- * No size, count or extension rule (owner decision 2026-11-15: an internal
- * development flow, limited only by what it must protect). Until then T1 took
- * at most five files, 300 changed lines and 200 KiB a file, of seven
- * extensions, with `.json` only under locales/ and tests/fixtures/. What a
- * change may reach is judged by its paths -- control plane, credential
- * reachability, the control-plane slice, policy tests, framework entry
- * points -- and by what it contains, not by how big it is.
+ * No size, count, extension, path-shape or file-shape rule (owner decisions
+ * 2026-11-15 and 2026-11-16: an internal development flow, limited only by
+ * what it must protect). Until 2026-11-16 a path no rule classified, a
+ * top-level directory nobody listed, a new framework entry file (route, page,
+ * configuration), a file that loads code at run time, an executable bit, a
+ * binary file, a policy-sounding test name and a framework version nobody
+ * re-checked were each T2 as well. What is left is what money, secrets and
+ * the control plane need: the control-plane paths and slice (which itself
+ * fails closed on a control-plane module that assembles what it loads), the
+ * credential reachability of CI jobs, the decision-value alarms, the tests the
+ * policy documents name, and Git objects that are not plain files.
+ *
+ * A symbolic link stays T2: its target is read where the link is built or
+ * served, so a link at a product path can point at a credential file or a
+ * control-plane file that no path rule sees (`public/x -> /proc/self/environ`
+ * would publish the build's environment).
  */
-
-/** Next's file-based entry points, and files named as configuration. */
-const ENTRY_CONVENTION_NAMES = [
-  /^route\.[^/]+$/,
-  /^page\.[^/]+$/,
-  /^layout\.[^/]+$/,
-  /^template\.[^/]+$/,
-  /^default\.[^/]+$/,
-  /^middleware\.[^/]+$/,
-  /^instrumentation(?:-client)?\.[^/]+$/,
-  /^proxy\.[^/]+$/,
-  /^(?:loading|error|global-error|not-found|forbidden|unauthorized)\.[^/]+$/,
-  /^(?:opengraph-image|twitter-image|icon|apple-icon|sitemap|robots|manifest)\.[^/]+$/,
-  /\.config\.[^/]+$/,
-];
-
-/**
- * Code that assembles what it loads at run time. A graph built from literal
- * imports cannot see where these lead, so a change that introduces one is T2.
- */
-const RUNTIME_DISCOVERY_PATTERNS: ReadonlyArray<readonly [RegExp, string]> = [
-  // The whitespace sits inside the lookahead: outside it, the engine can give
-  // back a newline and let the lookahead fail on the wrong character.
-  [/\bimport\s*\((?!\s*["'`][^"'`$]*["'`]\s*[,)])/, "dynamic_import_non_literal"],
-  [/\brequire\s*\((?!\s*["'][^"']*["']\s*\))/, "require_non_literal"],
-  [/\brequire\.resolve\b/, "require_resolve"],
-  [/\bimport\.meta\.glob\b/, "import_meta_glob"],
-  [/\bcreateRequire\b/, "create_require"],
-  [/\breaddir(?:Sync)?\b/, "directory_loader"],
-  [/\bopendir(?:Sync)?\b/, "directory_loader"],
-  [/\bglob(?:Sync)?\s*\(/, "directory_loader"],
-  [/\bnew\s+Function\b/, "dynamic_evaluation"],
-  [/\beval\s*\(/, "dynamic_evaluation"],
-];
 
 /**
  * Names whose values AGENTS.md reserves for a person. Outside the
@@ -122,24 +88,16 @@ export const DECISION_VALUE_ALARMS: readonly RegExp[] = [
 export type T2Reason =
   | "path_not_canonical"
   | "control_plane_path"
-  | "unclassified_path"
-  | "unknown_top_level_directory"
-  | "not_text"
   | "symlink"
   | "gitlink"
-  | "executable_bit"
   | "not_a_blob"
   | "policy_named_test"
-  | "policy_test_name"
-  | "entry_convention"
-  | "runtime_discovery"
   | "decision_value_alarm"
   | "empty_change"
   | "credential_reachable"
   | "credential_analysis_failed"
   | "control_plane_slice"
   | "slice_analysis_failed"
-  | "convention_version_mismatch"
   | "unsupported_tree_change";
 
 export type PushFinding = { reason: T2Reason; path: string | null; detail?: string };
@@ -148,8 +106,6 @@ export type TierInput = {
   changes: readonly ChangedEntry[];
   /** Test files that the base commit's policy documents name by path. */
   policyNamedTests: ReadonlySet<string>;
-  /** Installed versions read from the base commit's lockfile. */
-  installedVersions: Readonly<Record<keyof typeof CONVENTION_VERSIONS, string | null>>;
   /** The credential reachability result for the base commit. */
   credential:
     | { status: "analysed"; forbidsAll: boolean; forbiddenPaths: ReadonlySet<string> }
@@ -176,7 +132,11 @@ export type TierVerdict =
 
 const basenameOf = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 
-/** A test whose own name says it pins a policy, a contract or an invariant. Also judged by the merge lane's Decision Maker allow list. */
+/**
+ * A test whose own name says it pins a policy, a contract or an invariant.
+ * The push policy no longer judges by name (2026-11-16); the merge lane's
+ * Decision Maker allow list still does, and its scope is unchanged.
+ */
 export const isPolicyTestName = (path: string) =>
   path.startsWith("tests/") && /Policy|Contract|Invariant/.test(basenameOf(path));
 
@@ -203,20 +163,13 @@ const entryChecks = (entry: ChangedEntry, input: TierInput): PushFinding[] => {
       findings.push({ reason: "path_not_canonical", path });
       continue;
     }
-    if (!isKnownTopLevel(path)) findings.push({ reason: "unknown_top_level_directory", path });
-    const cls = classifyPath(path);
-    if (cls === "control-plane") findings.push({ reason: "control_plane_path", path });
-    if (cls === "unclassified") findings.push({ reason: "unclassified_path", path });
+    if (classifyPath(path) === "control-plane") findings.push({ reason: "control_plane_path", path });
     if (input.policyNamedTests.has(path)) findings.push({ reason: "policy_named_test", path });
-    if (isPolicyTestName(path)) findings.push({ reason: "policy_test_name", path });
   }
 
   const modes = [entry.oldMode, entry.newMode];
   if (modes.includes(GIT_MODES.symlink)) findings.push({ reason: "symlink", path: entry.path });
   if (modes.includes(GIT_MODES.gitlink)) findings.push({ reason: "gitlink", path: entry.path });
-  if (modes.includes(GIT_MODES.executable)) {
-    findings.push({ reason: "executable_bit", path: entry.path });
-  }
   for (const mode of modes) {
     if (
       mode !== null &&
@@ -231,25 +184,6 @@ const entryChecks = (entry: ChangedEntry, input: TierInput): PushFinding[] => {
 
   if (entry.status !== "deleted") {
     if (entry.newType !== "blob") findings.push({ reason: "not_a_blob", path: entry.path });
-    if (!entry.isText) findings.push({ reason: "not_text", path: entry.path });
-
-    // A new file at a framework convention runs without anything importing it.
-    if (
-      (entry.status === "added" || entry.status === "renamed" || entry.status === "copied") &&
-      ENTRY_CONVENTION_NAMES.some((pattern) => pattern.test(basenameOf(entry.path)))
-    ) {
-      findings.push({ reason: "entry_convention", path: entry.path });
-    }
-
-    // The whole resulting file, not the added lines: `import(` on a line the
-    // base already had and `name)` on an added one make a non-literal import
-    // that no added line shows. A file that already contains such a construct
-    // is T2 on any change -- that is the conservative side of not parsing.
-    for (const [pattern, detail] of RUNTIME_DISCOVERY_PATTERNS) {
-      if (pattern.test(entry.newText)) {
-        findings.push({ reason: "runtime_discovery", path: entry.path, detail });
-      }
-    }
     for (const pattern of DECISION_VALUE_ALARMS) {
       if (pattern.test(entry.addedText)) {
         findings.push({ reason: "decision_value_alarm", path: entry.path, detail: pattern.source });
@@ -285,17 +219,6 @@ export const decideTier = (input: TierInput): TierVerdict => {
   const findings: PushFinding[] = [];
 
   if (input.changes.length === 0) findings.push({ reason: "empty_change", path: null });
-
-  for (const [name, recorded] of Object.entries(CONVENTION_VERSIONS)) {
-    const installed = input.installedVersions[name as keyof typeof CONVENTION_VERSIONS];
-    if (installed !== recorded) {
-      findings.push({
-        reason: "convention_version_mismatch",
-        path: null,
-        detail: `${name}:${installed ?? "missing"}`,
-      });
-    }
-  }
 
   if (input.credential.status === "failed") {
     findings.push({ reason: "credential_analysis_failed", path: null });
