@@ -47,6 +47,7 @@ function fakeRunner({ rules = [], gateway = {}, now = NOW, lockFree = true, file
   const calls = [];
   const gatewayCalls = [];
   const events = [];
+  const runLogs = [];
   let clock = now;
   const allRules = [...rules, ...DEFAULT_RULES];
   const replies = {
@@ -91,11 +92,11 @@ function fakeRunner({ rules = [], gateway = {}, now = NOW, lockFree = true, file
       listTestFiles: () => files.testFiles ?? Object.keys(TEST_TEXTS),
     },
     log: (event, fields = {}) => events.push({ event, ...fields }),
-    runLog: () => {},
+    runLog: (section, text) => runLogs.push({ section, text }),
     startRunLog: () => {},
     pruneLogs: () => {},
   };
-  return { deps, calls, gatewayCalls, events };
+  return { deps, calls, gatewayCalls, events, runLogs };
 }
 
 const ops = (gatewayCalls) => gatewayCalls.map(({ header }) => header.op);
@@ -300,6 +301,34 @@ for (const [name, rules, reason, files] of FAILURES) {
     assert.ok(!ran(calls, / bundle create /));
   });
 }
+
+test("a refused review submit preserves a redacted private diagnostic and exact range without retrying", async () => {
+  const stderr = JSON.stringify({ error: "client", message: "git bundle failed: retained-error-detail" }) +
+    "\nBearer confidential-bearer-value\npassword=confidential-password-value\n" +
+    "https://fixture:confidential-url-value@example.test/repo\nghp_confidentialTokenValue123";
+  const { deps, calls, gatewayCalls, events, runLogs } = fakeRunner({ rules: [
+    [/review\.mjs submit/, { ...exit(64), stderr }],
+  ] });
+  assert.equal(await runDailyBatch(deps), 1);
+  assert.deepEqual(ops(gatewayCalls), ["claim", "result", "halt_notice"]);
+  assert.equal(calls.filter(({ signature }) => /review\.mjs submit/.test(signature)).length, 1);
+  assert.equal(ran(calls, /review\.mjs wait/), false);
+  assert.deepEqual(events.find(({ event }) => event === "review_requested"), { event: "review_requested", base: BASE, head: HEAD });
+  const diagnostic = runLogs.find(({ section }) => section === "review_submit")?.text;
+  assert.match(diagnostic, /retained-error-detail/);
+  assert.doesNotMatch(diagnostic, /confidential/);
+  assert.doesNotMatch(JSON.stringify({ gatewayCalls, events }), /retained-error-detail|confidential/);
+});
+
+test("an unknown review wait preserves diagnostics without submitting another review", async () => {
+  const { deps, calls, runLogs, gatewayCalls } = fakeRunner({ rules: [
+    [/review\.mjs wait/, { ...exit(2), stderr: "review-outcome-unknown-fixture" }],
+  ] });
+  assert.equal(await runDailyBatch(deps), 1);
+  assert.equal(calls.filter(({ signature }) => /review\.mjs submit/.test(signature)).length, 1);
+  assert.match(runLogs.find(({ section }) => section === "review_wait")?.text, /review-outcome-unknown-fixture/);
+  assert.deepEqual(ops(gatewayCalls), ["claim", "result", "halt_notice"]);
+});
 
 test("an out-of-scope change never reaches tests or review", async () => {
   const { deps, calls } = fakeRunner({ rules: [[/ diff --raw/, ok(raw("docs/policy/x.md"))]] });

@@ -156,6 +156,16 @@ function parseJsonObject(text) {
   }
 }
 
+/** Private operator log only; command output never enters a result or journal event. */
+function reviewDiagnostic(result) {
+  return `${result.stdout || ""}\n${result.stderr || ""}`
+    .replace(/\b(?:Bearer|Basic)\s+\S+/gi, "[authorization redacted]")
+    .replace(/\b(?:sk-|gh[pousr]_|github_pat_|xox[baprs]-)[A-Za-z0-9_-]+/g, "[credential redacted]")
+    .replace(/((?:token|secret|password|authorization|api[_-]?key)\s*["']?\s*[:=]\s*["']?)\S+/gi, "$1[redacted]")
+    .replace(/(?:https?|postgres(?:ql)?):\/\/[^\s/@]+:[^\s/@]+@[^\s]+/gi, "[credential URL redacted]")
+    .slice(-12_000);
+}
+
 /** Make sure the mirror's node_modules matches develop's lockfile and Prisma schema. */
 async function ensureDependencies(deps, base) {
   const { config, exec, fs } = deps;
@@ -191,9 +201,11 @@ async function review(deps, ctx, claim, base, head) {
   // The base is the develop commit this run fetched itself. The client also
   // looks at the worktree's own refs, which the agent's code can move, so the
   // verdict counts only when the job reports this base and this head.
+  deps.log("review_requested", { base, head });
   const submitted = await client(["submit", "--author", "claude", "--base", base, "--scope", scope], 10 * 60_000);
   const jobId = parseJsonObject(submitted.stdout)?.jobId;
   if (submitted.code !== 3 || typeof jobId !== "string" || !REVIEW_JOB_ID.test(jobId)) {
+    deps.runLog("review_submit", reviewDiagnostic(submitted));
     deps.log("review_submit_failed", { code: submitted.code });
     return { verdict: "unknown", jobId: null };
   }
@@ -216,6 +228,7 @@ async function review(deps, ctx, claim, base, head) {
         return { verdict: "unknown", jobId };
       }
     }
+    if (verdict !== "accept") deps.runLog("review_wait", reviewDiagnostic(waited));
     return { verdict: verdict === "pending" ? "unknown" : verdict, jobId };
   }
 }
