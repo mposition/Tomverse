@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "migrationSqlSha256": "c48f9a2e72aca2a14a89fe1a24312438ac53099dc09adad77540bf81664b36bc",
+  "replacedChecks": [
+    {
+      "table": "AmuxPortfolioScoreSnapshot",
+      "constraint": "AmuxPortfolioScoreSnapshot_shape_check",
+      "previousDefinitionSha256": "9c8c08d4d584779cdb1bf9fbb6b3b5585dd4445ad79692bbd327e9ee742bbd22"
+    }
+  ]
+}

@@ -51,7 +51,11 @@ const fill = (template: string, values: Record<string, string | number>) =>
  * step-up flow, not only a message, as the Admin IA contract requires. A patch
  * is shown as text in a <pre> and never interpreted.
  */
-export function AdminEngineeringAgentPanel({ initial }: { initial: EngineeringAgentConsolePayload }) {
+export function AdminEngineeringAgentPanel({ initial, more = null }: {
+  initial: EngineeringAgentConsolePayload;
+  /** The next page of this section's list, while it holds only part of it. */
+  more?: { href: string; count: number } | null;
+}) {
   const m = useAdminMessages(adminEngineeringAgentMessages);
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
@@ -147,6 +151,7 @@ export function AdminEngineeringAgentPanel({ initial }: { initial: EngineeringAg
               mismatch: initial.queue.totals.state_mismatch,
             })}{" "}
             {fill(m.showingOldest, { count: initial.limit })}
+            {more ? <MoreLink more={more} label={fill(m.showMore, { count: more.count })} /> : null}
           </p>
           {initial.queue.items.length === 0 ? <p className="text-sm text-zinc-400">{m.emptyQueue}</p> : null}
           <ul className="flex flex-col gap-3">
@@ -297,7 +302,10 @@ export function AdminEngineeringAgentPanel({ initial }: { initial: EngineeringAg
 
       {initial.runs ? (
         <div className="flex flex-col gap-2">
-          <p className="text-sm text-zinc-400">{fill(m.showingNewest, { count: initial.limit })}</p>
+          <p className="text-sm text-zinc-400">
+            {fill(m.showingNewest, { count: initial.limit })}
+            {more ? <MoreLink more={more} label={fill(m.showMore, { count: more.count })} /> : null}
+          </p>
           <AdminDataTable
             caption={m.run}
             rows={initial.runs}
@@ -334,7 +342,10 @@ export function AdminEngineeringAgentPanel({ initial }: { initial: EngineeringAg
 
       {initial.pullRequests ? (
         <div className="flex flex-col gap-2">
-          <p className="text-sm text-zinc-400">{fill(m.showingNewest, { count: initial.limit })}</p>
+          <p className="text-sm text-zinc-400">
+            {fill(m.showingNewest, { count: initial.limit })}
+            {more ? <MoreLink more={more} label={fill(m.showMore, { count: more.count })} /> : null}
+          </p>
           <AdminDataTable
             caption={m.pullRequest}
             rows={initial.pullRequests}
@@ -380,12 +391,12 @@ export function AdminEngineeringAgentPanel({ initial }: { initial: EngineeringAg
           <p className="text-sm text-zinc-300">
             {fill(m.prQueue, {
               occupied: initial.settings.pullRequests.occupied,
-              limit: initial.settings.pullRequests.limit,
+              limit: initial.settings.pullRequests.limit === null ? "" : `/${initial.settings.pullRequests.limit}`,
             })}
             <br />
             {fill(m.decisionQueue, {
               occupied: initial.settings.decisions.occupied,
-              limit: initial.settings.decisions.limit,
+              limit: initial.settings.decisions.limit === null ? "" : `/${initial.settings.decisions.limit}`,
             })}
           </p>
           <p className="text-sm text-zinc-400">{m.queueNote}</p>
@@ -579,5 +590,15 @@ function OwnerItemContext({ item }: { item: EngineeringAgentOwnerItemView }) {
         </div>
       ) : null}
     </div>
+  );
+}
+
+/** The next page of a list, as the owner queue's "show more" (owner decision 2026-11-15). */
+function MoreLink({ more, label }: { more: { href: string; count: number }; label: string }) {
+  return (
+    <Link href={more.href} data-testid="engineering-agent-show-more"
+      className="ml-2 inline-flex min-h-8 items-center rounded-lg border border-zinc-700 px-3 font-bold hover:bg-zinc-800">
+      {label}
+    </Link>
   );
 }

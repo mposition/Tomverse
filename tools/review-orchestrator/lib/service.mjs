@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { createWriteStream, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { computeLoad, independentVendorCount, isName, planAssignments, resolveAuthorVendor } from "./assign.mjs";
+import { computeLoad, eligibleProviders, independentVendorCount, isName, planAssignments, resolveAuthorVendor } from "./assign.mjs";
 import { requiredReviewers } from "./config.mjs";
 import { withLock } from "./fsutil.mjs";
 import { reviewerEnv } from "./env.mjs";
@@ -10,7 +10,6 @@ import {
   addWorktree,
   changedFiles,
   deleteReviewRef,
-  diffText,
   ensureMirror,
   git,
   importBundle,
@@ -87,6 +86,16 @@ function reviewedHead(store, repoName, head) {
     );
 }
 
+/** Vendors to prefer not to use for this job: names only, a preference, never an error for an unknown vendor. */
+function checkAvoidVendors(value) {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length < 1 || value.length > 4 || !value.every(isName) ||
+      new Set(value).size !== value.length) {
+    throw new UsageError("avoid_vendors_invalid", "pass one to four vendor names");
+  }
+  return [...value];
+}
+
 function checkReviewerProviders(config, ids, authorVendor) {
   if (ids === undefined) return [];
   if (!Array.isArray(ids) || ids.length < 1 || ids.length > 3 || !ids.every(isName)) {
@@ -123,6 +132,7 @@ export async function submitJob(config, request, bundlePath, { now = new Date() 
     throw new UsageError("reviewers_invalid");
   }
   const reviewerProviders = checkReviewerProviders(config, request.reviewerProviders, authorVendor);
+  const avoidVendors = checkAvoidVendors(request.avoidVendors);
   if (statSync(bundlePath).size > config.maxBundleBytes) throw new UsageError("bundle_too_large");
 
   const store = new Store(config.stateDir);
@@ -176,8 +186,9 @@ export async function submitJob(config, request, bundlePath, { now = new Date() 
         authorVendor,
         reviewers,
         reviewerProviders,
+        ...(avoidVendors.length > 0 ? { avoidVendors } : {}),
         touchesContract,
-        scope: typeof scope === "string" ? scope.slice(0, 8192) : "",
+        scope: typeof scope === "string" ? scope : "",
         fileCount: files.length,
         focusFileCount: focusFiles.length,
         focusReviewed,
@@ -350,8 +361,33 @@ export class Orchestrator {
       this.log(`ignored a late result for ${job.id}#${slot.index}`);
       return;
     }
+    // A reviewer that ran out of time is not the answer (owner decision
+    // 2026-11-15): the slot goes back to the queue for another vendor, and ends
+    // unknown only when no other vendor is left to try.
+    if (outcome.reason === "timeout" && this.requeueTimedOut(job, slot)) return;
     this.store.writeSlot(job.id, { ...slot, status: "done", ...outcome, endedAt: this.now() });
     this.log(`finished ${job.id}#${slot.index} ${outcome.verdict}${outcome.reason ? ` (${outcome.reason})` : ""}`);
+  }
+
+  /**
+   * Queue a timed-out slot again, excluding every vendor that already timed
+   * out on it and every vendor another slot of the job uses. An operator-pinned
+   * slot is left as it ended: the operator named that reviewer.
+   */
+  requeueTimedOut(job, slot) {
+    if (job.reviewerProviders?.[slot.index] !== undefined) return false;
+    const entry = this.store.readJob(job.id);
+    if (!entry) return false;
+    const tried = [...new Set([...(slot.excludeVendors ?? []), slot.vendor].filter(Boolean))];
+    const usedElsewhere = entry.slots.filter((other) => other.index !== slot.index && other.vendor)
+      .map((other) => other.vendor);
+    const alternatives = eligibleProviders(this.config.providers, job.authorVendor)
+      .filter((provider) => !tried.includes(provider.vendor) && !usedElsewhere.includes(provider.vendor));
+    if (alternatives.length === 0) return false;
+    this.store.writeSlot(job.id, { index: slot.index, status: "queued", excludeVendors: tried,
+      retriedAfter: "timeout" });
+    this.log(`timed out ${job.id}#${slot.index} on ${slot.vendor}; queued for another vendor (not ${tried.join(", ")})`);
+    return true;
   }
 
   async runReview(job, slot, provider) {
@@ -370,21 +406,16 @@ export class Orchestrator {
           const instructions = instructionDiff(repo.mirror, job.base, job.head, allFiles);
           const from = job.focus ?? job.base;
           const files = job.focus ? changedFiles(repo.mirror, from, job.head) : allFiles;
-          const diff = diffText(repo.mirror, from, job.head);
-          return { files, instructions, diff };
+          return { files, instructions };
         });
       } catch (error) {
         this.finish(job, slot, { verdict: "unknown", reason: "worktree_failed", findings: [] });
         this.log(`worktree failed for ${job.id}: ${error.message}`);
         return;
       }
-      // An instruction-file change the reviewer cannot see in full cannot be
-      // reviewed: the checkout holds the base version, so nothing else shows it.
-      if (Buffer.byteLength(prepared.instructions.text, "utf8") > this.config.maxPromptDiffBytes) {
-        this.finish(job, slot, { verdict: "unknown", reason: "instruction_diff_too_large", findings: [] });
-        return;
-      }
-      const prompt = buildPrompt({ job, ...prepared, maxDiffBytes: this.config.maxPromptDiffBytes });
+      // The instruction-file diff is shown whole in the prompt (the checkout
+      // holds their base version); the rest of the diff is read from the checkout.
+      const prompt = buildPrompt({ job, ...prepared });
       const outcome = await this.spawnReviewer(job, slot, provider, workdir, prompt);
       this.finish(job, slot, outcome);
     } finally {

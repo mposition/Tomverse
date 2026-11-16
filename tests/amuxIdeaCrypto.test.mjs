@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import test from "node:test";
 
-import { openAmuxContent, sealAmuxContent, verifyAmuxContentDigest } from "../lib/amux/ideaCrypto.ts";
+import { AMUX_CONTENT_UNIT_MAX_BYTES, AMUX_TASK_RESULT_UNIT_MAX_BYTES, openAmuxContent, sealAmuxContent,
+  verifyAmuxContentDigest } from "../lib/amux/ideaCrypto.ts";
+import { AMUX_INTAKE_SAFETY_MAX_BYTES } from "../lib/amux/intakeLimitsCore.ts";
+import { AMUX_V22_TRANSPORT_MAX_BYTES } from "../lib/amux/v22LocalCliFlowCore.ts";
 
 const keys = () => ({
   masterKeyId: "amux-v4-master-test",
@@ -47,8 +50,12 @@ test("idea raw content has no crypto byte ceiling while other purposes stay boun
   assert.throws(() => openAmuxContent(
     tampered, "idea_raw", "idea-large-test-1", keyring,
   ));
+  // Past the 4 MiB unit backstop, a bounded purpose is refused; raw is not.
+  const huge = Buffer.alloc(AMUX_CONTENT_UNIT_MAX_BYTES + 257, 0x61);
+  assert.equal(openAmuxContent(sealAmuxContent(huge, "idea_raw", "idea-large-test-1", keyring),
+    "idea_raw", "idea-large-test-1", keyring).length, huge.length);
   assert.throws(() => sealAmuxContent(
-    raw, "source_scope", "idea-large-test-1", keyring,
+    huge, "source_scope", "idea-large-test-1", keyring,
   ));
 });
 
@@ -86,8 +93,21 @@ test("AMUX content fails closed on missing key configuration and oversized bound
     ...keyring,
     digestKeyId: "",
   }));
+  // One sealed unit's backstop (owner decision 2026-11-15): the intake flow's
+  // 4 MiB ceiling for its purposes, the v22 transport backstop for a report.
+  assert.equal(AMUX_CONTENT_UNIT_MAX_BYTES, AMUX_INTAKE_SAFETY_MAX_BYTES);
+  assert.equal(AMUX_TASK_RESULT_UNIT_MAX_BYTES, AMUX_V22_TRANSPORT_MAX_BYTES);
+  const analysis = Buffer.alloc(3 * 1024 * 1024, 0x61);
+  assert.deepEqual(openAmuxContent(sealAmuxContent(analysis, "analysis_result", "claim-test-1", keyring),
+    "analysis_result", "claim-test-1", keyring), analysis, "an analysis answer past the old 1 MiB unit is sealed");
   assert.throws(() => sealAmuxContent(
-    Buffer.alloc(1024 * 1024 + 1), "card_brief", "card-test-1", keyring,
+    Buffer.alloc(AMUX_CONTENT_UNIT_MAX_BYTES + 1), "card_brief", "card-test-1", keyring,
+  ));
+  const report = Buffer.alloc(AMUX_CONTENT_UNIT_MAX_BYTES + 1, 0x62);
+  assert.equal(openAmuxContent(sealAmuxContent(report, "task_result", "attempt-test-1", keyring),
+    "task_result", "attempt-test-1", keyring).length, report.length, "a v22 report past 4 MiB is sealed");
+  assert.throws(() => sealAmuxContent(
+    Buffer.alloc(AMUX_TASK_RESULT_UNIT_MAX_BYTES + 1), "task_result", "attempt-test-1", keyring,
   ));
   assert.deepEqual(openAmuxContent(sealAmuxContent(Buffer.alloc(0), "idea_raw", "idea-test-1", keyring), "idea_raw", "idea-test-1", keyring), Buffer.alloc(0));
   assert.deepEqual(openAmuxContent(sealAmuxContent(Buffer.alloc(1024 * 1024), "idea_raw", "idea-test-1", keyring), "idea_raw", "idea-test-1", keyring), Buffer.alloc(1024 * 1024));

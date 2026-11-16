@@ -5,7 +5,8 @@ import { AmuxContentRetirementError, readAmuxContentPurgeOutcome,
   retireVerifiedAmuxContentKey,
   type AmuxRetirableContent } from "./ideaContentKeyRetirementService.ts";
 import { deleteAmuxContentUnitKey } from "./ideaKeyStore.ts";
-import { AMUX_READ_MANIFEST_RETENTION_MS,
+import { amuxAnalysisEndedWhere } from "./ideaRetentionCore.ts";
+import { amuxReadManifestRetentionMs,
   commitAmuxDueReadManifestPurge } from
   "./ideaTrackedCheckoutReadManifestStore.ts";
 
@@ -39,7 +40,8 @@ export async function purgeDueAmuxReadManifests(
   if (!now) throw new AmuxContentRetirementError("integrity_unavailable");
   const due = await prisma.amuxIdeaTrackedCheckoutReadManifest.findMany({
     where: { ciphertext: { not: null }, bodyPurgedAt: null,
-      idea: { submittedAt: { lte: new Date(now.getTime() - AMUX_READ_MANIFEST_RETENTION_MS) },
+      idea: { submittedAt: { lte: new Date(now.getTime() - amuxReadManifestRetentionMs()) },
+        ...amuxAnalysisEndedWhere(now),
         retentionHolds: { none: { releasedAt: null,
           expiresAt: { gt: now } } } } },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],

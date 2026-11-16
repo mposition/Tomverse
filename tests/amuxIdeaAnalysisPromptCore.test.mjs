@@ -10,6 +10,16 @@ import {
 } from "../lib/amux/ideaAnalysisPromptCore.ts";
 import { AMUX_CONTRACT_PATHS } from "../lib/amux/executionGradeCore.ts";
 
+// Owner direction 2026-11-15: the switch restores the former prompt limits.
+const LEGACY_ENV = "TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS";
+const withLegacyLimits = (run) => {
+  const before = process.env[LEGACY_ENV];
+  process.env[LEGACY_ENV] = "enabled";
+  try { return run(); } finally {
+    if (before === undefined) delete process.env[LEGACY_ENV]; else process.env[LEGACY_ENV] = before;
+  }
+};
+
 const valid = () => ({
   previewId: "preview_12345678",
   chunkIndex: 2,
@@ -37,7 +47,14 @@ test("prompt candidate states the bounded proposal schema and no write authority
   assert.equal(result.status, "prompt_candidate");
   assert.equal(result.version, "amux-v4-analysis-prompt-v7");
   assert.ok(result.prompt.includes("You do not approve, register, prioritize, promote, execute"));
-  assert.ok(result.prompt.includes("at most 8 card units"));
+  // No per-chunk unit or field size limit is stated; the switch restores them.
+  assert.ok(result.prompt.includes("There is no per-chunk unit limit"));
+  assert.ok(result.prompt.includes("No text field or list has a length limit"));
+  assert.equal(result.prompt.includes("at most 8 card units"), false);
+  assert.equal(result.prompt.includes("within 2,000 bytes"), false);
+  const legacy = withLegacyLimits(() => buildAmuxIdeaAnalysisPrompt(valid()));
+  assert.ok(legacy.prompt.includes("at most 8 card units"));
+  assert.ok(legacy.prompt.includes("within 2,000 bytes"));
   assert.ok(result.prompt.includes("needs_information"));
   assert.ok(result.prompt.includes("continuationKind"));
   assert.ok(result.prompt.includes("Never quietly truncate"));
@@ -113,12 +130,45 @@ test("missing idea, forged target and oversized data fail closed", () => {
   forgedTarget.permittedTargetRefs[0].level = "owner";
   assert.deepEqual(buildAmuxIdeaAnalysisPrompt(forgedTarget),
     { status: "hold", reason: "prompt_data_unverified" });
+  // Past the former 16 KiB the data is sent whole; only the switch holds it,
+  // and the 4 MiB safety ceiling holds a prompt past it.
   const oversized = valid();
   oversized.sourceTexts[0].text = "A".repeat(7_900);
   oversized.sourceTexts[1].text = "B".repeat(7_900);
   oversized.sourceTexts.push({ refId: "source_more", kind: "github_excerpt", text: "C".repeat(1_000) });
-  assert.deepEqual(buildAmuxIdeaAnalysisPrompt(oversized),
+  const sent = buildAmuxIdeaAnalysisPrompt(oversized);
+  assert.equal(sent.status, "prompt_candidate");
+  assert.ok(sent.dataBytes > AMUX_V4_ANALYSIS_DATA_MAX_BYTES);
+  assert.deepEqual(withLegacyLimits(() => buildAmuxIdeaAnalysisPrompt(oversized)),
     { status: "hold", reason: "prompt_data_too_large" });
+  const beyond = valid();
+  beyond.sourceTexts[0].text = "A".repeat(4 * 1024 * 1024);
+  assert.deepEqual(buildAmuxIdeaAnalysisPrompt(beyond),
+    { status: "hold", reason: "prompt_data_too_large" });
+});
+
+test("a large idea's late page carries every earlier proposal and source", () => {
+  const late = valid();
+  late.chunkIndex = 40;
+  late.revisionChunkIndex = 40;
+  late.continuation.previousChunkIndex = 39;
+  late.sourceTexts[0].text = "Rebuild the intake flow. ".repeat(2_000);
+  for (let index = 0; index < 13; index += 1) {
+    late.sourceTexts.push({ refId: `source_extra_${index}`, kind: "github_excerpt",
+      text: `Excerpt ${index}.` });
+  }
+  for (let index = 0; index < 300; index += 1) {
+    late.permittedTargetRefs.push({ ref: `c${index % 39}:card-${index}`, kind: "card",
+      cardType: "task", storyKind: null, featureRef: "feature_1" });
+  }
+  const built = buildAmuxIdeaAnalysisPrompt(late);
+  assert.equal(built.status, "prompt_candidate");
+  const data = JSON.parse(built.prompt.split("BEGIN_CONFIRMED_DATA_JSON\n")[1]
+    .split("\nEND_CONFIRMED_DATA_JSON")[0]);
+  assert.equal(data.permittedTargetRefs.length, 303);
+  assert.equal(data.sourceTexts.length, 15);
+  assert.deepEqual(withLegacyLimits(() => buildAmuxIdeaAnalysisPrompt(late)),
+    { status: "hold", reason: "prompt_data_unverified" });
 });
 
 test("continuation requires the preceding chunk and preserves its remaining scope", () => {
@@ -139,9 +189,11 @@ test("continuation requires the preceding chunk and preserves its remaining scop
   unsigned.continuation.previousChunkDigest = "not-a-keyed-digest";
   assert.deepEqual(buildAmuxIdeaAnalysisPrompt(unsigned),
     { status: "hold", reason: "prompt_data_unverified" });
+  // A long remaining scope carries over whole; the switch restores 2,000 bytes.
   const overlongCoverage = valid();
   overlongCoverage.continuation.remainingScope = "A".repeat(2_001);
-  assert.deepEqual(buildAmuxIdeaAnalysisPrompt(overlongCoverage),
+  assert.equal(buildAmuxIdeaAnalysisPrompt(overlongCoverage).status, "prompt_candidate");
+  assert.deepEqual(withLegacyLimits(() => buildAmuxIdeaAnalysisPrompt(overlongCoverage)),
     { status: "hold", reason: "prompt_data_unverified" });
   const largePreview = valid();
   largePreview.sourceTexts[0].text = "A".repeat(7_000);

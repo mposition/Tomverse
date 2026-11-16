@@ -1,13 +1,15 @@
 import "server-only";
 
 import { prisma } from "@/lib/prisma";
-import { listAmuxCardsForAdmin, type AmuxAdminCardRow } from "./adminCardList.ts";
+import { AMUX_ADMIN_CARD_LIST_LIMIT, AMUX_ADMIN_CARD_LIST_MAX_LIMIT, listAmuxCardsForAdmin,
+  type AmuxAdminCardRow } from "./adminCardList.ts";
 import { readAmuxCardTitle } from "./adminExecutionRead.ts";
 
 /**
  * The Execution board's List view: the owner card list (`listAmuxCardsForAdmin`,
- * the newest cards by last change) with what a person reads first on each row,
- * the card's title and the worker it was assigned to.
+ * the newest cards by last change, one page and as many more as the person
+ * asked for with "show more") with what a person reads first on each row, the
+ * card's title and the worker it was assigned to.
  *
  * Read only. The title is read the way the board reads it (a digest-verified
  * title, or null when it is unavailable or expired), never from free text a
@@ -19,12 +21,17 @@ export type AmuxExecutionListRow = AmuxAdminCardRow & {
   worker: string | null;
 };
 
-export async function listAmuxCardsForExecutionList(): Promise<{
+export async function listAmuxCardsForExecutionList(limit: number = AMUX_ADMIN_CARD_LIST_LIMIT): Promise<{
   rows: AmuxExecutionListRow[];
   total: number;
   limit: number;
+  /** The `cardLimit` of the next page while the list holds only part of the board; null when it holds all. */
+  nextLimit: number | null;
 }> {
-  const base = await listAmuxCardsForAdmin();
+  const read = await listAmuxCardsForAdmin({ limit });
+  const nextLimit = read.rows.length < read.total && limit < AMUX_ADMIN_CARD_LIST_MAX_LIMIT ?
+    Math.min(AMUX_ADMIN_CARD_LIST_MAX_LIMIT, limit + AMUX_ADMIN_CARD_LIST_LIMIT) : null;
+  const base = { ...read, limit, nextLimit };
   const ids = base.rows.map((row) => row.id);
   const details = ids.length === 0 ? [] : await prisma.amuxWorkItem.findMany({
     where: { id: { in: ids } },

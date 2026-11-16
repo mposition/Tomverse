@@ -6,7 +6,8 @@ import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/amux/auditContract";
 import { BoardImportError } from "@/lib/amux/boardImportCore";
 import { readDecisionMakerSwitchesOrThrow } from "@/lib/amux/decisionMakerSwitchStore";
-import { settlementDestinationForBudget } from "@/lib/amux/executionBudgetCore";
+import { decideAmuxAttemptBudget } from "@/lib/amux/executionBudgetCore";
+import { readAmuxAttemptBudgetFacts } from "@/lib/amux/infraFailureStore";
 import { readAmuxCardTitle } from "./adminExecutionRead.ts";
 import { amuxDatabaseDiagnosticCode } from "./readFailureCore.ts";
 import {
@@ -23,10 +24,13 @@ import {
   AMUX_DM_OWNER_SETTLEMENT_RESOLVER, closeAmuxStoppedCardAsSystemWithin,
   completeAmuxStoppedCardAsSystemWithin, type AmuxStoppedCardLockedFacts,
 } from "./legacyCardSystemService.ts";
-import { amuxDmT2MergeEnabled, amuxDmT2MergeGate, amuxDmT2MergePatchPaths } from "./dmT2MergeCore.ts";
+import { amuxDmT2MergeEnabled, amuxDmT2MergePatchGate } from "./dmT2MergeCore.ts";
+import { qaReleaseDmMergeScope } from "../qaReleaseMergeLaneExclusionCore.ts";
 import { parseAmuxV22Conclusion } from "./v22ConclusionCore.ts";
 import { openCompletionCriteria } from "./v22ResultReviewService.ts";
 import { openAmuxV22TaskResultRow, v22TaskResultIdeaId } from "./v22TaskResultStore.ts";
+import { AMUX_V52_REJECTED_REVIEWS_PRISMA_CALLS, openAmuxV52RejectedReviewEntries,
+  readAmuxV52RejectedReviews, type AmuxV52ReviewHistoryRow } from "./v52ReviewFindingsStore.ts";
 
 /**
  * The AMUX owner queue through the Decision Maker (owner decision 2026-11-13).
@@ -48,6 +52,8 @@ import { openAmuxV22TaskResultRow, v22TaskResultIdeaId } from "./v22TaskResultSt
  */
 
 const CARD_ID = /^[A-Za-z0-9_-]{1,64}$/;
+/** Statements the sync makes for the rejected reviews' findings: every rejection of every pending Task. */
+export const AMUX_DM_OWNER_SETTLEMENT_REVIEW_PRISMA_CALLS = AMUX_V52_REJECTED_REVIEWS_PRISMA_CALLS;
 /** New settlements filed per tick, and cards handed to the relay per tick. */
 export const AMUX_DM_OWNER_SETTLEMENT_SYNC_LIMIT = 3;
 /** Pending settlements read per tick, so a few that cannot be filed never hide the rest. */
@@ -82,8 +88,9 @@ type SiblingRow = SealedTitle & { forTaskId: string; id: string; label: string; 
  * card yet are read with the rows their cards are opened from; the cards of
  * settlements no longer open that the relay has not closed come back to be
  * closed. While the switch is off, the settlements the owner asked for from
- * the owner queue are read and opened the same way. At most eight statements
- * past the boundary's own.
+ * the owner queue are read and opened the same way. At most nine statements
+ * past the boundary's own (the ninth reads the pending Tasks' rejected
+ * reviews, every one, owner decision 2026-11-15).
  */
 export async function readAmuxDmOwnerSettlementSyncRows(tx: Prisma.TransactionClient,
   input: { enabled: boolean }) {
@@ -103,6 +110,7 @@ export async function readAmuxDmOwnerSettlementSyncRows(tx: Prisma.TransactionCl
   let pending: PendingSettlement[] = [];
   let siblings: SiblingRow[] = [];
   let pulls: Awaited<ReturnType<typeof readAmuxDmOwnerSettlementPullEvidence>> = [];
+  let reviews: AmuxV52ReviewHistoryRow[] = [];
   // While the switch is off, only the settlements the owner asked for from the
   // owner queue are filed (owner decision 2026-11-14): one more statement.
   const requested = input.enabled ? null :
@@ -171,6 +179,8 @@ export async function readAmuxDmOwnerSettlementSyncRows(tx: Prisma.TransactionCl
       ORDER BY x."forTaskId", x."position"`;
     const bindingIds = pending.flatMap((row) => row.bindingId ? [row.bindingId] : []);
     pulls = await readAmuxDmOwnerSettlementPullEvidence(tx, bindingIds);
+    // Why the review server rejected each Task's runs: FINDINGS.md, after the run's report.
+    reviews = await readAmuxV52RejectedReviews(tx, taskIds);
   }
   const closing = await tx.$queryRaw<Array<{ questionId: string; cardId: string }>>`
     SELECT s."id" AS "questionId", s."localCardId" AS "cardId"
@@ -179,7 +189,7 @@ export async function readAmuxDmOwnerSettlementSyncRows(tx: Prisma.TransactionCl
       AND s."localCardClosedAt" IS NULL
     ORDER BY s."updatedAt", s."id"
     LIMIT ${AMUX_DM_OWNER_SETTLEMENT_SYNC_LIMIT}`;
-  return { pending, siblings, pulls, closing };
+  return { pending, siblings, pulls, reviews, closing };
 }
 
 const sealedTitle = (row: SealedTitle & { id: string }) => readAmuxCardTitle({ id: row.id,
@@ -221,6 +231,10 @@ export async function openAmuxDmOwnerSettlementCards(rows: Awaited<ReturnType<
         else findings = parseAmuxV22Conclusion(text)?.findings ?? text;
       }
       if (readable && criteria) {
+        // The rejected runs' findings, opened here outside the transaction. A
+        // body that cannot be read leaves its run out and is counted instead.
+        const reviews = await openAmuxV52RejectedReviewEntries(
+          rows.reviews.filter((review) => review.taskId === row.taskId));
         const mine = rows.siblings.filter((sibling) => sibling.forTaskId === row.taskId);
         const titles = await Promise.all([sealedTitle({ ...row, id: row.taskId }),
           ...mine.map((sibling) => sealedTitle(sibling))]);
@@ -229,6 +243,7 @@ export async function openAmuxDmOwnerSettlementCards(rows: Awaited<ReturnType<
           taskLabel: row.taskLabel, title: titles[0] ?? null, role: row.role, grade: row.grade,
           taskStatus: row.taskStatus, reason: row.reason, criteria, findings,
           rejections: row.rejections,
+          reviews,
           siblings: mine.map((sibling, index) => ({ label: sibling.label, title: titles[index + 1] ?? null,
             status: sibling.status, waitsOnThis: sibling.waitsOnThis })),
           siblingTotal: mine[0]?.total ?? 0,
@@ -319,6 +334,8 @@ type SettlementFacts = AmuxStoppedCardLockedFacts & {
   remakeIdeaId: string | null;
   lastAttempt: { id: string; attemptNumber: number; endedAt: string | null; outcome: string | null;
     reason: string | null } | null;
+  /** The card's review attempt, which a review pull request's settlement is judged against. */
+  reviewAttempt: { id: string } | null;
 };
 type LockedSettlement = SettlementFacts;
 
@@ -343,7 +360,10 @@ const SETTLEMENT_FACTS = Prisma.sql`
       (SELECT json_build_object('id', a."id", 'attemptNumber', a."attemptNumber",
           'endedAt', a."endedAt", 'outcome', a."outcome", 'reason', a."reason")
         FROM "AmuxExecutionAttempt" a WHERE a."taskId" = w."id"
-        ORDER BY a."taskRevision" DESC, a."startedAt" DESC, a."id" DESC LIMIT 1) AS "lastAttempt"
+        ORDER BY a."taskRevision" DESC, a."startedAt" DESC, a."id" DESC LIMIT 1) AS "lastAttempt",
+      (SELECT json_build_object('id', a."id") FROM "AmuxExecutionAttempt" a WHERE a."taskId" = w."id"
+          AND a."outcome" = 'succeeded' AND a."toStatus" = 'review'
+        ORDER BY a."attemptNumber" DESC NULLS LAST, a."startedAt" DESC, a."id" DESC LIMIT 1) AS "reviewAttempt"
     FROM "AmuxDmOwnerSettlement" s
     JOIN "AmuxWorkItem" w ON w."id" = s."taskId"`;
 
@@ -484,11 +504,13 @@ export async function applyAmuxDmOwnerSettlementDecision(tx: Prisma.TransactionC
       null;
     // The pull request it was asked about is no longer the open one of this run.
     if (!facts) return cancel("binding_moved");
-    // Behind the develop merge switch (owner decision 2026-11-13): an approval
-    // of a change with any path outside the merge allow list -- or whose paths
-    // cannot be read -- is not recorded; the person merges it.
-    if (amuxDmT2MergeEnabled(input.env ?? process.env)) {
-      const gate = amuxDmT2MergeGate(amuxDmT2MergePatchPaths(facts.patchBody));
+    // Behind the develop merge switch (owner decisions 2026-11-13, 2026-11-15):
+    // an approval of a change its merge scope leaves to a person -- a path, or
+    // in the block list scope a line -- or whose paths cannot be read is not
+    // recorded; the person merges it.
+    const env = input.env ?? process.env;
+    if (amuxDmT2MergeEnabled(env)) {
+      const gate = amuxDmT2MergePatchGate(facts.patchBody, qaReleaseDmMergeScope(env));
       if (!gate.pass) return handOff(gate.reason, { bindingId: row.bindingId, paths: gate.paths });
     }
     await record({ approvedHeadSha: facts.verifiedHeadSha, approvedDiffDigest: facts.diffDigest });
@@ -501,8 +523,15 @@ export async function applyAmuxDmOwnerSettlementDecision(tx: Prisma.TransactionC
   }
 
   if (decision === "retry") {
-    if (settlementDestinationForBudget({ requested_status: "todo",
-      attempt_number: row.lastAttempt?.attemptNumber ?? null }).to_status !== "todo")
+    // The claim's own rule (executionBudgetCore.ts): the card's counted
+    // attempts against the runaway guard, and its platform failures since a
+    // person's last retry against their bound. The settlement's own retry
+    // never starts that bound over (infraFailureStore.ts), so a card that
+    // used it goes to a person instead of running again with no one looking.
+    const facts = await readAmuxAttemptBudgetFacts(tx, row.taskId);
+    if (!decideAmuxAttemptBudget({ historical_rows: facts.historicalRows,
+      greatest_attempt_number: facts.greatestAttemptNumber, infra_rows: facts.infraRows,
+      infra_window_rows: facts.infraWindowRows }).allowed)
       return handOff("attempt_budget_spent");
     const changed = await tx.amuxWorkItem.updateMany({
       where: { id: row.taskId, revision: row.revision, status: row.status, archivedAt: null },

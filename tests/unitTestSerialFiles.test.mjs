@@ -39,6 +39,10 @@ const REVIEWED_NOT_TREE_WRITERS = new Map([
     "reads installer source to assert its writeFileSync ordering and calls only the pure environment parser; never runs installation or writes files",
   ],
   [
+    "tests/qaReleaseDmMergeScopePolicy.test.mjs",
+    "the writeFile call is a line of fixture patch text fed to the merge-scope gate; the test writes nothing",
+  ],
+  [
     "tests/issueBacklogShaMode.test.mjs",
     "writes only inside the temporary repository tests/support/issueBacklogFixtureRepo.mjs creates with mkdtempSync; the mkdtemp call is in the helper, so this file's own source does not show one",
   ],

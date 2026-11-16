@@ -18,6 +18,11 @@ import { amuxV22ReadOnlyActualLauncherConfigDigest, amuxV22ReadOnlyLaunchScope,
   amuxV22ReadOnlyLaunchScopeDigest } from
   "../lib/amux/v22ReadOnlyRetryProtocol.mjs";
 
+// This file pins the earlier flow, the kill switch's behaviour
+// (TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW=disabled). The local CLI flow, the
+// default, is covered in amuxV22LocalCliFlow.test.mjs. Read at call time.
+process.env.TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW = "disabled";
+
 const attemptId = "00000000-0000-4000-8000-000000000001";
 const request = { version: 1, attemptId, worker: "worker-a",
   role: "implement", modelId: "claude-opus-5-5",

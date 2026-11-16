@@ -26,6 +26,7 @@ import {
   finalSignalIsSuccess,
   reportedHalt,
 } from "../lib/engineeringAgentCore.ts";
+import { detectSecrets } from "../lib/engineeringAgentSecretPatterns.ts";
 import { runPublisherCycle } from "./engineering-agent-publisher-core.mjs";
 import { isSupervisedWorker, superviseCycle } from "./engineering-agent-supervisor.mjs";
 
@@ -146,6 +147,21 @@ async function workspaceAt(baseSha) {
       const applied = await git(["-C", repo, "apply", "--cached", patchFile], { home });
       if (applied.code !== 0) return null;
       const treeId = (await step(["write-tree"])).trim();
+      // Every blob the applied tree adds, read as the branch would publish
+      // it: a binary file's bytes are base85 text of deflated data in the
+      // patch, so the scan of the patch text never saw them (§11).
+      const raw = await git(["-C", repo, "diff-tree", "-r", "-z", "--no-renames", baseSha, treeId], { home });
+      if (raw.code !== 0) throw new Error("git_failed");
+      const fields = raw.stdout.toString("utf8").split("\0");
+      if (fields.pop() !== "" || fields.length % 2 !== 0) throw new Error("git_failed");
+      for (let i = 0; i < fields.length; i += 2) {
+        const meta = /^:\d{6} (\d{6}) [0-9a-f]{40} ([0-9a-f]{40}) [A-Z]$/.exec(fields[i]);
+        if (!meta) throw new Error("git_failed");
+        if (/^0+$/.test(meta[2]) || meta[1] === "160000") continue;
+        const blob = await git(["-C", repo, "cat-file", "blob", meta[2]], { home });
+        if (blob.code !== 0) throw new Error("git_failed");
+        if (detectSecrets(blob.stdout.toString("latin1")).length > 0) return { refused: "content_check_failed" };
+      }
       const env = {
         GIT_AUTHOR_NAME: identity.name,
         GIT_AUTHOR_EMAIL: identity.email,

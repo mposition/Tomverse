@@ -63,6 +63,8 @@ const seedIdea = async (actorUserId: string, submittedAt: Date) => {
   return id;
 };
 
+const GAP_OVER_TIMEOUT_MS = AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS + 300;
+
 test("the progress list reads the owner's newest ideas in one statement inside its three-call boundary", async () => {
   assert.equal(AMUX_DB_BOUNDARIES.ideaProgressListRead.prismaCallCeiling, 3);
   const owner = `idea-progress-owner-${randomUUID()}`;
@@ -100,7 +102,10 @@ test("a gap over the 100 ms a boundary used to allow no longer ends its session"
       await tx.$queryRaw`SELECT 1`;
     });
   }
-  const expected = [{ idle_in_transaction_session_timeout: `${AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS}ms` }];
+  // PostgreSQL prints a whole second as "1s".
+  const shown = AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS % 1000 === 0
+    ? `${AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS / 1000}s` : `${AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS}ms`;
+  const expected = [{ idle_in_transaction_session_timeout: shown }];
   assert.deepEqual(observed, [expected, expected]);
 });
 
@@ -116,8 +121,8 @@ test("a gap over the boundary's idle-in-transaction timeout ends a read with no 
     });
   await probe(10);
   let failure: unknown;
-  await probe(400).catch((error: unknown) => { failure = error; });
-  assert.ok(failure, "a 400 ms gap between two statements ends the session");
+  await probe(GAP_OVER_TIMEOUT_MS).catch((error: unknown) => { failure = error; });
+  assert.ok(failure, `a ${GAP_OVER_TIMEOUT_MS} ms gap between two statements ends the session`);
   assert.equal(failure instanceof AmuxDbBoundaryError, false);
   assert.deepEqual(amuxIdeaProgressFailureLog(failure), {
     subsystem: "amux", event: "idea_progress_read_failed", name: "Error", boundaryCode: null, prismaCode: null,
@@ -130,11 +135,11 @@ test("inside a route that gap is a busy read, at the next statement and at the C
   // WSL bridge. A read wrote nothing, so the caller may ask again on its next tick.
   const boundary = { operation: "read_gap_probe", prismaCallCeiling: 5, isolation: "read" } as const;
   const withNextStatement = () => withAmuxRouteBudget(() => withAmuxDbBoundary(boundary, async (tx) => {
-    await sleep(400);
+    await sleep(GAP_OVER_TIMEOUT_MS);
     await tx.$queryRaw`SELECT 1`;
   }));
   const atCommit = () => withAmuxRouteBudget(() => withAmuxDbBoundary(boundary, async () => {
-    await sleep(400);
+    await sleep(GAP_OVER_TIMEOUT_MS);
   }));
   for (const read of [withNextStatement, atCommit]) {
     const failure = await read().then(() => null, (error: unknown) => error);

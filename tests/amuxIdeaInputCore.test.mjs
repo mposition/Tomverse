@@ -50,7 +50,32 @@ test("idea input rejects schema expansion, malformed references and oversized te
   assert.deepEqual(inspectAmuxIdeaInput(request({ unexpected: true })), { ok: false, code: "schema_rejected" });
   assert.deepEqual(inspectAmuxIdeaInput(request({ repositories: ["mposition/Tomverse", "mposition/Tomverse"] })), { ok: false, code: "schema_rejected" });
   assert.deepEqual(inspectAmuxIdeaInput(request({ pullRequests: [{ repository: "mposition/Tomverse", number: -1 }] })), { ok: false, code: "schema_rejected" });
-  assert.deepEqual(inspectAmuxIdeaInput(request({ idea: "한".repeat(3000) })), { ok: false, code: "too_large" });
+  // Only the 4 MiB safety ceiling refuses an idea for its size.
+  assert.deepEqual(inspectAmuxIdeaInput(request({ idea: "a".repeat(4 * 1024 * 1024 + 1) })),
+    { ok: false, code: "too_large" });
+});
+
+test("a long idea with many references passes; the legacy switch restores the former limits", () => {
+  // Owner direction 2026-11-15: no 8 KiB, 8-repository or 16-PR limit.
+  const repositories = Array.from({ length: 30 }, (_, index) => `mposition/repository-${index}`);
+  const pullRequests = Array.from({ length: 50 }, (_, index) => ({
+    repository: "mposition/Tomverse", number: index + 1,
+  }));
+  const long = request({ idea: "한".repeat(3000), repositories, pullRequests });
+  const checked = inspectAmuxIdeaInput(long);
+  assert.equal(checked.ok, true);
+  if (checked.ok) {
+    assert.equal(checked.repositoryCount, 30);
+    assert.equal(checked.pullRequestCount, 50);
+    assert.equal(checked.ideaBytes, 9000);
+  }
+  const ciLog = `Fix the failing CI.\n\n${"not ok 3 - the build step failed at line 12\n".repeat(20_000)}`;
+  assert.equal(inspectAmuxIdeaInput(request({ idea: ciLog })).ok, true);
+  process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS = "enabled";
+  try {
+    assert.deepEqual(inspectAmuxIdeaInput(request({ idea: "한".repeat(3000) })), { ok: false, code: "too_large" });
+    assert.deepEqual(inspectAmuxIdeaInput(request({ repositories })), { ok: false, code: "schema_rejected" });
+  } finally { delete process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS; }
 });
 
 test("input preview route is owner-only, no-store and audits only a body-free result", () => {

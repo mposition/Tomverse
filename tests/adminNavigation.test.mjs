@@ -912,7 +912,7 @@ test("view roles never promise more than the pages grant, nor hide what they gra
   const cardsBranch = page.slice(branchAt);
   const gateAt = cardsBranch.search(OWNER_GATE);
   assert.ok(
-    gateAt >= 0 && gateAt < cardsBranch.indexOf("listAmuxCardsForExecutionList()"),
+    gateAt >= 0 && gateAt < cardsBranch.indexOf("listAmuxCardsForExecutionList("),
     "the Cards branch reads the list before refusing a non-owner"
   );
   assert.match(page, /if \(!resolved\) notFound\(\);/);
@@ -1007,7 +1007,7 @@ test("execution board and Safety & recovery count distinct actions without dupli
   assert.match(queueRead, /prisma\.amuxWorkItem\.count\(\{ where: amuxOwnerQueueWhere\(\) \}\)/);
   assert.match(queueRead, /const where = amuxOwnerQueueWhere\(\);/);
   assert.match(queueRead, /findMany\(\{\s*where, orderBy/);
-  assert.match(queueRead, /take: AMUX_OWNER_QUEUE_LIMIT/);
+  assert.match(queueRead, /take: limit/);
   // The list is bounded and says so: its total counts the same set as the badge.
   assert.match(queueRead, /return \{ items, total, processedToday/);
   // The page's tab badge turns a failed read into no badge.

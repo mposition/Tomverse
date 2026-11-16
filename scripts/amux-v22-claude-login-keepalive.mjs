@@ -15,10 +15,45 @@
 // A login that is gone is the operator's to renew (`claude auth login`); this
 // unit only reports it and exits non-zero.
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
+import { mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+
+// The script is installed on its own (~/.local/lib/tomverse-amux-v22/), so the
+// health file it writes is spelled out here; lib/amux/v22WorkerHealthFile.mjs
+// reads the same version-1 shape and tests/amuxCardWaitAndWorkerHealthCore
+// checks the two agree.
+const HEALTH_WORKER = /^[a-z0-9][a-z0-9-]{0,63}$/;
+const HEALTH_SIGNAL = /^[a-z0-9_]{1,64}$/;
+
+/** The keepalive line's health signal for the worker copies. */
+export function amuxV22KeepaliveHealthSignal(line) {
+  if (line?.outcome === "fresh" || line?.outcome === "refreshed")
+    return line.warning === "relogin_soon" ? "relogin_soon" : "ok";
+  if (line?.outcome === "refresh_failed") return "refresh_failed";
+  if (line?.state === "missing") return "login_missing";
+  if (line?.state === "unreadable") return "login_unreadable";
+  return "login_required";
+}
+
+/** Writes one worker's keepalive signal next to its copy, atomically. Codes and times only. */
+export async function writeKeepaliveHealth({ worker, signal, observedAt, expiresAt = null,
+  stateRoot = "/var/lib" }) {
+  if (!HEALTH_WORKER.test(worker) || !HEALTH_SIGNAL.test(signal))
+    throw new TypeError("invalid health signal");
+  const directory = join(stateRoot, `tomverse-amux-v22-${worker}`, "cli");
+  const target = join(directory, "amux-health-login_keepalive.json");
+  const temporary = join(directory, `.amux-health-login_keepalive.json.${randomBytes(6).toString("hex")}`);
+  const body = JSON.stringify({ version: 1, source: "login_keepalive", signal,
+    observedAt: new Date(observedAt).toISOString(),
+    ...(expiresAt ? { expiresAt: new Date(expiresAt).toISOString() } : {}) });
+  try {
+    await writeFile(temporary, body, { mode: 0o600, flag: "wx" });
+    await rename(temporary, target);
+  } catch (error) { await rm(temporary, { force: true }); throw error; }
+}
 
 /** Use the CLI when the access token has this little left (or is past it). */
 export const CLAUDE_KEEPALIVE_REFRESH_WITHIN_MS = 10 * 60 * 1000;
@@ -51,8 +86,14 @@ const iso = (ms) => (ms === null || ms === undefined ? null : new Date(ms).toISO
  * One keepalive round. `runCli(args)` and `runStage()` resolve when the
  * process ends (a non-zero exit rejects); `log(object)` writes one line.
  */
-export async function runClaudeLoginKeepalive({ readLogin, runCli, runStage, log,
-  readCopyExpiries = async () => [], now = () => Date.now() }) {
+export async function runClaudeLoginKeepalive({ readLogin, runCli, runStage, log: writeLog,
+  readCopyExpiries = async () => [], now = () => Date.now(), report = async () => {} }) {
+  // Every outcome line is also reported (owner decision 2026-11-15); a
+  // failed report never changes the round.
+  const log = async (line) => {
+    writeLog(line);
+    try { await report(line); } catch { /* the journal line is written */ }
+  };
   const read = async () => {
     let bytes;
     // A login file that is gone is the operator's to renew, like a cleared one.
@@ -79,14 +120,14 @@ export async function runClaudeLoginKeepalive({ readLogin, runCli, runStage, log
     if (behind) {
       try { await runStage(); staged = "ok"; } catch { staged = "failed"; }
     }
-    log({ outcome: "fresh", expiresAt: iso(login.expiresAt),
+    await log({ outcome: "fresh", expiresAt: iso(login.expiresAt),
       refreshTokenExpiresAt: iso(login.refreshExpiresAt),
       ...(staged ? { restaged: staged } : {}),
       ...(reloginSoon(login) ? { warning: "relogin_soon" } : {}) });
     return staged === "failed" ? 1 : 0;
   }
   if (login.state !== "refresh_due") {
-    log({ outcome: "login_required", state: login.state,
+    await log({ outcome: "login_required", state: login.state,
       refreshTokenExpiresAt: iso(login.refreshExpiresAt),
       action: "operator: run `claude auth login` as this user" });
     return 1;
@@ -103,18 +144,29 @@ export async function runClaudeLoginKeepalive({ readLogin, runCli, runStage, log
     if (login.state === "fresh" && (login.expiresAt ?? 0) > before) {
       let staged = "ok";
       try { await runStage(); } catch { staged = "failed"; }
-      log({ outcome: "refreshed", by: how, staged,
+      await log({ outcome: "refreshed", by: how, staged,
         expiresAt: iso(login.expiresAt), refreshTokenExpiresAt: iso(login.refreshExpiresAt),
         ...(reloginSoon(login) ? { warning: "relogin_soon" } : {}) });
       return staged === "ok" ? 0 : 1;
     }
     if (login.state === "login_required") break;
   }
-  log({ outcome: login.state === "login_required" ? "login_required" : "refresh_failed",
+  await log({ outcome: login.state === "login_required" ? "login_required" : "refresh_failed",
     state: login.state, expiresAt: iso(login.expiresAt),
     refreshTokenExpiresAt: iso(login.refreshExpiresAt),
     action: "operator: run `claude auth login` as this user" });
   return 1;
+}
+
+/** Writes the round's signal next to each worker's copy; a failed write is skipped. */
+export async function reportClaudeKeepaliveHealth(workers, line, write = writeKeepaliveHealth) {
+  const signal = amuxV22KeepaliveHealthSignal(line);
+  const observedAt = new Date().toISOString();
+  for (const worker of workers) {
+    try {
+      await write({ worker, signal, observedAt, expiresAt: line?.refreshTokenExpiresAt ?? null });
+    } catch { /* the journal line still says it */ }
+  }
 }
 
 const run = (file, args, options) => new Promise((resolve, reject) => {
@@ -149,6 +201,10 @@ async function main() {
           { timeout: 60_000 }) :
         Promise.reject(new Error("AMUX_V22_STAGE_AUTH_SCRIPT or AMUX_V22_CLAUDE_WORKERS is not set"))),
       log: (line) => console.log(JSON.stringify({ event: "amux_v22_claude_keepalive", ...line })),
+      // Owner decision 2026-11-15: the outcome also goes next to each Claude
+      // worker's copy, so the worker's sidecar and bridge carry it to Admin
+      // (login_required, relogin_soon). Never fatal.
+      report: (line) => reportClaudeKeepaliveHealth(workers, line),
     });
   } finally {
     await rm(workDir, { recursive: true, force: true });

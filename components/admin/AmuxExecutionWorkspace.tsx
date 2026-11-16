@@ -38,6 +38,8 @@ import type { DmAttention, DmAttentionItem } from "@/lib/amux/decisionMakerAtten
 import { AmuxOutcomeObservationForm } from "./AmuxOutcomeObservationForm";
 import { requestArchiveAllActiveCards } from "./amuxExecutionArchiveRequest";
 import { AmuxAttemptUsageAcceptance } from "./AmuxAttemptUsageAcceptance";
+import { AmuxCardWaitReasonLine, AmuxCardWaitReasonPanel,
+  type AmuxCardWaitReasonView } from "./AmuxCardWaitReason";
 import { AmuxReviewRejectionReason } from "./AmuxReviewRejection";
 import type { AmuxV52AttemptReviewView } from "@/lib/amux/v52ReviewFindingsCore";
 import {
@@ -64,6 +66,8 @@ type Card = {
   attentionReason: string | null;
   /** A v22 worker question still waiting on the owner; null when none. */
   ownerQuestion: "open" | "answered" | null;
+  /** Why the card is not running (2026-11-15); null when nothing holds it. */
+  waitReason?: AmuxCardWaitReasonView | null;
   /** In the archive drawer (the archive lane also holds finished cards that were never archived). */
   archived?: boolean;
   updatedAt: string;
@@ -106,6 +110,8 @@ type Detail = Omit<Card, "score"> & { revision: number; body: string | null;
     toStatus: string | null; reason: string | null;
     reservedCostMicrousd: string; settledCostMicrousd: string | null;
     costConfirmed: boolean; usageUnknown: boolean;
+    /** The infrastructure failure this run ended in; it used no attempt. */
+    infraFailure?: string | null;
     usageAcceptance: { source: string; acceptedAt: string } | null;
     v52Review?: AmuxV52AttemptReviewView | null }>;
   escalations: Array<{ id: string; reason: string; status: string;
@@ -237,9 +243,11 @@ function IdeaLaneCard({ card }: { card: AmuxIdeaLaneBoardCard }) {
   </li>;
 }
 
-export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = false,
+export function AmuxExecutionWorkspace({ initialTaskId = null, initialView = "board", canMoveCards = false,
   canReviewCards = false, decisionMaker, laneIdeas, workerChannels, cardList, ownerQueue }: {
   initialTaskId?: string | null; canMoveCards?: boolean;
+  /** The view the board opens in: the List view after its "show more" (`?cardView=list`). */
+  initialView?: "board" | "list" | "hierarchy";
   /** The "Waiting on me" queue's count and groups, read by the page; null: not read. */
   ownerQueue?: AmuxBoardOwnerQueue | null;
   /**
@@ -265,7 +273,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
    * The List view's rows, read by the page (lib/amux/adminExecutionCardList.ts).
    * Absent: the view is not offered; null: the read failed, which the view says.
    */
-  cardList?: { rows: AmuxExecutionListRow[]; total: number; limit: number } | null;
+  cardList?: { rows: AmuxExecutionListRow[]; total: number; limit: number; nextLimit?: number | null } | null;
 }) {
   const m = useAdminMessages(adminAmuxExecutionMessages);
   const d = useAdminMessages(adminAmuxDecisionMakerAttentionMessages);
@@ -275,7 +283,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
   // The clock the card ages are counted against: read when the board was read, not on every render.
   const [nowMs, setNowMs] = useState<number | null>(null);
   const dmTotal = decisionMaker?.total ?? 0;
-  const [view, setView] = useState<"board" | "list" | "hierarchy">("board");
+  const [view, setView] = useState<"board" | "list" | "hierarchy">(initialView);
   // A lane the board pages on its own (the attention lane's rest, the past-work list) stops after a failed read instead of retrying in a loop.
   const [autoStopped, setAutoStopped] = useState<Partial<Record<AmuxExecutionLane, true>>>({});
   const [board, setBoard] = useState<BoardSnapshot | null>(null);
@@ -731,6 +739,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
         <span>{card.priority.toUpperCase()}</span>
         {since && <span className={styles.elapsed} title={screens.sinceChange}>{since}</span>}
       </p>
+      <AmuxCardWaitReasonLine wait={card.waitReason} />
     </li>;
   };
   /** The "waiting on you" column: counts by reason, the first cards as one line each, and the way to the tab that handles them. */
@@ -906,7 +915,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
     </>}
     {view === "list" && cardList !== undefined && (cardList === null ?
       <AdminReadFailed title={views.list.unavailableTitle} detail={views.list.unavailableDetail} /> :
-      <AmuxCardListPanel rows={cardList.rows} total={cardList.total} limit={cardList.limit} nowMs={nowMs}
+      <AmuxCardListPanel rows={cardList.rows} total={cardList.total} limit={cardList.limit} nextLimit={cardList.nextLimit} nowMs={nowMs}
         workerChannels={workerChannels}
         onOpen={(taskId, opener) => { returnFocusRef.current = opener; void openCard(taskId); }} />)}
     {view === "hierarchy" && <section className="rounded-lg border p-4 border-zinc-700">
@@ -1018,6 +1027,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
           if (new URL(window.location.href).searchParams.get("taskId") === selected.id)
             void openCard(selected.id, false, true);
         }} />}
+      <AmuxCardWaitReasonPanel wait={selected.waitReason} date={date} />
       {selected.ownerQuestion && <AmuxTaskQuestionSection key={selected.id + ":" + selected.revision}
         taskId={selected.id} canAnswer={canReviewCards} onAnswered={() => {
           void refreshBoard();
@@ -1087,6 +1097,8 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
           <p>{m.internalCost}: {item.costConfirmed && item.settledCostMicrousd !== null ?
             `$${USD(item.settledCostMicrousd)}` : m.unconfirmed}</p>
           {item.reason && <p>{item.reason}</p>}
+          {item.infraFailure && <p className="text-xs text-zinc-400" data-testid="amux-attempt-infra-failure">
+            {m.infraAttempt.kind[item.infraFailure] ?? item.infraFailure} · {m.infraAttempt.notCounted}</p>}
           <AmuxReviewRejectionReason review={item.v52Review} attemptNumber={item.attemptNumber} />
           <AmuxAttemptUsageAcceptance taskId={selected.id} attempt={item}
             canAccept={canReviewCards} date={date}

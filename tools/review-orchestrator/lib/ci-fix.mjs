@@ -49,12 +49,13 @@ export const CI_FIX_COMMIT_PREFIX = "auto-fix(ci): ";
 export const CI_FIX_MAX_RUN_IDS = 8;
 /** workflow_dispatch takes 65,535 characters of inputs in all. */
 export const CI_FIX_MAX_PATCH_CHARS = 60_000;
-export const CI_FIX_MAX_LOG_CHARS = 60_000;
-export const CI_FIX_LEDGER_DAYS = 14;
-/** The sender ignores a request older than six hours; this side clears a day-old one. */
-export const CI_FIX_OUTBOX_KEEP_MS = 86_400_000;
+// Internal development flow (owner decision 2026-11-15): the model reads far more of the log.
+export const CI_FIX_MAX_LOG_CHARS = 240_000;
+export const CI_FIX_LEDGER_DAYS = 90;
+/** The sender ignores a request older than 48 hours; this side clears a month-old one. */
+export const CI_FIX_OUTBOX_KEEP_MS = 30 * 86_400_000;
 /** The sender's own hourly cap: queueing no faster means nothing waits there to expire. */
-export const CI_FIX_MAX_QUEUED_PER_HOUR = 6;
+export const CI_FIX_MAX_QUEUED_PER_HOUR = 60;
 /**
  * How much of each job log is read: its last 16 MB. The excerpt, not this
  * read, is what the model sees; a failure line can sit far from the end,
@@ -106,7 +107,7 @@ export const CI_FIX_DIGEST_PLACEHOLDER = "RESOLVE";
  * the sender let it expire. The sender sends within the hour (its cap is the
  * proposing side's) and the workflow takes minutes.
  */
-export const CI_FIX_PUBLISH_WAIT_MS = 2 * 3_600_000;
+export const CI_FIX_PUBLISH_WAIT_MS = 12 * 3_600_000;
 /** A pass that started an hour ago and never recorded an end crashed. */
 const STARTED_STALE_MS = 3_600_000;
 /**

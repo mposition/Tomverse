@@ -74,7 +74,7 @@ export const dmInstanceForProvider = (provider: string): string | null =>
  * vendor CLI's prompt, read whole on stdin, and 256 KiB (64-90k tokens) leaves
  * most of the smaller vendor context window for what the DM reads in its
  * workspace. The body store's `card_text` row has the same cap (migration
- * 20261115120000_amux_dm_card_text_cap). It replaces 16 KiB, which §5 set when
+ * 20261115140000_amux_dm_card_text_cap). It replaces 16 KiB, which §5 set when
  * the card was all a DM could read.
  */
 export const DM_CARD_TEXT_MAX_BYTES = 256 * 1024;

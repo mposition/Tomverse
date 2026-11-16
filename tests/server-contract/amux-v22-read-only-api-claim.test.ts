@@ -52,6 +52,9 @@ const tx = {
     if (sql.includes("ORDER BY CASE WHEN lane")) return [{ id: taskId }];
     if (sql.includes("FROM \"AmuxWorkItem\" WHERE \"id\"") &&
         sql.includes("FOR UPDATE")) return [{ id: taskId }];
+    // readAmuxAttemptBudgetFacts (2026-11-15): the aggregate below, in one statement.
+    if (sql.includes('COUNT(*)::int AS "rows"'))
+      return [{ rows: 1, greatest: 1, infra: 0, reserved: BigInt("3400000") }];
     if (sql.includes("FROM \"AmuxExecutionAttempt\" a")) return [];
     if (sql.includes("FROM \"AmuxWorkerRuntime\"") && sql.includes("FOR UPDATE"))
       return [runtime(workerName, pinnedCapabilities)];
@@ -80,7 +83,7 @@ const tx = {
   amuxIdeaUnitDecision: { findUnique: async () => ({
     confirmationSnapshot: { card: { task: { costReceipt: receipt } } },
   }) },
-  amuxExecutionAttempt: { aggregate: async () => ({
+  amuxExecutionAttempt: { findMany: async () => [], aggregate: async () => ({
     _count: { _all: 1 }, _max: { attemptNumber: 1 },
     _sum: { reservedCostMicrousd: BigInt("3400000") },
   }) },

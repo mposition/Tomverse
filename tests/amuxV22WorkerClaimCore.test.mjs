@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { AMUX_V22_GLOBAL_ACTIVE_LIMIT, amuxV22ClaimCapacity, amuxV22ExecutionRole, amuxV22RequiredTool,
+import { amuxV22ClaimCapacity, amuxV22ExecutionRole, amuxV22RequiredTool,
   amuxV22ResumeRoutes, amuxV22WorkerClaimEnabled, amuxV22OneShotRoleSupported, amuxV22OneShotRouteSupported,
   amuxV22TaskRoleSupported, amuxV22TaskWritesPatch, chooseAmuxV22WorkerRoute } from
   "../lib/amux/v22WorkerClaimCore.ts";
@@ -19,15 +19,14 @@ test("v22 claim requires its own exact environment switch", () => {
   }
 });
 
-test("Tasks run in parallel up to the global limit and never past the verified workers", () => {
-  assert.equal(AMUX_V22_GLOBAL_ACTIVE_LIMIT, 6);
-  // A second, third ... normal Task no longer waits for the first.
-  for (let assigned = 0; assigned < 6; assigned += 1) {
+test("Tasks run in parallel on every verified worker and never past them", () => {
+  // Owner direction 2026-11-15: the global six is gone; the workers are the bound.
+  for (let assigned = 0; assigned < 9; assigned += 1) {
     assert.equal(amuxV22ClaimCapacity({ verifiedWorkerCount: 9,
       totalAssigned: assigned }).allowed, true, `assigned ${assigned}`);
   }
   assert.equal(amuxV22ClaimCapacity({ verifiedWorkerCount: 9,
-    totalAssigned: 6 }).reason, "global_capacity_full");
+    totalAssigned: 9 }).reason, "global_capacity_full");
   // Fewer verified workers than the limit: one Task per worker.
   assert.equal(amuxV22ClaimCapacity({ verifiedWorkerCount: 2,
     totalAssigned: 1 }).allowed, true);
@@ -97,7 +96,7 @@ test("no price competition: at equal load the provider that waited longest takes
   // and passes both turns on.
   const claim = readFileSync("lib/amux/v22WorkerClaimService.ts", "utf8");
   assert.match(claim, /tx\.amuxV22WorkerAssignment\.groupBy\(\{\s*by: \["workerName"\], _max: \{ assignedAt: true \} \}\)/);
-  assert.match(claim, /activeByProvider, lastAssignedAtByWorker, lastAssignedAtByProvider \}\)/);
+  assert.match(claim, /activeByProvider, lastAssignedAtByWorker, lastAssignedAtByProvider,\s+infraFailedWorkers: recentInfra,/);
   const recovery = readFileSync("lib/amux/v22TaskRecoveryService.ts", "utf8");
   assert.match(recovery, /isReview: false, preferLowerPrice: true \}\)/);
 });
@@ -109,9 +108,12 @@ test("one tick assigns every ready Task, logs what it passed over, and stops at 
   assert.doesNotMatch(tick, /return await claimCandidate/);
   assert.match(tick, /claims\.push\(claimed\)/);
   assert.match(tick, /event: "amux_v22_claim_tick"/);
-  assert.match(tick, /stop = "outcome_unknown";\s+break;/);
-  assert.match(claim, /isReview: card\.taskRole === "review", activeByProvider, lastAssignedAtByWorker, lastAssignedAtByProvider \}\)/);
+  assert.match(tick, /stop = "outcome_unknown";\s+stopIndex = index;\s+break;/);
+  assert.match(claim, /isReview: card\.taskRole === "review", activeByProvider, lastAssignedAtByWorker, lastAssignedAtByProvider,/);
   assert.doesNotMatch(claim, /laneAssigned|lane_capacity_full|reserved_capacity_unavailable/);
+  // Owner decision 2026-11-15: each card passed over keeps why.
+  assert.match(tick, /await recordAmuxCardWaitReasons\(waits\);/);
+  assert.match(tick, /await clearAmuxCardWaitReasons\(claims\.map/);
 });
 
 test("review prefers another provider and never selects its author", () => {
@@ -240,7 +242,9 @@ test("review independence traces implementation through intermediate Task edges"
   // A Task resumed after an owner question narrows the quota routes (those
   // whose worker has settled usage) through amuxV22ResumeRoutes, which only
   // holds the Task for a worker that still serves the Task's grade.
-  assert.match(claim, /amuxV22ResumeRoutes\(\{\s+resumeWorker: resume\?\.worker \?\? null,\s+approvedRoutes: approved\.receipt\.routes, routes: settled\.routes,/);
+  // Since 2026-11-15 those routes are also past the worker quarantine.
+  assert.match(claim, /const admittedRoutes = settled\.routes\.filter\(\(route\) =>\s+amuxWorkerCircuitAdmits\(circuits\.get\(route\.workerName\)\)\);/);
+  assert.match(claim, /amuxV22ResumeRoutes\(\{\s+resumeWorker: resume\?\.worker \?\? null,\s+approvedRoutes: approved\.receipt\.routes, routes: admittedRoutes,/);
   assert.match(claim, /amuxWorkerMatchesExecutionGrade\(card\.executionGrade, workerName,/);
   assert.match(claim, /chooseAmuxV22WorkerRoute\(\{ routes: resumeRoutes,/);
 });

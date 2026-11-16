@@ -9,7 +9,7 @@ import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { assertRecentAdminAuthentication, isAdminReauthenticationError } from "@/lib/adminReauthentication";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedText } from "@/lib/apiSecurity";
 import {
-  AMUX_IDEA_SUBMISSION_ENVELOPE_MAX_BYTES,
+  amuxIdeaSubmissionEnvelopeMaxBytes,
   AMUX_V4_IDEA_READBACK_ENV,
   AMUX_V4_IDEA_SUBMISSION_ENV,
   ideaSubmissionReadBackPermitted,
@@ -126,7 +126,7 @@ export async function POST(request: Request) {
       minute: 3,
       day: 20,
     });
-    const raw = await readLimitedText(request, AMUX_IDEA_SUBMISSION_ENVELOPE_MAX_BYTES);
+    const raw = await readLimitedText(request, amuxIdeaSubmissionEnvelopeMaxBytes());
     // The idea lane's test entry: saved as an owner idea with no analysis,
     // which is what the lane claims, even while session intake is on.
     const toLane = new URL(request.url).searchParams.get("target") === "lane";

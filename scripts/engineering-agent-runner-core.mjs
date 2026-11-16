@@ -6,9 +6,11 @@
 // idea lane's, and the Publisher opens their pull requests. What it still does
 // is the round only it starts: register the runtime, read GitHub for an
 // unbound pull request or branch under the agent's namespace (which halts
-// everything), and trigger the app's read of its published pull requests'
-// approvals and merges (§9-10). It then reports itself stopped, never ready
-// for dispatch, so AMUX assigns it nothing.
+// everything until a later clean reading or a person clears it; a bound
+// card's own pull request moved by someone else is not unbound -- owner
+// decision 2026-11-15), and trigger the app's read of its published pull
+// requests' approvals and merges (§9-10). It then reports itself stopped,
+// never ready for dispatch, so AMUX assigns it nothing.
 //
 // Imports: node builtins and the dependency-free core only (§8).
 
@@ -35,15 +37,33 @@ export const haltOf = (json) => reportedHalt(json?.halt);
  * consumed capability allowed -- the publisher's own, between its push and its
  * result. `commitDigestAt(sha)` is the sha256 of that commit's object, or null.
  */
-export const observeUnbound = async ({ refs, pulls, known, commitDigestAt, refsComplete = true, pullsComplete = true }) => {
+export const observeUnbound = async (input) => (await readNamespace(input)).verdict;
+
+/**
+ * observeUnbound with what it found: `subject`, the first unbound pull
+ * request or branch, so the halt names it; and `moved`, how many of a bound
+ * run's pull requests or branches stand at a head the app did not verify.
+ *
+ * Owner decision 2026-11-15: a bound run's own pull request or branch at a
+ * moved head is that card's pull request moved by a person or the CI auto-fix
+ * (a push, develop merged in, a rebase, a conflict resolved -- #3942 and #3944
+ * halted the agent for nine hours). It is not unbound: the approval observer
+ * judges its merge, and only an approver's merge approves a diff the app did
+ * not verify. `known.legacyHalts` (ENGINEERING_AGENT_LEGACY_HALTS) restores the
+ * reading before it, where any move was unbound.
+ */
+export const readNamespace = async ({ refs, pulls, known, commitDigestAt, refsComplete = true, pullsComplete = true }) => {
   // A list GitHub did not give whole -- no body (null) or a first page of more
   // -- is judged for what it holds; with nothing definite found, the round is
   // undetermined, never "none".
   let undetermined = refs === null || pulls === null || !refsComplete || !pullsComplete;
   refs = refs ?? [];
   pulls = pulls ?? [];
+  const cardScoped = known.legacyHalts !== true;
   const byNumber = new Map(known.bindings.map((binding) => [binding.prNumber, binding]));
   const boundRuns = new Set(known.bindings.map((binding) => binding.runId));
+  let moved = 0;
+  let subject = null;
   // A commit a consumed capability allowed counts only for a run the app has
   // not bound yet -- the publisher's own write before its result. Once bound,
   // only the bound head is the run's. An object that cannot be read (or a
@@ -62,12 +82,25 @@ export const observeUnbound = async ({ refs, pulls, known, commitDigestAt, refsC
   // unread entry leave the observation undetermined.
   let unboundPr = false;
   let unboundRef = false;
+  const pullSubject = (pull) => {
+    if (subject === null && Number.isSafeInteger(pull.number) && pull.number > 0) subject = { prNumber: pull.number };
+  };
+  const refSubject = (ref) => {
+    if (subject === null && !unboundPr && typeof ref === "string") subject = { ref };
+  };
   for (const pull of pulls) {
     const runId = parseEngineeringBranchName(pull.headRef ?? "");
     const binding = byNumber.get(pull.number);
     if (binding !== undefined) {
-      // A bound pull request stays at the head it was verified at.
-      if (!(binding.runId === runId && pull.headSha === binding.verifiedHeadSha)) unboundPr = true;
+      // A bound pull request stays at the head it was verified at -- or, by
+      // default, is its card's own pull request moved by someone else.
+      if (binding.runId === runId && pull.headSha === binding.verifiedHeadSha) continue;
+      if (cardScoped && binding.runId === runId) {
+        moved += 1;
+        continue;
+      }
+      unboundPr = true;
+      pullSubject(pull);
       continue;
     }
     const marked = runId !== null && prBodyCarriesMarker(pull.body ?? "", runId);
@@ -75,22 +108,33 @@ export const observeUnbound = async ({ refs, pulls, known, commitDigestAt, refsC
     if (!claimsToBeOurs) continue;
     const allowed = marked ? await allowedCommit(runId, pull.headSha) : false;
     if (allowed === "undetermined") undetermined = true;
-    else if (!allowed) unboundPr = true;
+    else if (!allowed) {
+      unboundPr = true;
+      pullSubject(pull);
+    }
   }
+  // An unbound pull request is the higher halt, so a branch is named only when none was found.
   for (const { ref, sha } of refs) {
     const runId = parseEngineeringBranchName(ref);
     if (runId === null) {
       unboundRef = true;
+      refSubject(ref);
       continue;
     }
     if (known.bindings.some((binding) => binding.runId === runId && binding.verifiedHeadSha === sha)) continue;
+    if (cardScoped && boundRuns.has(runId)) {
+      moved += 1;
+      continue;
+    }
     const allowed = await allowedCommit(runId, sha);
     if (allowed === "undetermined") undetermined = true;
-    else if (!allowed) unboundRef = true;
+    else if (!allowed) {
+      unboundRef = true;
+      refSubject(ref);
+    }
   }
-  if (unboundPr) return "unbound_app_pr";
-  if (unboundRef) return "unbound_app_ref";
-  return undetermined ? "undetermined" : "none";
+  const verdict = unboundPr ? "unbound_app_pr" : unboundRef ? "unbound_app_ref" : undetermined ? "undetermined" : "none";
+  return { verdict, subject: verdict.startsWith("unbound_") ? subject : null, moved };
 };
 
 const knownShape = (json) => Array.isArray(json?.bindings) && Array.isArray(json?.consumed);
@@ -175,14 +219,30 @@ export async function runRunnerCycle(ports) {
   if (knownAfter.status !== 200 || JSON.stringify(knownAfter.json) !== JSON.stringify(known.json)) {
     return { finishedNormally: false, halt: "unknown", reason: "observation_raced" };
   }
-  const observed = await observeUnbound({ ...namespace, known: known.json, commitDigestAt: ports.commitDigestAt });
-  if (observed === "undetermined") {
-    // Like a raced reading: nothing is recorded, and the round is not healthy.
-    return { finishedNormally: false, halt: "unknown", reason: "observation_undetermined" };
-  }
-  if (observed !== "none") {
-    const recorded = await ports.app("observe/halt", { halt: observed });
-    return { finishedNormally: recorded.status === 200, halt: observed, reason: "observed_unbound" };
+  const reading = await readNamespace({ ...namespace, known: known.json, commitDigestAt: ports.commitDigestAt });
+  const observed = reading.verdict;
+  if (known.json.legacyHalts === true) {
+    // ENGINEERING_AGENT_LEGACY_HALTS: the cycle before owner decision
+    // 2026-11-15, where an unbound or undetermined reading ends the round.
+    if (observed === "undetermined") {
+      return { finishedNormally: false, halt: "unknown", reason: "observation_undetermined" };
+    }
+    if (observed !== "none") {
+      const recorded = await ports.app("observe/halt", { halt: observed });
+      return { finishedNormally: recorded.status === 200, halt: observed, reason: "observed_unbound" };
+    }
+  } else if (observed === "unbound_app_pr" || observed === "unbound_app_ref") {
+    // Recorded before anything else, naming its pull request or branch; the
+    // round goes on, since the observer only reads and records what GitHub
+    // already shows, and a merge it records may be what explains the reading.
+    const recorded = await ports.app("observe/halt", { halt: observed, ...(reading.subject ? { subject: reading.subject } : {}) });
+    if (recorded.status !== 200) return { finishedNormally: false, halt: observed, reason: "observed_unbound" };
+  } else if (observed === "none" && known.json.observedHalt && known.json.observedHaltAt) {
+    // Owner decision 2026-11-15: nothing unbound now explains the halt an
+    // earlier reading recorded -- merged, closed, deleted or bound since. A
+    // failed clear decides nothing; the next clean reading asks again.
+    // It names the halt it saw, so a halt recorded after this reading is not cleared by it.
+    await ports.app("observe/halt", { halt: "none", observedAt: known.json.observedHaltAt });
   }
 
   // The app reads its published pull requests' approvals and merges itself
@@ -195,5 +255,8 @@ export async function runRunnerCycle(ports) {
   if (stopped.status !== 200 || stopped.json?.accepted !== true) {
     return { finishedNormally: false, halt: "unknown", reason: "runtime_lease_lost" };
   }
+  // Like a raced reading: nothing is recorded or cleared, and the round is not healthy.
+  if (observed === "undetermined") return { finishedNormally: false, halt: "unknown", reason: "observation_undetermined" };
+  if (observed !== "none") return { finishedNormally: true, halt: observed, reason: "observed_unbound" };
   return { finishedNormally: true, halt: haltOf(stopped.json), reason: "observed" };
 }

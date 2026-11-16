@@ -1,4 +1,5 @@
 import { AMUX_PORTFOLIO_SCORE_REFRESH_ACTION } from "../adminAuditSystemActors.ts";
+import { amuxIntakeLegacyLimits } from "./intakeLimitsCore.ts";
 
 /** V4 portfolio scoring is distinct from the legacy scheduler's p0-p3 score.
  * A model may suggest these observations, but only confirmed evidence enters
@@ -91,18 +92,52 @@ export function scoreAmuxPortfolio(input: PortfolioScoreInput,
 
 /** Owner decision 2026-11-14: a Task whose confirmed evidence is unchanged
  * keeps its active window without a weekly owner action. The system extends
- * `activeStaleAt` to seven days past the refresh, never past the evidence's
- * own 28-day baseline, and never rewrites `evidenceAsOf`: the age of the
- * evidence stays what an owner or the registration last confirmed. */
+ * `activeStaleAt` to seven days past the refresh and never rewrites
+ * `evidenceAsOf`: the age of the evidence stays what an owner or the
+ * registration last confirmed.
+ *
+ * Owner direction 2026-11-15 (intakeLimitsCore.ts): the refresh is on unless
+ * the switch is exactly "disabled", and an unchanged score no longer stops at
+ * its 28-day baseline for an owner to confirm again: the refresh moves the
+ * baseline forward with the active window (amuxRefreshedScoreWindows). Only a
+ * changed input -- a revised Task or subject, a newer assessment, another
+ * source approval or calculation -- sends the score back to the owner. The
+ * intake legacy-limits switch restores the 2026-11-14 rule: on only when
+ * exactly "enabled", capped at the baseline. */
 export const AMUX_SCORE_REFRESH_ENV = "TOMVERSE_AMUX_V4_SCORE_AUTO_REFRESH";
-export const amuxScoreAutoRefreshEnabled = (value: string | undefined) =>
-  value === "enabled";
+export const amuxScoreAutoRefreshEnabled = (value: string | undefined,
+  legacy: boolean = amuxIntakeLegacyLimits()) =>
+  legacy ? value === "enabled" : value !== "disabled";
 /** Refresh a day before the window closes, so a five-minute tick never lets
  * a ready Task drop out of the candidate list. */
 export const AMUX_SCORE_REFRESH_LEAD_MS = 86_400_000;
 
-/** The extended active deadline, or null when the refresh would not move it
- * (the baseline caps it, or it is not yet due). */
+/** The windows one refresh of an unchanged score writes, or null when it is
+ * not yet due. The active window moves to seven days past now; the baseline
+ * moves to 28 days past now, never back. A score whose windows both lapsed is
+ * due like any other: its inputs are checked again before it is written. With
+ * the legacy switch, the 2026-11-14 rule (amuxRefreshedActiveStaleAt). */
+export function amuxRefreshedScoreWindows(input: { now: Date;
+  activeStaleAt: Date; baselineStaleAt: Date; legacy?: boolean }):
+  { activeStaleAt: Date; baselineStaleAt: Date } | null {
+  if (input.legacy ?? amuxIntakeLegacyLimits()) {
+    const activeStaleAt = amuxRefreshedActiveStaleAt(input);
+    return activeStaleAt ? { activeStaleAt, baselineStaleAt: input.baselineStaleAt } : null;
+  }
+  const now = input.now.getTime();
+  const active = input.activeStaleAt.getTime();
+  const baseline = input.baselineStaleAt.getTime();
+  if (![now, active, baseline].every(Number.isFinite)) return null;
+  if (active - now > AMUX_SCORE_REFRESH_LEAD_MS) return null;
+  const nextActive = now + AMUX_ACTIVE_SCORE_MAX_AGE_MS;
+  if (nextActive <= active) return null;
+  return { activeStaleAt: new Date(nextActive),
+    baselineStaleAt: new Date(Math.max(baseline, now + AMUX_BASELINE_SCORE_MAX_AGE_MS)) };
+}
+
+/** The 2026-11-14 rule, kept for the legacy switch: the extended active
+ * deadline, or null when the refresh would not move it (the baseline caps
+ * it, or it is not yet due). */
 export function amuxRefreshedActiveStaleAt(input: { now: Date;
   activeStaleAt: Date; baselineStaleAt: Date }): Date | null {
   const now = input.now.getTime();

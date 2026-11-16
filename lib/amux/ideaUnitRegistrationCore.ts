@@ -1,6 +1,7 @@
 import { AMUX_TASK_EXPECTED_PATHS_MAX,
   type AmuxAnalysisCard } from "./ideaAnalysisChunkCore.ts";
 import { amuxCanonicalJson } from "./boardImportCore.ts";
+import { amuxIntakeCap, amuxIntakeLegacyLimits } from "./intakeLimitsCore.ts";
 import { amuxV22TaskRoleSupported, amuxV22TaskWritesPatch } from "./v22WorkerClaimCore.ts";
 import { classifyAmuxExecutionPath, deriveAmuxExecutionGrade,
   normalizeAmuxExecutionPath,
@@ -97,7 +98,13 @@ export function inspectAmuxV20TaskRegistration(
       return { ok: false, code: "task_expected_path_invalid" };
     }
     const expectedPaths = descriptor.value as unknown[];
-    if (expectedPaths.length < 1 || expectedPaths.length > AMUX_TASK_EXPECTED_PATHS_MAX) {
+    // Owner direction 2026-11-15: no upper bound, and a path repeated after
+    // normalisation counts once; both former refusals hold only under
+    // TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS. Grade derivation still settles a
+    // Task with more than 40 paths to frontier.
+    const legacy = amuxIntakeLegacyLimits();
+    if (expectedPaths.length < 1 ||
+        expectedPaths.length > amuxIntakeCap(AMUX_TASK_EXPECTED_PATHS_MAX, legacy)) {
       return { ok: false, code: "task_expected_paths_out_of_range" };
     }
     let contract = false;
@@ -111,7 +118,8 @@ export function inspectAmuxV20TaskRegistration(
         return { ok: false, code: "task_expected_path_invalid" };
       }
       if (normalizedPaths.has(normalizedPath)) {
-        return { ok: false, code: "task_expected_paths_duplicate" };
+        if (legacy) return { ok: false, code: "task_expected_paths_duplicate" };
+        continue;
       }
       normalizedPaths.add(normalizedPath);
       const pathClass = classifyAmuxExecutionPath(path);
@@ -190,7 +198,7 @@ export function inspectAmuxV4CardRegistration(input: {
       snapshot.draftShape.cardType !== proposal.cardType ||
       snapshot.draftShape.storyKind !== proposal.storyKind ||
       !id.test(prepared.draftUnitId) || !digest.test(prepared.unitDigest) ||
-      proposal.title.length < 1 || proposal.title.length > 200 ||
+      proposal.title.length < 1 || proposal.title.length > amuxIntakeCap(200) ||
       proposal.featureRef.length < 1 ||
       (proposal.cardType === "story" &&
         (proposal.executionBrief !== null || proposal.taskRole !== null ||

@@ -11,6 +11,10 @@ import { parseAmuxV22ReadOnlyRecoveryBinding, parseAmuxV22RecoveryInspectionRequ
   runAmuxV22RecoveryCheckerOnce,
   inspectAmuxV22RecoveryUnit, readAmuxV22RecoveryJournal } from "../lib/amux/v22RecoveryHost.mjs";
 
+// The earlier flow (TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW=disabled), where a read
+// role has no shell; amuxV22LocalCliFlow.test.mjs covers the local CLI flow.
+process.env.TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW = "disabled";
+
 const attemptId = "00000000-0000-4000-8000-000000000001";
 const instanceId = "00000000-0000-4000-8000-000000000002";
 const binding = { version: 1, taskId: "task-1", taskRevision: 4,
