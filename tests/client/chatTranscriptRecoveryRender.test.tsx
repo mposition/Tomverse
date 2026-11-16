@@ -24,10 +24,9 @@ test("transport error preserves the complete markdown body and separates its not
   assert.match(html, /First paragraph/);
   assert.match(html, /Second <strong>paragraph<\/strong>/);
   assert.match(html, /data-testid="chat-recovery-notice"[^>]*>Connection interrupted/);
-  assert.match(html, /data-testid="chat-error-auxiliary-info"/);
   assert.match(html, /Trace ID: local-trace/);
-  // The trace ID sits in a collapsed "Diagnostic details" disclosure, not on the card face.
-  assert.match(html, /<details(?![^>]*\bopen\b)[^>]*data-testid="chat-error-auxiliary-info"[^>]*><summary[^>]*>Diagnostic details<\/summary>/);
+  // The trace ID sits in a collapsed diagnostics disclosure, not on the card face.
+  assert.match(html, /<details(?![^>]*\bopen\b)[^>]*data-testid="chat-error-diagnostics"[^>]*><summary[^>]*>Show diagnostic info<\/summary>/);
   assert.equal((html.match(/data-testid="restore-chat-question"/g) ?? []).length, 1);
 });
 test("error before text renders the notice without a phantom generating indicator", () => {
@@ -74,6 +73,18 @@ test("legacy Review errors still split their existing title and auxiliary detail
   assert.match(html, /Existing error/);
   assert.match(html, /Trace ID: review/);
   assert.doesNotMatch(html, /chat-recovery-notice|restore-chat-question/);
+});
+
+test("trace IDs sit behind a collapsed diagnostics disclosure; other details stay visible", () => {
+  const html = render([question, { id: "a", role: "assistant", status: "error",
+    content: "Request failed\nCost guard details\nTrace ID: 0000-trace" }], false);
+  const diagnostics = html.match(/<details data-testid="chat-error-diagnostics"[^>]*>.*?<\/details>/)?.[0];
+  assert.ok(diagnostics, "trace ID is wrapped in a diagnostics disclosure");
+  assert.doesNotMatch(diagnostics, /\sopen[\s=>]/);
+  assert.match(diagnostics, /<summary[^>]*>Show diagnostic info<\/summary>/);
+  assert.match(diagnostics, /Trace ID: 0000-trace/);
+  assert.doesNotMatch(diagnostics, /Cost guard details/);
+  assert.match(html, /Cost guard details/);
 });
 
 test("Chat attachment errors classify the recovery notice, not an empty or unrelated partial body", () => {

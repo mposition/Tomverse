@@ -1077,6 +1077,10 @@ export function ChatMessageList({
               !isUser && msg.status === "error"
                 ? errorText.split("\n").slice(1).filter(Boolean)
                 : [];
+            const isTraceLine = (line: string) =>
+              line.startsWith(`${t("chat.traceId")}:`) || line.startsWith("Trace ID:");
+            const errorTraceLines = errorAuxiliaryLines.filter(isTraceLine);
+            const errorDetailLines = errorAuxiliaryLines.filter((line) => !isTraceLine(line));
             // A turn that can be retried in place does not also offer to put
             // the question back in the composer: retrying is that, done for you.
             const canRestoreQuestion = recoveryEnabled && !isSending &&
@@ -1877,29 +1881,31 @@ export function ChatMessageList({
                               : chatProductUiCopy[lang].guestChatSignInDescription}
                           </p>
                         )}
-                        {errorAuxiliaryLines.length > 0 && (
+                        {errorDetailLines.map((line, lineIndex) => (
+                          <p
+                            key={lineIndex}
+                            // UI-003/UI-007. Supporting detail, not the error
+                            // itself: zinc at the readable floor -- 7.0:1 on
+                            // zinc-50, 6.1:1 on zinc-900.
+                            className="mt-2 text-[11px] leading-4 text-zinc-600 dark:text-zinc-400"
+                          >
+                            {line}
+                          </p>
+                        ))}
+                        {errorTraceLines.length > 0 && (
                           // The trace ID already travels with "Report error"
                           // (msg.errorReport), so it stays folded away until
-                          // someone asks for the diagnostic details.
-                          <details data-testid="chat-error-auxiliary-info" className="mt-2 space-y-0.5">
+                          // someone asks for the diagnostic info.
+                          <details data-testid="chat-error-diagnostics" className="mt-2 space-y-0.5">
                             <summary
-                              data-testid="chat-error-auxiliary-toggle"
                               className="cursor-pointer text-[11px] leading-4 text-zinc-600 dark:text-zinc-400"
                             >
-                              {t("chat.errorDiagnostics")}
+                              {t("chat.showDiagnostics")}
                             </summary>
-                            {errorAuxiliaryLines.map((line, lineIndex) => (
+                            {errorTraceLines.map((line, lineIndex) => (
                               <p
-                                key={lineIndex}
-                                // UI-003/UI-007. The trace ID is what a user
-                                // has to read back to support, and at
-                                // 10px/red-500-at-70% it measured 2.63:1 on
-                                // light and 3.84:1 on dark against the card it
-                                // sits on. It is supporting detail, not the
-                                // error itself, so on the neutral card it is
-                                // zinc at the readable floor -- 7.0:1 on
-                                // zinc-50, 6.1:1 on zinc-900.
-                                className="text-[11px] leading-4 text-zinc-600 dark:text-zinc-400"
+                                key={`trace-${lineIndex}`}
+                                className="select-all break-all text-[11px] leading-4 text-zinc-600 dark:text-zinc-400"
                               >
                                 {line}
                               </p>
