@@ -11,6 +11,10 @@ import { AMUX_V19_DIAGNOSTIC_DETAIL_ENV, AMUX_V19_EXCLUDED_PATH_DIGEST_KEY_ID,
   AMUX_V19_MAX_SESSION_CYCLE_ENV, amuxV19SessionAnalysisFailure,
   AMUX_V19_ABSENT_CLAIM_FINAL_MS, runAmuxV19MaxSessionCycleOnce, writeAmuxV19DiagnosticDetail } from
   "../lib/amux/ideaLocalMaxSessionCycle.mjs";
+import { readAmuxV19SessionInFlightShadowClaims } from
+  "../lib/amux/ideaLocalSessionInFlightClaimsRead.mjs";
+import { settleAmuxV19MaxShadowResultOnce } from
+  "../lib/amux/ideaLocalMaxShadowResultOnce.mjs";
 import { observeAmuxTrackedCheckoutChild } from
   "../lib/amux/ideaTrackedCheckoutProcessResult.mjs";
 import { amuxV19MaxSessionCycleStatus } from
@@ -864,5 +868,70 @@ test("a marker whose claim never reached the app is removed, not asked about for
         stateDirectory: "/state" }, held.steps);
       assert.equal(kept.kind, "outcome_unknown", receiptStatus);
       assert.equal(held.released(), 0, receiptStatus);
+    }
+  }));
+
+// Review r-20261116-193845-9932ef: an old runner's marker must never close a
+// claim a current runner is working on. This runs the real list and report
+// steps against an in-memory app that, like the real one, lists only in-flight
+// subscription claims whose claim audit carries no runner mark.
+test("recovering an old runner's marker closes its unmarked claims and leaves a current runner's marked claim running", () =>
+  withSwitches(async () => {
+    const originName = "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_APP_ORIGIN";
+    const previousOrigin = process.env[originName];
+    process.env[originName] = origin;
+    try {
+      const writtenAtMs = Date.now() - AMUX_V19_ABSENT_CLAIM_FINAL_MS - 60_000;
+      const makeClaim = (n, extra) => ({ claimId: `9942fb52-4b78-4af6-931a-9eec8f66d39${n}`,
+        requestId: `44c72436-c011-4cfc-b52f-e3345c22fc8${n}`,
+        reservationId: `bf72ad14-585c-41bd-b25e-aab4c17a6d3${n}`,
+        ideaId: `53d6918e-b05d-4531-a1ab-704dd756cc4${n}`,
+        invocationOrdinal: 0, status: "in_flight", marked: false,
+        createdAtMs: writtenAtMs - 120_000, ...extra });
+      const claims = [makeClaim(1, {}), makeClaim(2, { invocationOrdinal: 1 }),
+        // A current runner's claim, written before the list's time: only its
+        // mark keeps it out.
+        makeClaim(3, { marked: true, createdAtMs: writtenAtMs - 30_000 }),
+        // Not in flight any more, and a later claim: neither is listed.
+        makeClaim(4, { status: "owner_consumed" }),
+        makeClaim(5, { createdAtMs: Date.now() })];
+      const requests = [];
+      const app = async (url, options) => {
+        const endpoint = new URL(url);
+        requests.push(`${options.method} ${endpoint.pathname}`);
+        if (endpoint.pathname.endsWith("/analysis-budget/in-flight")) {
+          const before = Date.parse(endpoint.searchParams.get("before"));
+          return Response.json({ claims: claims
+            .filter((claim) => claim.status === "in_flight" && !claim.marked &&
+              claim.createdAtMs < before)
+            .map(({ claimId, requestId, reservationId, ideaId,
+              invocationOrdinal }) => ({ claimId, requestId, reservationId,
+              ideaId, invocationOrdinal })) });
+        }
+        assert.ok(endpoint.pathname.endsWith("/analysis-budget/unknown"));
+        const body = JSON.parse(options.body);
+        const claim = claims.find((item) => item.claimId === body.claimId);
+        assert.equal(claim?.status, "in_flight", "only an open claim is reported");
+        claim.status = "owner_consumed";
+        return Response.json({ claimId: claim.claimId, status: "owner_consumed",
+          settledMicroUsd: "0", auditId: "synthetic-audit" });
+      };
+      let released = 0;
+      const result = await runAmuxV19MaxSessionCycleOnce({ origin, fetchImpl: app,
+        stateDirectory: "/state" }, {
+        reportUnknown: settleAmuxV19MaxShadowResultOnce,
+        listInFlight: readAmuxV19SessionInFlightShadowClaims,
+        marker: () => ({ read: async () => ({ identity: null, writtenAtMs }),
+          release: async () => { released += 1; } }),
+      });
+      assert.deepEqual(result, { kind: "recovered", stage: "recover",
+        reason: "unnamed_marker", haltReleased: true, claims: 2 });
+      assert.deepEqual(claims.map((claim) => claim.status), ["owner_consumed",
+        "owner_consumed", "in_flight", "owner_consumed", "in_flight"]);
+      assert.equal(requests.filter((line) => line.startsWith("POST")).length, 2);
+      assert.equal(released, 1);
+    } finally {
+      if (previousOrigin === undefined) delete process.env[originName];
+      else process.env[originName] = previousOrigin;
     }
   }));

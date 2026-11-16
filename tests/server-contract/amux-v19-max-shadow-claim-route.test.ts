@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { GET, POST } from "../../app/api/internal/amux/v19/analysis-budget/claim/route.ts";
 import { AMUX_V19_MAX_LAUNCHER_ID } from
   "../../lib/amux/ideaSessionMaxLauncherAuth.ts";
-import { signAmuxV19MaxClaimAttestation,
+import { AMUX_V19_MAX_CLAIM_RUNNER_MARKER, signAmuxV19MaxClaimAttestation,
   verifyAmuxV19MaxClaimAttestation } from
   "../../lib/amux/ideaSessionMaxLauncherAttestation.mjs";
 
@@ -88,6 +89,39 @@ test("claim body cannot supply its own Max authentication assertion", async () =
     assert.equal((await POST(request({ ...gemini, authVerifiedAt,
       authProof: signAmuxV19MaxClaimAttestation(secret, gemini,
         authVerifiedAt) }))).status, 400);
+  });
+});
+
+test("claim body takes the fixed runner mark or none, and nothing else", async () => {
+  await withEnvironment({ TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET: secret },
+  async () => {
+    const identity = { claimId: "06b23730-7a7f-488c-a879-145d540d8794",
+      requestId: "44c72436-c011-4cfc-b52f-e3345c22fc80",
+      reservationId: "bf72ad14-585c-41bd-b25e-aab4c17a6d3c",
+      ideaId: "53d6918e-b05d-4531-a1ab-704dd756cc40",
+      invocationOrdinal: 0, provider: "anthropic", modelId: "claude-opus-5-5",
+      reasoningEffort: "high", priceVersionId: "approved-price" };
+    const authVerifiedAt = new Date().toISOString();
+    const authProof = signAmuxV19MaxClaimAttestation(secret, identity,
+      authVerifiedAt);
+    // Any other value is refused before authentication evidence or the database.
+    for (const runnerMarker of ["other", "", "Claim_named", true, 1, null,
+      ["claim_named"], { claim: "named" }]) {
+      assert.equal((await POST(request({ ...identity, authVerifiedAt, authProof,
+        runnerMarker }))).status, 400, JSON.stringify(runnerMarker));
+    }
+    assert.equal(AMUX_V19_MAX_CLAIM_RUNNER_MARKER, "claim_named");
+    // A runner from before the mark sends none and is still accepted, so the
+    // field is optional and the one literal (the claim itself then needs the
+    // database, which the integration suite covers).
+    const source = await readFile(new URL(
+      "../../app/api/internal/amux/v19/analysis-budget/claim/route.ts",
+      import.meta.url), "utf8");
+    assert.ok(source.includes(
+      "runnerMarker: z.literal(AMUX_V19_MAX_CLAIM_RUNNER_MARKER).optional()"));
+    // The mark is not part of the signed proof.
+    assert.equal(signAmuxV19MaxClaimAttestation(secret,
+      { ...identity, runnerMarker: "claim_named" }, authVerifiedAt), authProof);
   });
 });
 

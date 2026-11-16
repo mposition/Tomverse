@@ -95,6 +95,12 @@ test("the in-flight list is read-only and answers identities only", async () => 
   assert.match(list, /budgetMode: "max_shadow"/);
   assert.match(list, /status: "in_flight"/);
   assert.match(list, /createdAt: \{ lt: input\.before \}/);
+  // A claim a current runner marked is never listed, and the mark is read from
+  // the claim's own audit row (filtered in code: a SQL "not equal" would skip
+  // a row whose key is missing, which is the very claim this lists).
+  assert.ok(list.includes("claimAudit: { select: { metadata: true } }"));
+  assert.ok(list.includes("AMUX_V19_MAX_CLAIM_RUNNER_MARKER"));
+  assert.ok(list.includes("!marked(row.claimAudit.metadata)"));
   assert.doesNotMatch(list, /\btake:/, "no count limit");
   assert.doesNotMatch(list,
     /\.(?:create|update|updateMany|upsert|delete|deleteMany)\(|writeSystemAuditLog/);

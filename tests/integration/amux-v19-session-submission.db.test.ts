@@ -1841,11 +1841,35 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
       "https://test.invalid/api/internal/amux/v19/analysis-budget/claim", {
         method: "POST", headers: { ...headers,
           "content-type": "application/json" },
+        // A current runner marks its claim (review r-20261116-193845-9932ef).
         body: JSON.stringify({ ...signedIdentity, authVerifiedAt,
-          authProof }),
+          authProof, runnerMarker: "claim_named" }),
       }));
     assert.equal(response.status, 200);
     claim = await response.json();
+    const markedRow = await prisma.amuxIdeaSessionAnalysisBudgetClaim
+      .findUniqueOrThrow({ where: { id: claimId },
+        include: { claimAudit: { select: { metadata: true } } } });
+    assert.equal(markedRow.status, "in_flight");
+    assert.equal((markedRow.claimAudit.metadata as Record<string, unknown>)
+      .runnerMarker, "claim_named", "the mark is recorded in the claim audit");
+    // The claim is in flight and was written before now, yet a marker an old
+    // runner left must not reach it: it belongs to a current runner.
+    const markedList = await listMaxInFlightRoute(new Request(
+      `https://test.invalid/api/internal/amux/v19/analysis-budget/in-flight?before=${
+        encodeURIComponent(new Date().toISOString())}`, { headers }));
+    assert.equal(markedList.status, 200);
+    assert.equal(((await markedList.json()) as { claims: Array<{ claimId: string }> })
+      .claims.some((listed) => listed.claimId === claimId), false,
+    "a marked in-flight claim is never listed");
+    // A wrong mark is refused by the route before anything is written.
+    const refusedMark = await postMaxClaimRoute(new Request(
+      "https://test.invalid/api/internal/amux/v19/analysis-budget/claim", {
+        method: "POST", headers: { ...headers,
+          "content-type": "application/json" },
+        body: JSON.stringify({ ...signedIdentity, authVerifiedAt, authProof,
+          runnerMarker: "other" }) }));
+    assert.equal(refusedMark.status, 400);
     const readback = await readMaxClaimRoute(new Request(
       `https://test.invalid/api/internal/amux/v19/analysis-budget/claim?requestId=${claimRequestId}&reservationId=${reservation.reservationId}&invocationOrdinal=0`,
       { headers }));
@@ -2236,8 +2260,13 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
   try {
     process.env.TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET = launcherSecret;
     const openRow = await prisma.amuxIdeaSessionAnalysisBudgetClaim
-      .findUniqueOrThrow({ where: { id: unknownClaim.claimId } });
+      .findUniqueOrThrow({ where: { id: unknownClaim.claimId },
+        include: { claimAudit: { select: { metadata: true } } } });
     assert.equal(openRow.status, "in_flight");
+    // This claim came from a runner that sent no mark (the shape an older
+    // runner leaves), so the audit has none and the claim is listed.
+    assert.equal(Object.hasOwn(openRow.claimAudit.metadata as object,
+      "runnerMarker"), false);
     assert.deepEqual(await listInFlight(new Date()), [unknownIdentity]);
     assert.deepEqual(await listInFlight(openRow.createdAt), [],
       "a claim written at the marker's own time is not before it");

@@ -9,7 +9,8 @@ import { AMUX_V4_ANALYSIS_AGENT_SECRET_ENV,
 import { AMUX_V19_MAX_LAUNCHER_SECRET_ENV,
   isAmuxV19MaxLauncherAuthorized } from
   "@/lib/amux/ideaSessionMaxLauncherAuth";
-import { verifyAmuxV19MaxClaimAttestation } from
+import { AMUX_V19_MAX_CLAIM_RUNNER_MARKER,
+  verifyAmuxV19MaxClaimAttestation } from
   "@/lib/amux/ideaSessionMaxLauncherAttestation.mjs";
 import { AmuxSessionBudgetClaimError, commitAmuxSessionBudgetClaim,
   readAmuxSessionBudgetClaimReceipt } from
@@ -28,7 +29,10 @@ const claimBody = identity.extend({ claimId: uuid, ideaId: uuid,
   modelId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/),
   reasoningEffort: z.string().regex(/^[A-Za-z0-9_-]{1,32}$/),
   authVerifiedAt: z.string().datetime(),
-  authProof: z.string().regex(/^[a-f0-9]{64}$/) }).strict();
+  authProof: z.string().regex(/^[a-f0-9]{64}$/),
+  // A runner from 2026-11-17 on marks its claim; one from before sends none
+  // and is still accepted. Any other value is refused.
+  runnerMarker: z.literal(AMUX_V19_MAX_CLAIM_RUNNER_MARKER).optional() }).strict();
 
 /** Only the dedicated Ubuntu Max launcher can create a shadow claim. The
  * request cannot assert its own authentication or runner capabilities. A
@@ -63,7 +67,8 @@ export async function POST(request: Request): Promise<Response> {
         priceVersionId: body.priceVersionId,
         maxLauncherIdentity: { ideaId: body.ideaId, provider: body.provider,
           modelId: body.modelId,
-          reasoningEffort: body.reasoningEffort, authEvidenceDigest },
+          reasoningEffort: body.reasoningEffort, authEvidenceDigest,
+          ...(body.runnerMarker ? { runnerMarker: body.runnerMarker } : {}) },
         runner: { tokenCapsEnforceable: false, billableToolsDisabled: true,
           maxSubscriptionAuthenticated: true },
       });

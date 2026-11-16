@@ -21,6 +21,8 @@ import { readAmuxIdeaAnalysisFailureStreak } from
 import { closeOpenAmuxSessionShadowUnknownClaimsInTx } from
   "./ideaSessionAnalysisBudgetSettlementService.ts";
 import { amuxSessionNextClaimDue } from "./ideaSessionAnalysisRetryCore.ts";
+import { AMUX_V19_MAX_CLAIM_RUNNER_MARKER } from
+  "./ideaSessionMaxLauncherAttestation.mjs";
 import { AMUX_V19_SESSION_ANALYSIS_STOP_ACTION } from "./ideaSessionLateResult.ts";
 
 type Tx = Prisma.TransactionClient;
@@ -80,11 +82,14 @@ export async function readAmuxSessionBudgetClaimReceipt(tx: Tx, input: {
 }
 
 /** Read-only: the subscription (max_shadow) claims still in flight that were
- * written before `before`. A runner that finds a marker naming no claim (left
- * by a runner from before 2026-11-16) asks for the claims its stopped runs may
- * have left open, then reports each one's outcome unknown through the existing
- * unknown route. Identity only: no prompt, result or token count. Every match
- * is returned, oldest first, with no count limit. */
+ * written before `before` by a runner that did not mark its claim. A runner
+ * that finds a marker naming no claim (left by a runner from before
+ * 2026-11-16) asks for the claims its stopped runs may have left open, then
+ * reports each one's outcome unknown through the existing unknown route. A
+ * claim whose audit metadata carries the runner mark belongs to a current
+ * runner, which may be working on it right now, so it is never listed.
+ * Identity only: no prompt, result or token count. Every match is returned,
+ * oldest first, with no count limit. */
 export async function listAmuxSessionInFlightShadowClaims(tx: Tx, input: {
   before: Date;
 }): Promise<Array<{ claimId: string; requestId: string; reservationId: string;
@@ -103,9 +108,16 @@ export async function listAmuxSessionInFlightShadowClaims(tx: Tx, input: {
       createdAt: { lt: input.before } },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     select: { id: true, requestId: true, reservationId: true,
-      invocationOrdinal: true, reservation: { select: { ideaId: true } } },
+      invocationOrdinal: true, reservation: { select: { ideaId: true } },
+      claimAudit: { select: { metadata: true } } },
   });
-  return rows.map((row) => ({ claimId: row.id, requestId: row.requestId,
+  // Filtered here, not in SQL: a JSON "not equal" skips a row whose key is
+  // missing, and a missing mark is exactly the claim this lists.
+  const marked = (metadata: unknown) => metadata !== null &&
+    typeof metadata === "object" && !Array.isArray(metadata) &&
+    (metadata as Record<string, unknown>).runnerMarker ===
+      AMUX_V19_MAX_CLAIM_RUNNER_MARKER;
+  return rows.filter((row) => !marked(row.claimAudit.metadata)).map((row) => ({ claimId: row.id, requestId: row.requestId,
     reservationId: row.reservationId, ideaId: row.reservation.ideaId,
     invocationOrdinal: row.invocationOrdinal }));
 }
@@ -125,7 +137,9 @@ export async function commitAmuxSessionBudgetClaim(tx: Tx, input: {
   /** The launcher that verified one channel's subscription sign-in. Its
    * provider must be the reservation's channel (owner decision 2026-10-20). */
   maxLauncherIdentity?: { ideaId: string; provider: string; modelId: string;
-    reasoningEffort: string; authEvidenceDigest: string };
+    reasoningEffort: string; authEvidenceDigest: string;
+    /** Recorded in the claim's audit metadata when the runner sent it. */
+    runnerMarker?: typeof AMUX_V19_MAX_CLAIM_RUNNER_MARKER };
 }): Promise<{ claimId: string; reservationId: string; requestId: string;
   invocationOrdinal: number; reservedMicroUsd: string; auditId: string }> {
   if (!UUID.test(input.claimId) || !UUID.test(input.requestId) ||
@@ -327,7 +341,10 @@ export async function commitAmuxSessionBudgetClaim(tx: Tx, input: {
       ...(maxShadow ? { ideaId: reservation.ideaId,
         reasoningEffort: reservation.reasoningEffort,
         maxAuthProfile: amuxSubscriptionAuthProfile(reservation.modelProvider),
-        maxAuthEvidenceDigest: input.maxLauncherIdentity!.authEvidenceDigest } : {}),
+        maxAuthEvidenceDigest: input.maxLauncherIdentity!.authEvidenceDigest,
+        ...(input.maxLauncherIdentity!.runnerMarker ===
+          AMUX_V19_MAX_CLAIM_RUNNER_MARKER
+          ? { runnerMarker: AMUX_V19_MAX_CLAIM_RUNNER_MARKER } : {}) } : {}),
       amountMeaning: decision.amountMeaning, modelCallStarted: false },
   });
   const incremented = await tx.amuxIdeaAnalysisBudgetWindow.updateMany({

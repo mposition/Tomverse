@@ -17,8 +17,9 @@ const beforeSchema = z.string().datetime();
  * written before `before` and are still in flight, so a marker that names no
  * claim (a runner from before 2026-11-16) can be reconciled: each identity is
  * then reported outcome unknown through the existing unknown route, which
- * closes a subscription claim at zero. The answer is identities only. A
- * `before` that is malformed or in the future is refused. */
+ * closes a subscription claim at zero. A claim whose audit carries the runner
+ * mark belongs to a current runner and is never listed. The answer is
+ * identities only. A `before` that is malformed or in the future is refused. */
 export async function GET(request: Request): Promise<Response> {
   if (!isAmuxV19MaxLauncherAuthorized(request,
     process.env[AMUX_V19_MAX_LAUNCHER_SECRET_ENV],
