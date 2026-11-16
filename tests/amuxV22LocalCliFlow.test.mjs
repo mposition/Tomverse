@@ -359,13 +359,15 @@ test("on Linux a real quiet busy child is kept and a real sleeping one stalls", 
   const { spawn } = await import("node:child_process");
   const real = (script) => (_binary, _args, options) =>
     spawn(process.execPath, ["-e", script], { ...options, cwd: process.cwd(), env: process.env });
-  const busy = `const end=Date.now()+900;while(Date.now()<end){}` +
+  // The stall window is wide so a child starved of CPU on a loaded runner still
+  // shows a tick inside it; the busy run is longer than the window.
+  const busy = `const end=Date.now()+2500;while(Date.now()<end){}` +
     `process.stdout.write(${JSON.stringify(stream(resultEvent))})`;
   const kept = await runAmuxV22OneShot(request, config, { syntheticPlatform: true,
-    spawnChild: real(busy), localCliFlow: true, stallMs: 300, progressPollMs: 50 });
-  assert.equal(kept.kind, "succeeded", "900 ms of silent CPU is not a stall");
+    spawnChild: real(busy), localCliFlow: true, stallMs: 1000, progressPollMs: 50 });
+  assert.equal(kept.kind, "succeeded", "2500 ms of silent CPU is not a stall");
   const asleep = await runAmuxV22OneShot(request, config, { syntheticPlatform: true,
-    spawnChild: real("setTimeout(()=>{},10000)"), localCliFlow: true, stallMs: 300,
+    spawnChild: real("setTimeout(()=>{},10000)"), localCliFlow: true, stallMs: 1000,
     progressPollMs: 50 });
   assert.equal(asleep.failure, "stalled");
 });
