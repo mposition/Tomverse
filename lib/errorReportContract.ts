@@ -107,6 +107,10 @@ const RECORDABLE_ERROR_CODES = new Set([
   "AI_REQUEST_FAILED",
   "DEEP_RESEARCH_JOB_FAILED",
   "AI_EMPTY_RESPONSE",
+  // A stream that broke after the 200 response had started. Like the empty
+  // answer above it is settled inside the stream, so its code carries a
+  // diagnostic suffix and its status is always 200.
+  "AI_STREAM_FAILED",
   // Storage- and application-layer chat failures. Recorded despite riding on
   // a 4xx/5xx that the default rule would either skip (410) or accept only by
   // accident (503): these are the rows that tell an operator the failure was
@@ -146,7 +150,12 @@ export const traceEvidenceRecordability = (
       availability: EVIDENCE_AVAILABILITY.intentionallyNotRecorded,
     };
   }
-  if (RECORDABLE_ERROR_CODES.has(errorCode)) return { record: true };
+  // Matched on the root: in-stream failures are reported under their
+  // diagnostic code (`AI_EMPTY_RESPONSE.STOP`), and the suffix only says how
+  // the same recordable failure ended.
+  if (RECORDABLE_ERROR_CODES.has(errorCode.split(".")[0])) {
+    return { record: true };
+  }
   if (httpStatus >= 500) return { record: true };
   // Unlisted 4xx: reportable, but not evidence-worthy by default. Widening
   // this set is a policy decision, not a code default.
