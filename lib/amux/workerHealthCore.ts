@@ -11,8 +11,8 @@
  *
  * Three facts, each already the claim's own rule:
  * - the worker quarantine (lib/amux/workerCircuitCore.ts);
- * - the usage reading: an Anthropic route needs one no older than fifteen
- *   minutes (lib/amux/planningCore.ts evaluateAmuxQuotaTelemetry); another
+ * - the usage reading: an Anthropic route needs one no older than an hour
+ *   (lib/amux/planningCore.ts evaluateAmuxQuotaTelemetry); another
  *   provider's exhausted reading holds it only while
  *   TOMVERSE_AMUX_V22_NON_CLAUDE_QUOTA_GATE is enabled;
  * - the box health signals the bridge forwards (login keepalive, sign-in
@@ -24,8 +24,9 @@
 export const AMUX_WORKER_HEALTH_SOURCES = ["login_keepalive", "auth_stage", "sidecar"] as const;
 export type AmuxWorkerHealthSource = (typeof AMUX_WORKER_HEALTH_SOURCES)[number];
 
-/** A usage reading older than this is not fresh (the claim's own bound). */
-export const AMUX_WORKER_USAGE_FRESH_MS = 15 * 60_000;
+/** A usage reading older than this is not fresh (the claim's own bound,
+ * AMUX_QUOTA_FRESH_SECONDS in lib/amux/planningCore.ts). */
+export const AMUX_WORKER_USAGE_FRESH_MS = 60 * 60_000;
 /** A health signal not repeated for this long no longer describes the worker. */
 export const AMUX_WORKER_HEALTH_SIGNAL_STALE_MS = 3 * 60 * 60_000;
 

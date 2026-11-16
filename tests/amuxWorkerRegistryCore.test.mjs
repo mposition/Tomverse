@@ -26,7 +26,6 @@ import {
   amuxWorkerSeedEntriesToRegister,
   buildAmuxWorkerRegistryAdminView,
   amuxWorkerEffectiveState,
-  amuxWorkerLatchOpen,
   amuxWorkerRegistrationFromRow,
   amuxWorkerRegistryAuditAction,
   amuxWorkerRegistryAuditMetadata,
@@ -249,10 +248,11 @@ test("a stored row maps back only when it is one the guard would have accepted",
   assert.deepEqual(amuxWorkerRegistrationFromRow({ ...row, providerClass: "codex" }), { ...row, providerClass: "codex", revision: 2 });
 });
 
-test("a latch is open when its newest event is an opening", () => {
-  assert.equal(amuxWorkerLatchOpen("opened"), true);
-  assert.equal(amuxWorkerLatchOpen("released"), false);
-  assert.equal(amuxWorkerLatchOpen(null), false);
+test("a recorded latch opening holds no worker", () => {
+  const active = registration("claude-impl", "active", "implementation");
+  for (const latchNewestKind of ["opened", "released", null])
+    assert.deepEqual(amuxWorkerEffectiveState({ registration: active, latchNewestKind,
+      latestObservationStatus: "ok" }), { assignable: true, reasons: [] });
 });
 
 test("a worker is assigned only when active, unlatched and last observed ok -- every failure is named", () => {
@@ -275,7 +275,7 @@ test("a worker is assigned only when active, unlatched and last observed ok -- e
       latchNewestKind: "opened",
       latestObservationStatus: "halted",
     }).reasons,
-    ["not_active", "latch_open", "observation_not_ok"],
+    ["not_active", "observation_not_ok"],
   );
   // Before R4 nothing records an observation, so nothing is assignable by the registry yet.
   assert.equal(
@@ -315,7 +315,7 @@ test("the Admin view shows desired and effective state apart, and offers only un
   assert.equal(claude.classMaxRole, "contract");
   assert.equal(claude.latch, "opened");
   assert.equal(claude.observation, "ok");
-  assert.deepEqual(claude.reasons, ["latch_open"]);
+  assert.deepEqual(claude.reasons, []);
   assert.equal(view.rows[1].verified, false);
   assert.deepEqual(view.rows[1].reasons, ["not_active", "no_observation"]);
   assert.equal("comparison" in view, false, "R1's comparison went with the catalog variable at R2e");

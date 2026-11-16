@@ -116,8 +116,8 @@ test("can take work means the claim would assign it work", () => {
   assert.equal(amuxWorkerHealthNotice(view({ circuit: { state: "probing", consecutive: 3, lastKind: "early_exit",
     lastAt: null, retryAt: null } })), "probing");
   assert.equal(amuxWorkerUsageState(null, 0), "missing");
-  assert.equal(amuxWorkerUsageState(0, 15 * 60_000), "fresh");
-  assert.equal(amuxWorkerUsageState(0, 15 * 60_000 + 1), "stale");
+  assert.equal(amuxWorkerUsageState(0, 60 * 60_000), "fresh");
+  assert.equal(amuxWorkerUsageState(0, 60 * 60_000 + 1), "stale");
 });
 
 test("the box writes a health signal next to the copy and the sidecar reads it back, codes only", async () => {

@@ -2,7 +2,6 @@ import { amuxWorkerCapabilityWithinCeiling, type AmuxWorkerCapability } from "./
 import { amuxV22ProviderForClass, type AmuxV22Provider } from "./v22WorkerClaimCore.ts";
 import {
   AMUX_WORKER_CATALOG_EXEMPT,
-  amuxWorkerLatchOpen,
   amuxWorkerRoleRank,
   type AmuxWorkerRoleCeiling,
   type AmuxWorkerLatchEventKind,
@@ -116,7 +115,6 @@ export function deriveAmuxWorkerCatalog(input: {
   const v22: AmuxDerivedV22CatalogEntry[] = [];
   for (const registration of input.registrations) {
     if (registration.desiredState !== "active") continue;
-    if (amuxWorkerLatchOpen(input.latches.get(registration.workerName) ?? null)) continue;
     const recorded = input.capabilities.get(registration.workerName);
     if (recorded === undefined) continue;
     const capability = amuxWorkerCapabilityWithinCeiling(registration, recorded.capability);
