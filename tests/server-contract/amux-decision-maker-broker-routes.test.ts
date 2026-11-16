@@ -278,7 +278,8 @@ const ROUTES: Route[] = [
     operation: "decision_maker_result_submission",
     store: "submitDecisionMakerOutput",
     envelope: "submitted",
-    maxBodyBytes: 1152 * 1_024,
+    // 2026-11-16: the worst case an output under the launcher's cap can make (it was 1,152 KiB).
+    maxBodyBytes: 4 * 1_024 * 1_024,
     body: {
       request_id: REQUEST_ID,
       instance: "decision-maker-openai",
