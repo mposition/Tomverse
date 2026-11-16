@@ -13,6 +13,7 @@ import { inspectAmuxResolutionChoices, type AmuxCardResolutionChoice,
 import type { AmuxHierarchySnapshotNode } from
   "./ideaHierarchyDecisionCore.ts";
 import type { AmuxNodeResolutionChoice } from "./ideaResolutionChoiceCore.ts";
+import { amuxIntakeCap } from "./intakeLimitsCore.ts";
 
 export class AmuxIdeaResolutionPreviewError extends Error {
   constructor(readonly code: "not_found" | "integrity_unavailable" | "catalog_too_large") {
@@ -91,9 +92,10 @@ export async function readAmuxIdeaResolutionCatalog(
     if (!REF.test(row.id) || typeof row.title !== "string") {
       throw new AmuxIdeaResolutionPreviewError("integrity_unavailable");
     }
-    // A07 proposal titles are 1..200 characters. Longer or empty legacy
-    // titles cannot match and must not break a different proposal's preview.
-    return row.title.length >= 1 && row.title.length <= 200
+    // A07 proposal titles were 1..200 characters; since owner direction
+    // 2026-11-15 only an empty legacy title cannot match (the former bound
+    // holds under TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS).
+    return row.title.length >= 1 && row.title.length <= amuxIntakeCap(200)
       ? [{ ref: row.id, title: row.title }] : [];
   });
   return { nodes, cards, legacyCards };

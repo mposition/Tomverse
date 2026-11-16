@@ -30,6 +30,8 @@ import { adminAmuxOwnerQueueMessages } from "@/lib/adminMessages/amuxOwnerQueue"
 import { amuxVisibleInspectionText } from "@/lib/amux/adminExecutionViewCore";
 import {
   AMUX_OWNER_QUEUE_GROUPS,
+  AMUX_OWNER_QUEUE_LIMIT,
+  AMUX_OWNER_QUEUE_MAX_LIMIT,
   amuxOwnerQueueGroup,
   amuxOwnerQueueGroupCounts,
   amuxOwnerQueueVisible,
@@ -66,7 +68,7 @@ export type AmuxOwnerQueueStatus = "loading" | "failed" | "ready";
  */
 export function AmuxOwnerQueueView({
   status, read, selectedId, onSelect, navLocked, query, onQuery, groupFilter, onGroupFilter,
-  focusMode, onToggleFocus, onRetry, detail,
+  focusMode, onToggleFocus, onRetry, onShowMore, detail,
 }: {
   status: AmuxOwnerQueueStatus;
   read: AmuxOwnerQueueRead | null;
@@ -80,6 +82,8 @@ export function AmuxOwnerQueueView({
   focusMode: boolean;
   onToggleFocus: () => void;
   onRetry: () => void;
+  /** Reads one more page of the queue; offered while the list holds only part of it. */
+  onShowMore: () => void;
   detail: ReactNode;
 }) {
   const copy = useAdminMessages(adminAmuxOwnerQueueMessages);
@@ -178,6 +182,13 @@ export function AmuxOwnerQueueView({
               <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs leading-5 text-amber-200"
                 data-testid="amux-owner-queue-partial">
                 {copy.list.partial(read.items.length, read.total)}
+                {read.items.length < AMUX_OWNER_QUEUE_MAX_LIMIT ? (
+                  <button type="button" data-testid="amux-owner-queue-show-more"
+                    onClick={onShowMore}
+                    className="ml-2 inline-flex min-h-8 items-center rounded-lg border border-amber-500/40 px-3 font-bold hover:bg-amber-500/10">
+                    {copy.list.showMore(Math.min(AMUX_OWNER_QUEUE_LIMIT, read.total - read.items.length))}
+                  </button>
+                ) : null}
               </p>
             ) : null}
             {visible.length === 0 ? (
@@ -278,6 +289,8 @@ export function AmuxOwnerQueueScreen({ canInspectCards, canWriteEngineering = fa
   const [focusMode, setFocusMode] = useState(false);
   const requestId = useRef(0);
   const firstRead = useRef(true);
+  // How many cards the list asks for: one page, and one more each time "show more" is pressed.
+  const wanted = useRef(AMUX_OWNER_QUEUE_LIMIT);
   const loadRef = useRef<(select?: string | null) => Promise<void>>(async () => {});
   // What the callbacks below need from the latest render without being rebuilt by it.
   const live = useRef<{ visible: AmuxOwnerQueueItem[]; selectedId: string | null; advance: boolean }>(
@@ -288,7 +301,8 @@ export function AmuxOwnerQueueScreen({ canInspectCards, canWriteEngineering = fa
     const id = ++requestId.current;
     setStatus("loading");
     try {
-      const response = await adminFetch("/api/admin/amux/owner-queue", { cache: "no-store" });
+      const more = wanted.current > AMUX_OWNER_QUEUE_LIMIT ? `?limit=${wanted.current}` : "";
+      const response = await adminFetch("/api/admin/amux/owner-queue" + more, { cache: "no-store" });
       if (id !== requestId.current) return;
       const body: unknown = response.ok ? await response.json() : null;
       if (id !== requestId.current) return;
@@ -318,6 +332,10 @@ export function AmuxOwnerQueueScreen({ canInspectCards, canWriteEngineering = fa
     }
   }, [focusEscalationId]);
   useEffect(() => { loadRef.current = load; }, [load]);
+  const showMore = useCallback(() => {
+    wanted.current = Math.min(AMUX_OWNER_QUEUE_MAX_LIMIT, wanted.current + AMUX_OWNER_QUEUE_LIMIT);
+    void load();
+  }, [load]);
   useEffect(() => { queueMicrotask(() => void load()); }, [load]);
 
   const items = useMemo(() => read?.items ?? [], [read]);
@@ -416,7 +434,7 @@ export function AmuxOwnerQueueScreen({ canInspectCards, canWriteEngineering = fa
       <AmuxOwnerQueueView status={status} read={read} selectedId={selectedId} onSelect={select}
         navLocked={navLocked} query={query} onQuery={setQuery} groupFilter={groupFilter}
         onGroupFilter={setGroupFilter} focusMode={focusMode} onToggleFocus={() => setFocusMode((on) => !on)}
-        onRetry={() => void load()} detail={detail} />
+        onRetry={() => void load()} onShowMore={showMore} detail={detail} />
     </div>
   );
 }

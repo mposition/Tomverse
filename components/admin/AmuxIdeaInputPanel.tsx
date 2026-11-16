@@ -673,7 +673,6 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
                 value={idea}
                 onChange={(event) => { setIdea(event.target.value); invalidateResult(); }}
                 disabled={pending || frozen}
-                maxLength={8192}
                 className="min-h-56 w-full rounded-lg border p-3 text-base font-normal focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-300 border-zinc-700 bg-zinc-900 text-zinc-100"
                 aria-describedby="amux-v4-idea-hint amux-v4-idea-count"
               />
@@ -727,7 +726,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
                   <button
                     type="button"
                     onClick={() => void checkInput()}
-                    disabled={pending || frozen || scopeBlocked || idea.trim().length === 0 || ideaBytes > 8192}
+                    disabled={pending || frozen || scopeBlocked || idea.trim().length === 0}
                     className="min-h-11 rounded-lg bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-300 disabled:opacity-50"
                   >
                     {messages.preview}
@@ -770,7 +769,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
               <button type="button"
                 onClick={() => void (async () => { if (await checkInput()) await submit(true); })()}
                 disabled={!submissionAvailable || !recoveryChecked || pending || frozen || scopeBlocked ||
-                  idea.trim().length === 0 || ideaBytes > 8192}
+                  idea.trim().length === 0}
                 className="min-h-11 rounded-lg bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-300 disabled:opacity-50">
                 {messages.sessionSubmit}
               </button>
@@ -787,7 +786,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
               <button type="button"
                 onClick={() => void (async () => { if (await checkInput()) await submit(true, true); })()}
                 disabled={!submissionAvailable || !recoveryChecked || pending || frozen || scopeBlocked ||
-                  idea.trim().length === 0 || ideaBytes > 8192}
+                  idea.trim().length === 0}
                 className="min-h-11 rounded-lg border border-emerald-400 px-4 text-sm font-medium text-emerald-200 hover:bg-emerald-500/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-300 disabled:opacity-50">
                 {messages.laneSubmit}
               </button>

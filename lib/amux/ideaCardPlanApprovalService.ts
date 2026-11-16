@@ -13,6 +13,7 @@ import { AmuxCardDuplicateScanError, loadAmuxCardDuplicateScanner } from
 import { AMUX_V4_CARD_PLAN_MAX_PROPOSED, AmuxV4CardPlanError, amuxV4CardPlanRound,
   amuxV4PlanPublicPrConsent, orderAmuxV4CardPlan } from "./ideaCardPlanCore.ts";
 import { loadCurrentAmuxContentKeys } from "./ideaKeyConfig.ts";
+import { amuxIntakeLegacyLimits } from "./intakeLimitsCore.ts";
 import { createAmuxContentKeyRing } from "./ideaKeyStore.ts";
 import { prepareAmuxV4CardRegistrationInTx } from "./ideaStoryRegistrationService.ts";
 import { amuxV4UnitBrowserDigest } from "./ideaUnitBrowserCore.ts";
@@ -92,7 +93,10 @@ export type AmuxV4CardPlanPrepared = Awaited<ReturnType<typeof prepareAmuxV4Card
 /** Everything the card part reads and makes before its transaction. */
 export async function prepareAmuxV4CardPlan(session: Session, request: Request, input: {
   ideaId: string; reasons: Readonly<Record<string, string>>; publicPrConsentOff: readonly string[];
-}, options: { allowEmpty?: boolean; pendingFeatures?: ReadonlyMap<string, string> } = {}) {
+}, options: { allowEmpty?: boolean; pendingFeatures?: ReadonlyMap<string, string>;
+  /** Nodes of this plan wait for a later round: no card is approved yet, so
+   * a card is never refused for a Feature the next round creates. */
+  deferAll?: boolean } = {}) {
   const actorUserId = session.user?.id;
   if (!actorUserId || !isAdminSession(session) || getAdminRole(session) !== "owner") {
     throw new AmuxV4UnitDecisionError("forbidden");
@@ -109,16 +113,24 @@ export async function prepareAmuxV4CardPlan(session: Session, request: Request, 
       throw new AmuxV4CardPlanError("reason_invalid", [unitId]);
     }
   }
+  // Owner direction 2026-11-15: any number of proposed cards is approved over
+  // rounds; only the legacy switch keeps the former 200-card refusal.
+  const legacy = amuxIntakeLegacyLimits();
   const proposed = await prisma.amuxIdeaDraftUnit.findMany({
     // The analysis's own units only; a derived unit keeps its own flow.
     where: { ideaId: input.ideaId, actorUserId, unitKind: "card", state: "proposed",
       derivationGroupId: null },
-    select: { id: true }, orderBy: { id: "asc" }, take: AMUX_V4_CARD_PLAN_MAX_PROPOSED + 1,
+    select: { id: true }, orderBy: { id: "asc" },
+    ...(legacy ? { take: AMUX_V4_CARD_PLAN_MAX_PROPOSED + 1 } : {}),
   });
   if (proposed.length === 0 && !options.allowEmpty) throw new AmuxV4CardPlanError("nothing_to_approve");
-  if (proposed.length > AMUX_V4_CARD_PLAN_MAX_PROPOSED) throw new AmuxV4CardPlanError("too_many_units");
-  const verified = await Promise.all(proposed.map((unit) =>
-    readVerifiedAmuxCardProposal(session, input.ideaId, unit.id)));
+  if (legacy && proposed.length > AMUX_V4_CARD_PLAN_MAX_PROPOSED) {
+    throw new AmuxV4CardPlanError("too_many_units");
+  }
+  // A deferred round reads no proposal: every card waits for the node rounds.
+  const verified: Awaited<ReturnType<typeof readVerifiedAmuxCardProposal>>[] =
+    options.deferAll ? [] : await Promise.all(proposed.map((unit) =>
+      readVerifiedAmuxCardProposal(session, input.ideaId, unit.id)));
   // A Feature is a node a consumed decision of this idea created or linked, or a node id.
   const approvedNodes = await prisma.amuxIdeaDraftUnit.findMany({
     where: { ideaId: input.ideaId, actorUserId, unitKind: "node", state: "approved" },
@@ -150,7 +162,8 @@ export async function prepareAmuxV4CardPlan(session: Session, request: Request, 
     decisionId: randomUUID(), cardId: randomUUID(),
   })));
   // A large plan is approved in rounds; this one is the dependency-closed prefix.
-  const { round: plan, remaining } = amuxV4CardPlanRound(ordered);
+  const { round: plan, remaining } = options.deferAll
+    ? { round: ordered, remaining: proposed.length } : amuxV4CardPlanRound(ordered);
   for (const entry of plan) {
     const proposal = entry.verified.proposal;
     if (proposal.cardType !== "task") continue;

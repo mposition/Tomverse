@@ -1,12 +1,14 @@
 import { buildChatStreamTrailerChunk } from "../../lib/webSearchStreamTrailer";
 import { observeConnectedJourneyEvents } from "./support/connected-journey-fixtures";
 import { expect, test, type Page } from "@playwright/test";
+import { mockReviewHandoffBackground } from "./support/review-handoff-background-fixtures";
 import { mockAuthenticatedApi, prepareGuestPage, expectNoHorizontalOverflow } from "./support/app-fixtures";
 import { mockComparisonReview, mockConversationHistory, reviewModels } from "./support/comparison-review-fixtures";
 
 test.setTimeout(90000);
 
 async function setup(page: Page, baseURL: string, appearance: "studio" | "classic" = "studio") {
+  await mockReviewHandoffBackground(page);
   await prepareGuestPage(page, "ko", appearance, "studio");
   await mockAuthenticatedApi(page, { selectedModels: reviewModels, productKey: "review", extraConversations: [
     { id: "previous-chat", title: "Previous Chat", productKey: "chat", selectedModels: [reviewModels[0]] },
@@ -20,6 +22,7 @@ async function setup(page: Page, baseURL: string, appearance: "studio" | "classi
   const api = await mockComparisonReview(page, { withSecondary: true, recoverStored: true, withoutSynthesis: true });
   await page.context().addCookies([{ name: "__tomverse_e2e_chat_workspace", value: "1", url: baseURL }]);
   await page.goto("/review?lang=ko&conversation=qa-conversation");
+  await expect(page.locator('[data-testid="chat-input"]:visible')).toBeVisible();
   await expect(page.getByTestId("studio-analysis-entry")
     .or(page.getByRole("button", { name: "AI 답변 교차검토" }))).toBeVisible();
   return { ...api, journeys, getSetup: () => analysisSetup };

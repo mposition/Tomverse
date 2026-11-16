@@ -69,7 +69,18 @@ const newest = async (tx: LifecycleTx, taskId: string) => (await tx.$queryRaw<Sc
     "approvedByUserId", "approvalAuditLogId" FROM "AmuxPortfolioScoreSnapshot"
   WHERE "taskId" = ${taskId} ORDER BY "computedAt" DESC, "id" DESC LIMIT 1`)[0];
 
-test("an unchanged score is extended by the system refresher, once, within its baseline", async () => {
+const LEGACY = "TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS";
+/** Runs `work` with the intake legacy-limits switch on (the 2026-11-14 rule). */
+async function withLegacyLimits(work: () => Promise<void>) {
+  const previous = process.env[LEGACY];
+  process.env[LEGACY] = "enabled";
+  try { await work(); } finally {
+    if (previous === undefined) delete process.env[LEGACY];
+    else process.env[LEGACY] = previous;
+  }
+}
+
+test("an unchanged score is extended by the system refresher, once, both windows forward", async () => {
   const { readDueAmuxPortfolioScoreTaskIds, refreshAmuxPortfolioScoreInTx } = await services();
   await lifecycle(async (tx) => {
     // Evidence six and a half days old: the window closes in twelve hours.
@@ -82,10 +93,12 @@ test("an unchanged score is extended by the system refresher, once, within its b
       assert.equal(outcome.state, "refreshed", JSON.stringify(outcome));
       const after = await newest(tx, taskId);
       assert.notEqual(after.id, scoreId);
-      // The evidence's age and baseline are the confirmed ones; only the
-      // active window moved, to seven days past now.
+      // The evidence's age is the confirmed one. Owner direction 2026-11-15:
+      // the active window moves to seven days past now and the baseline to
+      // 28 days past now, so the score never waits at it for an owner.
       assert.equal(after.evidenceAsOf.getTime(), before.evidenceAsOf.getTime());
-      assert.equal(after.baselineStaleAt.getTime(), before.baselineStaleAt.getTime());
+      assert.ok(after.baselineStaleAt.getTime() > before.baselineStaleAt.getTime());
+      assert.ok(Math.abs(after.baselineStaleAt.getTime() - (Date.now() + 28 * DAY)) < 60_000);
       assert.ok(Math.abs(after.activeStaleAt.getTime() - (Date.now() + 7 * DAY)) < 60_000);
       assert.equal(after.approvedByUserId, before.approvedByUserId);
       const [audit] = await tx.$queryRaw<Array<{ action: string; actorUserId: string | null;
@@ -112,9 +125,59 @@ test("an unchanged score is extended by the system refresher, once, within its b
   });
 });
 
-test("a score at its baseline, or whose assessment the owner replaced, waits for the owner", async () => {
+test("owner direction 2026-11-15: an unchanged score past its 28-day baseline is reopened, not left for the owner", async () => {
   const { readDueAmuxPortfolioScoreTaskIds, refreshAmuxPortfolioScoreInTx } = await services();
   await lifecycle(async (tx) => {
+    // Evidence 40 days old: both windows closed long ago.
+    await dueTask(tx, 40 * DAY, async (taskId, scoreId) => {
+      const before = await newest(tx, taskId);
+      assert.ok(before.baselineStaleAt.getTime() < Date.now() - 10 * DAY);
+      assert.deepEqual(await readDueAmuxPortfolioScoreTaskIds(tx), [taskId]);
+      assert.equal((await refreshAmuxPortfolioScoreInTx(tx, { taskId, digestKey })).state,
+        "refreshed");
+      const reopened = await newest(tx, taskId);
+      assert.notEqual(reopened.id, scoreId);
+      assert.equal(reopened.evidenceAsOf.getTime(), before.evidenceAsOf.getTime());
+      assert.ok(reopened.activeStaleAt.getTime() > Date.now() + 6 * DAY);
+      assert.ok(reopened.baselineStaleAt.getTime() > Date.now() + 27 * DAY);
+      // The promotion's window read sees it fresh again.
+      const [fresh] = await tx.$queryRaw<Array<{ fresh: boolean }>>`
+        SELECT ("activeStaleAt" > clock_timestamp() AT TIME ZONE 'UTC' AND
+          "baselineStaleAt" > clock_timestamp() AT TIME ZONE 'UTC') AS "fresh"
+        FROM "AmuxPortfolioScoreSnapshot" WHERE "id" = ${reopened.id}::uuid`;
+      assert.equal(fresh.fresh, true);
+      // Not due again for six days.
+      assert.deepEqual(await readDueAmuxPortfolioScoreTaskIds(tx), []);
+    });
+  });
+});
+
+test("the shape CHECK keeps the baseline between the evidence's 28 days and 28 days past the computation", async () => {
+  await lifecycle(async (tx) => {
+    await dueTask(tx, 6.5 * DAY, async (_taskId, scoreId) => {
+      // Triggers off (the snapshot is append-only), so only the CHECK answers.
+      await tx.$executeRawUnsafe("SET LOCAL session_replication_role = replica");
+      const refused = async (baseline: string) => {
+        await tx.$executeRawUnsafe("SAVEPOINT shape_probe");
+        await assert.rejects(tx.$executeRawUnsafe(`UPDATE "AmuxPortfolioScoreSnapshot"
+          SET "baselineStaleAt" = ${baseline} WHERE "id" = $1::uuid`, scoreId),
+        (error: unknown) => /AmuxPortfolioScoreSnapshot_shape_check/.test(String(
+          (error as { message?: string })?.message ?? error)));
+        await tx.$executeRawUnsafe("ROLLBACK TO SAVEPOINT shape_probe");
+      };
+      await refused(`"computedAt" + INTERVAL '28 days' + INTERVAL '1 millisecond'`);
+      await refused(`"evidenceAsOf" + INTERVAL '28 days' - INTERVAL '1 millisecond'`);
+      // Anywhere between is a shape a refresh may write.
+      assert.equal(await tx.$executeRawUnsafe(`UPDATE "AmuxPortfolioScoreSnapshot"
+        SET "baselineStaleAt" = "computedAt" + INTERVAL '28 days' WHERE "id" = $1::uuid`, scoreId), 1);
+      await tx.$executeRawUnsafe("SET LOCAL session_replication_role = origin");
+    });
+  });
+});
+
+test("with the legacy-limits switch, a score at its baseline, or whose assessment the owner replaced, waits for the owner", async () => {
+  const { readDueAmuxPortfolioScoreTaskIds, refreshAmuxPortfolioScoreInTx } = await services();
+  await withLegacyLimits(() => lifecycle(async (tx) => {
     // Evidence 27.5 days old, its active window long closed (as on the
     // stopped board): reopened, but only up to the 28-day baseline.
     await dueTask(tx, 27.5 * DAY, async (taskId) => {
@@ -124,12 +187,17 @@ test("a score at its baseline, or whose assessment the owner replaced, waits for
         "refreshed");
       const capped = await newest(tx, taskId);
       assert.equal(capped.activeStaleAt.getTime(), before.baselineStaleAt.getTime());
+      assert.equal(capped.baselineStaleAt.getTime(), before.baselineStaleAt.getTime());
       // Its window now ends at the baseline itself: nothing left to extend.
       assert.deepEqual(await readDueAmuxPortfolioScoreTaskIds(tx), []);
       assert.deepEqual(await refreshAmuxPortfolioScoreInTx(tx, { taskId, digestKey }),
         { state: "skipped", taskId, reason: "not_due" });
     });
-  });
+  }));
+});
+
+test("a score whose assessment the owner replaced, or whose subject was revised, waits for the owner", async () => {
+  const { readDueAmuxPortfolioScoreTaskIds, refreshAmuxPortfolioScoreInTx } = await services();
   await lifecycle(async (tx) => {
     // The owner's newer Task assessment stays: the next score is the owner's
     // to confirm, so the refresher neither lists nor writes one.

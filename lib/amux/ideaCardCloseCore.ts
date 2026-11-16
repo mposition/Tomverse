@@ -11,7 +11,11 @@
 
 import { AMUX_IDEA_BLOCK_REASONS, amuxIdeaBlockReason, type AmuxIdeaBlockReason } from "./ideaProgressCore.ts";
 
-/** Default off. A question filed to the Decision Maker is a paid turn. */
+/**
+ * A question filed to the Decision Maker is a turn on its subscription. On
+ * unless exactly `disabled` (owner decision 2026-11-15: the switches that make
+ * the Decision Maker work default on, and are kill switches).
+ */
 export const AMUX_IDEA_CARD_CLOSE_ENV = "TOMVERSE_AMUX_CARD_CLOSE_DM";
 export const AMUX_IDEA_CARD_CLOSE_DAILY_ENV = "AMUX_IDEA_CARD_CLOSE_MAX_PER_DAY";
 export const AMUX_IDEA_CARD_CLOSE_STALE_DAYS_ENV = "AMUX_IDEA_CARD_CLOSE_STALE_DAYS";
@@ -29,7 +33,7 @@ export const AMUX_IDEA_CARD_CLOSE_SCAN = 24;
 export type AmuxIdeaCardCloseEnv = Record<string, string | undefined>;
 
 export const amuxIdeaCardCloseEnabled = (env: AmuxIdeaCardCloseEnv = process.env) =>
-  env[AMUX_IDEA_CARD_CLOSE_ENV] === "enabled";
+  env[AMUX_IDEA_CARD_CLOSE_ENV]?.trim() !== "disabled";
 
 const boundedInteger = (raw: string | undefined, min: number, max: number, fallback: number) => {
   const value = Number(raw ?? "");
@@ -108,7 +112,7 @@ export const AMUX_IDEA_CARD_CLOSE_BLOCK_REASON_TEXT: Readonly<Record<AmuxIdeaBlo
   cli_budget_limit: "its run stopped at its cost limit",
   analysis_stop: "its investigation concluded the idea should not go on",
   analysis_replan: "its investigation concluded the remaining plan should change",
-  review_server_rejected_twice: "the automatic code review rejected its change twice",
+  review_server_rejected_twice: "the automatic code review rejected the same finding again",
 });
 
 const FINISHED = new Set(["done", "cancelled"]);
@@ -214,9 +218,6 @@ export const AMUX_IDEA_CARD_CLOSE_DM_WORKER = "amux-card-close";
  */
 export const AMUX_IDEA_CARD_CLOSE_DM_PROVIDER = "claude";
 
-/** The local AMUX's bounds on a filed card (vendor/amux dm_relay_v22.rs). */
-export const AMUX_IDEA_CARD_CLOSE_QUESTION_MAX = 2_000;
-export const AMUX_IDEA_CARD_CLOSE_TITLE_MAX = 200;
 
 const cardLabel = (card: AmuxIdeaCardCloseAskedCard) => card.displayKey ?? card.id;
 
@@ -262,23 +263,14 @@ export function amuxIdeaCardCloseRelayCard(input: {
     "Remaining cards:",
   ];
   const tail = "Should the remaining cards be closed?";
-  const lines: string[] = [];
-  // The whole list when it fits; the local AMUX refuses a longer question.
-  const room = AMUX_IDEA_CARD_CLOSE_QUESTION_MAX - head.join("\n").length - tail.length - 40;
-  let used = 0;
-  for (const card of input.cards) {
-    const line = cardLine(card, nowMs);
-    if (used + line.length + 1 > room) break;
-    lines.push(line);
-    used += line.length + 1;
-  }
-  const more = input.cards.length - lines.length;
+  // The whole list: a card has no question cap of its own (owner decision 2026-11-15).
+  const lines = input.cards.map((card) => cardLine(card, nowMs));
   return {
     question_id: input.questionId,
     worker: AMUX_IDEA_CARD_CLOSE_DM_WORKER,
     provider: AMUX_IDEA_CARD_CLOSE_DM_PROVIDER,
-    title: `Idea cards stalled: ${cardLabel(input.cards[0])}`.slice(0, AMUX_IDEA_CARD_CLOSE_TITLE_MAX),
-    question: [...head, ...lines, ...(more > 0 ? [`and ${more} more`] : []), tail].join("\n"),
+    title: `Idea cards stalled: ${cardLabel(input.cards[0])}`,
+    question: [...head, ...lines, tail].join("\n"),
     unblocks: `The remaining cards are closed as cancelled, or kept and not asked about for ${AMUX_IDEA_CARD_CLOSE_KEEP_DAYS} days.`,
     options: [
       { id: "close", label: "Close the remaining cards as cancelled" },

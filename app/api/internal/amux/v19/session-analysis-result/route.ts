@@ -4,6 +4,8 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { readLimitedJson } from "@/lib/apiSecurity";
 import { AMUX_IDEA_ANALYSIS_PROVIDERS } from "@/lib/amux/ideaAnalysisChannelCore";
+import { amuxAnalysisAnswerRequestMaxBytes, amuxAnalysisChunkMaxBytes } from
+  "@/lib/amux/ideaAnalysisChunkCore";
 import { amuxJsonNoStore } from "@/lib/amux/internalRoute";
 import { AMUX_V4_ANALYSIS_AGENT_SECRET_ENV } from
   "@/lib/amux/ideaAnalysisQueueCore";
@@ -55,7 +57,7 @@ const bodySchema = identity.extend({
   outputTokens: z.number().int().safe().nonnegative(),
   cliAttestation,
 }).refine((body) => Buffer.byteLength(body.rawModelOutput, "utf8") <=
-    65_536 && body.inputTokens + body.outputTokens > 0 &&
+    amuxAnalysisChunkMaxBytes() && body.inputTokens + body.outputTokens > 0 &&
     Number.isSafeInteger(body.inputTokens + body.outputTokens));
 const receiptSchema = identity.pick({ claimId: true, requestId: true,
   reservationId: true, ideaId: true, invocationOrdinal: true });
@@ -83,8 +85,11 @@ export async function POST(request: Request): Promise<Response> {
     return amuxJsonNoStore({ error: "Invalid content type." }, 415);
   }
   let body: z.infer<typeof bodySchema>;
-  // JSON escaping can nearly double a 64 KiB plaintext result.
-  try { body = await readLimitedJson(request, 140 * 1024, bodySchema); }
+  // JSON escaping can nearly double a plaintext result.
+  try {
+    body = await readLimitedJson(request, amuxAnalysisAnswerRequestMaxBytes(140 * 1024),
+      bodySchema);
+  }
   catch { return amuxJsonNoStore({ error: "Invalid request." }, 400); }
   try {
     await prisma.$transaction((tx) => preflightAmuxMaxSessionResult(tx, body),

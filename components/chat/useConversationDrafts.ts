@@ -30,6 +30,7 @@ import {
   type PublicChatDraft,
 } from "@/components/chat/chatDurableRecoveryClient";
 import { discardResponseBody } from "@/lib/discardResponseBody";
+import { reviewHandoffDraftEndpoint } from "@/lib/reviewContinuationHandoffClient";
 import {
   consumeConversationDraftSession,
   openConversationDraftSession,
@@ -150,6 +151,7 @@ export type DraftSendCapture = Omit<PreparedDraftSend, "revision">;
 
 type DraftSyncMeta = {
   scopeKey: string;
+  endpoint: string | null;
   revision: number;
   generation: number;
   persistedGeneration: number;
@@ -217,9 +219,9 @@ const releasePreviews = (items: ChatAttachment[], keep: ChatAttachment[]) => {
 };
 
 /**
- * Composer drafts, one per conversation. Guest/Review/continuation callers
- * keep the original tab-memory behavior; authenticated stored Chat callers
- * additionally synchronize through the revision-CAS draft endpoint.
+ * Composer drafts, one per conversation. Authenticated Chat callers and
+ * server-identified Review handoff targets synchronize through their separate
+ * revision-CAS draft endpoints. Other Review and Guest drafts stay in tab memory.
  *
  * The composer used to be a single `inputValue` shared by every conversation,
  * so opening another conversation from the sidebar carried the half-written
@@ -245,7 +247,8 @@ export function useConversationDrafts(
   currentConversationId: string | null,
   identityKey: string | null,
   durableSyncEnabled = false,
-  sessionProduct: DraftSessionProduct | null = null
+  sessionProduct: DraftSessionProduct | null = null,
+  durableDraftKind: "chat" | "review-handoff" = "chat"
 ): ConversationDraftsApi {
   const [drafts, setDrafts] = useState<ConversationDraftStore>({});
   const [, setSyncRevision] = useState(0);
@@ -375,6 +378,12 @@ export function useConversationDrafts(
     if (current && current.identityKey === fence.identityKey &&
         current.identityEpoch === fence.epoch) {
       current.scopeKey = scopeKey;
+      // A freshly opened Review scope can acquire its server handoff marker
+      // after local metadata was allocated. No generic Chat draft request may
+      // escape while that scope is being activated.
+      if (durableDraftKind === "review-handoff" && scopeKey === activeScopeKey) {
+        current.endpoint = reviewHandoffDraftEndpoint(scopeKey);
+      }
       return current;
     }
     current?.requestAbort?.abort();
@@ -384,6 +393,9 @@ export function useConversationDrafts(
     );
     const created: DraftSyncMeta = {
       scopeKey,
+      endpoint: durableDraftKind === "review-handoff" && scopeKey === activeScopeKey
+        ? reviewHandoffDraftEndpoint(scopeKey)
+        : sessionProduct === "review" ? null : `/api/products/chat/drafts/${encodeURIComponent(scopeKey)}`,
       revision: 0,
       generation: hasLocalDraft ? 1 : 0,
       persistedGeneration: 0,
@@ -401,7 +413,7 @@ export function useConversationDrafts(
     };
     syncMetaRef.current.set(key, created);
     return created;
-  }, []);
+  }, [activeScopeKey, durableDraftKind, sessionProduct]);
 
   const replaceDrafts = useCallback((next: ConversationDraftStore) => {
     draftsRef.current = next;
@@ -571,7 +583,8 @@ export function useConversationDrafts(
   ) => {
     if (!durableSyncEnabled) return true;
     const meta = syncMetaRef.current.get(key);
-    if (!meta) return true;
+    if (!meta?.endpoint) return true;
+    const endpoint = meta.endpoint;
     const expectedIdentityKey = meta.identityKey;
     const expectedIdentityEpoch = meta.identityEpoch;
     const operationIsCurrent = () =>
@@ -615,7 +628,7 @@ export function useConversationDrafts(
             return;
           }
           const response = await fetch(
-            `/api/products/chat/drafts/${encodeURIComponent(meta.scopeKey)}`,
+            endpoint,
             {
               method: "DELETE",
               headers: { "Content-Type": "application/json" },
@@ -661,7 +674,7 @@ export function useConversationDrafts(
         const generation = exactGeneration ?? meta.generation;
         const expectedRevision = meta.revision;
         const response = await fetch(
-          `/api/products/chat/drafts/${encodeURIComponent(meta.scopeKey)}`,
+          endpoint,
           {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
@@ -800,6 +813,8 @@ export function useConversationDrafts(
     }
     const key = activeDraftKey;
     const meta = metaFor(key, activeScopeKey);
+    if (!meta.endpoint) return;
+    const endpoint = meta.endpoint;
     if (meta.hydrated) {
       queueMicrotask(() => {
         if (activeDraftKeyRef.current === key && syncMetaRef.current.get(key) === meta &&
@@ -821,7 +836,7 @@ export function useConversationDrafts(
     void (async () => {
       try {
         const response = await fetch(
-          `/api/products/chat/drafts/${encodeURIComponent(activeScopeKey)}`,
+          endpoint,
           { cache: "no-store", signal: controller.signal }
         );
         if (response.status === 409) {

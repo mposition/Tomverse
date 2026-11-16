@@ -1591,6 +1591,9 @@ model ChatResponseAttempt {
   finishReason        String?
   failureCode         String?
   terminalAt          DateTime?
+  /// Reference-only description of the imported source ranges used by the
+  /// provider attempt that produced a completed saved answer. Never source text.
+  continuationSourcePlan Json?
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
@@ -6507,6 +6510,12 @@ model ConversationContinuationBridge {
   /// deliberate fork carries a new key and is a new conversation.
   idempotencyKey String
 
+  /// Reference-only binding for an answer-level Chat -> Review handoff.
+  /// NULL is every ordinary continuation and every source-level Review fork.
+  /// The JSON contains parent/message ids, content digests and omission counts;
+  /// it never contains parent or imported transcript text.
+  reviewHandoff Json?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -8172,7 +8181,9 @@ model AmuxWorkItem {
   v22OwnerQuestions AmuxV22TaskQuestion[]
   v22ResultReviews  AmuxV22ResultReview[]
   dmOwnerSettlements AmuxDmOwnerSettlement[]
+  waitReason        AmuxCardWaitReason?
   v52ReviewRecords  AmuxV52ReviewRecord[]
+  v52ReviewFindings AmuxV52ReviewFindings[]
   humanEscalations  AmuxHumanEscalation[]
   costLedgerEntries AmuxCostLedgerEntry[]
   reviewProposals   AmuxReviewProposal[]
@@ -8293,6 +8304,7 @@ model AmuxExecutionAttempt {
   v22ResultReview   AmuxV22ResultReview?
   dmOwnerSettlements AmuxDmOwnerSettlement[]
   v52ReviewRecord   AmuxV52ReviewRecord?
+  v52ReviewFindings AmuxV52ReviewFindings?
   v22AssignmentId   String? @unique @db.Uuid
   v22Assignment     AmuxV22WorkerAssignment? @relation("AmuxV22ExecutionAssignment", fields: [v22AssignmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
@@ -8438,6 +8450,46 @@ model AmuxV22ResultReview {
   @@index([taskId, createdAt])
 }
 
+/// Why one card is not running (owner decision 2026-11-15,
+/// lib/amux/cardWaitReasonStore.ts): the reason the automatic promotion or
+/// the claim passed it over, as a code with structured detail (codes and card
+/// keys only, never worker text). Replaced on every pass, removed when the
+/// card is claimed. `firstSeenAt` is when the same stage and code began;
+/// `reportedAt` when a long wait was raised as an operational incident.
+model AmuxCardWaitReason {
+  taskId      String       @id
+  /// promotion | claim
+  stage       String
+  code        String
+  detail      Json
+  firstSeenAt DateTime
+  lastSeenAt  DateTime
+  seenCount   Int          @default(1)
+  reportedAt  DateTime?
+  task        AmuxWorkItem @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([lastSeenAt])
+}
+
+/// The latest box health signal per worker and source, forwarded by the
+/// worker's bridge (owner decision 2026-11-15,
+/// lib/amux/workerHealthSignalStore.ts): the Claude login keepalive, the
+/// sign-in stage and the sidecar. Non-secret facts only. `firstSeenAt` is
+/// when the current signal began; `reportedAt` when it was raised.
+model AmuxWorkerHealthSignal {
+  workerName  String
+  /// login_keepalive | auth_stage | sidecar
+  source      String
+  signal      String
+  detail      Json
+  observedAt  DateTime
+  firstSeenAt DateTime
+  receivedAt  DateTime
+  reportedAt  DateTime?
+
+  @@id([workerName, source])
+}
+
 /// One AMUX process analysis report (owner request 2026-11-14,
 /// lib/amuxProcessAuditStore.ts): the app's deterministic figures for the
 /// window, the box Codex CLI's structured reading and the Markdown shown in
@@ -8533,8 +8585,9 @@ model AmuxV22TaskPatch {
   @@index([ideaId, bodyPurgedAt])
 }
 
-/// One immutable review-server verdict for a v52 implement attempt. Findings
-/// stay on the review server; only the content-free binding is stored here.
+/// One immutable review-server verdict for a v52 implement attempt. The row is
+/// the content-free binding; a reject's findings are the attempt's sealed
+/// AmuxV52ReviewFindings body (owner decision 2026-11-15).
 model AmuxV52ReviewRecord {
   attemptId       String   @id
   taskId          String
@@ -8547,16 +8600,56 @@ model AmuxV52ReviewRecord {
   touchesContract Boolean
   requestDigest   String
   auditLogId      String   @unique
-  /// A reject's bounded, redacted reasons (lib/amux/v52ReviewFindingsCore.ts). Display only.
+  /// Legacy (owner decision 2026-11-14): a reject's bounded, redacted reasons
+  /// kept in the clear. New records leave it null; their findings are sealed in
+  /// AmuxV52ReviewFindings. Display only.
   findingsSummary String?
   createdAt       DateTime @default(now())
 
   attempt  AmuxExecutionAttempt @relation(fields: [attemptId, taskId], references: [id, taskId], onDelete: Restrict, onUpdate: Restrict)
   task     AmuxWorkItem         @relation(fields: [taskId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   auditLog AdminAuditLog        @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  findings AmuxV52ReviewFindings?
 
   @@unique([attemptId, taskId])
   @@index([taskId, createdAt])
+}
+
+/// A rejected v52 review's findings, sealed as one AMUX content unit (purpose
+/// `review_findings`, its own external key per attempt) in the same
+/// transaction as the review record (owner decision 2026-11-15): the
+/// reviewers, each one's reason, and per finding its severity, summary, file
+/// and line. Untrusted text for people, the Decision Maker and the next
+/// attempt's prompt, never authority. Kept until 90 days after the Task ends,
+/// as the attempt's result; the purge clears the body and queues the key's
+/// deletion (lib/amux/v22TaskResultRetention.ts).
+model AmuxV52ReviewFindings {
+  attemptId    String    @id
+  taskId       String
+  ideaId       String
+  ciphertext   Bytes?
+  keyId        String?
+  keyVersion   Int?
+  digest       String
+  digestKeyId  String
+  byteLength   Int
+  findingCount Int
+  /// The same reviewer vendor rejected the Task's previous review for a similar
+  /// blocking finding (lib/amux/v52ReviewFindingsCore.ts amuxV52FindingsRepeat),
+  /// judged when the review was recorded. Settlement reads it to hand a repeated
+  /// rejection to a person instead of running the Task again.
+  repeatsPrior Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+  bodyPurgedAt DateTime?
+
+  record  AmuxV52ReviewRecord  @relation(fields: [attemptId, taskId], references: [attemptId, taskId], onDelete: Restrict, onUpdate: Restrict)
+  attempt AmuxExecutionAttempt @relation(fields: [attemptId, taskId], references: [id, taskId], onDelete: Restrict, onUpdate: Restrict, map: "AmuxV52ReviewFindings_attempt_fkey")
+  task    AmuxWorkItem         @relation(fields: [taskId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  idea    AmuxIdeaSubmission   @relation(fields: [ideaId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([attemptId, taskId])
+  @@index([taskId, createdAt])
+  @@index([ideaId, bodyPurgedAt])
 }
 
 model AmuxCostLedgerEntry {
@@ -10674,6 +10767,7 @@ model AmuxIdeaSubmission {
   updatedAt           DateTime  @updatedAt
   v22TaskResults      AmuxV22TaskResult[]
   v22TaskPatches      AmuxV22TaskPatch[]
+  v52ReviewFindings   AmuxV52ReviewFindings[]
   laneAttempts        AmuxIdeaLaneAttempt[]
   cardCloseQuestions  AmuxIdeaCardCloseQuestion[]
 

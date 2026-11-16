@@ -16,6 +16,7 @@ import { reportAmuxOperationalIncident } from "@/lib/amux/operationalError";
 import {
   AMUX_DATABASE_BUSY_REASON,
   AMUX_DATABASE_BUSY_RETRY_AFTER_SECONDS,
+  amuxRolledBackWriteCode,
   amuxTransactionNotStartedCode,
   amuxTransientDatabaseCode,
   isAmuxDbBusyCode,
@@ -138,10 +139,15 @@ const isKnownDeadlineFailure = (
   if (error && typeof error === "object" && "code" in error && error.code === "P2028") {
     return false;
   }
+  // A deadlock, a serialization failure and an idle-in-transaction session end
+  // are rollbacks too (readFailureCore.ts): the same "nothing committed" answer
+  // the Rust client already retries on, instead of a 500 incident that drops
+  // the call.
   return (
     databaseCode === "57014" ||
     databaseError.includes("57014") ||
-    amuxTransientDatabaseCode(error) === "57014"
+    amuxTransientDatabaseCode(error) === "57014" ||
+    amuxRolledBackWriteCode(error) !== null
   );
 };
 
@@ -270,7 +276,9 @@ export const amuxInternalErrorResponse = (
         event: "internal_route_deadline_exceeded",
         operation,
         error_code:
-          error instanceof AmuxDbBoundaryError ? error.code : "57014",
+          error instanceof AmuxDbBoundaryError
+            ? error.code
+            : (amuxRolledBackWriteCode(error) ?? "57014"),
       }),
     );
     return amuxJsonNoStore(

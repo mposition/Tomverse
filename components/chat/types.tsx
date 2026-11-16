@@ -268,6 +268,8 @@ export type Conversation = {
      * continuations existed.
      */
     surface?: ConversationSurface;
+    /** Opaque server marker; references remain in the continuation bridge. */
+    reviewHandoff?: true;
     /**
      * Which service this conversation's imported half came from, so the
      * sidebar row can carry that service's icon.

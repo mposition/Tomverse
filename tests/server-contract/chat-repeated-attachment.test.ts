@@ -472,8 +472,10 @@ test("the extracted-text budget counts a repeat once and two files twice", async
     )
   );
   assert.notEqual(repeat.payload.code, "ATTACHMENT_TEXT_TOO_LARGE");
-  assert.equal(world.budgets.length, 1, "one 200k file fits the 300k budget");
+  assert.equal(world.budgets.length, 1, "a repeated file is read once");
 
+  // Two different files add up to more than the old 300,000-character request
+  // limit, which refused this turn. Both now fit the input allowance.
   world = freshWorld(["big1", "big2"]);
   world.bodies.set("big1", large);
   world.bodies.set("big2", large);
@@ -483,9 +485,64 @@ test("the extracted-text budget counts a repeat once and two files twice", async
       user("second", "Read.", [stored("big2")])
     )
   );
-  assert.equal(two.status, 413);
-  assert.equal(two.payload.code, "ATTACHMENT_TEXT_TOO_LARGE");
-  assert.deepEqual(world.budgets, [], "nothing was priced");
+  assert.notEqual(two.payload.code, "ATTACHMENT_TEXT_TOO_LARGE");
+  assert.equal(world.budgets.length, 1, "two files past 300k characters are priced, not refused");
+});
+
+/**
+ * The 2026-11-16 report: a conversation whose earlier files added up past the
+ * request limit refused every later message, even one with no file, because
+ * each turn reads the earlier files again. Earlier files now share half the
+ * input allowance; past it a file is named to the model and left out.
+ */
+test("earlier files past their share are left out of the turn instead of refusing it", async () => {
+  const words = "lorem ipsum dolor sit amet ".repeat(8_000); // ~216k characters
+  const inputTokens = (budget: unknown) => (budget as { inputTokens: number }).inputTokens;
+
+  world = freshWorld(["past1"]);
+  world.bodies.set("past1", words);
+  await send(requestFor([user("first", "Read.", [stored("past1")]), failed("reply1")], user("now", "Thanks.")));
+  assert.equal(world.budgets.length, 1);
+  const onePastFile = inputTokens(world.budgets[0]);
+
+  world = freshWorld(["past1", "past2", "past3"]);
+  for (const id of ["past1", "past2", "past3"]) world.bodies.set(id, words);
+  const stuck = await send(
+    requestFor(
+      [
+        user("first", "Read.", [stored("past1")]), failed("reply1"),
+        user("second", "And this.", [stored("past2")]), failed("reply2"),
+        user("third", "And this.", [stored("past3")]), failed("reply3"),
+      ],
+      user("now", "Thanks.")
+    )
+  );
+  assert.notEqual(stuck.payload.code, "ATTACHMENT_TEXT_TOO_LARGE");
+  assert.notEqual(stuck.payload.code, "CHAT_INPUT_TOKEN_LIMIT");
+  assert.equal(world.budgets.length, 1, "the turn reaches pricing");
+  const threePastFiles = inputTokens(world.budgets[0]);
+  // Only the files that fit the earlier-files share are sent; the rest add a
+  // one-line note each, not their text.
+  assert.ok(threePastFiles < onePastFile * 2.5, `${threePastFiles} vs ${onePastFile}`);
+  assert.ok(threePastFiles > onePastFile, "at least one earlier file is still sent");
+});
+
+test("the message being sent keeps its own files when earlier files fill their share", async () => {
+  const words = "lorem ipsum dolor sit amet ".repeat(8_000);
+  world = freshWorld(["past1", "past2", "now1"]);
+  for (const id of ["past1", "past2", "now1"]) world.bodies.set(id, words);
+  const turn = await send(
+    requestFor(
+      [
+        user("first", "Read.", [stored("past1")]), failed("reply1"),
+        user("second", "And this.", [stored("past2")]), failed("reply2"),
+      ],
+      user("now", "Compare with this one.", [stored("now1")])
+    )
+  );
+  assert.notEqual(turn.payload.code, "ATTACHMENT_TEXT_TOO_LARGE");
+  assert.equal(world.budgets.length, 1);
+  assert.ok(world.reads.includes("now1"), "the new file was read");
 });
 
 test("a retried file that storage lost is named once, on the turn being sent", async () => {

@@ -17,6 +17,7 @@ import {
   settleAmuxExecution,
   startAmuxExecution,
 } from "@/lib/amux/execution";
+import { AMUX_MAX_EXECUTION_ATTEMPTS } from "@/lib/amux/executionBudgetCore";
 import { recordAmuxReviewPullRequest } from "@/lib/amux/reviewPullRequest";
 import {
   heartbeatAmuxWorkerRuntime,
@@ -869,8 +870,9 @@ test("a card that reached review without asking for one is marked for review by 
 
 test("a run that may not start leaves no AMUX trace, even on a card AMUX would block", async () => {
   const fixture = await readyWorkerWithCard();
-  // Five ended attempts spend the card's attempt budget: a start would block it.
-  for (let attemptNumber = 1; attemptNumber <= 5; attemptNumber += 1) {
+  // Ended attempts up to the runaway guard spend the card's attempt budget
+  // (no fixed count of five since 2026-11-15): a start would block it.
+  for (let attemptNumber = 1; attemptNumber <= AMUX_MAX_EXECUTION_ATTEMPTS; attemptNumber += 1) {
     await prisma.amuxExecutionAttempt.create({
       data: {
         id: randomUUID(),
@@ -935,14 +937,24 @@ test("an active run whose attempt ended halts runs before anyone reports it", as
   await reclaimExpiredAmuxExecutions({ now: new Date(Date.now() + 10 * 60_000), limit: 200 });
   const ended = await prisma.amuxExecutionAttempt.findUniqueOrThrow({ where: { id: started.attemptId } });
   assert.ok(ended.endedAt, "recovery ended the attempt");
-  const other = await readyWorkerWithCard();
-  await assert.rejects(
-    startWithRun(other, nextRunId()),
-    (error: unknown) => error instanceof EngineeringAgentStoreRefusedError && error.code === "halted",
-  );
-  assert.equal(await runEngineeringAgentTransaction(prisma, (tx) => openEngineeringAgentRunMismatches(tx)), 1);
-  const mismatch = await prisma.engineeringAgentWorkItem.findUniqueOrThrow({ where: { causeKey: `run_attempt:${runId}` } });
-  assert.equal(currentEngineeringAgentHalt(await readEngineeringAgentHaltState(prisma)), "state_mismatch");
+  // Owner decision 2026-11-15: the orphaned run holds its own card only, so
+  // the agent as a whole reports no halt for it.
+  assert.equal(currentEngineeringAgentHalt(await readEngineeringAgentHaltState(prisma)), "none");
+  // ENGINEERING_AGENT_LEGACY_HALTS: it halts every run, as before.
+  process.env.ENGINEERING_AGENT_LEGACY_HALTS = "enabled";
+  let mismatch!: { id: string };
+  try {
+    const other = await readyWorkerWithCard();
+    await assert.rejects(
+      startWithRun(other, nextRunId()),
+      (error: unknown) => error instanceof EngineeringAgentStoreRefusedError && error.code === "halted",
+    );
+    assert.equal(await runEngineeringAgentTransaction(prisma, (tx) => openEngineeringAgentRunMismatches(tx)), 1);
+    mismatch = await prisma.engineeringAgentWorkItem.findUniqueOrThrow({ where: { causeKey: `run_attempt:${runId}` } });
+    assert.equal(currentEngineeringAgentHalt(await readEngineeringAgentHaltState(prisma)), "state_mismatch");
+  } finally {
+    delete process.env.ENGINEERING_AGENT_LEGACY_HALTS;
+  }
 
   // A person's action: AMUX's rows locked first, both sides read again.
   const person = {

@@ -11,7 +11,7 @@ import {
   AmuxResponseCapacityError,
   isAmuxInputError,
 } from "@/lib/amux/internalRoute";
-import { AmuxQueueCapacityError, listOwnedTodos } from "@/lib/amux/store";
+import { listOwnedTodos } from "@/lib/amux/store";
 import {
   amuxOwnedQueueResponseSchema,
   keepCanonicalAmuxQueueRows,
@@ -47,10 +47,9 @@ export async function POST(request: Request) {
       if (isAmuxInputError(error)) {
         return amuxJsonNoStore({ error: "Invalid request." }, 400);
       }
-      if (
-        error instanceof AmuxQueueCapacityError ||
-        error instanceof AmuxResponseCapacityError
-      ) {
+      // A queue longer than one answer is answered with its head (store.ts);
+      // only an answer past the wire's 512 KiB is refused.
+      if (error instanceof AmuxResponseCapacityError) {
         return amuxJsonNoStore(
           {
             error: "Queue capacity exceeded.",

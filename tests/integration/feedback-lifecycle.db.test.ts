@@ -125,6 +125,7 @@ const resetData = () =>
       "NotificationDelivery",
       "FeedbackLifecycleEvent",
       "Feedback",
+      "TraceErrorEvidence",
       "ChatUsageBucket",
       "UserSettings",
       "User"
@@ -457,4 +458,120 @@ test("account deletion scrubs consent and a pending receipt abandons instead of 
   // deleted report (docs/policy/email-notifications.md §0 v12).
   assert.equal(receipt.lastErrorKind, "contact_removed");
   assert.equal(unexpectedHostCalls.length, 0, "no send may have been attempted");
+});
+
+// --- a turn that failed inside its 200 stream ---------------------------------
+
+test("a report carrying the stream trailer's token is verified and opens an auto-fix case", async () => {
+  // docs/policy/trace-feedback-automation.md §3.3 (operator decision
+  // 2026-11-16). The chat route signs this grant when it settles an empty
+  // answer and sends the token in the stream trailer; this is the other end.
+  const previousSecret = process.env.ERROR_REPORT_SIGNING_SECRET;
+  const previousShadow = process.env.FEEDBACK_AUTOFIX_SHADOW_ENABLED;
+  process.env.ERROR_REPORT_SIGNING_SECRET = "an-error-report-secret-of-32-chars!!";
+  process.env.FEEDBACK_AUTOFIX_SHADOW_ENABLED = "true";
+  try {
+    await seedReporter();
+    const { streamFailureGrantInput } = (await import(
+      mod("lib/chatStreamErrorReport.ts")
+    )) as typeof import("@/lib/chatStreamErrorReport");
+    const { issueErrorReportToken } = (await import(
+      mod("lib/errorReportToken.ts")
+    )) as typeof import("@/lib/errorReportToken");
+    const { buildChatStreamTrailerChunk, parseChatStreamTrailer, splitSearchMetadataTrailer } =
+      (await import(mod("lib/webSearchStreamTrailer.ts"))) as typeof import("@/lib/webSearchStreamTrailer");
+
+    const traceId = "9f0c2a53-6f0e-4c0f-9d53-1f2d8f7a1b11";
+    const grant = streamFailureGrantInput({
+      traceId,
+      root: "AI_EMPTY_RESPONSE",
+      diagnosticCode: "AI_EMPTY_RESPONSE.AI_NoOutputGeneratedError",
+      provider: "openai",
+      modelId: "gpt-6-luna",
+      error: Object.assign(new Error("No output generated."), { name: "AI_NoOutputGeneratedError" }),
+      observedStreamError: Object.assign(new TypeError("Invalid state: Controller is already closed"), {
+        code: "ERR_INVALID_STATE",
+      }),
+    });
+    const evidence = await prisma.traceErrorEvidence.create({
+      data: {
+        occurrenceId: "occ-stream-empty-1",
+        traceId,
+        traceProvenance: "server_generated",
+        environment: "test",
+        routeClass: grant.routeClass,
+        phase: grant.phase,
+        failureLayer: grant.failureLayer,
+        errorCode: grant.errorCode,
+        classificationSource: "server",
+        httpStatus: grant.httpStatus,
+        provider: grant.provider,
+        modelId: grant.modelId,
+      },
+    });
+    const token = issueErrorReportToken({
+      traceId,
+      routeClass: grant.routeClass,
+      errorCode: grant.errorCode,
+      occurrenceId: evidence.occurrenceId,
+    });
+    // As the browser receives it: out of the trailer, not out of a header.
+    const received = parseChatStreamTrailer(
+      splitSearchMetadataTrailer(
+        buildChatStreamTrailerChunk({
+          searchMetadata: null,
+          completion: { status: "normal" },
+          errorReport: { token: token!, code: grant.errorCode },
+        })
+      ).searchMetadataJson
+    );
+
+    const verifiedResponse = await submitAsReporter({
+      traceId,
+      traceProvenance: "server_generated",
+      errorReportToken: received!.errorReport!.token,
+    });
+    assert.equal(verifiedResponse.status, 200);
+    const verified = await prisma.feedback.findFirstOrThrow({ where: { traceId } });
+    assert.equal(verified.errorReportVerification, "verified");
+    assert.equal(verified.errorClassificationSource, "server");
+    assert.equal(verified.evidenceAvailability, "recorded");
+    assert.equal(verified.traceEvidenceId, evidence.id);
+    const opened = await prisma.feedbackAutoFixCase.findUniqueOrThrow({
+      where: { feedbackId: verified.id },
+    });
+    assert.equal(opened.traceId, traceId);
+    assert.equal(opened.occurrenceId, evidence.occurrenceId);
+    assert.equal(opened.fingerprint?.split("|")[0], "AI_EMPTY_RESPONSE.ERR_INVALID_STATE");
+
+    // The same report without the trailer -- the connection dropped first --
+    // is stored, unverified, and opens nothing.
+    const otherTrace = "9f0c2a53-6f0e-4c0f-9d53-1f2d8f7a1b12";
+    const unverifiedResponse = await submitAsReporter({
+      traceId: otherTrace,
+      traceProvenance: "server_generated",
+      clientErrorCode: "EMPTY_RESPONSE",
+    });
+    assert.equal(unverifiedResponse.status, 200);
+    const unverified = await prisma.feedback.findFirstOrThrow({ where: { traceId: otherTrace } });
+    assert.equal(unverified.errorReportVerification, "missing_token");
+    assert.equal(unverified.errorClassificationSource, "client");
+    assert.equal(await prisma.feedbackAutoFixCase.count({ where: { feedbackId: unverified.id } }), 0);
+
+    // And a token signed for one trace does not vouch for another.
+    const mismatchTrace = "9f0c2a53-6f0e-4c0f-9d53-1f2d8f7a1b13";
+    await submitAsReporter({
+      traceId: mismatchTrace,
+      traceProvenance: "server_generated",
+      errorReportToken: received!.errorReport!.token,
+    });
+    const mismatch = await prisma.feedback.findFirstOrThrow({ where: { traceId: mismatchTrace } });
+    assert.equal(mismatch.errorReportVerification, "payload_mismatch");
+    assert.equal(await prisma.feedbackAutoFixCase.count({ where: { feedbackId: mismatch.id } }), 0);
+  } finally {
+    if (previousSecret === undefined) delete process.env.ERROR_REPORT_SIGNING_SECRET;
+    else process.env.ERROR_REPORT_SIGNING_SECRET = previousSecret;
+    if (previousShadow === undefined) delete process.env.FEEDBACK_AUTOFIX_SHADOW_ENABLED;
+    else process.env.FEEDBACK_AUTOFIX_SHADOW_ENABLED = previousShadow;
+  }
 });

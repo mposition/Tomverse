@@ -34,9 +34,13 @@ test("invalid file evidence and secrets fail closed", () => {
   for (const files of bad) assert.throws(() =>
     encodeV22PatchEvidence(text, files));
   assert.throws(() => encodeV22PatchEvidence(text + "ghp_" + "A".repeat(40)));
-  assert.throws(() => encodeV22PatchEvidence(text, [file,
+  // Bounded only as the evidence is (4 MiB), no longer five files of 48 KiB.
+  assert.ok(encodeV22PatchEvidence(text, [file,
     { ...file, path: "components/chat/Other.tsx",
       bytesBase64: Buffer.alloc(49 * 1024, 65).toString("base64") }]));
+  assert.throws(() => encodeV22PatchEvidence(text, [file,
+    { ...file, path: "components/chat/Other.tsx",
+      bytesBase64: Buffer.alloc(4 * 1024 * 1024, 65).toString("base64") }]));
 });
 
 test("decoding rejects tampered or noncanonical evidence", () => {

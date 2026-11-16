@@ -250,6 +250,7 @@ type ChatAppProps = {
   onRetryPrompt?: (prompt: ChatRecoveryPrompt) => void;
   /** Chat: open a Review draft prefilled from one answer's question. */
   onCompareInReview?: (seed: string) => void;
+  onCompareContinuationInReview?: (assistantMessageId: string) => void;
   initialConversationId?: string | null;
   /**
    * The question a composer send is still preparing, drawn at the bottom of
@@ -495,6 +496,7 @@ function ChatAppComponent({
   onRestorePrompt,
   onRetryPrompt,
   onCompareInReview,
+  onCompareContinuationInReview,
   initialConversationId = null,
   sendEcho = null,
   promptPayload,
@@ -1733,6 +1735,18 @@ function ChatAppComponent({
     // server issued one. Lives only in this closure and in the error
     // message's runtime `errorReport` context -- never persisted.
     let requestErrorReportToken: string | null = null;
+    // The server's own code for a turn it judged failed after the 200 stream
+    // had started. Arrives with the token in the stream trailer, and the
+    // token signs it -- so a report carrying both is a server classification
+    // (docs/policy/trace-feedback-automation.md section 3.3).
+    let streamErrorReportCode: string | null = null;
+    const adoptStreamErrorReport = (
+      trailer: ReturnType<typeof parseChatStreamTrailer>
+    ) => {
+      if (!trailer?.errorReport) return;
+      requestErrorReportToken = trailer.errorReport.token;
+      streamErrorReportCode = trailer.errorReport.code;
+    };
     // Declared here (not inside the try block below) so a stop mid-stream
     // can still show whatever was generated before the abort, instead of
     // discarding it -- the catch block needs to read it too.
@@ -1752,8 +1766,13 @@ function ChatAppComponent({
             ...(requestErrorReportToken
               ? { errorReportToken: requestErrorReportToken }
               : {}),
-            errorCode,
-            errorClassificationSource: classificationSource,
+            // What the panel calls the failure (`EMPTY_RESPONSE`) is this
+            // client's word for it. When the server signed its own code for
+            // the same turn, the report says that one.
+            errorCode: streamErrorReportCode ?? errorCode,
+            errorClassificationSource: streamErrorReportCode
+              ? ERROR_CLASSIFICATION_SOURCE.server
+              : classificationSource,
             occurredAt: new Date().toISOString(),
           }
         : undefined;
@@ -2139,6 +2158,7 @@ function ChatAppComponent({
         routedReason = res.headers.get("X-Chat-Routed-Reason");
         autoRewrite = decodeAutoRewriteHeader(res.headers.get("X-Chat-Auto-Rewrite"));
         requestErrorReportToken = res.headers.get(ERROR_REPORT_TOKEN_HEADER);
+        streamErrorReportCode = null;
 
         if (!res.ok) {
           const errorBody = await res.json().catch(() => null);
@@ -2411,6 +2431,11 @@ function ChatAppComponent({
       const streamed = await consumeChatStream({
         reader: response.body.getReader(),
         liveness,
+        // A stream the server failed part way carries its error report in a
+        // trailer written just before the break. A connection that simply
+        // dropped has none, and that report stays unverified.
+        onInterrupted: (json) =>
+          adoptStreamErrorReport(parseChatStreamTrailer(json)),
         onProgress: (progress) => {
           if (progress.displayText.trim() && sourceReceipt?.status === "unknown") sourceReceipt = { ...sourceReceipt, status: "dispatched" };
           if (progress.retryingWithModelId && sourceReceipt?.attempt === 0) sourceReceipt = { ...sourceReceipt, attempt: 1, status: "unknown" };
@@ -2452,6 +2477,7 @@ function ChatAppComponent({
       latencyCompleted = !serverStallCode && Boolean(assistantText.trim());
       const searchMetadataJson = streamed.searchMetadataJson;
       const trailer = parseChatStreamTrailer(searchMetadataJson);
+      adoptStreamErrorReport(trailer);
       sourceReceipt = receiptForAttempt(trailer?.continuationReceipt, requestTraceId, assistantMessageId, sourceReceipt) ?? sourceReceipt;
       const searchMetadata =
         (trailer?.searchMetadata as WebSearchExecution | null | undefined) ??
@@ -2505,10 +2531,13 @@ function ChatAppComponent({
           {
             errorCode: "EMPTY_RESPONSE",
             errorHadAttachments: attachments.length > 0,
-            // EMPTY_RESPONSE is a *client* classification: the stream ended
-            // normally (HTTP 200) with no text, so no server error was
-            // emitted and no token exists. The report stays unverified by
-            // design -- see docs/policy/trace-feedback-automation.md.
+            // EMPTY_RESPONSE is this client's name for a 200 stream that
+            // ended with no text. The server judges the same turn itself and
+            // signs its own code into the trailer (operator decision
+            // 2026-11-16), which `buildErrorReport` then reports in place of
+            // this one. Without that trailer -- an older server, signing not
+            // configured -- the report is client-classified and unverified.
+            // See docs/policy/trace-feedback-automation.md section 3.3.
             errorReport: buildErrorReport(
               requestTraceId,
               "EMPTY_RESPONSE",
@@ -3420,12 +3449,14 @@ function ChatAppComponent({
         // In Chat the shell's close-model handler opens the model picker.
         onChooseAnotherModel={transcriptScope === "conversation" ? onRequestCloseModel : undefined}
         // Built from this transcript, which is the one on screen.
-        onCompareInReview={transcriptScope === "conversation" && onCompareInReview
+        onCompareInReview={transcriptScope === "conversation" && (onCompareContinuationInReview || onCompareInReview)
           ? (messageId) => {
+              if (onCompareContinuationInReview) { onCompareContinuationInReview(messageId); return; }
               const seed = reviewSeedFromChat(messages, messageId, t("chat.compareInReviewContext"));
-              if (seed) onCompareInReview(seed);
+              if (seed) onCompareInReview?.(seed);
             }
           : undefined}
+        compareRequiresCompleted={Boolean(onCompareContinuationInReview)}
         // Both scopes: a concurrency refusal is the one failure Chat may
         // resend, since nothing of the refused turn ever ran (see the handler).
         // Without a held retry prompt (after a reload) Chat falls back to

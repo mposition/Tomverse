@@ -1,12 +1,15 @@
 import { isCanonicalRepoPath } from "@/lib/agentAuthorityFiles";
+import { v22PatchBinaryPayloads } from "@/lib/amux/v22PatchBinary";
+import { AMUX_V22_PATCH_MAX_BYTES } from "@/lib/amux/v22PatchLimit";
 import { detectSecrets } from "@/lib/engineeringAgentSecretPatterns";
 import { createHash } from "node:crypto";
 
 export type V22PublishFile = { path: string; mode: "100644";
   bytesBase64: string };
 
-const MAX_PATCH_BYTES = 65_536;
-const MAX_FILE_BYTES = 48 * 1024;
+/** The stored evidence, text or JSON: the one patch bound (owner decision
+ * 2026-11-15; 64 KiB until then). */
+const MAX_PATCH_BYTES = AMUX_V22_PATCH_MAX_BYTES;
 const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 const utf8 = new TextDecoder("utf-8", { fatal: true });
 
@@ -19,15 +22,13 @@ export function v22PublishFilesSha256(files: readonly V22PublishFile[]): string 
 type V22PublishFileLimits = Readonly<{ maxFiles: number;
   maxFileBytes: number; maxTotalBytes: number }>;
 
-/** What the sidecar may store beside the patch text (its capture limits). */
+/** File bytes a sidecar before 2026-11-15 stored beside the patch text (it
+ * sent up to five, 48 KiB in all). Still accepted, so its settlement and the
+ * rows it left keep their evidence, but bounded only as the evidence is: the
+ * candidate rebuilds from the text and reads none of them. */
 export const V22_STORED_FILE_LIMITS: V22PublishFileLimits = Object.freeze({
-  maxFiles: 5, maxFileBytes: MAX_FILE_BYTES, maxTotalBytes: MAX_FILE_BYTES });
-
-/** What the app may rebuild from a stored patch and its pinned base blobs.
- * The patch text itself stays within the 64 KiB evidence limit, and the
- * tier gate still judges file count and size (`PUSH_LIMITS`) for T1. */
-export const V22_CANDIDATE_FILE_LIMITS: V22PublishFileLimits = Object.freeze({
-  maxFiles: 20, maxFileBytes: 200 * 1024, maxTotalBytes: 2 * 1024 * 1024 });
+  maxFiles: Number.MAX_SAFE_INTEGER, maxFileBytes: MAX_PATCH_BYTES,
+  maxTotalBytes: MAX_PATCH_BYTES });
 
 /** Canonical paths and base64, UTF-8 text with no NUL and no secret. Throws
  * `invalid_patch_evidence`; returns copies of the checked fields. */
@@ -61,10 +62,27 @@ export function checkV22PublishFiles(files: readonly V22PublishFile[],
   return checked;
 }
 
+const utf8Strict = new TextDecoder("utf-8", { fatal: true });
+const latin1 = new TextDecoder("latin1");
+
+/** A secret in the patch text, or inside a binary file it carries (whose
+ * bytes are base85 text of deflated data, so the text shows none of them).
+ * A binary section that cannot be read cannot be shown clean. */
+function patchCarriesSecret(text: string): boolean {
+  if (detectSecrets(text).length) return true;
+  const payloads = v22PatchBinaryPayloads(text);
+  if (payloads === null) return true;
+  return payloads.some((payload) => {
+    let content: string;
+    try { content = utf8Strict.decode(payload); } catch { content = latin1.decode(payload); }
+    return detectSecrets(content).length > 0;
+  });
+}
+
 /** Sparse file evidence is never publication authority by itself. */
 export function encodeV22PatchEvidence(text: string,
   files?: readonly V22PublishFile[]): Buffer {
-  if (!text.startsWith("diff --git ") || detectSecrets(text).length)
+  if (!text.startsWith("diff --git ") || patchCarriesSecret(text))
     throw new Error("invalid_patch_evidence");
   if (!files) {
     const bytes = Buffer.from(text, "utf8");

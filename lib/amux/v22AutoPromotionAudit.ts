@@ -10,7 +10,10 @@ import { AMUX_V22_AUTO_ADMIT_AUDIT_ACTOR } from
 export function writeV22AutoPromotionAudit(tx: Prisma.TransactionClient,
   entry: { action: "amux.v22.auto_promotion.consumed" |
       "amux.v22.auto_promotion.outcome_unknown" |
-      "amux.auto_promotion.halted";
+      "amux.auto_promotion.halted" |
+      // Owner direction 2026-11-15: a halt whose unknowns were all read back
+      // as never committed clears itself.
+      "amux.auto_promotion.resumed_by_readback";
     targetType: "AmuxV22PromotionReceipt" |
       "AmuxV22PromotionUnknown" | "AmuxRecommendationAutoHalt";
     targetId: string; summary: string;

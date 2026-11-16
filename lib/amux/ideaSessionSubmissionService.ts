@@ -102,7 +102,7 @@ const analysisModel = (authority: AmuxOperatingScopeAuthority,
   chosen ?? amuxOperatingScopeSelection(authority.scope);
 
 /** A chosen model the runner's CLI channel cannot launch at that effort would
- * wait in the queue until the seven-day deadline; refuse it before writing. */
+ * wait in the queue until its analysis deadline; refuse it before writing. */
 const requireLaunchableChoice = (chosen: AmuxIdeaModelSelection | null | undefined) => {
   if (chosen && !amuxV19ChannelAdmits(chosen)) {
     throw new AmuxIdeaSessionSubmissionError("model_not_launchable");

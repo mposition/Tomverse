@@ -12,7 +12,7 @@
  * for five days.
  *
  * One tick can be long: a question the relay routed is handed to the broker,
- * and the relay waits for its answer (up to `DM_BROKER_RESPONSE_DEADLINE`, 34
+ * and the relay waits for its answer (up to `DM_BROKER_RESPONSE_DEADLINE`, 39
  * minutes, after an assignment window of 2 minutes) before the next sync. So a
  * relay that routed a question recently is asking, not silent.
  *
@@ -35,9 +35,11 @@ export const AMUX_DM_RELAY_SILENT_MS = 5 * 60_000;
 /**
  * How long after a Decision Maker request was created the relay may still be
  * inside that question's tick: the 2-minute assignment window, the broker's
- * 34-minute response deadline, and 4 minutes for the result's writes.
+ * 39-minute response deadline (34 until 2026-11-15, when the Decision Maker's
+ * workspace build, at most 5 minutes, came before the launcher), and 4 minutes
+ * for the result's writes.
  */
-export const AMUX_DM_RELAY_QUESTION_MS = 40 * 60_000;
+export const AMUX_DM_RELAY_QUESTION_MS = 45 * 60_000;
 
 /** How often a relay that stays silent pages again. */
 export const AMUX_DM_RELAY_REMINDER_MS = 3 * 60 * 60_000;

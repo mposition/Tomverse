@@ -38,6 +38,8 @@ import { dmAdminRequestDetailHref } from "@/lib/amux/decisionMakerAdminHrefs";
 import { readAgentOfficeAmuxWorkers } from "@/lib/agentOfficeLiveRead";
 import { readAmuxWorkerCapabilitiesForAdmin } from "@/lib/amux/workerCapabilityAdminRead";
 import { readAmuxWorkerRegistryForAdmin } from "@/lib/amux/workerRegistryAdminRead";
+import { readAmuxWorkerHealthViews } from "@/lib/amux/workerHealthStore";
+import { AMUX_V22_NON_CLAUDE_QUOTA_GATE_ENV } from "@/lib/amux/v22WorkerClaimCore";
 import { amuxWorkerRegistryWritesOpen } from "@/lib/amux/workerRegistryCore";
 import { authOptions } from "@/lib/auth";
 import {
@@ -94,9 +96,15 @@ export default async function AdminAmuxSettingsPage({
       readAmuxWorkerCapabilitiesForAdmin().catch(() => null),
       readAgentOfficeAmuxWorkers(),
     ]);
+    // What the claim would do with each worker (owner decision 2026-11-15): a
+    // quarantine, an unread usage, a box sign-in signal. Unread is shown as
+    // the bridge reading alone, never as a guessed hold.
+    const health = registry ? await readAmuxWorkerHealthViews(
+      registry.rows.map((row) => row.workerName)).catch(() => null) : null;
     return <div className="flex min-w-0 flex-col gap-5">{tabs}
       <AmuxWorkersOverviewPanel registry={registry} capabilities={capabilities} live={live}
-        readAtMs={currentTimeMs()} isOwner={isOwner} /></div>;
+        readAtMs={currentTimeMs()} isOwner={isOwner} health={health}
+        nonClaudeQuotaGate={process.env[AMUX_V22_NON_CLAUDE_QUOTA_GATE_ENV] === "enabled"} /></div>;
   }
   // Owner only (the tab's viewRoles); resolveAdminTabFor has already refused other roles.
   // Approved backlog redesign, screen C: the monthly analysis budget, the

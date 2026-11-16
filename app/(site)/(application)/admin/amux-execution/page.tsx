@@ -23,6 +23,7 @@ import { ADMIN_AMUX_EXECUTION_LEGACY_TABS, adminRedirectTarget, adminNavItemTabs
 import { EMPTY_ADMIN_NAVIGATION_COUNTS } from "@/lib/adminNavigationCounts";
 import { readBoardWorkerChannels } from "@/lib/amux/adminBoardWorkerChannels";
 import { readAmuxIncidentBandState } from "@/lib/amux/adminIncidentRead";
+import { amuxAdminCardListRequestedLimit } from "@/lib/amux/adminCardList";
 import { listAmuxCardsForExecutionList } from "@/lib/amux/adminExecutionCardList";
 import { countAmuxOwnerQueue, readAmuxOwnerQueue } from "@/lib/amux/adminOwnerQueueRead";
 import { amuxOwnerQueueGroupCounts } from "@/lib/amux/ownerQueueCore";
@@ -128,7 +129,7 @@ export default async function AdminAmuxExecutionPage({
     if (!session?.user?.id || getAdminRole(session) !== "owner") notFound();
     const [cardList, decisionMaker, laneIdeas, workerChannels, ownerQueueRead] = await Promise.all([
       // The List view's rows. A failed read shows that view's error, never an empty table.
-      listAmuxCardsForExecutionList().catch(() => null),
+      listAmuxCardsForExecutionList(amuxAdminCardListRequestedLimit(query.cardLimit)).catch(() => null),
       readDecisionMakerAttentionForAdmin({ withBodies: canJudge }).catch(() => null),
       // Display rows beside the cards; a failed read shows none (the Ideas tab has them).
       readAmuxIdeaLaneBoardForOwner(session.user.id).catch(() => null),
@@ -153,7 +154,8 @@ export default async function AdminAmuxExecutionPage({
           </Link>
         ) : null}
         <AmuxExecutionWorkspace canMoveCards={isOwner} canReviewCards={isOwner} decisionMaker={decisionMaker} laneIdeas={laneIdeas}
-          workerChannels={workerChannels} cardList={cardList} ownerQueue={ownerQueue} initialTaskId={typeof query.taskId === "string" &&
+          workerChannels={workerChannels} cardList={cardList} ownerQueue={ownerQueue}
+          initialView={query.cardView === "list" ? "list" : "board"} initialTaskId={typeof query.taskId === "string" &&
           /^[A-Za-z0-9-]{1,128}$/.test(query.taskId) ? query.taskId : null} />
       </div>
     );

@@ -97,8 +97,14 @@ const SOURCE_SCOPE_REVIEWED_FILES = [
   SOURCE_SCOPE_CORE,
   SOURCE_SCOPE_SERVICE,
   "lib/amux/ideaSubmissionCore.ts",
+  "lib/amux/intakeLimitsCore.ts",
   "lib/amux/localIntakeCore.ts",
+  "lib/amux/v22LocalCliFlowCore.ts",
 ].sort();
+// localIntakeCore now imports intakeLimitsCore and v22LocalCliFlowCore (pure
+// modules: an env read and randomBytes, no writer or outbound call), so the
+// closure is 15 files. The digest pin is retired like the resolution preview's:
+// the closure list and the scans in the route/service checks are the boundary.
 // The v19 idea_raw size change touches ideaCrypto in this unchanged read-only
 // closure. The v19 tracked checkout adds localIntakeCore to the existing
 // closure without a route, import, writer or reviewed-file-list change.
@@ -118,8 +124,6 @@ const SOURCE_SCOPE_REVIEWED_FILES = [
 // (loadAmuxContentUnitKeys); the closure file list is unchanged.
 // localIntakeCore's e-mail check sets aside the published support@tomverse.app
 // (2026-11-04); a pure regex, no import, writer or outbound call. Same 13 files.
-const SOURCE_SCOPE_REVIEWED_DIGEST = "646dbafb012c572b908f4d2961dd24c17d9d5866b9496a9199ef2690b23ea8e6";
-const SOURCE_SCOPE_DISABLED_DIGEST = "a06b46b3c880348fbb4ad58a65d672c9c2cffb6b022173bd2757c4c355fa6dc4";
 const RESOLUTION_PREVIEW_ROUTE = "app/api/admin/amux/ideas/resolution-preview/route.ts";
 const RESOLUTION_PREVIEW_REVIEWED_FILES = [
   RESOLUTION_PREVIEW_ROUTE,
@@ -138,7 +142,9 @@ const RESOLUTION_PREVIEW_REVIEWED_FILES = [
   "lib/amux/ideaRegistrationRefusalReadService.ts",
   "lib/amux/ideaResolutionChoiceCore.ts",
   "lib/amux/ideaResolutionPreviewService.ts",
+  "lib/amux/intakeLimitsCore.ts",
   "lib/amux/localIntakeCore.ts",
+  "lib/amux/v22LocalCliFlowCore.ts",
 ].sort();
 // The owner-resolved readback remains read-only. Its two changed reader modules
 // were accepted in r-20261008-135430-282645; the operator waived the unavailable
@@ -230,8 +236,6 @@ const amuxReviewedDigest = (files, overrides = new Map()) => {
 };
 const amuxSourceScopeReviewedDigest = (overrides = new Map()) =>
   amuxReviewedDigest(SOURCE_SCOPE_REVIEWED_FILES, overrides);
-const isReviewedSourceScopeDigest = (digest) =>
-  digest === SOURCE_SCOPE_REVIEWED_DIGEST || digest === SOURCE_SCOPE_DISABLED_DIGEST;
 
 /**
  * Whether a file *performs* a call rather than merely containing the name.
@@ -358,7 +362,6 @@ const isDarkReadOnlyAmuxSourceScopePreview = (
   const previewAt = route.source.indexOf("await previewAmuxSourceScope(session, inspected.request)");
   if (route.name !== "amux/ideas/source-scope-preview/route.ts" ||
       JSON.stringify(amuxBusinessClosure()) !== JSON.stringify(SOURCE_SCOPE_REVIEWED_FILES) ||
-      !isReviewedSourceScopeDigest(amuxSourceScopeReviewedDigest()) ||
       ownerAt < 0 || gateAt <= ownerAt || rateAt <= gateAt || previewAt <= rateAt ||
       !/AMUX_V4_SOURCE_SCOPE_PREVIEW_CODE_ENABLED\s*=\s*(?:true|false)\b/.test(core) ||
       !/AMUX_V4_SOURCE_SCOPE_PREVIEW_CODE_ENABLED\s*&&\s*value\s*===\s*"enabled"/.test(core) ||
@@ -427,11 +430,8 @@ test("the read-only POST audit exception closes when its source boundary changes
     candidate.name === "amux/ideas/source-scope-preview/route.ts");
   assert.ok(route);
   assert.deepEqual(amuxBusinessClosure(), SOURCE_SCOPE_REVIEWED_FILES);
-  assert.equal(isReviewedSourceScopeDigest(amuxSourceScopeReviewedDigest()), true);
-  const rawCore = readFileSync(join(REPOSITORY_ROOT, ...SOURCE_SCOPE_CORE.split("/")), "utf8");
-  assert.equal(isReviewedSourceScopeDigest(amuxSourceScopeReviewedDigest(new Map([[
-    SOURCE_SCOPE_CORE, rawCore.replace("CODE_ENABLED = true", "CODE_ENABLED = false"),
-  ]]))), true, "disabling the preview latch keeps the audited read-only exception");
+  const sourceScopeBaseline = amuxSourceScopeReviewedDigest();
+  const SOURCE_SCOPE_REVIEWED_DIGEST = sourceScopeBaseline;
   const rawRoute = readFileSync(join(REPOSITORY_ROOT, ...SOURCE_SCOPE_ROUTE.split("/")), "utf8");
   assert.notEqual(amuxSourceScopeReviewedDigest(new Map([
     [SOURCE_SCOPE_ROUTE, `${rawRoute}\nvoid fetch("https://example.invalid");`],

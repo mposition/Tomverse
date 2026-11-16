@@ -13,6 +13,10 @@ import { seedAmuxV4PortfolioRecoveryPrerequisites } from
 // usage gate must not keep refusing the Task its own failed attempt
 // (review r-20261107-015440-41ac19), while every other Task still waits.
 
+// The CLI usage gate this suite proves is the one
+// TOMVERSE_AMUX_V22_READ_BACK_PROCEED=disabled restores; since 2026-11-15 the
+// switch is on by default and only a paid route's unknown usage holds a worker.
+process.env.TOMVERSE_AMUX_V22_READ_BACK_PROCEED = "disabled";
 const raw = process.env.TEST_DATABASE_URL;
 const allowed = (() => {
   if (!raw || process.env.DATABASE_URL !== raw) return false;

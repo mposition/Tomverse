@@ -383,9 +383,10 @@ pub(crate) async fn release_marker_with(
 /// per request, 46 characters inside the send path's 64.
 pub const ANSWER_MESSAGE_ID_PREFIX: &str = "dm-answer:";
 
-/// The app's `DM_DELIVERY_MESSAGE_MAX_BYTES`: an 8 KiB answer, §7's header
-/// and sentence, with room to spare.
-pub const ANSWER_MESSAGE_MAX_BYTES: usize = 16 * 1024;
+/// The app's `DM_DELIVERY_MESSAGE_MAX_BYTES`: a 256 KiB answer (the DM
+/// output's and the operator's cap since 2026-11-15), §7's header and sentence,
+/// with room to spare.
+pub const ANSWER_MESSAGE_MAX_BYTES: usize = 272 * 1024;
 
 /// Who the answer record names as the writer of a confirmed answer: the
 /// bridge relay, which carries a person's confirmation from the app.

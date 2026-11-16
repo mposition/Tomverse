@@ -145,6 +145,42 @@ test("retryable and provider-side failures are provider_transient", () => {
   }
 });
 
+test("an empty answer this process caused is a candidate, not provider_transient", () => {
+  // Same code root as the provider's own empty answer; the recorded layer is
+  // what says the failure was raised on this side.
+  for (const failureLayer of ["application", "storage"]) {
+    const outcome = classifyAutoFixCase({
+      errorReportVerification: "verified",
+      errorClassificationSource: "server",
+      clientErrorCode: null,
+      evidenceAvailability: "recorded",
+      evidence: {
+        errorCode: "AI_EMPTY_RESPONSE.ERR_INVALID_STATE",
+        retryable: null,
+        httpStatus: 200,
+        failureLayer,
+      },
+    });
+    assert.equal(outcome.classification, AUTOFIX_CLASSIFICATION.applicationCandidate, failureLayer);
+    assert.equal(outcome.eligible, true);
+  }
+  for (const failureLayer of ["provider_stream", "provider_request", null]) {
+    const outcome = classifyAutoFixCase({
+      errorReportVerification: "verified",
+      errorClassificationSource: "server",
+      clientErrorCode: null,
+      evidenceAvailability: "recorded",
+      evidence: {
+        errorCode: "AI_EMPTY_RESPONSE.AI_NoOutputGeneratedError",
+        retryable: null,
+        httpStatus: 200,
+        failureLayer,
+      },
+    });
+    assert.equal(outcome.classification, AUTOFIX_CLASSIFICATION.providerTransient, String(failureLayer));
+  }
+});
+
 test("only a verified, recorded, non-transient server failure is a candidate", () => {
   const outcome = classifyAutoFixCase({
     errorReportVerification: "verified",

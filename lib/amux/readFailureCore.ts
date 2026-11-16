@@ -160,6 +160,34 @@ export const amuxTransientDatabaseCode = (error: unknown): string | null => {
 };
 
 /**
+ * The failures after which PostgreSQL has rolled the transaction back, whatever
+ * the transaction wrote before: a deadlock (40P01), a serialization failure
+ * (40001, Prisma's P2034 "write conflict or deadlock") and the session ended
+ * for idling in its transaction (25P03). None of them can arrive after a
+ * COMMIT took effect, so a write that failed this way committed nothing and
+ * its caller may ask again, like a statement timeout. The boundary has already
+ * turned every failure of its own COMMIT into an unknown outcome before this is
+ * asked, so it is only ever read for a failure before COMMIT.
+ */
+const ROLLED_BACK_CODES = new Set(["40P01", "40001", "25P03", "P2034"]);
+
+export const amuxRolledBackWriteCode = (error: unknown): string | null => {
+  const seen = new Set<unknown>();
+  const queue: unknown[] = [error];
+  while (queue.length > 0 && seen.size < MAX_ERROR_NODES) {
+    const current = queue.shift();
+    if (!current || typeof current !== "object" || seen.has(current)) continue;
+    seen.add(current);
+    const record = current as Record<string, unknown>;
+    for (const code of [record.code, record.originalCode]) {
+      if (typeof code === "string" && ROLLED_BACK_CODES.has(code)) return code;
+    }
+    queue.push(record.cause, record.meta, record.driverAdapterError);
+  }
+  return null;
+};
+
+/**
  * Prisma's two answers for a transaction that never got going: no pool
  * connection in time (P2024), and the transaction manager's `maxWait` expiring
  * before the transaction started (P2028, "Unable to start a transaction in

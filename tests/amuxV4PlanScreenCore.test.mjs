@@ -107,3 +107,31 @@ test("a large plan sends only the server's first round, with that round's scores
   assert.ok(body.scoreTaskUnitIds.every((id) => inRound.has(id)));
   assert.ok(deferred.every((id) => !body.expectedUnitIds.includes(id)));
 });
+
+test("more nodes than one round holds go over rounds, parents first, before any card", () => {
+  // Owner direction 2026-11-15: a plan with more than twelve nodes is not
+  // refused; the nodes are approved a round at a time and the cards follow.
+  const many = [node("unit-init-01", "i1", "initiative", null)];
+  for (let index = 1; index <= 5; index += 1) {
+    many.push(node(`unit-epic-${String(index).padStart(2, "0")}`, `e${index}`, "epic", "i1"));
+  }
+  for (let index = 1; index <= 15; index += 1) {
+    many.push(node(`unit-feat-${String(index).padStart(2, "0")}`, `f${index}`, "feature",
+      `e${(index % 5) + 1}`));
+  }
+  many.push(card("unit-story-1", "s1", "story"), card("unit-task-01", "t1", "task"));
+  const listed = amuxV4PlanScreenUnits(many);
+  const first = amuxV4PlanRound(listed);
+  assert.equal(first.inRound.size, 12);
+  // The Initiative and every Epic come first; no card waits on a missing Feature.
+  for (const id of ["unit-init-01", "unit-epic-01", "unit-epic-05"]) assert.ok(first.inRound.has(id));
+  assert.ok(!first.inRound.has("unit-story-1") && !first.inRound.has("unit-task-01"));
+  assert.equal(first.deferred.length, listed.length - 12);
+  // The next round reads the remaining units, the first round's now approved:
+  // nine Features fit one round, so the cards come with them.
+  const second = amuxV4PlanRound(listed.filter((unit) => !first.inRound.has(unit.unitId)));
+  assert.equal(second.inRound.size, 9 + 2);
+  assert.ok(second.inRound.has("unit-story-1") && second.inRound.has("unit-task-01"));
+  const last = amuxV4PlanRound(listed.filter((unit) => unit.kind === "story" || unit.kind === "task"));
+  assert.deepEqual([...last.inRound].sort(), ["unit-story-1", "unit-task-01"]);
+});

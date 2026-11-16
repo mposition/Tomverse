@@ -74,6 +74,12 @@ test("every reason the agent writes on an owner item is explained in both langua
     // t2_draft (lib/engineeringAgentV22TierPromotion.ts, V22StoredCandidate, V22ProductStore)
     "tier_pending", "tier_two", "tier_evidence_unavailable", "patch_unavailable",
     "publication_not_authorized", "publication_state_changed", "publish_refused",
+    // The candidate builder's own (lib/engineeringAgentV22CandidateLoad.ts), and
+    // the earlier builder's, which a deploy judges again (2026-11-15).
+    "patch_unreadable", "path_invalid", "path_conflict", "base_mismatch",
+    "patch_mismatch", "secret_detected", "patch_over_limit", "tree_invalid",
+    "base_blob_missing", "files_invalid", "patch_unsupported", "patch_does_not_apply",
+    "unsupported_tree_change", "tree_verification_failed",
     // state_mismatch (lib/amux/reviewPullRequest.ts refusals, adapter, observer, run sweep)
     "review_not_required", "task_not_in_review", "not_the_workers_review", "review_pr_conflict",
     "adapter_closed", "attempt_ended_run_active", "pr_file_state_mismatch", "merged_without_approval",

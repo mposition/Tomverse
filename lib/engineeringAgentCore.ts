@@ -132,9 +132,9 @@ export type PublishState = WriteItemState<"publish">;
  * The three kinds of work item that wait on a person (policy §7, §12): a T2
  * draft waits for its decision, a decision item for acknowledgement, a state
  * mismatch for a person's fix. Each opens once and closes once; nothing
- * reopens it. A T2 draft and a decision item expire by the owner queue's TTL
- * (`QUEUE_TTL_DAYS.decision`); a state mismatch never does, because it halts
- * the agent until a person acts.
+ * reopens it. None of them expires for its age (owner decision 2026-11-15);
+ * a v22 item closes as `expired` only when its tier judgement replaces or
+ * refuses it (lib/engineeringAgentV22TierPromotion.ts).
  */
 export const OWNER_ITEM_KINDS = ["t2_draft", "decision", "state_mismatch"] as const;
 export type OwnerItemKind = (typeof OWNER_ITEM_KINDS)[number];
@@ -386,15 +386,22 @@ export const UNKNOWN_OUTCOME_DECISION_CAUSE_PREFIX = "unknown:";
 /**
  * Read back, then proceed (owner decision 2026-11-14, AMUXFLOW/B1): an
  * unknown outcome is looked up again by the publisher on its own once its
- * decision has waited this long, at most this many times per publish item.
- * A lookup only reads GitHub, and a lookup that settles the result closes
- * the open decisions with it. Off unless exactly `enabled`.
+ * decision has waited this long -- twice as long for each decision the item
+ * already opened, up to 2^MAX_DOUBLINGS times (owner decision 2026-11-15; at
+ * most three decisions until then). A lookup only reads GitHub, and a lookup
+ * that settles the result closes the open decisions with it. On by default
+ * since owner decision 2026-11-15; exactly `disabled` turns it off.
  */
 export const ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_ENV = "ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP";
 export const engineeringAgentUnknownAutoLookupEnabled = (value: string | undefined) =>
-  value?.trim() === "enabled";
+  value?.trim() !== "disabled";
 export const ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_AFTER_MS = 30 * 60_000;
-export const ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_MAX_DECISIONS = 3;
+export const ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_MAX_DOUBLINGS = 5;
+/** How long an item's open decision waits before the next lookup, given how
+ * many decisions the item has opened in all. */
+export const engineeringAgentUnknownAutoLookupWaitMs = (decisions: number) =>
+  ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_AFTER_MS *
+    2 ** Math.min(Math.max(decisions - 1, 0), ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_MAX_DOUBLINGS);
 export const unknownOutcomeDecisionCauseKey = (workItemId: string, fencingToken: bigint | number) =>
   `${UNKNOWN_OUTCOME_DECISION_CAUSE_PREFIX}${workItemId}:${fencingToken}`;
 
@@ -456,10 +463,15 @@ export const ENGINEERING_AGENT_V22_PROMOTED_REASON = "publish_promoted";
  * lookup cannot turn it into an ordinary pull request.
  */
 export const ENGINEERING_AGENT_V22_REVIEW_CAUSE_PREFIX = "publish_review:";
-/** The app's switch for it: off unless exactly `on`. */
+/**
+ * The app's switch for it: on by default since owner decision 2026-11-15
+ * (a T2 patch that waited for a switch was a result nobody could review);
+ * exactly `off` turns it off. A publisher still opens one only when it names
+ * `review_draft` (ENGINEERING_PUBLISHER_FEATURES_HEADER).
+ */
 export const ENGINEERING_AGENT_V22_REVIEW_PR_ENV = "ENGINEERING_AGENT_V22_REVIEW_PR";
 export const engineeringAgentV22ReviewPrEnabled = (value: string | undefined) =>
-  value === "on";
+  value?.trim() !== "off";
 /**
  * The header a publisher names what it can do in. A review item is claimed
  * only by a publisher that names `review_draft`, so one deployed before this
@@ -642,14 +654,32 @@ export const ENGINEERING_AGENT_PUBLISHER_LAST_FINISH_SETTING_KEY = "engineeringA
 export const ENGINEERING_AGENT_MONITORS_CONFIRMED_SETTING_KEY = "engineeringAgent.monitorsConfirmedAt";
 /**
  * The latest unbound pull request or ref the runner observed outside a run,
- * as `{"halt":"unbound_app_pr","at":"<ISO instant>"}`. It halts like a halt a
- * run recorded, until a person acknowledges it (§12).
+ * as `{"halt":"unbound_app_pr","at":"<ISO instant>","subject":{"prNumber":7}}`.
+ * It halts like a halt a run recorded, until a person acknowledges it or --
+ * owner decision 2026-11-15 -- a later clean reading explains it, which the
+ * store writes as `"clearedAt":"<ISO instant>"` on the same value (§12).
  */
 export const ENGINEERING_AGENT_OBSERVED_HALT_SETTING_KEY = "engineeringAgent.observedHalt";
 
 /** The halts an observation outside a run may record: what only GitHub shows. */
 export const OBSERVABLE_HALTS = ["unbound_app_pr", "unbound_app_ref"] as const;
 export type ObservableHalt = (typeof OBSERVABLE_HALTS)[number];
+
+/** What an unbound reading is about, so the halt names its pull request or branch. */
+export type ObservedHaltSubject = { prNumber: number } | { ref: string };
+const OBSERVED_REF = /^refs\/heads\/[A-Za-z0-9._/-]{1,200}$/;
+/** A subject as the runner reports it, or null when it names nothing this build reads. */
+export const parseObservedHaltSubject = (raw: unknown): ObservedHaltSubject | null => {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const value = raw as Record<string, unknown>;
+  const keys = Object.keys(value);
+  if (keys.length !== 1) return null;
+  if (keys[0] === "prNumber" && Number.isSafeInteger(value.prNumber) && (value.prNumber as number) > 0 &&
+      (value.prNumber as number) <= 2_147_483_647) return { prNumber: value.prNumber as number };
+  if (keys[0] === "ref" && typeof value.ref === "string" && OBSERVED_REF.test(value.ref) &&
+      !value.ref.includes("..")) return { ref: value.ref };
+  return null;
+};
 
 const SETTING_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
 
@@ -727,16 +757,22 @@ export const resolveEngineeringAgentSwitches = (
 /* ------------------------------------------------------------------------- */
 
 /**
- * Owner decision 2026-11-09 (§12): 8 pull requests and 8 decisions, with no
- * first-T1 window. An active run counts in both, so 8 runs can be active at
- * once. The run and work item guards hold the same numbers.
+ * The owner queues are counted, never capped (owner decision 2026-11-15:
+ * "내부 개발용 Flow입니다. 제한을 줄 이유가 없습니다"). A full queue stopped
+ * every new claim, so one slow review held every other card; now the counts
+ * only show how much waits on the owner, and nothing in a queue expires. The
+ * run and work item guards no longer count them
+ * (migrations `engineering_agent_run_guard_uncapped`,
+ * `engineering_agent_work_item_guard_uncapped`).
+ *
+ * With ENGINEERING_AGENT_LEGACY_HALTS the app holds the caps of owner decision
+ * 2026-11-09 again at admission -- 8 pull requests and 8 decisions, an active
+ * run counting in both -- so a runaway can be stopped without a migration.
  */
-export const OWNER_QUEUE_LIMITS = {
+export const OWNER_QUEUE_LEGACY_LIMITS = {
   pr: 8,
   decision: 8,
 } as const;
-export const OWNER_QUEUE_TOTAL = OWNER_QUEUE_LIMITS.pr + OWNER_QUEUE_LIMITS.decision;
-export const QUEUE_TTL_DAYS = { pr: 14, decision: 7 } as const;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -754,13 +790,14 @@ export type QueueReading = {
 export type QueueVerdict = {
   prFull: boolean;
   decisionFull: boolean;
-  /** A card is claimed only when both queues have room (policy §2.1, §12). */
+  /** Always, unless the kill switch brought the caps back (policy §2.1, §12). */
   claimAllowed: boolean;
 };
 
-export const decideOwnerQueues = (reading: QueueReading): QueueVerdict => {
-  const prFull = reading.openPrBindings >= OWNER_QUEUE_LIMITS.pr;
-  const decisionFull = reading.pendingDecisions >= OWNER_QUEUE_LIMITS.decision;
+export const decideOwnerQueues = (reading: QueueReading, legacyCaps = false): QueueVerdict => {
+  if (!legacyCaps) return { prFull: false, decisionFull: false, claimAllowed: true };
+  const prFull = reading.openPrBindings >= OWNER_QUEUE_LEGACY_LIMITS.pr;
+  const decisionFull = reading.pendingDecisions >= OWNER_QUEUE_LEGACY_LIMITS.decision;
   return { prFull, decisionFull, claimAllowed: !prFull && !decisionFull };
 };
 
@@ -825,23 +862,61 @@ export const RUNNER_REPORTABLE_HALTS = ["none", "config_missing", "unbound_app_p
 export type RunnerReportableHalt = (typeof RUNNER_REPORTABLE_HALTS)[number];
 
 /**
+ * Owner decision 2026-11-15 ("이런 류의 시나리오를 다 커버하는 포괄적인 솔루션으로
+ * 개발하세요 ... AMUX 프로세스가 로컬 CLI를 돌리는 것과 같이 자연스럽게"): what
+ * happens to one agent pull request or one card's run is that card's record,
+ * never the whole agent's. By default
+ *
+ * - an open state mismatch or an orphaned run holds its own card only
+ *   (AMUXFLOW/B2, owner decision 2026-11-14, behind a switch until now);
+ * - a person or the CI auto-fix moving a bound pull request's head -- a push,
+ *   develop merged in, a rebase -- is not an unbound pull request or branch;
+ * - an observed unbound reading clears once a later reading explains it;
+ * - an approver's own merge into develop approves the diff it merged;
+ * - a successful result whose publication could not open is kept and
+ *   published once it can (lib/amux/v22KeptResultPublication.ts), and the
+ *   Decision Maker is never asked to run it again;
+ * - the owner queues are counted, never capped, and nothing in them expires
+ *   (OWNER_QUEUE_LEGACY_LIMITS), and the circuit no longer latches
+ *   (owner direction the same day: "내부 개발용 Flow입니다. 제한을 줄 이유가
+ *   없습니다. 이런 제한을 다 찾아 없애 주세요.").
+ *
+ * Only ENGINEERING_AGENT_GLOBAL_HALTS still halt everything.
+ * `ENGINEERING_AGENT_LEGACY_HALTS=enabled` is the one kill switch back to the
+ * behaviour before this decision, everywhere at once.
+ */
+export const ENGINEERING_AGENT_LEGACY_HALTS_ENV = "ENGINEERING_AGENT_LEGACY_HALTS";
+export const engineeringAgentLegacyHalts = (value: string | undefined) => value?.trim() === "enabled";
+/** A mismatch or an orphaned run holds only its card unless the kill switch (its env value) is on. */
+export const engineeringAgentMismatchCardScoped = (legacyHaltsValue: string | undefined) =>
+  !engineeringAgentLegacyHalts(legacyHaltsValue);
+
+/**
+ * The halts that still stop the whole agent (owner decision 2026-11-15): the
+ * security boundaries, where the app can no longer tell its own writes from
+ * anyone else's, and a mismatch with no card to hold. Credential exposure is
+ * the kill switch's and the incident's (§12): a secret found in a patch is
+ * refused before anything is stored, and a leaked key is revoked, not waited
+ * out. Everything not listed here holds one card at most.
+ *
+ * `circuit_open` is not one of them: the halts the circuit counted are each
+ * one of these (with its own clearing) or a card's hold, and a card that keeps
+ * failing is held by its attempt budget. It latches and halts only with
+ * ENGINEERING_AGENT_LEGACY_HALTS.
+ */
+export const ENGINEERING_AGENT_GLOBAL_HALTS: Readonly<Record<Exclude<HaltValue, "none" | "circuit_open">, string>> =
+  Object.freeze({
+    config_missing: "the publisher App's identity is not configured, so the app cannot tell its own writes from anyone else's",
+    unbound_app_pr: "a pull request in the agent's namespace that no run, binding or capability accounts for -- a write the app never issued; it clears once a later reading explains it",
+    unbound_app_ref: "a branch in the agent's namespace that no run, binding or capability accounts for -- a write the app never issued; it clears once a later reading explains it",
+    state_mismatch: "only a mismatch bound to no card at all: there is no card to hold instead",
+  });
+
+/**
  * The halt a run ends with: the runner's report combined with what the app
  * holds, in the policy's priority, so a report of `none` can never lower a
  * halt the app can see.
  */
-/**
- * Owner decision 2026-11-14 (AMUX process audit bundle 2, AMUXFLOW/B2): an
- * open state mismatch or an orphaned run is a record about one card's run --
- * a merged pull request, an ended attempt -- so it holds that card, not the
- * whole agent. With the switch on it no longer halts claims, runs and
- * publication everywhere; a new run of the same card and a publish write for
- * the same run are refused until the mismatch is resolved. The unbound app
- * pull request and ref readings, a recorded halt and the circuit still halt
- * everything. Off unless exactly `enabled`.
- */
-export const ENGINEERING_AGENT_MISMATCH_CARD_SCOPED_ENV = "ENGINEERING_AGENT_MISMATCH_CARD_SCOPED";
-export const engineeringAgentMismatchCardScoped = (value: string | undefined) =>
-  value?.trim() === "enabled";
 
 export const combineRunHalt = (input: {
   reported: RunnerReportableHalt;

@@ -6,8 +6,11 @@ import {
   timingSafeEqual,
 } from "node:crypto";
 
+import { AMUX_INTAKE_SAFETY_MAX_BYTES } from "./intakeLimitsCore.ts";
+import { AMUX_V22_TRANSPORT_MAX_BYTES } from "./v22LocalCliFlowCore.ts";
+
 /** AMUX v4 content categories use separate random data keys per sealed row. */
-export type AmuxContentPurpose = "idea_raw" | "repository_read_manifest" | "source_scope" | "collection_result" | "transfer_payload" | "analysis_result" | "analysis_draft" | "analysis_freeform" | "derivation_confirmation" | "derivation_reason" | "portfolio_assessment" | "portfolio_score" | "node_content" | "card_title" | "card_body" | "card_brief" | "task_result" | "task_patch";
+export type AmuxContentPurpose = "idea_raw" | "repository_read_manifest" | "source_scope" | "collection_result" | "transfer_payload" | "analysis_result" | "analysis_draft" | "analysis_freeform" | "derivation_confirmation" | "derivation_reason" | "portfolio_assessment" | "portfolio_score" | "node_content" | "card_title" | "card_body" | "card_brief" | "task_result" | "task_patch" | "review_findings";
 
 export type AmuxMasterKey = {
   masterKeyId: string;
@@ -39,19 +42,28 @@ const KEY_BYTES = 32;
 const IV_BYTES = 12;
 const TAG_BYTES = 16;
 const HEADER_BYTES = MAGIC.length + 1 + IV_BYTES + TAG_BYTES + KEY_BYTES + IV_BYTES + TAG_BYTES;
-const MAX_BOUNDED_CONTENT_BYTES = 1024 * 1024;
+/**
+ * One sealed unit's memory backstop, not a work limit (owner decision
+ * 2026-11-15): the intake flow's one ceiling on a model answer or body
+ * (AMUX_INTAKE_SAFETY_MAX_BYTES, 4 MiB), and for a v22 run's report the
+ * transport backstop it already crosses the bridge under (32 MiB). It was
+ * 1 MiB, below what the routes now accept, so a long answer passed its route
+ * and was then refused here.
+ */
+export const AMUX_CONTENT_UNIT_MAX_BYTES = Math.max(1024 * 1024, AMUX_INTAKE_SAFETY_MAX_BYTES);
+export const AMUX_TASK_RESULT_UNIT_MAX_BYTES = AMUX_V22_TRANSPORT_MAX_BYTES;
 const SUBJECT_ID = /^[A-Za-z0-9:_-]{1,160}$/;
 const KEY_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const PURPOSES: ReadonlySet<string> = new Set<AmuxContentPurpose>([
   "idea_raw", "repository_read_manifest", "source_scope", "collection_result", "transfer_payload", "analysis_result", "analysis_draft", "analysis_freeform", "derivation_confirmation", "derivation_reason", "portfolio_assessment", "portfolio_score",
-  "node_content", "card_title", "card_body", "card_brief", "task_result", "task_patch",
+  "node_content", "card_title", "card_body", "card_brief", "task_result", "task_patch", "review_findings",
 ]);
 
 /** Intake v19 sets no byte ceiling for an idea, its session provenance, or
  * the verified repository read-file manifest. Other purposes stay bounded. */
 const contentSizeAccepted = (bytes: number, purpose: AmuxContentPurpose) =>
   purpose === "idea_raw" || purpose === "repository_read_manifest" ||
-  bytes <= MAX_BOUNDED_CONTENT_BYTES;
+  bytes <= (purpose === "task_result" ? AMUX_TASK_RESULT_UNIT_MAX_BYTES : AMUX_CONTENT_UNIT_MAX_BYTES);
 
 const assertMaster = (keys: AmuxMasterKey) => {
   if (!KEY_ID.test(keys.masterKeyId) || !Number.isSafeInteger(keys.masterKeyVersion) ||

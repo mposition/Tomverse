@@ -124,7 +124,8 @@ test("Claude result needs exact served model and complete usage", () => {
       claudeEnvelope().modelUsage[anthropic.modelId], helper: {
         inputTokens: 1, outputTokens: 1, cacheReadInputTokens: 0,
         cacheCreationInputTokens: 0 } } },
-    { ...claudeEnvelope(), result: "x".repeat(65_537) },
+    // One answer may be up to 4 MiB (owner direction 2026-11-15).
+    { ...claudeEnvelope(), result: "x".repeat(4 * 1024 * 1024 + 1) },
     { ...claudeEnvelope(), modelUsage: {} },
   ]) {
     assert.deepEqual(inspectAmuxV4AnalysisCliResult(plan,

@@ -231,7 +231,7 @@ export async function GET(
         // Existence only (docs/policy/external-conversation-continuation.md
         // §8.2). A deep link into the workspace has to be able to correct
         // itself, and the row is the only thing that knows.
-        continuationBridge: { select: { id: true } },
+        continuationBridge: { select: { id: true, reviewHandoff: true } },
       },
     });
 
@@ -292,6 +292,7 @@ export async function GET(
         // Spread above would emit the relation object itself; this replaces it
         // with the one fact the client is owed.
         continuationBridge: undefined,
+        ...(conversation.continuationBridge?.reviewHandoff != null ? { reviewHandoff: true } : {}),
         surface: conversationSurface({
           hasContinuationBridge: conversation.continuationBridge !== null,
           productKey: conversation.productKey,

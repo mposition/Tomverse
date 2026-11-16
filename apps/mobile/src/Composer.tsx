@@ -28,11 +28,12 @@ type Props = {
   language: MobileLanguage;
   conversation?: Conversation | null; onConfigureTools?: (input: ToolChange) => Promise<void>;
   extraTools?: ComposerAction[];
+  inputMaxLength?: number;
   product?: MobileProduct; onProductChange?: (product: MobileProduct) => void;
   productBusy?: boolean; productLoading?: boolean; selectionControl?: ReactNode;
   offline?: boolean; disabled: boolean; streaming: boolean; onSend: (text: string, files: MobileAttachment[]) => Promise<void | boolean>; onStop: () => void;
 };
-export function Composer({ researchPreview, locationIdentity = null, files: controlledFiles, onFilesChange, onRemoveFile, onFileUploaded, copy, language, transport, draft, setDraft, disabled, offline = false, streaming, onSend, onStop, conversation, onConfigureTools, extraTools, voiceConversation, product = "chat", onProductChange, productBusy, productLoading, selectionControl }: Props) {
+export function Composer({ researchPreview, locationIdentity = null, files: controlledFiles, onFilesChange, onRemoveFile, onFileUploaded, copy, language, transport, draft, setDraft, disabled, offline = false, streaming, onSend, onStop, conversation, onConfigureTools, extraTools, inputMaxLength = 40000, voiceConversation, product = "chat", onProductChange, productBusy, productLoading, selectionControl }: Props) {
   const shortViewport = useCompactBottomDock();
   const visibleHeight = useVisibleViewportHeight();
   const compact = shortViewport || (visibleHeight > 0 && visibleHeight < 640);
@@ -112,7 +113,7 @@ export function Composer({ researchPreview, locationIdentity = null, files: cont
     <input data-testid="file-picker" ref={picker} type="file" multiple hidden accept={chatAttachmentAcceptAttribute({})} onChange={event => void attach(event.target.files)} />
     <input data-testid="photo-picker" ref={photos} type="file" multiple hidden accept="image/*" onChange={event => void attach(event.target.files)} />
     <form className={`composer compact-composer${voiceBusy ? " is-recording" : ""}`} onSubmit={event => { event.preventDefault(); submit(); }}>
-      <textarea ref={input} maxLength={40000} aria-label={copy.placeholder} placeholder={copy.placeholder} rows={1} value={draft} disabled={disabled || streaming || voiceBusy}
+      <textarea ref={input} maxLength={inputMaxLength} aria-label={copy.placeholder} placeholder={copy.placeholder} rows={1} value={draft} disabled={disabled || streaming || voiceBusy}
         onChange={event => setDraft(event.target.value)} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }} />
       <div className="composer-toolbar">
       <div className="composer-tool-controls">
