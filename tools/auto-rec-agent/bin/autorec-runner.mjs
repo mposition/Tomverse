@@ -159,9 +159,11 @@ function parseJsonObject(text) {
 /** Private operator log only; command output never enters a result or journal event. */
 function reviewDiagnostic(result) {
   return `${result.stdout || ""}\n${result.stderr || ""}`
+    .replace(/-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----/g, "[private key redacted]")
     .replace(/\b(?:Bearer|Basic)\s+\S+/gi, "[authorization redacted]")
     .replace(/\b(?:sk-|gh[pousr]_|github_pat_|xox[baprs]-)[A-Za-z0-9_-]+/g, "[credential redacted]")
-    .replace(/((?:token|secret|password|authorization|api[_-]?key)\s*["']?\s*[:=]\s*["']?)\S+/gi, "$1[redacted]")
+    .replace(/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, "[access key redacted]")
+    .replace(/((?:token|secret|password|authorization|api[_-]?key)\s*["']?\s*[:=]\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;}]+)/gi, "$1[redacted]")
     .replace(/(?:https?|postgres(?:ql)?):\/\/[^\s/@]+:[^\s/@]+@[^\s]+/gi, "[credential URL redacted]")
     .slice(-12_000);
 }
@@ -224,6 +226,7 @@ async function review(deps, ctx, claim, base, head) {
     if (verdict === "accept") {
       const job = parseJsonObject(waited.stdout);
       if (job?.head !== head || job?.base !== base || (job?.focus ?? null) !== null) {
+        deps.runLog("review_wait", reviewDiagnostic(waited));
         deps.log("review_range_mismatch", { jobId });
         return { verdict: "unknown", jobId };
       }

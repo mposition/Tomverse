@@ -305,7 +305,9 @@ for (const [name, rules, reason, files] of FAILURES) {
 test("a refused review submit preserves a redacted private diagnostic and exact range without retrying", async () => {
   const stderr = JSON.stringify({ error: "client", message: "git bundle failed: retained-error-detail" }) +
     "\nBearer confidential-bearer-value\npassword=confidential-password-value\n" +
-    "https://fixture:confidential-url-value@example.test/repo\nghp_confidentialTokenValue123";
+    "https://fixture:confidential-url-value@example.test/repo\nghp_confidentialTokenValue123" +
+    '\n{"token": "confidential quoted multi word value"}\n' +
+    "-----BEGIN PRIVATE KEY-----\nconfidential-private-key\n-----END PRIVATE KEY-----\nAKIA1234567890123456";
   const { deps, calls, gatewayCalls, events, runLogs } = fakeRunner({ rules: [
     [/review\.mjs submit/, { ...exit(64), stderr }],
   ] });
@@ -317,6 +319,7 @@ test("a refused review submit preserves a redacted private diagnostic and exact 
   const diagnostic = runLogs.find(({ section }) => section === "review_submit")?.text;
   assert.match(diagnostic, /retained-error-detail/);
   assert.doesNotMatch(diagnostic, /confidential/);
+  assert.doesNotMatch(diagnostic, /quoted multi word|AKIA1234567890123456/);
   assert.doesNotMatch(JSON.stringify({ gatewayCalls, events }), /retained-error-detail|confidential/);
 });
 
@@ -328,6 +331,16 @@ test("an unknown review wait preserves diagnostics without submitting another re
   assert.equal(calls.filter(({ signature }) => /review\.mjs submit/.test(signature)).length, 1);
   assert.match(runLogs.find(({ section }) => section === "review_wait")?.text, /review-outcome-unknown-fixture/);
   assert.deepEqual(ops(gatewayCalls), ["claim", "result", "halt_notice"]);
+});
+
+test("a review range mismatch keeps the actual response privately and stays fail-closed", async () => {
+  const actualHead = "d".repeat(40);
+  const { deps, runLogs, gatewayCalls } = fakeRunner({ rules: [
+    [/review\.mjs wait/, ok(JSON.stringify({ status: "accept", base: BASE, head: actualHead }))],
+  ] });
+  assert.equal(await runDailyBatch(deps), 1);
+  assert.deepEqual(ops(gatewayCalls), ["claim", "result", "halt_notice"]);
+  assert.match(runLogs.find(({ section }) => section === "review_wait")?.text, new RegExp(actualHead));
 });
 
 test("an out-of-scope change never reaches tests or review", async () => {
