@@ -243,6 +243,24 @@ test("a generation is one keyed submit, keyed polls on bfl.ai, then an unkeyed d
   assert.equal(result.requestParams.grounding, false);
 });
 
+test("a poll whose body is cut off is asked again, not taken as the task failing", async () => {
+  const calls = [];
+  const cutOff = () =>
+    new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"id":"task-1","sta'));
+          controller.error(new TypeError("terminated"));
+        },
+      }),
+      { headers: { "content-type": "application/json" } }
+    );
+  const result = await withBfl(fakeFetch(calls, { polls: [cutOff, () => ready()] }), () => generate());
+  assert.equal(result.outputWidth, 1024);
+  assert.equal(calls.filter((call) => call.url === POLLING_URL).length, 2);
+  assert.equal(calls.filter((call) => call.url.endsWith("/v1/flux-3-image")).length, 1, "never a second submit");
+});
+
 test("a refused submit is never sent again, and 402 is our balance, not the user's error", async () => {
   for (const [status, phase] of [
     [402, "provider_failed"],

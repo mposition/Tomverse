@@ -1479,7 +1479,15 @@ const generateWithBfl = async (
           pollResponse.status
         );
       }
-      const state = parseBflPollResponse(await pollResponse.json().catch(() => null));
+      // A body cut off mid-read is a lost poll, not an answer: ask again rather
+      // than give up on a task that may already be billed.
+      let pollPayload: unknown;
+      try {
+        pollPayload = await pollResponse.json();
+      } catch {
+        continue;
+      }
+      const state = parseBflPollResponse(pollPayload);
       if (state.state === "pending") continue;
       if (state.state === "moderated") {
         throw new ImageProviderError(
