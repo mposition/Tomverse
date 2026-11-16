@@ -830,9 +830,9 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/amux/ideaSessionAnalysisBudgetSettlementService.ts",
     table: "AmuxIdeaSessionAnalysisBudgetClaim",
-    tableMentions: 1,
-    writeVerbs: 2,
-    reason: "The settlement writer uses this SQL only to lock an exact claim; the guarded mutation uses its authorized Prisma delegate.",
+    tableMentions: 2,
+    writeVerbs: 4,
+    reason: "The settlement writer uses this SQL only to lock an exact claim (settlement, and the system close of a subscription claim's unknown outcome at zero, owner direction 2026-11-16); the guarded mutation uses its authorized Prisma delegate.",
   },
   {
     path: "lib/amux/ideaSessionAnalysisBudgetResolutionService.ts",
@@ -3356,6 +3356,166 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 23,
     reason:
       "Adds the delivery event's notSentReason with its two CHECKs, replaces the kind CHECK and the one-outcome partial unique index with the third outcome delivery_not_sent (sections 2-7 and 9), and replaces the delivery guard, which allows it once after the decision. Nothing here inserts, updates or deletes a delivery event.",
+  },
+  {
+    path: "prisma/migrations/20261116120000_amux_session_claim_record_only_checks/migration.sql",
+    table: "AmuxIdeaSessionAnalysisBudgetClaim",
+    tableMentions: 1,
+    writeVerbs: 6,
+    reason:
+      "The 2026-11-16 sweep migration (owner direction; docs/policy/amux-intake.md, a subscription claim reserves nothing and a zero-token result settles at zero): CHECK-only DDL, each constraint dropped and added again with its new bound; its write verbs are DROP/ADD words of ALTER TABLE and comments. It has no INSERT, UPDATE or DELETE.",
+  },
+  {
+    path: "prisma/migrations/20261116120100_amux_v19_session_claim_mode_record_only/migration.sql",
+    table: "AmuxIdeaSessionAnalysisBudgetClaim",
+    tableMentions: 2,
+    writeVerbs: 3,
+    reason:
+      "The 2026-11-16 sweep migration (owner direction; docs/policy/amux-intake.md, subscription analysis closes an unknown outcome at zero and accepts a late result): it only replaces a guard function body under its replace-function-if-body-sha256 header. Its write verbs are the guard's TG_OP comparisons and words of comments inside the function body; the table mentions are the guard's reads. It has no INSERT, UPDATE or DELETE.",
+  },
+  {
+    path: "prisma/migrations/20261116120100_amux_v19_session_claim_mode_record_only/migration.sql",
+    table: "AmuxIdeaSessionAnalysisReservation",
+    tableMentions: 1,
+    writeVerbs: 3,
+    reason:
+      "The 2026-11-16 sweep migration (owner direction; docs/policy/amux-intake.md, subscription analysis closes an unknown outcome at zero and accepts a late result): it only replaces a guard function body under its replace-function-if-body-sha256 header. Its write verbs are the guard's TG_OP comparisons and words of comments inside the function body; the table mentions are the guard's reads. It has no INSERT, UPDATE or DELETE.",
+  },
+  {
+    path: "prisma/migrations/20261116120100_amux_v19_session_claim_mode_record_only/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 3,
+    writeVerbs: 3,
+    reason:
+      "The 2026-11-16 sweep migration (owner direction; docs/policy/amux-intake.md, subscription analysis closes an unknown outcome at zero and accepts a late result): it only replaces a guard function body under its replace-function-if-body-sha256 header. Its write verbs are the guard's TG_OP comparisons and words of comments inside the function body; the table mentions are the guard's reads. It has no INSERT, UPDATE or DELETE.",
+  },
+  {
+    path: "prisma/migrations/20261116120200_amux_v19_session_claim_system_close/migration.sql",
+    table: "AmuxIdeaSessionAnalysisBudgetClaim",
+    tableMentions: 9,
+    writeVerbs: 2,
+    reason:
+      "The 2026-11-16 sweep migration (owner direction; docs/policy/amux-intake.md, subscription analysis closes an unknown outcome at zero and accepts a late result): it only replaces a guard function body under its replace-function-if-body-sha256 header. Its write verbs are the guard's TG_OP comparisons and words of comments inside the function body; the table mentions are the guard's reads. It has no INSERT, UPDATE or DELETE.",
+  },
+  {
+    path: "prisma/migrations/20261116120200_amux_v19_session_claim_system_close/migration.sql",
+    table: "AmuxIdeaSessionAnalysisReservation",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "The 2026-11-16 sweep migration (owner direction; docs/policy/amux-intake.md, subscription analysis closes an unknown outcome at zero and accepts a late result): it only replaces a guard function body under its replace-function-if-body-sha256 header. Its write verbs are the guard's TG_OP comparisons and words of comments inside the function body; the table mentions are the guard's reads. It has no INSERT, UPDATE or DELETE.",
+  },
+  {
+    path: "prisma/migrations/20261116120200_amux_v19_session_claim_system_close/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 5,
+    writeVerbs: 2,
+    reason:
+      "The 2026-11-16 sweep migration (owner direction; docs/policy/amux-intake.md, subscription analysis closes an unknown outcome at zero and accepts a late result): it only replaces a guard function body under its replace-function-if-body-sha256 header. Its write verbs are the guard's TG_OP comparisons and words of comments inside the function body; the table mentions are the guard's reads. It has no INSERT, UPDATE or DELETE.",
+  },
+  {
+    path: "prisma/migrations/20261116120300_amux_v19_shadow_usage_late_result/migration.sql",
+    table: "AmuxIdeaSessionAnalysisBudgetClaim",
+    tableMentions: 2,
+    writeVerbs: 1,
+    reason:
+      "The 2026-11-16 sweep migration (owner direction; docs/policy/amux-intake.md, subscription analysis closes an unknown outcome at zero and accepts a late result): it only replaces a guard function body under its replace-function-if-body-sha256 header. Its write verbs are the guard's TG_OP comparisons and words of comments inside the function body; the table mentions are the guard's reads. It has no INSERT, UPDATE or DELETE.",
+  },
+  {
+    path: "prisma/migrations/20261116120300_amux_v19_shadow_usage_late_result/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 1,
+    reason:
+      "The 2026-11-16 sweep migration (owner direction; docs/policy/amux-intake.md, subscription analysis closes an unknown outcome at zero and accepts a late result): it only replaces a guard function body under its replace-function-if-body-sha256 header. Its write verbs are the guard's TG_OP comparisons and words of comments inside the function body; the table mentions are the guard's reads. It has no INSERT, UPDATE or DELETE.",
+  },
+  {
+    path: "prisma/migrations/20261116120400_amux_v19_session_result_late_guard/migration.sql",
+    table: "AmuxIdeaSessionAnalysisBudgetClaim",
+    tableMentions: 3,
+    writeVerbs: 2,
+    reason:
+      "The 2026-11-16 sweep migration (owner direction; docs/policy/amux-intake.md, subscription analysis closes an unknown outcome at zero and accepts a late result): it only replaces a guard function body under its replace-function-if-body-sha256 header. Its write verbs are the guard's TG_OP comparisons and words of comments inside the function body; the table mentions are the guard's reads. It has no INSERT, UPDATE or DELETE.",
+  },
+  {
+    path: "prisma/migrations/20261116120400_amux_v19_session_result_late_guard/migration.sql",
+    table: "AmuxIdeaSessionAnalysisReservation",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "The 2026-11-16 sweep migration (owner direction; docs/policy/amux-intake.md, subscription analysis closes an unknown outcome at zero and accepts a late result): it only replaces a guard function body under its replace-function-if-body-sha256 header. Its write verbs are the guard's TG_OP comparisons and words of comments inside the function body; the table mentions are the guard's reads. It has no INSERT, UPDATE or DELETE.",
+  },
+  {
+    path: "prisma/migrations/20261116120400_amux_v19_session_result_late_guard/migration.sql",
+    table: "AmuxIdeaTrackedCheckoutEvidence",
+    tableMentions: 2,
+    writeVerbs: 2,
+    reason:
+      "The 2026-11-16 sweep migration (owner direction; docs/policy/amux-intake.md, subscription analysis closes an unknown outcome at zero and accepts a late result): it only replaces a guard function body under its replace-function-if-body-sha256 header. Its write verbs are the guard's TG_OP comparisons and words of comments inside the function body; the table mentions are the guard's reads. It has no INSERT, UPDATE or DELETE.",
+  },
+  {
+    path: "prisma/migrations/20261116120400_amux_v19_session_result_late_guard/migration.sql",
+    table: "AmuxIdeaTrackedCheckoutReadManifest",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "The 2026-11-16 sweep migration (owner direction; docs/policy/amux-intake.md, subscription analysis closes an unknown outcome at zero and accepts a late result): it only replaces a guard function body under its replace-function-if-body-sha256 header. Its write verbs are the guard's TG_OP comparisons and words of comments inside the function body; the table mentions are the guard's reads. It has no INSERT, UPDATE or DELETE.",
+  },
+  {
+    path: "prisma/migrations/20261116120400_amux_v19_session_result_late_guard/migration.sql",
+    table: "AmuxIdeaReadManifestKeyIntent",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "The 2026-11-16 sweep migration (owner direction; docs/policy/amux-intake.md, subscription analysis closes an unknown outcome at zero and accepts a late result): it only replaces a guard function body under its replace-function-if-body-sha256 header. Its write verbs are the guard's TG_OP comparisons and words of comments inside the function body; the table mentions are the guard's reads. It has no INSERT, UPDATE or DELETE.",
+  },
+  {
+    path: "prisma/migrations/20261116120400_amux_v19_session_result_late_guard/migration.sql",
+    table: "AmuxIdeaOperatingScopeSetting",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "The 2026-11-16 sweep migration (owner direction; docs/policy/amux-intake.md, subscription analysis closes an unknown outcome at zero and accepts a late result): it only replaces a guard function body under its replace-function-if-body-sha256 header. Its write verbs are the guard's TG_OP comparisons and words of comments inside the function body; the table mentions are the guard's reads. It has no INSERT, UPDATE or DELETE.",
+  },
+  {
+    path: "prisma/migrations/20261116120400_amux_v19_session_result_late_guard/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 5,
+    writeVerbs: 2,
+    reason:
+      "The 2026-11-16 sweep migration (owner direction; docs/policy/amux-intake.md, subscription analysis closes an unknown outcome at zero and accepts a late result): it only replaces a guard function body under its replace-function-if-body-sha256 header. Its write verbs are the guard's TG_OP comparisons and words of comments inside the function body; the table mentions are the guard's reads. It has no INSERT, UPDATE or DELETE.",
+  },
+  {
+    path: "prisma/migrations/20261116130000_amux_card_exec_report_sizes/migration.sql",
+    table: "AmuxV22TaskRecoveryEvidence",
+    tableMentions: 1,
+    writeVerbs: 10,
+    reason:
+      "The 2026-11-16 sweep migration (owner direction; docs/policy/development-agent-orchestration.md, card execution report and detail bounds become one 1 MiB bound): CHECK-only DDL, each constraint dropped and added again with its new bound; its write verbs are DROP/ADD words of ALTER TABLE and comments. It has no INSERT, UPDATE or DELETE.",
+  },
+  {
+    path: "prisma/migrations/20261116130000_amux_card_exec_report_sizes/migration.sql",
+    table: "AmuxV22ReadOnlyLaunchCheck",
+    tableMentions: 1,
+    writeVerbs: 10,
+    reason:
+      "The 2026-11-16 sweep migration (owner direction; docs/policy/development-agent-orchestration.md, card execution report and detail bounds become one 1 MiB bound): CHECK-only DDL, each constraint dropped and added again with its new bound; its write verbs are DROP/ADD words of ALTER TABLE and comments. It has no INSERT, UPDATE or DELETE.",
+  },
+  {
+    path: "prisma/migrations/20261116130000_amux_card_exec_report_sizes/migration.sql",
+    table: "AmuxV22ReadOnlyLaunchProof",
+    tableMentions: 1,
+    writeVerbs: 10,
+    reason:
+      "The 2026-11-16 sweep migration (owner direction; docs/policy/development-agent-orchestration.md, card execution report and detail bounds become one 1 MiB bound): CHECK-only DDL, each constraint dropped and added again with its new bound; its write verbs are DROP/ADD words of ALTER TABLE and comments. It has no INSERT, UPDATE or DELETE.",
+  },
+  {
+    path: "prisma/migrations/20261116130400_amux_v22_recovery_approval_attempt_unbounded/migration.sql",
+    table: "AmuxV22TaskRecoveryApproval",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "The 2026-11-16 sweep migration (owner direction; docs/policy/development-agent-orchestration.md, a recovery approval's attempt number has no bound of ours): CHECK-only DDL, each constraint dropped and added again with its new bound; its write verbs are DROP/ADD words of ALTER TABLE and comments. It has no INSERT, UPDATE or DELETE.",
   },
   {
     path: "prisma/migrations/20261116140000_amux_dm_request_windows/migration.sql",
