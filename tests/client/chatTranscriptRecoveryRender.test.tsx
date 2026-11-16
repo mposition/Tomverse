@@ -24,10 +24,9 @@ test("transport error preserves the complete markdown body and separates its not
   assert.match(html, /First paragraph/);
   assert.match(html, /Second <strong>paragraph<\/strong>/);
   assert.match(html, /data-testid="chat-recovery-notice"[^>]*>Connection interrupted/);
-  assert.match(html, /data-testid="chat-error-auxiliary-info"/);
   assert.match(html, /Trace ID: local-trace/);
-  // The trace ID sits in a collapsed "Diagnostic details" disclosure, not on the card face.
-  assert.match(html, /<details(?![^>]*\bopen\b)[^>]*data-testid="chat-error-auxiliary-info"[^>]*><summary[^>]*>Diagnostic details<\/summary>/);
+  // The trace ID sits in a collapsed diagnostics disclosure, not on the card face.
+  assert.match(html, /<details(?![^>]*\bopen\b)[^>]*data-testid="chat-error-diagnostics"[^>]*><summary[^>]*>Show diagnostic info<\/summary>/);
   assert.equal((html.match(/data-testid="restore-chat-question"/g) ?? []).length, 1);
 });
 test("error before text renders the notice without a phantom generating indicator", () => {
