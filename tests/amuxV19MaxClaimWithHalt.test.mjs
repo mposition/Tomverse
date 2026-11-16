@@ -141,8 +141,11 @@ test("committed claim holds a durable marker naming it and is reconciled before 
       const first = await claimAmuxV19MaxShadowBudgetWithHaltOnce(input);
       assert.equal(first.kind, "claimed");
       assert.equal(first.recovered, false);
-      assert.deepEqual(await claimAmuxV19MaxShadowBudgetWithHaltOnce(input),
+      // The marker's time comes with it (the cycle's absent-claim window).
+      const recover = await claimAmuxV19MaxShadowBudgetWithHaltOnce(input);
+      assert.deepEqual({ kind: recover.kind, identity: recover.identity },
         { kind: "recover", identity: named });
+      assert.ok(Number.isFinite(recover.writtenAtMs));
       assert.equal(writes, 1);
     } finally {
       await localAmuxSessionClaimMarker(stateDirectory).release();
@@ -166,8 +169,9 @@ test("unknown claim response retains marker even when readback says absent",
       });
       assert.equal(result.kind, "outcome_unknown");
       assert.equal(writes, 1);
-      assert.deepEqual(await localAmuxSessionClaimMarker(stateDirectory).read(),
-        { identity: named });
+      const pending = await localAmuxSessionClaimMarker(stateDirectory).read();
+      assert.deepEqual(pending.identity, named);
+      assert.ok(Number.isFinite(pending.writtenAtMs));
     } finally {
       await localAmuxSessionClaimMarker(stateDirectory).release();
     }

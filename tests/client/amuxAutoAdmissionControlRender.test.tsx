@@ -194,9 +194,10 @@ test("English and Korean report the measured graduation evidence", () => {
   for (const catalog of [adminAmuxAutoAdmissionMessages.en, adminAmuxAutoAdmissionMessages.ko]) {
     const available = textOf(render({ m: catalog, control: { ...CONTROL,
       graduation: { ok: false, count: 0, spanMs: 0 } } }));
-    assert.ok(available.includes(catalog.graduationUnmet));
+    // No threshold gates the path (2026-11-16): the screen says so and shows
+    // the measurement, never "met" (review r-20261116-215204-1beb6b).
+    assert.ok(available.includes(catalog.graduationNoGate));
     assert.ok(available.includes(catalog.graduationMeasurement(0, 0)));
-    assert.equal(available.includes(catalog.graduationMet), false);
     const applied = render({ m: catalog, control: { ...CONTROL, active: true } });
     assert.equal(byId(applied, "amux-auto-admission-confirmation"), undefined);
     assert.equal(byId(applied, "amux-auto-admission-stop")!.disabled, false);

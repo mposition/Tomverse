@@ -25,7 +25,6 @@ const CONTROL_PATH = "/api/admin/amux/v22-auto-promotion";
 const buttonClass = "relative inline-flex min-h-11 items-center justify-center rounded-lg border px-4 py-2 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 enabled:cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 border-zinc-600 bg-zinc-800 text-zinc-100 hover:bg-zinc-700";
 const helpClass = "text-xs leading-5 text-zinc-400";
 const chipClass = "inline-flex rounded-md px-2.5 py-1.5 text-xs font-semibold bg-zinc-800";
-const positiveClass = "text-status-success-300";
 const switchOnClass = "text-status-switch-on-300";
 
 /** Only returned control fields are state. Claim and execution remain scope text. */
@@ -50,8 +49,9 @@ export function AmuxAutoAdmissionControlView({
   const stateSummary = control
     ? control.active ? m.activeSummary : m.inactiveSummary
     : pending === "reading" ? m.loading : m.unknownSummary;
-  const graduationState = control ? control.graduation.ok ? m.graduationMet
-    : m.graduationUnmet : m.unreadable;
+  // No count or span gates the automatic path (2026-11-16); the measurement
+  // is shown for what it is, never as a threshold met.
+  const graduationState = control ? m.graduationNoGate : m.unreadable;
   return (
     <section className="mx-auto w-full min-w-0 max-w-6xl p-4"
       data-testid="amux-v22-promotion-control" aria-busy={busy}>
@@ -82,7 +82,7 @@ export function AmuxAutoAdmissionControlView({
             </div>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 py-3" data-testid="amux-auto-admission-graduation-gate">
               <dt className="font-semibold">{m.graduationGate}</dt>
-              <dd className={`${chipClass} ${control?.graduation.ok ? positiveClass : "text-zinc-400"}`}>
+              <dd className={`${chipClass} text-zinc-400`}>
                 {graduationState}
               </dd>
               <dd className={`${helpClass} w-full`} data-testid="amux-auto-admission-measurement">

@@ -18,9 +18,11 @@ import { promisify } from "node:util";
 
 import { readAntigravityModelList, readCodexModelsCache, readCopilotHelpConfig, readCursorModelList } from
   "../lib/amux/cliModelListReader.mjs";
-import { agentOfficeCliMonitorSwitchOn } from "../lib/agentOfficeCliMonitorCore.ts";
 
 const run = promisify(execFile);
+// The CLI monitor's switch as agentOfficeCliMonitorSwitchOn reads it; kept
+// here because this script runs on plain Node, which loads no .ts module.
+const monitorSwitchOn = (value) => value === "enabled" || value === "1";
 const flags = process.argv.slice(2);
 if (flags.some((flag) => flag !== "--dry-run")) throw new Error("invalid arguments");
 const dryRun = flags.includes("--dry-run");
@@ -39,7 +41,7 @@ const sources = {
 };
 
 function destination() {
-  if (!agentOfficeCliMonitorSwitchOn(process.env.TOMVERSE_AMUX_CLI_MONITOR) || (process.env.TOMVERSE_AMUX_CLI_MONITOR_SECRET ?? "").length < 32) {
+  if (!monitorSwitchOn(process.env.TOMVERSE_AMUX_CLI_MONITOR) || (process.env.TOMVERSE_AMUX_CLI_MONITOR_SECRET ?? "").length < 32) {
     throw new Error("credential_missing");
   }
   const url = new URL(process.env.TOMVERSE_INTERNAL_URL ?? "");

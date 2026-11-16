@@ -12,8 +12,7 @@ export const adminAmuxAutoAdmissionMessages = defineAdminMessages({
     gates: "Admission conditions",
     ownerGate: "Owner approval", enabled: "Activated", disabled: "Deactivated",
     ownerHelp: "Only an owner with a recent administrator sign-in can change this setting.",
-    graduationGate: "Graduation evidence", graduationMet: "Measured threshold met",
-    graduationUnmet: "Measured threshold not met",
+    graduationGate: "Graduation evidence", graduationNoGate: "No threshold (measured only)",
     graduationMeasurement: (count: number, days: number) =>
       `Measured evidence: ${count.toLocaleString("en-US")} approvals · ${days.toLocaleString("en-US")} days.`,
     flow: "Registration approval → Todo admission → worker assignment → execution",
@@ -44,8 +43,7 @@ export const adminAmuxAutoAdmissionMessages = defineAdminMessages({
     gates: "편입 조건",
     ownerGate: "운영자 승인", enabled: "활성화", disabled: "비활성화",
     ownerHelp: "최근 재인증한 owner만 이 설정을 변경할 수 있습니다.",
-    graduationGate: "졸업 근거", graduationMet: "실측 기준 충족",
-    graduationUnmet: "실측 기준 미충족",
+    graduationGate: "졸업 근거", graduationNoGate: "기준 없음(측정만 표시)",
     graduationMeasurement: (count: number, days: number) =>
       `실제 측정값: 승인 ${count.toLocaleString("ko-KR")}건 · 기간 ${days.toLocaleString("ko-KR")}일.`,
     flow: "등록 승인 → Todo 편입 → worker 배정 → 실행",
