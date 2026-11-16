@@ -24,6 +24,7 @@ import { PricingKoreanPlanLimits } from "./PricingKoreanPlanLimits";
 import { PricingCreditExample } from "./PricingCreditExample";
 import { PricingPlanCapabilities } from "./PricingPlanCapabilities";
 import { pricingMobilePlanSummaryCopy } from "./pricingMobilePlanSummary";
+import { getPricingStarterLabelKey } from "@/lib/pricingStarterNotice";
 import { UpgradeInterestButton } from "@/components/marketing/UpgradeInterestButton";
 import { usePublicBilling } from "@/components/marketing/usePublicBilling";
 import { usePricingAccount } from "@/components/marketing/usePricingAccount";
@@ -73,6 +74,17 @@ const annualLabelByLanguage: Partial<Record<Language, { annual: string; save: st
   de: { annual: "Jährlich", save: "20 % sparen", checkout: "Beim Checkout wird der angezeigte lokale Festpreis berechnet." },
   es: { annual: "Anual", save: "20 % de descuento", checkout: "Se cobra el precio local fijo mostrado." },
   pt: { annual: "Anual", save: "20% de desconto", checkout: "O preço local fixo exibido é cobrado no checkout." },
+};
+
+const starterNoticePrefix: Record<Language, string> = {
+  en: "You came from ",
+  ko: "다음 기능에서 오셨습니다: ",
+  zh: "您来自此功能：",
+  "zh-Hant": "您來自此功能：",
+  fr: "Vous venez de ",
+  de: "Sie kommen von ",
+  es: "Vienes de ",
+  pt: "Você veio de ",
 };
 
 // The public catalogue always offers exactly these three packs, so the
@@ -926,7 +938,7 @@ type BillingOutcome = {
 };
 
 export function PricingPageContent() {
-  const { lang } = useLanguage();
+  const { lang, t } = useLanguage();
   const content = copy[lang] ?? copy.en;
   const billing = usePublicBilling();
   const account = usePricingAccount();
@@ -941,6 +953,7 @@ export function PricingPageContent() {
   // static HTML intact and cannot produce a hydration mismatch, and it is the
   // pattern UpgradeCtaLink already uses for the same reason.
   const [pageIntent, setPageIntent] = useState<PurchaseIntent | null>(null);
+  const [starterLabelKey, setStarterLabelKey] = useState<string | null>(null);
   const [subscriptionInterval, setSubscriptionInterval] = useState<"monthly" | "annual">("monthly");
   const [billingOutcome, setBillingOutcome] = useState<BillingOutcome | null>(
     null
@@ -958,6 +971,10 @@ export function PricingPageContent() {
   );
   const planChangeTriggerRef = useRef<HTMLButtonElement | null>(null);
   const purchaseResumedRef = useRef(false);
+  // The plan whose checkout dialog opens on its own after sign-in.
+  const [resumedSubscriptionPlan, setResumedSubscriptionPlan] = useState<
+    "pro" | "max" | null
+  >(null);
   const creditPackCtaRef = useRef<HTMLDivElement | null>(null);
   const annualCopy = annualLabelByLanguage[lang] ?? annualLabelByLanguage.en!;
   const saleCopy = saleLabelByLanguage[lang] ?? saleLabelByLanguage.en!;
@@ -1017,6 +1034,7 @@ export function PricingPageContent() {
     const search = window.location.search;
     const intent = parsePurchaseIntent(search);
     const params = new URLSearchParams(search);
+    const starterLabelKeyFromUrl = getPricingStarterLabelKey(params.get("starter"));
     const billingParam = params.get("billing");
     const planParam = params.get("plan");
     const outcome: BillingOutcome | null =
@@ -1033,6 +1051,7 @@ export function PricingPageContent() {
     // the shape the repo's React Compiler lint rejects.
     queueMicrotask(() => {
       setPageIntent(intent);
+      setStarterLabelKey(starterLabelKeyFromUrl);
       if (intent.billingInterval) setSubscriptionInterval(intent.billingInterval);
       if (outcome) setBillingOutcome(outcome);
     });
@@ -1113,6 +1132,62 @@ export function PricingPageContent() {
     );
   }, [
     account.addonCreditsRemaining,
+    account.plan,
+    account.planCreditsRemaining,
+    account.status,
+    pageIntent,
+  ]);
+
+  // The same round trip for a subscription: "Sign in or join to start Pro"
+  // comes back here with `intent=subscription&target=pro`, and the visitor
+  // goes straight to that plan's checkout dialog instead of having to find and
+  // press "Upgrade" again. Only when the card would offer a fresh upgrade -- a
+  // Pro subscriber returning with a Pro intent gets the page as it is. The
+  // dialog opens empty: a promotion code is never carried in the link.
+  useEffect(() => {
+    if (purchaseResumedRef.current) return;
+    if (!pageIntent || pageIntent.intent !== "subscription") return;
+    const targetPlan = pageIntent.targetPlan;
+    if (!targetPlan) return;
+    if (account.status !== "authenticated" || !account.plan) return;
+    const ctaState = resolvePlanCtaState({
+      sessionStatus: account.status,
+      currentPlan: account.plan,
+      cardPlan: targetPlan === "max" ? "Max" : "Pro",
+      hasActiveSubscription: account.hasActiveSubscription,
+      currentBillingInterval: account.billingInterval,
+    });
+    if (ctaState !== "upgrade") return;
+    purchaseResumedRef.current = true;
+    trackProductEvent("purchase_intent_resumed", 0, {
+      cta_location: pageIntent.ctaLocation || `pricing_plan_card_${targetPlan}`,
+      purchase_type: "subscription",
+      target_plan: targetPlan,
+      authentication_state: "authenticated",
+      current_plan: account.plan.toLowerCase() as "free" | "pro" | "max",
+      ...(pageIntent.trigger ? { trigger: pageIntent.trigger } : {}),
+      plan_credits_remaining: account.planCreditsRemaining,
+      addon_credits_remaining: account.addonCreditsRemaining,
+    });
+    queueMicrotask(() => setResumedSubscriptionPlan(targetPlan));
+
+    if (typeof window === "undefined") return;
+    // A reload after closing the dialog must not reopen it.
+    const params = new URLSearchParams(window.location.search);
+    params.delete("intent");
+    params.delete("target");
+    const nextSearch = params.toString();
+    window.history.replaceState(
+      null,
+      "",
+      `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${
+        window.location.hash
+      }`
+    );
+  }, [
+    account.addonCreditsRemaining,
+    account.billingInterval,
+    account.hasActiveSubscription,
     account.plan,
     account.planCreditsRemaining,
     account.status,
@@ -1359,6 +1434,7 @@ export function PricingPageContent() {
         <div className="mx-auto max-w-4xl text-center">
           <p className="text-sm font-bold uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400">{content.eyebrow}</p>
           <h1 className={`mt-4 text-4xl font-bold leading-tight sm:text-6xl ${displayHeadingClass(lang)}`}>{content.title}</h1>
+          {starterLabelKey && <p data-testid="pricing-starter-notice" className="mt-3 text-sm text-zinc-600 dark:text-zinc-300">{starterNoticePrefix[lang]}{t(starterLabelKey)}</p>}
           <p className={`mx-auto mt-5 max-w-2xl text-lg leading-8 text-zinc-600 dark:text-zinc-300 ${mobileSummary ? "hidden sm:block" : ""}`}>{content.description}</p>
           {mobileSummary && <p className="mt-4 text-base leading-7 text-zinc-600 dark:text-zinc-300 sm:hidden">{mobileSummary.lead}</p>}
           {mobileSummary && <section aria-label={mobileSummary.label} data-testid="pricing-mobile-plan-summary" className="mt-7 rounded-2xl border border-zinc-200 bg-zinc-50 p-3 text-left dark:border-zinc-800 dark:bg-zinc-900/40 sm:hidden">
@@ -1855,6 +1931,7 @@ export function PricingPageContent() {
                     plan={plan.name === "Max" ? "Max" : "Pro"}
                     initialBillingInterval={lang === "ko" ? subscriptionInterval : undefined}
                     trigger={pageIntent?.trigger || undefined}
+                    autoOpen={resumedSubscriptionPlan === planId}
                     className={`inline-flex min-h-12 w-full items-center justify-center rounded-xl px-4 py-3 text-center text-sm font-bold transition ${planCtaSurface(plan.highlighted)}`}
                   >
                     {plan.cta}

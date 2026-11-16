@@ -38,6 +38,7 @@ import { fileURLToPath } from "node:url";
 import { release, tryAcquire } from "../../review-orchestrator/lib/fsutil.mjs";
 import { DEFAULTS, FAILURE_REASONS, GIT_IDENTITY, LIMITS, OUTCOME_FAILED, OUTCOME_PR_OPENED, REPO_URL } from "../lib/contract.mjs";
 import {
+  workAssessment,
   TEST_LANES,
   branchNameFor,
   buildInstruction,
@@ -259,6 +260,30 @@ async function work(deps, claim, ctx) {
   const baseResult = await git(config.mirror, ["rev-parse", "--verify", "refs/remotes/origin/develop^{commit}"]);
   if (baseResult.code !== 0) return failed("setup_failed", "develop_missing");
   const base = baseResult.stdout.trim();
+  if (config.dailyProduct) {
+    const context = await deps.gateway({ op: "work_context" }, null, 3 * 60_000);
+    if (context?.status !== "context" || !Array.isArray(context.pulls) || context.pulls.length > 200 ||
+        context.pulls.some(pr => !Number.isSafeInteger(pr.number) || pr.number < 1 || pr.number > 999999999 || !/^[0-9a-f]{40}$/.test(pr.head ?? ""))) {
+      return failed("setup_failed", "work_context");
+    }
+    if (context.pulls.length) {
+      const refs = context.pulls.map(pr => `+refs/pull/${pr.number}/head:refs/autorec/context/pr-${pr.number}`);
+      ctx.contextRefs = context.pulls.map(pr => `refs/autorec/context/pr-${pr.number}`);
+      if ((await git(config.mirror, ["fetch", "--no-tags", "--quiet", REPO_URL, ...refs], LIMITS.setupMs)).code !== 0) return failed("setup_failed", "work_context_fetch");
+      for (const pr of context.pulls) {
+        const actual = await git(config.mirror, ["rev-parse", `refs/autorec/context/pr-${pr.number}`]);
+        if (actual.code !== 0 || !/^[0-9a-f]{40}$/.test(actual.stdout.trim())) return failed("setup_failed", "work_context_invalid");
+        // A push after the API listing is normal. Inspect the fetched commit,
+        // instead of stopping the entire batch on an unrelated PR update.
+        pr.head = actual.stdout.trim();
+        const paths = await git(config.mirror, ["diff", "--name-only", `${base}...${pr.head}`]);
+        pr.pathsUnavailable = paths.code !== 0;
+        pr.paths = paths.code === 0 ? paths.stdout.slice(0, 1500) : "";
+        pr.pathsTruncated = paths.stdout.length > 1500;
+      }
+    }
+    claim = { ...claim, openPrs: context.pulls, previousWork: ctx.previousWork };
+  }
   // A previous run that died mid-way may have left both behind.
   await git(config.mirror, ["worktree", "prune"]);
   if (fs.exists(worktree)) await git(config.mirror, ["worktree", "remove", "--force", worktree]);
@@ -289,6 +314,16 @@ async function work(deps, claim, ctx) {
   deps.runLog("agent_result", typeof summary?.result === "string" ? summary.result.slice(-8_000) : agent.stderr.slice(-4_000));
   if (agent.timedOut) return failed("timeout");
   if (agent.code !== 0) return failed("agent_error");
+  if (config.dailyProduct) {
+    const assessment = workAssessment(summary?.result, claim.openPrs);
+    if (!assessment) return failed("no_change", "work_assessment_missing");
+    if (assessment.disposition === "already_satisfied") {
+      if ((await git(worktree, ["merge-base", "--is-ancestor", assessment.commit, base])).code !== 0) return failed("no_change", "work_assessment_unverified");
+      return failed("already_satisfied");
+    }
+    if (assessment.disposition === "covered_by_pr") return failed("covered_by_pr", `pr_${assessment.pr}`);
+    if (assessment.disposition === "blocked") return failed("no_change");
+  }
   const publicSummary = publicAgentSummary(summary?.result);
   if (publicSummary) claim = { ...claim, publicSummary };
 
@@ -394,6 +429,7 @@ async function cleanup(deps, ctx) {
   try {
     if (ctx.worktree) await git(["worktree", "remove", "--force", ctx.worktree]);
     if (ctx.branch) await git(["branch", "-D", ctx.branch]);
+    for (const ref of ctx.contextRefs ?? []) await git(["update-ref", "-d", ref]);
     await git(["worktree", "prune"]);
   } catch (error) {
     deps.log("cleanup_failed", { message: error.message });
@@ -418,7 +454,7 @@ async function report(deps, claim, outcome, onReport) {
   return reply?.status === "reported" ? 0 : 1;
 }
 
-export async function runLocked(deps, { onEmpty = () => {}, onClaim = () => {}, onOutcome = () => {}, onReport = () => {} } = {}) {
+export async function runLocked(deps, { onEmpty = () => {}, onClaim = () => {}, onOutcome = () => {}, onReport = () => {}, previousWork = [] } = {}) {
   let reply;
   try {
     reply = await deps.gateway({ op: "claim" }, null, 3 * 60_000);
@@ -439,7 +475,7 @@ export async function runLocked(deps, { onEmpty = () => {}, onClaim = () => {}, 
   onClaim();
   deps.startRunLog(claim.id);
   deps.log("claimed", { id: claim.id, leaseUntil: claim.leaseUntil });
-  const ctx = { stage: "claimed", worktree: null, branch: null, reviewJobId: null };
+  const ctx = { stage: "claimed", worktree: null, branch: null, reviewJobId: null, previousWork };
   let outcome;
   try {
     outcome = await work(deps, claim, ctx);
@@ -450,6 +486,8 @@ export async function runLocked(deps, { onEmpty = () => {}, onClaim = () => {}, 
     await cleanup(deps, ctx);
   }
   onOutcome(outcome);
+  previousWork.push({ id: claim.id, recommendation: claim.recommendation.slice(0, 1000),
+    outcome: outcome.outcome ?? "unknown", reason: outcome.reason ?? null, prUrl: outcome.prUrl ?? null });
   if (outcome.unknown) {
     deps.log("outcome_unknown", { step: outcome.unknown, id: claim.id });
     return 1;
@@ -476,6 +514,7 @@ export async function runOnce(deps) {
 /** Task failures advance; infrastructure failures and unknown outcomes stop the batch. */
 export async function runDailyBatch(deps) {
   const started = deps.now();
+  const previousWork = [];
   const notice = { runId: randomUUID(), attempted: 0, prOpened: 0, lastPrUrl: null };
   const stopped = async (reason) => {
     try {
@@ -493,6 +532,7 @@ export async function runDailyBatch(deps) {
       let outcome = null;
       let reportState = null;
       const code = await runLocked(deps, {
+        previousWork,
         onEmpty: () => { empty = true; }, onClaim: () => { notice.attempted += 1; },
         onReport: (value) => { reportState = value; },
         onOutcome: (value) => {
@@ -507,7 +547,7 @@ export async function runDailyBatch(deps) {
         return stopped(reason);
       }
       if (empty) return 0;
-      if (outcome?.outcome === OUTCOME_FAILED && !["no_change", "out_of_scope", "tests", "review_reject"].includes(outcome.reason)) {
+      if (outcome?.outcome === OUTCOME_FAILED && !["no_change", "already_satisfied", "covered_by_pr", "out_of_scope", "tests", "review_reject"].includes(outcome.reason)) {
         deps.log("daily_batch_paused", { reason: outcome.reason });
         return stopped(outcome.reason);
       }

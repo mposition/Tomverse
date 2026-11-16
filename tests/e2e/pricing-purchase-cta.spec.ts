@@ -350,8 +350,8 @@ test.describe("pricing plan CTAs by authentication state and plan", { tag: "@ui-
       "data-cta-state",
       "signed_out"
     );
-    await expect(ctaState(page, "pro")).toContainText("Sign in to start Pro");
-    await expect(ctaState(page, "max")).toContainText("Sign in to start Max");
+    await expect(ctaState(page, "pro")).toContainText("Sign in or join to start Pro");
+    await expect(ctaState(page, "max")).toContainText("Sign in or join to start Max");
     await expect(page.getByTestId("credit-pack-section-cta")).toContainText(
       "Sign in to buy credits"
     );
@@ -647,6 +647,15 @@ test.describe("the sign-in round trip keeps the purchase intent", { tag: "@ui-ri
       "?lang=en&intent=subscription&target=max&trigger=account#plans"
     );
 
+    // A Free account returning with a Max intent goes straight to the Max
+    // checkout. Wait for it before counting text in the card: the dialog sits
+    // inside the card and carries its own "Upgrade to Max", so a count taken
+    // while it is opening depends on timing.
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+
     const maxCard = page.getByTestId("pricing-plan-card-max");
     await expect(maxCard).toHaveAttribute("data-requested-target", "true");
     await expect(page.getByTestId("pricing-plan-card-pro")).not.toHaveAttribute(
@@ -655,6 +664,56 @@ test.describe("the sign-in round trip keeps the purchase intent", { tag: "@ui-ri
     );
     // Identified in the accessibility tree too, not by the ring alone.
     await expect(maxCard.getByText("Upgrade to Max")).toHaveCount(2);
+  });
+
+  test("a returning subscription intent opens that plan's checkout with an empty code", async ({
+    page,
+  }) => {
+    const harness = await preparePricingPage(page, { plan: "Free" });
+    const subscriptionCheckouts: Record<string, unknown>[] = [];
+    await page.route("**/api/billing/checkout", async (route) => {
+      subscriptionCheckouts.push(route.request().postDataJSON());
+      await route.fulfill(json({ error: "Synthetic checkout refusal" }, 503));
+    });
+    // Exactly the URL "Sign in or join to start Pro" sends the sign-in callback to.
+    await gotoPricing(
+      page,
+      "?lang=en&intent=subscription&target=pro&ctaLocation=pricing_plan_card_pro&utm_source=ozbargain#plans"
+    );
+
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByTestId("checkout-due-today")).toHaveText(/^\$15(?:\.0{1,2})?$/);
+    // A promotion code is never carried in the link.
+    await expect(dialog.getByPlaceholder("Optional promotion code")).toHaveValue("");
+
+    // The purchase must not auto-run: the visitor confirms it themselves.
+    await expect
+      .poll(() =>
+        eventsNamed(harness, "purchase_intent_resumed").map((event) => event.properties)
+      )
+      .toEqual([
+        expect.objectContaining({ purchase_type: "subscription", target_plan: "pro" }),
+      ]);
+    expect(subscriptionCheckouts).toHaveLength(0);
+    expect(eventNames(harness)).not.toContain("checkout_started");
+
+    // The intent is spent, and the campaign is kept for attribution.
+    await expect.poll(() => page.url()).not.toContain("intent=subscription");
+    expect(page.url()).toContain("utm_source=ozbargain");
+  });
+
+  test("a returning intent for the plan already held opens nothing", async ({
+    page,
+  }) => {
+    await preparePricingPage(page, { plan: "Pro", hasActiveSubscription: true });
+    await gotoPricing(page, "?lang=en&intent=subscription&target=pro#plans");
+
+    await expect(ctaState(page, "pro")).toHaveAttribute(
+      "data-cta-state",
+      "current_plan"
+    );
+    await expect(page.getByRole("dialog")).toHaveCount(0);
   });
 });
 

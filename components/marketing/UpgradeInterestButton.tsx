@@ -760,12 +760,20 @@ export function UpgradeInterestButton({
   children,
   trigger,
   initialBillingInterval,
+  autoOpen = false,
 }: {
   plan: "Pro" | "Max";
   className: string;
   children: ReactNode;
   trigger?: PurchaseAnalyticsTrigger;
   initialBillingInterval?: BillingInterval;
+  /**
+   * Opens the checkout dialog once, without a click. Set by the pricing page
+   * when a visitor comes back from sign-in with a subscription intent for this
+   * plan. Nothing is charged and no promotion code is filled in: the visitor
+   * still enters any code and confirms the purchase themselves.
+   */
+  autoOpen?: boolean;
 }) {
   const { lang, t } = useLanguage();
   const router = useRouter();
@@ -936,6 +944,14 @@ export function UpgradeInterestButton({
       }
     }
   }, [copy, planId, requestPromotionValidation]);
+
+  const autoOpenedRef = useRef(false);
+  useEffect(() => {
+    if (!autoOpen || autoOpenedRef.current) return;
+    autoOpenedRef.current = true;
+    // Deferred so the effect body stays free of synchronous setState.
+    queueMicrotask(() => setIsOpen(true));
+  }, [autoOpen]);
 
   useEffect(() => {
     if (!isOpen || billingConfig) return;

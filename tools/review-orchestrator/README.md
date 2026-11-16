@@ -588,6 +588,17 @@ sender를 업데이트할 때는 ④의 `curl` 두 줄과 `chmod`를 다시 실�
 
 ## CI 자동 수정 (PR CI Auto-Fix)
 
+2026-11-16 운영자 요청: 같은 모델 호출에 최신 base와 PR의 diff, 다른 열린 PR의 실제 diff 스냅샷,
+이전 처리 결과를 제공합니다. 모델은 기능이 이미 충족됐는지 먼저 확인하고, 충돌을 푼 뒤에도 남는
+동작을 재평가합니다. 번역 파일이나 테스트만 바뀐다는 이유로 일괄 거절하지 않습니다.
+이미 충족됐으면 `RESULT: obsolete`로 기록하고 dispatch하지 않습니다. base와 완전히 같은 결과도
+게시하지 않습니다. 같은 head는 CI·conflict 두 경로에서 모두 멈추며 코드/설정 갱신으로 재개하지 않습니다.
+원본 PR은 operator가 검토해 닫으며 Agent는 닫기·라벨 변경 권한을 얻지 않습니다. 운영자의 기존 `ci:fix-again`
+명시 요청은 같은 head를 한 번 재검토할 수 있으며 코드/설정 변경만으로 자동 재개하지 않습니다. 새 head는 다시 판단합니다.
+Git만으로 깨끗이 병합되는 경우도 남는 변경이 있으면 기존 구독 모델로 필요성을 한 번 확인한 뒤에만
+기존 empty-resolution 경로를 게시합니다. pass당 모델 호출은 최대 한 번이며 기존 quota·시간·게시 상한을 유지합니다.
+새 상태를 받는 앱/상태 sender와 proposer의 호환성을 맞춘 뒤 운영 프로그램을 갱신해야 합니다.
+
 이 저장소의 열린 PR이면 base·브랜치·draft와 상관없이, 그 PR에서 돈 CI(pull_request run)가 실패하면 이 서버의
 구독 Claude CLI가 가장 작은 수정을 만들고 `.github/workflows/pr-ci-auto-fix.yml`이 검사한 뒤
 그 PR 브랜치에 `auto-fix(ci):` 커밋 하나로 push합니다(API key 과금 없이 구독 quota를 씁니다,
@@ -625,7 +636,7 @@ workflow는 그 커밋을 직접 merge한 뒤 다음을 검사하고 `auto-fix(c
 - 한쪽이 지운 파일, symlink, 지시 파일이 걸린 충돌은 풀지 않습니다(`no_change`, `outside_rules`).
 - head 하나에는 요청 하나만 보냅니다. 같은 head의 CI 수정이 진행 중이거나 보내졌으면 충돌 해결은 기다립니다(반대도 같습니다).
 - GitHub은 충돌로 보는데 git merge는 깨끗한 경우가 있습니다. 병합 베이스가 둘이면(쌓은 PR의 부모가 먼저 병합됐을 때, #3314)
-  베이스 하나로는 충돌하고 git이 합친 베이스로는 충돌하지 않습니다. 이때는 모델을 부르지 않고 빈 해결안을 보내며,
+  베이스 하나로는 충돌하고 git이 합친 베이스로는 충돌하지 않습니다. 이때도 모델이 남는 변경의 필요성을 확인한 뒤 빈 해결안을 보내며,
   workflow가 자기가 만든 merge를 그대로 커밋합니다. 그 뒤로는 베이스가 하나가 되어 GitHub도 충돌로 보지 않습니다.
   head에 base가 이미 들어 있어 merge할 것이 없으면 전처럼 `no_change`입니다.
 켜는 방법(둘 다 필요): 이 서버의 `/etc/pr-ci-auto-fix/read.env`에 `PR_CI_AUTO_FIX_CONFLICTS=on`,

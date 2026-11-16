@@ -106,6 +106,7 @@ export function ciFixState(fix: CiFixTry | undefined, headSha: string, nowMs: nu
     case "queued":
       return "sent";
     case "no_change":
+    case "obsolete":
       return "not_fixed";
     case "model_failed":
     case "model_timeout":

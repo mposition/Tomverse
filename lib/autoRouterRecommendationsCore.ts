@@ -75,6 +75,8 @@ export const REC_AGENT_LEASE_MS = 2 * 60 * 60 * 1000;
 export const RECOMMENDATION_FAILURE_REASONS = [
     "out_of_scope",
     "no_change",
+    "already_satisfied",
+    "covered_by_pr",
     "tests",
     "review_reject",
     "review_unknown",

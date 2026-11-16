@@ -145,7 +145,9 @@ const billingSuccessUrl = (
   language?: Language,
   accessType?: "founding-tester-pass"
 ) =>
-  `${origin}${PRODUCT_SURFACE_PATH.review}?billing=success&plan=${encodeURIComponent(
+  // A new subscriber lands on the main Chat page. `/chat` and `/review` mount
+  // the same client, so the success notice reads these parameters on either.
+  `${origin}${PRODUCT_SURFACE_PATH.chat}?billing=success&plan=${encodeURIComponent(
     planId
   )}&interval=${encodeURIComponent(billingInterval)}${
     language ? `&lang=${encodeURIComponent(language)}` : ""
