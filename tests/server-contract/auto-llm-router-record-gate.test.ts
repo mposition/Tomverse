@@ -769,6 +769,46 @@ test("a context refusal precedes the live Router hold and provider; no eligible 
   assert.equal(routerRequests.length, callsBefore);
 });
 
+test("the parallel precheck switch overlaps the guidance read and still refuses before the hold and provider", async t => {
+  const oldGuidance = readGuidance;
+  const oldFlag = process.env.CHAT_ROUTER_PARALLEL_CONTEXT_PRECHECK_ENABLED;
+  t.after(() => {
+    readGuidance = oldGuidance;
+    if (oldFlag === undefined) delete process.env.CHAT_ROUTER_PARALLEL_CONTEXT_PRECHECK_ENABLED;
+    else process.env.CHAT_ROUTER_PARALLEL_CONTEXT_PRECHECK_ENABLED = oldFlag;
+  });
+  const order: string[] = [];
+  readGuidance = async () => {
+    order.push("guidance:start");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    order.push("guidance:end");
+    return { guidance: "", cycleId: null };
+  };
+  const verify = (ok: boolean) => async () => { order.push("precheck"); return ok; };
+
+  delete process.env.CHAT_ROUTER_PARALLEL_CONTEXT_PRECHECK_ENABLED;
+  await pick(undefined, false, { verifyPreparedContext: verify(true) });
+  assert.deepEqual(order, ["guidance:start", "guidance:end", "precheck"], "off: the check waits for the reads");
+
+  process.env.CHAT_ROUTER_PARALLEL_CONTEXT_PRECHECK_ENABLED = "true";
+  order.length = 0;
+  const holdsBefore = holds.length;
+  const callsBefore = routerRequests.length;
+  assert.equal(await pick(undefined, false, { verifyPreparedContext: verify(false) }), null);
+  assert.deepEqual(order, ["precheck", "guidance:start", "guidance:end"], "on: the check starts beside the reads");
+  assert.equal(holds.length, holdsBefore);
+  assert.equal(routerRequests.length, callsBefore);
+
+  order.length = 0;
+  assert.ok(await pick(undefined, false, { verifyPreparedContext: verify(true) }));
+  assert.equal(order.filter(step => step === "precheck").length, 1, "one check per call");
+  assert.equal(routerRequests.length, callsBefore + 1);
+
+  let readCount = 0;
+  await pick(undefined, false, { eligibleModelIds: ["deepseek-v4-flash"], verifyPreparedContext: async () => { readCount++; return false; } });
+  assert.equal(readCount, 0, "no eligible choice still skips the check");
+});
+
 test("fresh location prices the authored 8k and reuses its dated search decision across UTC midnight", async t => {
   const original = generateRouterResult;
   const text = "a".repeat(7_992) + "near me?overflow";

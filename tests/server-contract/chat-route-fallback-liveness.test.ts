@@ -1908,6 +1908,12 @@ const ask = async (
   if (abortFallbackAt !== "none") {
     await until("the aborted fallback to settle", () => ledger.settlements.length > 0);
   }
+  if (behaviour === "silent") {
+    // A first-token deadline closes the response before asynchronous cleanup.
+    // Wait for its final lease release before inspecting settlement or resetting
+    // the shared fixtures for the next test.
+    await until("the stalled fallback cleanup", () => ledger.releases.length > 0);
+  }
   return { response, ...read };
 };
 
