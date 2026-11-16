@@ -409,7 +409,7 @@ test("a promotion checkout sends discounts and never sends allow_promotion_codes
   const params = lastSessionParams();
   assert.match(
     String(params.success_url),
-    /^http:\/\/127\.0\.0\.1:3100\/review\?billing=success&/
+    /^http:\/\/127\.0\.0\.1:3100\/chat\?billing=success&/
   );
   assert.deepEqual(params.discounts, [{ promotion_code: "promo_live" }]);
   assert.equal(
