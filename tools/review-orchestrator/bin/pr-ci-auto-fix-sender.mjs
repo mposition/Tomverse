@@ -190,6 +190,15 @@ export function readSent(path, now) {
   return sent;
 }
 
+/** The POSTs GitHub refused in the last hour, as their times; anything else is dropped. */
+export function readRefusedPosts(path, now) {
+  let value = null;
+  try { value = parseOrNull(readFileSync(path, "utf8")); } catch { /* none yet */ }
+  return Array.isArray(value)
+    ? value.filter((at) => Number.isFinite(at) && at <= now && now - at < 60 * 60_000)
+    : [];
+}
+
 function writeSent(path, sent) {
   const tmp = `${path}.${process.pid}.tmp`;
   writeFileSync(tmp, `${JSON.stringify(sent)}\n`);
@@ -213,11 +222,12 @@ export function createDispatchSender({
   const noted = new Set();
   // Requests GitHub refused: how often, and not before when. In memory; a restart sends them at once.
   const refused = new Map();
-  // When each POST GitHub refused was made. A refused request leaves the sent
-  // ledger so it is sent again, but its POST still counts toward the hourly
-  // cap (review r-20261116-191958-8b665b): a burst of 4xx (a bad token, 429)
-  // never sends past MAX_DISPATCHES_PER_HOUR.
-  let refusedPosts = [];
+  // When each POST GitHub refused was made, kept beside the sent ledger so a
+  // restart does not forget them. A refused request leaves the sent ledger so
+  // it is sent again, but its POST still counts toward the hourly cap (reviews
+  // r-20261116-191958-8b665b, r-20261116-193845-9932ef): a burst of 4xx (a bad
+  // token, 429), even across restarts, never sends past MAX_DISPATCHES_PER_HOUR.
+  const refusedPath = join(settings.stateDir, "refused-posts.json");
   return {
     async scanOnce() {
       let names;
@@ -229,6 +239,7 @@ export function createDispatchSender({
       }
       const at = now();
       const sent = readSent(sentPath, at);
+      const refusedPosts = readRefusedPosts(refusedPath, at);
       const requests = [];
       for (const name of names) {
         if (!REQUEST_NAME.test(name)) continue;
@@ -257,7 +268,6 @@ export function createDispatchSender({
       }
       requests.sort((a, b) => a.createdAt - b.createdAt);
       for (const request of requests) {
-        refusedPosts = refusedPosts.filter((time) => at - time < 60 * 60_000);
         const lastHour = Object.values(sent).filter((time) => at - time < 60 * 60_000).length +
           refusedPosts.length;
         if (lastHour >= MAX_DISPATCHES_PER_HOUR) {
@@ -279,7 +289,10 @@ export function createDispatchSender({
           const failures = (refused.get(requestKey(request))?.failures ?? 0) + 1;
           const wait = sendRetryDelayMs(failures);
           refused.set(requestKey(request), { failures, notBefore: now() + wait });
+          // Recorded as refused before it leaves the ledger: a stop in between
+          // counts it twice at most, never not at all.
           refusedPosts.push(sent[requestKey(request)]);
+          writeSent(refusedPath, refusedPosts);
           delete sent[requestKey(request)];
           writeSent(sentPath, sent);
           log(`${label}: dispatch failed: ${result.outcome}; sending again in ${Math.round(wait / 1000)}s`);

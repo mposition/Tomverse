@@ -593,6 +593,20 @@ test("a burst of refused dispatches still stops at MAX_DISPATCHES_PER_HOUR", asy
     assert.equal(posts.length, MAX_DISPATCHES_PER_HOUR);
     assert.match(h.lines.at(-1), /rate cap/);
     assert.deepEqual(h.sent(), {}, "every refused request is still to be sent again");
+    // A restart keeps the count: a new sender on the same state sends nothing more this hour.
+    const restarted = createDispatchSender({
+      settings: { token: TOKEN, repo: "o/r", outbox: "/outbox", stateDir: h.stateDir },
+      log: () => {},
+      now: () => now + 60_000 * 31,
+      listOutbox: () => Object.keys(files),
+      readRequest: (path) => files[path.replace(/^.*[\\/]/, "")],
+      fetchImpl: async (url, init) => {
+        posts.push(JSON.parse(init.body).inputs.head_sha);
+        return { status: 401, body: null };
+      },
+    });
+    await restarted.scanOnce();
+    assert.equal(posts.length, MAX_DISPATCHES_PER_HOUR, "the restarted sender still waits for the hour");
   } finally {
     rmSync(h.stateDir, { recursive: true, force: true });
   }

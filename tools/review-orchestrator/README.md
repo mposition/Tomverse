@@ -849,7 +849,7 @@ Variables에 `PR_AUTO_FIX_ENABLED` = `true`. 이것을 켜기 전에는 sender�
 **끄기**: 변수를 지우면 바로 멈춥니다. 서버 쪽은
 `sudo systemctl disable --now pr-ci-auto-fix.timer pr-ci-auto-fix-sender`입니다. 시도 기록은
 `<stateDir>/ci-fix/ledger.json`(14일), sender가 보낸 기록은
-`/var/lib/private/pr-ci-auto-fix-sender/sent.json`에 있습니다.
+`/var/lib/private/pr-ci-auto-fix-sender/sent.json`에, GitHub이 거절한 전송의 시각(시간당 60건 상한에 함께 셈)은 같은 디렉터리의 `refused-posts.json`에 있습니다.
 
 ## 알려진 한계
 
