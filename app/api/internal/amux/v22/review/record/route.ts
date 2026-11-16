@@ -9,6 +9,12 @@ import { AMUX_V22_EXECUTION_ROUTE_BUDGET_MS,
 import { recordAmuxV52Review } from "@/lib/amux/execution";
 import { AMUX_V22_PATCH_ENVELOPE_MAX_BYTES } from "@/lib/amux/v22PatchLimit";
 import { AMUX_V52_FINDINGS_SUMMARY_INPUT_MAX_CHARS } from "@/lib/amux/v52ReviewFindingsCore";
+
+/** The body holds the largest summary the schema takes even fully JSON-escaped
+ * (six bytes a character) and never less than a patch envelope (review
+ * r-20261116-212113-1a6291). */
+const REVIEW_RECORD_BODY_MAX_BYTES = Math.max(AMUX_V22_PATCH_ENVELOPE_MAX_BYTES,
+  AMUX_V52_FINDINGS_SUMMARY_INPUT_MAX_CHARS * 6 + 1024 * 1024);
 import { prepareAmuxV52ReviewFindings } from "@/lib/amux/v52ReviewFindingsStore";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 import { amuxInternalErrorResponse, amuxJsonNoStore,
@@ -77,7 +83,7 @@ export async function POST(request: Request) {
     return amuxJsonNoStore({ error: "Invalid content type." }, 415);
   return withAmuxRouteBudget(async () => {
     try {
-      const body = await readLimitedJson(request, AMUX_V22_PATCH_ENVELOPE_MAX_BYTES, requestSchema);
+      const body = await readLimitedJson(request, REVIEW_RECORD_BODY_MAX_BYTES, requestSchema);
       // A reject's findings are sealed under the attempt's own key, made here
       // before the record's transaction; without them the verdict is recorded.
       const findings = await prepareAmuxV52ReviewFindings({

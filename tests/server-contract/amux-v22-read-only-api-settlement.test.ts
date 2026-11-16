@@ -406,13 +406,13 @@ test("other Tasks keep the global settlement budget of thirty", async () => {
     const result = await (await execution).settleAmuxV22TaskExecution({
       attemptId: world.attemptId, worker, instanceId, generation: 1,
       taskRevision: 5, outcome: "failed", invocationIds: [world.attemptId],
-    })();
+    });
     assert.equal(result.settled, true);
     assert.equal(world.taskUpdateData?.status, expectedStatus);
     assert.equal(world.attemptUpdateData?.toStatus, expectedStatus);
     assert.equal(world.attemptUpdateData?.reason,
       expectedStatus === "blocked" ? "attempt_budget_exhausted" : "reported_result");
-  });
+  })();
 });
 
 test("legacy settlement does not acquire the v52 assignment-audit gate", async () => {
