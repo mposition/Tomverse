@@ -9,7 +9,7 @@ import test from "node:test";
 
 import { AMUX_V19_DIAGNOSTIC_DETAIL_ENV, AMUX_V19_EXCLUDED_PATH_DIGEST_KEY_ID,
   AMUX_V19_MAX_SESSION_CYCLE_ENV, amuxV19SessionAnalysisFailure,
-  runAmuxV19MaxSessionCycleOnce, writeAmuxV19DiagnosticDetail } from
+  AMUX_V19_ABSENT_CLAIM_FINAL_MS, runAmuxV19MaxSessionCycleOnce, writeAmuxV19DiagnosticDetail } from
   "../lib/amux/ideaLocalMaxSessionCycle.mjs";
 import { observeAmuxTrackedCheckoutChild } from
   "../lib/amux/ideaTrackedCheckoutProcessResult.mjs";
@@ -53,7 +53,7 @@ async function withSwitches(fn) {
   }
 }
 
-function steps(overrides = {}) {
+function steps(overrides = {}, pendingMarker = null) {
   const calls = [];
   const reports = [];
   let released = 0;
@@ -93,7 +93,8 @@ function steps(overrides = {}) {
         "ideaId", "invocationOrdinal", "requestId", "reservationId"]);
       return { kind: "recorded", recovered: false, retryWrite: false,
         planState: "plan_ready", registrationState: "write_disabled" }; },
-    marker: () => ({ release: async () => { released += 1; } }),
+    marker: () => ({ read: async () => pendingMarker,
+      release: async () => { released += 1; } }),
   };
   return { steps: { ...base, ...overrides }, calls, reports,
     released: () => released };
@@ -675,4 +676,48 @@ test("a marker an earlier tick left is reconciled before any new claim", () =>
       stage: "recover", reason: "unnamed_marker", haltReleased: true });
     assert.deepEqual(legacy.reports, []);
     assert.equal(legacy.released(), 1);
+  }));
+
+test("a pending marker is reconciled before the queue is read, even with no other candidate", () =>
+  withSwitches(async () => {
+    const named = { claimId: identity.claimId, requestId: identity.requestId,
+      reservationId: identity.reservationId, ideaId: identity.ideaId,
+      invocationOrdinal: identity.invocationOrdinal };
+    // The queue would answer idle: the in-flight claim is not in it.
+    const fake = steps({ claim: async () => { throw new Error("the queue must not be read"); } },
+      { identity: named });
+    const result = await runAmuxV19MaxSessionCycleOnce({ origin,
+      stateDirectory: "/state" }, fake.steps);
+    assert.deepEqual(result, { kind: "recovered", stage: "recover",
+      claimId: identity.claimId, unknownReport: "recorded", haltReleased: true });
+    assert.deepEqual(fake.calls, ["reportUnknown"]);
+    assert.equal(fake.released(), 1);
+  }));
+
+test("a marker whose claim never reached the app is removed, not asked about forever", () =>
+  withSwitches(async () => {
+    const named = { claimId: identity.claimId, requestId: identity.requestId,
+      reservationId: identity.reservationId, ideaId: identity.ideaId,
+      invocationOrdinal: identity.invocationOrdinal };
+    // As the real report answers it: an unconfirmed report, receipt absent.
+    const old = Date.now() - AMUX_V19_ABSENT_CLAIM_FINAL_MS - 1;
+    const absent = steps({ reportUnknown: async () => ({ kind: "outcome_unknown",
+      receiptStatus: "absent", retryWrite: false, reason: "readback_absent" }) },
+      { identity: named, writtenAtMs: old });
+    const result = await runAmuxV19MaxSessionCycleOnce({ origin,
+      stateDirectory: "/state" }, absent.steps);
+    assert.equal(result.kind, "recovered");
+    assert.equal(result.neverClaimed, true);
+    assert.equal(absent.released(), 1);
+    // A partial receipt is not proof of absence, and an absent receipt inside
+    // the window may still commit: the marker stays in both.
+    for (const [receiptStatus, writtenAtMs] of [["partial", old], ["absent", Date.now()]]) {
+      const held = steps({ reportUnknown: async () => ({ kind: "outcome_unknown",
+        receiptStatus, retryWrite: false, reason: "readback_absent" }) },
+        { identity: named, writtenAtMs });
+      const kept = await runAmuxV19MaxSessionCycleOnce({ origin,
+        stateDirectory: "/state" }, held.steps);
+      assert.equal(kept.kind, "outcome_unknown", receiptStatus);
+      assert.equal(held.released(), 0, receiptStatus);
+    }
   }));

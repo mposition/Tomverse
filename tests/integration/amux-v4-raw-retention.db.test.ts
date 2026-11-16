@@ -312,7 +312,8 @@ test("owner hold pauses the original purge clock and release makes it due again"
   const renewedId = randomUUID();
   await prisma.$transaction((tx) => commitAmuxIdeaRetentionHold(tx,
     { session: ownerSession, request: ownerRequest, id: renewedId,
-      ideaId: id, reasonCode: "legal_request", days: 2,
+      // Past the former 90-day bound: the owner's hold has none of ours (2026-11-16).
+      ideaId: id, reasonCode: "legal_request", days: 400,
       expectedRemainingBodies: 1, expectedAlreadyPurgedBodies: 0,
       replacesHoldId: holdId }));
   const prior = await prisma.amuxIdeaRetentionHold.findUniqueOrThrow({

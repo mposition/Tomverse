@@ -33,7 +33,10 @@ test("Linux marker records the claim, is read back by a new instance and removed
       assert.equal(await first.read(), null);
       assert.equal(await first.claim(identity), true);
       assert.equal(await localAmuxSessionClaimMarker(directory).claim(identity), false);
-      assert.deepEqual(await localAmuxSessionClaimMarker(directory).read(), { identity });
+      const pending = await localAmuxSessionClaimMarker(directory).read();
+      assert.deepEqual(pending.identity, identity);
+      // When it was written, for the absent-claim window of the cycle.
+      assert.ok(Math.abs(pending.writtenAtMs - Date.now()) < 60_000);
       const file = join(directory, "analysis-outcome-unknown.halt");
       assert.equal((await stat(file)).mode & 0o777, 0o600);
       assert.deepEqual(JSON.parse(await readFile(file, "utf8")),
@@ -53,7 +56,7 @@ test("Linux marker from before 2026-11-16 and the legacy marker name no claim an
       for (const name of ["analysis-outcome-unknown.halt", "outcome-unknown.halt"]) {
         await writeFile(join(directory, name), "analysis_outcome_unverified\n",
           { mode: 0o600 });
-        assert.deepEqual(await marker.read(), { identity: null }, name);
+        assert.equal((await marker.read()).identity, null, name);
         await marker.release();
         assert.equal(await marker.read(), null, name);
       }

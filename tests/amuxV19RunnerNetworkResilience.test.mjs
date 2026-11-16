@@ -343,7 +343,7 @@ test("every stop prints its fixed reason on the cycle status line", async () => 
   const run = (steps) => runAmuxV19MaxSessionCycleOnce({ origin,
     stateDirectory: "/state" }, { claim: claimed,
     readIdea: async () => ({ kind: "unavailable" }),
-    marker: () => ({ release: async () => {} }),
+    marker: () => ({ read: async () => null, release: async () => {} }),
     // Every stop after the claim reports it unknown (operator, 2026-11-16).
     reportUnknown: async () => ({ kind: "recorded", status: "owner_consumed",
       settledMicroUsd: "0", recovered: false, retryWrite: false }), ...steps });

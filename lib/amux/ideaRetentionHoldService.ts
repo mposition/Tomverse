@@ -97,7 +97,7 @@ export async function commitAmuxIdeaRetentionHold(tx: Prisma.TransactionClient,
       (input.replacesHoldId !== undefined &&
         (!UUID.test(input.replacesHoldId) || input.replacesHoldId === input.id)) ||
       !REASONS.includes(input.reasonCode) ||
-      !Number.isSafeInteger(input.days) || input.days < 1 || input.days > 90 ||
+      !Number.isSafeInteger(input.days) || input.days < 1 || input.days > 36_500 ||
       !Number.isSafeInteger(input.expectedRemainingBodies) ||
       input.expectedRemainingBodies < 1 ||
       !Number.isSafeInteger(input.expectedAlreadyPurgedBodies) ||
