@@ -37,6 +37,10 @@ test("expired and corrupt claims need lookup rather than being reopened", () => 
 });
 
 test("the result contract admits one repository and closed failure codes only", () => {
+  for (const reason of ["already_satisfied", "covered_by_pr"]) {
+    assert.equal(dailyProductResultSchema.safeParse({ ...result, reason }).success, true);
+    assert.equal(parseDailyProductState(JSON.stringify({ ...state, status: "failed", reason })).reason, reason);
+  }
   assert.equal(dailyProductResultSchema.safeParse(result).success, true);
   assert.equal(dailyProductResultSchema.safeParse({ ...result, reason: "arbitrary private text" }).success, false);
   assert.equal(dailyProductResultSchema.safeParse({ id: result.id, claimId: state.claimId, outcome: "pr_opened", prUrl: "https://attacker.test/pull/1" }).success, false);

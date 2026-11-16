@@ -15,7 +15,7 @@ export const dailyProductDaySchema = z.object({
   count: z.number().int().min(0).max(DAILY_PRODUCT_AGENT_TASK_CAP),
 }).strict();
 /** These outcomes are known to precede any push or PR request. */
-const RETRYABLE_FAILURES = ["out_of_scope", "no_change", "tests", "review_reject",
+const RETRYABLE_FAILURES = ["out_of_scope", "no_change", "already_satisfied", "covered_by_pr", "tests", "review_reject",
   "agent_error", "timeout", "lease_expired", "setup_failed", "runner_error", "rate_limited"] as const;
 export const DAILY_PRODUCT_SOURCES = ["research", "routing", "memory"] as const;
 export type DailyProductSource = (typeof DAILY_PRODUCT_SOURCES)[number];

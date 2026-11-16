@@ -58,6 +58,7 @@ export const CI_FIX_OUTCOMES = [
   "started",
   "queued",
   "no_change",
+  "obsolete",
   "model_failed",
   "model_timeout",
   "patch_refused",
@@ -69,7 +70,7 @@ export const CI_FIX_OUTCOMES = [
   "superseded",
   "not_published",
 ] as const;
-export const CI_FIX_REASONS = ["fixed", "transient", "outside_rules", "not_found"] as const;
+export const CI_FIX_REASONS = ["fixed", "transient", "outside_rules", "not_found", "obsolete"] as const;
 
 /** The CI auto-fix's latest tries (tools/review-orchestrator/lib/ci-fix.mjs ciFixReport), newest first. */
 const ciFixSchema = z
