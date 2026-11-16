@@ -1,8 +1,8 @@
 /**
  * The merge lane service's port to the app (docs/policy/qa-release-agent.md
- * version 4, section 3): the state read and the three calls that write --
- * instruction, consume, report -- each to its one fixed URL, with the lane's
- * secret and the operator control revision.
+ * version 4, section 3): the state read and the calls that write --
+ * instruction, consume, report, and the lane's own latch release -- each to
+ * its one fixed URL, with the lane's secret and the operator control revision.
  *
  * Only an answer the route can give is an answer: 200 with the expected body,
  * or 409 with a refusal. Anything else -- a 5xx, `deadline_passed`, a body of
@@ -125,6 +125,12 @@ export function createQaReleaseMergeLaneAppPorts(input: {
       const answer = await call("report", { attemptId, report });
       if (answer.status === 200 && answer.body.recorded === true) return { recorded: true };
       if (answer.status === 409 && answer.body.recorded === false) return { recorded: false, reason: reason(answer.body) };
+      throw new Error("app_shape");
+    },
+    async release() {
+      const answer = await call("release", {});
+      if (answer.status === 200 && answer.body.released === true) return { released: true };
+      if (answer.status === 409 && answer.body.released === false) return { released: false, reason: reason(answer.body) };
       throw new Error("app_shape");
     },
   };

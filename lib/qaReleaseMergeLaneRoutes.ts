@@ -7,6 +7,7 @@ import {
   consumeQaReleaseMergeInstruction,
   issueQaReleaseMergeInstruction,
   readQaReleaseMergeLaneState,
+  releaseQaReleaseMergeLaneLatchBySystem,
   reportQaReleaseMergeResult,
 } from "@/lib/qaReleaseMergeLaneStore";
 import { amuxDmT2MergeEnabled } from "@/lib/amux/dmT2MergeCore";
@@ -16,9 +17,9 @@ import { qaReleaseDeployObservation } from "@/lib/qaReleaseMergeLaneReportCore";
 import { QA_RELEASE_CONTROL_REVISION_HEADER, isQaReleaseRouteSecret } from "@/lib/qaReleaseRouteAuthCore";
 
 /**
- * The merge lane service's three app calls (docs/policy/qa-release-agent.md
- * version 4, sections 3, 6 and 10): instruction issue, instruction consume and
- * result report. Each authenticates the merge lane's own secret, reads the
+ * The merge lane service's app calls that write (docs/policy/qa-release-agent.md
+ * version 4, sections 3, 6 and 10): instruction issue, instruction consume,
+ * result report, and -- owner decision 2026-11-16 -- its own latch release. Each authenticates the merge lane's own secret, reads the
  * revision number the service carries, checks a strict body and hands both to
  * the single writer, which judges the revision inside its transaction -- issue
  * and consume refuse a mismatch, a report is kept and latches (section 6).
@@ -157,6 +158,28 @@ export async function handleQaReleaseMergeReport(request: Request, env: Env = pr
       budget: { startedAt, budgetMs: QA_RELEASE_MERGE_LANE_CALL_BUDGET_MS, clock },
     });
     return result.recorded ? answer(200, { ...result }) : answer(409, { recorded: false, reason: result.reason });
+  });
+}
+
+const releaseBody = z.object({}).strict();
+
+/**
+ * The lane releases its own latch once it read again what latched it and dev
+ * deploys nothing broken (owner decision 2026-11-16). The store and the
+ * migration judge whether it may; the revision must be the newest, as for an issue.
+ */
+export async function handleQaReleaseMergeLaneRelease(request: Request, env: Env = process.env, clock: () => number = Date.now) {
+  const startedAt = clock();
+  const auth = authenticate(request, env);
+  if (!auth) return answer(401, { error: "unauthorized" });
+  const parsed = releaseBody.safeParse(await readBody(request));
+  if (!parsed.success) return answer(400, { error: "invalid_request" });
+  return guarded(async () => {
+    const result = await releaseQaReleaseMergeLaneLatchBySystem({
+      callerRevision: auth.callerRevision,
+      budget: { startedAt, budgetMs: QA_RELEASE_MERGE_LANE_CALL_BUDGET_MS, clock },
+    });
+    return result.released ? answer(200, { ...result }) : answer(409, { released: false, reason: result.reason });
   });
 }
 
