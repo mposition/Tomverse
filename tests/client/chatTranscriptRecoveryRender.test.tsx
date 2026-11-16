@@ -110,3 +110,20 @@ test("Chat error cards offer the model picker beside question restoration; Revie
   assert.doesNotMatch(withPicker(false, () => {}), /chat-error-choose-model/);
   assert.doesNotMatch(render([question, failed]), /chat-error-choose-model/);
 });
+
+test("Chat error cards show a single model picker when both picker handlers are wired", () => {
+  const failed: Message = { id: "a", role: "assistant", status: "error", content: "",
+    recoveryNotice: "Connection interrupted" };
+  const html = renderToStaticMarkup(
+    <SessionProvider session={null}>
+      <LanguageProvider initialLang="en">
+        <ChatMessageList messages={[question, failed]} currentChatId="c"
+          onRestoreQuestion={() => {}} onRetryQuestion={() => {}}
+          onChooseAnotherModel={() => {}} onRequestCloseModel={() => {}} />
+      </LanguageProvider>
+    </SessionProvider>
+  );
+  assert.equal((html.match(/data-testid="chat-error-choose-model"/g) ?? []).length, 1);
+  assert.equal((html.match(/Choose another model</g) ?? []).length, 1);
+  assert.match(html, /data-testid="retry-chat-question"/);
+});
