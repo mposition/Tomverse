@@ -763,7 +763,7 @@ grant를 남기는 요청의 step-up 창은 15분이다. 그 15분은 grant의 7
 
 출고 스위치는 둘이다. 환경 변수 `TOMVERSE_AMUX_BOARD_AUTO_PROMOTE`가 정확히 `enabled`인 것과 코드 래치가 true인 것이다. 버전 8이 출고하는 코드 래치는 false다. 이 버전은 그 환경 변수를 설정하지 않는다. 래치가 꺼져 있거나 환경 값이 `enabled`가 아니면 grant 쓰기와 자동 소비 모두 트랜잭션을 열기 전에 `apply_disabled`로 거절한다. HTTP route는 래치를 인자로 받지 않는다.
 
-추가 정지는 저장된 halt다. `clearedAt`이 null인 halt가 있으면 카드를 쓰기 전에 `auto_halted`로 거절한다. halt를 여는 조건은 둘 중 하나다. 저장된 중대 위반이 1건 이상이거나, 자동 경로의 `outcome_unknown`이 DB 시계로부터 뒤로 15분 안에 2건 이상인 것이다. 15분은 `15 * 60`초이고 경계는 포함한다. 결과 불명 1건은 halt를 열지 않는다. 간격이 15분을 넘는 2건은 halt를 열지 않는다.
+추가 정지는 저장된 halt다. `clearedAt`이 null인 halt가 있으면 카드를 쓰기 전에 `auto_halted`로 거절한다. halt를 여는 조건은 저장된 중대 위반이 1건 이상인 것 하나다. 결과 불명은 halt를 열지 않는다(운영자 결정 2026-11-16: 15분 안 2건이 열었다). 결과 불명은 기록되고 그 카드만 멈추며, 이미 열려 있던 `outcome_unknown_burst` halt는 다음 승격 tick이 시스템 감사 하나와 함께 닫는다. 졸업 조건(사람 결정 20건/14일)과 자동 경로의 전역·worker당 동시 수 상한(3·1)도 없앴다. 측정값은 계속 보이고, 비용 원장(1회·24시간·30일)은 그대로다.
 
 중대 위반 코드는 `cost_exceeded`, `worker_cap_exceeded`, `global_wip_exceeded`, `unapproved_todo`, `lifecycle_write`뿐이다. `unapproved_todo`는 grant 소비 없이 `todo`가 된 자동 경로 카드다. `lifecycle_write`는 이 경로가 attempt, delivery, route decision을 만든 것이다. 졸업 미달, 용량 미설정, 용량 가득 참, grant 없음, 사전 비용 거절은 중대 위반이 아니다. 사람의 재개 writer는 이 버전에 없다.
 
@@ -781,7 +781,7 @@ grant를 남기는 요청의 step-up 창은 15분이다. 그 15분은 grant의 7
 6. 새 자격증명은 없다. 로그와 감사에 brief, 제목, source key를 넣지 않는다.
 7. 위 네 테이블만 추가한다. 용량 행의 insert와 update writer는 없다. 추천 분자는 바꾸지 않는다.
 8. 비용 namespace는 자동 경로의 USD cent다. 상한은 500, 1,500, 10,000이다. 사용자 크레딧과 섞지 않는다. 이 버전은 비용 행을 쓰지 않는다.
-9. 스위치는 `TOMVERSE_AMUX_BOARD_AUTO_PROMOTE`가 정확히 `enabled`인 것과 코드 래치다. 출고 래치는 false다. 중대 위반 1건 또는 15분 안 결과 불명 2건은 halt다. 환경 값의 해제는 사람의 조작이고, 래치를 다시 켜는 것과 halt를 닫는 것은 별도 버전이다.
+9. 스위치는 `TOMVERSE_AMUX_BOARD_AUTO_PROMOTE`가 정확히 `enabled`인 것과 코드 래치다. 출고 래치는 false다. 중대 위반 1건은 halt다(결과 불명은 halt가 아니다: 2026-11-16). 환경 값의 해제는 사람의 조작이고, 래치를 다시 켜는 것과 halt를 닫는 것은 별도 버전이다.
 10. 멱등 키는 consumption id다. `outcome_unknown` 뒤에는 read-back만 한다.
 11. 외부 worker와 모델이 없으므로 S0 실측과 DPA 행은 없다.
 12. 위 감사 action의 actor는 사람이다.
@@ -3369,7 +3369,7 @@ v22 실행은 CLI 한 번이라 실행 중에 답을 기다릴 수 없다. 그�
 
 운영자 지시: "내부 개발용 Flow입니다. 제한을 줄 이유가 없습니다. 로컬 CLI에 명령했을 때 제가 받는 답처럼 편리한 Flow였으면 합니다." 이 흐름이 기본이다. `TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW=disabled`이면 앱·sidecar·bridge가 각각 이전 동작으로 돌아간다(코드: `lib/amux/v22LocalCliFlowCore.ts`). 스위치는 Railway와 box의 sidecar·bridge unit에 같은 값으로 둔다.
 
-- **시간 상한 없음.** sidecar는 10분 마감(`AMUX_V22_SIDECAR_DEADLINE_MS`)도 다른 고정 상한도 두지 않는다. 실행은 CLI가 끝나거나, 운영자가 멈추거나(sidecar `stop` op, unit의 SIGTERM: `operator_stop`), 살아 있다는 신호가 30분 동안 하나도 없을 때(`stalled`)만 끝난다. 살아 있다는 신호는 새 출력, checkout 변화, CLI 프로세스 트리(자식·같은 프로세스 그룹 포함)의 CPU 시간 증가(리눅스 `/proc/<pid>/stat`) 셋이다. 출력 없이 CPU를 쓰며 오래 도는 테스트나 빌드는 멈추지 않는다. `/proc`을 읽을 수 없으면 앞의 두 신호로 판정한다. 어떤 이유로 끝나든 checkout 변경은 버리지 않는다. 그 자리에 두고, 임시 index로 작업 트리 전체(크기·새 파일·바이너리 상관없이, ignore된 파일 제외)를 commit 객체로 떠서 worker clone의 `refs/amux-v22-preserved/<attempt>`에 묶는다(`reset --hard`·`clean`으로 지워지지 않는다). 그 diff는 sidecar state 디렉터리의 `<attempt>.preserved.patch`(0600)에 쓴다. 다음 attempt는 base 동기화로 남은 변경을 정리하기 전에 같은 방식으로 `leftover-<attempt>`에 보존하고, 보존하지 못하면 checkout을 건드리지 않고 시작하지 않는다(`leftover_preserve_unavailable`). 결과 분류(`outcome_unknown`과 그 정산)는 바꾸지 않는다. execution lease는 생존 표시라 heartbeat마다 갱신되고, 이 흐름에서는 180초다.
+- **시간 상한 없음.** sidecar는 10분 마감(`AMUX_V22_SIDECAR_DEADLINE_MS`)도 다른 고정 상한도 두지 않는다. 실행은 CLI가 끝나거나, 운영자가 멈추거나(sidecar `stop` op, unit의 SIGTERM: `operator_stop`), 살아 있다는 신호가 3시간 동안 하나도 없을 때(`stalled`)만 끝난다(30분이던 창을 넓혔다: 운영자 결정 2026-11-16). checkout을 다루는 git 한 단계의 대기도 하나의 값(2시간)이고, 멈춘 lock이나 죽은 파일 시스템을 위한 장치일 뿐 작업 상한이 아니다. 살아 있다는 신호는 새 출력, checkout 변화, CLI 프로세스 트리(자식·같은 프로세스 그룹 포함)의 CPU 시간 증가(리눅스 `/proc/<pid>/stat`) 셋이다. 출력 없이 CPU를 쓰며 오래 도는 테스트나 빌드는 멈추지 않는다. `/proc`을 읽을 수 없으면 앞의 두 신호로 판정한다. 어떤 이유로 끝나든 checkout 변경은 버리지 않는다. 그 자리에 두고, 임시 index로 작업 트리 전체(크기·새 파일·바이너리 상관없이, ignore된 파일 제외)를 commit 객체로 떠서 worker clone의 `refs/amux-v22-preserved/<attempt>`에 묶는다(`reset --hard`·`clean`으로 지워지지 않는다). 그 diff는 sidecar state 디렉터리의 `<attempt>.preserved.patch`(0600)에 쓴다. 다음 attempt는 base 동기화로 남은 변경을 정리하기 전에 같은 방식으로 `leftover-<attempt>`에 보존하고, 보존하지 못하면 checkout을 건드리지 않고 시작하지 않는다(`leftover_preserve_unavailable`). 결과 분류(`outcome_unknown`과 그 정산)는 바꾸지 않는다. execution lease는 생존 표시라 heartbeat마다 갱신되고, 이 흐름에서는 180초다.
 - **크기 상한 없음.** 프롬프트 32 KiB, Claude stdout 256 KiB, 보고 64 KiB, 결론 형식 한도(findings 4,000자, handoff 12개 등), 이전 결론 8 KiB·의존 8개를 두지 않는다. 남는 것은 bridge를 건너는 메시지 하나의 메모리 backstop(32 MiB)뿐이고, 그보다 긴 보고는 처음과 끝(결론과 질문이 있는 마지막 줄)을 남기고 가운데를 줄인다. 결론은 관대하게 읽는다(모르는 키 무시, 여러 줄 JSON, 잘못된 항목만 버림, verdict만 필수).
 - **context 파일.** brief, 운영자·DM 답, 이전 patch, 이전 결론, 검토 지적(`review-findings.md`)은 worker checkout의 `.amux/context/`로 간다. delivery는 이 파일들을 프롬프트 끝의 경계 토큰 블록에 싣고(bridge는 프롬프트를 그대로 넘긴다), sidecar가 블록을 꺼내 파일로 쓴 뒤 프롬프트는 그 파일을 가리킨다. 디렉터리는 checkout의 `.git/info/exclude`에 들어가 patch와 변경 경로 목록에 들어가지 않는다. implement의 이전 patch는 CLI 시작 전에 `git apply --3way`로 적용해 둔다.
 - **transcript.** Claude는 `--output-format stream-json --verbose`로 돌고, 모든 CLI의 stdout 전체가 sidecar state 디렉터리의 `<attempt>.transcript.jsonl`(0600, 30일 뒤 정리)에 남는다. journal에는 들어가지 않는다. 앱 저장과 Admin 보기는 아직 없다.
@@ -3390,7 +3390,7 @@ sidecar는 실행 종료 기록을 메모리에도 들고 있었고, 점검은 �
 운영자 지시: "이 시나리오만 맞게 고치지 말고 이런 류의 시나리오를 다 커버하는 포괄적인 솔루션으로 개발하세요. … AMUX 프로세스가 로컬 CLI를 돌리는 것과 같이 자연스럽게 돌아갔으면 합니다." 이어서 "내부 개발용 Flow입니다. 제한을 줄 이유가 없습니다. 이런 제한을 다 찾아 없애 주세요." 이 절과 다른 절의 서술이 다르면 이 절이 맞다. 전체를 `TOMVERSE_AMUX_INFRA_FAILURE_ROUTING=disabled` 하나로 이전 동작으로 되돌린다(기본은 켜짐).
 
 - **카드 시도를 쓰는 실패와 쓰지 않는 실패.** 카드의 시도로 세는 것은 워커가 실제로 일을 하고 낸 결과의 실패뿐이다(CLI가 보고한 실패, 검토 거절, 범위 위반, 마감 시간을 넘긴 실행, 출력 한도 초과). 결과 없음, 시작 직후 종료, 로그인 거부, 사용량 소진, 네트워크, lease 만료, sidecar 오류, 사용량 미보고는 플랫폼 실패다. attempt 사유 `infra_<종류>`로 남고, 카드는 `todo`로 돌아가 다른 워커·다른 공급자에게 먼저 간다(`lib/amux/infraFailureCore.ts`). 유료(위험 수락) 경로는 분류하지 않는다. bridge는 미검증 정산에 sidecar의 실패 코드를 싣는다(`failure`). 그 코드가 없는 이전 bridge의 정산은 사용량 기록 유무로 `no_result`와 `usage_unreported`를 가른다.
-- **고정 횟수 없음.** 카드는 다섯 번에서 멈추지 않는다. 워커의 결과가 같은 방식으로 세 번 연속 실패하면(`outcome:reason`이 같음) `repeated_failure`로 사람·DM에게 넘어간다. 30회는 실패가 계속 달라지는 카드를 위한 폭주 방지선이고, 넘으면 같은 방식으로 넘어간다. 플랫폼 실패는 카드당 12번이 한도이고(`infra_attempts_exhausted`), 역시 사람·DM에게 넘어간다. 한도에 닿은 실행도 자기 `infra_<종류>` 사유를 그대로 가지므로 계속 세어진다(한도 이름은 escalation에만 적는다). 사람이 `retry`로 돌려보내면(owner 검토 결정, DM 정산 — 둘 다 escalation을 `retry`로 닫는다) 그 뒤의 플랫폼 실패만 한도에 센다. 사람의 결정(검토 승인, 원클릭 복구)은 이 한도로 막지 않는다. 유료 재시도는 자기 한도를 그대로 쓴다. 등급별 비용 영수증의 `maxAttempts`(2/2/3)는 승인 상한 계산에만 쓰이고, 넘으면 기록할 뿐 막지 않는다(2026-11-14 결정 그대로). DB도 같은 규칙으로 센다. 검토 제안 guard는 플랫폼 실패를 빼고 30에서 막고, v22 attempt guard·복구 attempt guard·복구 승인 CHECK의 attempt 번호 상한은 5에서 64로 넓혔다(30 + 12보다 크다).
+- **고정 횟수 없음.** 카드는 다섯 번에서 멈추지 않는다. 워커의 결과가 같은 방식으로 세 번 연속 실패하면(`outcome:reason`이 같음) `repeated_failure`로 사람·DM에게 넘어간다. 30회는 실패가 계속 달라지는 카드를 위한 폭주 방지선이고, 넘으면 같은 방식으로 넘어간다. 플랫폼 실패는 카드당 12번이 한도이던 것을 2026-11-16에 없앴다: 카드는 사람에게 넘어가지 않고 기다렸다가(아래 "카드 실행: 남은 정지와 상한 정리") 다시 배정된다. 사람이 `retry`로 돌려보내면(owner 검토 결정, DM 정산 — 둘 다 escalation을 `retry`로 닫는다) 그 뒤의 플랫폼 실패부터 기다리는 시간을 센다. 유료 재시도는 자기 한도를 그대로 쓴다. 등급별 비용 영수증의 `maxAttempts`(2/2/3)는 승인 상한 계산에만 쓰이고, 넘으면 기록할 뿐 막지 않는다(2026-11-14 결정 그대로). DB도 같은 규칙으로 센다. 검토 제안 guard는 플랫폼 실패를 빼고 30에서 막고, v22 attempt guard·복구 attempt guard·복구 승인 CHECK의 attempt 번호는 상한 없이 양수이기만 하면 된다(5에서 64로 넓혔던 것을 2026-11-16에 없앴다).
 - **사용량은 0이 아니다.** 플랫폼 실패의 사용량은 원장에 "알 수 없음"으로 남는다. 워커 사용량 게이트는 이 실행을 세지 않으므로 사람의 "받아들이기" 없이 워커가 풀린다. 비용 상한·예약·정산 행은 바뀌지 않는다.
 - **워커 격리.** 같은 워커에서 플랫폼 실패가 세 번 연속 나면 그 워커는 5분 동안 배정에서 빠진다. 실패가 더 이어질 때마다 대기는 두 배가 되고 최대 1시간이다. 대기가 끝나거나, 마지막 실패 뒤 그 워커의 사용량이 다시 관측되면(앞쪽 두 번까지) 카드 한 장으로 다시 시험하고, 성공하면 닫힌다. 상태는 저장하지 않고 워커의 최근 attempt에서 매번 계산한다(`lib/amux/workerCircuitCore.ts`). 워커 registry의 "시험 3장·3회 연속 실패 latch"는 이것으로 합쳤다. 이미 기록된 latch만 사람이 풀 때까지 남는다.
 - **Admin의 "배정 가능".** 워커 목록은 claim과 같은 규칙으로만 판정한다. 격리 중이면 "반복 실패로 잠시 빠짐", Anthropic 워커의 사용량 관측이 15분보다 오래되면 "사용량 관측 안 됨 · 로그인 확인 필요"로 보인다. box가 보낸 로그인 신호(`login_required`, `auth_stage_failed` 등)는 배정을 막지 않는 경고로 함께 보인다. 사본이 몇 시간 더 유효할 수 있고, 실제로 실패하면 격리가 잡는다.
@@ -3400,3 +3400,21 @@ sidecar는 실행 종료 기록을 메모리에도 들고 있었고, 점검은 �
 - **자동 승격.** 결과를 잃은 승격은 queue lock 아래에서 다시 읽는다. 영수증이 아예 없으면 커밋되지 않은 것이므로 결과 불명으로 남기지 않고 다음 tick이 다시 시도한다. 그런 결과 불명만으로 열린 승격 정지는 스스로 풀린다(감사 `amux.auto_promotion.resumed_by_readback`). 영수증이 있는데 맞지 않는 결과 불명과 치명적 위반 정지는 그대로 사람에게 남는다.
 - **분석 Agent.** 세 번 연속 실패 정지는 유료 API 경로에만 적용하고, 그 경로의 정산만 센다. 구독 세션 경로는 실패 연속으로 멈추지 않는다.
 - **처리량.** 동시 실행 상한은 검증된 워커 수뿐이다(전역 6 삭제). claim과 자동 승격은 tick마다 후보를 100개까지 읽고, route 예산이 다음 transaction을 담지 못하면 그 자리에서 멈춘다.
+
+## 카드 실행: 남은 정지와 상한 정리 (운영자 결정 2026-11-16)
+
+운영자 지시: AMUX 전수 점검에서 나온 "사람 없이는 풀리지 않는 정지"와 "결과를 버리는 경로", 우리가 정한 크기·개수·시간 상한을 카드 실행과 검토 재시도 영역에서 없앤다. 실제 돈이 나가는 경로(읽기 전용 API 재시도의 3.4/6.8 USD, 재시도 task 고정, 모델 접근 비용 상한), 외부 한계(GitHub 파일 100 MiB, Next proxy 10 MB와 patch envelope 9 MiB, 메모리 backstop 32 MiB), 감사 체인은 그대로다.
+
+- **결과 patch의 상한은 하나다.** 결과 저장소가 따로 갖던 64 KiB는 없앴고 `lib/amux/v22PatchLimit.ts`의 4 MiB 하나를 쓴다. 이전에는 64 KiB를 넘는 변경이 있는 결과가 통째로 거부됐다. 결과 본문은 이미 bridge의 전송 backstop(32 MiB)까지 받는다.
+- **결과는 가져갈 때까지 box에 남는다.** sidecar는 끝난 실행의 결과 본문과 patch를 메모리에 15분만 들고 있었다. 이제 state 디렉터리의 `<attempt>.result.pending`·`<attempt>.patch.pending`(0600)에 쓰고, 앱이 받았다고 확인한 뒤(`confirm_result`, `confirm_patch`)에만 지운다. sidecar가 재시작돼도 결과는 남는다. journal(`<attempt>.result`)에는 여전히 본문이 없다. 복구 점검이 쓰는 종료 기록(terminal)의 개수 상한(256)도 없앴다.
+- **바뀐 경로 목록과 정산 body.** 바뀐 경로의 개수 상한(4,096)과 JSON 24 KiB, git 출력 32 KiB를 없앴다. 목록은 patch와 같은 4 MiB 안에서만 막힌다(settlement body가 같은 proxy buffer를 지난다). 정산·검토 기록 route의 body는 patch envelope(9 MiB)이고, invocation 128개, 경로 4,096개, 실패 보고 24시간 상한은 없다.
+- **보관된 결과를 찾는 범위.** 카드의 검토 대상 attempt를 최신 20개에서 찾던 것을 attempt 전체에서 찾는다. 한 번에 게시하는 보관 결과는 3개에서 10개로, 연기한 카드를 기억하는 개수 상한(500)은 없앴다. 선행 결론은 의존 카드 500개까지만 읽던 것을 전부 읽는다.
+- **인프라 실패는 사람에게 넘기지 않는다.** 카드당 12번이 한도이던 플랫폼 실패는 개수 상한이 없다. 카드는 `todo`로 돌아가고, 두 번까지는 바로, 그 뒤로는 1분에서 시작해 두 배씩(최대 1시간) 기다린 다음 다시 배정된다(`amuxInfraRetryDelayMs`, claim의 `infra_retry_backoff`, 사람이 `retry`로 돌려보낸 뒤의 실패부터 센다). 그래서 카드의 attempt 번호도 상한이 없고, 세 DB 가드(실행 attempt, 복구 attempt, 복구 승인)의 64는 양수 조건으로 바꿨다. 이미 `infra_attempts_exhausted`로 넘어간 카드의 기록은 남는다.
+- **사용량을 모르는 실행은 워커를 묶지 않는다.** 워커 사용량 게이트는 이제 예산에 묶인(위험 수락·읽기 전용 API) 실행만 센다(전에는 `TOMVERSE_AMUX_V22_READ_BACK_PROCEED=disabled`이면 구독 경로도 셌다). PR이 없는 review 카드의 재시도도 사용량 불명(`usage_outcome_unknown`)으로 막지 않는다. "변경 없음으로 완료" 승인은 DB guard가 아는 실행만 받으므로 그대로다.
+- **검토 요청은 다시 보낸다.** 검토 서버가 job id를 돌려주지 않으면 box의 launcher는 attempt를 unknown으로 닫지 않고 15초에서 시작해 두 배씩(최대 5분) 기다려 같은 요청을 다시 보낸다. 같은 commit의 job이 둘 생겨도 attempt가 저장한 job id만 읽으므로 판정은 틀리지 않는다. 알려진 job은 읽기만 다시 하고 제출하지 않는다. bridge는 이 대기(`waiting`)를 진행 중으로 본다. 검토 지적 요약(legacy 평문)의 2,000자·12줄도 없앴고 DB CHECK는 비어 있지 않을 것만 요구한다.
+- **worker 등록의 latch는 아무것도 묶지 않는다.** 기록된 latch 이벤트(`opened`)는 기록으로 남고, 배정은 더 이상 그것을 보지 않는다. 사람이 풀어야 하던 worker가 이미 있었다면 따로 지울 행이 없다(테이블은 append-only).
+- **사용량 관측의 신선도.** 관측이 "신선"한 시간을 15분에서 1시간으로 넓혔고(`AMUX_QUOTA_FRESH_SECONDS`), 기록 route는 오래된 관측도 받는다(미래 5분 넘게 앞선 관측만 시계 오류로 거절한다).
+- **자동 승격.** 위 "자동 승격" 정지 설명대로 졸업·동시 수 상한·결과 불명 halt가 없다. 한 tick이 시도하는 grant는 10개에서 1,000개로 늘렸고(한 tick이 옮기는 카드는 여전히 하나). orchestrator halt 한 번의 상태 읽기가 묻는 halt key는 16개에서 64개다.
+- **복구 정지.** 이전 요청이 결과를 모른 채 남긴 정지 의도는, 읽어 보니 같은 실행(invocation과 control group)이 아직 돌고 있으면 한 번 더 `systemctl stop`한다(정지는 멱등이다). 프로필 설정 파일의 개수 상한은 128/16에서 4,096/256으로 넓혔다.
+- **DB 크기 CHECK.** 복구 보고(4 KiB, 8 KiB), 읽기 전용 launch scope(2 KiB), 대기 이유 detail(8 KiB), worker 건강 신호 detail(2 KiB)을 모두 1 MiB로 맞췄다.
+- **옛 흐름에 남은 값.** `TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW=disabled`가 돌려놓는 옛 값(10분 마감, stdout 256 KiB, 보고 64 KiB)과 위험 수락 읽기 전용 재시도의 고정 launch는 그대로다. 스위치와 옛 분기는 따로 정리한다.
