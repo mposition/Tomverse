@@ -74,6 +74,18 @@ test("legacy Review errors still split their existing title and auxiliary detail
   assert.doesNotMatch(html, /chat-recovery-notice|restore-chat-question/);
 });
 
+test("trace IDs sit behind a collapsed diagnostics disclosure; other details stay visible", () => {
+  const html = render([question, { id: "a", role: "assistant", status: "error",
+    content: "Request failed\nCost guard details\nTrace ID: 0000-trace" }], false);
+  const diagnostics = html.match(/<details data-testid="chat-error-diagnostics"[^>]*>.*?<\/details>/)?.[0];
+  assert.ok(diagnostics, "trace ID is wrapped in a diagnostics disclosure");
+  assert.doesNotMatch(diagnostics, /\sopen[\s=>]/);
+  assert.match(diagnostics, /<summary[^>]*>Show diagnostic info<\/summary>/);
+  assert.match(diagnostics, /Trace ID: 0000-trace/);
+  assert.doesNotMatch(diagnostics, /Cost guard details/);
+  assert.match(html, /Cost guard details/);
+});
+
 test("Chat attachment errors classify the recovery notice, not an empty or unrelated partial body", () => {
   for (const content of ["", "Kept partial answer"]) {
     const html = render([question, { id: "a", role: "assistant", status: "error", content,

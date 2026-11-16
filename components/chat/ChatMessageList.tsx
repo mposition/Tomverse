@@ -1079,6 +1079,10 @@ export function ChatMessageList({
               !isUser && msg.status === "error"
                 ? errorText.split("\n").slice(1).filter(Boolean)
                 : [];
+            const isTraceLine = (line: string) =>
+              line.startsWith(`${t("chat.traceId")}:`) || line.startsWith("Trace ID:");
+            const errorTraceLines = errorAuxiliaryLines.filter(isTraceLine);
+            const errorDetailLines = errorAuxiliaryLines.filter((line) => !isTraceLine(line));
             // A turn that can be retried in place does not also offer to put
             // the question back in the composer: retrying is that, done for you.
             const canRestoreQuestion = recoveryEnabled && !isSending &&
@@ -1882,7 +1886,7 @@ export function ChatMessageList({
                         )}
                         {errorAuxiliaryLines.length > 0 && (
                           <div data-testid="chat-error-auxiliary-info" className="mt-2 space-y-0.5">
-                            {errorAuxiliaryLines.map((line, lineIndex) => (
+                            {errorDetailLines.map((line, lineIndex) => (
                               <p
                                 key={lineIndex}
                                 // UI-003/UI-007. The trace ID is what a user
@@ -1898,6 +1902,23 @@ export function ChatMessageList({
                                 {line}
                               </p>
                             ))}
+                            {/* The error report already attaches the trace ID;
+                                the raw UUID stays one click away for support. */}
+                            {errorTraceLines.length > 0 && (
+                              <details data-testid="chat-error-diagnostics">
+                                <summary className="cursor-pointer text-[11px] leading-4 text-zinc-600 dark:text-zinc-400">
+                                  {t("chat.showDiagnostics")}
+                                </summary>
+                                {errorTraceLines.map((line, lineIndex) => (
+                                  <p
+                                    key={lineIndex}
+                                    className="select-all break-all text-[11px] leading-4 text-zinc-600 dark:text-zinc-400"
+                                  >
+                                    {line}
+                                  </p>
+                                ))}
+                              </details>
+                            )}
                           </div>
                         )}
                       </div>
