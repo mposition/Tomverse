@@ -1,52 +1,39 @@
 #!/bin/bash
-# Restarts the AMUX Decision Maker relay when it halted on a read that wrote
-# nothing.
+# Restarts the AMUX Decision Maker relay when it halted, whatever the cause,
+# and starts it when a reboot left it stopped.
 #
 # docs/ops/amux/bridge-monitoring.md §6 is the runbook. Off until the operator
 # installs it (install.sh beside this file); a systemd timer then runs it every
 # two minutes.
 #
-# The relay (tomverse-amux-dm-relay.service, apps/tomverse-orchestrator/src/
-# dm_relay/) does not exit when it halts. It prints one line,
+# Since 2026-11-16 the relay (tomverse-amux-dm-relay.service,
+# apps/tomverse-orchestrator/src/dm_relay/) never halts: a write whose answer
+# it lost, or that was refused for now, is kept owed and sent again by its key
+# on every tick (dm_relay/owed.rs). A relay built before that does not exit
+# when it halts. It prints one line,
 #
 #   amux dm relay halt: <cause>; ... until the bridge restarts. Read the request in Admin first.
 #
 # and stays active doing nothing but releasing local markers, so systemd's own
-# Restart=on-failure never sees it. A process halts at most once: a halted
-# relay's tick returns before any step that could halt. Every cause but two is
-# a write whose answer was lost, refused or unreadable (assignment, transmit
-# intent and outcome, result-unknown record, discard, cleanup report, delivery
-# decision, pause, not-sent and card records), and a person reads the request
-# in Admin before the relay runs again. The two restarted here are reads:
+# Restart=on-failure never sees it. Such a run is restarted whatever its cause
+# (owner direction 2026-11-16: no stop waits for a person). A new process
+# rebuilds what it needs at its start -- leftover markers are listed and
+# released, unsettled decisions settled from the local records, cursors
+# started again -- and every write it repeats is keyed by its request, so the
+# app records each at most once.
 #
-#   cause=unsettled_read_unreadable   the start-of-process read of decisions a
-#                                     stopped relay left unsettled
-#   cause=delivery_read_unreadable    the read of the next confirmed answer
+# A run restarts when
 #
-# Each is the first step of its walk and returns before anything is written, so
-# the halted process holds nothing a new one does not rebuild at its start:
-# leftover markers are listed and released, unsettled decisions settled from
-# the local records, cursors started again.
-#
-# A run restarts only when
-#
-#   - the unit is active and its current run printed exactly one halt line,
-#     with an approved cause;
-#   - every line after the halt line is the v22 question summary the halting
-#     tick may still print (that sync is idempotent by its own keys and never
-#     halts);
-#   - this script restarted nothing in the last hour: an app answering in a
-#     shape the relay cannot read halts every new process, and the second halt
-#     stays halted, so the app's own silence alert (AMUX_DM_RELAY_SILENT) pages
-#     instead of being fed by a restart every two minutes;
-#   - the local AMUX server and the Tomverse app answer;
+#   - the unit is active and its current run printed a halt line;
+#   - the local AMUX server and the Tomverse app answer (a restart into an app
+#     that is down would only wait again);
 #   - the unit's run is still the one judged, right before the restart.
 #
 # One more case is started: a relay that is inactive and has not been active
 # once since this boot (ActiveEnterTimestampMonotonic=0), the state a reboot
 # left the static unit in on 2026-11-09. The unit now has an [Install] section,
 # so an enabled relay starts at boot and this covers a host where it is not
-# enabled. The same hourly bound, health checks and re-read apply.
+# enabled. The same health checks and re-read apply.
 #
 # Any other relay that exited is systemd's: Restart=on-failure restarts a
 # crash, exit 2 (enabled without a usable token) waits for a person, and one a
@@ -58,45 +45,24 @@
 set -euo pipefail
 
 unit=tomverse-amux-dm-relay.service
-self=tomverse-dm-relay-autorestart.service
 amux_health=https://127.0.0.1:8824/health
 app_health=https://tomverse.app/api/health
 
 log() { echo "tomverse-dm-relay-autorestart: $*"; }
 
-# As apps/tomverse-orchestrator/src/dm_relay/io.rs prints them.
+# As a relay built before 2026-11-16 printed it (dm_relay/io.rs).
 halt_line='^amux dm relay halt: ([a-z0-9_]+); .* until the bridge restarts\. Read the request in Admin first\.$'
-after_halt='^amux dm relay: v22 questions: resolved (true|false), filed [0-9]+, closed [0-9]+$'
-restarted_line='; restarted$'
 
-approved() {
-  [[ "$1" == unsettled_read_unreadable || "$1" == delivery_read_unreadable ]]
-}
-
-# Prints "restart <cause>", "hold <reason>" or "running" for the relay's lines.
+# Prints "restart <cause>" for a run that halted, "running" for one that did not.
 decide() {
-  local lines=$1 cause="" halts=0 line
+  local lines=$1 line
   while IFS= read -r line; do
-    [[ -z "$line" ]] && continue
     if [[ "$line" =~ $halt_line ]]; then
-      cause=${BASH_REMATCH[1]}
-      halts=$((halts + 1))
-      continue
-    fi
-    if ((halts > 0)) && [[ ! "$line" =~ $after_halt ]]; then
-      echo "hold an unrecognised line after the halt: ${line:0:160}"
+      echo "restart ${BASH_REMATCH[1]}"
       return
     fi
   done <<<"$lines"
-  if ((halts == 0)); then
-    echo running
-  elif ((halts != 1)); then
-    echo "hold $halts halt lines in one run"
-  elif ! approved "$cause"; then
-    echo "hold cause=$cause is not restarted automatically"
-  else
-    echo "restart $cause"
-  fi
+  echo running
 }
 
 answers() {
@@ -144,29 +110,12 @@ elif [[ "$state" == active && "$sub" == running ]]; then
     exit 0
   fi
   read -r verdict reason <<<"$(decide "$lines")"
-  case "$verdict" in
-    running) exit 0 ;;
-    hold)
-      log "$unit halted; $reason, left halted"
-      exit 0
-      ;;
-  esac
+  [[ "$verdict" == restart ]] || exit 0
   what=halted
   cause=$reason
 else
   # Stopped by a person, off, failed (left to systemd and, for exit 2, to a
   # person) or on its way somewhere.
-  exit 0
-fi
-
-# This script's own journal says whether it restarted the relay in the last
-# hour. Unreadable is not "no": the relay is left as it is.
-if ! recent=$(journalctl -u "$self" --since=-60min --no-pager -q -o cat 2>/dev/null); then
-  log "$unit $what with cause=$cause; this unit's own journal is unreadable, left as it is"
-  exit 0
-fi
-if grep -qE "$restarted_line" <<<"$recent"; then
-  log "$unit $what with cause=$cause again within an hour of a restart; left as it is"
   exit 0
 fi
 

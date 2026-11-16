@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/amux/auditContract";
+import { AMUX_DM_PENDING_SCAN, AMUX_DM_TICK_LIMIT } from "@/lib/amux/decisionMakerCore";
 import { BoardImportError } from "@/lib/amux/boardImportCore";
 import { readDecisionMakerSwitchesOrThrow } from "@/lib/amux/decisionMakerSwitchStore";
 import { decideAmuxAttemptBudget } from "@/lib/amux/executionBudgetCore";
@@ -55,9 +56,9 @@ const CARD_ID = /^[A-Za-z0-9_-]{1,64}$/;
 /** Statements the sync makes for the rejected reviews' findings: every rejection of every pending Task. */
 export const AMUX_DM_OWNER_SETTLEMENT_REVIEW_PRISMA_CALLS = AMUX_V52_REJECTED_REVIEWS_PRISMA_CALLS;
 /** New settlements filed per tick, and cards handed to the relay per tick. */
-export const AMUX_DM_OWNER_SETTLEMENT_SYNC_LIMIT = 3;
+export const AMUX_DM_OWNER_SETTLEMENT_SYNC_LIMIT = AMUX_DM_TICK_LIMIT;
 /** Pending settlements read per tick, so a few that cannot be filed never hide the rest. */
-export const AMUX_DM_OWNER_SETTLEMENT_PENDING_SCAN = 12;
+export const AMUX_DM_OWNER_SETTLEMENT_PENDING_SCAN = AMUX_DM_PENDING_SCAN;
 const SIBLINGS_READ = 8;
 export const AMUX_DM_OWNER_SETTLEMENT_APPLIED_ACTION = "amux.dm_owner_settlement.applied";
 export const AMUX_DM_OWNER_SETTLEMENT_HANDED_OFF_ACTION = "amux.dm_owner_settlement.handed_off";

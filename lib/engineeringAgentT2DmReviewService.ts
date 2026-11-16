@@ -3,6 +3,7 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 
 import { BoardImportError } from "@/lib/amux/boardImportCore";
+import { AMUX_DM_TICK_LIMIT } from "@/lib/amux/decisionMakerCore";
 import { engineeringAgentT2DmCard } from "@/lib/engineeringAgentT2DmReviewCore";
 
 /**
@@ -15,7 +16,7 @@ import { engineeringAgentT2DmCard } from "@/lib/engineeringAgentT2DmReviewCore";
 
 const CARD_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const QUESTION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-export const ENGINEERING_AGENT_T2_DM_SYNC_LIMIT = 3;
+export const ENGINEERING_AGENT_T2_DM_SYNC_LIMIT = AMUX_DM_TICK_LIMIT;
 
 type PendingDraft = { workItemId: string; reason: string | null; patchBody: string | null; cardLabel: string | null };
 

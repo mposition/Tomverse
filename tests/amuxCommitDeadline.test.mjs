@@ -430,6 +430,12 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   "20261116130200_amux_v22_attempt_number_unbounded",
   "20261116130300_amux_v22_recovery_attempt_unbounded",
   "20261116130400_amux_v22_recovery_approval_attempt_unbounded",
+  // Owner direction 2026-11-16: the Decision Maker request ledger's windows and
+  // a late result read back by its digest (two guard bodies), and a system
+  // release of an instance latch (two CHECKs and the switch guard body); no
+  // commit-deadline marker, classifier or deferred trigger changes.
+  "20261116140000_amux_dm_request_windows",
+  "20261116140100_amux_dm_latch_release",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {

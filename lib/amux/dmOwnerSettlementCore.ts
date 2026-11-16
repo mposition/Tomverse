@@ -252,8 +252,6 @@ export function amuxDmOwnerSettlementCard(input: {
   siblingTotal: number;
   /** A review pull request: its number and patch. */
   pull: { number: number; patch: string | null } | null;
-  /** Whether the Decision Maker has a workspace; the switch decides by default. */
-  workspace?: boolean;
 }) {
   if (input.criteria.length === 0) return null;
   if (input.kind === "t2_pr" && !input.pull?.patch) return null;
@@ -284,8 +282,7 @@ export function amuxDmOwnerSettlementCard(input: {
     text: findingsText,
   }];
   if (input.kind === "stopped") {
-    const context = dmCardEvidenceContext(evidence, input.workspace);
-    if (context === null) return null;
+    const context = dmCardEvidenceContext(evidence);
     return {
       question_id: input.settlementId,
       worker: AMUX_DM_OWNER_SETTLEMENT_DM_WORKER,
@@ -305,9 +302,7 @@ export function amuxDmOwnerSettlementCard(input: {
   const patch = input.pull!.patch!;
   const files = engineeringAgentPatchFiles(patch);
   if (files.length === 0) return null;
-  const context = dmCardEvidenceContext([{ name: "PATCH.diff", heading: "The pull request's patch", text: patch }, ...evidence],
-    input.workspace);
-  if (context === null) return null;
+  const context = dmCardEvidenceContext([{ name: "PATCH.diff", heading: "The pull request's patch", text: patch }, ...evidence]);
   return {
     question_id: input.settlementId,
     worker: AMUX_DM_OWNER_SETTLEMENT_DM_WORKER,

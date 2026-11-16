@@ -349,7 +349,7 @@ export async function readDecisionMakerRequestState(
       e."assigned", e."resultDeadlineAtEpochMs", e."transmitted", e."snapshotState",
       e."snapshotTargetSha", e."snapshotManifestDigest", e."inputPayloadDigest", e."transmitOutcome",
       e."terminalEventId", e."terminalResultKind", e."terminalResultDigest", e."resultUnknown",
-      e."cleanupUnknownEventId", e."cleanupUnknownAtEpochMs", e."closingKind", e."probedRejection"
+      e."resultUnknownDigest", e."cleanupUnknownEventId", e."cleanupUnknownAtEpochMs", e."closingKind", e."probedRejection"
     FROM "AmuxDecisionMakerRequest" r
     CROSS JOIN LATERAL (
       SELECT
@@ -365,6 +365,7 @@ export async function readDecisionMakerRequestState(
         max(ev."resultKind") FILTER (WHERE ev."kind" = 'result') AS "terminalResultKind",
         max(ev."resultDigest") FILTER (WHERE ev."kind" = 'result') AS "terminalResultDigest",
         coalesce(bool_or(ev."kind" = 'result_unknown'), false) AS "resultUnknown",
+        max(ev."resultDigest") FILTER (WHERE ev."kind" = 'result_unknown') AS "resultUnknownDigest",
         max(ev."id") FILTER (WHERE ev."kind" = 'cleanup_unknown') AS "cleanupUnknownEventId",
         floor(extract(epoch FROM max(ev."createdAt") FILTER (WHERE ev."kind" = 'cleanup_unknown')) * 1000)::bigint
           AS "cleanupUnknownAtEpochMs",
@@ -1219,9 +1220,12 @@ export type DecisionMakerResultUnknownWrite =
 
 /**
  * §9: a submitter that lost the response to a result and could not confirm it
- * by the (request, digest) pair records the result as unknown; the request
- * then goes to the operator and no later result is accepted for it. A pair
- * the ledger already accepted or rejected is reported as such instead.
+ * by the (request, digest) pair records the result as unknown. Since
+ * 2026-11-16 (migration 20261116140000_amux_dm_request_windows) it then reads
+ * the pair back and submits the result again, and a later result of the digest
+ * the unknown names is accepted -- the same output -- while one of another
+ * digest is rejected as `result_unknown`. A pair the ledger already accepted
+ * or rejected is reported as such instead.
  * Statements: 2 when nothing is written; 6, or 7.
  */
 export async function recordDecisionMakerResultUnknown(

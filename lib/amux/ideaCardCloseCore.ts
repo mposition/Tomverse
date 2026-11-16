@@ -10,6 +10,7 @@
  */
 
 import { AMUX_IDEA_BLOCK_REASONS, amuxIdeaBlockReason, type AmuxIdeaBlockReason } from "./ideaProgressCore.ts";
+import { AMUX_DM_PENDING_SCAN, AMUX_DM_TICK_LIMIT } from "./decisionMakerCore.ts";
 
 /**
  * A question filed to the Decision Maker is a turn on its subscription. On
@@ -25,10 +26,10 @@ export const AMUX_IDEA_CARD_CLOSE_DEFAULT_STALE_DAYS = 7;
 export const AMUX_IDEA_CARD_CLOSE_KEEP_DAYS = 30;
 /** A question that closed with no effect is not asked again for this long. */
 export const AMUX_IDEA_CARD_CLOSE_CANCEL_COOLDOWN_DAYS = 1;
-/** At most this many questions or cards per relay tick, as the v22 list. */
-export const AMUX_IDEA_CARD_CLOSE_SYNC_LIMIT = 3;
+/** At most this many questions or cards per relay tick: the Decision Maker's one per-tick count. */
+export const AMUX_IDEA_CARD_CLOSE_SYNC_LIMIT = AMUX_DM_TICK_LIMIT;
 /** Ideas read per scan. The scan's filter makes the core's exclusions before this bound. */
-export const AMUX_IDEA_CARD_CLOSE_SCAN = 24;
+export const AMUX_IDEA_CARD_CLOSE_SCAN = AMUX_DM_PENDING_SCAN;
 
 export type AmuxIdeaCardCloseEnv = Record<string, string | undefined>;
 

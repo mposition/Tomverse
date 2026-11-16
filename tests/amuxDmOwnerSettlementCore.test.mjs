@@ -136,8 +136,8 @@ test("the card's fixed words hit no routing term, so it reaches a DM", () => {
   }
 });
 
-test("a stopped Task's card is a summary; its report is evidence in the workspace, or whole in the context, never cut (AMUXFLOW/B2)", () => {
-  const card = amuxDmOwnerSettlementCard({ ...base, kind: "stopped", workspace: true });
+test("a stopped Task's card is a summary; its report is evidence in the workspace, never cut (AMUXFLOW/B2)", () => {
+  const card = amuxDmOwnerSettlementCard({ ...base, kind: "stopped" });
   assert.deepEqual(card.options.map((option) => option.id), ["retry", "complete", "close"]);
   assert.match(card.question, /Task: AMUX-ROUTERFAIL2-002 "Name the router failure" \(implement Task, grade routine, now blocked\)/);
   assert.match(card.question, /Its completion criteria:\n- The failure is named\n- The caller uses it\n/);
@@ -153,23 +153,11 @@ test("a stopped Task's card is a summary; its report is evidence in the workspac
     /Its run left no result to read\./, "a run that left no result says so");
   assert.equal(amuxDmOwnerSettlementCard({ ...base, kind: "stopped", criteria: [] }), null,
     "no approved criteria: the person decides");
-  // With the workspace switched off the run's words ride in the context whole, as an evidence block the term check can skip.
-  const inline = amuxDmOwnerSettlementCard({ ...base, kind: "stopped", workspace: false });
-  assert.equal(inline.context, "[evidence]\nIts run's report:\nAdded the function; the caller is in the next card.\n[/evidence]");
-  assert.doesNotMatch(inline.question, /Added the function/);
-  // No cut: a report far past the old question's room is in whole, and the card is filed.
-  const longFindings = `${"x".repeat(100_000)}END`;
-  const long = amuxDmOwnerSettlementCard({ ...base, kind: "stopped", findings: longFindings, workspace: false });
-  assert.ok(long, "long findings never leave the card unfiled");
-  assert.equal(long.context, `[evidence]\nIts run's report:\n${longFindings}\n[/evidence]`);
-  assert.doesNotMatch(long.context, /cut to fit/);
-  // Evidence a card cannot carry whole files no card: the person decides (a DM never judges without it).
-  const bell = amuxDmOwnerSettlementCard({ ...base, kind: "stopped", findings: "bell\u0007", workspace: false });
-  assert.equal(bell, null);
-  const huge = amuxDmOwnerSettlementCard({ ...base, kind: "stopped", findings: "y".repeat(300_000), workspace: false });
-  assert.equal(huge, null);
-  // A card with no findings has no evidence block, and says so in the question.
-  assert.equal(amuxDmOwnerSettlementCard({ ...base, kind: "stopped", findings: null, workspace: false }).context, "");
+  // No cut and no card left unfiled: a report of any size or characters is evidence in the workspace
+  // (owner direction 2026-11-16: the workspace is always on).
+  for (const findings of [`${"x".repeat(100_000)}END`, "bell\u0007", "y".repeat(300_000)]) {
+    assert.equal(amuxDmOwnerSettlementCard({ ...base, kind: "stopped", findings }).context, dmWorkspaceCardPointer(["FINDINGS.md"]));
+  }
   // The cards beside it: eight are named, the rest counted, and a title is never shortened.
   const many = Array.from({ length: 11 }, (_, index) => ({ label: `L-${index}`, title: "t".repeat(200),
     status: "todo", waitsOnThis: false }));
@@ -217,35 +205,24 @@ test("every rejected review's findings follow the run's report in FINDINGS.md, n
   assert.equal(amuxDmOwnerSettlementFindingsText({ report: "  ", reviews: undefined }), null);
 });
 
-test("a stopped Task's card points at the review findings in FINDINGS.md, or carries them inline whole with the workspace off", () => {
+test("a stopped Task's card points at the review findings in FINDINGS.md", () => {
   const entries = [rejectedRun(3, 2), rejectedRun(2, 1)];
-  const card = amuxDmOwnerSettlementCard({ ...base, kind: "stopped", reviews: { entries, unread: 0 }, workspace: true });
+  const card = amuxDmOwnerSettlementCard({ ...base, kind: "stopped", reviews: { entries, unread: 0 } });
   assert.equal(card.context, dmWorkspaceCardPointer(["FINDINGS.md"]));
   assert.match(card.question, /rejected its change 2 times; its findings are in the evidence named below\./);
   assert.doesNotMatch(card.question, /Finding 3\.0/, "the findings are evidence, not the question");
   assert.deepEqual(irreversibleTermCategories(card.question), []);
 
-  const unread = amuxDmOwnerSettlementCard({ ...base, kind: "stopped", reviews: { entries: entries.slice(0, 1), unread: 1 },
-    workspace: true });
+  const unread = amuxDmOwnerSettlementCard({ ...base, kind: "stopped", reviews: { entries: entries.slice(0, 1), unread: 1 } });
   assert.match(unread.question, /its findings are in the evidence named below, except for 1 rejection whose findings could not be read\./);
 
-  // The kill switch: the same text, whole, in one evidence block.
-  const big = [rejectedRun(4, 300), rejectedRun(3, 300)];
-  const inline = amuxDmOwnerSettlementCard({ ...base, kind: "stopped", reviews: { entries: big, unread: 0 }, workspace: false });
-  assert.equal(inline.context, `[evidence]\nIts run's report, then the review findings:\n${amuxDmOwnerSettlementFindingsText({ report: base.findings, reviews: { entries: big, unread: 0 } })}\n[/evidence]`);
-  assert.ok(inline.context.includes("Finding 3.299:"), "the oldest run's last finding is in");
-  assert.doesNotMatch(inline.context, /not shown here|cut to fit/);
-
   // A run that left no report, but was rejected: the findings are the evidence.
-  const noReport = amuxDmOwnerSettlementCard({ ...base, kind: "stopped", findings: null, reviews: { entries, unread: 0 },
-    workspace: true });
+  const noReport = amuxDmOwnerSettlementCard({ ...base, kind: "stopped", findings: null, reviews: { entries, unread: 0 } });
   assert.match(noReport.question, /Its run left no result to read\./);
   assert.equal(noReport.context, dmWorkspaceCardPointer(["FINDINGS.md"]));
-  assert.match(amuxDmOwnerSettlementCard({ ...base, kind: "stopped", findings: null, reviews: { entries, unread: 0 },
-    workspace: false }).context, /^\[evidence\]\nThe review findings:\n## Independent review findings\n/);
 
   // No findings to read: the card says where they are, and only the report is evidence.
-  const none = amuxDmOwnerSettlementCard({ ...base, kind: "stopped", reviews: { entries: [], unread: 2 }, workspace: true });
+  const none = amuxDmOwnerSettlementCard({ ...base, kind: "stopped", reviews: { entries: [], unread: 2 } });
   assert.match(none.question, /its findings are not in this card/);
   assert.equal(none.context, dmWorkspaceCardPointer(["FINDINGS.md"]));
 });
@@ -254,18 +231,15 @@ test("a review pull request's card carries its Task's review findings beside the
   const entries = [rejectedRun(3, 2)];
   const input = { ...base, kind: "t2_pr", taskStatus: "review", reason: "human_review_required", rejections: 1,
     reviews: { entries, unread: 0 }, pull: { number: 3812, patch: PATCH } };
-  const card = amuxDmOwnerSettlementCard({ ...input, workspace: true });
+  const card = amuxDmOwnerSettlementCard({ ...input });
   assert.equal(card.context, dmWorkspaceCardPointer(["PATCH.diff", "FINDINGS.md"]));
   assert.match(card.question, /rejected its change once; its findings are in the evidence named below\./);
-  const inline = amuxDmOwnerSettlementCard({ ...input, workspace: false });
-  assert.ok(inline.context.startsWith("[evidence]\nThe pull request's patch:\ndiff --git"));
-  assert.ok(inline.context.includes(`\n[/evidence]\n[evidence]\nIts run's report, then the review findings:\n${base.findings}\n\n## Independent review findings\n`));
 });
 
-test("a review pull request's card lists its files in the question; the patch is in the workspace, or whole in the context", () => {
+test("a review pull request's card lists its files in the question; the patch is in the workspace", () => {
   const input = { ...base, kind: "t2_pr", taskStatus: "review", reason: "human_review_required", rejections: 0,
     pull: { number: 3812, patch: PATCH } };
-  const card = amuxDmOwnerSettlementCard({ ...input, workspace: true });
+  const card = amuxDmOwnerSettlementCard({ ...input });
   assert.deepEqual(card.options.map((option) => option.id), ["approve", "retry", "close"]);
   assert.match(card.question, /Pull request #3812, files \(2\):\n- lib\/amux\/routerFailure\.ts \(\+1 -0\)\n- tests\/routerFailure\.test\.mjs \(\+1 -0\)/);
   assert.ok(card.question.endsWith("\nShould the pull request be approved, the Task run again, or the card closed?"));
@@ -275,45 +249,24 @@ test("a review pull request's card lists its files in the question; the patch is
   assert.equal(card.context, dmWorkspaceCardPointer(["PATCH.diff", "FINDINGS.md"]));
   assert.deepEqual(card.context_paths, ["lib/amux/routerFailure.ts", "tests/routerFailure.test.mjs"]);
 
-  // The kill switch: everything rides in the context, whole, in evidence blocks.
-  const inline = amuxDmOwnerSettlementCard({ ...input, workspace: false });
-  assert.ok(inline.context.startsWith("[evidence]\nThe pull request's patch:\ndiff --git a/lib/amux/routerFailure.ts"));
-  assert.ok(inline.context.includes("\n[/evidence]\n[evidence]\nIts run's report:\nAdded the function; the caller is in the next card.\n[/evidence]"));
-  assert.ok(inline.context.endsWith("\n[/evidence]"));
-  assert.deepEqual(inline.context_paths, card.context_paths);
-  // No cut: a file far past the old 4,000-character context is in whole, and so is a long report.
+  // No cut: a file far past the old 4,000-character context is listed, and the card points at the evidence.
   const big = `${PATCH}\n${["diff --git a/big.ts b/big.ts", "@@ -0,0 +1 @@", `+${"z".repeat(50_000)}END`].join("\n")}`;
-  const whole = amuxDmOwnerSettlementCard({ ...input, findings: `${"f".repeat(20_000)}END`, pull: { number: 1, patch: big }, workspace: false });
+  const whole = amuxDmOwnerSettlementCard({ ...input, findings: `${"f".repeat(20_000)}END`, pull: { number: 1, patch: big } });
   assert.match(whole.question, /- big\.ts \(\+1 -0\)/, "every file is listed");
-  assert.ok(whole.context.includes(`${"z".repeat(50_000)}END`));
-  assert.ok(whole.context.includes(`${"f".repeat(20_000)}END`));
-  assert.doesNotMatch(whole.context, /not shown|does not fit|cut to fit/);
+  assert.equal(whole.context, dmWorkspaceCardPointer(["PATCH.diff", "FINDINGS.md"]));
   assert.equal(whole.context_paths.length, 3);
   // There is no count cap on the listed files or the paths.
   const dozens = Array.from({ length: 150 }, (_, i) => `diff --git a/d/f${i}.ts b/d/f${i}.ts\n@@ -0,0 +1 @@\n+a`).join("\n");
-  const wide = amuxDmOwnerSettlementCard({ ...input, pull: { number: 1, patch: dozens }, workspace: true });
+  const wide = amuxDmOwnerSettlementCard({ ...input, pull: { number: 1, patch: dozens } });
   assert.match(wide.question, /files \(150\):/);
   assert.match(wide.question, /- d\/f149\.ts \(\+1 -0\)/);
   assert.equal(wide.context_paths.length, 150);
   // No findings: only the patch is evidence.
-  assert.equal(amuxDmOwnerSettlementCard({ ...input, findings: null, workspace: true }).context, dmWorkspaceCardPointer(["PATCH.diff"]));
+  assert.equal(amuxDmOwnerSettlementCard({ ...input, findings: null }).context, dmWorkspaceCardPointer(["PATCH.diff"]));
   assert.equal(amuxDmOwnerSettlementCard({ ...input, pull: { number: 1, patch: "no diff" } }), null, "a patch with no file is left to the person");
   assert.equal(amuxDmOwnerSettlementCard({ ...base, kind: "t2_pr", pull: { number: 1, patch: null } }), null,
     "a pull request whose patch cannot be read is left to the person");
   assert.equal(amuxDmOwnerSettlementCard({ ...base, kind: "t2_pr", pull: null }), null);
-});
-
-test("the card default follows the workspace switch", () => {
-  const before = process.env.TOMVERSE_AMUX_DM_WORKSPACE;
-  try {
-    delete process.env.TOMVERSE_AMUX_DM_WORKSPACE;
-    assert.equal(amuxDmOwnerSettlementCard({ ...base, kind: "stopped" }).context, dmWorkspaceCardPointer(["FINDINGS.md"]));
-    process.env.TOMVERSE_AMUX_DM_WORKSPACE = "disabled";
-    assert.match(amuxDmOwnerSettlementCard({ ...base, kind: "stopped" }).context, /^\[evidence\]\nIts run's report:\n/);
-  } finally {
-    if (before === undefined) delete process.env.TOMVERSE_AMUX_DM_WORKSPACE;
-    else process.env.TOMVERSE_AMUX_DM_WORKSPACE = before;
-  }
 });
 
 test("an answer decides only by its kind's fixed words, with the delivery's precedence", () => {

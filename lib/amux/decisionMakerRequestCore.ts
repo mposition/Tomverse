@@ -35,9 +35,11 @@ export const DM_REQUEST_ROUTES = ["operator", "dm_proposal"] as const;
 export type DmRequestRoute = (typeof DM_REQUEST_ROUTES)[number];
 
 /**
- * Every refusal `routeDmQuestion()` can record, in its own order. The
+ * Every refusal `routeDmQuestion()` has recorded, in its own order. The
  * migration's array CHECK holds the same set; tests pin both to what the
- * router actually produces.
+ * router produces. Two are no longer made and stay for the rows that hold
+ * them: `throughput_exceeded` (its cap went on 2026-11-15) and
+ * `ask_type_not_allowed` (its allowlist went on 2026-11-16).
  */
 export const DM_ROUTING_REFUSAL_CODES = [
   "kill_switch_on",
@@ -174,9 +176,15 @@ export const DM_REQUEST_EVENT_AUDIT_TARGET_TYPE = "AmuxDecisionMakerRequestEvent
 export const dmEventAuditAction = (kind: DmRequestEventKind): string =>
   kind === "direct_answer_close" ? "amux.decision.assign_discarded" : `amux.decision.${kind}`;
 
-/** §2, §9: the database-clock windows. */
-export const DM_ASSIGNMENT_WINDOW_MS = 2 * 60 * 1000;
-export const DM_RESULT_WINDOW_MS = 30 * 60 * 1000;
+/**
+ * §2, §9: the database-clock windows (owner direction 2026-11-16, migration
+ * 20261116140000_amux_dm_request_windows: they were two minutes and 30
+ * minutes). The result window outlasts the broker's answer deadline
+ * (DM_BROKER_RESPONSE_DEADLINE_MS, 3 hours 4 minutes), so a DM that uses all
+ * of its run still answers inside it.
+ */
+export const DM_ASSIGNMENT_WINDOW_MS = 24 * 60 * 60 * 1000;
+export const DM_RESULT_WINDOW_MS = 8 * 60 * 60 * 1000;
 /**
  * §10: an open request is closed as stale 30 days after it was created --
  * exactly 720 hours. Since migration
@@ -468,12 +476,18 @@ export type DmRequestState = {
   /** The database clock when the state was read. */
   dbNowMs: number;
   assigned: boolean;
-  /** Set by the assignment: its database clock plus 30 minutes. */
+  /** Set by the assignment: its database clock plus the result window (8 hours). */
   resultDeadlineAtMs: number | null;
   transmission: DmTransmission | null;
   transmitOutcome: "receipt" | "unknown" | null;
   terminal: { eventId: string; resultKind: DmResultKind; resultDigest: string } | null;
   resultUnknown: boolean;
+  /**
+   * The digest the request's `result_unknown` names (owner direction
+   * 2026-11-16): a later result of this digest is the same output read back,
+   * and is accepted. Null without one.
+   */
+  resultUnknownDigest: string | null;
   /** §5's report that the broker could not confirm the request's directories deleted; one per request. */
   cleanupUnknown: { eventId: string; createdAtMs: number } | null;
   /** Why the request is closed; a request routed to the operator is closed from its creation. */
@@ -535,6 +549,9 @@ export const dmRequestStateFromRow = (row: unknown): DmRequestState | null => {
   else if (r.transmitOutcome === "transmit_unknown") transmitOutcome = "unknown";
   else if (r.transmitOutcome !== null) return null;
 
+  const resultUnknownDigest = r.resultUnknownDigest ?? null;
+  if (r.resultUnknown ? !isDmDigest(resultUnknownDigest) : resultUnknownDigest !== null) return null;
+
   let terminal: DmRequestState["terminal"] = null;
   if (r.terminalEventId !== null) {
     if (!isDmRequestId(r.terminalEventId) || !isOneOf(DM_RESULT_KINDS, r.terminalResultKind) || !isDmDigest(r.terminalResultDigest)) {
@@ -581,6 +598,7 @@ export const dmRequestStateFromRow = (row: unknown): DmRequestState | null => {
     transmitOutcome,
     terminal,
     resultUnknown: r.resultUnknown,
+    resultUnknownDigest: resultUnknownDigest as string | null,
     cleanupUnknown,
     closing,
     probedRejection,
@@ -640,7 +658,7 @@ export const isDmDeadlineResultKind = (kind: DmResultKind): boolean =>
  * otherwise the first clause it fails.
  *
  * - `assign`: a request routed to a DM, open, not yet assigned, before its
- *   assignment deadline (creation + 2 min) less the commit reserve.
+ *   assignment deadline (creation + 24 hours) less the commit reserve.
  * - `assign_discarded`: assigned, open, and nothing has happened since --
  *   the local AMUX could not mark the card (§2-3). Closes the request.
  * - `transmit_intent`: assigned, open, not yet transmitted, no result and no
@@ -649,7 +667,8 @@ export const isDmDeadlineResultKind = (kind: DmResultKind): boolean =>
  * - `transmit_receipt` / `transmit_unknown`: after the intent, one of the two
  *   once. Accepted after the request closed or its result arrived: a
  *   transmission that happened is a fact either way.
- * - `result`: assigned, open, no result and no unknown result; every kind but
+ * - `result`: assigned, open, no result, and no unknown result but one of the
+ *   same digest -- the output read back (owner direction 2026-11-16); every kind but
  *   `unavailable` needs the transmission intent, and the result names the
  *   intent's payload digest (none without an intent). A DM output (proposal,
  *   escalation, validation failure) must arrive before the result deadline
@@ -710,7 +729,7 @@ export const dmEventRefusal = (state: DmRequestState, attempt: DmEventAttempt): 
       if (!state.assigned) return "not_assigned";
       if (closed) return "closed";
       if (state.terminal !== null) return "result_recorded";
-      if (state.resultUnknown) return "result_unknown_recorded";
+      if (state.resultUnknown && attempt.resultDigest !== state.resultUnknownDigest) return "result_unknown_recorded";
       if (state.transmission === null && attempt.resultKind !== "unavailable") return "not_transmitted";
       if (attempt.inputPayloadDigest !== (state.transmission?.inputPayloadDigest ?? null)) return "payload_mismatch";
       if (isDmDeadlineResultKind(attempt.resultKind) && deadlineReached(state.dbNowMs, state.resultDeadlineAtMs)) {
@@ -725,7 +744,7 @@ export const dmEventRefusal = (state: DmRequestState, attempt: DmEventAttempt): 
           case "terminal_exists":
             return state.terminal !== null && state.terminal.resultDigest !== attempt.resultDigest;
           case "result_unknown":
-            return state.resultUnknown;
+            return state.resultUnknown && state.resultUnknownDigest !== attempt.resultDigest;
           case "not_transmitted":
             return state.transmission === null;
           case "deadline_passed":
@@ -889,7 +908,9 @@ export type DmResultSubmissionOutcome =
  * - the same (request, digest) pair as the recorded result returns that
  *   result, and the same digest already rejected returns that rejection --
  *   neither writes again, so a submission is idempotent on the pair;
- * - otherwise a closed request, an unknown result, another digest's result,
+ * - otherwise a closed request, an unknown result of another digest (one of
+ *   the same digest is the output the submitter lost and read back, owner
+ *   direction 2026-11-16), another digest's result,
  *   no transmission, a binding that differs, a DM output at or past the
  *   result deadline less the reserve, and a proposal while the kill switch is
  *   on or unreadable (§6's table: "진행 중 결과의 제안 저장 — 거부") are each
@@ -912,7 +933,9 @@ export const dmResultSubmissionOutcome = (
   }
   if (state.probedRejection !== null) return { outcome: "existing_rejection", reason: state.probedRejection };
   if (state.closing !== null) return { outcome: "reject", reason: "request_closed" };
-  if (state.resultUnknown) return { outcome: "reject", reason: "result_unknown" };
+  if (state.resultUnknown && submission.resultDigest !== state.resultUnknownDigest) {
+    return { outcome: "reject", reason: "result_unknown" };
+  }
   if (state.terminal !== null) return { outcome: "reject", reason: "terminal_exists" };
   if (!state.assigned || (state.transmission === null && submission.resultKind !== "unavailable")) {
     return { outcome: "reject", reason: "not_transmitted" };
@@ -933,11 +956,12 @@ export const dmResultSubmissionOutcome = (
 export const DM_VALIDATION_LATCH_THRESHOLD = 3;
 
 /**
- * How many of an instance's newest terminal results the latch reads. §3-6
- * caps an instance at 100 routed requests a day, so this covers at least a
- * day of its results -- far longer than the fifteen minutes before the
- * maintenance sweep checks again -- and bounds the read whatever the age of
- * the instance's count boundary.
+ * How many of an instance's newest terminal results the latch reads. A run of
+ * three needs only the newest few; this bounds the read whatever the age of
+ * the instance's count boundary, and covers far more results than an
+ * instance makes in the fifteen minutes before the maintenance sweep checks
+ * again. (It once leaned on §3-6's 100 routed requests a day, a cap removed on
+ * 2026-11-15.)
  */
 export const DM_VALIDATION_LATCH_WINDOW = 100;
 

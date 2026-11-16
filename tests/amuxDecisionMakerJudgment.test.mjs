@@ -585,9 +585,11 @@ test("stage S2-2b4's migration pins each of its six functions to the body it rep
   for (const [name, from] of GAPS_REPLACED) {
     const writer = from.split("/")[2];
     const redefining = readdirSync(join(root, MIGRATIONS))
-      // The card text cap migration replaces the body guard once more, against its own pinned body.
+      // The card text cap migration replaces the body guard once more, and the 2026-11-16 windows
+      // migration the event guard, each against its own pinned body (their own tests hold them).
       .filter((migration) => migration > writer && migration !== GAPS_MIGRATION_NAME &&
-        !(name === "amux_decision_maker_body_guard" && migration === "20261115140000_amux_dm_card_text_cap"))
+        !(name === "amux_decision_maker_body_guard" && migration === "20261115140000_amux_dm_card_text_cap") &&
+        !(name === "amux_decision_maker_request_event_guard" && migration === "20261116140000_amux_dm_request_windows"))
       .filter((migration) => {
         try {
           return new RegExp(`FUNCTION "${name}"\\(`).test(read(`${MIGRATIONS}/${migration}/migration.sql`));

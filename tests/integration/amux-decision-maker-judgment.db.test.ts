@@ -1049,7 +1049,8 @@ test("Admin's request list shows each request's route, status and delivery as th
         classificationVersion: "authority-manifest-1",
         scannerVersion: "v1",
       },
-      card: { ...CARD, askType: "customer_outbound" },
+      // A real boundary word keeps it with the operator (owner direction 2026-11-16: no ask type does).
+      card: { ...CARD, question: "Delete the cache table?" },
       keyRing: RING,
     }),
   );
@@ -1083,7 +1084,7 @@ test("Admin's request list shows each request's route, status and delivery as th
   assert.equal(dmAdminRequestStatus(keptRow, list.dbNowMs), "routed_to_operator");
   // A kept question still names the instance its provider maps to.
   assert.equal(keptRow.instance, "decision-maker-openai");
-  assert.ok(keptRow.refusalCodes.includes("ask_type_not_allowed"));
+  assert.ok(keptRow.refusalCodes.includes("irreversible_term"));
 
   const irreversibleRow = rowOf(irreversible.requestId);
   assert.equal(dmAdminRequestStatus(irreversibleRow, list.dbNowMs), "proposal");

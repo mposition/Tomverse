@@ -74,8 +74,8 @@ export const AMUX_V22_RESULT_REVIEW_DM_PROVIDER = "claude";
  * or null when its evidence is missing. Written from the Task's number, its
  * role, the fixed sentence of its kind and its approved completion criteria;
  * the run's findings (its conclusion's, else the whole result) are in the
- * Decision Maker's workspace, whole (owner decision 2026-11-15), or in the
- * card's context, whole, with the workspace switched off. Nothing is cut and
+ * Decision Maker's workspace, whole (owner decision 2026-11-15; always on
+ * since 2026-11-16). Nothing is cut and
  * nothing is left out to fit a card. Words in the criteria may send the card
  * to the operator: that is the routing working.
  */
@@ -86,12 +86,9 @@ export function amuxV22ResultReviewRelayCard(input: {
   kind: AmuxV22ResultReviewKind;
   criteria: readonly string[];
   findings: string;
-  /** Whether the Decision Maker has a workspace; the switch decides by default. */
-  workspace?: boolean;
 }) {
   if (input.criteria.length === 0 || !input.findings.trim()) return null;
-  const context = dmCardEvidenceContext([{ name: "FINDINGS.md", heading: "Its run's report", text: input.findings }], input.workspace);
-  if (context === null) return null;
+  const context = dmCardEvidenceContext([{ name: "FINDINGS.md", heading: "Its run's report", text: input.findings }]);
   const question = [
     "A v22 Task finished and waits for review before it can be marked done.",
     `Task: ${input.taskLabel} (${input.role ?? "task"} Task)`,

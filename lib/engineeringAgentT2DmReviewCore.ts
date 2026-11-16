@@ -55,22 +55,19 @@ export const patchContextPaths = (patch: string): string[] =>
 /**
  * The card the relay files, in the shape of a v22 question's pending entry,
  * or null when there is no patch to show. The question lists the draft's
- * files; the patch itself is in the workspace, whole (or, with the workspace
- * switched off, in the card's context, whole).
+ * files; the patch itself is in the workspace, whole (always on since
+ * 2026-11-16).
  */
 export function engineeringAgentT2DmCard(input: {
   workItemId: string;
   cardLabel: string;
   reason: string | null;
   patchBody: string | null;
-  /** Whether the Decision Maker has a workspace; the switch decides by default. */
-  workspace?: boolean;
 }) {
   if (!input.patchBody) return null;
   const files = engineeringAgentPatchFiles(input.patchBody);
   if (files.length === 0) return null;
-  const context = dmCardEvidenceContext([{ name: "PATCH.diff", heading: "The patch", text: input.patchBody }], input.workspace);
-  if (context === null) return null;
+  const context = dmCardEvidenceContext([{ name: "PATCH.diff", heading: "The patch", text: input.patchBody }]);
   const question = [
     "An engineering agent patch waits for the owner. The agent may not open a pull request for it on its own; a person approves it to apply by hand, or rejects it.",
     `Card: ${input.cardLabel}`,

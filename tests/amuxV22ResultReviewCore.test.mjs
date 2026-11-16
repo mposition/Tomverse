@@ -63,19 +63,15 @@ test("the card's fixed words hit no routing term, so it reaches a DM", () => {
   const input = { reviewId: "00000000-0000-4000-8000-00000000000a",
     taskLabel: "T", role: null, kind: "needs_owner", criteria: ["A", "B"], findings: "done" };
   // A workspace: the findings are evidence/FINDINGS.md, and the card only points at it.
-  const whole = amuxV22ResultReviewRelayCard({ ...input, workspace: true });
+  const whole = amuxV22ResultReviewRelayCard({ ...input });
   assert.match(whole.question, /Its completion criteria:\n- A\n- B\nIts run's report is in the evidence named below\./);
   assert.doesNotMatch(whole.question, /done\n|Its findings/, "the report is not in the question");
   assert.equal(whole.context, dmWorkspaceCardPointer(["FINDINGS.md"]));
-  // The kill switch: the findings ride in the context, whole, in an evidence block.
-  assert.equal(amuxV22ResultReviewRelayCard({ ...input, workspace: false }).context,
-    "[evidence]\nIts run's report:\ndone\n[/evidence]");
-  // No size is too long for it (the old 1,700-character findings left the card unfiled): the whole report is in.
-  const long = `${"x".repeat(100_000)}END`;
-  assert.equal(amuxV22ResultReviewRelayCard({ ...input, findings: long, workspace: false }).context,
-    `[evidence]\nIts run's report:\n${long}\n[/evidence]`);
-  assert.equal(amuxV22ResultReviewRelayCard({ ...input, findings: "x".repeat(2_000), workspace: true }).context,
-    dmWorkspaceCardPointer(["FINDINGS.md"]));
+  // No size is too long for it (the old 1,700-character findings left the card unfiled): the card points at the
+  // whole report, and the workspace is always on (owner direction 2026-11-16).
+  for (const findings of [`${"x".repeat(100_000)}END`, "x".repeat(2_000)]) {
+    assert.equal(amuxV22ResultReviewRelayCard({ ...input, findings }).context, dmWorkspaceCardPointer(["FINDINGS.md"]));
+  }
   // Only missing evidence is left to the person.
   for (const [criteria, findings] of [[[], "done"], [["A"], " "]])
     assert.equal(amuxV22ResultReviewRelayCard({ ...input, criteria, findings }), null,
