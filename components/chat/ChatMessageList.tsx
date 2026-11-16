@@ -1772,6 +1772,8 @@ export function ChatMessageList({
                             picker here, so the "try another model" hint below
                             is an action rather than only advice. Nothing is
                             sent: the next turn stays the user's submission.
+                            When onChooseAnotherModel is wired, the picker
+                            button after "Report error" is the only one.
                           */}
                           {(errorCategory === "generic" || errorCategory === "attachment") &&
                             chooseModelOnError && (
