@@ -78,12 +78,12 @@ function ConsentAction({
       // The accessible name is always the full label; only the visible text
       // shortens in a narrow container, and it is a substring of that name.
       aria-label={label}
-      className={`${consentButtonClass} ${readable ? "text-sm" : "text-[11px] @md/notice:text-xs"}`}
+      data-short-label={shortLabel}
+      className={`${consentButtonClass} ${readable ? "text-sm" : "text-[11px] @md/notice:text-xs @max-md/notice:before:content-[attr(data-short-label)]"}`}
     >
-      {readable ? label : <>
-        <span className="@md/notice:hidden">{shortLabel}</span>
-        <span className="hidden @md/notice:inline">{label}</span>
-      </>}
+      {/* One text node, so the DOM text is the full label; in a narrow
+          container it is swapped for the short label via a pseudo-element. */}
+      {readable ? label : <span className="@max-md/notice:hidden">{label}</span>}
     </button>
   );
 }
