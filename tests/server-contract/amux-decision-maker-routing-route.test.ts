@@ -36,7 +36,6 @@ const RING = new Map([[20000, Buffer.alloc(32, 7)]]);
 
 type World = {
   authorized: boolean;
-  env: string | undefined;
   budgetDepth: number;
   boundaries: Array<{ operation: string; inBudget: boolean }>;
   calls: Array<{ binding: unknown; card: unknown; keyRing: unknown }>;
@@ -49,7 +48,6 @@ let world: World;
 const reset = (changes: Partial<World> = {}) => {
   world = {
     authorized: true,
-    env: "enabled",
     budgetDepth: 0,
     boundaries: [],
     calls: [],
@@ -59,8 +57,6 @@ const reset = (changes: Partial<World> = {}) => {
     logged: [],
     ...changes,
   };
-  if (world.env === undefined) delete process.env.TOMVERSE_AMUX_DM_ROUTING;
-  else process.env.TOMVERSE_AMUX_DM_ROUTING = world.env;
 };
 reset();
 
@@ -175,7 +171,7 @@ const post = (body: unknown) =>
     body: typeof body === "string" ? body : JSON.stringify(body),
   });
 
-test("only the sync token reaches the route, and it stays closed until the operator enables it", async () => {
+test("only the sync token reaches the route", async () => {
   const { POST } = await loadRoute();
 
   reset({ authorized: false });
@@ -183,15 +179,6 @@ test("only the sync token reaches the route, and it stays closed until the opera
   assert.equal(unauthorized.status, 401);
   assert.equal(world.calls.length, 0);
 
-  for (const env of [undefined, "", "true", "ENABLED", "enabled "]) {
-    reset({ env });
-    const closed = await POST(post({ binding: BINDING, card: CARD }));
-    assert.equal(closed.status, 409, String(env));
-    assert.deepEqual(await closed.json(), { routed: false, reason: "dm_routing_disabled" });
-    assert.equal(closed.headers.get("cache-control"), "no-store");
-    assert.deepEqual(world.boundaries, []);
-    assert.equal(world.calls.length, 0);
-  }
 });
 
 test("an enabled route records through the routing boundary inside the route budget and answers without the card", async () => {

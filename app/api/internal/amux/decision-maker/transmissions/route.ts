@@ -9,7 +9,6 @@ import {
   withAmuxRouteBudget,
 } from "@/lib/amux/dbBoundary";
 import {
-  dmInternalRoutesEnabled,
   dmReturnedRefusalStatus,
   dmRouteErrorResponse,
   dmRouteRefusal,
@@ -35,8 +34,6 @@ import { amuxJsonNoStore } from "@/lib/amux/internalRoute";
  * this route only authenticates, reads the body and runs that one transaction
  * in the route budget and its DB boundary, whose commit fence holds the result
  * deadline. Anything but a recorded intent means the broker starts nothing.
- *
- * Closed until the operator sets `TOMVERSE_AMUX_DM_ROUTING=enabled`.
  */
 
 /** A request id, an instance and four short values: the SHA and three digests. */
@@ -58,7 +55,6 @@ export async function POST(request: Request) {
   if (!isAmuxSyncAuthorized(request)) {
     return amuxJsonNoStore({ error: "Unauthorized" }, 401);
   }
-  if (!dmInternalRoutesEnabled()) return refused(409, "dm_routing_disabled");
 
   return withAmuxRouteBudget(async () => {
     try {

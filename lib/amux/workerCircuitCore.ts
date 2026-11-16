@@ -43,14 +43,12 @@ export function amuxWorkerCircuitWaitMs(consecutive: number): number {
 }
 
 export function amuxWorkerCircuit(input: {
-  enabled: boolean;
   /** The worker's latest ended attempts, newest first. */
   recent: ReadonlyArray<{ reason: string | null; endedAtMs: number }>;
   /** When the worker's usage was last observed with work left; null when never. */
   usageObservedAtMs: number | null;
   nowMs: number;
 }): AmuxWorkerCircuit {
-  if (!input.enabled) return AMUX_WORKER_CIRCUIT_CLOSED;
   let consecutive = 0;
   let lastKind: AmuxInfraFailureKind | null = null;
   let lastAtMs = 0;

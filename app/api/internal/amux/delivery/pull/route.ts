@@ -18,7 +18,6 @@ import {
 } from "@/lib/amux/internalRoute";
 import { pullAmuxWorkDelivery,
   type AmuxV22ReadOnlyDeliveryBinding } from "@/lib/amux/delivery";
-import { isAmuxExecutionApiEnabled } from "@/lib/amux/executionGate";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 
 const requestSchema = z
@@ -74,18 +73,6 @@ export async function POST(request: Request) {
     );
   }
 
-  if (!isAmuxExecutionApiEnabled()) {
-    return Response.json(
-      {
-        available: false,
-        reason: "execution_api_disabled",
-      },
-      {
-        status: 409,
-        headers: { "Cache-Control": "no-store" },
-      },
-    );
-  }
 
   return withAmuxRouteBudget(async () => {
     try {

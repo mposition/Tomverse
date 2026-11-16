@@ -390,12 +390,10 @@ export const UNKNOWN_OUTCOME_DECISION_CAUSE_PREFIX = "unknown:";
  * already opened, up to 2^MAX_DOUBLINGS times (16 hours) and then at that
  * interval with no end (owner decisions 2026-11-15 and 2026-11-16; at most
  * three decisions until 2026-11-15). A lookup only reads GitHub, and a lookup
- * that settles the result closes the open decisions with it. On by default
- * since owner decision 2026-11-15; exactly `disabled` turns it off.
+ * that settles the result closes the open decisions with it. Always on (the
+ * ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP switch was removed, owner decision
+ * 2026-11-16).
  */
-export const ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_ENV = "ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP";
-export const engineeringAgentUnknownAutoLookupEnabled = (value: string | undefined) =>
-  value?.trim() !== "disabled";
 export const ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_AFTER_MS = 30 * 60_000;
 /** Where the wait stops growing; the lookups go on at that interval. */
 export const ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_MAX_DOUBLINGS = 5;
@@ -466,14 +464,11 @@ export const ENGINEERING_AGENT_V22_PROMOTED_REASON = "publish_promoted";
  */
 export const ENGINEERING_AGENT_V22_REVIEW_CAUSE_PREFIX = "publish_review:";
 /**
- * The app's switch for it: on by default since owner decision 2026-11-15
- * (a T2 patch that waited for a switch was a result nobody could review);
- * exactly `off` turns it off. A publisher still opens one only when it names
- * `review_draft` (ENGINEERING_PUBLISHER_FEATURES_HEADER).
+ * Always open (owner decision 2026-11-15: a T2 patch that waited for a switch
+ * was a result nobody could review; the ENGINEERING_AGENT_V22_REVIEW_PR switch
+ * was removed, owner decision 2026-11-16). A publisher still opens one only
+ * when it names `review_draft` (ENGINEERING_PUBLISHER_FEATURES_HEADER).
  */
-export const ENGINEERING_AGENT_V22_REVIEW_PR_ENV = "ENGINEERING_AGENT_V22_REVIEW_PR";
-export const engineeringAgentV22ReviewPrEnabled = (value: string | undefined) =>
-  value?.trim() !== "off";
 /**
  * The header a publisher names what it can do in. A review item is claimed
  * only by a publisher that names `review_draft`, so one deployed before this
@@ -729,9 +724,14 @@ export type EffectiveSwitches = {
   maintenanceAllowed: boolean;
 };
 
-/** Anything set other than empty, `0` or `false` engages the kill switch. */
+/**
+ * `enabled` engages the kill switch (the documented value). Production values
+ * from before stay valid: anything set other than empty, `0`, `false` or
+ * `disabled` engages it.
+ */
 export const killSwitchEngaged = (raw: string | null | undefined): boolean =>
-  raw !== undefined && raw !== null && raw !== "" && raw !== "0" && raw.toLowerCase() !== "false";
+  raw !== undefined && raw !== null && raw !== "" && raw !== "0" &&
+  raw.toLowerCase() !== "false" && raw.toLowerCase() !== "disabled";
 
 export const resolveEngineeringAgentSwitches = (
   reading: SwitchReading,
@@ -766,15 +766,7 @@ export const resolveEngineeringAgentSwitches = (
  * run and work item guards no longer count them
  * (migrations `engineering_agent_run_guard_uncapped`,
  * `engineering_agent_work_item_guard_uncapped`).
- *
- * With ENGINEERING_AGENT_LEGACY_HALTS the app holds the caps of owner decision
- * 2026-11-09 again at admission -- 8 pull requests and 8 decisions, an active
- * run counting in both -- so a runaway can be stopped without a migration.
  */
-export const OWNER_QUEUE_LEGACY_LIMITS = {
-  pr: 8,
-  decision: 8,
-} as const;
 
 export type QueueReading = {
   /** Bindings with an open PR or a remaining branch. */
@@ -787,19 +779,16 @@ export type QueueReading = {
   pendingDecisions: number;
 };
 
-export type QueueVerdict = {
+export type QueueVerdict = QueueReading & {
   prFull: boolean;
   decisionFull: boolean;
-  /** Always, unless the kill switch brought the caps back (policy §2.1, §12). */
+  /** Always (policy §2.1, §12). */
   claimAllowed: boolean;
 };
 
-export const decideOwnerQueues = (reading: QueueReading, legacyCaps = false): QueueVerdict => {
-  if (!legacyCaps) return { prFull: false, decisionFull: false, claimAllowed: true };
-  const prFull = reading.openPrBindings >= OWNER_QUEUE_LEGACY_LIMITS.pr;
-  const decisionFull = reading.pendingDecisions >= OWNER_QUEUE_LEGACY_LIMITS.decision;
-  return { prFull, decisionFull, claimAllowed: !prFull && !decisionFull };
-};
+/** The queues are counted, never capped: the counts are carried and a run is always admitted. */
+export const decideOwnerQueues = (reading: QueueReading): QueueVerdict =>
+  ({ ...reading, prFull: false, decisionFull: false, claimAllowed: true });
 
 /* ------------------------------------------------------------------------- */
 /* Halt and circuit                                                           */
@@ -873,22 +862,15 @@ export type RunnerReportableHalt = (typeof RUNNER_REPORTABLE_HALTS)[number];
  *   published once it can (lib/amux/v22KeptResultPublication.ts), and the
  *   Decision Maker is never asked to run it again;
  * - the owner queues are counted, never capped, and nothing in them expires
- *   (OWNER_QUEUE_LEGACY_LIMITS), and the circuit no longer latches
+ *   and the circuit no longer latches
  *   (owner direction the same day: "내부 개발용 Flow입니다. 제한을 줄 이유가
  *   없습니다. 이런 제한을 다 찾아 없애 주세요.").
  *
- * Only ENGINEERING_AGENT_GLOBAL_HALTS still halt everything.
- * `ENGINEERING_AGENT_LEGACY_HALTS=enabled` is the one kill switch back to the
- * behaviour before this decision, everywhere at once -- except what went on
- * 2026-11-16 (owner decision), which it does not bring back: the circuit, the
- * armed gate, and a person's acknowledgement for recorded halts other than
- * the App's identity and namespace signals (ACKNOWLEDGEMENT_ONLY_HALTS).
+ * Only ENGINEERING_AGENT_GLOBAL_HALTS still halt everything. The
+ * ENGINEERING_AGENT_LEGACY_HALTS switch that restored the earlier behaviour was
+ * removed (owner decision 2026-11-16): a mismatch or an orphaned run holds
+ * only its card.
  */
-export const ENGINEERING_AGENT_LEGACY_HALTS_ENV = "ENGINEERING_AGENT_LEGACY_HALTS";
-export const engineeringAgentLegacyHalts = (value: string | undefined) => value?.trim() === "enabled";
-/** A mismatch or an orphaned run holds only its card unless the kill switch (its env value) is on. */
-export const engineeringAgentMismatchCardScoped = (legacyHaltsValue: string | undefined) =>
-  !engineeringAgentLegacyHalts(legacyHaltsValue);
 
 /**
  * The halts that still stop the whole agent (owner decision 2026-11-15): the

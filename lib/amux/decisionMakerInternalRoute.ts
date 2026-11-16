@@ -30,17 +30,6 @@ import {
  */
 
 /**
- * The operator's switch for every Decision Maker route the bridge calls. Until
- * it is exactly `enabled` each route answers 409 `dm_routing_disabled` before
- * it reads the body or opens a transaction: the bridge path is stage S2, and
- * until it is approved and running nothing is written to the ledger, whatever
- * the Decision Maker switches say.
- */
-export const AMUX_DM_ROUTING_ENV = "TOMVERSE_AMUX_DM_ROUTING";
-
-export const dmInternalRoutesEnabled = (): boolean => process.env[AMUX_DM_ROUTING_ENV] === "enabled";
-
-/**
  * The code of an error from the latch's boundary or stores, read by the name
  * each class sets on itself, as the maintenance sweep reads it; anything else
  * is null. No message, which could carry a value, reaches the log.

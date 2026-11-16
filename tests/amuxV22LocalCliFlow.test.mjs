@@ -9,7 +9,7 @@ import { join } from "node:path";
 
 import { AMUX_V22_CONTEXT_FILES, AMUX_V22_RUN_STOP_REASONS, AMUX_V22_TRANSPORT_MAX_BYTES,
   amuxV22ContextPromptSection, amuxV22EmbedContextFiles, amuxV22ExtractContextFiles,
-  amuxV22FitReportText, amuxV22LocalCliFlowEnabled, amuxV22LocalCliLeaseMs,
+  amuxV22FitReportText, amuxV22LocalCliLeaseMs,
   amuxV22RoleHasShell, parseAmuxV22ContextFiles } from "../lib/amux/v22LocalCliFlowCore.ts";
 import { amuxV22ClaudeArgs, amuxV22ClaudeStreamResult, createAmuxV22SidecarHandler,
   parseAmuxV22OneShotRequest, runAmuxV22OneShot } from "../lib/amux/v22OneShotSidecar.mjs";
@@ -21,8 +21,8 @@ import { parseAmuxV22Conclusion } from "../lib/amux/v22ConclusionCore.ts";
 import { buildAmuxV22ResumeContextFile } from "../lib/amux/v22OwnerQuestionCore.ts";
 
 // Owner decision 2026-11-15: a v22 worker run behaves like a local CLI
-// session. Every case here runs the local CLI flow (the default).
-delete process.env.TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW;
+// session. Every case here runs the local CLI flow (always on since
+// 2026-11-16).
 
 const attemptId = "00000000-0000-4000-8000-000000000001";
 const request = { version: 1, attemptId, worker: "worker-a",
@@ -93,20 +93,15 @@ function fakeSpawn({ chunks = [okStream], everyMs = 0, hang = false, exitCode = 
   return { spawnChild, calls };
 }
 
-test("the local CLI flow is on unless the switch says exactly disabled", () => {
-  assert.equal(amuxV22LocalCliFlowEnabled(undefined), true);
-  for (const value of ["", "enabled", "0", "off"]) assert.equal(amuxV22LocalCliFlowEnabled(value), true);
-  assert.equal(amuxV22LocalCliFlowEnabled("disabled"), false);
-  assert.equal(amuxV22LocalCliFlowEnabled(" disabled "), false);
-  assert.equal(amuxV22LocalCliLeaseMs(true), 180_000);
-  assert.equal(amuxV22LocalCliLeaseMs(false), 0);
+test("the local CLI flow has no switch: the lease is always the read-back lease", () => {
+  assert.equal(amuxV22LocalCliLeaseMs(), 180_000);
+  assert.equal(process.env.TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW, undefined);
 });
 
 test("every one-shot role gets the jailed shell; implement alone keeps the file tools", () => {
   for (const role of ["design", "investigate", "review", "implement"])
-    assert.equal(amuxV22RoleHasShell(role, true), true, role);
-  assert.equal(amuxV22RoleHasShell("investigate", false), false);
-  assert.equal(amuxV22RoleHasShell("operate", true), false);
+    assert.equal(amuxV22RoleHasShell(role), true, role);
+  assert.equal(amuxV22RoleHasShell("operate"), false);
   for (const role of ["design", "investigate", "review"]) {
     const args = amuxV22ClaudeArgs({ ...request, role }, { flow: true });
     assert.equal(args[args.indexOf("--tools") + 1], "Read,Grep,Glob,Bash", role);
@@ -160,7 +155,7 @@ test("a report over the transport backstop keeps its start and its last lines", 
   assert.ok(fitted.startsWith("start\n"));
   assert.ok(fitted.endsWith(last));
   assert.match(fitted, /bytes of this report omitted/);
-  assert.equal(parseAmuxV22Conclusion(fitted, { lenient: true })?.verdict, "proceed");
+  assert.equal(parseAmuxV22Conclusion(fitted)?.verdict, "proceed");
   assert.equal(AMUX_V22_TRANSPORT_MAX_BYTES, 32 * 1024 * 1024);
 });
 
@@ -171,7 +166,7 @@ test("a run past the earlier ten-minute deadline goes on while it makes progress
     stream(resultEvent)];
   const fake = fakeSpawn({ chunks, everyMs: 15 });
   const result = await runAmuxV22OneShot({ ...request, role: "investigate" }, config, {
-    syntheticPlatform: true, spawnChild: fake.spawnChild, localCliFlow: true,
+    syntheticPlatform: true, spawnChild: fake.spawnChild,
     deadlineMs: 5, stallMs: 60, progressPollMs: 10 });
   assert.equal(result.kind, "succeeded");
   assert.equal(result.resultText, resultEvent.result);
@@ -181,20 +176,20 @@ test("a run past the earlier ten-minute deadline goes on while it makes progress
 test("a run with no sign of life stops as stalled; there is no time cap; the operator can stop one", async () => {
   const silent = fakeSpawn({ chunks: [], hang: true });
   const stalled = await runAmuxV22OneShot(request, config, { syntheticPlatform: true,
-    spawnChild: silent.spawnChild, localCliFlow: true, stallMs: 30, progressPollMs: 10 });
+    spawnChild: silent.spawnChild, stallMs: 30, progressPollMs: 10 });
   assert.deepEqual([stalled.kind, stalled.failure], ["outcome_unknown", "stalled"]);
   assert.deepEqual([...AMUX_V22_RUN_STOP_REASONS], ["stalled", "operator_stop"]);
   // The earlier safety cap is gone: a busy run goes on until its CLI ends.
   const busy = fakeSpawn({ chunks: [...Array.from({ length: 40 }, () => "{}\n"),
     stream(resultEvent)], everyMs: 5 });
   const long = await runAmuxV22OneShot(request, config, { syntheticPlatform: true,
-    spawnChild: busy.spawnChild, localCliFlow: true, runCapMs: 20, deadlineMs: 20,
+    spawnChild: busy.spawnChild, runCapMs: 20, deadlineMs: 20,
     stallMs: 1_000, progressPollMs: 10 });
   assert.equal(long.kind, "succeeded");
   const controller = new AbortController();
   const waiting = fakeSpawn({ chunks: [], hang: true });
   const pending = runAmuxV22OneShot(request, config, { syntheticPlatform: true,
-    spawnChild: waiting.spawnChild, localCliFlow: true, signal: controller.signal });
+    spawnChild: waiting.spawnChild, signal: controller.signal });
   setTimeout(() => controller.abort(), 20);
   const stopped = await pending;
   assert.deepEqual([stopped.kind, stopped.failure], ["outcome_unknown", "operator_stop"]);
@@ -205,7 +200,7 @@ test("CPU time in the process tree keeps a quiet run alive; with none, and nothi
   let ticks = 0;
   const controller = new AbortController();
   const quiet = runAmuxV22OneShot(request, config, { syntheticPlatform: true,
-    spawnChild: fakeSpawn({ chunks: [], hang: true }).spawnChild, localCliFlow: true,
+    spawnChild: fakeSpawn({ chunks: [], hang: true }).spawnChild,
     stallMs: 40, progressPollMs: 10, signal: controller.signal,
     probeCpu: () => { ticks += 3; return ticks; } });
   setTimeout(() => controller.abort(), 250);
@@ -213,7 +208,7 @@ test("CPU time in the process tree keeps a quiet run alive; with none, and nothi
   // The same tree once it stops using CPU, and a tree /proc cannot read.
   for (const probeCpu of [() => 7, () => null, () => { throw new Error("no /proc"); }]) {
     const idle = await runAmuxV22OneShot(request, config, { syntheticPlatform: true,
-      spawnChild: fakeSpawn({ chunks: [], hang: true }).spawnChild, localCliFlow: true,
+      spawnChild: fakeSpawn({ chunks: [], hang: true }).spawnChild,
       stallMs: 40, progressPollMs: 10, probeCpu });
     assert.equal(idle.failure, "stalled");
   }
@@ -248,7 +243,7 @@ test("a run that keeps writing a file it already changed is alive even without /
     const writer = setInterval(() => { appendFile(join(repo, "log.txt"), "tick\n").catch(() => {}); }, 20);
     const controller = new AbortController();
     const kept = runAmuxV22OneShot(request, config, { syntheticPlatform: true,
-      spawnChild: fakeSpawn({ chunks: [], hang: true }).spawnChild, localCliFlow: true,
+      spawnChild: fakeSpawn({ chunks: [], hang: true }).spawnChild,
       stallMs: 1_500, progressPollMs: 40, signal: controller.signal, probeCpu: () => null,
       probeActivity: probe });
     setTimeout(() => controller.abort(), 4_000);
@@ -257,7 +252,7 @@ test("a run that keeps writing a file it already changed is alive even without /
     assert.equal(keptResult.failure, "operator_stop", "never stalled while it kept writing");
     // ...and once nothing writes, it stalls.
     const idle = await runAmuxV22OneShot(request, config, { syntheticPlatform: true,
-      spawnChild: fakeSpawn({ chunks: [], hang: true }).spawnChild, localCliFlow: true,
+      spawnChild: fakeSpawn({ chunks: [], hang: true }).spawnChild,
       stallMs: 1_500, progressPollMs: 40, probeCpu: () => null, probeActivity: probe });
     assert.equal(idle.failure, "stalled");
   } finally { await rm(repo, { recursive: true, force: true }); }
@@ -283,7 +278,7 @@ test("a transcript of hundreds of MB is read back in a small heap without losing
     const script = `import { spawn } from "node:child_process";` +
       `const { runAmuxV22OneShot } = await import(${JSON.stringify(sidecar)});` +
       `const result = await runAmuxV22OneShot(${JSON.stringify(request)}, ${JSON.stringify(config)},` +
-      `{ syntheticPlatform: true, localCliFlow: true, transcriptPath: ${JSON.stringify(transcriptPath)},` +
+      `{ syntheticPlatform: true, transcriptPath: ${JSON.stringify(transcriptPath)},` +
       ` spawnChild: (b, a, o) => spawn(process.execPath, ["-e", ${JSON.stringify(writer)}], { ...o, cwd: process.cwd(), env: process.env }) });` +
       `process.stdout.write(JSON.stringify({ kind: result.kind, failure: result.failure ?? null,` +
       ` resultText: result.resultText, outputDigest: result.outputDigest,` +
@@ -364,10 +359,10 @@ test("on Linux a real quiet busy child is kept and a real sleeping one stalls", 
   const busy = `const end=Date.now()+2500;while(Date.now()<end){}` +
     `process.stdout.write(${JSON.stringify(stream(resultEvent))})`;
   const kept = await runAmuxV22OneShot(request, config, { syntheticPlatform: true,
-    spawnChild: real(busy), localCliFlow: true, stallMs: 1000, progressPollMs: 50 });
+    spawnChild: real(busy), stallMs: 1000, progressPollMs: 50 });
   assert.equal(kept.kind, "succeeded", "2500 ms of silent CPU is not a stall");
   const asleep = await runAmuxV22OneShot(request, config, { syntheticPlatform: true,
-    spawnChild: real("setTimeout(()=>{},10000)"), localCliFlow: true, stallMs: 1000,
+    spawnChild: real("setTimeout(()=>{},10000)"), stallMs: 1000,
     progressPollMs: 50 });
   assert.equal(asleep.failure, "stalled");
 });
@@ -383,7 +378,7 @@ test("a stopped run keeps its checkout change and writes it beside the journal",
     const controller = new AbortController();
     const waiting = fakeSpawn({ chunks: [], hang: true });
     const pending = runAmuxV22OneShot(request, config, { syntheticPlatform: true,
-      spawnChild: waiting.spawnChild, localCliFlow: true, signal: controller.signal,
+      spawnChild: waiting.spawnChild, signal: controller.signal,
       preservedPatchPath: join(dir, `${attemptId}.preserved.patch`), preserveWorkingTree,
       captureChangedPaths: async () => ({ ok: true, files: ["lib/a.ts"], contractPaths: [] }),
       discardAttemptChanges: async () => { discarded += 1; return true; } });
@@ -403,7 +398,7 @@ test("a stopped run keeps its checkout change and writes it beside the journal",
 test("an earlier run's leftovers are preserved before the base sync, or the run does not start", async () => {
   const order = [];
   const ok = await runAmuxV22OneShot(request, config, { syntheticPlatform: true,
-    spawnChild: fakeSpawn().spawnChild, localCliFlow: true,
+    spawnChild: fakeSpawn().spawnChild,
     preserveWorkingTree: async (_worktree, name) => { order.push(`preserve:${name}`);
       return { ok: true, changed: true, ref: `refs/amux-v22-preserved/${name}`,
         commit: "d".repeat(40) }; },
@@ -414,7 +409,7 @@ test("an earlier run's leftovers are preserved before the base sync, or the run 
   const refused = fakeSpawn();
   let synced = 0;
   const failed = await runAmuxV22OneShot(request, config, { syntheticPlatform: true,
-    spawnChild: refused.spawnChild, localCliFlow: true,
+    spawnChild: refused.spawnChild,
     preserveWorkingTree: async () => ({ ok: false }),
     syncBase: async () => { synced += 1; return { ok: true, baseSha: "a".repeat(40) }; } });
   assert.deepEqual([failed.kind, failed.cliStarted, failed.failure],
@@ -475,7 +470,7 @@ test("the stream is the run's transcript, kept whole and never an output-limit k
     const fake = fakeSpawn({ chunks: [...big, stream(resultEvent)] });
     const transcriptPath = join(dir, `${attemptId}.transcript.jsonl`);
     const result = await runAmuxV22OneShot({ ...request, role: "review" }, config, {
-      syntheticPlatform: true, spawnChild: fake.spawnChild, localCliFlow: true,
+      syntheticPlatform: true, spawnChild: fake.spawnChild,
       transcriptPath });
     assert.equal(result.kind, "succeeded");
     const transcript = await readFile(transcriptPath, "utf8");
@@ -493,14 +488,12 @@ test("a large brief and the previous change reach the checkout as files", async 
   const prompt = `Task: t\n\n${amuxV22ContextPromptSection(files)}\n\n` +
     amuxV22EmbedContextFiles(files);
   assert.doesNotThrow(() => parseAmuxV22OneShotRequest({ ...request, prompt }, "worker-a",
-    "anthropic", { flow: true }));
-  assert.throws(() => parseAmuxV22OneShotRequest({ ...request, prompt }, "worker-a",
-    "anthropic", { flow: false }), "the earlier flow keeps its 32 KiB bound");
+    "anthropic"));
   const written = [];
   let applied = 0;
   const fake = fakeSpawn();
   const result = await runAmuxV22OneShot({ ...request, prompt }, config, {
-    syntheticPlatform: true, spawnChild: fake.spawnChild, localCliFlow: true,
+    syntheticPlatform: true, spawnChild: fake.spawnChild,
     writeContextFiles: async (worktree, list) => { written.push([worktree, list]); return { ok: true }; },
     applyPriorPatch: async () => { applied += 1; return { applied: true }; } });
   assert.equal(result.kind, "succeeded");
@@ -513,14 +506,14 @@ test("a large brief and the previous change reach the checkout as files", async 
   // A read role reads the previous change but the runner applies none.
   applied = 0;
   await runAmuxV22OneShot({ ...request, role: "investigate", prompt }, config, {
-    syntheticPlatform: true, spawnChild: fakeSpawn().spawnChild, localCliFlow: true,
+    syntheticPlatform: true, spawnChild: fakeSpawn().spawnChild,
     writeContextFiles: async () => ({ ok: true }),
     applyPriorPatch: async () => { applied += 1; return { applied: true }; } });
   assert.equal(applied, 0);
   // Files that cannot be written stop the run before the CLI starts.
   const refused = fakeSpawn();
   const failed = await runAmuxV22OneShot({ ...request, prompt }, config, {
-    syntheticPlatform: true, spawnChild: refused.spawnChild, localCliFlow: true,
+    syntheticPlatform: true, spawnChild: refused.spawnChild,
     writeContextFiles: async () => { throw new Error("disk"); } });
   assert.deepEqual([failed.kind, failed.cliStarted, failed.failure],
     ["failed", false, "context_files_unavailable"]);
@@ -532,7 +525,7 @@ test("a lower grade's contract change is kept with its review commit, never disc
   const patchBody = "diff --git a/lib/amux/execution.ts b/lib/amux/execution.ts\n";
   const result = await runAmuxV22OneShot({ ...request, gradeGuard: true,
     executionGrade: "routine" }, config, { syntheticPlatform: true,
-    spawnChild: fakeSpawn().spawnChild, localCliFlow: true,
+    spawnChild: fakeSpawn().spawnChild,
     captureBaseline: async () => ({ ok: true, baseSha: "a".repeat(40) }),
     captureChangedPaths: async () => ({ ok: true, files: ["lib/amux/execution.ts"],
       contractPaths: ["lib/amux/execution.ts"] }),
@@ -564,7 +557,7 @@ test("a verify (investigate) run can install packages, run tests and report what
   const dir = await mkdtemp(join(tmpdir(), "amux-v22-flow-read-"));
   const result = await runAmuxV22OneShot({ ...request, role: "investigate",
     gradeGuard: true, executionGrade: "advanced" }, config, {
-    syntheticPlatform: true, spawnChild: fake.spawnChild, localCliFlow: true,
+    syntheticPlatform: true, spawnChild: fake.spawnChild,
     preservedPatchPath: join(dir, `${attemptId}.preserved.patch`),
     ensureDependencies: async (worktree, home, options) => { deps.push(options); return { ok: true }; },
     createShellJail: async (paths) => { jails.push(paths);
@@ -602,7 +595,7 @@ test("a verify (investigate) run can install packages, run tests and report what
 test("a failed install is named to the worker and in the result", async () => {
   const fake = fakeSpawn();
   const result = await runAmuxV22OneShot({ ...request, role: "review" }, config, {
-    syntheticPlatform: true, spawnChild: fake.spawnChild, localCliFlow: true,
+    syntheticPlatform: true, spawnChild: fake.spawnChild,
     ensureDependencies: async () => ({ ok: false, reason: "install_timed_out" }) });
   assert.deepEqual(result.dependencies, { ok: false, reason: "install_timed_out" });
   assert.match(fake.calls[0].stdin, /could not install this checkout's locked dependencies \(install_timed_out\)/);
@@ -613,7 +606,6 @@ test("the handler hands the run its transcript, preserved-patch path and the ope
   try {
     let seen;
     const handler = createAmuxV22SidecarHandler({ worker: "worker-a", stateDir,
-      localCliFlow: true,
       run: (input, extra) => { seen = extra;
         return runAmuxV22OneShot(input, config, { ...extra, syntheticPlatform: true,
           spawnChild: fakeSpawn({ chunks: [], hang: true }).spawnChild }); } });
@@ -652,7 +644,7 @@ test("a read role with a shell proves its stop only from a clean checkout on its
     const stateDir = await mkdtemp(join(tmpdir(), "amux-v22-flow-recovery-"));
     try {
       const handler = createAmuxV22SidecarHandler({ worker: "worker-a", stateDir,
-        localCliFlow: true, invocationId: "b".repeat(32),
+        invocationId: "b".repeat(32),
         recoveryUnit: async () => ({ rootOwnedUnit: true, controlGroupBound: true,
           processTreeStopped: true }),
         recoveryWorkspace: async () => workspace,
@@ -702,7 +694,7 @@ test("the risk-accepted read-only retry keeps its exact signed launch", async ()
   let jails = 0;
   let installs = 0;
   const result = await runAmuxV22OneShot(readOnly, config, { syntheticPlatform: true,
-    spawnChild: hanging.spawnChild, localCliFlow: true, deadlineMs: 5,
+    spawnChild: hanging.spawnChild, deadlineMs: 5,
     inspectReadOnlyLauncherConfig: async (value) => ({ current: true,
       launcherConfigDigest: amuxV22ReadOnlyActualLauncherConfigDigest({ ...value,
         profileConfigDigest: "1".repeat(64), ...digests }) }),
@@ -805,18 +797,16 @@ test("conclusions are read leniently: no bounds, unknown keys ignored, pretty JS
       note: "n".repeat(3_000) })).concat([{ bogus: true }]),
     evidence: Array.from({ length: 40 }, (_, index) => `lib/file ${index}.ts`),
     extra: "ignored" }, null, 2)}\n\`\`\`\n`;
-  const lenient = parseAmuxV22Conclusion(pretty, { lenient: true });
+  const lenient = parseAmuxV22Conclusion(pretty);
   assert.equal(lenient.verdict, "replan");
   assert.equal(lenient.findings.length, 20_000);
   assert.equal(lenient.handoff.length, 30);
   assert.equal(lenient.evidence.length, 40);
-  assert.equal(parseAmuxV22Conclusion(pretty, { lenient: false }), null);
   // A verdict is still required, and prose after it means it is not the end.
-  assert.equal(parseAmuxV22Conclusion('AMUX_CONCLUSION: {"findings":"x"}', { lenient: true }), null);
-  assert.equal(parseAmuxV22Conclusion('AMUX_CONCLUSION: {"verdict":"stop"}\n' + "p".repeat(400),
-    { lenient: true }), null);
-  assert.equal(parseAmuxV22Conclusion('AMUX_CONCLUSION: {"verdict":"stop"}',
-    { lenient: true })?.findings, "(no findings given)");
+  assert.equal(parseAmuxV22Conclusion('AMUX_CONCLUSION: {"findings":"x"}'), null);
+  assert.equal(parseAmuxV22Conclusion('AMUX_CONCLUSION: {"verdict":"stop"}\n' + "p".repeat(400)), null);
+  assert.equal(parseAmuxV22Conclusion('AMUX_CONCLUSION: {"verdict":"stop"}')?.findings,
+    "(no findings given)");
 });
 
 test("a resumed Task's answer file carries the whole question, options and context", () => {

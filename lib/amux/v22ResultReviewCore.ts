@@ -13,19 +13,11 @@
 
 import { dmCardEvidenceContext } from "./decisionMakerWorkspaceCore.ts";
 
-/**
- * Filing a review card starts a Decision Maker turn. Owner decision
- * 2026-11-15: the switches that make the Decision Maker work default on, and
- * are kill switches -- on unless exactly `disabled`.
- */
-export const AMUX_V22_RESULT_REVIEW_DM_ENV = "TOMVERSE_AMUX_V22_RESULT_REVIEW_DM";
 /** A Decision Maker proposal for a question the app answers itself is
  * applied without the operator's confirmation in Admin. On unless `disabled`. */
 export const AMUX_DM_APPROVER_ENV = "TOMVERSE_AMUX_DM_APPROVER";
 
 export type AmuxResultReviewEnv = Record<string, string | undefined>;
-export const amuxV22ResultReviewDmEnabled = (env: AmuxResultReviewEnv = process.env) =>
-  env[AMUX_V22_RESULT_REVIEW_DM_ENV]?.trim() !== "disabled";
 export const amuxDmApproverEnabled = (env: AmuxResultReviewEnv = process.env) =>
   env[AMUX_DM_APPROVER_ENV]?.trim() !== "disabled";
 

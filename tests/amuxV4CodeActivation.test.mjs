@@ -82,17 +82,17 @@ test("v4 live CLI retains its v13 child and tunnel limits", () => {
   assert.doesNotMatch(runOnce, /createAmuxV19EgressProxy|awaitAmuxV19StoppableChild/);
 });
 
-test("v29 opens four v22 code latches and v49 adds publication, not outcome writes", () => {
-  const sources = [
-    ["../lib/amux/v22AutoPromotionCore.ts", "AMUX_V22_AUTO_PROMOTION_CODE_LATCH", true],
-    ["../lib/amux/v22WorkerClaimCore.ts", "AMUX_V22_WORKER_CLAIM_CODE_LATCH", true],
-    ["../lib/amux/v22TaskExecutionCore.ts", "AMUX_V22_TASK_EXECUTION_CODE_LATCH", true],
-    ["../lib/amux/v22TaskExecutionCore.ts", "AMUX_V22_ENGINEERING_PUBLICATION_CODE_LATCH", true],
-    ["../lib/amux/v22OutcomeObservationCore.ts", "AMUX_V22_OUTCOME_WRITE_CODE_LATCH", false],
-    ["../lib/amux/v22OneShotSidecar.mjs", "AMUX_V22_SIDECAR_CODE_LATCH", true],
-  ];
-  for (const [path, name, enabled] of sources) {
+test("the card execution code latches are gone", () => {
+  for (const [path, name] of [
+    ["../lib/amux/v22AutoPromotionCore.ts", "AMUX_V22_AUTO_PROMOTION_CODE_LATCH"],
+    ["../lib/amux/v22WorkerClaimCore.ts", "AMUX_V22_WORKER_CLAIM_CODE_LATCH"],
+    ["../lib/amux/v22TaskExecutionCore.ts", "AMUX_V22_TASK_EXECUTION_CODE_LATCH"],
+    ["../lib/amux/v22TaskExecutionCore.ts", "AMUX_V22_ENGINEERING_PUBLICATION_CODE_LATCH"],
+    ["../lib/amux/v22OutcomeObservationCore.ts", "AMUX_V22_OUTCOME_WRITE_CODE_LATCH"],
+    ["../lib/amux/v22OneShotSidecar.mjs", "AMUX_V22_SIDECAR_CODE_LATCH"],
+    ["../lib/amux/wslBridgeCore.ts", "WSL_BRIDGE_CODE_LATCH"],
+  ]) {
     const source = readFileSync(new URL(path, import.meta.url), "utf8");
-    assert.match(source, new RegExp(`export const ${name} = ${enabled};`), name);
+    assert.doesNotMatch(source, new RegExp(name), name);
   }
 });

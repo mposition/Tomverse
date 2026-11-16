@@ -56,7 +56,7 @@ export const AMUX_OWNER_QUEUE_DM_STATES = [
   "unfilable",
   /** Nothing stops it: the next relay tick files the card. */
   "waiting_relay",
-  /** The path's switch is off, so no card is filed on its own. */
+  /** The Decision Maker kill switch holds the path (or its switches could not be read), so no card is filed. */
   "switch_off",
   /** The path's conditions do not hold for this card. */
   "not_eligible",
@@ -105,8 +105,6 @@ export type AmuxOwnerQueueDmFacts = {
   settlement: {
     id: string; state: string; localCardId: string | null; request: AmuxOwnerQueueDmRequestFact | null;
     handoffReason: string | null; cancelReason: string | null;
-    /** The owner asked for it from this screen (its audit entry). */
-    requested: boolean;
   } | null;
   /** The card's newest open escalation, which a settlement is filed for. */
   escalationId: string | null;
@@ -115,11 +113,8 @@ export type AmuxOwnerQueueDmFacts = {
 };
 
 export type AmuxOwnerQueueDmSwitches = {
-  /** TOMVERSE_AMUX_DM_ROUTING: the relay's routes answer 409 without it. */
-  routing: boolean;
   /** The Decision Maker kill switch; null when it could not be read (fail closed). */
   killSwitch: boolean | null;
-  resultReview: boolean; t2: boolean; settlement: boolean;
 };
 
 /** Only a read that failed once is worth sending again; a card too big stays too big. */
@@ -144,9 +139,8 @@ const filed = (source: AmuxOwnerQueueDmSource, request: AmuxOwnerQueueDmRequestF
  */
 export function amuxOwnerQueueDmView(facts: AmuxOwnerQueueDmFacts,
   switches: AmuxOwnerQueueDmSwitches): AmuxOwnerQueueDmView {
-  // Every path stops here when the routing is off or the kill switch holds it.
-  const held = !switches.routing ? "dm_routing" : switches.killSwitch === null ? "switches_unreadable" :
-    switches.killSwitch ? "kill_switch" : null;
+  // Every path stops here when the kill switch holds it.
+  const held = switches.killSwitch === null ? "switches_unreadable" : switches.killSwitch ? "kill_switch" : null;
   const routingOff = (source: AmuxOwnerQueueDmSource, sourceId: string) =>
     view(source, "switch_off", { reason: held, sourceId });
   const { question, review, t2, settlement } = facts;
@@ -160,21 +154,19 @@ export function amuxOwnerQueueDmView(facts: AmuxOwnerQueueDmFacts,
   }
   if (review) {
     if (review.localCardId) return filed("result_review", review.request, review.id);
-    // Sent again only where the tick would file it: routing on, no kill switch, its own switch on.
+    // Sent again only where the tick would file it: no kill switch.
     if (review.handoffReason) return view("result_review", "unfilable", { reason: review.handoffReason,
       sourceId: review.id,
-      action: review.handoffReason === AMUX_OWNER_QUEUE_DM_RESENDABLE_HANDOFF && !held && switches.resultReview ?
+      action: review.handoffReason === AMUX_OWNER_QUEUE_DM_RESENDABLE_HANDOFF && !held ?
         "resend" : null });
     if (held) return routingOff("result_review", review.id);
-    return switches.resultReview ? view("result_review", "waiting_relay", { sourceId: review.id }) :
-      view("result_review", "switch_off", { reason: "result_review", sourceId: review.id });
+    return view("result_review", "waiting_relay", { sourceId: review.id });
   }
   if (t2) {
     if (t2.localCardId) return filed("t2_draft", t2.request, t2.workItemId);
     if (t2.unfilable) return view("t2_draft", "unfilable", { reason: "patch_does_not_fit", sourceId: t2.workItemId });
     if (held) return routingOff("t2_draft", t2.workItemId);
-    return switches.t2 ? view("t2_draft", "waiting_relay", { sourceId: t2.workItemId }) :
-      view("t2_draft", "switch_off", { reason: "t2_draft", sourceId: t2.workItemId });
+    return view("t2_draft", "waiting_relay", { sourceId: t2.workItemId });
   }
   if (settlement) {
     const sourceId = settlement.id;
@@ -185,19 +177,16 @@ export function amuxOwnerQueueDmView(facts: AmuxOwnerQueueDmFacts,
     if (settlement.localCardId) return filed("settlement", settlement.request, sourceId);
     if (settlement.handoffReason) return view("settlement", "unfilable", { reason: settlement.handoffReason,
       sourceId,
-      // A resend is marked requested, so its own switch does not matter; the routing does.
       action: settlement.handoffReason === AMUX_OWNER_QUEUE_DM_RESENDABLE_HANDOFF && !held ? "resend" : null });
     if (held) return routingOff("settlement", sourceId);
-    return switches.settlement || settlement.requested ? view("settlement", "waiting_relay", { sourceId }) :
-      view("settlement", "switch_off", { reason: "settlement", sourceId, action: "request" });
+    return view("settlement", "waiting_relay", { sourceId });
   }
   if (facts.escalationId === null) return view(null, "none");
   const sourceId = facts.escalationId;
   if (!facts.settlementEligible) return view("settlement", "not_eligible",
     { reason: "settlement_not_eligible", sourceId });
   if (held) return routingOff("settlement", sourceId);
-  return switches.settlement ? view("settlement", "waiting_relay", { sourceId }) :
-    view("settlement", "switch_off", { reason: "settlement", sourceId, action: "request" });
+  return view("settlement", "waiting_relay", { sourceId });
 }
 
 /**

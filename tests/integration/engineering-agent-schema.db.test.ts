@@ -6,7 +6,9 @@ import { setTimeout as sleep } from "node:timers/promises";
 import type { Session } from "next-auth";
 
 import { writeAdminAuditLog } from "@/lib/adminAudit";
-import { OWNER_QUEUE_LEGACY_LIMITS } from "@/lib/engineeringAgentCore";
+
+/** The size of the owner queue cap that existed before owner decision 2026-11-15. */
+const OWNER_QUEUE_LEGACY_LIMITS = { pr: 8, decision: 8 } as const;
 import { prisma } from "@/lib/prisma";
 
 // Real PostgreSQL evidence for the engineering agent's state tables

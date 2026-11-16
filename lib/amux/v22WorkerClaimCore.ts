@@ -1,7 +1,5 @@
 /** Assignment is deliberately distinct from execution start. The role/grade
  * and route facts come from owner-approved receipts, never model prose. */
-export const AMUX_V22_WORKER_CLAIM_CODE_LATCH = true;
-export const AMUX_V22_WORKER_CLAIM_ENV = "TOMVERSE_AMUX_V22_WORKER_CLAIM";
 /**
  * Tasks held by workers at once, across every lane: one per verified worker
  * and no other bound (owner direction 2026-11-15, "제한을 줄 이유가
@@ -45,8 +43,8 @@ export const amuxV22TaskWritesPatch = (taskRole: string | null | undefined) =>
 /**
  * The one-shot providers, keyed by the v19 CLI channel names (owner decision
  * 2026-10-26: every registered provider class may run v22 Tasks). Claude is
- * always on; the others enter the catalog only while
- * TOMVERSE_AMUX_V22_MULTI_PROVIDER is `enabled`. Every route is priced from
+ * always on, and so are the others (the multi-provider switch is gone,
+ * 2026-11-16). Every route is priced from
  * Admin › Models by its model ID, so a model missing there holds the route.
  * Cursor's print mode cannot be kept from its shell once it may write, so a
  * Cursor worker takes the read roles only (`implement: false`): Cursor
@@ -70,20 +68,6 @@ export const AMUX_V22_PROVIDERS = Object.freeze({
     model: ANY_MODEL, implement: true }),
 });
 export type AmuxV22Provider = keyof typeof AMUX_V22_PROVIDERS;
-export const AMUX_V22_MULTI_PROVIDER_ENV = "TOMVERSE_AMUX_V22_MULTI_PROVIDER";
-export const amuxV22MultiProviderEnabled = (value: string | undefined) =>
-  value === "enabled";
-/**
- * Since 2026-11-08 the Codex, Copilot and Cursor sidecars record their own
- * sign-in's subscription quota as Claude's does, for the Agent office.
- * Whether such a reading also feeds dispatch -- the routing score and both
- * exhausted checks (the native router's and the v22 claim's) -- is this
- * switch, off unless exactly `enabled`; off, dispatch treats those workers
- * as before, with no reading. Claude's readings always count.
- */
-export const AMUX_V22_NON_CLAUDE_QUOTA_GATE_ENV = "TOMVERSE_AMUX_V22_NON_CLAUDE_QUOTA_GATE";
-export const amuxQuotaObservationFeedsDispatch = (provider: string, gate: string | undefined) =>
-  provider.trim().toLowerCase() === "anthropic" || gate === "enabled";
 export const amuxV22Provider = (provider: string): AmuxV22Provider | null => {
   const key = provider.toLowerCase();
   return Object.hasOwn(AMUX_V22_PROVIDERS, key) ? key as AmuxV22Provider : null;
@@ -101,9 +85,6 @@ export const amuxV22OneShotRouteSupported = (provider: string, modelId: string) 
   const known = amuxV22Provider(provider);
   return known !== null && AMUX_V22_PROVIDERS[known].model.test(modelId);
 };
-
-export const amuxV22WorkerClaimEnabled = (value: string | undefined) =>
-  AMUX_V22_WORKER_CLAIM_CODE_LATCH && value === "enabled";
 
 /**
  * Whether one more Task may be assigned now. Until 2026-11-13 each lane

@@ -20,16 +20,6 @@ import { repositoryPathRefusal } from "./amux/decisionMakerCore.ts";
 import { dmCardEvidenceContext } from "./amux/decisionMakerWorkspaceCore.ts";
 import { engineeringAgentPatchFiles } from "./engineeringAgentOwnerItemContextCore.ts";
 
-/**
- * Filing a card starts a Decision Maker turn. On unless exactly `disabled`
- * (owner decision 2026-11-15: the switches that make the Decision Maker work
- * default on, and are kill switches).
- */
-export const ENGINEERING_AGENT_T2_DM_REVIEW_ENV = "TOMVERSE_ENGINEERING_AGENT_T2_DM_REVIEW";
-
-export const engineeringAgentT2DmReviewEnabled = (env: Record<string, string | undefined> = process.env) =>
-  env[ENGINEERING_AGENT_T2_DM_REVIEW_ENV]?.trim() !== "disabled";
-
 /** The session name the relay files the card under: no worker session asks it. */
 export const ENGINEERING_AGENT_T2_DM_WORKER = "engineering-t2-review";
 /** As the v22 result review: `claude` routes to `decision-maker-openai`. */

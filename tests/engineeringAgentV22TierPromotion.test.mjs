@@ -29,7 +29,7 @@ const ports = (overrides = {}) => {
       resolved.push(input);
       return input.candidate ? { publishWorkItemId: "publish-1" } :
         { kept: true };
-    }, reviewPrEnabled: () => false, ...overrides };
+    }, ...overrides };
 };
 const t2 = { ...t1, tier: { tier: "T2", findings: [] }, imageProofDigest: null,
   candidate: { ...t1.candidate, changes: [{ path: "components/chat/x.tsx" }] } };
@@ -78,32 +78,31 @@ test("anything short of T1 on this exact patch keeps an owner draft", async () =
   assert.equal(shadow.resolved[0].candidate, null);
 });
 
-test("with its switch on, a T2 verdict opens an owner review item; T1 stays ordinary", async () => {
-  const value = ports({ reviewPrEnabled: () => true, loadStored: async () => t2 });
+test("a T2 verdict opens an owner review item; T1 stays ordinary", async () => {
+  const value = ports({ loadStored: async () => t2 });
   assert.deepEqual(await promoteEngineeringAgentV22Draft(value),
     { outcome: "review_promoted" });
   assert.equal(value.resolved[0].ownerReview, true);
   assert.deepEqual(value.resolved[0].candidate, {
     expectedTreeId: t2.candidate.expectedTreeId,
     baseCommitterDate: t2.candidate.baseCommitterDate, imageProofDigest: null });
-  const ordinary = ports({ reviewPrEnabled: () => true });
+  const ordinary = ports({});
   assert.deepEqual(await promoteEngineeringAgentV22Draft(ordinary),
     { outcome: "promoted" });
   assert.equal(ordinary.resolved[0].ownerReview, false);
-  // Off, or a patch that does not qualify: an ordinary owner draft, as before.
-  for (const [enabled, stored] of [
-    [false, t2],
-    [true, { ...t2, candidate: { ...t2.candidate,
-      changes: [{ path: ".github/workflows/ci.yml" }] } }],
-    [true, { ...t2, patchDigest: "f".repeat(64) }],
-    [true, { ok: false, reason: "patch_unavailable" }],
+  // A patch that does not qualify: an ordinary owner draft, as before.
+  for (const stored of [
+    { ...t2, candidate: { ...t2.candidate,
+      changes: [{ path: ".github/workflows/ci.yml" }] } },
+    { ...t2, patchDigest: "f".repeat(64) },
+    { ok: false, reason: "patch_unavailable" },
   ]) {
-    const kept = ports({ reviewPrEnabled: () => enabled, loadStored: async () => stored });
+    const kept = ports({ loadStored: async () => stored });
     assert.equal((await promoteEngineeringAgentV22Draft(kept)).outcome, "kept");
     assert.equal(kept.resolved[0].candidate, null);
   }
   // The database still refusing it is an ordinary draft, like a T1 refusal.
-  const refused = ports({ reviewPrEnabled: () => true, loadStored: async () => t2 });
+  const refused = ports({ loadStored: async () => t2 });
   refused.resolve = async (input) => {
     refused.resolved.push(input);
     if (input.candidate) throw new Error("Database error. Code: `23514`.");
@@ -113,22 +112,17 @@ test("with its switch on, a T2 verdict opens an owner review item; T1 stays ordi
     { outcome: "kept", reason: "publish_refused" });
 });
 
-test("a lapsed owner review item is reissued on T1 or T2 while on, and closed when off", async () => {
+test("a lapsed owner review item is reissued on T1 or T2", async () => {
   const lapsed = { ...pending, workItemId: "publish-1",
     expectedTreeId: t1.candidate.expectedTreeId, ownerReview: true };
   for (const stored of [t1, t2]) {
-    const value = ports({ readLapsed: async () => lapsed,
-      reviewPrEnabled: () => true, loadStored: async () => stored });
+    const value = ports({ readLapsed: async () => lapsed, loadStored: async () => stored });
     assert.deepEqual(await promoteEngineeringAgentV22Draft(value), { outcome: "reissued" });
     assert.equal(value.resolved[0].reissue.workItemId, "publish-1");
   }
-  const off = ports({ readLapsed: async () => lapsed, loadStored: async () => t2 });
-  assert.deepEqual(await promoteEngineeringAgentV22Draft(off),
-    { outcome: "reissue_refused", reason: "review_pr_off" });
-  assert.deepEqual(off.resolved, [{ expire: { workItemId: "publish-1", reason: "review_pr_off" } }]);
-  // An ordinary item is never kept alive by a T2 verdict, switch or not.
+  // An ordinary item is never kept alive by a T2 verdict.
   const ordinary = ports({ readLapsed: async () => ({ ...lapsed, ownerReview: false }),
-    reviewPrEnabled: () => true, loadStored: async () => t2 });
+    loadStored: async () => t2 });
   assert.deepEqual(await promoteEngineeringAgentV22Draft(ordinary),
     { outcome: "reissue_refused", reason: "tier_changed" });
 });

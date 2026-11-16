@@ -19,12 +19,14 @@ import { AMUX_V22_READ_ONLY_API_BROKER_POLICY_DIGEST,
 const uuid = "8b465370-568a-4a78-b9dd-31dfd5413f95";
 test("recovery capability defaults off and only the exact master value opens it", () => {
   assert.equal(amuxV22TaskRecoveryEnabled("true"), true);
-  for (const value of [undefined, "", "enabled", "1", "TRUE", " true", "false"])
+  assert.equal(amuxV22TaskRecoveryEnabled("enabled"), true);
+  for (const value of [undefined, "", "1", "TRUE", " true", "false", "disabled"])
     assert.equal(amuxV22TaskRecoveryEnabled(value), false);
 });
 test("legacy safe-stop defaults off and rejects reuse of the broad sync secret", () => {
   assert.equal(amuxV22LegacySafeStopEnabled("true"), true);
-  for (const value of [undefined, "", "1", "TRUE", " true", "false"])
+  assert.equal(amuxV22LegacySafeStopEnabled("enabled"), true);
+  for (const value of [undefined, "", "1", "TRUE", " true", "false", "disabled"])
     assert.equal(amuxV22LegacySafeStopEnabled(value), false);
   const own = "r".repeat(40); const broad = "s".repeat(40);
   const request = (secret) => new Request("https://tomverse.test", {

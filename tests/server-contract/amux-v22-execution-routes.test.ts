@@ -30,7 +30,7 @@ mock.module(mod("lib/amux/execution.ts"), { namedExports: {
   startAmuxV22TaskExecution: async (input: { publicationBaseSha?: string | null }) => {
     startReachedService = true;
     startInput = input;
-    assert.equal(permitStart, true, "disabled start reached a service");
+    assert.equal(permitStart, true, "an unpermitted start reached a service");
     return { started: true,
       attemptId: "00000000-0000-4000-8000-000000000003",
       taskRevision: 2,
@@ -76,10 +76,8 @@ const routes = Promise.all([
   return { name, call: name === "attempt" ? loaded.GET : loaded.POST };
 }));
 
-test("v22 disabled admission permits only authenticated read-back and fenced attempt drainage", async () => {
-  const previous = process.env.TOMVERSE_AMUX_V22_TASK_EXECUTION;
-  process.env.TOMVERSE_AMUX_V22_TASK_EXECUTION = "disabled";
-  try {
+test("v22 routes refuse an unauthenticated call; read-back and fenced attempts answer", async () => {
+  {
     startReachedService = false;
     permitStart = false;
     readbackCalls = 0;
@@ -108,12 +106,12 @@ test("v22 disabled admission permits only authenticated read-back and fenced att
       const unauthorized = await call(request());
       assert.equal(unauthorized.status, 401, name);
       assert.equal(unauthorized.headers.get("cache-control"), "no-store");
+      if (name === "start") continue; // the authenticated start is covered below
       authorized = true;
-      const disabled = await call(request());
-      assert.equal(disabled.status, name === "attempt" ? 200 : 409, name);
-      assert.equal(disabled.headers.get("cache-control"), "no-store");
-      const result = await disabled.json();
-      if (name === "start") assert.equal(result.reason, "v22_execution_disabled");
+      const answered = await call(request());
+      assert.equal(answered.status, name === "attempt" ? 200 : 409, name);
+      assert.equal(answered.headers.get("cache-control"), "no-store");
+      const result = await answered.json();
       if (name === "heartbeat" || name === "settle")
         assert.equal(result.reason, "fenced_out");
     }
@@ -121,16 +119,11 @@ test("v22 disabled admission permits only authenticated read-back and fenced att
     assert.equal(readbackCalls, 1);
     assert.equal(heartbeatCalls, 1);
     assert.equal(settleCalls, 1);
-  } finally {
-    if (previous === undefined) delete process.env.TOMVERSE_AMUX_V22_TASK_EXECUTION;
-    else process.env.TOMVERSE_AMUX_V22_TASK_EXECUTION = previous;
   }
 });
 
-test("v22 exact enabled admission reaches start only after authentication", async () => {
-  const previous = process.env.TOMVERSE_AMUX_V22_TASK_EXECUTION;
-  process.env.TOMVERSE_AMUX_V22_TASK_EXECUTION = "enabled";
-  try {
+test("v22 admission reaches start only after authentication", async () => {
+  {
     const { call } = (await routes).find(({ name }) => name === "start")!;
     const request = () => new Request(
       "https://tomverse.test/api/internal/amux/v22/execution/start", {
@@ -153,17 +146,11 @@ test("v22 exact enabled admission reaches start only after authentication", asyn
     assert.equal(response.headers.get("cache-control"), "no-store");
     assert.equal((await response.json()).started, true);
     assert.equal(startReachedService, true);
-  } finally {
-    permitStart = false;
-    if (previous === undefined) delete process.env.TOMVERSE_AMUX_V22_TASK_EXECUTION;
-    else process.env.TOMVERSE_AMUX_V22_TASK_EXECUTION = previous;
   }
 });
 
 test("v22 start logs why publication was skipped and still starts the Task", async () => {
-  const saved = { exec: process.env.TOMVERSE_AMUX_V22_TASK_EXECUTION,
-    publication: process.env.TOMVERSE_AMUX_V22_ENGINEERING_PUBLICATION };
-  process.env.TOMVERSE_AMUX_V22_TASK_EXECUTION = "enabled";
+  const saved = { publication: process.env.TOMVERSE_AMUX_V22_ENGINEERING_PUBLICATION };
   process.env.TOMVERSE_AMUX_V22_ENGINEERING_PUBLICATION = "enabled";
   const warnings: string[] = [];
   const warn = mock.method(console, "warn", (line: string) => { warnings.push(line); });
@@ -196,12 +183,8 @@ test("v22 start logs why publication was skipped and still starts the Task", asy
     warn.mock.restore();
     permitStart = false;
     developHead = async () => "a".repeat(40);
-    for (const [name, value] of [
-      ["TOMVERSE_AMUX_V22_TASK_EXECUTION", saved.exec],
-      ["TOMVERSE_AMUX_V22_ENGINEERING_PUBLICATION", saved.publication]] as const) {
-      if (value === undefined) delete process.env[name];
-      else process.env[name] = value;
-    }
+    if (saved.publication === undefined) delete process.env.TOMVERSE_AMUX_V22_ENGINEERING_PUBLICATION;
+    else process.env.TOMVERSE_AMUX_V22_ENGINEERING_PUBLICATION = saved.publication;
   }
 });
 

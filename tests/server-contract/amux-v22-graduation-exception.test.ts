@@ -2,8 +2,6 @@ import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { mock, test } from "node:test";
-import { AMUX_V22_GRADUATION_EXCEPTION_ENV as flag,
-  AMUX_V22_GRADUATION_EXCEPTION_ID as exceptionId } from "../../lib/amux/v22AutoPromotionCore.ts";
 
 const root = resolve(import.meta.dirname, "../..");
 const mod = (path: string) => pathToFileURL(resolve(root, path)).href;
@@ -67,37 +65,28 @@ const input = { session: { user: { id: "owner-1" } },
   request: new Request("https://tomverse.test"), active: true,
   expectedAuditLogId: null };
 
-test("bootstrap requires explicit owner intent, records it, and ticks enforce revocation and audit binding", async () => {
-  const previous = [flag, "TOMVERSE_AMUX_BOARD_AUTO_PROMOTE", "TOMVERSE_AMUX_V22_AUTO_PROMOTE"]
+test("activation needs the owner, is recorded, and ticks enforce revocation and audit binding", async () => {
+  const previous = ["TOMVERSE_AMUX_BOARD_AUTO_PROMOTE"]
     .map((key) => [key, process.env[key]] as const);
   try {
-    process.env[flag] = exceptionId;
     process.env.TOMVERSE_AMUX_BOARD_AUTO_PROMOTE = "disabled";
-    process.env.TOMVERSE_AMUX_V22_AUTO_PROMOTE = "enabled";
     const service = await load();
-    // No count of decisions gates activation any more (2026-11-16), so it
-    // needs no exception: the exception only still records its own audit.
-    await service.configureV22AutoPromotion({ ...input, graduationExceptionId: exceptionId });
+    // No count of decisions gates activation (2026-11-16).
+    await service.configureV22AutoPromotion({ ...input });
     assert.equal(world.writes, 1);
-    assert.equal((world.audit?.metadata as Record<string, unknown>).graduationExceptionId, exceptionId);
     const status = await service.readV22AutoPromotionControl();
     assert.equal(status.graduation.ok, true);
     assert.equal(status.graduation.count, 0);
-    assert.equal(status.graduationExceptionApplied, true);
+    assert.equal(status.active, true);
     assert.equal((await service.tickV22AutoPromotion()).reason, "no_ready_candidate");
     assert.equal(world.readyChecks, 1);
 
-    delete process.env[flag];
-    assert.equal((await service.tickV22AutoPromotion()).reason, "no_ready_candidate");
-    assert.equal(world.readyChecks, 2);
-    process.env[flag] = exceptionId;
     world.audit!.actorUserId = "another-owner";
     assert.equal((await service.tickV22AutoPromotion()).reason, "v22_not_activated");
-    assert.equal((await service.readV22AutoPromotionControl()).graduationExceptionApplied, false);
     world.audit!.actorUserId = "owner-1";
     world.halted = true;
     assert.equal((await service.tickV22AutoPromotion()).reason, "auto_halted");
-    assert.equal(world.readyChecks, 2);
+    assert.equal(world.readyChecks, 1);
     await service.configureV22AutoPromotion({ ...input, active: false,
       expectedAuditLogId: world.control!.authorizationAuditLogId as string });
     assert.equal(world.control!.active, false);

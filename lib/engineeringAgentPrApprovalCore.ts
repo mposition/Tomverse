@@ -98,24 +98,22 @@ export function decideEngineeringAgentPrApproval(input: EngineeringAgentPrApprov
  * pull request, so a separate GitHub review was never written and every such
  * merge stopped the agent).
  *
- * Owner decision 2026-11-15 (`approverMergeApprovesMergedDiff`, the default):
+ * Owner decision 2026-11-15:
  * the approver's merge approves whatever head and diff it merged. A person
  * who merges on GitHub merges the diff GitHub shows them then, so a head that
  * moved after verification -- develop merged in, a conflict the CI auto-fix
  * resolved, the owner's own push -- is still that person's approval; the
- * observer records the merged head and diff with it. Before it (and with
- * ENGINEERING_AGENT_LEGACY_HALTS) the approver's merge counted only at the
- * verified head or the verified diff.
+ * observer records the merged head and diff with it. Before it the approver's
+ * merge counted only at the verified head or the verified diff.
  *
  * An approval recorded before the merge still stands for a merge of the
  * verified head or diff, and for the approver's own merge. It no longer
  * stands for someone else's merge of a head that moved after it: the review
- * approved a diff that is not the one merged (with the kill switch on it
- * still does, as before).
+ * approved a diff that is not the one merged.
  *
  * Any other merge -- a bot's, an app's, another account's, into main -- is
  * not approved, whatever its reviews say now. It opens a decision for that
- * card; it no longer stops the agent (engineeringAgentMismatchCardScoped).
+ * card; it no longer stops the agent (the hold is the card's).
  */
 export function decideEngineeringAgentMergedPr(input: {
   merged: boolean;
@@ -125,16 +123,13 @@ export function decideEngineeringAgentMergedPr(input: {
   baseRef?: string;
   /** The merged head is the commit the app recorded as verified, or its diff is the verified one. */
   headVerified?: boolean;
-  /** Owner decision 2026-11-15: the approver's develop merge approves the diff it merged. */
-  approverMergeApprovesMergedDiff?: boolean;
 }): "done" | "merged_without_approval" | "open" {
   if (!input.merged) return "open";
   const approverMerge = input.mergedByApprover === true && input.baseRef === "develop";
   const sameChange = input.headVerified === true;
-  if (input.approvalRecordedBeforeMerge &&
-      (input.approverMergeApprovesMergedDiff !== true || sameChange || approverMerge)) return "done";
-  if (!approverMerge) return "merged_without_approval";
-  return sameChange || input.approverMergeApprovesMergedDiff === true ? "done" : "merged_without_approval";
+  if (input.approvalRecordedBeforeMerge && (sameChange || approverMerge)) return "done";
+  // Owner decision 2026-11-15: the approver's develop merge approves the diff it merged.
+  return approverMerge ? "done" : "merged_without_approval";
 }
 
 /**

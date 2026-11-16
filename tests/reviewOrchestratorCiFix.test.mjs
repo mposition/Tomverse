@@ -589,6 +589,10 @@ test("settings: the sender needs its token and absolute paths; the proposing hal
   assert.deepEqual(ciFixSettings(mine, config), { token: TOKEN, repo: "o/r", outbox: "/var/lib/fix/outbox",
     workDir: "/var/lib/fix/work", home: "/home/review", model: "sonnet", minRemainingPercent: 30, conflicts: false, install: false, regenerate: false });
   assert.equal(ciFixSettings({ ...mine, PR_CI_AUTO_FIX_CONFLICTS: "on" }, config).conflicts, true, "conflicts only when switched on");
+  assert.equal(ciFixSettings({ ...mine, PR_CI_AUTO_FIX_CONFLICTS: "enabled" }, config).conflicts, true, "enabled reads like on");
+  assert.equal(ciFixSettings({ ...mine, PR_CI_AUTO_FIX_CONFLICTS: "disabled" }, config).conflicts, false);
+  assert.equal(ciFixSettings({ ...mine, PR_CI_AUTO_FIX_INSTALL: "enabled" }, config).install, true);
+  assert.equal(ciFixSettings({ ...mine, PR_CI_AUTO_FIX_REGENERATE: "enabled" }, config).regenerate, true);
   assert.equal(ciFixSettings({ ...mine, PR_CI_AUTO_FIX_CONFLICTS: "true" }, config).conflicts, false);
   assert.equal(ciFixSettings({ ...mine, PR_CI_AUTO_FIX_INSTALL: "on" }, config).install, true, "packages only when switched on");
   assert.equal(ciFixSettings({ ...mine, PR_CI_AUTO_FIX_INSTALL: "1" }, config).install, false);

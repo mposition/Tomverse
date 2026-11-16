@@ -27,39 +27,19 @@ import {
 } from "../lib/amux/boardReconciliationCore.ts";
 import { AMUX_INTAKE_APPLY_CODE_LATCH, AMUX_INTAKE_APPLY_ENV } from "../lib/amux/intakeCore.ts";
 import { RECOMMENDATION_APPLY_ENV, RECOMMENDATION_CODE_LATCH } from "../lib/amux/recommendationPoolCore.ts";
-import {
-  AMUX_V22_AUTO_PROMOTION_CODE_LATCH,
-  AMUX_V22_AUTO_PROMOTION_ENV,
-} from "../lib/amux/v22AutoPromotionCore.ts";
 
 const read = (path) => readFileSync(join(process.cwd(), path), "utf8");
 
-test("legacy auto-promotion and v22 automatic admission have independent chips", () => {
-  const v22Only = {
-    TOMVERSE_AMUX_BOARD_AUTO_PROMOTE: "disabled",
-    TOMVERSE_AMUX_V22_AUTO_PROMOTE: "enabled",
-  };
+test("legacy auto-promotion has its own chip; automatic admission has none", () => {
   assert.equal(
-    amuxSwitchedTabStatus("auto-promotion", v22Only),
+    amuxSwitchedTabStatus("auto-promotion", { TOMVERSE_AMUX_BOARD_AUTO_PROMOTE: "disabled" }),
     "behind_server_switch"
   );
   assert.equal(
-    amuxSwitchedTabStatus("automatic-admission", v22Only),
+    amuxSwitchedTabStatus("auto-promotion", { TOMVERSE_AMUX_BOARD_AUTO_PROMOTE: "enabled" }),
     "server_switch_on"
   );
-
-  const legacyOnly = {
-    TOMVERSE_AMUX_BOARD_AUTO_PROMOTE: "enabled",
-    TOMVERSE_AMUX_V22_AUTO_PROMOTE: "disabled",
-  };
-  assert.equal(
-    amuxSwitchedTabStatus("auto-promotion", legacyOnly),
-    "server_switch_on"
-  );
-  assert.equal(
-    amuxSwitchedTabStatus("automatic-admission", legacyOnly),
-    "behind_server_switch"
-  );
+  assert.equal("automatic-admission" in AMUX_TAB_SWITCHES, false);
 });
 
 /**
@@ -116,17 +96,9 @@ const SWITCHES = {
     latchName: "AUTO_PROMOTION_CODE_LATCH",
     reader: "lib/amux/autoPromotionService.ts",
   },
-  "automatic-admission": {
-    env: AMUX_V22_AUTO_PROMOTION_ENV,
-    envName: "AMUX_V22_AUTO_PROMOTION_ENV",
-    latch: AMUX_V22_AUTO_PROMOTION_CODE_LATCH,
-    permitName: "amuxV22AutoPromotionEnabled",
-    reader: "lib/amux/v22AutoPromotionService.ts",
-  },
 };
 
-const isServerSwitch = (tab) =>
-  tab === "auto-promotion" || tab === "automatic-admission";
+const isServerSwitch = (tab) => tab === "auto-promotion";
 
 test("every gated AMUX tab has a switch, and nothing else does", () => {
   assert.deepEqual(Object.keys(AMUX_TAB_SWITCHES).sort(), Object.keys(SWITCHES).sort());
@@ -211,9 +183,6 @@ test("an open switch is drawn for attention and a closed one is not", () => {
   assert.deepEqual(amuxSwitchedTabStatuses(["auto-promotion"], {}), {
     "auto-promotion": "behind_server_switch",
   });
-  assert.deepEqual(amuxSwitchedTabStatuses(["automatic-admission"], {}), {
-    "automatic-admission": "behind_server_switch",
-  });
 });
 
 test("the pages ask the switches rather than writing the state", () => {
@@ -230,10 +199,7 @@ test("the pages ask the switches rather than writing the state", () => {
   assert.doesNotMatch(recovery, /apply off|apply_off"|server switch/i, "amux-recovery writes a state");
   assert.doesNotMatch(read("app/(site)/(application)/admin/amux-backlog/page.tsx"), /amuxSwitchedTabStatuses/);
   const settings = read("app/(site)/(application)/admin/amux-settings/page.tsx");
-  assert.match(
-    settings,
-    /amuxSwitchedTabStatus\("automatic-admission"\)/
-  );
+  assert.doesNotMatch(settings, /amuxSwitchedTabStatus\("automatic-admission"\)/);
   assert.match(settings, /<AmuxV22PromotionControl \/>/);
   assert.doesNotMatch(recovery, /AmuxV22PromotionControl/);
   const execution = read("app/(site)/(application)/admin/amux-execution/page.tsx");

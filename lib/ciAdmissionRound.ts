@@ -70,10 +70,6 @@ const STATUS = {
 export const ciAdmissionMode = (env: NodeJS.ProcessEnv = process.env): CiAdmissionMode =>
   parseCiAdmissionMode(env.CI_ADMISSION_MODE) ?? "off";
 
-/** Whether a draft behind its base has its branch updated: on unless CI_ADMISSION_UPDATE_BRANCH is "off". */
-export const ciAdmissionUpdatesBranches = (env: NodeJS.ProcessEnv = process.env): boolean =>
-  (env.CI_ADMISSION_UPDATE_BRANCH ?? "").trim().toLowerCase() !== "off";
-
 export const readState = async (db: Pick<Prisma.TransactionClient, "appSetting">) =>
   parseCiAdmissionState(
     (await db.appSetting.findUnique({ where: { key: CI_ADMISSION_STATE_SETTING_KEY }, select: { value: true } }))?.value,
@@ -199,7 +195,7 @@ async function round(deps: RoundDeps): Promise<CiAdmissionRoundOutcome> {
     async (tx) => {
       await takeLock(tx);
       const state = await readState(tx);
-      const judged = evaluateCiAdmission({ state, openPulls, running, runningBases, deploys, checks, runners, personReady, nowMs: now(), shadow: mode === "shadow", updateBranches: ciAdmissionUpdatesBranches() });
+      const judged = evaluateCiAdmission({ state, openPulls, running, runningBases, deploys, checks, runners, personReady, nowMs: now(), shadow: mode === "shadow" });
       // Shadow keeps what it would have done out of the reservations and statuses.
       await writeState(
         tx,

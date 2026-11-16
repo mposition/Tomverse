@@ -58,9 +58,6 @@ class TestBoundaryError extends Error {
 mock.module(mod("lib/amux/guard.ts"), {
   namedExports: { isAmuxSyncAuthorized: () => true },
 });
-mock.module(mod("lib/amux/executionGate.ts"), {
-  namedExports: { isAmuxExecutionApiEnabled: () => true },
-});
 mock.module(mod("lib/amux/dbBoundary.ts"), {
   namedExports: {
     AMUX_LIFECYCLE_ROUTE_BUDGET_MS: 12_000,

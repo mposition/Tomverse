@@ -136,13 +136,13 @@ test("a draft with a conflict, behind its base, or not checked yet is passed ove
     [6, { conflict: false, behind: null }],
   ]);
   const queue = lineOf(1, 2, 3, 4, 5, 6).map((entry) => ({ ...entry, title: `Pull ${entry.number}` }));
-  // Branch updates off: a draft behind its base is only passed over.
-  const evaluation = judge({ state: state({ queue }), openPulls: open, checks, updateBranches: false });
-  assert.deepEqual(statuses(evaluation), { 1: "conflict", 2: "behind", 4: "checking", 5: "next", 6: "next" });
+  // A draft behind its base is updated and passed over until the new head is read.
+  const evaluation = judge({ state: state({ queue }), openPulls: open, checks });
+  assert.deepEqual(statuses(evaluation), { 1: "conflict", 2: "updating", 4: "checking", 5: "next", 6: "next" });
   // Left the line while open: not recorded as closed.
   assert.equal(evaluation.state.events.filter((e) => e.kind === "dropped").length, 0);
   // Behind unknown (no permission to compare) does not block.
-  assert.deepEqual(kinds(evaluation), ["release:5", "release:6"]);
+  assert.deepEqual(kinds(evaluation), ["update_branch:2", "release:5", "release:6"]);
 });
 
 test("nothing jumps a higher draft: one that does not fit stops the drafts below it", () => {

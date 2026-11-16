@@ -66,9 +66,7 @@ import {
   ENGINEERING_AGENT_FREEZE_SETTING_KEY,
   ENGINEERING_AGENT_V22_PROMOTED_REASON,
   ENGINEERING_AGENT_V22_REVIEW_CAUSE_PREFIX,
-  ENGINEERING_AGENT_V22_REVIEW_PR_ENV,
   ENGINEERING_AGENT_V22_TIER_PENDING_REASON,
-  engineeringAgentV22ReviewPrEnabled,
   ENGINEERING_AGENT_KILL_SWITCH_ENV,
   ENGINEERING_AGENT_OBSERVED_HALT_SETTING_KEY,
   OBSERVABLE_HALTS,
@@ -86,15 +84,10 @@ import {
   ENGINEERING_AGENT_PR_RESUME_CLAIMED_REASON,
   ENGINEERING_AGENT_REGISTRATION_SETTING_KEY,
   UNKNOWN_OUTCOME_DECISION_CAUSE_PREFIX,
-  ENGINEERING_AGENT_LEGACY_HALTS_ENV,
-  engineeringAgentLegacyHalts,
-  engineeringAgentMismatchCardScoped,
   parseObservedHaltSubject,
   type ObservedHaltSubject,
   ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_AFTER_MS,
-  ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_ENV,
   ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_MAX_DOUBLINGS,
-  engineeringAgentUnknownAutoLookupEnabled,
   WRITE_ITEM_KINDS,
   decideOwnerQueues,
   decideWriteItemTransition,
@@ -325,11 +318,6 @@ export type EngineeringAgentHaltState = {
    */
   unacknowledgedHalt: HaltValue | null;
   /**
-   * Mismatches and orphaned runs hold only their card (AMUXFLOW/B2; the
-   * default since owner decision 2026-11-15, off with ENGINEERING_AGENT_LEGACY_HALTS).
-   */
-  cardScoped?: boolean;
-  /**
    * Open mismatches bound to no card: no run, and no published item of a run
    * (a `review_pr:` mismatch names its publish item, whose run is a card's).
    * There is no card to hold, so they still halt.
@@ -407,10 +395,8 @@ export async function readEngineeringAgentHaltState(
   const observedHolds = observed !== null && observed.clearedAt === null &&
     (acknowledgedAt === null || observed.at.getTime() > acknowledgedAt.getTime());
   const observedHalt = observedHolds ? observed!.halt : null;
-  const cardScoped = engineeringAgentMismatchCardScoped(process.env[ENGINEERING_AGENT_LEGACY_HALTS_ENV]);
   const unscopedStateMismatches = Number(mismatchCounts?.unscoped ?? 0);
   return {
-    cardScoped,
     unscopedStateMismatches,
     openStateMismatches,
     orphanedRuns: orphaned,
@@ -446,8 +432,7 @@ const parseObservedHalt = (value: string | undefined): ObservedHaltValue | null 
  */
 export const currentEngineeringAgentHalt = (state: EngineeringAgentHaltState): HaltValue => {
   if (state.unacknowledgedHalt !== null) return state.unacknowledgedHalt;
-  if (state.cardScoped ? (state.unscopedStateMismatches ?? 0) > 0 :
-    state.openStateMismatches > 0 || state.orphanedRuns > 0) return "state_mismatch";
+  if ((state.unscopedStateMismatches ?? 0) > 0) return "state_mismatch";
   return "none";
 };
 
@@ -464,13 +449,6 @@ export async function readEngineeringAgentKnownPublishes(
 ): Promise<{
   bindings: Array<{ runId: string; prNumber: number; headSha: string; verifiedHeadSha: string }>;
   consumed: Array<{ runId: string; commitDigest: string }>;
-  /**
-   * Owner decision 2026-11-15: with the kill switch off the runner takes a
-   * bound run's branch or pull request at a moved head for that card's own
-   * (a person's or the CI auto-fix's push), and reports a clean reading when
-   * an observed halt still holds, so the app can clear it.
-   */
-  legacyHalts: boolean;
   observedHalt: ObservableHalt | null;
   /** When that halt was observed: a clean reading clears exactly this one, never a later one. */
   observedHaltAt: string | null;
@@ -491,7 +469,6 @@ export async function readEngineeringAgentKnownPublishes(
       select: { key: true, value: true },
     }),
   ]);
-  const legacyHalts = engineeringAgentLegacyHalts(process.env[ENGINEERING_AGENT_LEGACY_HALTS_ENV]);
   const observed = parseObservedHalt(settings.find((row) => row.key === ENGINEERING_AGENT_OBSERVED_HALT_SETTING_KEY)?.value);
   const acknowledgedAt = parseSettingInstant(
     settings.find((row) => row.key === ENGINEERING_AGENT_HALT_ACKNOWLEDGED_SETTING_KEY)?.value);
@@ -502,7 +479,6 @@ export async function readEngineeringAgentKnownPublishes(
     consumed: capabilities
       .filter((row) => row.workItem.runId !== null)
       .map((row) => ({ runId: row.workItem.runId as string, commitDigest: row.commitDigest })),
-    legacyHalts,
     observedHalt: holds ? observed!.halt : null,
     observedHaltAt: holds ? observed!.at.toISOString() : null,
   };
@@ -572,9 +548,7 @@ async function engineeringAgentCardHeld(
 
 /** Whether anything halts claims, runs and pushes (§12). */
 export const engineeringAgentHalted = (state: EngineeringAgentHaltState): boolean =>
-  (state.cardScoped ? (state.unscopedStateMismatches ?? 0) > 0 :
-    state.openStateMismatches > 0 || state.orphanedRuns > 0) ||
-  state.unacknowledgedHalt !== null;
+  (state.unscopedStateMismatches ?? 0) > 0 || state.unacknowledgedHalt !== null;
 
 /**
  * Whether a run may start at all, asked before AMUX writes anything for it
@@ -591,8 +565,8 @@ export async function requireEngineeringAgentRunAdmission(tx: EngineeringAgentTr
   // A card held by its own record is refused here, before AMUX writes the
   // run's attempt, so its Task runs with its result kept private (AMUXFLOW/B2).
   // A start that names no card keeps the agent-wide halt.
-  if (haltState.cardScoped && (card ? await engineeringAgentCardHeld(tx, card) :
-    haltState.openStateMismatches > 0 || haltState.orphanedRuns > 0)) refuse("halted");
+  if (card ? await engineeringAgentCardHeld(tx, card) :
+    haltState.openStateMismatches > 0 || haltState.orphanedRuns > 0) refuse("halted");
   if (!(await readEngineeringAgentOwnerQueues(tx)).claimAllowed) refuse("owner_queue_full");
 }
 
@@ -604,9 +578,7 @@ export async function requireEngineeringAgentRunAdmission(tx: EngineeringAgentTr
  * The owner queues as the run trigger counted them before owner decision
  * 2026-11-15 removed the caps: an active run may still become a pull request
  * or a decision, and a publish item not yet settled may still become a
- * binding. Uncapped, a run is always admitted here; with
- * ENGINEERING_AGENT_LEGACY_HALTS this reading is the cap, held by the app
- * alone, since the guards no longer count (§2.1).
+ * binding. Uncapped, a run is always admitted here (§2.1).
  */
 export async function readEngineeringAgentOwnerQueues(
   db: PrismaClient | Prisma.TransactionClient,
@@ -626,11 +598,11 @@ export async function readEngineeringAgentOwnerQueues(
   `;
   const row = rows[0];
   const activeRuns = Number(row.activeRuns);
-  // Counted, never capped (owner decision 2026-11-15); the kill switch brings the caps back.
+  // Counted, never capped (owner decision 2026-11-15).
   return decideOwnerQueues({
     openPrBindings: Number(row.openPrs) + activeRuns,
     pendingDecisions: Number(row.pendingDecisions) + activeRuns,
-  }, engineeringAgentLegacyHalts(process.env[ENGINEERING_AGENT_LEGACY_HALTS_ENV]));
+  });
 }
 
 /* ------------------------------------------------------------------------- */
@@ -1039,7 +1011,7 @@ export async function claimEngineeringAgentWorkItem(
     await lockEngineeringAgentHalt(tx);
     const haltState = await readEngineeringAgentHaltState(tx);
     if (engineeringAgentHalted(haltState)) refuse("halted");
-    if (haltState.cardScoped && item.runId &&
+    if (item.runId &&
         await engineeringAgentCardHeld(tx, { runId: item.runId })) refuse("halted");
     capability = await lockLiveCapability(tx, item.id);
     if (!capability) refuse("capability_unavailable");
@@ -1165,19 +1137,15 @@ export async function claimNextEngineeringAgentPublishWork(
   const publishAllowed = switches.publishAllowed && !engineeringAgentHalted(await readEngineeringAgentHaltState(tx));
   const v22PublicationEnabled = amuxV22EngineeringPublicationEnabled(
     process.env[AMUX_V22_ENGINEERING_PUBLICATION_ENV]);
-  const reviewWrites = input.reviewDrafts === true && engineeringAgentV22ReviewPrEnabled(
-    process.env[ENGINEERING_AGENT_V22_REVIEW_PR_ENV]);
+  const reviewWrites = input.reviewDrafts === true;
   const reviewKeys = `${ENGINEERING_AGENT_V22_REVIEW_CAUSE_PREFIX}%`;
   // A resume opens a pull request: the same switches as a write, and a review
   // item's only for a publisher that also opens drafts.
   const resumeAllowed = publishAllowed && input.resumePullRequests === true;
   const now = await databaseNow(tx);
-  const cardScoped = engineeringAgentMismatchCardScoped(process.env[ENGINEERING_AGENT_LEGACY_HALTS_ENV]);
-  // A lookup only reads: with the switch on, a decision that has waited its
-  // time no longer holds it -- a time that doubles with each decision the
-  // item opened (engineeringAgentUnknownAutoLookupWaitMs), never a count.
-  const autoLookup = engineeringAgentUnknownAutoLookupEnabled(
-    process.env[ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_ENV]);
+  // A lookup only reads: a decision that has waited its time no longer holds
+  // it -- a time that doubles with each decision the item opened
+  // (engineeringAgentUnknownAutoLookupWaitMs), never a count.
   const candidates = await tx.$queryRaw<Array<{ id: string; state: string; reason: string | null }>>`
     SELECT w."id", w."state", w."reason"
     FROM "EngineeringAgentWorkItem" w
@@ -1190,8 +1158,8 @@ export async function claimNextEngineeringAgentPublishWork(
             SELECT 1 FROM "EngineeringAgentWorkItem" d
             WHERE d."kind" = 'decision' AND d."state" = 'open'
               AND d."causeKey" LIKE ${UNKNOWN_OUTCOME_DECISION_CAUSE_PREFIX} || w."id" || ':%'
-          ) OR (${autoLookup}
-            AND NOT EXISTS (
+          ) OR (
+            NOT EXISTS (
               SELECT 1 FROM "EngineeringAgentWorkItem" d
               WHERE d."kind" = 'decision' AND d."state" = 'open'
                 AND d."causeKey" LIKE ${UNKNOWN_OUTCOME_DECISION_CAUSE_PREFIX} || w."id" || ':%'
@@ -1222,7 +1190,7 @@ export async function claimNextEngineeringAgentPublishWork(
           AND (${reviewWrites} OR w."causeKey" NOT LIKE ${reviewKeys})
           -- AMUXFLOW/B2: a card held by its own record is left out, so its
           -- oldest item never takes every other card's turn.
-          AND (${!cardScoped} OR NOT EXISTS (
+          AND (NOT EXISTS (
             SELECT 1 FROM "EngineeringAgentRun" own
             JOIN "EngineeringAgentRun" sib ON sib."cardId" = own."cardId"
             WHERE own."id" = w."runId" AND (
@@ -2281,14 +2249,12 @@ const observedHaltSubjectAudit = (subject: ObservedHaltSubject | null): Record<s
  * -- the pull request merged or closed, the branch deleted, or the app bound
  * it. The halt stops holding from this instant; the reading it was and this
  * clearance both stay on the audit chain. Nothing is written when no observed
- * halt holds, and with ENGINEERING_AGENT_LEGACY_HALTS only a person's
- * acknowledgement clears one. A reading, never refused by a switch.
+ * halt holds. A reading, never refused by a switch.
  */
 export async function clearEngineeringAgentObservedHalt(
   tx: EngineeringAgentTransaction,
   input: { observedAt: string },
 ): Promise<{ cleared: boolean }> {
-  if (engineeringAgentLegacyHalts(process.env[ENGINEERING_AGENT_LEGACY_HALTS_ENV])) return { cleared: false };
   await lockEngineeringAgentHalt(tx);
   const [setting, acknowledgement] = await Promise.all([
     tx.appSetting.findUnique({ where: { key: ENGINEERING_AGENT_OBSERVED_HALT_SETTING_KEY }, select: { value: true } }),

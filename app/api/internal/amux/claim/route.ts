@@ -11,7 +11,6 @@ import {
   anchorAmuxClaimDeadline,
 } from "@/lib/amux/claimDeadline";
 import { withAmuxRouteBudget } from "@/lib/amux/dbBoundary";
-import { isAmuxExecutionApiEnabled } from "@/lib/amux/executionGate";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 import {
   compareAmuxRoutingRank,
@@ -258,13 +257,6 @@ export async function POST(request: Request) {
       const refused = await admitAmuxOrchestratorRequest(identity, "claim");
       if (refused) return refused;
       await anchorAmuxClaimDeadline();
-      if (!isAmuxExecutionApiEnabled()) {
-        await recordAmuxClaimRefusal("execution_api_disabled");
-        return jsonNoStore(
-          { claimed: false, reason: "execution_api_disabled" },
-          409,
-        );
-      }
 
       let body: AmuxClaimRequest;
       try {

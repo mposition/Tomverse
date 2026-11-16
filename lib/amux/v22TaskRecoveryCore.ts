@@ -64,8 +64,12 @@ export const AMUX_V22_READ_ONLY_API_EXECUTOR_ARTIFACT_DIGEST_ENV =
   "TOMVERSE_AMUX_V22_READ_ONLY_API_EXECUTOR_ARTIFACT_DIGEST";
 export const AMUX_V22_READ_ONLY_API_REPOSITORY_SCOPE_DIGEST_ENV =
   "TOMVERSE_AMUX_V22_READ_ONLY_API_REPOSITORY_SCOPE_DIGEST";
-export const amuxV22TaskRecoveryEnabled = (value: string | undefined) => value === "true";
-export const amuxV22LegacySafeStopEnabled = (value: string | undefined) => value === "true";
+// The recovery switches read `enabled`, or the earlier exact `true` that
+// production already sets (owner decision 2026-11-16).
+export const amuxV22TaskRecoveryEnabled = (value: string | undefined) =>
+  value === "enabled" || value === "true";
+export const amuxV22LegacySafeStopEnabled = (value: string | undefined) =>
+  value === "enabled" || value === "true";
 export const amuxV22ReadOnlyApiExecutorEnabled = (value: string | undefined) =>
   value === "true";
 export const AMUX_V22_RECOVERY_ID_PATTERN = /^[A-Za-z0-9:_-]{1,128}$/;

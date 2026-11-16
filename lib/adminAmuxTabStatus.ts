@@ -31,10 +31,6 @@ import {
   RECOMMENDATION_CODE_LATCH,
   recommendationApplyPermitted,
 } from "@/lib/amux/recommendationPoolCore";
-import {
-  AMUX_V22_AUTO_PROMOTION_ENV,
-  amuxV22AutoPromotionEnabled,
-} from "@/lib/amux/v22AutoPromotionCore";
 
 /**
  * The status chip on each AMUX section tab.
@@ -100,8 +96,6 @@ export const AMUX_TAB_SWITCHES = {
       envValue: env[AUTO_PROMOTION_APPLY_ENV],
       codeLatch: AUTO_PROMOTION_CODE_LATCH,
     }),
-  "automatic-admission": (env: Environment) =>
-    amuxV22AutoPromotionEnabled(env[AMUX_V22_AUTO_PROMOTION_ENV]),
 } as const;
 
 export type AmuxSwitchedTab = keyof typeof AMUX_TAB_SWITCHES;
@@ -112,7 +106,7 @@ export const amuxSwitchedTabStatus = (
   env: Environment = process.env
 ): AmuxTabStatus => {
   const open = AMUX_TAB_SWITCHES[tab](env);
-  if (tab === "auto-promotion" || tab === "automatic-admission") {
+  if (tab === "auto-promotion") {
     return open ? "server_switch_on" : "behind_server_switch";
   }
   return open ? "apply_on" : "preview_apply_off";

@@ -12,7 +12,6 @@ import { submitDecisionMakerOutput } from "@/lib/amux/decisionMakerBodyStore";
 import { dmRunUnavailableIncident } from "@/lib/amux/decisionMakerCore";
 import { loadDecisionMakerDigestKeyRing } from "@/lib/amux/decisionMakerDigestKeys";
 import {
-  dmInternalRoutesEnabled,
   dmReturnedRefusalStatus,
   dmRouteErrorResponse,
   dmRouteRefusal,
@@ -50,8 +49,6 @@ import { reportOperationalIncident } from "@/lib/operationalMonitoring";
  * (`settleDmValidationLatch()`), which can only turn the instance off. The
  * answer is the result's whatever that check does; one that could not be
  * written stays owed to the next check.
- *
- * Closed until the operator sets `TOMVERSE_AMUX_DM_ROUTING=enabled`.
  */
 
 /**
@@ -85,7 +82,6 @@ export async function POST(request: Request) {
   if (!isAmuxSyncAuthorized(request)) {
     return amuxJsonNoStore({ error: "Unauthorized" }, 401);
   }
-  if (!dmInternalRoutesEnabled()) return refused(409, "dm_routing_disabled");
 
   return withAmuxRouteBudget(async () => {
     try {

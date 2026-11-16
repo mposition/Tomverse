@@ -7,6 +7,8 @@ import {
   checkQaReleaseServiceEnv,
   decideQaReleaseServiceStart,
   isUnconfiguredAgentService,
+  qaReleaseSwitchOff,
+  qaReleaseSwitchOn,
 } from "../lib/qaReleaseServiceEnvCore.ts";
 
 const runtime = { PATH: "/usr/bin", HOME: "/root", NODE_ENV: "production", RAILWAY_ENVIRONMENT_NAME: "staging", RAILWAY_DEPLOYMENT_ID: "d" };
@@ -70,6 +72,21 @@ test("a complete digest environment runs; switched off exits quietly", () => {
   assert.equal(decideQaReleaseServiceStart("digest", digestEnv()), "run");
   assert.equal(decideQaReleaseServiceStart("digest", digestEnv({ QA_RELEASE_DIGEST_ENABLED: undefined })), "disabled");
   assert.equal(decideQaReleaseServiceStart("digest", digestEnv({ QA_RELEASE_DIGEST_ENABLED: "yes" })), "disabled");
+});
+
+test("a service switch reads enabled and the earlier true, and nothing else", () => {
+  for (const [value, on] of [["enabled", true], ["true", true], [" enabled ", true], ["disabled", false],
+    ["false", false], ["1", false], ["on", false], ["", false]]) {
+    assert.equal(qaReleaseSwitchOn(value), on, value);
+    assert.equal(decideQaReleaseServiceStart("digest", digestEnv({ QA_RELEASE_DIGEST_ENABLED: value })),
+      on ? "run" : "disabled", value);
+    assert.equal(decideQaReleaseServiceStart("mergeLane", laneEnv({ QA_RELEASE_MERGE_LANE_ENABLED: value })),
+      on ? "run" : "disabled", value);
+  }
+  assert.equal(qaReleaseSwitchOn(undefined), false);
+  // A paid step that is on by default is turned off by disabled, or the earlier false.
+  for (const [value, off] of [["disabled", true], ["false", true], ["enabled", false], ["", false], [undefined, false]])
+    assert.equal(qaReleaseSwitchOff(value), off, String(value));
 });
 
 test("enabled but missing a required value or a valid revision refuses", () => {

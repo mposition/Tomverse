@@ -4,7 +4,8 @@
  * be restricted; make it as convenient as the answer I get from a local CLI,
  * and cover the whole class, not one scenario").
  *
- * What changes while the flow is on (the default):
+ * What the flow does (always; the switch that restored the earlier behaviour
+ * was removed by owner decision 2026-11-16):
  *
  * - No time limit at all. A run ends when its CLI ends, when the operator
  *   stops it, or when it shows no sign of life for AMUX_V22_RUN_STALL_MS: no
@@ -25,20 +26,10 @@
  * - A lower-grade change that touches a contract path is kept and judged at
  *   frontier in place: independent review, then a person.
  *
- * TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW=disabled restores the earlier behaviour
- * everywhere it is read (the app, the sidecar and the bridge). Pure: no I/O.
+ * Pure: no I/O.
  */
 
 import { randomBytes } from "node:crypto";
-
-export const AMUX_V22_LOCAL_CLI_FLOW_ENV = "TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW";
-
-/** On unless the switch says exactly `disabled`. */
-export function amuxV22LocalCliFlowEnabled(
-  value: string | undefined = process.env[AMUX_V22_LOCAL_CLI_FLOW_ENV],
-): boolean {
-  return value?.trim() !== "disabled";
-}
 
 /** No sign of life for this long reads as a hung run: no output, no checkout
  * change and no CPU time in the CLI's process tree (where /proc can be read;
@@ -65,8 +56,7 @@ export const AMUX_V22_PROMPT_MAX_BYTES = 2 * AMUX_V22_TRANSPORT_MAX_BYTES;
  * live, heartbeating run (the read-back lease). */
 export const AMUX_V22_LOCAL_CLI_LEASE_MS = 180_000;
 
-export const amuxV22LocalCliLeaseMs = (enabled = amuxV22LocalCliFlowEnabled()) =>
-  enabled ? AMUX_V22_LOCAL_CLI_LEASE_MS : 0;
+export const amuxV22LocalCliLeaseMs = () => AMUX_V22_LOCAL_CLI_LEASE_MS;
 
 /** Where the sidecar writes a run's context files, relative to the checkout.
  * The sidecar keeps the directory out of Git's view (.git/info/exclude), so
@@ -203,8 +193,7 @@ export function amuxV22ContextPromptSection(files: readonly AmuxV22ContextFile[]
 
 /** The read and write roles that get the jailed shell. */
 const ONE_SHOT_SHELL_ROLES = new Set(["design", "investigate", "review", "implement"]);
-export const amuxV22RoleHasShell = (role: string, enabled = amuxV22LocalCliFlowEnabled()) =>
-  enabled ? ONE_SHOT_SHELL_ROLES.has(role) : role === "implement";
+export const amuxV22RoleHasShell = (role: string) => ONE_SHOT_SHELL_ROLES.has(role);
 
 const REPORT_MARKER = (omitted: number) =>
   `\n\n[runner: ${omitted} bytes of this report omitted here to fit the bridge; ` +

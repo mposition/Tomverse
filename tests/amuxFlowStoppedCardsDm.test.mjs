@@ -31,48 +31,35 @@ test("routing: evidence words no longer send a system card to the operator, a fi
   assert.ok(strict.route === "operator" && strict.refusals.includes("irreversible_term"));
   const exempt = core.routeDmQuestion(input(`A Task stopped.\n${evidence}\nWhat now?`, true));
   assert.ok(!exempt.refusals?.includes("irreversible_term"), JSON.stringify(exempt));
-  const asked = core.routeDmQuestion(input(`Should we deploy this?\n${evidence}`, true));
+  const asked = core.routeDmQuestion(input(`Should we refund the payment?\n${evidence}`, true));
   assert.ok(asked.refusals.includes("irreversible_term"), "a word in the fixed question still routes");
 });
 
-test("v52: every rejection returns to todo unless switched off; off, the second still blocks", async () => {
-  const { decideAmuxV52ReviewDisposition, amuxV52RejectRetryInBudgetEnabled } =
+test("v52: every rejection returns to todo; only a repeated finding blocks", async () => {
+  const { decideAmuxV52ReviewDisposition } =
     await import("../lib/amux/v52ReviewCore.ts");
-  // Owner decision 2026-11-15: on by default; only `disabled` brings back the old rule.
-  assert.equal(amuxV52RejectRetryInBudgetEnabled(undefined), true);
-  assert.equal(amuxV52RejectRetryInBudgetEnabled("enabled"), true);
-  assert.equal(amuxV52RejectRetryInBudgetEnabled("disabled"), false);
-  assert.deepEqual(decideAmuxV52ReviewDisposition("reject", 1, false),
-    { status: "blocked", reason: "review_server_rejected_twice" });
-  assert.deepEqual(decideAmuxV52ReviewDisposition("reject", 3, true),
+  assert.deepEqual(decideAmuxV52ReviewDisposition("reject", 1),
     { status: "todo", reason: "review_server_rejected" });
-  assert.deepEqual(decideAmuxV52ReviewDisposition("unknown", 0, true),
+  assert.deepEqual(decideAmuxV52ReviewDisposition("reject", 3),
+    { status: "todo", reason: "review_server_rejected" });
+  assert.deepEqual(decideAmuxV52ReviewDisposition("unknown", 0),
     { status: "todo", reason: "review_server_unknown" });
-  assert.deepEqual(decideAmuxV52ReviewDisposition("unknown", 0, false),
-    { status: "blocked", reason: "review_server_unknown" });
-  assert.deepEqual(decideAmuxV52ReviewDisposition("accept", 4, true),
+  assert.deepEqual(decideAmuxV52ReviewDisposition("accept", 4),
     { status: "review", reason: "review_server_accepted" });
 });
 
 test("engineering agent: a card-scoped mismatch holds no other card; an unbound one still halts", async () => {
   const { engineeringAgentHalted, currentEngineeringAgentHalt } = await import("../lib/engineeringAgentStore.ts");
-  const base = { openStateMismatches: 1, orphanedRuns: 1, unacknowledgedHalt: null, circuitLatched: false };
-  assert.equal(engineeringAgentHalted(base), true, "off: a mismatch halts everything");
-  assert.equal(currentEngineeringAgentHalt(base), "state_mismatch");
-  const scoped = { ...base, cardScoped: true, unscopedStateMismatches: 0 };
+  const base = { openStateMismatches: 1, orphanedRuns: 1, unacknowledgedHalt: null };
+  const scoped = { ...base, unscopedStateMismatches: 0 };
   assert.equal(engineeringAgentHalted(scoped), false);
   assert.equal(currentEngineeringAgentHalt(scoped), "none");
   assert.equal(engineeringAgentHalted({ ...scoped, unscopedStateMismatches: 1 }), true);
-  assert.equal(engineeringAgentHalted({ ...scoped, circuitLatched: true }), true, "the circuit still halts");
   assert.equal(engineeringAgentHalted({ ...scoped, unacknowledgedHalt: "unbound_app_pr" }), true);
 });
 
 test("the stalled card sweep reads only a promoted todo Task whose budget is spent", async () => {
   const sweep = await import("../lib/amux/stalledCardSweep.ts");
-  // Owner direction 2026-11-15: on unless disabled.
-  assert.equal(sweep.amuxStalledCardSweepEnabled(undefined), true);
-  assert.equal(sweep.amuxStalledCardSweepEnabled("enabled"), true);
-  assert.equal(sweep.amuxStalledCardSweepEnabled("disabled"), false);
   const calls = [];
   const tx = { $queryRaw: async (strings, ...values) => {
     calls.push({ sql: strings.join("?").replace(/\s+/g, " "), values });
@@ -119,9 +106,9 @@ test("only a card the app filed earns the evidence exemption; a worker's markers
 test("a held card is left out of the publisher's queue and refused before its run's AMUX write", () => {
   const store = readFileSync("lib/engineeringAgentStore.ts", "utf8");
   const pick = store.slice(store.indexOf("export async function claimNextEngineeringAgentPublishWork"));
-  assert.match(pick.slice(0, 6000), /AND \(\$\{!cardScoped\} OR NOT EXISTS \(\s+SELECT 1 FROM "EngineeringAgentRun" own/);
+  assert.match(pick.slice(0, 6000), /AND \(NOT EXISTS \(\s+SELECT 1 FROM "EngineeringAgentRun" own/);
   const admission = store.slice(store.indexOf("export async function requireEngineeringAgentRunAdmission"));
-  assert.match(admission.slice(0, 1200), /haltState\.cardScoped && \(card \? await engineeringAgentCardHeld\(tx, card\) :\s+haltState\.openStateMismatches > 0 \|\| haltState\.orphanedRuns > 0\)\)/,
+  assert.match(admission.slice(0, 1200), /\(card \? await engineeringAgentCardHeld\(tx, card\) :\s+haltState\.openStateMismatches > 0 \|\| haltState\.orphanedRuns > 0\) refuse\("halted"\)/,
     "a start that names no card keeps the agent-wide halt");
   const execution = readFileSync("lib/amux/execution.ts", "utf8");
   assert.match(execution, /requireEngineeringAgentRunAdmission\(\s+engineeringAgentTransactionInAmux\(context\.attachedTransaction\),\s+\{ cardId: input\.taskId \}\)/);

@@ -3,28 +3,22 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 // AMUX process audit bundle 3 (owner decision 2026-11-14, AMUXFLOW/B3):
-// promotion folded into the claim. Off by default.
+// promotion folded into the claim. Always on since 2026-11-16.
 
-test("the promotion flow switch is off unless exactly enabled", async () => {
+test("a tick promotes several Tasks per tick", async () => {
   const core = await import("../lib/amux/v22AutoPromotionCore.ts");
-  assert.equal(core.amuxV22PromotionFlowEnabled(undefined), false);
-  assert.equal(core.amuxV22PromotionFlowEnabled("true"), false);
-  assert.equal(core.amuxV22PromotionFlowEnabled("enabled"), true);
   assert.ok(core.AMUX_V22_PROMOTIONS_PER_TICK > 1);
 });
 
-test("an expired score window orders only with the switch; its bindings still decide", async () => {
+test("the score orders only; its bindings still decide", async () => {
   const { amuxV22ScoreCurrent } = await import("../lib/amux/v22AutoPromotionCore.ts");
-  const now = new Date("2026-11-14T00:00:00Z");
-  const past = new Date("2026-11-12T00:00:00Z");
   const base = { scoreVersion: "v1", expectedVersion: "v1", taskRevision: 3, currentRevision: 3,
-    sourceApprovalId: "a", currentSourceApprovalId: "a", activeStaleAt: past, baselineStaleAt: past, now };
-  assert.equal(amuxV22ScoreCurrent(base), false, "off: an expired window takes the Task out");
-  assert.equal(amuxV22ScoreCurrent({ ...base, orderOnly: true }), true);
-  assert.equal(amuxV22ScoreCurrent({ ...base, orderOnly: true, currentRevision: 4 }), false,
+    sourceApprovalId: "a", currentSourceApprovalId: "a" };
+  assert.equal(amuxV22ScoreCurrent(base), true);
+  assert.equal(amuxV22ScoreCurrent({ ...base, currentRevision: 4 }), false,
     "a revision change still invalidates the score");
-  assert.equal(amuxV22ScoreCurrent({ ...base, orderOnly: true, currentSourceApprovalId: "b" }), false);
-  assert.equal(amuxV22ScoreCurrent({ ...base, orderOnly: true, expectedVersion: "v2" }), false);
+  assert.equal(amuxV22ScoreCurrent({ ...base, currentSourceApprovalId: "b" }), false);
+  assert.equal(amuxV22ScoreCurrent({ ...base, expectedVersion: "v2" }), false);
 });
 
 test("a card's own route or approval reason is skipped, never a stop for the tick", () => {
@@ -42,18 +36,15 @@ test("a card's own route or approval reason is skipped, never a stop for the tic
 
 test("the claim stays first; a tick that assigned nothing promotes several, and an unknown promotion still stops it", () => {
   const source = readFileSync("app/api/internal/amux/auto-promotion/tick/route.ts", "utf8");
-  const flow = source.indexOf("if (amuxV22PromotionFlowEnabled() && v22Enabled");
   const claim = source.indexOf("const result = await tickV22WorkerClaim();");
+  const flow = source.indexOf("for (let index = 0; index < AMUX_V22_PROMOTIONS_PER_TICK");
   assert.ok(claim > 0 && flow > claim, "the claim runs before any promotion write");
   const loop = source.slice(flow, flow + 1200);
-  assert.match(loop, /AMUX_V22_PROMOTIONS_PER_TICK/);
-  assert.match(loop, /promoted\.reason === "outcome_unknown"/);
-  assert.match(source, /if \(v22Enabled && identity\.kind === "admitted" && !amuxV22PromotionFlowEnabled\(\)\)/,
-    "the single promotion is not run again after the loop");
+  assert.match(loop, /promoted.reason === "outcome_unknown"/);
 });
 
-test("the candidate query keeps the score window unless the flow is on", () => {
+test("the candidate query keeps no score window and the promotion checks no newer assessment", () => {
   const source = readFileSync("lib/amux/v22AutoPromotionService.ts", "utf8");
-  assert.match(source, /AND \(\$\{amuxV22PromotionFlowEnabled\(\)\} OR\s+\(n\."activeStaleAt" > \$\{now\} AND n\."baselineStaleAt" > \$\{now\}\)\)/);
-  assert.match(source, /if \(!amuxV22PromotionFlowEnabled\(\) && !amuxV22AssessmentIdsCurrent\(/);
+  assert.doesNotMatch(source, /activeStaleAt" > /);
+  assert.doesNotMatch(source, /amuxV22AssessmentIdsCurrent/);
 });

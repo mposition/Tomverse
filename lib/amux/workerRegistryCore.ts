@@ -376,18 +376,6 @@ export const AMUX_WORKER_CATALOG_EXEMPT: readonly string[] = Object.freeze(["eng
 // ---------------------------------------------------------------------------
 // The Admin screen (R1)
 
-/**
- * Section 8: each stage ships with its code latch off; the operator's
- * activation record turns it on. R1 shipped it false; version 32 (approved
- * 2026-10-12) is that record and sets it true, so the owner may write the
- * registry. While it is false the registry route refuses every write. Reading
- * is never latched.
- */
-export const AMUX_WORKER_REGISTRY_WRITES_LATCH = true;
-
-/** The latch as the route and the page read it: one place to look. */
-export const amuxWorkerRegistryWritesOpen = (): boolean => AMUX_WORKER_REGISTRY_WRITES_LATCH;
-
 export type AmuxWorkerRegistryAdminRow = {
   workerName: string;
   providerClass: AmuxWorkerProviderClass;
@@ -406,7 +394,6 @@ export type AmuxWorkerRegistryAdminRow = {
 export type AmuxWorkerRegistryAdminSeedRow = AmuxWorkerSeedEntry & { registered: boolean };
 
 export type AmuxWorkerRegistryAdminView = {
-  writesLatch: boolean;
   /** False when a stored registry row is one the guard would not have accepted. */
   registryReadable: boolean;
   rows: AmuxWorkerRegistryAdminRow[];
@@ -422,12 +409,10 @@ export function buildAmuxWorkerRegistryAdminView(input: {
   registrations: ReadonlyArray<AmuxWorkerRegistration & { changedAt: string }> | null;
   latches: ReadonlyMap<string, AmuxWorkerLatchEventKind>;
   observations: ReadonlyMap<string, AmuxWorkerObservationStatus>;
-  writesLatch?: boolean;
 }): AmuxWorkerRegistryAdminView {
-  const writesLatch = input.writesLatch ?? amuxWorkerRegistryWritesOpen();
   const registrations = input.registrations;
   if (registrations === null) {
-    return { writesLatch, registryReadable: false, rows: [], seed: null };
+    return { registryReadable: false, rows: [], seed: null };
   }
   const rows = [...registrations]
     .sort((a, b) => a.workerName.localeCompare(b.workerName))
@@ -460,7 +445,7 @@ export function buildAmuxWorkerRegistryAdminView(input: {
     ...entry,
     registered: registered.has(entry.workerName),
   }));
-  return { writesLatch, registryReadable: true, rows, seed };
+  return { registryReadable: true, rows, seed };
 }
 
 /** The seed entries an owner may still register, in seed order. */
@@ -499,7 +484,7 @@ const parseAdminRow = (value: unknown): AmuxWorkerRegistryAdminRow | null => {
  * A body that does not parse is a failed read, never a guessed registry.
  */
 export function parseAmuxWorkerRegistryAdminView(body: unknown): AmuxWorkerRegistryAdminView | null {
-  if (!isRecord(body) || !isBool(body.writesLatch) || !isBool(body.registryReadable)) return null;
+  if (!isRecord(body) || !isBool(body.registryReadable)) return null;
   if (!Array.isArray(body.rows)) return null;
   const rows: AmuxWorkerRegistryAdminRow[] = [];
   for (const row of body.rows) {
@@ -523,5 +508,5 @@ export function parseAmuxWorkerRegistryAdminView(body: unknown): AmuxWorkerRegis
     }
   }
   if (!body.registryReadable && (seed !== null || rows.length > 0)) return null;
-  return { writesLatch: body.writesLatch, registryReadable: body.registryReadable, rows, seed };
+  return { registryReadable: body.registryReadable, rows, seed };
 }

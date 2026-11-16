@@ -1,15 +1,9 @@
 import type { AdminApiFailure } from "@/lib/adminApiOutcome";
-import { AMUX_V22_GRADUATION_EXCEPTION_ID } from "@/lib/amux/v22AutoPromotionCore";
 
 export type AmuxAutoAdmissionControl = {
-  codeLatch: boolean;
-  environmentEnabled: boolean;
   active: boolean;
   authorizationAuditLogId: string | null;
   graduation: { ok: boolean; count: number; spanMs: number };
-  graduationExceptionId: string;
-  graduationExceptionAvailable: boolean;
-  graduationExceptionApplied: boolean;
 };
 
 export type AmuxAutoAdmissionNotice =
@@ -35,43 +29,30 @@ export function parseAmuxAutoAdmissionControl(body: unknown): AmuxAutoAdmissionC
   const value = record(body);
   const graduation = record(value?.graduation);
   if (!value || !graduation ||
-      typeof value.codeLatch !== "boolean" ||
-      typeof value.environmentEnabled !== "boolean" ||
       typeof value.active !== "boolean" || !auditId(value.authorizationAuditLogId) ||
       typeof graduation.ok !== "boolean" ||
       !Number.isSafeInteger(graduation.count) || (graduation.count as number) < 0 ||
       typeof graduation.spanMs !== "number" || !Number.isFinite(graduation.spanMs) ||
-      graduation.spanMs < 0 ||
-      value.graduationExceptionId !== AMUX_V22_GRADUATION_EXCEPTION_ID ||
-      typeof value.graduationExceptionAvailable !== "boolean" ||
-      typeof value.graduationExceptionApplied !== "boolean") return null;
+      graduation.spanMs < 0) return null;
   return {
-    codeLatch: value.codeLatch, environmentEnabled: value.environmentEnabled,
     active: value.active, authorizationAuditLogId: value.authorizationAuditLogId,
     graduation: { ok: graduation.ok, count: graduation.count as number,
       spanMs: graduation.spanMs },
-    graduationExceptionId: value.graduationExceptionId,
-    graduationExceptionAvailable: value.graduationExceptionAvailable,
-    graduationExceptionApplied: value.graduationExceptionApplied,
   };
 }
 
 export const amuxAutoAdmissionCanActivate = (control: AmuxAutoAdmissionControl) =>
-  control.codeLatch && control.environmentEnabled &&
-  (control.graduation.ok || control.graduationExceptionAvailable);
+  control.graduation.ok;
 
 export const amuxAutoAdmissionNeedsApproval = (control: AmuxAutoAdmissionControl) =>
-  !control.active || (control.graduationExceptionAvailable &&
-    !control.graduationExceptionApplied && !control.graduation.ok);
+  !control.active;
 
 export const amuxAutoAdmissionWriteLocked = (notice: AmuxAutoAdmissionNotice) =>
   notice === "outcome_unknown" || notice === "outcome_unknown_unread";
 
-/** Keep the existing CAS and bootstrap exception contract exactly. */
+/** Keep the existing CAS contract exactly. */
 export const amuxAutoAdmissionChangeBody = (active: boolean, control: AmuxAutoAdmissionControl) => ({
   policyVersion: 22, active, expectedAuditLogId: control.authorizationAuditLogId,
-  ...(active && control.graduationExceptionAvailable
-    ? { graduationExceptionId: control.graduationExceptionId } : {}),
 });
 
 export type AmuxAutoAdmissionIo = {
@@ -84,7 +65,7 @@ export type AmuxAutoAdmissionIo = {
 // The route answers these before starting its control transaction.
 const NO_WRITE_STATUSES = new Set([400, 403, 404, 413, 428, 429]);
 const KNOWN_REFUSALS = new Set([
-  "forbidden", "origin_refused", "graduation_exception_unavailable", "apply_disabled",
+  "forbidden", "origin_refused", "apply_disabled",
   "legacy_auto_promotion_enabled", "graduation_unmet", "auto_halted", "capacity_unconfigured",
 ]);
 

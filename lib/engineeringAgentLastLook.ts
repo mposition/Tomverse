@@ -27,9 +27,6 @@ import { readAmuxV22PublicPrConsent } from
 import { decideLastLook, type LastLookVerdict } from "@/lib/engineeringAgentCapability";
 import {
   ENGINEERING_AGENT_KILL_SWITCH_ENV,
-  ENGINEERING_AGENT_V22_REVIEW_CAUSE_PREFIX,
-  ENGINEERING_AGENT_V22_REVIEW_PR_ENV,
-  engineeringAgentV22ReviewPrEnabled,
   killSwitchEngaged,
 } from "@/lib/engineeringAgentCore";
 import {
@@ -41,8 +38,7 @@ import {
 export type EngineeringAgentLastLookVerdict =
   | LastLookVerdict
   | { verdict: "refuse"; reason: "lease_passed" |
-      "commit_digest_mismatch" | "v22_publication_disabled" |
-      "review_pr_off" };
+      "commit_digest_mismatch" | "v22_publication_disabled" };
 
 const SHA256 = /^[0-9a-f]{64}$/;
 
@@ -88,11 +84,6 @@ export async function readEngineeringAgentLastLook(
         env[AMUX_V22_ENGINEERING_PUBLICATION_ENV]) ||
         !(await readAmuxV22PublicPrConsent(item.run.cardId, db))))
     return { verdict: "refuse", reason: "v22_publication_disabled" };
-  // An owner review item's switch is read again here, not only at the claim:
-  // turning it off stops a claim already held before its push.
-  if (item?.causeKey.startsWith(ENGINEERING_AGENT_V22_REVIEW_CAUSE_PREFIX) &&
-      !engineeringAgentV22ReviewPrEnabled(env[ENGINEERING_AGENT_V22_REVIEW_PR_ENV]))
-    return { verdict: "refuse", reason: "review_pr_off" };
   if (!item?.leaseExpiresAt || item.leaseExpiresAt.getTime() <= clock[0].now.getTime()) {
     return { verdict: "refuse", reason: "lease_passed" };
   }

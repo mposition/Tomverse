@@ -7,7 +7,6 @@ import { AMUX_MAX_EXPECTED_REVISION } from "@/lib/amux/claimContract";
 import { isAmuxDmOwnerSettlementId } from "@/lib/amux/dmOwnerSettlementCore";
 import { decideAmuxV52ChangedPaths } from "@/lib/amux/executionGradeCore";
 import { amuxV22ReviewAttempt } from "@/lib/amux/v22KeptResultCore";
-import { ENGINEERING_AGENT_LEGACY_HALTS_ENV, engineeringAgentLegacyHalts } from "@/lib/engineeringAgentCore";
 import {
   AMUX_DB_BOUNDARIES,
   amuxBoundaryWithAttachment,
@@ -165,15 +164,14 @@ export async function completeAmuxV22ReviewOnObservedMerge(
       // judged it (lib/amux/reviewPullRequest.ts): the newest that ended
       // succeeded into review, so a kept result published after the card's
       // budget ran out completes it (owner decision 2026-11-15); only the
-      // newest with ENGINEERING_AGENT_LEGACY_HALTS.
+      // newest.
       const attempts = await tx.$queryRaw<AttemptRow[]>`
         SELECT "id", "outcome", "toStatus", "endedAt", "v22AssignmentId"
         FROM "AmuxExecutionAttempt"
         WHERE "taskId" = ${input.taskId}
         ORDER BY "attemptNumber" DESC NULLS LAST, "startedAt" DESC, "id" DESC
       `;
-      const last = amuxV22ReviewAttempt(attempts,
-        engineeringAgentLegacyHalts(process.env[ENGINEERING_AGENT_LEGACY_HALTS_ENV]));
+      const last = amuxV22ReviewAttempt(attempts);
       if (!last || last.id !== input.attemptId || last.endedAt === null || last.outcome !== "succeeded" ||
           last.toStatus !== "review" || last.v22AssignmentId === null) {
         return { completed: false as const, reason: "not_the_latest_attempt" as const };

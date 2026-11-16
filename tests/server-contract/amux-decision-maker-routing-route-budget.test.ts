@@ -26,7 +26,6 @@ let installed = false;
 async function loadRoute(): Promise<{ POST: (request: Request) => Promise<Response> }> {
   if (!installed) {
     installed = true;
-    process.env.TOMVERSE_AMUX_DM_ROUTING = "enabled";
     mock.timers.enable({ apis: ["Date"], now: START });
     mock.module(mod("lib/amux/guard.ts"), { namedExports: { isAmuxSyncAuthorized: () => true } });
     mock.module(mod("lib/prisma.ts"), {

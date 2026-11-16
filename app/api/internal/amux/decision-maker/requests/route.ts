@@ -40,13 +40,7 @@ import {
  * 남는다"). A request is one per (card, question revision) (§9), so sending
  * the same question again after an unknown outcome reads back the request
  * that committed instead of making a second one.
- *
- * Closed until the operator sets `TOMVERSE_AMUX_DM_ROUTING=enabled`: the
- * bridge path that calls this is stage S2 (§12), and until it is approved and
- * running no request row is written, whatever the switches say.
  */
-
-const AMUX_DM_ROUTING_ENV = "TOMVERSE_AMUX_DM_ROUTING";
 
 /**
  * The card text has one cap (§5, `DM_CARD_TEXT_MAX_BYTES`); the body carries it
@@ -70,9 +64,6 @@ const refused = (status: number, reason: string) =>
 export async function POST(request: Request) {
   if (!isAmuxSyncAuthorized(request)) {
     return amuxJsonNoStore({ error: "Unauthorized" }, 401);
-  }
-  if (process.env[AMUX_DM_ROUTING_ENV] !== "enabled") {
-    return refused(409, "dm_routing_disabled");
   }
 
   return withAmuxRouteBudget(async () => {

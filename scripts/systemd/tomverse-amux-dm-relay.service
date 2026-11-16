@@ -54,7 +54,7 @@ UMask=0077
 # the unit was static: a reboot on 2026-11-09 left it inactive (dead) with no
 # halt or exit line, and no worker question reached the Decision Maker for five
 # days. A started relay still does nothing unless TOMVERSE_AMUX_DM_RELAY in
-# dm-relay.env is enabled and the app's TOMVERSE_AMUX_DM_ROUTING is open.
+# dm-relay.env is enabled.
 # `systemctl disable` returns it to start-by-hand.
 [Install]
 WantedBy=multi-user.target

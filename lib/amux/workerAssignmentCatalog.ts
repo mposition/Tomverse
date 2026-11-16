@@ -7,7 +7,7 @@ import {
   amuxWorkerCapabilityNewestJsonSql,
 } from "@/lib/amux/workerCapabilityStore";
 import { deriveAmuxWorkerCatalog, type AmuxDerivedCatalog } from "@/lib/amux/workerDerivedCatalogCore";
-import { AMUX_V22_MULTI_PROVIDER_ENV, amuxV22MultiProviderEnabled, type AmuxV22Provider } from
+import type { AmuxV22Provider } from
   "@/lib/amux/v22WorkerClaimCore";
 import type { AmuxWorkerRegistration, AmuxWorkerRoleCeiling } from "@/lib/amux/workerRegistryCore";
 import {
@@ -113,7 +113,6 @@ export async function readAmuxRegistryAndDerivedCatalog(client: CatalogReader): 
       registrations: registry.registrations,
       capabilities,
       latches: registry.latches,
-      multiProvider: amuxV22MultiProviderEnabled(process.env[AMUX_V22_MULTI_PROVIDER_ENV]),
     }),
   };
 }

@@ -17,9 +17,7 @@ import { readEngineeringAgentSwitches } from
   "@/lib/engineeringAgentStore";
 import { prisma } from "@/lib/prisma";
 import { AMUX_V22_ENGINEERING_PUBLICATION_ENV,
-  AMUX_V22_TASK_EXECUTION_ENV,
-  amuxV22EngineeringPublicationEnabled,
-  amuxV22TaskExecutionEnabled } from "@/lib/amux/v22TaskExecutionCore";
+  amuxV22EngineeringPublicationEnabled } from "@/lib/amux/v22TaskExecutionCore";
 
 const requestSchema = z.object({
   task_id: amuxMachineIdSchema,
@@ -33,9 +31,6 @@ const requestSchema = z.object({
 export async function POST(request: Request) {
   if (!isAmuxSyncAuthorized(request))
     return amuxJsonNoStore({ error: "Unauthorized" }, 401);
-  if (!amuxV22TaskExecutionEnabled(process.env[AMUX_V22_TASK_EXECUTION_ENV]))
-    return amuxJsonNoStore({ started: false,
-      reason: "v22_execution_disabled" }, 409);
   return withAmuxRouteBudget(async () => {
     try {
       const body = await readLimitedJson(request, 4 * 1_024, requestSchema);

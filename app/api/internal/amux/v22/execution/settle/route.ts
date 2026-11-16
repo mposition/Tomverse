@@ -11,8 +11,6 @@ import { AMUX_V22_PATCH_ENVELOPE_MAX_BYTES } from "@/lib/amux/v22PatchLimit";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 import { amuxInternalErrorResponse, amuxJsonNoStore,
   isAmuxInputError } from "@/lib/amux/internalRoute";
-import { AMUX_V22_TASK_EXECUTION_CODE_LATCH } from
-  "@/lib/amux/v22TaskExecutionCore";
 
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
 const readOnlyRetryBase = {
@@ -51,11 +49,6 @@ const requestSchema = z.object({ attempt_id: z.string().uuid(),
 export async function POST(request: Request) {
   if (!isAmuxSyncAuthorized(request))
     return amuxJsonNoStore({ error: "Unauthorized" }, 401);
-  // An environment kill switch closes admission, not settlement of an
-  // existing fenced attempt. A code-latch-off build stays dark.
-  if (!AMUX_V22_TASK_EXECUTION_CODE_LATCH)
-    return amuxJsonNoStore({ settled: false,
-      reason: "v22_execution_disabled" }, 409);
   return withAmuxRouteBudget(async () => {
     try {
       const body = await readLimitedJson(request, AMUX_V22_PATCH_ENVELOPE_MAX_BYTES, requestSchema);

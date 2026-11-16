@@ -10,7 +10,6 @@ import {
   readEngineeringAgentPullObservation,
   type EngineeringAgentPullObservation,
 } from "@/lib/engineeringAgentGitHubRead";
-import { ENGINEERING_AGENT_LEGACY_HALTS_ENV, engineeringAgentLegacyHalts } from "@/lib/engineeringAgentCore";
 import {
   decideEngineeringAgentDmApprovedMerge, decideEngineeringAgentMergedPr, decideEngineeringAgentPrApproval,
 } from "@/lib/engineeringAgentPrApprovalCore";
@@ -39,8 +38,7 @@ import { prisma } from "@/lib/prisma";
  *   pull request the Decision Maker approved before it, at the merged head and
  *   diff (owner decision 2026-11-13). Any other merge is not approved and goes
  *   to a person as a state mismatch on that card's run, which holds that card
- *   only (engineeringAgentMismatchCardScoped; agent-wide with
- *   ENGINEERING_AGENT_LEGACY_HALTS).
+ *   only (the card-scoped hold).
  *
  * A read that fails decides nothing; the binding is looked at again next round.
  */
@@ -198,10 +196,9 @@ export async function observeEngineeringAgentPullRequests(
     // it merged, a moved head included (the CI auto-fix's develop merge on
     // #3942 and #3944 halted the agent for nine hours). The merged head and
     // diff ride the merge's audit entry, so what was approved is on record.
-    const approverMergeApprovesMergedDiff = !engineeringAgentLegacyHalts(process.env[ENGINEERING_AGENT_LEGACY_HALTS_ENV]);
     let merge = decideEngineeringAgentMergedPr({ merged: true, approvalRecordedBeforeMerge: approvedBeforeMerge,
       mergedByApprover: pull.mergedByApprover === true, baseRef: pull.baseRef,
-      headVerified, approverMergeApprovesMergedDiff });
+      headVerified });
     // The second basis (owner decision 2026-11-13): the merge lane's own merge
     // into develop of a pull request the Decision Maker approved before it, at
     // exactly the merged head and diff. Consulted only for a merge that would

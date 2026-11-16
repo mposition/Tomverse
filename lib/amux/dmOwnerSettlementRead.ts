@@ -45,8 +45,8 @@ export async function scanAmuxDmOwnerSettlementCandidates(tx: Prisma.Transaction
   // patch whose publication never opened -- needs publishing, not running
   // again, so it is never put to the Decision Maker, whose answers include a
   // retry (v22KeptResultCore.ts). The publication round takes it; a person
-  // still settles it from the owner queue. With ENGINEERING_AGENT_LEGACY_HALTS,
-  // or with v22 publication off, nothing publishes it, and it is filed as before.
+  // still settles it from the owner queue. With v22 publication off, nothing
+  // publishes it, and it is filed as before.
   const keepsNoResult = !amuxV22KeptResultPublicationEnabled();
   return tx.$queryRaw<AmuxDmOwnerSettlementCandidate[]>`
     SELECT w."id" AS "taskId", e."id" AS "escalationId", w."status" AS "taskStatus",
@@ -146,35 +146,6 @@ export async function readAmuxDmOwnerSettlementApprovalFacts(tx: Prisma.Transact
   if (!row || !/^[0-9a-f]{40}$/.test(row.verifiedHeadSha) ||
       !row.diffDigest || !/^[0-9a-f]{64}$/.test(row.diffDigest)) return null;
   return { verifiedHeadSha: row.verifiedHeadSha, diffDigest: row.diffDigest, patchBody: row.patchBody };
-}
-
-/**
- * The open settlements without a card that the owner asked for from the owner
- * queue (their audit entry, ownerQueueDmRequestService.ts): the sync files
- * these while TOMVERSE_AMUX_DM_OWNER_SETTLEMENT is off. One statement.
- */
-export async function readAmuxDmOwnerSettlementRequestedIds(tx: Prisma.TransactionClient,
-  limit: number): Promise<string[]> {
-  const rows = await tx.$queryRaw<Array<{ id: string }>>`
-    SELECT s."id" FROM "AmuxDmOwnerSettlement" s
-    WHERE s."state" = 'open' AND s."localCardId" IS NULL AND s."handoffAt" IS NULL
-      AND EXISTS (SELECT 1 FROM "AdminAuditLog" l
-        WHERE l."action" = ${AMUX_OWNER_QUEUE_DM_REQUESTED_ACTION}
-          AND l."targetType" = 'AmuxDmOwnerSettlement' AND l."targetId" = s."id")
-    ORDER BY s."createdAt", s."id"
-    LIMIT ${limit}`;
-  return rows.map((row) => row.id);
-}
-
-/** Which of these settlements the owner asked for from the owner queue. One statement. */
-export async function readAmuxDmOwnerSettlementRequestedAmong(tx: Prisma.TransactionClient,
-  settlementIds: string[]): Promise<Set<string>> {
-  if (settlementIds.length === 0) return new Set();
-  const rows = await tx.$queryRaw<Array<{ id: string }>>`
-    SELECT DISTINCT l."targetId" AS "id" FROM "AdminAuditLog" l
-    WHERE l."action" = ${AMUX_OWNER_QUEUE_DM_REQUESTED_ACTION}
-      AND l."targetType" = 'AmuxDmOwnerSettlement' AND l."targetId" = ANY(${settlementIds}::text[])`;
-  return new Set(rows.map((row) => row.id));
 }
 
 /**

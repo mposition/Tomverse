@@ -6,15 +6,12 @@ import {
   amuxInfraRetryDelayMs,
   amuxInfraFailureKindOfReason,
   amuxInfraFailureReason,
-  amuxInfraFailureRoutingEnabled,
   amuxV22InfraFailureKind,
   classifyAmuxSidecarFailure,
 } from "../lib/amux/infraFailureCore.ts";
 import {
-  AMUX_LEGACY_MAX_EXECUTION_ATTEMPTS,
   AMUX_MAX_EXECUTION_ATTEMPTS,
   AMUX_REPEATED_FAILURE_RUNS,
-  amuxDefaultMaxAttempts,
   amuxRepeatedResultFailure,
   amuxResultFailureSignature,
   decideAmuxAttemptBudget,
@@ -28,16 +25,6 @@ import {
   amuxWorkerCircuitAdmits,
   amuxWorkerCircuitWaitMs,
 } from "../lib/amux/workerCircuitCore.ts";
-
-const withRouting = (value, run) => {
-  const prior = process.env.TOMVERSE_AMUX_INFRA_FAILURE_ROUTING;
-  if (value === undefined) delete process.env.TOMVERSE_AMUX_INFRA_FAILURE_ROUTING;
-  else process.env.TOMVERSE_AMUX_INFRA_FAILURE_ROUTING = value;
-  try { return run(); } finally {
-    if (prior === undefined) delete process.env.TOMVERSE_AMUX_INFRA_FAILURE_ROUTING;
-    else process.env.TOMVERSE_AMUX_INFRA_FAILURE_ROUTING = prior;
-  }
-};
 
 test("the review proposal guard counts attempts as the app does", async () => {
   const { readFile } = await import("node:fs/promises");
@@ -58,12 +45,6 @@ test("the review proposal guard counts attempts as the app does", async () => {
     assert.match(text, pattern, file);
     assert.doesNotMatch(text, /AND 64|<= 64/, file);
   }
-});
-
-test("the switch is on unless exactly disabled", () => {
-  assert.equal(amuxInfraFailureRoutingEnabled(undefined), true);
-  assert.equal(amuxInfraFailureRoutingEnabled("enabled"), true);
-  assert.equal(amuxInfraFailureRoutingEnabled(" disabled "), false);
 });
 
 test("each sidecar failure is the platform's, unless the worker did the work", () => {
@@ -90,7 +71,7 @@ test("each sidecar failure is the platform's, unless the worker did the work", (
 });
 
 test("only an unverified, unpaid settlement with nothing stored can be an infrastructure failure", () => {
-  const base = { enabled: true, outcome: "blocked", budgetBound: false, apiReceipt: false,
+  const base = { outcome: "blocked", budgetBound: false, apiReceipt: false,
     receiptsComplete: false, knownCliFailure: false, resultStored: false, patchStored: false,
     usageEventCount: 0 };
   assert.equal(amuxV22InfraFailureKind(base), "no_result", "an old bridge, nothing reported");
@@ -98,7 +79,7 @@ test("only an unverified, unpaid settlement with nothing stored can be an infras
   assert.equal(amuxV22InfraFailureKind({ ...base, failure: { code: "invalid_result", elapsedMs: 1_000 } }),
     "early_exit");
   assert.equal(amuxV22InfraFailureKind({ ...base, failure: { code: "deadline" } }), null);
-  for (const change of [{ enabled: false }, { outcome: "failed" }, { outcome: "succeeded" },
+  for (const change of [{ outcome: "failed" }, { outcome: "succeeded" },
     { budgetBound: true }, { apiReceipt: true }, { receiptsComplete: true },
     { knownCliFailure: true }, { resultStored: true }, { patchStored: true }])
     assert.equal(amuxV22InfraFailureKind({ ...base, ...change }), null, JSON.stringify(change));
@@ -111,7 +92,7 @@ test("infrastructure reasons round-trip and nothing else is one", () => {
     assert.equal(amuxInfraFailureKindOfReason(reason), null);
 });
 
-test("infrastructure failures keep their number but use none of the card's attempts", () => withRouting(undefined, () => {
+test("infrastructure failures keep their number but use none of the card's attempts", () => {
   // AMUX-SCHEDJOBS-003: five Cursor exits in twenty minutes.
   const five = decideAmuxAttemptBudget({ historical_rows: 5, greatest_attempt_number: 5, infra_rows: 5 });
   assert.deepEqual(five, { allowed: true, next_attempt_number: 6, max_attempts: AMUX_MAX_EXECUTION_ATTEMPTS });
@@ -130,15 +111,9 @@ test("infrastructure failures keep their number but use none of the card's attem
     [0, 0, 0, 60_000, 120_000, 240_000, 3_600_000, 3_600_000, 3_600_000, 3_600_000]);
   assert.equal(settlementDestinationForBudget({ requested_status: "todo", attempt_number: 150,
     infra_attempts_before: 149, infra_failure: true }).to_status, "todo");
-}));
+});
 
-test("the kill switch restores the five-attempt count", () => withRouting("disabled", () => {
-  assert.equal(amuxDefaultMaxAttempts(), AMUX_LEGACY_MAX_EXECUTION_ATTEMPTS);
-  assert.equal(decideAmuxAttemptBudget({ historical_rows: 5, greatest_attempt_number: 5 }).allowed, false);
-  assert.equal(settlementDestinationForBudget({ requested_status: "todo", attempt_number: 5 }).to_status, "blocked");
-}));
-
-test("settlement hands a repeated failure to a person; an infrastructure failure goes back to todo", () => withRouting(undefined, () => {
+test("settlement hands a repeated failure to a person; an infrastructure failure goes back to todo", () => {
   assert.deepEqual(settlementDestinationForBudget({ requested_status: "todo", attempt_number: 9,
     infra_attempts_before: 8, infra_failure: true }),
   { to_status: "todo", exhausted_limit: null, max_attempts: AMUX_MAX_EXECUTION_ATTEMPTS });
@@ -153,7 +128,7 @@ test("settlement hands a repeated failure to a person; an infrastructure failure
     attempt_number: AMUX_MAX_EXECUTION_ATTEMPTS, infra_attempts_before: 3 }).to_status, "todo");
   assert.equal(settlementDestinationForBudget({ requested_status: "review", attempt_number: 40,
     repeated_failure: true }).to_status, "review");
-}));
+});
 
 test("an infrastructure failure keeps its own attempt reason and never names a bound", async () => {
   // Review r-20261115-120153-60193b: a failure stored under the bound's name
@@ -164,7 +139,7 @@ test("an infrastructure failure keeps its own attempt reason and never names a b
   const settle = source.slice(source.indexOf("await tx.amuxExecutionAttempt.update({ where: { id: attempt.id },\n        data: { endedAt: now, leaseExpiresAt: null, heartbeatAt: now,"));
   assert.match(settle.slice(0, 900), /reason: gradeEscalated \? "contract_path_touched" :\s+infraKind \? amuxInfraFailureReason\(infraKind\) :\s+next === "blocked" \? blockedReason :/);
   const reaper = source.slice(source.indexOf("endedBy: \"system:amux-v22-execution-reaper\","));
-  assert.match(reaper.slice(0, 500), /reason: retry \? \(infraRetry \? amuxInfraFailureReason\("lease_expired"\) :/);
+  assert.match(reaper.slice(0, 500), /reason: retry \? amuxInfraFailureReason\("lease_expired"\) : "outcome_unknown"/);
   assert.doesNotMatch(source, /AMUX_INFRA_ATTEMPTS_EXHAUSTED_REASON/);
   assert.ok(!AMUX_INFRA_FAILURE_REASONS.includes("infra_attempts_exhausted"),
     "the bound's name is not itself a counted failure");
@@ -183,7 +158,7 @@ test("a worker is quarantined after three platform failures in a row and tried a
   const now = 10_000_000;
   const infra = (minutesAgo, reason = "infra_early_exit") => ({ reason, endedAtMs: now - minutesAgo * 60_000 });
   const run = (recent, usageObservedAtMs = null, nowMs = now) =>
-    amuxWorkerCircuit({ enabled: true, recent, usageObservedAtMs, nowMs });
+    amuxWorkerCircuit({ recent, usageObservedAtMs, nowMs });
   assert.equal(run([infra(1), infra(2)]).state, "closed");
   assert.equal(run([infra(1), infra(2), { reason: "reported_result", endedAtMs: now - 180_000 }, infra(4)]).state, "closed");
   const open = run([infra(1), infra(2), infra(3)]);
@@ -202,7 +177,4 @@ test("a worker is quarantined after three platform failures in a row and tried a
   assert.equal(amuxWorkerCircuitWaitMs(AMUX_WORKER_CIRCUIT_THRESHOLD), AMUX_WORKER_CIRCUIT_BASE_MS);
   assert.equal(amuxWorkerCircuitWaitMs(AMUX_WORKER_CIRCUIT_THRESHOLD + 1), 2 * AMUX_WORKER_CIRCUIT_BASE_MS);
   assert.equal(amuxWorkerCircuitWaitMs(40), AMUX_WORKER_CIRCUIT_MAX_MS);
-  // The kill switch closes every circuit.
-  assert.equal(amuxWorkerCircuit({ enabled: false, recent: [infra(1), infra(2), infra(3)],
-    usageObservedAtMs: null, nowMs: now }).state, "closed");
 });

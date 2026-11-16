@@ -120,7 +120,6 @@ const reset = () => {
   locked = null;
   patch = { taskId: "card", text: "diff --git a/x b/x\n", sha256: DIGEST, baseSha: BASE };
   process.env.TOMVERSE_AMUX_V22_ENGINEERING_PUBLICATION = "enabled";
-  delete process.env.ENGINEERING_AGENT_LEGACY_HALTS;
 };
 const kinds = () => calls.map(([kind]) => kind);
 
@@ -225,11 +224,7 @@ admission = null;
 assert.deepEqual((await round(1)).map((row) => [row.taskId, row.outcome]), [["card-2", "published"]],
   "a waiting card is deferred as a failing one is");
 
-// Off with the kill switch, or with v22 publication off: no read at all.
-reset();
-process.env.ENGINEERING_AGENT_LEGACY_HALTS = "enabled";
-assert.deepEqual(await round(), []);
-assert.deepEqual(calls, []);
+// Off with v22 publication off: no read at all.
 reset();
 delete process.env.TOMVERSE_AMUX_V22_ENGINEERING_PUBLICATION;
 assert.deepEqual(await round(), []);

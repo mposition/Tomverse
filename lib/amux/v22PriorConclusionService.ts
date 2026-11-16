@@ -5,7 +5,6 @@ import type { Prisma } from "@prisma/client";
 import { amuxV22ConclusionSha256, amuxV22HandoffNotesFor, amuxV22PriorLabel,
   parseAmuxV22Conclusion, type AmuxV22PriorConclusionEntry } from
   "@/lib/amux/v22ConclusionCore";
-import { amuxV22LocalCliFlowEnabled } from "@/lib/amux/v22LocalCliFlowCore";
 import { openAmuxV22TaskResultRow } from "@/lib/amux/v22TaskResultStore";
 import { amuxV22TaskWritesPatch } from "@/lib/amux/v22WorkerClaimCore";
 
@@ -23,11 +22,7 @@ import { amuxV22TaskWritesPatch } from "@/lib/amux/v22WorkerClaimCore";
 
 /** Prisma calls `readAmuxV22PriorConclusionRows` makes, for its caller's boundary. */
 export const AMUX_V22_PRIOR_CONCLUSION_ROWS_PRISMA_CALLS = 3;
-/** Prerequisites read per delivery in the earlier flow; the section bound
- * decides how many fit. The local CLI flow carries every finished one
- * (v22LocalCliFlowCore.ts). */
-export const AMUX_V22_PRIOR_CONCLUSION_MAX_DEPENDENCIES = 8;
-
+// Every finished prerequisite is carried (v22LocalCliFlowCore.ts).
 const SEALED = { ideaId: true, ciphertext: true, keyId: true, keyVersion: true,
   digest: true, digestKeyId: true, bodyPurgedAt: true } as const;
 // The brief names sibling cards by the draft unit's local reference; the card
@@ -40,20 +35,19 @@ const localRefOf = (item: { amuxV4RegisteredDecisions?:
   item.amuxV4RegisteredDecisions?.[0]?.draftUnit?.localRef ?? null;
 
 export async function readAmuxV22PriorConclusionRows(tx: Prisma.TransactionClient,
-  taskId: string, flow = amuxV22LocalCliFlowEnabled()) {
+  taskId: string) {
   const found = await tx.amuxWorkItem.findUnique({ where: { id: taskId },
     select: { id: true, displayKey: true, ...LOCAL_REF } });
   if (!found) return null;
   const self = { id: found.id, displayKey: found.displayKey,
     localRef: localRefOf(found) };
   const links = await tx.amuxWorkDependency.findMany({ where: { taskId },
-    orderBy: { dependencyId: "asc" }, ...(flow ? {} : { take: 32 }),
+    orderBy: { dependencyId: "asc" },
     select: { dependency: { select: { id: true, displayKey: true, status: true,
       sourceSystem: true, v4TerminalAt: true, taskRole: true, ...LOCAL_REF } } } });
   const done = links.map((link) => link.dependency).filter((item) =>
     item.status === "done" && item.v4TerminalAt !== null &&
-    item.sourceSystem === "admin-idea-v4")
-    .slice(0, flow ? undefined : AMUX_V22_PRIOR_CONCLUSION_MAX_DEPENDENCIES);
+    item.sourceSystem === "admin-idea-v4");
   if (done.length === 0) return null;
   // The newest result of each prerequisite first, whatever it holds: when
   // that run gave no conclusion, an earlier run's conclusion is not revived.

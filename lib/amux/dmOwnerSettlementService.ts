@@ -19,7 +19,7 @@ import {
 } from "./dmOwnerSettlementCore.ts";
 import {
   readAmuxDmOwnerSettlementApprovalFacts, readAmuxDmOwnerSettlementPullEvidence,
-  readAmuxDmOwnerSettlementRequestedIds, scanAmuxDmOwnerSettlementCandidates,
+  scanAmuxDmOwnerSettlementCandidates,
 } from "./dmOwnerSettlementRead.ts";
 import {
   AMUX_DM_OWNER_SETTLEMENT_RESOLVER, closeAmuxStoppedCardAsSystemWithin,
@@ -40,16 +40,11 @@ import { AMUX_V52_REJECTED_REVIEWS_PRISMA_CALLS, openAmuxV52RejectedReviewEntrie
  * escalation, then as a typed-ask card in the shape of a v22 question, so the
  * bridge needs no change. The walk over confirmations and the DM approver
  * apply the answer here; the escalation stays open beside it, so a person who
- * answers first wins and the settlement is cancelled. Nothing is filed while
- * TOMVERSE_AMUX_DM_OWNER_SETTLEMENT is off; the rows already open still close.
+ * answers first wins and the settlement is cancelled.
  *
  * An approval of a review pull request is recorded only -- the binding, its
  * verified head and diff digest -- for the merge lane's next stage; the Task
  * and its escalation stay as they are.
- *
- * Owner decision 2026-11-14: with the switch off, the owner may still ask for
- * one card from the owner queue (ownerQueueDmRequestService.ts); the tick
- * files the settlements so asked for, and only those.
  */
 
 const CARD_ID = /^[A-Za-z0-9_-]{1,64}$/;
@@ -93,8 +88,7 @@ type SiblingRow = SealedTitle & { forTaskId: string; id: string; label: string; 
  * past the boundary's own (the ninth reads the pending Tasks' rejected
  * reviews, every one, owner decision 2026-11-15).
  */
-export async function readAmuxDmOwnerSettlementSyncRows(tx: Prisma.TransactionClient,
-  input: { enabled: boolean }) {
+export async function readAmuxDmOwnerSettlementSyncRows(tx: Prisma.TransactionClient) {
   // Up to fifty open or claimed settlements a tick, at random so none is
   // missed for good, judged as every other step judges them.
   const live = await tx.$queryRaw<SettlementFacts[]>`${SETTLEMENT_FACTS}
@@ -112,77 +106,68 @@ export async function readAmuxDmOwnerSettlementSyncRows(tx: Prisma.TransactionCl
   let siblings: SiblingRow[] = [];
   let pulls: Awaited<ReturnType<typeof readAmuxDmOwnerSettlementPullEvidence>> = [];
   let reviews: AmuxV52ReviewHistoryRow[] = [];
-  // While the switch is off, only the settlements the owner asked for from the
-  // owner queue are filed (owner decision 2026-11-14): one more statement.
-  const requested = input.enabled ? null :
-    await readAmuxDmOwnerSettlementRequestedIds(tx, AMUX_DM_OWNER_SETTLEMENT_PENDING_SCAN);
-  if (input.enabled) {
-    const found = await scanAmuxDmOwnerSettlementCandidates(tx, AMUX_DM_OWNER_SETTLEMENT_SYNC_LIMIT);
-    const filed = found.flatMap((row) => {
-      const kind = amuxDmOwnerSettlementKind({ openBinding: row.bindingId ? "review_draft" : null,
-        engineeringInFlight: false });
-      return kind ? [{ id: amuxDmOwnerSettlementId(row.escalationId), taskId: row.taskId,
-        escalationId: row.escalationId, attemptId: row.attemptId, kind,
-        taskStatus: row.taskStatus, bindingId: row.bindingId }] : [];
-    });
-    if (filed.length > 0) await tx.$executeRaw`
-      INSERT INTO "AmuxDmOwnerSettlement" ("id", "taskId", "escalationId", "attemptId", "kind",
-        "taskStatus", "bindingId", "updatedAt")
-      SELECT x."id", x."taskId", x."escalationId", x."attemptId", x."kind", x."taskStatus",
-        x."bindingId", (clock_timestamp() AT TIME ZONE 'UTC')
-      FROM jsonb_to_recordset(${JSON.stringify(filed)}::jsonb) AS x("id" text, "taskId" text,
-        "escalationId" text, "attemptId" text, "kind" text, "taskStatus" text, "bindingId" text)
-      ON CONFLICT DO NOTHING`;
-  }
-  if (input.enabled || (requested !== null && requested.length > 0)) {
-    pending = await tx.$queryRaw<PendingSettlement[]>`
-      SELECT s."id" AS "settlementId", s."kind", s."taskId", s."attemptId", s."bindingId",
-        s."taskStatus", e."reason", coalesce(w."displayKey", w."id") AS "taskLabel",
-        w."taskRole" AS "role", w."executionGrade" AS "grade",
-        w."title" AS "cardTitle", w."sourceSystem", w."sourceSnapshot",
-        w."v4TitleCiphertext", w."v4TitleKeyId", w."v4TitleKeyVersion", w."v4TitleDigest",
-        w."v4TitleDigestKeyId",
-        w."v4BodyCiphertext" AS "bodyCiphertext", w."v4BodyKeyId" AS "bodyKeyId",
-        w."v4BodyKeyVersion" AS "bodyKeyVersion", w."v4BodyDigest" AS "bodyDigest",
-        w."v4BodyDigestKeyId" AS "bodyDigestKeyId",
-        r."attemptId" IS NOT NULL AS "hasResult", r."ideaId" AS "resultIdeaId", r."ciphertext",
-        r."keyId", r."keyVersion", r."digest", r."digestKeyId", r."sourceSha256", r."bodyPurgedAt",
-        (SELECT count(*)::int FROM "AmuxV52ReviewRecord" v
-          WHERE v."taskId" = s."taskId" AND v."verdict" = 'reject') AS "rejections"
-      FROM "AmuxDmOwnerSettlement" s
-      JOIN "AmuxWorkItem" w ON w."id" = s."taskId"
-      JOIN "AmuxHumanEscalation" e ON e."id" = s."escalationId"
-      LEFT JOIN "AmuxV22TaskResult" r ON r."attemptId" = s."attemptId" AND r."taskId" = s."taskId"
-      WHERE s."state" = 'open' AND s."localCardId" IS NULL AND s."handoffAt" IS NULL
-        AND (${requested === null} OR s."id" = ANY(${requested ?? []}::text[]))
-      ORDER BY s."createdAt", s."id"
-      LIMIT ${AMUX_DM_OWNER_SETTLEMENT_PENDING_SCAN}`;
-    const taskIds = [...new Set(pending.map((row) => row.taskId))];
-    if (taskIds.length > 0) siblings = await tx.$queryRaw<SiblingRow[]>`
-      SELECT * FROM (
-        SELECT p."id" AS "forTaskId", o."id", coalesce(o."displayKey", o."id") AS "label",
-          o."status", o."title" AS "cardTitle", o."sourceSystem", o."sourceSnapshot",
-          o."v4TitleCiphertext", o."v4TitleKeyId", o."v4TitleKeyVersion", o."v4TitleDigest",
-          o."v4TitleDigestKeyId",
-          EXISTS (SELECT 1 FROM "AmuxWorkDependency" d
-            WHERE d."taskId" = o."id" AND d."dependencyId" = p."id") AS "waitsOnThis",
-          count(*) OVER (PARTITION BY p."id")::int AS "total",
-          row_number() OVER (PARTITION BY p."id" ORDER BY EXISTS (SELECT 1 FROM "AmuxWorkDependency" d
-            WHERE d."taskId" = o."id" AND d."dependencyId" = p."id") DESC,
-            o."displayKey" NULLS LAST, o."id") AS "position"
-        FROM "AmuxWorkItem" p
-        JOIN "AmuxWorkItem" o ON o."id" <> p."id" AND o."archivedAt" IS NULL AND o."cardType" = 'task'
-          AND ((p."parentStoryCardId" IS NOT NULL AND o."parentStoryCardId" = p."parentStoryCardId") OR
-            (p."parentStoryCardId" IS NULL AND p."parentFeatureNodeId" IS NOT NULL AND
-              o."parentStoryCardId" IS NULL AND o."parentFeatureNodeId" = p."parentFeatureNodeId"))
-        WHERE p."id" = ANY(${taskIds})
-      ) x WHERE x."position" <= ${SIBLINGS_READ}
-      ORDER BY x."forTaskId", x."position"`;
-    const bindingIds = pending.flatMap((row) => row.bindingId ? [row.bindingId] : []);
-    pulls = await readAmuxDmOwnerSettlementPullEvidence(tx, bindingIds);
-    // Why the review server rejected each Task's runs: FINDINGS.md, after the run's report.
-    reviews = await readAmuxV52RejectedReviews(tx, taskIds);
-  }
+  const found = await scanAmuxDmOwnerSettlementCandidates(tx, AMUX_DM_OWNER_SETTLEMENT_SYNC_LIMIT);
+  const filed = found.flatMap((row) => {
+    const kind = amuxDmOwnerSettlementKind({ openBinding: row.bindingId ? "review_draft" : null,
+      engineeringInFlight: false });
+    return kind ? [{ id: amuxDmOwnerSettlementId(row.escalationId), taskId: row.taskId,
+      escalationId: row.escalationId, attemptId: row.attemptId, kind,
+      taskStatus: row.taskStatus, bindingId: row.bindingId }] : [];
+  });
+  if (filed.length > 0) await tx.$executeRaw`
+    INSERT INTO "AmuxDmOwnerSettlement" ("id", "taskId", "escalationId", "attemptId", "kind",
+      "taskStatus", "bindingId", "updatedAt")
+    SELECT x."id", x."taskId", x."escalationId", x."attemptId", x."kind", x."taskStatus",
+      x."bindingId", (clock_timestamp() AT TIME ZONE 'UTC')
+    FROM jsonb_to_recordset(${JSON.stringify(filed)}::jsonb) AS x("id" text, "taskId" text,
+      "escalationId" text, "attemptId" text, "kind" text, "taskStatus" text, "bindingId" text)
+    ON CONFLICT DO NOTHING`;
+  pending = await tx.$queryRaw<PendingSettlement[]>`
+    SELECT s."id" AS "settlementId", s."kind", s."taskId", s."attemptId", s."bindingId",
+      s."taskStatus", e."reason", coalesce(w."displayKey", w."id") AS "taskLabel",
+      w."taskRole" AS "role", w."executionGrade" AS "grade",
+      w."title" AS "cardTitle", w."sourceSystem", w."sourceSnapshot",
+      w."v4TitleCiphertext", w."v4TitleKeyId", w."v4TitleKeyVersion", w."v4TitleDigest",
+      w."v4TitleDigestKeyId",
+      w."v4BodyCiphertext" AS "bodyCiphertext", w."v4BodyKeyId" AS "bodyKeyId",
+      w."v4BodyKeyVersion" AS "bodyKeyVersion", w."v4BodyDigest" AS "bodyDigest",
+      w."v4BodyDigestKeyId" AS "bodyDigestKeyId",
+      r."attemptId" IS NOT NULL AS "hasResult", r."ideaId" AS "resultIdeaId", r."ciphertext",
+      r."keyId", r."keyVersion", r."digest", r."digestKeyId", r."sourceSha256", r."bodyPurgedAt",
+      (SELECT count(*)::int FROM "AmuxV52ReviewRecord" v
+        WHERE v."taskId" = s."taskId" AND v."verdict" = 'reject') AS "rejections"
+    FROM "AmuxDmOwnerSettlement" s
+    JOIN "AmuxWorkItem" w ON w."id" = s."taskId"
+    JOIN "AmuxHumanEscalation" e ON e."id" = s."escalationId"
+    LEFT JOIN "AmuxV22TaskResult" r ON r."attemptId" = s."attemptId" AND r."taskId" = s."taskId"
+    WHERE s."state" = 'open' AND s."localCardId" IS NULL AND s."handoffAt" IS NULL
+    ORDER BY s."createdAt", s."id"
+    LIMIT ${AMUX_DM_OWNER_SETTLEMENT_PENDING_SCAN}`;
+  const taskIds = [...new Set(pending.map((row) => row.taskId))];
+  if (taskIds.length > 0) siblings = await tx.$queryRaw<SiblingRow[]>`
+    SELECT * FROM (
+      SELECT p."id" AS "forTaskId", o."id", coalesce(o."displayKey", o."id") AS "label",
+        o."status", o."title" AS "cardTitle", o."sourceSystem", o."sourceSnapshot",
+        o."v4TitleCiphertext", o."v4TitleKeyId", o."v4TitleKeyVersion", o."v4TitleDigest",
+        o."v4TitleDigestKeyId",
+        EXISTS (SELECT 1 FROM "AmuxWorkDependency" d
+          WHERE d."taskId" = o."id" AND d."dependencyId" = p."id") AS "waitsOnThis",
+        count(*) OVER (PARTITION BY p."id")::int AS "total",
+        row_number() OVER (PARTITION BY p."id" ORDER BY EXISTS (SELECT 1 FROM "AmuxWorkDependency" d
+          WHERE d."taskId" = o."id" AND d."dependencyId" = p."id") DESC,
+          o."displayKey" NULLS LAST, o."id") AS "position"
+      FROM "AmuxWorkItem" p
+      JOIN "AmuxWorkItem" o ON o."id" <> p."id" AND o."archivedAt" IS NULL AND o."cardType" = 'task'
+        AND ((p."parentStoryCardId" IS NOT NULL AND o."parentStoryCardId" = p."parentStoryCardId") OR
+          (p."parentStoryCardId" IS NULL AND p."parentFeatureNodeId" IS NOT NULL AND
+            o."parentStoryCardId" IS NULL AND o."parentFeatureNodeId" = p."parentFeatureNodeId"))
+      WHERE p."id" = ANY(${taskIds})
+    ) x WHERE x."position" <= ${SIBLINGS_READ}
+    ORDER BY x."forTaskId", x."position"`;
+  const bindingIds = pending.flatMap((row) => row.bindingId ? [row.bindingId] : []);
+  pulls = await readAmuxDmOwnerSettlementPullEvidence(tx, bindingIds);
+  // Why the review server rejected each Task's runs: FINDINGS.md, after the run's report.
+  reviews = await readAmuxV52RejectedReviews(tx, taskIds);
   const closing = await tx.$queryRaw<Array<{ questionId: string; cardId: string }>>`
     SELECT s."id" AS "questionId", s."localCardId" AS "cardId"
     FROM "AmuxDmOwnerSettlement" s

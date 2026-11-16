@@ -98,7 +98,7 @@ test("v37 admits only the approved legacy read-only source and separates stop ac
   assert.match(sql, /'safe_stop_process_unknown'/);
   assert.match(actorSource, /AMUX_V22_RECOVERY_CONTROLLER_AUDIT_ACTOR = "amux-v22-recovery-controller"/);
   assert.match(actorSource, /action === "amux\.v22\.recovery\.safe_stop_reported"/);
-  assert.match(policySource, /TOMVERSE_AMUX_V22_LEGACY_SAFE_STOP_ENABLED`가 정확히 `true`/);
+  assert.match(policySource, /TOMVERSE_AMUX_V22_LEGACY_SAFE_STOP_ENABLED`가 정확히 `enabled`/);
   assert.match(policySource, /TOMVERSE_AMUX_V22_RECOVERY_CONTROLLER_SECRET/);
   assert.match(policySource, /`systemctl show <fixed-unit>`와\s+`systemctl stop <fixed-unit>`뿐/);
   assert.match(policySource, /모든 현재·미래 epoch/);

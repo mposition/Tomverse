@@ -19,15 +19,6 @@ import { patchContextPaths } from "../engineeringAgentT2DmReviewCore.ts";
 import { dmCardEvidenceContext, type DmWorkspaceEvidenceName } from "./decisionMakerWorkspaceCore.ts";
 import { amuxV52ReviewEntriesText, type AmuxV52ReviewEntry } from "./v52ReviewFindingsCore.ts";
 
-/**
- * Filing a settlement card starts a Decision Maker turn. On unless exactly
- * `disabled` (owner decision 2026-11-15: the switches that make the Decision
- * Maker work default on, and are kill switches).
- */
-export const AMUX_DM_OWNER_SETTLEMENT_ENV = "TOMVERSE_AMUX_DM_OWNER_SETTLEMENT";
-export const amuxDmOwnerSettlementEnabled = (env: Record<string, string | undefined> = process.env) =>
-  env[AMUX_DM_OWNER_SETTLEMENT_ENV]?.trim() !== "disabled";
-
 export const AMUX_DM_OWNER_SETTLEMENT_KINDS = ["t2_pr", "stopped"] as const;
 export type AmuxDmOwnerSettlementKind = (typeof AMUX_DM_OWNER_SETTLEMENT_KINDS)[number];
 

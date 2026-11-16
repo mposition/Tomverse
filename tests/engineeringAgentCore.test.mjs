@@ -7,7 +7,6 @@ import test from "node:test";
 
 import {
   AMUX_SETTLEMENT_FOR_OUTCOME,
-  OWNER_QUEUE_LEGACY_LIMITS,
   PUBLISH_STATES,
   PUBLISH_TERMINAL_STATES,
   PUBLISH_TRANSITIONS,
@@ -442,10 +441,10 @@ test("unset, unknown and unreadable mode is off", () => {
 
 test("the kill switch turns everything off unless it is plainly empty or false", () => {
   const base = { mode: "t1", freeze: "false", registration: "on", readFailed: false };
-  for (const killSwitch of ["1", "true", "yes", "anything"]) {
+  for (const killSwitch of ["enabled", "1", "true", "yes", "anything"]) {
     assert.equal(resolveEngineeringAgentSwitches({ ...base, killSwitch }).mode, "off");
   }
-  for (const killSwitch of [undefined, null, "", "0", "false", "FALSE"]) {
+  for (const killSwitch of [undefined, null, "", "0", "false", "FALSE", "disabled", "DISABLED"]) {
     assert.equal(resolveEngineeringAgentSwitches({ ...base, killSwitch }).mode, "t1");
   }
 });
@@ -477,21 +476,11 @@ test("shadow claims but never publishes; a freeze stops claims and publishing, n
 
 /* Owner queues --------------------------------------------------------- */
 
-test("the owner queues are counted, never capped; the kill switch brings back eight and eight", () => {
-  // Owner decision 2026-11-15; the caps are owner decision 2026-11-09's.
+test("the owner queues are counted, never capped", () => {
+  // Owner decision 2026-11-15.
   for (const [prs, decisions] of [[0, 0], [8, 8], [500, 500]])
     assert.deepEqual(decideOwnerQueues({ openPrBindings: prs, pendingDecisions: decisions }),
-      { prFull: false, decisionFull: false, claimAllowed: true });
-  assert.deepEqual({ ...OWNER_QUEUE_LEGACY_LIMITS }, { pr: 8, decision: 8 });
-});
-
-test("with the kill switch either full queue stops the claim at its limit and not before", () => {
-  const verdict = (openPrBindings, pendingDecisions) =>
-    decideOwnerQueues({ openPrBindings, pendingDecisions }, true);
-  assert.deepEqual(verdict(7, 7), { prFull: false, decisionFull: false, claimAllowed: true });
-  assert.deepEqual(verdict(8, 0), { prFull: true, decisionFull: false, claimAllowed: false });
-  assert.deepEqual(verdict(0, 8), { prFull: false, decisionFull: true, claimAllowed: false });
-  assert.deepEqual(verdict(9, 9), { prFull: true, decisionFull: true, claimAllowed: false });
+      { openPrBindings: prs, pendingDecisions: decisions, prFull: false, decisionFull: false, claimAllowed: true });
 });
 
 /* Halt and circuit ----------------------------------------------------- */

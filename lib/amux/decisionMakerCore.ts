@@ -357,8 +357,7 @@ const utf8Bytes = (value: string) => Buffer.byteLength(value, "utf8");
  *
  * Format `amux-dm-card-text-v2` (2026-10-18, stage S2-2b1) added each option's
  * `effect` and `paths`. The v1 layout, whose options were `{ id, label }`, is
- * not read back: its only writer was the routing route, closed by
- * `TOMVERSE_AMUX_DM_ROUTING` since it was added, and a stored text this module
+ * not read back: its only writer was a routing route that never wrote it, and a stored text this module
  * cannot read is shown as unreadable, never as a card.
  */
 export const DM_CARD_TEXT_FORMAT = "amux-dm-card-text-v2";

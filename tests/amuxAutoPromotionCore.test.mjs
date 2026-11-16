@@ -365,7 +365,6 @@ test("the public auto route checks the latch before the service", () => {
   assert.match(core, /AUTO_PROMOTION_CODE_LATCH = true/);
   assert.equal(service.includes("TOMVERSE_AMUX_EXECUTE"), false);
   assert.equal(core.includes("TOMVERSE_AMUX_EXECUTE"), false);
-  assert.equal(service.includes("TOMVERSE_AMUX_EXECUTION_API_ENABLED"), false);
   assert.match(service, /from "@\/lib\/amux\/recommendationPoolCore"/);
   assert.match(service, /pg_advisory_xact_lock\(hashtext\(\$\{RECOMMENDATION_LOCK_NAME\}\)\)/);
   assert.equal(service.includes("unapprovedTodo: 0"), false);

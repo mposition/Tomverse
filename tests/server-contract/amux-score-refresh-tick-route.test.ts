@@ -48,8 +48,7 @@ const load = async () => ({
 let loaded: ReturnType<typeof load> | undefined;
 const modules = () => (loaded ??= load());
 
-const ENV = ["TOMVERSE_AMUX_V22_AUTO_PROMOTE", "TOMVERSE_AMUX_V22_WORKER_CLAIM",
-  "TOMVERSE_AMUX_V4_SCORE_AUTO_REFRESH", "TOMVERSE_AMUX_BOARD_AUTO_PROMOTE",
+const ENV = ["TOMVERSE_AMUX_V4_SCORE_AUTO_REFRESH", "TOMVERSE_AMUX_BOARD_AUTO_PROMOTE",
   "TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS"] as const;
 const previous = Object.fromEntries(ENV.map((key) => [key, process.env[key]]));
 after(() => {
@@ -61,8 +60,6 @@ after(() => {
 
 const tick = async (refreshSwitch: string | undefined) => {
   calls.length = 0;
-  process.env.TOMVERSE_AMUX_V22_AUTO_PROMOTE = "enabled";
-  process.env.TOMVERSE_AMUX_V22_WORKER_CLAIM = "enabled";
   delete process.env.TOMVERSE_AMUX_BOARD_AUTO_PROMOTE;
   if (refreshSwitch === undefined) delete process.env.TOMVERSE_AMUX_V4_SCORE_AUTO_REFRESH;
   else process.env.TOMVERSE_AMUX_V4_SCORE_AUTO_REFRESH = refreshSwitch;

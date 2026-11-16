@@ -11,7 +11,6 @@ import { dmWorkspaceCardPointer } from "../lib/amux/decisionMakerWorkspaceCore.t
 import {
   ENGINEERING_AGENT_T2_DM_REASON_TEXT,
   engineeringAgentT2DmCard,
-  engineeringAgentT2DmReviewEnabled,
   patchContextPaths,
 } from "../lib/engineeringAgentT2DmReviewCore.ts";
 
@@ -19,16 +18,6 @@ const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf
 const ID = "00000000-0000-4000-8000-00000000000a";
 const filePatch = (path, lines) =>
   [`diff --git a/${path} b/${path}`, `--- a/${path}`, `+++ b/${path}`, "@@ -1 +1 @@", ...lines].join("\n");
-
-test("the switch is on unless set to disabled", () => {
-  // Owner decision 2026-11-15: the switches that make the Decision Maker work default on.
-  assert.equal(engineeringAgentT2DmReviewEnabled({}), true);
-  assert.equal(engineeringAgentT2DmReviewEnabled({ TOMVERSE_ENGINEERING_AGENT_T2_DM_REVIEW: undefined }), true);
-  assert.equal(engineeringAgentT2DmReviewEnabled({ TOMVERSE_ENGINEERING_AGENT_T2_DM_REVIEW: "enabled" }), true);
-  assert.equal(engineeringAgentT2DmReviewEnabled({ TOMVERSE_ENGINEERING_AGENT_T2_DM_REVIEW: "disabled" }), false);
-  assert.equal(engineeringAgentT2DmReviewEnabled({ TOMVERSE_ENGINEERING_AGENT_T2_DM_REVIEW: " disabled " }), false);
-  assert.equal(engineeringAgentT2DmReviewEnabled({ TOMVERSE_ENGINEERING_AGENT_T2_DM_REVIEW: "false" }), true);
-});
 
 test("the card's fixed words hit no routing term, so it reaches a DM", () => {
   for (const reason of [...Object.keys(ENGINEERING_AGENT_T2_DM_REASON_TEXT), "something_else", null]) {
@@ -96,8 +85,7 @@ test("patchContextPaths: the patch's files once each, and only paths a card may 
 
 test("the relay files, names and closes the card; nothing reads the answer to decide a draft", () => {
   const route = read("app/api/internal/amux/decision-maker/v22-questions/sync/route.ts");
-  assert.match(route, /if \(!engineeringAgentT2DmReviewEnabled\(\)\) return \{ pending: \[\], closing: rows\.closing \}/,
-    "no new card while the switch is off; cards still close");
+  assert.doesNotMatch(route, /engineeringAgentT2DmReviewEnabled/, "no switch: a draft always gets its advice card");
 
   const dm = read("lib/amux/v22OwnerQuestionDmService.ts");
   assert.match(dm, /FROM "EngineeringAgentDmReview"\s+WHERE "localCardId" = \$\{cardId\}/,

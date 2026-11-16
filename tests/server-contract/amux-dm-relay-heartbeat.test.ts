@@ -118,8 +118,8 @@ test("calling, asking and silent", () => {
     state: "silent", lastSyncAt: null, minutesSilent: null,
   });
   assert.equal(core.parseAmuxDmRelayLastSync("not a time"), null);
-  assert.equal(core.amuxDmRelayExpected({ NODE_ENV: "production", TOMVERSE_AMUX_DM_ROUTING: "enabled", APP_ENV: "production" }), true);
-  assert.equal(core.amuxDmRelayExpected({ TOMVERSE_AMUX_DM_ROUTING: "true" } as unknown as NodeJS.ProcessEnv), false);
+  assert.equal(core.amuxDmRelayExpected({ NODE_ENV: "production", APP_ENV: "production" }), true);
+  assert.equal(core.amuxDmRelayExpected({ NODE_ENV: "development" }), false);
 });
 
 test("the production relay is not expected in dev or staging production builds", () => {
@@ -127,15 +127,13 @@ test("the production relay is not expected in dev or staging production builds",
     assert.equal(core.amuxDmRelayExpected({
       NODE_ENV: "production",
       RAILWAY_ENVIRONMENT_NAME: environment,
-      TOMVERSE_AMUX_DM_ROUTING: "enabled",
     }), false, environment);
   }
   assert.equal(core.amuxDmRelayExpected({
-    NODE_ENV: "production", TOMVERSE_AMUX_DM_ROUTING: "enabled",
+    NODE_ENV: "production",
   }), true, "unlabelled production builds remain monitored");
   assert.equal(core.amuxDmRelayExpected({
     NODE_ENV: "production", APP_ENV: "dev", RAILWAY_ENVIRONMENT_NAME: "production",
-    TOMVERSE_AMUX_DM_ROUTING: "enabled",
   }), false, "the deployment resolver's explicit override is respected");
 });
 
@@ -147,6 +145,4 @@ test("the question window covers the relay's longest wait on one question", () =
   // (migration 20261008090100_amux_decision_maker_request_ledger).
   assert.ok(broker > 0 && (broker + 2) * 60_000 < core.AMUX_DM_RELAY_QUESTION_MS, `broker ${broker} min`);
   assert.ok(idle > 0 && idle * 1_000 * 10 <= core.AMUX_DM_RELAY_SILENT_MS, `idle ${idle} s`);
-  const routing = readFileSync(resolve(ROOT, "lib/amux/decisionMakerInternalRoute.ts"), "utf8");
-  assert.match(routing, /AMUX_DM_ROUTING_ENV = "TOMVERSE_AMUX_DM_ROUTING"/, "the switch read by name is the routes' switch");
 });

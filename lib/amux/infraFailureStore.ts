@@ -1,7 +1,6 @@
 import { Prisma } from "@prisma/client";
 
-import { AMUX_INFRA_FAILURE_REASONS, amuxInfraFailureRoutingEnabled,
-  amuxIsInfraFailureReason } from "./infraFailureCore.ts";
+import { AMUX_INFRA_FAILURE_REASONS, amuxIsInfraFailureReason } from "./infraFailureCore.ts";
 
 /**
  * The infrastructure failures the bound counts start after a person last
@@ -24,12 +23,11 @@ const lastRetry = (taskId: string) => Prisma.sql`(SELECT MAX(e."resolvedAt")
  * the greatest number, the reserved total, how many ended as an
  * infrastructure failure (lib/amux/infraFailureCore.ts), and how many of those
  * came after a person's last retry (`infraWindowRows`, what the
- * infrastructure bound counts). With TOMVERSE_AMUX_INFRA_FAILURE_ROUTING=
- * disabled both are always 0, so every attempt counts again as before.
+ * infrastructure bound counts).
  */
 export async function readAmuxAttemptBudgetFacts(tx: Prisma.TransactionClient,
-  taskId: string, enabled = amuxInfraFailureRoutingEnabled()) {
-  const reasons = enabled ? [...AMUX_INFRA_FAILURE_REASONS] : [];
+  taskId: string) {
+  const reasons = [...AMUX_INFRA_FAILURE_REASONS];
   const [row] = await tx.$queryRaw<Array<{ rows: number; greatest: number | null;
     infra: number; infraWindow?: number; reserved: bigint | null;
     lastEndedAt?: Date | null; lastEndedReason?: string | null }>>`
@@ -52,7 +50,7 @@ export async function readAmuxAttemptBudgetFacts(tx: Prisma.TransactionClient,
     infraWindowRows: row?.infraWindow ?? infraRows,
     /** When the newest ended run ended, and whether it was a platform failure. */
     lastEndedAt: row?.lastEndedAt ? new Date(row.lastEndedAt) : null,
-    lastEndedIsInfra: enabled && amuxIsInfraFailureReason(row?.lastEndedReason),
+    lastEndedIsInfra: amuxIsInfraFailureReason(row?.lastEndedReason),
     reservedMicrousd: row?.reserved ?? BigInt(0),
   };
 }
@@ -62,8 +60,7 @@ export async function readAmuxAttemptBudgetFacts(tx: Prisma.TransactionClient,
  * first: the claim tries another worker, and another provider, first.
  */
 export async function recentAmuxInfraFailureWorkers(tx: Prisma.TransactionClient,
-  taskId: string, enabled = amuxInfraFailureRoutingEnabled()): Promise<string[]> {
-  if (!enabled) return [];
+  taskId: string): Promise<string[]> {
   const rows = await tx.amuxExecutionAttempt.findMany({
     where: { taskId, endedAt: { not: null } },
     orderBy: [{ endedAt: "desc" }, { id: "desc" }], take: 6,
@@ -83,10 +80,10 @@ export async function recentAmuxInfraFailureWorkers(tx: Prisma.TransactionClient
  */
 export async function readAmuxRecentResultSignatures(tx: Prisma.TransactionClient,
   taskId: string, attemptId: string, count: number): Promise<string[]> {
-  const infra = amuxInfraFailureRoutingEnabled() ? [...AMUX_INFRA_FAILURE_REASONS] : [];
+  const infra = [...AMUX_INFRA_FAILURE_REASONS];
   const rows = await tx.amuxExecutionAttempt.findMany({
     where: { taskId, id: { not: attemptId }, endedAt: { not: null },
-      ...(infra.length ? { OR: [{ reason: null }, { reason: { notIn: infra } }] } : {}) },
+      OR: [{ reason: null }, { reason: { notIn: infra } }] },
     orderBy: [{ endedAt: "desc" }, { id: "desc" }], take: Math.max(0, count),
     select: { outcome: true, reason: true } });
   return rows.map((row) => `${row.outcome ?? "unknown"}:${row.reason ?? "unknown"}`);
@@ -98,9 +95,8 @@ export async function readAmuxRecentResultSignatures(tx: Prisma.TransactionClien
  * person's last retry (`window`, which the bound counts). One statement.
  */
 export async function countAmuxInfraAttemptsBefore(tx: Prisma.TransactionClient,
-  taskId: string, attemptId: string, enabled = amuxInfraFailureRoutingEnabled()):
+  taskId: string, attemptId: string):
   Promise<{ total: number; window: number }> {
-  if (!enabled) return { total: 0, window: 0 };
   const [row] = await tx.$queryRaw<Array<{ total: number; infraWindow: number }>>`
     SELECT COUNT(*)::int AS "total",
       (COUNT(*) FILTER (WHERE r."at" IS NULL OR a."startedAt" > r."at"))::int AS "infraWindow"

@@ -102,7 +102,7 @@ test("the workflow's guard reads a checkout's diff with -z and refuses a binary"
 });
 
 test("a fix to a gate path is pushed so CI runs, and the merge lane still leaves its merge to a person", () => {
-  // #3190: a Dependabot `next` bump fails until CONVENTION_VERSIONS records the installed version.
+  // A change to the authority manifest and its generated copy is a gate path (it was #3190: a framework version bump).
   const nameStatus = "M\tlib/agentAuthorityFiles.ts\nM\ttools/auto-rec-agent/lib/agentAuthorityFiles.generated.mjs";
   const numstat = "1\t1\tlib/agentAuthorityFiles.ts\n1\t1\ttools/auto-rec-agent/lib/agentAuthorityFiles.generated.mjs";
   assert.deepEqual(diff(nameStatus, numstat), { push: true });
