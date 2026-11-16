@@ -63,6 +63,10 @@ export const JOURNEY_FAMILIES = Object.freeze([
   "a later turn that brings new files: after a turn with attachments worked, attach new files in the same conversation and ask again -- the second answer must read the new files and be as good as the first",
   "the same flow on a phone and on a desktop, switching conversations mid-answer, starting a new chat twice, Escape and Enter where a person would press them",
   "labels that show internal ids, codes or untranslated keys where a person expects words",
+  // 2026-11-16: a conversation whose files added up past an internal text limit refused every later message.
+  "limits and accumulation: one conversation carrying more and more -- the long text files below over two turns, several files at once, a long history -- up to and past what a single message could hold; every turn should still answer, or say plainly what is too big and what to do, and never refuse a short follow-up because of what came before",
+  // 2026-11-16: after a failed answer the user switched model and opened a new chat; both failed the same way.
+  "recovery after a failure: when an answer fails or is refused, do what a person does next -- retry, pick another model, or start a new chat with the same files -- and expect the product to recover rather than repeat the same error",
 ]);
 const familyLines = JOURNEY_FAMILIES.map((family, index) => `${index + 1}. ${family};`).join("\n");
 
@@ -72,7 +76,7 @@ const anchorLines = Object.entries(JOURNEY_ANCHORS as Record<string, string>)
 
 export const JOURNEY_SYSTEM_PROMPT = `You plan one test for Tomverse, an AI chat platform, as a demanding QA engineer who uses it like a real person.
 Signed-in users chat with many AI models (Smart Auto picks one per message), keep a history of conversations in a sidebar (a drawer on a phone, a History button in the studio rail), write drafts that should survive moving around, attach files, ask for files and images to be made and then changed, compare answers, use memory, assistants, plugins and settings.
-Plan ONE journey of a few steps that a person would really take and that is likely to expose a defect that only shows BETWEEN screens. Plan it in today's family (named after the date) unless the findings in <recent> already cover that family; then pick another, and never repeat what <recent> covers:
+When <production> lists failures real users hit lately (an error code, the model, how often), plan the journey that reproduces the most frequent one instead -- the same model when the model picker offers it, files and history like the failing turns -- because a defect users already hit outranks any family. Otherwise plan ONE journey of a few steps that a person would really take and that is likely to expose a defect that only shows BETWEEN screens. Plan it in today's family (named after the date) unless the findings in <recent> already cover that family; then pick another, and never repeat what <recent> covers:
 ${familyLines}
 The walker starts on a new chat in Korean. Steps use only these actions, each with a value (empty when none):
 - open: go to one of ${JOURNEY_PATHS.join(", ")}
@@ -89,10 +93,15 @@ ${fixtureLines}
 At most ${JOURNEY_STEPS_MAX} steps, on a ${JOURNEY_VIEWPORTS.join(" or ")} screen. Never delete, rename, share, sign out, buy, connect accounts or change settings: the walker refuses those writes anyway. Nothing about real people.
 Return the viewport, the start draft, the steps, and in one Korean sentence what a person would expect to see along the way (at most ${SCENARIO_EXPECTATION_MAX_CHARS} characters).`;
 
-export function journeyPromptText(recentTitles: readonly string[], today: Date): string {
+export function journeyPromptText(recentTitles: readonly string[], today: Date, productionFailures: readonly string[] = []): string {
   const recent = recentTitles.slice(0, JOURNEY_RECENT_TITLES_MAX).map((title) => `- ${title}`).join("\n");
   const family = Math.floor(today.getTime() / 86_400_000) % JOURNEY_FAMILIES.length + 1;
-  return [`Today is ${today.toISOString().slice(0, 10)}. Today's family is ${family}.`, `<recent>\n${recent || "none"}\n</recent>`].join("\n");
+  const production = productionFailures.map((line) => `- ${line}`).join("\n");
+  return [
+    `Today is ${today.toISOString().slice(0, 10)}. Today's family is ${family}.`,
+    `<production>\n${production || "none"}\n</production>`,
+    `<recent>\n${recent || "none"}\n</recent>`,
+  ].join("\n");
 }
 
 export const JOURNEY_OUTPUT_SCHEMA = {
@@ -130,10 +139,12 @@ export const parseJourneyAnswer = (value: unknown): ScoutJourney | null => admit
 export type JourneyDeps = {
   readonly now: Date;
   readonly recentTitles: () => Promise<readonly string[]>;
+  /** What real users' turns failed with lately (lib/productResearchScoutProductionFailures.ts); none when absent. */
+  readonly productionFailures?: () => Promise<readonly string[]>;
   /** The owner's chosen model, or null when the model step is off. */
   readonly model: () => Promise<{
     readonly modelId: string;
-    readonly planJourney: (recentTitles: readonly string[], today: Date) => Promise<{
+    readonly planJourney: (recentTitles: readonly string[], today: Date, productionFailures?: readonly string[]) => Promise<{
       readonly journey: ScoutJourney | null;
       readonly inputTokens: number | null;
       readonly outputTokens: number | null;
@@ -152,7 +163,7 @@ export async function runJourney(deps: JourneyDeps): Promise<JourneyAnswer> {
   if (!llm) return { judged: false, reason: "model_off" };
   const reservation = await deps.reserve(llm.modelId);
   if ("refused" in reservation) return { judged: false, reason: reservation.refused };
-  const planned = await llm.planJourney(await deps.recentTitles(), deps.now);
+  const planned = await llm.planJourney(await deps.recentTitles(), deps.now, (await deps.productionFailures?.()) ?? []);
   await deps.settle(reservation.id, {
     ok: planned.journey !== null,
     inputTokens: planned.inputTokens,

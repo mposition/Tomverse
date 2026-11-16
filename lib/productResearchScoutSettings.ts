@@ -19,6 +19,7 @@ import {
   SCOUT_GENERATION_PERMIT_PREFIX,
   type ScoutCallRow,
 } from "@/lib/productResearchScoutCore";
+import { SCOUT_DEPLOY_CHECK_GENERATION } from "@/lib/productResearchScoutBrowserPolicy.mjs";
 
 export const SCOUT_MODEL_SETTING_KEY = "productResearch.scoutModelId";
 export const SCOUT_DAILY_CALL_CAP_SETTING_KEY = "productResearch.scoutDailyCallCap";
@@ -145,6 +146,16 @@ export async function startScoutCall(input: ScoutCallInput & {onceOnUtcDay?:stri
  * judge what the money made. `audit` runs in the same transaction with what was
  * granted.
  */
+/**
+ * The ledger subject of one generation permit. The deploy check's names the app's
+ * build commit, so each build is checked once and a redeploy of the same build is not.
+ */
+export const scoutGenerationPermitSubject = (id: string, env: Readonly<Record<string, string | undefined>> = process.env): string | null => {
+  if (id !== SCOUT_DEPLOY_CHECK_GENERATION) return `${SCOUT_GENERATION_PERMIT_PREFIX}${id}`;
+  const commit = (env.RAILWAY_GIT_COMMIT_SHA ?? "").trim();
+  return /^[0-9a-f]{7,40}$/i.test(commit) ? `${SCOUT_GENERATION_PERMIT_PREFIX}${id}@${commit.slice(0, 40)}` : null;
+};
+
 export async function reserveScoutGenerations(
   requested: readonly string[],
   audit: (tx: Prisma.TransactionClient, granted: readonly string[]) => Promise<unknown>,
@@ -154,11 +165,18 @@ export async function reserveScoutGenerations(
     const { modelId, dailyCallCap, generationDailyCap } = await settingsFrom(tx);
     const used = await tx.productResearchScoutLlmCall.count({ where: { createdAt: { gte: startOfUtcDay(new Date()) }, ...GENERATION_PERMITS } });
     const allowed = modelId === null || dailyCallCap === 0 ? 0 : Math.max(0, generationDailyCap - used);
-    const granted = requested.slice(0, allowed);
+    // The deploy check is granted once per build of this app, whenever it is asked
+    // for; the build's permit row is what says it was already checked.
+    // With no build commit there is no build to key it by: it is not granted at all,
+    // rather than once ever under a shared name.
+    const deployCheck = scoutGenerationPermitSubject(SCOUT_DEPLOY_CHECK_GENERATION);
+    const checked = requested.includes(SCOUT_DEPLOY_CHECK_GENERATION)
+      && (deployCheck === null || (await tx.productResearchScoutLlmCall.count({ where: { subject: deployCheck } })) > 0);
+    const granted = requested.filter((id) => !(checked && id === SCOUT_DEPLOY_CHECK_GENERATION)).slice(0, allowed);
     if (granted.length > 0) {
       await tx.productResearchScoutLlmCall.createMany({
         data: granted.map((id) => ({
-          subject: `${SCOUT_GENERATION_PERMIT_PREFIX}${id}`,
+          subject: scoutGenerationPermitSubject(id) as string,
           modelId: SCOUT_GENERATION_LEDGER_MODEL,
           outcome: "ok",
         })),

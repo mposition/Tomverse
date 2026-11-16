@@ -28,7 +28,9 @@ import { join } from "node:path";
 import { installCdpRules, launch, resolverRules, ruledContext, sandboxHost } from "../../lib/productResearchScoutBrowser.mjs";
 import {
   SCOUT_EXPLORE_GENERATION,
+  SCOUT_DEPLOY_CHECK_GENERATION,
   SCOUT_GENERATIONS,
+  scoutRunMode,
   SCOUT_IMAGE_FOLLOW_UP_GENERATION,
   SCOUT_JOURNEY_GENERATION,
   SCOUT_LOCALES,
@@ -50,6 +52,7 @@ import {
 } from "../../lib/productResearchScoutBrowserPolicy.mjs";
 import { SCOUT_PAGE_TIMEOUT_MS, generateFile, generateImage, generateImageFollowUp, officePackage, pdfFirstPage, screenshot } from "../../lib/productResearchScoutGeneration.mjs";
 import { walkJourney } from "../../lib/productResearchScoutJourney.mjs";
+import { createTurnReporter } from "../../lib/productResearchScoutTurnHealth.mjs";
 import { walkMemoryProbes, walkMemoryComparison } from "../../lib/productResearchScoutMemoryWalk.mjs";
 import { scoutSendOutcome } from "../../lib/productResearchScoutCore.ts";
 
@@ -93,7 +96,11 @@ setTimeout(() => {
   process.exit(1);
 }, RUN_DEADLINE_MS).unref();
 
-const outcomes = { sent: 0, stored: 0, modelOff: 0, capped: 0, refused: 0, failed: 0, stopped: 0, skipped: 0, signedInPages: 0, generated: 0 };
+const outcomes = { sent: 0, stored: 0, modelOff: 0, capped: 0, refused: 0, failed: 0, stopped: 0, skipped: 0, signedInPages: 0, generated: 0, deployChecked: 0, deployCheckFailed: 0 };
+/** The hourly walker's job this run: the full look once a day, otherwise only a new build's check. */
+const runMode = outDir ? "daily" : scoutRunMode();
+/** Turns the product did not answer, and how many the Scout reported (lib/productResearchScoutTurnHealth.mjs). */
+const turnReporter = createTurnReporter();
 /** Set by the route's first daily_cap_reached; nothing more is captured or sent today. */
 let capReached = false;
 
@@ -215,6 +222,10 @@ async function walkPages() {
   }
   try {
     const rules = await installCdpRules(browser, [walk.origin]);
+    if (runMode === "deploy_check") {
+      await walkSignedIn(browser, rules, { deployCheckOnly: true });
+      return;
+    }
     for (const target of SCOUT_PAGES) {
       if (capReached) {
         outcomes.capped += 1;
@@ -245,11 +256,11 @@ async function walkPages() {
  * session and today's generation permits, or null when there is no test account
  * (the route is 404) or the app refused.
  */
-async function askSignedIn() {
+async function askSignedIn(generations = SCOUT_GENERATIONS.map((generation) => generation.id)) {
   const response = await fetch(`${ingestUrl}/signed-in`, {
     method: "POST",
     headers: { authorization: `Bearer ${ingestSecret}`, "content-type": "application/json" },
-    body: JSON.stringify({ generations: SCOUT_GENERATIONS.map((generation) => generation.id) }),
+    body: JSON.stringify({ generations }),
     signal: AbortSignal.timeout(30_000),
   });
   if (response.status === 404) return null;
@@ -299,12 +310,12 @@ async function askPlan(route, subject, read) {
   }
 }
 
-async function walkSignedIn(browser, rules) {
+async function walkSignedIn(browser, rules, { deployCheckOnly = false } = {}) {
   // Nothing signed in is worth paying for when the model will not judge it.
   if (outDir || capReached || outcomes.modelOff > 0) return;
-  const access = await askSignedIn();
+  const access = await askSignedIn(deployCheckOnly ? [SCOUT_DEPLOY_CHECK_GENERATION] : undefined);
   if (!access) return;
-  for (const target of SCOUT_SIGNED_IN_PAGES) {
+  for (const target of deployCheckOnly ? [] : SCOUT_SIGNED_IN_PAGES) {
     if (capReached) {
       outcomes.capped += 1;
       continue;
@@ -327,10 +338,31 @@ async function walkSignedIn(browser, rules) {
       continue;
     }
     let generation = SCOUT_GENERATIONS.find((entry) => entry.id === id);
+    if (id === SCOUT_DEPLOY_CHECK_GENERATION) {
+      // A new build's one turn. A healthy build costs no judge call; a broken one is
+      // judged, and the reporter has already filed it as a customer would.
+      const failuresBefore = turnReporter.counts.turnFailures;
+      const subject = await generateFile(browser, rules, generation, { walk, cookie: access.cookie, reporter: turnReporter });
+      if (!subject) {
+        // Signed out or stopped by a challenge: nothing was checked (the permit stays spent, as every permit does).
+        outcomes.skipped += 1;
+        console.warn(JSON.stringify({ event: "product_research_scout_deploy_check_skipped" }));
+        continue;
+      }
+      outcomes.deployChecked += 1;
+      // A turn that failed, or a walk that stopped before the answer (the upload or the draft broke), goes to the judge.
+      const broken = turnReporter.counts.turnFailures > failuresBefore || subject.stoppedAt !== null;
+      if (broken) {
+        outcomes.deployCheckFailed += 1;
+        console.warn(JSON.stringify({ event: "product_research_scout_deploy_check_failed", stoppedAt: subject.stoppedAt }));
+        await deliver(subject);
+      }
+      continue;
+    }
     if (id === SCOUT_JOURNEY_GENERATION) {
       // The planner's steps; the permit stays spent if none come.
       const journey = await askJourney();
-      const subject = journey ? await walkJourney(browser, rules, journey, { walk, cookie: access.cookie }) : null;
+      const subject = journey ? await walkJourney(browser, rules, journey, { walk, cookie: access.cookie, reporter: turnReporter }) : null;
       if (subject) {
         outcomes.generated += 1;
         await deliver(subject);
@@ -342,7 +374,7 @@ async function walkSignedIn(browser, rules) {
     if (generation?.journey) {
       // A fixed journey (a regression check): the same walker, the steps from SCOUT_GENERATIONS.
       const journey = admitJourney(generation.journey);
-      const subject = journey ? await walkJourney(browser, rules, journey, { walk, cookie: access.cookie, subject: id, author: "a fixed regression check" }) : null;
+      const subject = journey ? await walkJourney(browser, rules, journey, { walk, cookie: access.cookie, subject: id, author: "a fixed regression check", reporter: turnReporter }) : null;
       outcomes[subject ? "generated" : "skipped"] += 1;
       if (subject) await deliver(subject);
       continue;
@@ -356,7 +388,7 @@ async function walkSignedIn(browser, rules) {
       }
       generation = { ...generation, ...task };
     }
-    const place = { walk, cookie: access.cookie };
+    const place = { walk, cookie: access.cookie, reporter: turnReporter };
     const subject = id === "generated.image"
       ? await generateImage(browser, generation, place)
       : id === SCOUT_IMAGE_FOLLOW_UP_GENERATION
@@ -498,7 +530,10 @@ async function walkMemory() {
   }
 }
 const startedAt = Date.now();
-for (const [name, step] of [["memory", walkMemory], ["pages", walkPages], ["files", walkFiles], ["catalogue", walkCatalogue], ["issues", walkIssues]]) {
+const steps = runMode === "deploy_check"
+  ? [["pages", walkPages]]
+  : [["memory", walkMemory], ["pages", walkPages], ["files", walkFiles], ["catalogue", walkCatalogue], ["issues", walkIssues]];
+for (const [name, step] of steps) {
   try {
     await step();
   } catch (error) {
@@ -506,4 +541,4 @@ for (const [name, step] of [["memory", walkMemory], ["pages", walkPages], ["file
     console.warn(JSON.stringify({ event: "product_research_scout_step_failed", step: name, error: errorCode(error) }));
   }
 }
-console.log(JSON.stringify({ event: "product_research_scout_run", elapsedMs: Date.now() - startedAt, ...outcomes, sandbox, mode: outDir ? "local" : "send" }));
+console.log(JSON.stringify({ event: "product_research_scout_run", elapsedMs: Date.now() - startedAt, ...outcomes, ...turnReporter.counts, sandbox, mode: outDir ? "local" : "send", runMode }));
