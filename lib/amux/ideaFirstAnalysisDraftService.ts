@@ -10,6 +10,7 @@ import {
   AMUX_V4_IDEA_SYSTEM_ACTOR,
 } from "@/lib/adminAuditSystemActors";
 import { AMUX_V4_ANALYSIS_NAMESPACE } from "./ideaAnalysisBudgetCore.ts";
+import { amuxAnalysisChunkMaxBytes } from "./ideaAnalysisChunkCore.ts";
 import { prepareAmuxAnalysisPageDraft } from "./ideaAnalysisPageDraftCore.ts";
 import { readPreviousOutputPage } from "./ideaTransferPreviewService.ts";
 import { openAmuxContent, verifyAmuxContentDigest } from "./ideaCrypto.ts";
@@ -42,7 +43,7 @@ export async function commitAmuxFirstIdeaAnalysisDraft(
   if (!input || !ID.test(input.ideaId) || !ID.test(input.previewId) ||
       !ID.test(input.holdId) || !Number.isSafeInteger(input.leaseGeneration) ||
       input.leaseGeneration < 1 || typeof input.rawModelOutput !== "string" ||
-      Buffer.byteLength(input.rawModelOutput, "utf8") > 65_536) {
+      Buffer.byteLength(input.rawModelOutput, "utf8") > amuxAnalysisChunkMaxBytes()) {
     throw new AmuxFirstAnalysisDraftError("not_ready");
   }
   const chunkIndex = input.chunkIndex ?? 0;

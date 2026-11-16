@@ -28,16 +28,31 @@ test("a blank first line gives way to the first line with text; no text gives no
   assert.equal(amuxIdeaTitleFromText("[Scout 제안]   \nbody"), null);
 });
 
-test("a long first line is cut to 80 characters with an ellipsis, counting code points", () => {
+test("a long first line is kept whole (owner direction 2026-11-15)", () => {
+  const long = `${"y".repeat(500)} ${"한".repeat(300)} ${"😀".repeat(100)}`;
+  assert.equal(amuxIdeaTitleFromText(`${long}\nrest`, false), long);
+  assert.equal(amuxIdeaTitleFromText(`${long}\nrest`), long, "the new behaviour is the default");
+  assert.ok(!amuxIdeaTitleFromText(`${"z".repeat(78)}  tail tail`, false).includes("…"));
+});
+
+test("with the legacy switch a long first line is cut to 80 characters with an ellipsis, counting code points", () => {
   assert.equal(AMUX_IDEA_TITLE_MAX, 80);
   const exact = "x".repeat(80);
-  assert.equal(amuxIdeaTitleFromText(exact), exact);
-  const cut = amuxIdeaTitleFromText(`${"y".repeat(81)}\nrest`);
+  assert.equal(amuxIdeaTitleFromText(exact, true), exact);
+  const cut = amuxIdeaTitleFromText(`${"y".repeat(81)}\nrest`, true);
   assert.equal(cut, `${"y".repeat(79)}…`);
-  const emoji = amuxIdeaTitleFromText("😀".repeat(100));
+  const emoji = amuxIdeaTitleFromText("😀".repeat(100), true);
   assert.equal(Array.from(emoji).length, 80);
   assert.equal(emoji, `${"😀".repeat(79)}…`);
-  assert.equal(amuxIdeaTitleFromText(`${"z".repeat(78)}  tail tail`), `${"z".repeat(78)}…`);
+  assert.equal(amuxIdeaTitleFromText(`${"z".repeat(78)}  tail tail`, true), `${"z".repeat(78)}…`);
+  const previous = process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS;
+  process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS = "enabled";
+  try {
+    assert.equal(amuxIdeaTitleFromText(`${"y".repeat(81)}`), `${"y".repeat(79)}…`, "the switch is read from the environment");
+  } finally {
+    if (previous === undefined) delete process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS;
+    else process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS = previous;
+  }
 });
 
 test("an idea is named by its card key, then its title with the short id, then the short id", () => {
@@ -65,4 +80,17 @@ test("the migration backfills only sent Scout ideas whose body still exists, wit
   // The raw purge clears the title in the same update that clears the body.
   const purge = readFileSync(new URL("../lib/amux/ideaRawRetentionService.ts", import.meta.url), "utf8");
   assert.match(purge, /data: \{ rawCiphertext: null, rawKeyId: null, rawKeyVersion: null, title: null,/);
+});
+
+test("the 2026-11-15 migration drops only the length cap and keeps the purge rule", () => {
+  const dir = "../prisma/migrations/20261116010700_amux_idea_title_no_length_cap/";
+  const sql = readFileSync(new URL(`${dir}migration.sql`, import.meta.url), "utf8");
+  const statements = sql.split(/\r?\n/).filter((line) => !line.startsWith("--")).join("\n");
+  assert.match(statements, /DROP CONSTRAINT "AmuxIdeaSubmission_title_check",\s*ADD CONSTRAINT "AmuxIdeaSubmission_title_check" CHECK/);
+  assert.match(statements, /"rawPurgedAt" IS NULL AND "rawCiphertext" IS NOT NULL/);
+  assert.match(statements, /char_length\("title"\) >= 1/);
+  assert.doesNotMatch(statements, /80|<=|BETWEEN|UPDATE|DELETE/);
+  const sidecar = JSON.parse(readFileSync(new URL(`${dir}baseline-check.json`, import.meta.url), "utf8"));
+  assert.deepEqual(sidecar.replacedChecks.map((check) => [check.table, check.constraint]),
+    [["AmuxIdeaSubmission", "AmuxIdeaSubmission_title_check"]]);
 });

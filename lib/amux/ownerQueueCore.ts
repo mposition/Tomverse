@@ -16,8 +16,19 @@ import type { AmuxDmRelayView, AmuxOwnerQueueDmView } from "./ownerQueueDmReques
  * existing owner review (`useAmuxOwnerReview`) and its routes.
  */
 
-/** The cards the list holds at most; a longer queue says it is partial. */
+/** The cards one read lists; a longer queue says it is partial and offers the next page. */
 export const AMUX_OWNER_QUEUE_LIMIT = 100;
+/**
+ * The most cards one read can be asked for. Each card's title is opened one at
+ * a time, so this is the size one admin request still answers in a few seconds.
+ */
+export const AMUX_OWNER_QUEUE_MAX_LIMIT = 2_000;
+
+/** The `limit` a request asked for: a whole number from one page up to the maximum, else one page. */
+export const amuxOwnerQueueRequestedLimit = (raw: string | null): number => {
+  const value = raw !== null && /^[0-9]{1,5}$/.test(raw) ? Number(raw) : AMUX_OWNER_QUEUE_LIMIT;
+  return Math.min(AMUX_OWNER_QUEUE_MAX_LIMIT, Math.max(AMUX_OWNER_QUEUE_LIMIT, value));
+};
 
 export const AMUX_OWNER_QUEUE_GROUPS = ["decide", "question", "recover", "read"] as const;
 export type AmuxOwnerQueueGroup = (typeof AMUX_OWNER_QUEUE_GROUPS)[number];

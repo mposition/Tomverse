@@ -51,7 +51,8 @@ test("the box sidecar captures and holds patches to the same bound, and no file 
 
 test("the settlement route, the evidence and both database checks hold one patch", () => {
   const route = read("app/api/internal/amux/v22/execution/result/route.ts");
-  assert.match(route, /readLimitedJson\(request, AMUX_V22_PATCH_ENVELOPE_MAX_BYTES,/);
+  // One patch envelope, and in the local CLI flow (#4004) the report's transport backstop beside it.
+  assert.match(route, /readLimitedJson\(request, AMUX_V22_PATCH_ENVELOPE_MAX_BYTES \+\s+\(localCliFlow\(\) \? 2 \* AMUX_V22_TRANSPORT_MAX_BYTES : 0\), bodySchema\)/);
   assert.match(read("lib/amux/v22PatchEvidence.ts"),
     /const MAX_PATCH_BYTES = AMUX_V22_PATCH_MAX_BYTES;/);
   assert.match(read("lib/engineeringAgentStore.ts"),

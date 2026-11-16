@@ -177,7 +177,6 @@ mock.module(mod("lib/amux/store.ts"), {
     // lib/amux/wireContract.ts reads its item bounds from the store module.
     AMUX_QUEUE_MAX_ITEMS: 512,
     AMUX_OWNED_QUEUE_MAX_ITEMS: 512,
-    AmuxQueueCapacityError: class extends Error {},
     listDispatchable: async () => [queueWire.queue_server],
     listOwnedTodos: async () => [queueWire.owned_server],
   },

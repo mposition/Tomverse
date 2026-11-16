@@ -289,8 +289,11 @@ DB timeout은 실제 PostgreSQL 버전과 세션에서 읽은 설정값으로만
 true)`로 다음만 설정한다.
 
 - `statement_timeout`: 200 milliseconds
-- `idle_in_transaction_session_timeout`: 300 milliseconds (운영자 결정 2026-11-05. 100 ms는 운영에서 시간당
-  약 13건의 세션을 끊어 bridge를 멈췄다. 예산 계산의 호출당 간격은 100 ms 그대로다)
+- `idle_in_transaction_session_timeout`: 1,000 milliseconds (운영자 결정 2026-11-05. 100 ms는 운영에서 시간당
+  약 13건의 세션을 끊어 bridge를 멈췄다. 2026-11-15 운영자 지시로 300 ms에서 1,000 ms로 올렸다. 예산 계산의 호출당 간격은
+  100 ms 그대로다. `statement_timeout` 200 ms는 Prisma 트랜잭션 timeout 여유(300 ms)와 Rust client의 1초 전송 여유에 묶여
+  있어 그대로 둔다. 교착(40P01)·직렬화 실패(40001)·유휴 세션 종료(25P03)는 롤백이 확정이므로 쓰기도 "아무것도 기록되지
+  않았다"는 503 `amux_database_deadline_exceeded`로 답하고 호출자가 다시 시도한다)
 - session-local deadline marker: `tomverse.amux_deadline`
 
 같은 코드는 `transaction_timeout`을 설정하지 않는다. 마지막 SQL은
@@ -1201,7 +1204,7 @@ PR 병합, `review` → `done`, 배포, worker catalog 변경, WSL 세션 추가
 ### 1. 전략 계층·점수·실행 풀
 
 - Initiative(Project)→Epic→Feature는 영구 저장하는 **비실행 계층**이고, User Story는 범위·진행률 집계 카드, Task는 worker 실행 카드다. Bug는 문제 해결 Story의 subtype, Error는 그 근거 기록이다. Task는 Story의 하위 또는 `parentStoryCardId = null`인 Feature 직속일 수 있다. 부모·자식·의존성은 서로 다른 관계다. 부모가 같다는 이유로 실행 선후를 추정하지 않는다.
-- 점수는 카드 한 장만 보지 않는다. 모델이 상위 Initiative/Epic의 플랫폼 전략 가치, Story의 효과, Task의 기여·위험·노력·의존성·worker 용량을 근거와 함께 제안하고, 버전 있는 결정적 계산이 최종 실행 추천 점수와 그 사유를 남긴다. 모델 제안은 승인, SEV1 판정 또는 전이 권한이 아니다. 운영자 override는 이유·이전값·새값을 감사한다. 활성 포트폴리오는 7일, 전체 기준선은 28일마다 재평가하며 중대 사건은 조건부 조기 재평가한다. 재평가 실패 또는 근거 만료는 새 자동 승격을 보류하지만 진행 중 실행을 삭제하지 않는다.
+- 점수는 카드 한 장만 보지 않는다. 모델이 상위 Initiative/Epic의 플랫폼 전략 가치, Story의 효과, Task의 기여·위험·노력·의존성·worker 용량을 근거와 함께 제안하고, 버전 있는 결정적 계산이 최종 실행 추천 점수와 그 사유를 남긴다. 모델 제안은 승인, SEV1 판정 또는 전이 권한이 아니다. 운영자 override는 이유·이전값·새값을 감사한다. 활성 포트폴리오는 7일, 전체 기준선은 28일마다 재평가하며 중대 사건은 조건부 조기 재평가한다. 입력이 그대로인 점수는 시스템이 7일 창과 28일 기준선을 함께 연장하므로 만료로 멈추지 않는다(운영자 지시 2026-11-15, 기본 켜짐, `amux-intake.md` 맨 위 절). 재평가 실패 또는 입력 변경 뒤 미확인은 새 자동 승격을 보류하지만 진행 중 실행을 삭제하지 않는다.
 - `ready`는 새 lifecycle status가 아니라 계산된 자격이다: 운영자가 등록할 때 **실행 brief 원문·digest·Task 역할·실행 등급·예상 경로·비용 상한까지 확인한 Task**가 허용 scope와 완료 조건, 승인된 부모 경로, 명시적 dependency, 비용·권한·worker 조건을 갖추고 정지 상태가 아니다. Story는 승인된 backlog 카드로 남아 점수·진행률을 집계하지만 직접 worker가 claim하지 않으며, 실행하려면 독립 Task로 분해한다. 이 판정은 승격 직전 DB 현재값에서 다시 계산한다. 승인 뒤 brief 또는 그 결속 필드가 달라지면 `ready`가 풀리고 운영자가 새 digest를 확인해야 한다.
 - 운영자가 아이디어·계층·카드의 `backlog` 등록을 승인한 뒤에는 **카드별 backlog→todo 승격 승인 요구를 제거한다.** `ready`이고 최신 점수가 높은 카드부터 현재 용량에서 자동으로 실행 풀(`todo`, worker 미배정)에 편입한다. 모델의 점수만으로 밀어 넣지 않고 결정적 Guard, CAS, 감사와 kill switch를 통과한다. 운영자가 앞서 승인한 한 아이디어 전체를 한번에 `todo`로 보내지 않는다. 작업 풀은 검증된 worker 수의 최대 3배라는 운영 상한을 넘지 않게 설계하고, 정확한 분모·예약 슬롯과 경합 계산은 구현 전 테스트로 고정한다. 기존 v7/v8의 추천 풀·사전 승인 subset·래치는 이 새 경로의 암묵적 허가가 아니며 별도 전환 전까지 현행 규칙대로 남는다.
 - **새 자동 편입의 졸업과 상한.** v22 경로를 켜기 전에도 v8의 측정된 사람 결정 **20건/14일**과 운영자 활성화 판정을 요구한다. 자동 편입 판단의 Agent 원가 상한은 v8보다 넓지 않게 **1회 US$5·24시간 US$15·30일 US$100**이다. 새 `todo` 대기열은 설정된 `wipLimit`과 `검증된 worker 수 × 3`을 모두 넘지 않는다. 동시 실행은 **전역 6(검증된 worker 수 이하), worker당 1**을 넘지 않고(운영자 결정 2026-11-13, 이전 전역 3), 대기열 수와 동시 실행 수를 혼동하지 않는다. 중대 위반 1건 또는 15분 내 결과 불명 2건은 기존 v8의 자동 승격 정지보다 약하게 만들지 않는다. 수치·분모·병행/SEV1 예약의 원자적 합산 테스트와 새 경로 전용 off switch가 없으면 v22 자동 편입은 닫혀 있다. v2가 자동 등록한 카드와 v1~v3의 과거 카드는 운영자의 새 hierarchy·brief 확인과 명시적 opt-in 전에는 v22 `ready`가 아니다. 이 재확인은 **현재 카드와 결속한 새로운 사람 source 승인 ID**를 만들며, 과거 자동 등록 기록을 사람 승인으로 바꿔 해석하지 않는다. 이 조건은 평상시 카드별 승격 승인을 부활시키지 않고 **활성화 전 졸업과 source 자격**을 정한다.
@@ -2853,9 +2856,11 @@ v16 역할 판정이 생기면 2항의 유도를 그 값으로 바꾸는 것은 
    독립 검토 서버에 요청한다.
 5. Task의 `done`은 지금처럼 본 앱이 관측한 병합이다(v49·v50). PR 없는 Task의 `done`은 운영자 결정
    2026-11-07부터 사람 승인, DM 결과 검토, investigate `proceed` 결론 중 하나다(`amux-decision-maker.md` §0a).
-6. 실행 뒤 chore·implementation worker의 변경이 contract 경로에 닿으면, 그 변경을 버리고 Task의
-   등급을 `frontier`로 올려 처음부터 다시 실행한다. 그러면 Task 전체를 contract worker가 다시 하므로
-   남는 작업이 없다.
+6. 실행 뒤 chore·implementation worker의 변경이 contract 경로에 닿으면, 그 변경을 보존한 채 Task의
+   등급을 `frontier`로 올리고 그 결과를 frontier의 검토(독립 검토 서버, 그다음 사람)로 보낸다. 시도를
+   새로 쓰지 않는다(운영자 결정 2026-11-15, 아래 "v22 worker 실행: 로컬 CLI 흐름"). 검토 기록이 없으면
+   (그 검토를 하지 않는 이전 bridge) 이전 방식대로 `frontier`로 다시 실행하되 저장된 patch는 남긴다.
+   `TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW=disabled`이면 이전 방식(변경을 버리고 처음부터 다시 실행)이다.
 
 ### 1. 적용 범위
 
@@ -3013,16 +3018,43 @@ Task의 `taskRole`, 예상 경로(`expectedPaths`), intake의 등급 제안뿐�
   - base는 클라이언트의 규칙을 따르고 `--base`를 붙이지 않는다.
   - reviewer 배정, 작성자와 다른 공급사, contract 경로 변경의 2인 검토는 검토 서버가 정한다.
 - **기록.** 본 앱 내부 route가 job id, commit SHA, base SHA, 판정, reviewer 공급사를 기록하고, 시스템
-  감사 `amux.review.recorded`를 같은 트랜잭션에 남긴다. 지적 원문은 본 앱에 저장하지 않는다. 다시
-  작업할 때 runner가 검토 서버에서 읽어 다음 시도의 prompt에 데이터로 넣는다.
+  감사 `amux.review.recorded`를 같은 트랜잭션에 남긴다. 판정 행은 내용 없는 binding이며 바뀌지 않는다.
+  - **지적 저장(운영자 결정 2026-11-15).** reject이면 runner가 검토 서버가 이미 돌려준 구조화 지적과
+    reviewer별 이유 코드(지적을 적지 않았으면 그 report의 글)를 JSON 문서로 만들어 기록 요청의
+    `findings_summary`로 보낸다. 앱은 비밀값처럼 보이는 줄을 지우고 링크를 `[link]`로 바꾼 뒤, 판정 행
+    옆에 AMUX의 다른 본문과 같은 **암호화된 content unit**(`AmuxV52ReviewFindings`, 목적 `review_findings`,
+    attempt마다 외부 key)으로 같은 트랜잭션에 저장한다. 지적 개수와 길이에는 한도를 두지 않고(봉인 단위
+    1 MB를 넘을 때만 덜 심각한 지적부터 빼고 `omitted`로 센다), 감사에는 본문이 아니라 digest와 개수만 남는다.
+    보존은 그 attempt의 result와 같다(Task가 끝난 뒤 90일, 지나면 본문을 비우고 key 삭제를 대기열에 올린다).
+    저장은 신호일 뿐 판정을 바꾸지 않으며, key 저장소가 닿지 않으면 판정만 기록한다.
+  - **읽는 곳.** Admin 카드의 실행 이력과 운영자 확인 대기(지적별 심각도·검토자·파일·줄), Decision Maker
+    작업 공간의 `evidence/FINDINGS.md`(그 Task의 모든 reject를 통째로, `docs/policy/amux-decision-maker.md` 11항),
+    다음 시도의 prompt(아래 reject 항)다. 내용이 없을 때
+    (이전 기록, 보존 기한 경과, key 저장소 불통)만 검토 서버 job id와 CLI 안내를 보인다.
 - **판정별 처리.**
   - `accept`: v49의 게시 경로(Engineering Publisher의 `develop` PR)로 간다. `done`은 v49·v50의 병합
-    관측이다.
-  - `reject`: Task는 같은 등급으로 `todo`에 돌아간다. 두 번째 reject 뒤에는 `blocked`가 되고 사람에게
-    간다. 운영자 결정(2026-11-07): 그 시도는 패치와 판정 기록이 있는 끝난 실행이므로 운영자 검토에서
-    재시도할 수 있다(시도 예산 안에서, 그 시도의 reject 기록이 있을 때만). 재시도는 마지막 reject의
-    지적을 prompt에 받고, 재시도 뒤 첫 reject는 다시 같은 등급으로 한 번 돌아간다.
-  - `unknown`, 요청 오류, 서버 오류: 다시 보내지 않는다. Task는 `blocked`가 되고 사람에게 간다.
+    관측이다. 실행 시작 때 게시 run을 열 수 없었으면 그 patch는 게시 대기(kept result)로 남고, 막힌
+    조건이 풀리면 엔지니어링 관측 round가 같은 게시 경로에 태운다. 그런 결과를 다시 실행하지 않는다
+    (운영자 결정 2026-11-15, `engineering-agent.md` §11, `amux-decision-maker.md` §11). 카드의 검토
+    대상 시도는 가장 최근에 성공해 `review`로 간 시도다. 뒤이은 시도가 실패해 예산을 다 써도 그 결과가
+    카드의 결과다.
+  - `reject`: Task는 같은 등급으로 `todo`에 돌아간다. 운영자 결정(2026-11-07): `blocked`가 된 reject 시도는
+    패치와 판정 기록이 있는 끝난 실행이므로 운영자 검토에서 재시도할 수 있다(시도 예산 안에서, 그 시도의
+    reject 기록이 있을 때만).
+  - **운영자 결정 2026-11-15, 고정 횟수로 막지 않는다.** reject는 횟수와 무관하게 같은 등급으로 `todo`에
+    돌아가고(`TOMVERSE_AMUX_V52_REJECT_RETRY_IN_BUDGET`은 기본 켜짐, `disabled`로 옛 규칙), 다음 시도의
+    prompt는 직전 시도들의 지적(최근 세 번의 reject, 새것부터, 들어가는 만큼 통째로, 잘렸으면 잘렸다고
+    표시)을 데이터로 받는다. 저장된 지적을 열 수 없을 때만 box가 검토 서버에서 job id로 읽는다. **reviewer
+    자신이 "이 blocker·major 지적은 앞선 검토의 지적이 그대로 남은 것"이라고 표시했을 때만**(다음 검토의 scope note에
+    이 Task의 이전 지적이 데이터로 실리고, reviewer가 지적에 `repeats_earlier`를 붙인다. LLM first: 손으로 만든 유사도
+    점수를 쓰지 않고, 앱은 그 표시가 거절한 reviewer의 blocker·major 지적에 있는지만 확인한다) Task가
+    `blocked`(`review_server_rejected_twice`)가 되어 이유와 함께 사람·Decision Maker로 간다. 그 판단은 기록할 때
+    한 번 하고(`AmuxV52ReviewFindings.repeatsPrior`), 소유자가 재시도한 뒤에는 그 이후 reject만 센다. 같은 공급사가 두 번 연달아 거절하면 다음 검토는 다른 공급사를 우선한다(`--avoid-vendor`,
+    기본 꺼진 스위치 `TOMVERSE_AMUX_V52_REVIEW_AVOID_VENDORS`, 배정 규칙은 `tools/review-orchestrator/README.md`).
+  - `unknown`(판정을 읽을 수 없음, 요청·서버 오류 포함): Task는 같은 등급으로 `todo`에 돌아가 다시 실행되며 그
+    실행이 검토 서버에 새로 제출된다. 같은 diff를 같은 attempt에서 두 번 제출하지는 않는다. 시도 예산이 끝나면
+    `blocked`가 되어 사람에게 간다. 검토 서버는 reviewer가 시간을 넘기면 다른 공급사로 다시 시도하므로
+    unknown은 드물다.
 - **신호이지 승인이 아니다.** accept는 PR의 사람 required review·병합(v49)이나 v50 자동 병합의
   조건을 대신하지 않으며, 이 버전은 그 조건을 바꾸지 않는다.
 - **자격증명.** 검토 클라이언트의 SSH key는 launcher 계정만 읽는다. worker 계정이 읽을 수 있으면
@@ -3357,13 +3389,25 @@ r-20261018-063042-a41ba9에서 codex와 copilot이 둘 다 accept했다. 이 승
 
 ## v22 worker의 운영자 질문 (운영자 결정 2026-10-30)
 
-v22 실행은 마감 10분인 CLI 한 번이라 실행 중에 답을 기다릴 수 없다. 그래서 운영자 결정이 필요한 worker는 추측하지 않고, 결과의 마지막 줄에 `AMUX_OWNER_QUESTION: {"question", "unblocks", "options"}`를 남기고 끝낸다(`lib/amux/v22OwnerQuestionCore.ts`).
+v22 실행은 CLI 한 번이라 실행 중에 답을 기다릴 수 없다. 그래서 운영자 결정이 필요한 worker는 추측하지 않고, 결과의 마지막 줄에 `AMUX_OWNER_QUESTION: {"question", "unblocks", "options"}`를 남기고 끝낸다(`lib/amux/v22OwnerQuestionCore.ts`).
 
 - **완료가 아니다.** 질문으로 끝난 실행은 정산에서 review·게시·등급 판정을 받지 않는다. Task는 `blocked`(attempt 사유 `owner_question`)로 답을 기다리고, 사람 escalation은 열지 않는다.
 - **질문은 Task당 3번까지다.** 네 번째 질문은 `owner_question_limit`으로 막히고 사람 escalation이 열린다.
-- **답하면 같은 worker가 이어서 한다.** 답이 기록되면 Task는 `todo`로 돌아간다. 배정은 질문한 worker에 그 Task의 경로가 남아 있는 한 그 worker를 기다린다. 다음 전달에는 질문, 답, 이전 실행의 변경이 붙는다. 변경은 프롬프트 상한에 들어갈 때만 붙인다.
+- **답하면 같은 worker가 이어서 한다.** 답이 기록되면 Task는 `todo`로 돌아간다. 배정은 질문한 worker에 그 Task의 경로가 남아 있는 한 그 worker를 기다린다. 다음 전달에는 질문, 답, 이전 실행의 변경이 붙는다. 로컬 CLI 흐름(아래)에서는 셋 다 크기와 상관없이 checkout의 context 파일로 가고, implement의 이전 변경은 sidecar가 CLI 시작 전에 checkout에 적용해 둔다. 이전 흐름에서는 변경을 프롬프트 상한에 들어갈 때만 붙인다.
 - **기록 방식.** 질문 원문은 그 attempt의 암호화된 결과 본문에 남고, `AmuxV22TaskQuestion`에는 digest·상태·순번만 둔다. 답은 재개된 실행이 정산될 때 지운다. 상태는 `open → answered | cancelled`, `answered → resumed`로만 움직이고 행은 지우지 않는다(DB trigger).
 - **답하는 길.** 1단계에서는 운영자가 Admin › AMUX 카드의 결과 보기에서 직접 답한다. Decision Maker 경로는 그 다음 단계다: 질문을 박스 로컬 카드의 typed ask로 올려 DM이 제안하고, 운영자가 Admin에서 확정하면 그 답으로 재개한다.
+
+## v22 worker 실행: 로컬 CLI 흐름 (운영자 결정 2026-11-15)
+
+운영자 지시: "내부 개발용 Flow입니다. 제한을 줄 이유가 없습니다. 로컬 CLI에 명령했을 때 제가 받는 답처럼 편리한 Flow였으면 합니다." 이 흐름이 기본이다. `TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW=disabled`이면 앱·sidecar·bridge가 각각 이전 동작으로 돌아간다(코드: `lib/amux/v22LocalCliFlowCore.ts`). 스위치는 Railway와 box의 sidecar·bridge unit에 같은 값으로 둔다.
+
+- **시간 상한 없음.** sidecar는 10분 마감(`AMUX_V22_SIDECAR_DEADLINE_MS`)도 다른 고정 상한도 두지 않는다. 실행은 CLI가 끝나거나, 운영자가 멈추거나(sidecar `stop` op, unit의 SIGTERM: `operator_stop`), 살아 있다는 신호가 30분 동안 하나도 없을 때(`stalled`)만 끝난다. 살아 있다는 신호는 새 출력, checkout 변화, CLI 프로세스 트리(자식·같은 프로세스 그룹 포함)의 CPU 시간 증가(리눅스 `/proc/<pid>/stat`) 셋이다. 출력 없이 CPU를 쓰며 오래 도는 테스트나 빌드는 멈추지 않는다. `/proc`을 읽을 수 없으면 앞의 두 신호로 판정한다. 어떤 이유로 끝나든 checkout 변경은 버리지 않는다. 그 자리에 두고, 임시 index로 작업 트리 전체(크기·새 파일·바이너리 상관없이, ignore된 파일 제외)를 commit 객체로 떠서 worker clone의 `refs/amux-v22-preserved/<attempt>`에 묶는다(`reset --hard`·`clean`으로 지워지지 않는다). 그 diff는 sidecar state 디렉터리의 `<attempt>.preserved.patch`(0600)에 쓴다. 다음 attempt는 base 동기화로 남은 변경을 정리하기 전에 같은 방식으로 `leftover-<attempt>`에 보존하고, 보존하지 못하면 checkout을 건드리지 않고 시작하지 않는다(`leftover_preserve_unavailable`). 결과 분류(`outcome_unknown`과 그 정산)는 바꾸지 않는다. execution lease는 생존 표시라 heartbeat마다 갱신되고, 이 흐름에서는 180초다.
+- **크기 상한 없음.** 프롬프트 32 KiB, Claude stdout 256 KiB, 보고 64 KiB, 결론 형식 한도(findings 4,000자, handoff 12개 등), 이전 결론 8 KiB·의존 8개를 두지 않는다. 남는 것은 bridge를 건너는 메시지 하나의 메모리 backstop(32 MiB)뿐이고, 그보다 긴 보고는 처음과 끝(결론과 질문이 있는 마지막 줄)을 남기고 가운데를 줄인다. 결론은 관대하게 읽는다(모르는 키 무시, 여러 줄 JSON, 잘못된 항목만 버림, verdict만 필수).
+- **context 파일.** brief, 운영자·DM 답, 이전 patch, 이전 결론, 검토 지적(`review-findings.md`)은 worker checkout의 `.amux/context/`로 간다. delivery는 이 파일들을 프롬프트 끝의 경계 토큰 블록에 싣고(bridge는 프롬프트를 그대로 넘긴다), sidecar가 블록을 꺼내 파일로 쓴 뒤 프롬프트는 그 파일을 가리킨다. 디렉터리는 checkout의 `.git/info/exclude`에 들어가 patch와 변경 경로 목록에 들어가지 않는다. implement의 이전 patch는 CLI 시작 전에 `git apply --3way`로 적용해 둔다.
+- **transcript.** Claude는 `--output-format stream-json --verbose`로 돌고, 모든 CLI의 stdout 전체가 sidecar state 디렉터리의 `<attempt>.transcript.jsonl`(0600, 30일 뒤 정리)에 남는다. journal에는 들어가지 않는다. 앱 저장과 Admin 보기는 아직 없다.
+- **모든 역할에 shell.** design·investigate·review(verify 포함)도 jail 안의 shell로 테스트를 돌린다(Claude `Read,Grep,Glob,Bash`, Codex workspace-write sandbox, Copilot shell 도구, Antigravity `run_command`). 파일 쓰기 도구는 implement만 가진다. 읽기 역할이 checkout을 바꾸면 그 diff를 보고 앞에 싣고 preserved patch로 남긴 뒤 checkout을 base로 되돌린다. 게시 후보가 아니므로 등급 판정의 변경 경로에는 넣지 않고 `readRoleChangedPaths`로 따로 적는다. Cursor는 shell을 jail에 가둘 수 없어 읽기 전용 ask mode 그대로다. operate는 사람 몫이다(운영자 결정 2026-10-30). 네트워크 차단, checkout만 쓰는 jail, 자격 증명 격리는 그대로다. 복구 점검은 shell을 가진 모든 역할에 checkout이 base 위에서 깨끗할 것을 요구한다.
+- **의존성 설치.** 모든 역할이 설치하고 시간은 30분이다. 실패하면 worker 프롬프트에 그 사실과 이유를 적고 결과의 `dependencies`에 남긴다.
+- **계약 경로 변경 보존.** 위 v52 6항. 아래 등급의 계약 경로 변경도 patch와 v52 검토 commit을 만들고, bridge는 frontier처럼 독립 검토를 돌리며, 정산은 그 검토 기록이 있을 때 등급을 `frontier`로 올리면서 검토 결과(review·todo·blocked)로 보낸다. DB guard(`amux_v4_task_approval_binding_guard`)는 그 승급의 도착 상태로 `todo` 외에 `review`·`blocked`도 받는다(migration `20261116010100_amux_v52_in_place_grade_escalation`). 승급 감사 기록은 Task당 하나인 그대로다.
 
 ## v22 sidecar 재시작 뒤의 종료 증거 (운영자 결정 2026-11-07)
 
@@ -3372,3 +3416,19 @@ sidecar는 실행 종료 기록을 메모리에도 들고 있었고, 점검은 �
 - **journal 증거.** 메모리 기록이 없으면 sidecar는 이전 실행이 남긴 terminal journal(`<attempt>.result`)을 읽는다. 그 기록에 요청과 정확히 같은 Task·revision·worker 인스턴스·generation 결속(`recovery.binding`)이 있고, claim digest가 그 기록의 요청 digest와 같아야 한다. terminal은 child가 끝난 뒤에만 쓰이고, sidecar unit의 재시작은 control group 전체를 끝낸다(v46과 같은 근거). 지금 unit이 sidecar 하나만 돌고 있음(`processTreeStopped` 등)과 실행 중인 작업 없음, checkout이 깨끗함을 지금 다시 증명해야 사유 `terminal_journal_proven`이 된다. 이전 실행의 역할과 base는 남아 있지 않으므로 checkout 확인은 역할과 상관없이 요구한다.
 - **기록과 승인.** 이 증거는 `sameLiveInvocation`을 주장하지 않고, `hostInvocationId`는 terminal을 쓴 invocation이다. 증명이 bridge 등록과 무관하므로 이전 attempt 뒤 bridge가 다시 등록됐어도 현재 인스턴스 일치를 요구하지 않는다. `stopped_proven`에는 지금처럼 같은 invocation과 현재 인스턴스 일치를 요구한다. DB evidence guard는 `terminal_journal_proven`을 검증 사유로 받되 같은 invocation 외의 모든 증명과 깨끗한 checkout을 요구한다.
 - **바뀌지 않는 것.** journal이 없거나 읽지 못하거나 결속·claim이 다르면 지금처럼 미검증이다. 이전 attempt의 예약은 그대로 잡혀 있고, 운영자의 "추가 실행 1회 승인"과 그 비용 상한·90초 신선도·감사 결속은 그대로다. FIRST Task의 위험 수락·안전 종료 예외는 넓히지 않는다. Admin은 다른 Task에서 그 예외 상자 대신 쓸 수 없는 이유를 한 줄로 보인다.
+
+## v22 인프라 실패, 워커 격리, 멈춘 이유 (운영자 결정 2026-11-15)
+
+운영자 지시: "이 시나리오만 맞게 고치지 말고 이런 류의 시나리오를 다 커버하는 포괄적인 솔루션으로 개발하세요. … AMUX 프로세스가 로컬 CLI를 돌리는 것과 같이 자연스럽게 돌아갔으면 합니다." 이어서 "내부 개발용 Flow입니다. 제한을 줄 이유가 없습니다. 이런 제한을 다 찾아 없애 주세요." 이 절과 다른 절의 서술이 다르면 이 절이 맞다. 전체를 `TOMVERSE_AMUX_INFRA_FAILURE_ROUTING=disabled` 하나로 이전 동작으로 되돌린다(기본은 켜짐).
+
+- **카드 시도를 쓰는 실패와 쓰지 않는 실패.** 카드의 시도로 세는 것은 워커가 실제로 일을 하고 낸 결과의 실패뿐이다(CLI가 보고한 실패, 검토 거절, 범위 위반, 마감 시간을 넘긴 실행, 출력 한도 초과). 결과 없음, 시작 직후 종료, 로그인 거부, 사용량 소진, 네트워크, lease 만료, sidecar 오류, 사용량 미보고는 플랫폼 실패다. attempt 사유 `infra_<종류>`로 남고, 카드는 `todo`로 돌아가 다른 워커·다른 공급자에게 먼저 간다(`lib/amux/infraFailureCore.ts`). 유료(위험 수락) 경로는 분류하지 않는다. bridge는 미검증 정산에 sidecar의 실패 코드를 싣는다(`failure`). 그 코드가 없는 이전 bridge의 정산은 사용량 기록 유무로 `no_result`와 `usage_unreported`를 가른다.
+- **고정 횟수 없음.** 카드는 다섯 번에서 멈추지 않는다. 워커의 결과가 같은 방식으로 세 번 연속 실패하면(`outcome:reason`이 같음) `repeated_failure`로 사람·DM에게 넘어간다. 30회는 실패가 계속 달라지는 카드를 위한 폭주 방지선이고, 넘으면 같은 방식으로 넘어간다. 플랫폼 실패는 카드당 12번이 한도이고(`infra_attempts_exhausted`), 역시 사람·DM에게 넘어간다. 한도에 닿은 실행도 자기 `infra_<종류>` 사유를 그대로 가지므로 계속 세어진다(한도 이름은 escalation에만 적는다). 사람이 `retry`로 돌려보내면(owner 검토 결정, DM 정산 — 둘 다 escalation을 `retry`로 닫는다) 그 뒤의 플랫폼 실패만 한도에 센다. 사람의 결정(검토 승인, 원클릭 복구)은 이 한도로 막지 않는다. 유료 재시도는 자기 한도를 그대로 쓴다. 등급별 비용 영수증의 `maxAttempts`(2/2/3)는 승인 상한 계산에만 쓰이고, 넘으면 기록할 뿐 막지 않는다(2026-11-14 결정 그대로). DB도 같은 규칙으로 센다. 검토 제안 guard는 플랫폼 실패를 빼고 30에서 막고, v22 attempt guard·복구 attempt guard·복구 승인 CHECK의 attempt 번호 상한은 5에서 64로 넓혔다(30 + 12보다 크다).
+- **사용량은 0이 아니다.** 플랫폼 실패의 사용량은 원장에 "알 수 없음"으로 남는다. 워커 사용량 게이트는 이 실행을 세지 않으므로 사람의 "받아들이기" 없이 워커가 풀린다. 비용 상한·예약·정산 행은 바뀌지 않는다.
+- **워커 격리.** 같은 워커에서 플랫폼 실패가 세 번 연속 나면 그 워커는 5분 동안 배정에서 빠진다. 실패가 더 이어질 때마다 대기는 두 배가 되고 최대 1시간이다. 대기가 끝나거나, 마지막 실패 뒤 그 워커의 사용량이 다시 관측되면(앞쪽 두 번까지) 카드 한 장으로 다시 시험하고, 성공하면 닫힌다. 상태는 저장하지 않고 워커의 최근 attempt에서 매번 계산한다(`lib/amux/workerCircuitCore.ts`). 워커 registry의 "시험 3장·3회 연속 실패 latch"는 이것으로 합쳤다. 이미 기록된 latch만 사람이 풀 때까지 남는다.
+- **Admin의 "배정 가능".** 워커 목록은 claim과 같은 규칙으로만 판정한다. 격리 중이면 "반복 실패로 잠시 빠짐", Anthropic 워커의 사용량 관측이 15분보다 오래되면 "사용량 관측 안 됨 · 로그인 확인 필요"로 보인다. box가 보낸 로그인 신호(`login_required`, `auth_stage_failed` 등)는 배정을 막지 않는 경고로 함께 보인다. 사본이 몇 시간 더 유효할 수 있고, 실제로 실패하면 격리가 잡는다.
+- **멈춘 이유.** 자동 승격과 claim이 건너뛴 카드마다 이유 코드와 구조화된 내용(준비 미충족 사유, 경로별 워커와 제외 이유)을 `AmuxCardWaitReason`에 남긴다. 워커의 글은 남기지 않는다. Admin 보드 카드와 상세에 "왜 안 돌고 있나"로 보인다. 같은 이유로 한 시간 넘게 기다린 claim 단계 카드는 operational incident `AMUX_CARD_WAITING`으로 올린다. 격리된 워커는 `AMUX_WORKER_QUARANTINED`로 올린다.
+- **box 건강 신호.** 로그인 복사(`auth_stage`)와 Claude 로그인 keepalive(`login_keepalive`)는 결과를 워커 로그인 사본 옆 `amux-health-<source>.json`에 쓴다. sidecar의 `health` 동작이 이를 읽고, bridge가 5분마다 `/api/internal/amux/v22/worker-health`로 보낸다(`AmuxWorkerHealthSignal`). `login_required`·`refresh_failed`·`auth_stage_failed`·`relogin_soon`은 처음 들어올 때 incident로 올린다. 코드와 시각만 오가고 토큰은 오가지 않는다.
+- **스스로 진행.** `TOMVERSE_AMUX_V22_READ_BACK_PROCEED`와 bridge의 `TOMVERSE_AMUX_BRIDGE_READ_BACK_PROCEED`는 이제 기본으로 켜져 있다(`disabled`로 끈다). bridge halt는 유료 API 호출의 결과 불명일 때만 종료 코드 3으로 사람을 기다리고, 그 밖의 halt(`dispatch_outcome_unknown`, `settle_outcome_unknown`, `pending_session_missing` 등)는 종료 코드 75로 끝나 systemd가 다시 시작한다. 새 프로세스는 다시 등록하고, 남은 attempt는 lease가 끝나면 플랫폼 실패로 다른 워커에게 간다. 정체 카드 정리(`TOMVERSE_AMUX_STALLED_CARD_SWEEP`)도 기본으로 켜져 있다.
+- **자동 승격.** 결과를 잃은 승격은 queue lock 아래에서 다시 읽는다. 영수증이 아예 없으면 커밋되지 않은 것이므로 결과 불명으로 남기지 않고 다음 tick이 다시 시도한다. 그런 결과 불명만으로 열린 승격 정지는 스스로 풀린다(감사 `amux.auto_promotion.resumed_by_readback`). 영수증이 있는데 맞지 않는 결과 불명과 치명적 위반 정지는 그대로 사람에게 남는다.
+- **분석 Agent.** 세 번 연속 실패 정지는 유료 API 경로에만 적용하고, 그 경로의 정산만 센다. 구독 세션 경로는 실패 연속으로 멈추지 않는다.
+- **처리량.** 동시 실행 상한은 검증된 워커 수뿐이다(전역 6 삭제). claim과 자동 승격은 tick마다 후보를 100개까지 읽고, route 예산이 다음 transaction을 담지 못하면 그 자리에서 멈춘다.

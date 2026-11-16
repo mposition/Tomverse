@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 
 import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
 import { readAmuxOwnerQueue } from "@/lib/amux/adminOwnerQueueRead";
+import { amuxOwnerQueueRequestedLimit } from "@/lib/amux/ownerQueueCore";
 import { amuxOwnerQueueWithDmSettlements, amuxOwnerQueueWithDmStatus, amuxOwnerQueueWithEngineeringItems }
   from "@/lib/amux/ownerQueueCore";
 import { readAmuxOwnerQueueDm } from "@/lib/amux/ownerQueueDmRead";
@@ -46,7 +47,10 @@ export async function GET(request: Request) {
       minute: 40,
       day: 2_000,
     });
-    const read = await readAmuxOwnerQueue();
+    const read = await readAmuxOwnerQueue(
+      new Date(),
+      amuxOwnerQueueRequestedLimit(new URL(request.url).searchParams.get("limit")),
+    );
     const engineering = await readEngineeringAgentCardItems(read.items.map((item) => item.taskId)).catch((error) => {
       console.error("admin AMUX owner queue engineering items read failed", error);
       return null;

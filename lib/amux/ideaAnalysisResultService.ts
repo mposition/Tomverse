@@ -13,6 +13,7 @@ import { commitAmuxKnownIdeaAnalysisSettlement } from
 import { commitAmuxIdeaAnalysisUnknownOutcome } from
   "./ideaAnalysisUnknownOutcomeService.ts";
 import { amuxContentDigest, type AmuxContentKeys } from "./ideaCrypto.ts";
+import { amuxAnalysisChunkMaxBytes } from "./ideaAnalysisChunkCore.ts";
 import { prepareAmuxAnalysisPageDraft } from "./ideaAnalysisPageDraftCore.ts";
 import { commitAmuxFirstIdeaAnalysisDraft } from "./ideaFirstAnalysisDraftService.ts";
 import { readPreviousOutputPage } from "./ideaTransferPreviewService.ts";
@@ -49,7 +50,7 @@ function validInput(input: Input): boolean {
     Number.isSafeInteger(n) && n !== null && n >= 0)) return false;
   return input.outcome === "verified_success"
     ? typeof input.rawModelOutput === "string" &&
-      Buffer.byteLength(input.rawModelOutput, "utf8") <= 65_536
+      Buffer.byteLength(input.rawModelOutput, "utf8") <= amuxAnalysisChunkMaxBytes()
     : input.rawModelOutput === null;
 }
 

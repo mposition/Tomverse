@@ -174,3 +174,113 @@ only; no geographic or data-processing expansion; synthetic checks then
 review/CI before installation; existing Ubuntu sidecar/bridge split; app DB
 and Admin remain authoritative. Publishing and deployment of Task results
 are outside this repair.
+
+## Local CLI flow (owner decision 2026-11-15)
+
+A v22 one-shot run behaves like a local CLI session; this is the default.
+`TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW=disabled` restores the earlier behaviour in
+the app, the sidecar and the bridge, so set it the same way on Railway and in
+the box's sidecar and bridge unit drop-ins. Source:
+`lib/amux/v22LocalCliFlowCore.ts`; policy: `docs/policy/development-agent-orchestration.md`
+"v22 worker 실행: 로컬 CLI 흐름".
+
+What a worker gets:
+
+- Every role (`design`, `implement`, `review`, `investigate`, and `verify`,
+  which runs as investigate) has the jailed shell and can run tests: Claude
+  `Read,Grep,Glob,Bash` (implement adds `Edit,Write`), Codex's workspace-write
+  sandbox, Copilot's shell tools, Antigravity's `run_command`. The jail, the
+  network block and the credential isolation are unchanged. Cursor keeps its
+  read-only ask mode (its shell cannot be jailed); `operate` stays a person's
+  step. A read role's checkout change is reported in its result and kept as a
+  preserved patch, then the checkout goes back to its base; it is never
+  published. Profiles still name roles and tools as before.
+- Every role installs the checkout's locked dependencies (30 minutes); a
+  failure is told to the worker and recorded in the result's `dependencies`.
+- The brief, the owner's answer, the previous patch (already applied for
+  implement), prior conclusions and review findings are files under
+  `.amux/context/` in the checkout, kept out of Git by `.git/info/exclude`.
+- No time limit: a run stops only at the operator's stop, or when it shows no
+  sign of life for 30 minutes: no new output, no checkout change and no CPU
+  time used by the CLI's process tree (children and its process group
+  included, read from `/proc/<pid>/stat`). A quiet test or build that uses CPU
+  is never stopped; where `/proc` cannot be read, the first two signals
+  decide. Its change and output are kept.
+
+What the sidecar keeps in its state directory (mode 0600, beside the journal,
+never in it): `<attempt>.transcript.jsonl` (the CLI's whole stdout; Claude
+runs `--output-format stream-json --verbose`) and `<attempt>.preserved.patch`
+(the diff of the change a stopped or failed run, or a read role, left). Both
+are removed 30 days after they were written, when a later run starts. The
+change itself is also a commit under `refs/amux-v22-preserved/<attempt>` in
+the worker clone (an earlier run's leftovers under `leftover-<attempt>`,
+taken before the base sync); recover one with
+`git -C <worktree> diff HEAD refs/amux-v22-preserved/<name>`. Those refs are
+not pruned yet. The app does not store transcripts yet.
+
+Operator stop of a live run: send `{"op":"stop","attemptId":"<id>"}` on the
+worker's sidecar socket as the bridge account, or `systemctl stop` the sidecar
+unit (SIGTERM stops every live run the same way and writes its terminal
+before the process exits; give the unit a `TimeoutStopSec` of at least 120 s).
+
+Box rollout order: build and install the bridge binary and the sidecar bundle
+from the same commit before the app release that carries this flow reaches
+production. An earlier bridge refuses prompts over 64 KiB and does not review
+a lower grade's kept contract change; an earlier sidecar refuses prompts over
+32 KiB. Either way the content is never lost (the app keeps the result and
+patch rows), but such runs go to a person until the box is updated.
+
+## Box health signals and infrastructure failures (owner decision 2026-11-15)
+
+The sign-in stage (`scripts/amux-v22-stage-auth.mjs`) and the Claude login
+keepalive (`scripts/amux-v22-claude-login-keepalive.mjs`) now also write one
+small file each next to the worker's sign-in copy:
+`/var/lib/tomverse-amux-v22-<worker>/cli/amux-health-auth_stage.json` and
+`amux-health-login_keepalive.json` (mode 0600, written atomically). A file
+holds `version`, `source`, `signal` (`ok`, `auth_stage_failed`,
+`relogin_soon`, `login_required`, `refresh_failed`, `login_missing`,
+`login_unreadable`), `observedAt` and, for the keepalive,
+`expiresAt` (the refresh token's expiry). Never a token. A failed write
+leaves the round's outcome as it was; the journal line is still written.
+
+The worker's sidecar answers a new `health` operation with those signals
+(`lib/amux/v22WorkerHealthFile.mjs`), and the bridge forwards them every five
+minutes, with the quota probe, to `/api/internal/amux/v22/worker-health`. An
+old sidecar refuses the operation and an old bridge never asks; either way
+nothing else changes. The app keeps the newest signal per worker and source
+(`AmuxWorkerHealthSignal`), shows it on Admin › AMUX settings › Workers, and
+raises `login_required`, `refresh_failed`, `auth_stage_failed` and
+`relogin_soon` as an operational incident the first time each arrives.
+
+The sidecar also adds the CLI's exit code and run time to an unreadable result
+(`invalid_result`), and the bridge sends the sidecar's failure code with an
+unverified settlement. The app classifies the run as an infrastructure
+failure (no card attempt used, another worker first, the worker quarantined
+after three in a row) or as the card's own; see
+`docs/policy/development-agent-orchestration.md`, "v22 인프라 실패, 워커 격리,
+멈춘 이유". Before the new bridge is installed the app still classifies a run
+with no usage at all as `no_result` and a partial one as `usage_unreported`.
+
+Installation (operator, after the app is deployed; nothing here changes
+until it is):
+
+1. Rebuild and install the bridge binary from `apps/tomverse-orchestrator`
+   (`/usr/local/libexec/tomverse-wsl-bridge`), then restart each
+   `tomverse-amux-bridge@<worker>`. Install the updated
+   `scripts/systemd/tomverse-amux-bridge@.service` too (comment only; exit 3
+   stays in `RestartPreventExitStatus`, exit 75 now restarts).
+2. Rebuild and install the v22 sidecar bundle (it carries
+   `lib/amux/v22OneShotSidecar.mjs`, `lib/amux/v22WorkerHealthFile.mjs` and
+   `scripts/amux-v22-task-sidecar.mjs`), then restart each
+   `tomverse-amux-v22-sidecar@<worker>`.
+3. Install the updated `scripts/amux-v22-stage-auth.mjs` with its
+   `lib/amux/v22WorkerHealthFile.mjs` where the stage timer runs it.
+4. As the operator user, copy the updated
+   `scripts/amux-v22-claude-login-keepalive.mjs` to
+   `~/.local/lib/tomverse-amux-v22/` (it stays self-contained).
+5. Check: `ls -l /var/lib/tomverse-amux-v22-<worker>/cli/amux-health-*.json`
+   after the next stage or keepalive round, and the worker's row on Admin ›
+   AMUX settings › Workers.
+
+`TOMVERSE_AMUX_INFRA_FAILURE_ROUTING=disabled` on the app turns the whole
+change off (the route answers 409 and the bridge only logs it).

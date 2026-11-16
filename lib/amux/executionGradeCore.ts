@@ -167,6 +167,16 @@ export const decideAmuxV52SettlementPaths = (grade: unknown,
   return missing.length === 0 ? reported : "blocked";
 };
 
+/**
+ * Whether a lower grade's escalation may be judged at frontier in place (the
+ * local CLI flow, owner decision 2026-11-15): its complete inventory must
+ * pass at frontier, so only the contract touch is what raises it. An invalid
+ * or uncovered path still blocks.
+ */
+export const amuxV52InPlaceEscalationAllowed = (changedPaths: unknown,
+  publishFiles: readonly { path: string }[] | null) =>
+  decideAmuxV52SettlementPaths("frontier", changedPaths, publishFiles) === "pass";
+
 /** An implement run that succeeded with a diff needs its v52 review. One that
  * reported no changed path and left no patch has nothing to review: it settles
  * to `review` with its result for an owner to read (owner decision 2026-10-28). */

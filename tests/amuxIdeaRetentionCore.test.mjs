@@ -2,6 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  AMUX_ANALYSIS_MAX_AGE_MS,
+  AMUX_ANALYSIS_OPEN_MAX_AGE_MS,
+  amuxAnalysisEnded,
+  amuxAnalysisEndedWhere,
+  amuxAnalysisMaxAgeMs,
+  amuxSessionContentPurgeDue,
+  amuxSessionContentRetentionDays,
+  amuxSessionContentRetentionMs,
   analysisCanContinue,
   analysisDeadlineAt,
   decidedDraftPurgeAt,
@@ -21,23 +29,76 @@ import {
 
 const base = new Date("2026-10-01T00:00:00.000Z");
 const at = (days, hours = 0) => new Date(base.getTime() + days * 86_400_000 + hours * 3_600_000);
+/** A row written before 2026-11-15, or under the legacy switch. */
+const seven = { submittedAt: base, analysisDeadlineAt: at(7) };
+/** A row written under the owner direction of 2026-11-15. */
+const open = { submittedAt: base, analysisDeadlineAt: at(36_500) };
 
-test("unfinished analysis cancels at absolute day seven, independent of activity", () => {
-  assert.equal(analysisDeadlineAt(base).toISOString(), at(7).toISOString());
-  assert.equal(analysisCanContinue({ submittedAt: base, analysisCompletedAt: null, cancelledAt: null, dbNow: new Date(at(7).getTime() - 1) }), true);
-  assert.equal(analysisCanContinue({ submittedAt: base, analysisCompletedAt: null, cancelledAt: null, dbNow: at(7) }), false);
-  assert.equal(shouldAutoCancelAnalysis({ submittedAt: base, analysisCompletedAt: null, cancelledAt: null, dbNow: new Date(at(7).getTime() - 1) }), false);
-  assert.equal(shouldAutoCancelAnalysis({ submittedAt: base, analysisCompletedAt: null, cancelledAt: null, dbNow: at(7) }), true);
-  assert.equal(shouldAutoCancelAnalysis({ submittedAt: base, analysisCompletedAt: at(6), cancelledAt: null, dbNow: at(8) }), false);
-  assert.equal(shouldAutoCancelAnalysis({ submittedAt: base, analysisCompletedAt: null, cancelledAt: at(6), dbNow: at(8) }), false);
-  assert.equal(rawPurgeEligibleAt({ submittedAt: base, analysisCompletedAt: null, cancelledAt: null, dbNow: at(6) }), null);
-  assert.equal(rawPurgeBy({ submittedAt: base, analysisCompletedAt: null, cancelledAt: null, dbNow: at(6) }), null);
-  assert.equal(effectiveAnalysisTerminationAt({ submittedAt: base, analysisCompletedAt: null, cancelledAt: null, dbNow: at(9) })?.toISOString(), at(7).toISOString());
-  assert.equal(rawPurgeEligibleAt({ submittedAt: base, analysisCompletedAt: null, cancelledAt: null, dbNow: at(7) })?.toISOString(), at(7).toISOString());
-  assert.equal(purgeDisposition({ purgeAt: rawPurgeEligibleAt({ submittedAt: base, analysisCompletedAt: null, cancelledAt: null, dbNow: at(7) }), purgedAt: null, activeHoldExpiresAt: null, dbNow: at(7) }), "due");
-  assert.equal(rawPurgeBy({ submittedAt: base, analysisCompletedAt: null, cancelledAt: null, dbNow: at(9) })?.toISOString(), at(8).toISOString());
-  assert.equal(rawPurgeBy({ submittedAt: base, analysisCompletedAt: null, cancelledAt: at(9), dbNow: at(9) })?.toISOString(), at(8).toISOString());
-  assert.equal(rawPurgeBy({ submittedAt: base, analysisCompletedAt: at(5), cancelledAt: null, dbNow: at(9) })?.toISOString(), at(6).toISOString());
+test("a seven-day row still cancels at its stored day seven, independent of activity", () => {
+  assert.equal(analysisDeadlineAt(base, true).toISOString(), at(7).toISOString());
+  assert.equal(analysisCanContinue({ ...seven, analysisCompletedAt: null, cancelledAt: null, dbNow: new Date(at(7).getTime() - 1) }), true);
+  assert.equal(analysisCanContinue({ ...seven, analysisCompletedAt: null, cancelledAt: null, dbNow: at(7) }), false);
+  assert.equal(shouldAutoCancelAnalysis({ ...seven, analysisCompletedAt: null, cancelledAt: null, dbNow: new Date(at(7).getTime() - 1) }), false);
+  assert.equal(shouldAutoCancelAnalysis({ ...seven, analysisCompletedAt: null, cancelledAt: null, dbNow: at(7) }), true);
+  assert.equal(shouldAutoCancelAnalysis({ ...seven, analysisCompletedAt: at(6), cancelledAt: null, dbNow: at(8) }), false);
+  assert.equal(shouldAutoCancelAnalysis({ ...seven, analysisCompletedAt: null, cancelledAt: at(6), dbNow: at(8) }), false);
+  assert.equal(rawPurgeEligibleAt({ ...seven, analysisCompletedAt: null, cancelledAt: null, dbNow: at(6) }), null);
+  assert.equal(rawPurgeBy({ ...seven, analysisCompletedAt: null, cancelledAt: null, dbNow: at(6) }), null);
+  assert.equal(effectiveAnalysisTerminationAt({ ...seven, analysisCompletedAt: null, cancelledAt: null, dbNow: at(9) })?.toISOString(), at(7).toISOString());
+  assert.equal(rawPurgeEligibleAt({ ...seven, analysisCompletedAt: null, cancelledAt: null, dbNow: at(7) })?.toISOString(), at(7).toISOString());
+  assert.equal(purgeDisposition({ purgeAt: rawPurgeEligibleAt({ ...seven, analysisCompletedAt: null, cancelledAt: null, dbNow: at(7) }), purgedAt: null, activeHoldExpiresAt: null, dbNow: at(7) }), "due");
+  assert.equal(rawPurgeBy({ ...seven, analysisCompletedAt: null, cancelledAt: null, dbNow: at(9) })?.toISOString(), at(8).toISOString());
+  assert.equal(rawPurgeBy({ ...seven, analysisCompletedAt: null, cancelledAt: at(9), dbNow: at(9) })?.toISOString(), at(8).toISOString());
+  assert.equal(rawPurgeBy({ ...seven, analysisCompletedAt: at(5), cancelledAt: null, dbNow: at(9) })?.toISOString(), at(6).toISOString());
+});
+
+test("a new idea's analysis goes on past day seven and ends only when it completes or is cancelled", () => {
+  // Owner direction 2026-11-15: a hundred-year deadline, stored once.
+  assert.equal(analysisDeadlineAt(base, false).toISOString(), at(36_500).toISOString());
+  assert.equal(AMUX_ANALYSIS_OPEN_MAX_AGE_MS, 36_500 * 86_400_000);
+  assert.equal(amuxAnalysisMaxAgeMs(true), AMUX_ANALYSIS_MAX_AGE_MS);
+  assert.ok(Number.isFinite(analysisDeadlineAt(new Date("2026-11-15T00:00:00.000Z"), false).getTime()));
+  for (const day of [7, 8, 30, 365]) {
+    assert.equal(analysisCanContinue({ ...open, analysisCompletedAt: null, cancelledAt: null, dbNow: at(day) }), true);
+    assert.equal(shouldAutoCancelAnalysis({ ...open, analysisCompletedAt: null, cancelledAt: null, dbNow: at(day) }), false);
+    assert.equal(rawPurgeEligibleAt({ ...open, analysisCompletedAt: null, cancelledAt: null, dbNow: at(day) }), null);
+    assert.equal(amuxAnalysisEnded({ ...open, analysisCompletedAt: null, cancelledAt: null, dbNow: at(day) }), false);
+  }
+  // A completed or cancelled analysis keeps its termination clocks.
+  assert.equal(rawPurgeBy({ ...open, analysisCompletedAt: at(40), cancelledAt: null, dbNow: at(41) })?.toISOString(), at(41).toISOString());
+  assert.equal(rawPurgeEligibleAt({ ...open, analysisCompletedAt: null, cancelledAt: at(12), dbNow: at(12) })?.toISOString(), at(12).toISOString());
+  assert.equal(analysisCanContinue({ ...open, analysisCompletedAt: at(40), cancelledAt: null, dbNow: at(41) }), false);
+});
+
+test("the stored deadline decides, not the switch: a seven-day row is never extended or shortened", () => {
+  // The switch only chooses a new submission's deadline.
+  assert.equal(shouldAutoCancelAnalysis({ ...seven, analysisCompletedAt: null, cancelledAt: null, dbNow: at(7) }), true);
+  assert.equal(shouldAutoCancelAnalysis({ ...open, analysisCompletedAt: null, cancelledAt: null, dbNow: at(7) }), false);
+  assert.equal(amuxAnalysisEnded({ ...seven, analysisCompletedAt: null, cancelledAt: null, dbNow: at(7) }), true);
+});
+
+test("session content is kept ninety days after intake, and never while its analysis runs", () => {
+  assert.equal(amuxSessionContentRetentionDays(false), 90);
+  assert.equal(amuxSessionContentRetentionDays(true), 7);
+  assert.equal(amuxSessionContentRetentionMs(false), 90 * 86_400_000);
+  const ended = { ...open, analysisCompletedAt: at(3), cancelledAt: null };
+  assert.equal(amuxSessionContentPurgeDue({ ...ended, dbNow: at(7), legacy: false }), false);
+  assert.equal(amuxSessionContentPurgeDue({ ...ended, dbNow: at(89, 23), legacy: false }), false);
+  assert.equal(amuxSessionContentPurgeDue({ ...ended, dbNow: at(90), legacy: false }), true);
+  // Past retention, a running analysis keeps it until it ends.
+  const running = { ...open, analysisCompletedAt: null, cancelledAt: null };
+  assert.equal(amuxSessionContentPurgeDue({ ...running, dbNow: at(200), legacy: false }), false);
+  assert.equal(amuxSessionContentPurgeDue({ ...running, dbNow: at(200), legacy: true }), false);
+  assert.equal(amuxSessionContentPurgeDue({ ...running, cancelledAt: at(150), dbNow: at(200), legacy: false }), true);
+  // Under the legacy switch a seven-day row purges on day seven, as before.
+  const legacyRow = { ...seven, analysisCompletedAt: null, cancelledAt: null };
+  assert.equal(amuxSessionContentPurgeDue({ ...legacyRow, dbNow: new Date(at(7).getTime() - 1), legacy: true }), false);
+  assert.equal(amuxSessionContentPurgeDue({ ...legacyRow, dbNow: at(7), legacy: true }), true);
+  // Nothing is ever due before day seven, whichever the switch.
+  assert.equal(amuxSessionContentPurgeDue({ ...seven, analysisCompletedAt: at(1), cancelledAt: null, dbNow: at(6), legacy: true }), false);
+  const where = amuxAnalysisEndedWhere(at(5));
+  assert.deepEqual(where, { OR: [{ analysisCompletedAt: { not: null } }, { cancelledAt: { not: null } },
+    { analysisDeadlineAt: { lte: at(5) } }] });
 });
 
 test("undecided draft expires after thirty days and its body is due within twenty-four hours", () => {

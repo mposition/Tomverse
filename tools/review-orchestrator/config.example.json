@@ -1,6 +1,6 @@
 {
   "stateDir": "/var/lib/review-orchestrator",
-  "timeoutSeconds": 2400,
+  "timeoutSeconds": 7200,
   "waitMaxSeconds": 540,
   "repos": {
     "tomverse": {

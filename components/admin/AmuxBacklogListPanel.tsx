@@ -15,10 +15,11 @@ import { formatAestDate, type AdminTone } from "@/lib/adminUiCore";
 import { amuxBacklogHref } from "@/lib/amux/adminBacklogListCore";
 import type { AmuxBacklogList } from "@/lib/amux/adminBacklogRead";
 
-/** What the newest cards say about themselves; the paged list rows do not carry it. */
+/** The board's counts, and what the page's own cards say about themselves (the paged list rows do not carry it). */
 export type AmuxBacklogCardSummary = {
   total: number;
-  limit: number;
+  /** Cards per stored status, over every card that is not archived. */
+  statusCounts: Record<string, number>;
   cards: Array<{ id: string; status: string; kind: string; priority: string }>;
 };
 
@@ -37,14 +38,13 @@ type Row = AmuxBacklogList["rows"][number];
 /**
  * The card list: a count per state, then every card with its kind, priority,
  * portfolio score and state. The page of cards is the existing paged read;
- * the counts and each card's kind, priority and state come from the newest
- * cards' own read (`summary`), which is bounded and says so. A card older than
- * that read has no state to show, and a failed read draws "unavailable", never
- * a zero.
+ * the counts are the whole board's, and each card's kind, priority and state
+ * come from the page's own cards (`summary`, owner decision 2026-11-15: no
+ * display cap). A failed read draws "unavailable", never a zero.
  */
 export async function AmuxBacklogListPanel({ data, search, valid, summary }: {
   data: AmuxBacklogList | null; search: string; valid: boolean;
-  /** null: the newest-cards read failed or was not made. */
+  /** null: the summary read failed or was not made. */
   summary: AmuxBacklogCardSummary | null;
 }) {
   const [m, s] = await Promise.all([getAdminMessages(adminAmuxBacklogListMessages), getAdminMessages(adminAmuxScreensMessages)]);
@@ -52,8 +52,7 @@ export async function AmuxBacklogListPanel({ data, search, valid, summary }: {
   const iconClass = "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-zinc-700 hover:bg-zinc-800";
   const meta = new Map((summary?.cards ?? []).map((card) => [card.id, card]));
   const counts: Record<AmuxCardStatusGroup, number> = { waiting: 0, running: 0, review: 0, done: 0, blocked: 0, cancelled: 0, other: 0 };
-  for (const card of summary?.cards ?? []) counts[amuxCardStatusGroup(card.status)] += 1;
-  const bounded = summary !== null && summary.total > summary.cards.length;
+  for (const [status, count] of Object.entries(summary?.statusCounts ?? {})) counts[amuxCardStatusGroup(status)] += count;
   // A status the table does not know is shown as it is stored (an identifier).
   const statusWord = (status: string) => {
     const group = amuxCardStatusGroup(status);
@@ -167,7 +166,6 @@ export async function AmuxBacklogListPanel({ data, search, valid, summary }: {
         <AdminKpiCard label={c.counts.review} value={summary ? counts.review : null} />
         <AdminKpiCard label={c.counts.done} value={summary ? counts.done : null} />
       </div>
-      {bounded ? <p className="text-xs text-zinc-500" data-testid="amux-backlog-counts-note">{c.bounded(summary.cards.length, summary.total)}</p> : null}
       {!data && valid ? (
         <AdminTile title={m.title}>
           <p className="text-sm text-zinc-300">

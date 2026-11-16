@@ -274,10 +274,9 @@ export async function readLocalIntakeBoardSnapshot(generatedAt: string) {
       kind: true,
       sourceDigest: true,
     },
+    // The whole board, not its first 256 cards (owner decision 2026-11-15).
     orderBy: { id: "asc" },
-    take: 257,
   });
-  if (rows.length > 256) return { ok: false as const, code: "snapshot_too_large" };
   const dependencies =
     rows.length === 0
       ? []

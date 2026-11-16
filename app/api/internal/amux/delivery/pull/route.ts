@@ -133,6 +133,10 @@ export async function POST(request: Request) {
                       review_feedback_job_id:
                         outcome.delivery.v22Execution.reviewFeedbackJobId,
                     } : {}),
+                    ...(outcome.delivery.v22Execution.reviewAvoidVendors ? {
+                      review_avoid_vendors:
+                        outcome.delivery.v22Execution.reviewAvoidVendors,
+                    } : {}),
                   } : {}),
                 } : {}),
               ...(outcome.delivery.v22Execution.readOnlyRetry ? {

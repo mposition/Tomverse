@@ -192,7 +192,8 @@ test("only the system refresher extends an unchanged score's active window", {
         const prior = (await client.query(`SELECT * FROM
           public."AmuxPortfolioScoreSnapshot" WHERE "id" = $1`, [scoreId])).rows[0];
         // $1 id, $2 audit, $3 activeStaleAt offset, $4 approvedByUserId,
-        // $5 computedAt offset. Everything else repeats the prior row.
+        // $5 computedAt offset, $6 baselineStaleAt offset (null: the prior
+        // row's). Everything else repeats the prior row.
         const insertRefresh = `INSERT INTO public."AmuxPortfolioScoreSnapshot"
           ("id", "requestId", "taskId", "taskRevision", "sourceApprovalId",
            "initiativeAssessmentId", "epicAssessmentId", "featureAssessmentId",
@@ -205,18 +206,20 @@ test("only the system refresher extends an unchanged score's active window", {
             p."featureAssessmentId", p."storyAssessmentId", p."taskAssessmentId",
             p."scoreVersion", p."scoreTotal", p."components", p."inputDigest",
             p."inputDigestKeyId", p."evidenceAsOf",
-            c.now + $3::interval, p."baselineStaleAt", $4, $2,
+            c.now + $3::interval,
+            COALESCE(c.now + $6::interval, p."baselineStaleAt"), $4, $2,
             c.now + $5::interval
           FROM public."AmuxPortfolioScoreSnapshot" p,
             (SELECT date_trunc('milliseconds',
               clock_timestamp() AT TIME ZONE 'UTC') AS now) c
           WHERE p."id" = '${scoreId}'`;
         const probe = async (constraint, { audit = systemAudit,
-          active = "7 days", owner = "synthetic-owner", computed = "0" } = {}) => {
+          active = "7 days", owner = "synthetic-owner", computed = "0",
+          baseline = null } = {}) => {
           const id = randomUUID();
           const auditId = await audit(id);
-          await rejects(insertRefresh, [id, auditId, active, owner, computed],
-            constraint);
+          await rejects(insertRefresh, [id, auditId, active, owner, computed,
+            baseline], constraint);
         };
         // A person may not write a refresh, nor another system actor.
         await probe("AmuxPortfolioScoreSnapshot_audit_check", {
@@ -242,7 +245,7 @@ test("only the system refresher extends an unchanged score's active window", {
 
         const refreshedId = randomUUID();
         await client.query(insertRefresh, [refreshedId,
-          await systemAudit(refreshedId), "7 days", "synthetic-owner", "0"]);
+          await systemAudit(refreshedId), "7 days", "synthetic-owner", "0", null]);
         const refreshed = (await client.query(`SELECT "evidenceAsOf",
           "baselineStaleAt", "activeStaleAt" > $2 AS "extended"
           FROM public."AmuxPortfolioScoreSnapshot" WHERE "id" = $1`,
@@ -256,6 +259,41 @@ test("only the system refresher extends an unchanged score's active window", {
           SET "activeStaleAt" = "activeStaleAt" + INTERVAL '1 day'
           WHERE "id" = $1`, [refreshedId],
         "AmuxPortfolioScoreSnapshot_immutable_check");
+
+        // Owner direction 2026-11-15: a refresh may move the baseline forward
+        // with the active window, never back and never past 28 days of its
+        // own computation; a confirmation keeps the evidence's own baseline.
+        await client.query("SELECT pg_sleep(0.01)");
+        await probe("AmuxPortfolioScoreSnapshot_refresh_check", { baseline: "-1 day" });
+        await probe("AmuxPortfolioScoreSnapshot_shape_check",
+          { baseline: "28 days 1 second" });
+        const rolledId = randomUUID();
+        await client.query(insertRefresh, [rolledId, await systemAudit(rolledId),
+          "7 days", "synthetic-owner", "0", "28 days"]);
+        const rolled = (await client.query(`SELECT "evidenceAsOf",
+          "baselineStaleAt" > $2 AS "moved"
+          FROM public."AmuxPortfolioScoreSnapshot" WHERE "id" = $1`,
+        [rolledId, prior.baselineStaleAt])).rows[0];
+        assert.deepEqual(rolled, { evidenceAsOf: prior.evidenceAsOf, moved: true });
+        const confirmId = randomUUID();
+        await rejects(`INSERT INTO public."AmuxPortfolioScoreSnapshot"
+          ("id", "requestId", "taskId", "taskRevision", "sourceApprovalId",
+           "initiativeAssessmentId", "epicAssessmentId", "featureAssessmentId",
+           "storyAssessmentId", "taskAssessmentId", "scoreVersion", "scoreTotal",
+           "components", "inputDigest", "inputDigestKeyId", "evidenceAsOf",
+           "activeStaleAt", "baselineStaleAt", "approvedByUserId",
+           "approvalAuditLogId", "computedAt")
+          SELECT $1, gen_random_uuid(), p."taskId", p."taskRevision",
+            p."sourceApprovalId", p."initiativeAssessmentId", p."epicAssessmentId",
+            p."featureAssessmentId", p."storyAssessmentId", p."taskAssessmentId",
+            p."scoreVersion", p."scoreTotal", p."components", p."inputDigest",
+            p."inputDigestKeyId", p."evidenceAsOf",
+            p."evidenceAsOf" + INTERVAL '7 days',
+            p."evidenceAsOf" + INTERVAL '28 days 1 second', $3, $2,
+            p."evidenceAsOf" + INTERVAL '1 second'
+          FROM public."AmuxPortfolioScoreSnapshot" p WHERE p."id" = $4`,
+        [confirmId, await humanAudit(confirmId, "amux.v4.portfolio.score.confirm"),
+          "synthetic-owner", scoreId], "AmuxPortfolioScoreSnapshot_refresh_check");
       },
     });
   } finally {

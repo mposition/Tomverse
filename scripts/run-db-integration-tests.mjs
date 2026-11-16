@@ -273,6 +273,9 @@ run(
     // A run the v52 review rejected twice may be retried by the owner; the
     // retry reaches the claim and its first rejection returns once more.
     "tests/integration/amuxV22ReviewRejectedTwiceRetry.db.test.mjs",
+    // A rejected v52 review's findings are one sealed content unit bound to
+    // its rejected record, read back for cards and prompts, purged once.
+    "tests/integration/amuxV52ReviewFindingsSchema.db.test.mjs",
     // A v22 result in review with no pull request may be run again by the
     // owner; the proposal and decision guards accept review -> retry -> todo.
     "tests/integration/amuxV22PrlessReviewRetry.db.test.mjs",
@@ -447,6 +450,11 @@ run(
     // mismatch cause keys were longer than the store admits.
     "tests/integration/amux-card-lifecycle-e2e.db.test.ts",
     "tests/integration/amux-stalled-card-sweep.db.test.ts",
+    // Owner decision 2026-11-15: a worker's platform failure spends no card
+    // attempt, the next claim prefers another worker, a worker failing again
+    // and again is quarantined until its usage reads again, and why a card
+    // waits and the box's sign-in signals are stored for Admin.
+    "tests/integration/amux-infra-failure-routing.db.test.ts",
     // Owner decision 2026-11-14: an unchanged score's active window is
     // extended by the system refresher, up to its baseline, never past it.
     "tests/integration/amux-portfolio-score-refresh.db.test.ts",

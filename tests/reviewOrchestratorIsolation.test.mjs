@@ -84,12 +84,10 @@ test("rename, symlinked directory and glob-named files all come back as base", (
       job: { repo: "demo", base, head, scope: "" },
       files,
       instructions,
-      diff: "x".repeat(500),
-      maxDiffBytes: Buffer.byteLength(instructions.text) + 100,
     });
     assert.match(prompt, /edits 5 of them/);
-    assert.ok(prompt.indexOf("PLANTED GLOB") < prompt.indexOf("<<<DIFF"), "instruction diff comes first");
-    assert.match(prompt, /truncated at 100 bytes of 500/);
+    assert.match(prompt, /PLANTED GLOB/, "instruction diff is shown in full");
+    assert.ok(prompt.indexOf("PLANTED GLOB") < prompt.indexOf("The diff is not pasted here"), "instruction diff comes first");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

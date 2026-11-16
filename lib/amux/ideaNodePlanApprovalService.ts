@@ -19,8 +19,9 @@ import { deriveAmuxIdeaUnitConfirmation, sameAmuxIdeaUnitConfirmation } from
 import { AMUX_V4_UNIT_WRITE_ENV, AmuxV4UnitDecisionError, amuxV4UnitWriteEnabled,
   commitAmuxV4NodeCreation } from "./ideaUnitDecisionStore.ts";
 import { readVerifiedAmuxNodeProposal } from "./ideaUnitProposalReadService.ts";
-import { AMUX_V4_NODE_PLAN_MAX_UNITS, AmuxV4NodePlanError, orderAmuxV4NodePlan } from
-  "./ideaNodePlanCore.ts";
+import { AMUX_V4_NODE_PLAN_MAX_UNITS, AmuxV4NodePlanError, amuxV4NodePlanRound,
+  orderAmuxV4NodePlan } from "./ideaNodePlanCore.ts";
+import { amuxIntakeLegacyLimits } from "./intakeLimitsCore.ts";
 
 export { AmuxV4NodePlanError } from "./ideaNodePlanCore.ts";
 
@@ -45,7 +46,8 @@ export async function approveAmuxV4NodePlan(session: Session, request: Request,
     return await prisma.$transaction(async (tx) => {
       const nodes = await runAmuxV4NodePlanInTx(tx, prepared);
       callbackReturned = true;
-      return { ideaId: input.ideaId, nodes, executionAuthorized: false as const };
+      return { ideaId: input.ideaId, nodes, remainingNodes: prepared.remaining,
+        executionAuthorized: false as const };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
       ...AMUX_IDEA_NODE_PLAN_APPROVAL_TRANSACTION });
   } catch (error) {
@@ -83,16 +85,20 @@ export async function prepareAmuxV4NodePlan(session: Session, request: Request,
       throw new AmuxV4NodePlanError("reason_invalid", [unitId]);
     }
   }
+  // Owner direction 2026-11-15: a plan with more nodes than one round holds is
+  // approved over several rounds; only the legacy switch refuses it.
+  const legacy = amuxIntakeLegacyLimits();
   const proposed = await prisma.amuxIdeaDraftUnit.findMany({
     // The analysis's own units only. A unit derived by split or merge keeps its
     // own flow, and the plan screen (which reads the analysis result) never
     // shows one, so the plan and the screen name the same set.
     where: { ideaId: input.ideaId, actorUserId, unitKind: "node", state: "proposed",
       derivationGroupId: null },
-    select: { id: true }, orderBy: { id: "asc" }, take: AMUX_V4_NODE_PLAN_MAX_UNITS + 1,
+    select: { id: true }, orderBy: { id: "asc" },
+    ...(legacy ? { take: AMUX_V4_NODE_PLAN_MAX_UNITS + 1 } : {}),
   });
   if (proposed.length === 0 && !options.allowEmpty) throw new AmuxV4NodePlanError("nothing_to_approve");
-  if (proposed.length > AMUX_V4_NODE_PLAN_MAX_UNITS) throw new AmuxV4NodePlanError("too_many_units");
+  if (legacy && proposed.length > AMUX_V4_NODE_PLAN_MAX_UNITS) throw new AmuxV4NodePlanError("too_many_units");
   const verified = await Promise.all(proposed.map((unit) =>
     readVerifiedAmuxNodeProposal(session, input.ideaId, unit.id)));
 
@@ -111,11 +117,13 @@ export async function prepareAmuxV4NodePlan(session: Session, request: Request,
     const nodeId = decision?.resolvedNodeId ?? decision?.linkedNodeId ?? null;
     if (unit.localRef && nodeId) existing.set(unit.localRef, nodeId);
   }
-  const plan = orderAmuxV4NodePlan(verified.map((entry) => ({
+  const ordered = orderAmuxV4NodePlan(verified.map((entry) => ({
     draftUnitId: entry.unit.id, localRef: entry.unit.localRef ?? "",
     level: entry.proposal.level, parentRef: entry.proposal.parentRef, verified: entry,
     decisionId: randomUUID(), nodeId: randomUUID(),
   })), existing);
+  // This round: parents come first, so the prefix carries its own parents.
+  const { round: plan, remaining } = amuxV4NodePlanRound(ordered);
   const nodeIdOf = new Map(plan.map((entry) => [entry.localRef, entry.nodeId]));
   const parentNodeIdOf = (entry: (typeof plan)[number]) => entry.parent.kind === "none" ? null :
     entry.parent.kind === "existing" ? entry.parent.nodeId : nodeIdOf.get(entry.parent.localRef)!;
@@ -123,7 +131,7 @@ export async function prepareAmuxV4NodePlan(session: Session, request: Request,
   const keys = loadCurrentAmuxContentKeys(process.env);
   const nonce = randomBytes(32).toString("base64url");
   const base = { session, request, actorUserId, ideaId: input.ideaId, reasons: input.reasons,
-    plan, parentNodeIdOf, keys, nonce };
+    plan, remaining, parentNodeIdOf, keys, nonce };
   if (plan.length === 0) return { ...base, scanner: null, contentKeys: null };
   const scanner = await loadAmuxNodeDuplicateScanner();
   let contentKeys;

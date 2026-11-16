@@ -9,6 +9,8 @@ import {
   isSnapshotTargetSha,
 } from "./decisionMakerCore.ts";
 import { isDmRequestId } from "./decisionMakerRequestCore.ts";
+import { AMUX_V22_TRANSPORT_MAX_BYTES } from "./v22LocalCliFlowCore.ts";
+import { v22PatchBinaryPayloads } from "./v22PatchBinary.ts";
 import { detectSecretsInFields } from "../engineeringAgentSecretPatterns.ts";
 
 /**
@@ -64,11 +66,13 @@ export const DM_WORKSPACE_HISTORY_DEPTH = 100;
 /**
  * The evidence the app hands over for one request, in UTF-8 bytes, all files
  * together. It crosses three processes in memory (the app's answer, the
- * bridge, the broker's socket line, base64), so it is bounded; it is far above
- * what the app stores for one card (an engineering patch is at most 64 KiB,
- * ENGINEERING_AGENT_PATCH_BODY_MAX_BYTES).
+ * bridge, the broker's socket line, base64), so it is bounded, as a memory
+ * backstop only: twice the v22 transport backstop, so a run's report kept at
+ * that backstop (lib/amux/v22LocalCliFlowCore.ts) fits beside its patch and
+ * criteria (it was 16 MiB, under the 32 MiB report the local CLI flow keeps).
+ * The broker and the bridge mirror it (dm_relay/workspace.rs).
  */
-export const DM_WORKSPACE_EVIDENCE_MAX_BYTES = 16 * 1024 * 1024;
+export const DM_WORKSPACE_EVIDENCE_MAX_BYTES = 2 * AMUX_V22_TRANSPORT_MAX_BYTES;
 /** The request directory on the box's disk after the checkout: two requests may run at once (one per instance). */
 export const DM_WORKSPACE_DISK_MAX_BYTES = 4 * 1024 * 1024 * 1024;
 /**
@@ -159,7 +163,7 @@ export const dmWorkspaceAcceptFiles = (
       count("not_text");
       continue;
     }
-    if (detectSecretsInFields({ [file.name]: text }).length > 0) {
+    if (detectSecretsInFields({ [file.name]: text }).length > 0 || binaryPatchCarriesSecret(file.name, text)) {
       count("secret_content");
       continue;
     }
@@ -171,6 +175,21 @@ export const dmWorkspaceAcceptFiles = (
     accepted.push({ name: file.name, text });
   }
   return { files: accepted, excluded };
+};
+
+/**
+ * A patch's binary files are base85 text of deflated data, so the scan of its
+ * text sees none of their bytes (lib/amux/v22PatchBinary.ts). The evidence is
+ * about to leave for the Decision Maker's vendor, so the decoded bytes are
+ * scanned too, as the patch's storage and publication scan them; a binary
+ * section that cannot be read cannot be shown clean and is left out. Patches
+ * stored before that storage check are why this one is here.
+ */
+const binaryPatchCarriesSecret = (name: DmWorkspaceEvidenceName, text: string) => {
+  if (name !== DM_WORKSPACE_PATCH_NAME || !text.includes("GIT binary patch")) return false;
+  const payloads = v22PatchBinaryPayloads(text);
+  if (payloads === null) return true;
+  return payloads.some((payload) => detectSecretsInFields({ [name]: payload.toString("latin1") }).length > 0);
 };
 
 // ---------------------------------------------------------------------------
@@ -252,7 +271,7 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 const hasExactKeys = (record: Record<string, unknown>, keys: readonly string[]) =>
   Object.keys(record).length === keys.length && keys.every((key) => Object.hasOwn(record, key));
-/** The base64 alphabet and its padding, checked without a repeated group (a 16 MiB text would overflow the regex stack); the round trip below holds the rest. */
+/** The base64 alphabet and its padding, checked without a repeated group (a text of many megabytes would overflow the regex stack); the round trip below holds the rest. */
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
 
 /** Canonical base64 within the evidence cap, or null. */
@@ -418,7 +437,7 @@ export const dmWorkspaceGuide = (input: {
 
 const EVIDENCE_WORDS: Readonly<Record<DmWorkspaceEvidenceName, string>> = Object.freeze({
   "PATCH.diff": "the whole patch, and repo-patched/ is repo/ with it applied when it applies",
-  "FINDINGS.md": "the run's whole report",
+  "FINDINGS.md": "the run's whole report, then every rejected review's findings when the review server rejected it",
   "CRITERIA.md": "the Task's approved completion criteria",
   "CONTEXT.md": "what the worker found, whole",
 });

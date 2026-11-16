@@ -8,15 +8,16 @@ import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import { readDecisionMakerSwitchesOrThrow } from "@/lib/amux/decisionMakerSwitchStore";
 import {
   AMUX_DM_T2_MERGE_HEAD, AMUX_DM_T2_MERGE_READY_SETTLE_MS, amuxDmT2MergeChangeVerdict, amuxDmT2MergeEnabled,
-  amuxDmT2MergeReadyInFlight, amuxDmT2MergeReadyVerdict,
+  amuxDmT2MergeFilesToRead, amuxDmT2MergePatchGate, amuxDmT2MergeReadyInFlight, amuxDmT2MergeReadyVerdict,
   type AmuxDmT2MergeChangeNow,
 } from "@/lib/amux/dmT2MergeCore";
 import {
   readAmuxDmT2MergeApprovals, readAmuxDmT2MergeIsEngineeringPull, readAmuxDmT2MergeObservedFacts,
 } from "@/lib/amux/dmT2MergeRead";
-import type { CiAdmissionPull } from "@/lib/ciAdmissionCore";
+import { CI_ADMISSION_HOLD_LABEL, type CiAdmissionPull } from "@/lib/ciAdmissionCore";
 import type { CiAdmissionGithub } from "@/lib/ciAdmissionGithub";
 import { readEngineeringAgentPullChange } from "@/lib/engineeringAgentGitHubRead";
+import { qaReleaseDmMergeScope } from "@/lib/qaReleaseMergeLaneExclusionCore";
 
 /**
  * The Decision Maker's develop merge of a review pull request (owner decision
@@ -39,6 +40,21 @@ import { readEngineeringAgentPullChange } from "@/lib/engineeringAgentGitHubRead
 
 export const AMUX_DM_T2_MERGE_READY_ACTION = "amux.dm_t2_merge.ready_requested";
 type Env = Readonly<Record<string, string | undefined>>;
+
+/** The whole text of some files at one commit (lib/amux/dmT2MergeFileRead.ts), loaded only when a change needs it. */
+type AmuxDmT2MergeFilesRead = (headSha: string, paths: readonly string[]) => Promise<ReadonlyMap<string, string | null>>;
+const readFilesAtHead: AmuxDmT2MergeFilesRead = async (headSha, paths) =>
+  (await import("@/lib/amux/dmT2MergeFileRead")).readAmuxDmT2MergeFilesAt(headSha, paths);
+
+/**
+ * The files the block list scope reads whole for a change (amuxDmT2MergeFilesToRead), at the approved
+ * head: undefined when it needs none, null when the read failed -- which the verdict leaves to a person.
+ */
+async function filesForChange(change: AmuxDmT2MergeChangeNow, headSha: string, env: Env, read: AmuxDmT2MergeFilesRead) {
+  const needed = amuxDmT2MergeFilesToRead(change.changedFiles, qaReleaseDmMergeScope(env));
+  if (needed.length === 0) return undefined;
+  return read(headSha, needed).catch(() => null);
+}
 
 /**
  * Records that one approval was looked at, one statement. Both readers take
@@ -86,18 +102,22 @@ export async function readAmuxDmT2MergeHolding(tx: Prisma.TransactionClient, inp
  * while its Decision Maker approval still holds (readAmuxDmT2MergeHolding) at
  * exactly the head the lane will merge, into develop, and only when the diff
  * digest the lane read from GitHub right before is the approved one (a merge
- * base that moved with develop changes it at the same head). Any other pull
- * request is `not_engineering`: the lane's own rules decide it. At most three
- * statements.
+ * base that moved with develop changes it at the same head). The stored
+ * patch must still pass the app's merge scope (amuxDmT2MergePatchGate: its
+ * paths, and in the block list scope its lines): the lane judges paths in the
+ * block list scope whatever the app's switch says, so with the kill switch on
+ * this is where the allow list holds. Any other pull request is
+ * `not_engineering`: the lane's own rules decide it. At most three statements.
  */
 export async function amuxDmT2MergeConsumeAllowed(tx: Prisma.TransactionClient, input: {
   prNumber: number; headSha: string; base: string; diffDigest: string | null; env?: Env;
 }): Promise<"not_engineering" | "allowed" | "dm_approval_not_holding" | "dm_diff_changed"> {
   if (!(await readAmuxDmT2MergeIsEngineeringPull(tx, input.prNumber))) return "not_engineering";
   if (input.base !== "develop") return "dm_approval_not_holding";
-  const [held] = await readAmuxDmT2MergeHolding(tx, { env: input.env ?? process.env, limit: 1,
-    prNumbers: [input.prNumber] });
+  const env = input.env ?? process.env;
+  const [held] = await readAmuxDmT2MergeHolding(tx, { env, limit: 1, prNumbers: [input.prNumber] });
   if (held === undefined || held.approvedHeadSha !== input.headSha) return "dm_approval_not_holding";
+  if (!amuxDmT2MergePatchGate(held.patchBody, qaReleaseDmMergeScope(env)).pass) return "dm_approval_not_holding";
   return input.diffDigest === held.approvedDiffDigest ? "allowed" : "dm_diff_changed";
 }
 
@@ -108,14 +128,16 @@ export async function amuxDmT2MergeConsumeAllowed(tx: Prisma.TransactionClient, 
  * anyway). The least recently visited approval that still holds in the
  * database is picked and recorded as visited in the same transaction, then
  * its change is read again from GitHub (review r-20261113-134019-5d8f82):
- * listed only while its diff digest is the approved one and every path is on
- * the allow list (amuxDmT2MergeChangeVerdict). A change that differs or cannot
+ * listed only while its diff digest is the approved one and every path, and
+ * in the block list scope every line of the stored patch, is one the merge
+ * scope lets through (amuxDmT2MergeChangeVerdict). A change that differs or cannot
  * be read is not listed and has had its turn, so N approvals are each looked
  * at once in N rounds and none holds up the rest. Empty while the switch is
  * off or the kill switch is not off.
  */
 export async function readAmuxDmT2MergeLanePulls(env: Env = process.env, deps: {
   change?: (prNumber: number) => Promise<AmuxDmT2MergeChangeNow>;
+  files?: AmuxDmT2MergeFilesRead;
 } = {}) {
   if (!amuxDmT2MergeEnabled(env)) return [];
   const row = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.dmT2MergeLaneRead, async (tx) => {
@@ -127,8 +149,10 @@ export async function readAmuxDmT2MergeLanePulls(env: Env = process.env, deps: {
   const change = deps.change ?? ((prNumber: number) => readEngineeringAgentPullChange(prNumber));
   const now = await change(row.prNumber).catch(() => null);
   if (now === null) return [];
+  const files = await filesForChange(now, row.approvedHeadSha, env, deps.files ?? readFilesAtHead);
   const held = amuxDmT2MergeChangeVerdict({ change: now, approved: { prNumber: row.prNumber,
-    headRef: row.headRef, approvedHeadSha: row.approvedHeadSha, approvedDiffDigest: row.approvedDiffDigest } });
+    headRef: row.headRef, approvedHeadSha: row.approvedHeadSha, approvedDiffDigest: row.approvedDiffDigest },
+    scope: qaReleaseDmMergeScope(env), patch: row.patchBody, files });
   return held.holds ? [{ number: row.prNumber, headSha: row.approvedHeadSha, headRef: row.headRef }] : [];
 }
 
@@ -156,6 +180,8 @@ export type AmuxDmT2MergeReadyPorts = {
   change: (prNumber: number) => Promise<AmuxDmT2MergeChangeNow>;
   /** CI admission's App's write: draft to ready. */
   markReady: (pull: CiAdmissionPull) => Promise<void>;
+  /** The whole text of files at the approved head, for the block list scope; the engineering read token's by default. */
+  files?: AmuxDmT2MergeFilesRead;
 };
 
 export const amuxDmT2MergeReadyPorts = (github: Pick<CiAdmissionGithub, "pull" | "markReady">): AmuxDmT2MergeReadyPorts => ({
@@ -189,13 +215,15 @@ const failureCode = (error: unknown) => (error instanceof Error ? error.message 
  * so one that cannot move goes to the back. It is read fresh from GitHub --
  * CI admission's App for its stage and head, the engineering read token for
  * its diff and files -- and judged (amuxDmT2MergeReadyVerdict). A fork's pull
- * request is never taken. Only a pull request still exactly as approved, with
- * every path on the allow list, is audited and then marked ready. A write
+ * request is never taken, nor one a person put on ci:hold, as listed or as
+ * read fresh. Only a pull request still exactly as approved, with
+ * every path (and in the block list scope every line of its stored patch) one
+ * the merge scope lets through, is audited and then marked ready. A write
  * whose answer is unknown is never retried here: the next round reads the
  * pull request, and one already ready needs nothing.
  */
 export async function runAmuxDmT2MergeReadyStep(input: {
-  drafts: readonly Pick<CiAdmissionPull, "number" | "head" | "headSha" | "base" | "draft" | "fork">[];
+  drafts: readonly Pick<CiAdmissionPull, "number" | "head" | "headSha" | "base" | "draft" | "fork" | "labels">[];
   room: boolean;
   running: ReadonlySet<string>;
   ports: AmuxDmT2MergeReadyPorts;
@@ -204,8 +232,9 @@ export async function runAmuxDmT2MergeReadyStep(input: {
 }): Promise<AmuxDmT2MergeReadyOutcome> {
   const env = input.env ?? process.env;
   if (!amuxDmT2MergeEnabled(env)) return { outcome: "off" };
+  // A person's ci:hold stands, as in CI admission's own line (lib/ciAdmissionCore.ts).
   const drafts = input.drafts.filter((pull) => pull.draft && !pull.fork && pull.base === "develop" &&
-    AMUX_DM_T2_MERGE_HEAD.test(pull.head));
+    AMUX_DM_T2_MERGE_HEAD.test(pull.head) && !(pull.labels ?? []).includes(CI_ADMISSION_HOLD_LABEL));
   if (drafts.length === 0) return { outcome: "none" };
   if (!input.room) return { outcome: "no_room" };
 
@@ -239,12 +268,16 @@ export async function runAmuxDmT2MergeReadyStep(input: {
   } catch (error) {
     return { outcome: "skipped", ...at, reason: `unreadable:${failureCode(error)}` };
   }
+  const files = await filesForChange(change, row.approvedHeadSha, env, input.ports.files ?? readFilesAtHead);
   const verdict = amuxDmT2MergeReadyVerdict({
     approved: { prNumber: row.prNumber, headRef: row.headRef, approvedHeadSha: row.approvedHeadSha,
       approvedDiffDigest: row.approvedDiffDigest },
     pull: now ? { open: now.open, draft: now.pull.draft, base: now.pull.base, head: now.pull.head,
-      headSha: now.pull.headSha, fork: now.pull.fork } : null,
+      headSha: now.pull.headSha, fork: now.pull.fork, labels: now.pull.labels } : null,
     change,
+    scope: qaReleaseDmMergeScope(env),
+    patch: row.patchBody,
+    files,
   });
   if (verdict.verdict === "already_ready") return { outcome: "already_ready", ...at };
   if (verdict.verdict === "skip") return { outcome: "skipped", ...at, reason: verdict.reason };

@@ -22,6 +22,9 @@ import {
 import { formatAestDateTime } from "@/lib/adminUiCore";
 import { authOptions } from "@/lib/auth";
 import {
+  ENGINEERING_AGENT_CONSOLE_LIMIT,
+  ENGINEERING_AGENT_CONSOLE_MAX_LIMIT,
+  engineeringAgentConsoleRequestedLimit,
   readEngineeringAgentConsole,
   type EngineeringAgentConsoleSection,
 } from "@/lib/engineeringAgentConsoleRead";
@@ -123,7 +126,18 @@ export default async function AdminEngineeringAgentPage({
     hasAdminPermission(session, "engineering-agent:write"),
     // Decision Maker bodies are for who may judge them (ops:write), as elsewhere.
     hasAdminPermission(session, "ops:write"),
+    engineeringAgentConsoleRequestedLimit(query.limit),
   );
+  // A list with more rows than it shows offers the next page (owner decision
+  // 2026-11-15: no display cap), as the owner queue's "show more".
+  const nextLimit = Math.min(ENGINEERING_AGENT_CONSOLE_MAX_LIMIT, initial.limit + ENGINEERING_AGENT_CONSOLE_LIMIT);
+  const moreQuery = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (key !== "limit" && typeof value === "string") moreQuery.set(key, value);
+  }
+  moreQuery.set("limit", String(nextLimit));
+  const moreHref = initial.more && nextLimit > initial.limit ?
+    { href: `/admin/engineering-agent?${moreQuery.toString()}`, count: nextLimit - initial.limit } : null;
 
   return (
     <div className="flex min-w-0 flex-col gap-5">
@@ -141,7 +155,7 @@ export default async function AdminEngineeringAgentPage({
         />
       ) : null}
       {/* Keyed by section: a tab change remounts the panel with its own rows. */}
-      <AdminEngineeringAgentPanel key={section} initial={initial} />
+      <AdminEngineeringAgentPanel key={section} initial={initial} more={moreHref} />
     </div>
   );
 }

@@ -8,10 +8,13 @@ import { ADMIN_NAVIGATION } from "../lib/adminNavigation.ts";
 import { localizeAdminTabs } from "../lib/adminNavigationLocale.ts";
 import {
   AMUX_OWNER_QUEUE_GROUPS,
+  AMUX_OWNER_QUEUE_LIMIT,
+  AMUX_OWNER_QUEUE_MAX_LIMIT,
   amuxAestDayStartMs,
   amuxOwnerQueueGroup,
   amuxOwnerQueueGroupCounts,
   amuxOwnerQueuePublicationPathMissing,
+  amuxOwnerQueueRequestedLimit,
   amuxOwnerQueueVisible,
   amuxOwnerQueueWhere,
 } from "../lib/amux/ownerQueueCore.ts";
@@ -108,7 +111,7 @@ test("the read is read only and says when it could not count today's work", () =
   // Today's number is null (unknown) when either read fails, never 0.
   assert.match(source, /catch \{\s*return null;/);
   // The list is bounded.
-  assert.match(source, /take: AMUX_OWNER_QUEUE_LIMIT/);
+  assert.match(source, /take: limit/);
 });
 
 test("the route is a read for any admin role, rate limited, with no write verb", () => {
@@ -206,4 +209,14 @@ test("a card whose newest attempt stored a patch with no engineering run has no 
     { newestAttempt: { hasPatch: false, hasRun: false } },
     { newestAttempt: { hasPatch: true, hasRun: true } },
   ]) assert.equal(amuxOwnerQueuePublicationPathMissing({ ...missing, ...change }), false);
+});
+
+test("a longer queue is read a page at a time: the limit asked for is a whole number between one page and the maximum", () => {
+  assert.equal(amuxOwnerQueueRequestedLimit(null), AMUX_OWNER_QUEUE_LIMIT);
+  assert.equal(amuxOwnerQueueRequestedLimit("300"), 300);
+  assert.equal(amuxOwnerQueueRequestedLimit("1"), AMUX_OWNER_QUEUE_LIMIT);
+  assert.equal(amuxOwnerQueueRequestedLimit("99999"), AMUX_OWNER_QUEUE_MAX_LIMIT);
+  for (const raw of ["", "-5", "1.5", "abc", "1e3", "300 "]) {
+    assert.equal(amuxOwnerQueueRequestedLimit(raw), AMUX_OWNER_QUEUE_LIMIT, raw);
+  }
 });

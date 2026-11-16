@@ -49,7 +49,8 @@ test("owner catalog is idea-bound and keeps legacy cards as non-linkable hints",
     assert.equal(catalog.legacyCards.length >= 1, true);
     assert.equal(catalog.legacyCards.some((card) =>
       card.ref === matchingLegacyId && card.title === "synthetic legacy item"), true);
-    assert.equal(catalog.legacyCards.some((card) => card.ref === longLegacyId), false);
+    // Owner direction 2026-11-15: a long legacy title is no longer set aside.
+    assert.equal(catalog.legacyCards.some((card) => card.ref === longLegacyId), true);
     await assert.rejects(readAmuxIdeaResolutionCatalog({ ...session,
       user: { id: `other-${randomUUID()}`, email: actorEmail } } as Session, ideaId),
     (error: unknown) => error instanceof AmuxIdeaResolutionPreviewError &&

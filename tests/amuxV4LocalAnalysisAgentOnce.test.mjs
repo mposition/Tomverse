@@ -335,7 +335,8 @@ test("synthetic supervisor reports known overlong output as failed and unknown u
   try {
     for (const sample of [
       { outcome: "invocation_failed", state: "provider_failed",
-        fakeExecute: async () => ({ rawModelOutput: "가".repeat(30_000),
+        // Past the 4 MiB answer ceiling (owner direction 2026-11-15).
+        fakeExecute: async () => ({ rawModelOutput: "가".repeat(1_500_000),
           inputTokens: 100, outputTokens: 50 }) },
       { outcome: "outcome_unknown", state: "outcome_unknown",
         fakeExecute: async () => { throw new Error("usage unavailable"); } },

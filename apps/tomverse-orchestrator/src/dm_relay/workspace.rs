@@ -42,8 +42,9 @@ pub fn dm_snapshot_manifest_digest(key: &RequestKey, manifest: &[(String, String
 pub const DM_WORKSPACE_REPOSITORY: &str = "github.com/mposition/Tomverse";
 /// `DM_WORKSPACE_EVIDENCE_NAMES`.
 pub const DM_WORKSPACE_EVIDENCE_NAMES: [&str; 4] = ["PATCH.diff", "FINDINGS.md", "CRITERIA.md", "CONTEXT.md"];
-/// `DM_WORKSPACE_EVIDENCE_MAX_BYTES`: the evidence of one request, all files together.
-pub const DM_WORKSPACE_EVIDENCE_MAX_BYTES: usize = 16 * 1024 * 1024;
+/// `DM_WORKSPACE_EVIDENCE_MAX_BYTES`: the evidence of one request, all files together
+/// (twice the v22 transport backstop, `crate::tomverse_api::V22_TRANSPORT_MAX_BYTES`).
+pub const DM_WORKSPACE_EVIDENCE_MAX_BYTES: usize = 2 * crate::tomverse_api::V22_TRANSPORT_MAX_BYTES;
 /// The app's workspace answer: the evidence as base64 and a few hundred bytes more.
 pub const DM_WORKSPACE_ANSWER_MAX_BYTES: usize = DM_WORKSPACE_EVIDENCE_MAX_BYTES.div_ceil(3) * 4 + 64 * 1024;
 /// The broker's lines: a header and one short line per evidence file.
