@@ -24,7 +24,7 @@ approvedBy: mposition · approvedAt: 2026-10-17 · 정책 버전: 2
 
 1. DM이 다룰 수 있는 질문 유형은 `decision`, `judgment`, `budget`, `credential`, `access`,
    `external`이다. `customer_outbound`는 항상 운영자. 되돌릴 수 없는 행위는 유형과 무관하게 운영자.
-   (2026-11-16, §0c-5: 유형 허용 목록은 없앴고 용어 목록만 운영자에게 보낸다.)
+   (2026-11-16, §0c-5: 유형 허용 목록은 그대로이고, 용어 목록에서 migration 범주와 넓은 낱말만 뺐다.)
 2. 시작은 제안 모드. 자율 졸업 기준은 운영자가 결정한 제안 **50건**, 첫 제안 뒤 **30일**, 수정 없이
    확정한 비율 **95%** 이상.
 3. DM은 공급사를 교차한 두 개(GPT-6 Astra, Claude Fable 5.1).
@@ -192,10 +192,11 @@ approvedBy: mposition · approvedAt: 2026-10-17 · 정책 버전: 2
    `amux.decision.latch_release`로 푼다. 사람이 마지막으로 고른 값이 `proposal`일 때만 `proposal`로 되돌리며, 사람이
    끈 인스턴스는 켜지 않는다. §8의 검증 횟수는 그 해제부터 다시 센다(migration `20261116140100_amux_dm_latch_release`).
    사람의 `latch_release`도 그대로 쓸 수 있다.
-5. **라우팅.** `ask_type` 허용 목록을 없앴다: `customer_outbound`도 DM이 초안을 쓴다(확정 전에는 아무것도 worker에게
-   가지 않는다, §1). §3-3 용어 목록은 실제 경계만 남긴다: 돈(결제·환불·청구), 삭제, main 병합, production, 비밀값.
-   migration·외부 발송·권한/접근·정책/workflow 범주와 넓은 낱말(ship, release, deploy, 배포, token, 토큰, 단독 drop,
-   덮어쓰기, 초기화)은 뺐다. 카드 secret 검사(§3-8)는 그대로다.
+5. **라우팅.** §3-3 용어 목록은 §0a-4의 사람 경계만 남긴다: 돈(결제·환불·청구), 삭제, main 병합, production,
+   비밀값(token·토큰 포함), 외부 게시·발송·연락, 권한·접근 설정, 정책·workflow·branch protection. migration 범주와
+   경계처럼 보이기만 하던 넓은 낱말(ship, release, deploy, 배포, 단독 drop, 덮어쓰기, 초기화)은 뺐다. DM 승인자(§0a-1)가
+   운영자 확인 없이 제안을 적용하므로 이 목록과 `ask_type` 허용 목록(`customer_outbound`는 늘 운영자)이 그 경계를
+   지키는 결정적 검사이고, 그래서 둘 다 남긴다. 카드 secret 검사(§3-8)는 그대로다.
 6. **작업 공간은 늘 켜진다.** `TOMVERSE_AMUX_DM_WORKSPACE` kill switch와, 그때 근거를 카드에 싣던 경로(224 KiB 여유,
    제어 문자 거절)를 없앴다. 카드는 늘 작업 공간의 근거 파일을 가리킨다. 작업 공간 history는 1000 commit(100이었다),
    디스크는 16 GiB(4 GiB였다), launcher stdout 메모리 backstop은 256 MiB(16 MiB였다), broker 동시 연결 상한은 없다.
@@ -343,8 +344,8 @@ DM은 **제안을 쓰는 worker이지 승인자가 아니다.** (되돌릴 수 �
    카드(그 local card를 기록한 `AmuxDmOwnerSettlement` 행, 2026-11-14부터는 `EngineeringAgentDmReview`
    행도 있는 카드)가 `[evidence]`…`[/evidence]`로 감싼
    증거(실행 결과, diff)는 용어 판정에서 뺀다. worker 카드의 표식은 보통 글자로 읽는다. 닫히지 않은 표식은 빼지 않고, secret 검사는
-   카드 전체에 그대로 적용한다. 기본은 꺼짐이다. 아래가 v1 목록이며 바꾸려면 운영자 승인(대화 한 줄, PR에 기록)이 필요하다: main 병합, ship·release·배포·production,
-   삭제·delete·drop·truncate·덮어쓰기, migration, 결제·환불·청구, 외부 게시·발송·연락, secret·token·
+   카드 전체에 그대로 적용한다. 기본은 꺼짐이다. 아래가 목록이며(2026-11-16 §0c-5로 좁힘) 바꾸려면 운영자 승인(대화 한 줄, PR에 기록)이 필요하다: main 병합, production·운영 환경,
+   삭제·delete·drop table·truncate, 결제·환불·청구, 외부 게시·발송·연락, secret·token·
    password·API key의 제공, 권한·접근 설정 변경, 정책·workflow·branch protection 변경. 정확한 대소문자·
    어형 규칙과 검사 문자열은 S1의 테스트 고정값이 정한다. 운영자 결정 2026-11-14: 한국어 "권한"은 여전히 모두
    걸린다. 예외는 플랜을 설명하는 완결된 절 두 형태뿐이다(AMUX-PRICINGCOPY-002): "(주어는) <플랜 이름> 권한을
