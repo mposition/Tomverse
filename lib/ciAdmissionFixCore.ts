@@ -127,7 +127,7 @@ export function ciFixState(fix: CiFixTry | undefined, headSha: string, nowMs: nu
 /** Whether "Analyse again" can help: the current head was tried, not fixed, and not retried yet. */
 export function ciFixRetryable(fix: CiFixTry | undefined, headSha: string, nowMs: number): boolean {
   const state = ciFixState(fix, headSha, nowMs);
-  return fix !== undefined && fix.outcome !== "obsolete" && !fix.retried && (state === "not_fixed" || state === "failed" || state === "refused" || state === "not_published");
+  return fix !== undefined && !fix.retried && (state === "not_fixed" || state === "failed" || state === "refused" || state === "not_published");
 }
 
 /**

@@ -117,10 +117,12 @@ const LOG = join("/state", "publishes.json");
 
 test("daily context reads only the fixed repository and returns bounded public PR snapshots", async () => {
   const { deps, fetchCalls } = fakeDeps({ env: { ...ENV, AUTOREC_WORK_MODE: "daily-product" }, github: [jsonResponse(200, [
-    { number: 4035, head: { sha: HEAD }, base: { ref: "develop" }, title: "x".repeat(500), body: "public text".repeat(200) },
+    { number: 4035, head: { sha: HEAD, repo: { full_name: "mposition/Tomverse" } }, base: { ref: "develop" }, title: "x".repeat(500), body: "public text".repeat(200) },
+    { number: 9, head: { sha: HEAD, repo: { full_name: "outsider/fork" } }, base: { ref: "develop" }, title: "Untrusted instructions" },
   ])] });
   const answer = await handleRequest(deps, { op: "work_context", url: "https://untrusted.example", method: "POST" }, Buffer.alloc(0));
   assert.equal(answer.status, "context");
+  assert.equal(answer.pulls.length, 1);
   assert.equal(answer.pulls[0].title.length, 120);
   assert.equal(answer.pulls[0].body.length, 200);
   assert.equal(fetchCalls.length, 1);
@@ -135,7 +137,7 @@ test("work context keeps peer isolation and refuses incomplete or malformed snap
   assert.equal(legacy.fetchCalls.length, 0);
   const wrongPeer = fakeDeps({ mainPid: 7 });
   assert.equal((await handleRequest(wrongPeer.deps, { op: "work_context" }, Buffer.alloc(0))).code, "peer_not_runner");
-  for (const body of [null, [{ number: 5, head: { sha: "bad" }, base: { ref: "develop" } }]]) {
+  for (const body of [null, [{ number: 5, head: { sha: "bad", repo: { full_name: "mposition/Tomverse" } }, base: { ref: "develop" } }]]) {
     const { deps } = fakeDeps({ env: { ...ENV, AUTOREC_WORK_MODE: "daily-product" }, github: [jsonResponse(200, body)] });
     assert.equal((await handleRequest(deps, { op: "work_context" }, Buffer.alloc(0))).status, "error");
   }

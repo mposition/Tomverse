@@ -254,6 +254,25 @@ test("a resolution identical to the latest base is held even if the model calls 
   } finally { rmSync(f.root, { recursive: true, force: true }); }
 });
 
+test("an explicit fresh owner label can re-assess an obsolete head once", async () => {
+  const f = conflictFixture();
+  try {
+    assert.equal((await pass(f, () => ({ ok: true, tail: "RESULT: obsolete" }))).outcome, "obsolete");
+    const original = f.github.json;
+    f.github.json = async path => {
+      if (path === "/issues/51/events?per_page=100&page=1") return [{ event: "labeled", label: { name: "ci:fix-again" }, created_at: new Date(8000).toISOString() }];
+      const value = await original(path);
+      return path.startsWith("/pulls?") ? value.map(pr => ({ ...pr, labels: [{ name: "ci:fix-again" }] })) : value;
+    };
+    const result = await pass(f, ({ cwd }) => {
+      writeFileSync(join(cwd, "lib/app.js"), "const a = 1;\nconst b = 2 + branch + develop;\nconst c = 3;\n");
+      return { ok: true, tail: "An unmet change remains.\nRESULT: fixed" };
+    }, { clock: () => 9000 });
+    assert.equal(result.outcome, "queued");
+    assert.equal(readLedger(join(f.config.stateDir, "ci-fix", "ledger.json"))[`${f.head}:conflict`].retried, true);
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
 test("the repair model can inspect another open PR's actual diff despite a different title", async () => {
   const f = conflictFixture();
   try {
@@ -273,6 +292,27 @@ test("the repair model can inspect another open PR's actual diff despite a diffe
       return { ok: true, tail: "PR 52 already covers the same requirement.\nRESULT: obsolete" };
     });
     assert.equal(result.outcome, "obsolete");
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test("an unrelated open PR without a common ancestor does not abort a useful repair", async () => {
+  const f = conflictFixture();
+  try {
+    sh(f.source, "checkout", "-q", "--orphan", "unrelated");
+    sh(f.source, "commit", "-q", "-m", "unrelated history");
+    const otherHead = sh(f.source, "rev-parse", "HEAD");
+    const original = f.github.json;
+    f.github.json = async path => {
+      const value = await original(path);
+      return path.startsWith("/pulls?") ? [...value, pull(52, "unrelated", otherHead)] : value;
+    };
+    const result = await pass(f, ({ cwd, logDir }) => {
+      const context = JSON.parse(readFileSync(join(logDir, "work-context.json"), "utf8"));
+      assert.equal(context.openPrs[0].unavailable, true);
+      writeFileSync(join(cwd, "lib/app.js"), "const a = 1;\nconst b = 2 + branch + develop;\nconst c = 3;\n");
+      return { ok: true, tail: "The unrelated PR does not cover this useful change.\nRESULT: fixed" };
+    });
+    assert.equal(result.outcome, "queued");
   } finally { rmSync(f.root, { recursive: true, force: true }); }
 });
 

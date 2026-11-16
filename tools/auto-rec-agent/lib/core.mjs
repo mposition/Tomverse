@@ -299,7 +299,7 @@ export function buildInstruction(claim) {
 /** Model reasoning decides relevance; code validates only its closed result and references. */
 export function workAssessment(result, openPrs) {
   let value;
-  try { value = JSON.parse(result); } catch { return null; }
+  try { value = JSON.parse(String(result).trim().replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/i, "$1")); } catch { return null; }
   if (!value || typeof value.evidence !== "string" || !value.evidence.trim() || value.evidence.length > 4000) return null;
   if (value.disposition === "implemented" || value.disposition === "blocked") return { disposition: value.disposition };
   if (value.disposition === "already_satisfied" && /^[0-9a-f]{40}$/.test(value.satisfiedByCommit ?? "")) {

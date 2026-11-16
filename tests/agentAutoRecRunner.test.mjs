@@ -163,13 +163,23 @@ test("an unmet daily task with an explicit assessment still completes review and
   assert.equal(gatewayCalls.at(-1).header.outcome, "pr_opened");
 });
 
-test("daily work does not implement against a PR head that changed during snapshot fetch", async () => {
+test("a push during PR snapshot fetch uses the fetched SHA without halting the daily work", async () => {
   const { deps, calls, gatewayCalls } = fakeRunner({ gateway: { work_context: { status: "context", pulls: [{ number: 5, head: HEAD }] } },
     rules: [[/rev-parse refs\/autorec\/context\//, ok(BASE)]] });
   deps.config.dailyProduct = true;
   await runLocked(deps);
-  assert.equal(gatewayCalls.find(x => x.header.op === "result").header.reason, "setup_failed");
-  assert.equal(calls.some(x => /^claude /.test(x.signature)), false);
+  assert.equal(gatewayCalls.find(x => x.header.op === "result").header.outcome, "pr_opened");
+  const model = calls.find(x => /^claude /.test(x.signature));
+  assert.match(model.options.input, new RegExp(`"head":"${BASE}"`));
+  assert.ok(calls.some(x => /update-ref -d refs\/autorec\/context\/pr-5/.test(x.signature)));
+});
+
+test("daily skip assessments accept a single JSON fence without losing a valid result", async () => {
+  const assessment = { disposition: "already_satisfied", satisfiedByCommit: BASE, evidence: "Existing implementation and regression test." };
+  const { deps, gatewayCalls } = fakeRunner({ rules: [[/^claude /, ok(JSON.stringify({ result: "```json\n" + JSON.stringify(assessment) + "\n```" }))]] });
+  deps.config.dailyProduct = true;
+  await runLocked(deps);
+  assert.equal(gatewayCalls.find(x => x.header.op === "result").header.reason, "already_satisfied");
 });
 
 test("daily mode continues after a known no-change result and ends at an empty queue", async () => {

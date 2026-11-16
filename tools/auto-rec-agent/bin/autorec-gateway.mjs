@@ -306,6 +306,9 @@ async function workContext(deps) {
     const answer = await githubRequest(deps, "GET", `/repos/${REPO_SLUG}/pulls?base=develop&state=open&per_page=100&page=${page}`);
     if (!answer.ok || answer.status !== 200 || !Array.isArray(answer.json)) return { status: "error", code: "work_context_unavailable" };
     for (const pr of answer.json) {
+      // Match the repair agent's same-repository scope. Outsider PR metadata
+      // does not become evidence for suppressing an operator's task.
+      if (pr.head?.repo?.full_name !== REPO_SLUG) continue;
       if (!Number.isSafeInteger(pr.number) || pr.number < 1 || pr.number > 999999999 ||
           !SHA.test(pr.head?.sha ?? "") || pr.base?.ref !== "develop") return { status: "error", code: "work_context_invalid" };
       pulls.push({ number: pr.number, head: pr.head.sha, title: String(pr.title ?? "").slice(0, 120), body: String(pr.body ?? "").slice(0, 200) });

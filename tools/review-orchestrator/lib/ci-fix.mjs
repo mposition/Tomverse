@@ -92,6 +92,7 @@ export const CI_FIX_SETTLED = Object.freeze(["pushed", "superseded", "not_publis
 /** Outcomes a retry may follow: the head was tried and nothing changed it. */
 const RETRYABLE_OUTCOMES = new Set([
   "no_change", "model_failed", "model_timeout", "patch_refused", "patch_too_large", "error", "not_published", "digest_unresolved",
+  "obsolete",
 ]);
 /**
  * Registries an image digest is looked up from (resolveImageDigests): the
@@ -297,6 +298,7 @@ export function ciFixAbility({ kind, install = false, regenerate = false }) {
 export function retryable(entry, labelledAt, now, ability = null) {
   const asked = Number.isFinite(labelledAt) && entry?.retried !== true && labelledAt > (entry?.at ?? Infinity);
   const changed = typeof ability === "string" && entry?.ability !== ability;
+  if (entry?.outcome === "obsolete" && !asked) return false;
   if (!asked && !changed) return false;
   if (entry?.outcome === "started" ? !(now - (entry.at ?? now) > STARTED_STALE_MS) : !RETRYABLE_OUTCOMES.has(entry?.outcome)) return false;
   return asked ? "label" : "ability";
@@ -449,7 +451,12 @@ function writeWorkContext({ worktree, logDir, pull, pulls, ledger, base }) {
     const snapshot = { number: item.number, title: String(item.title ?? "").slice(0, 200), body: String(item.body ?? "").slice(0, 2000), head: item.head.sha };
     if (!git(["cat-file", "-e", `${item.head.sha}^{commit}`], { cwd: worktree, allowFailure: true }).ok) return { ...snapshot, unavailable: true };
     const file = join(logDir, `open-pr-${item.number}.patch`);
-    writeFileSync(file, readGit(["diff", "--no-ext-diff", "--no-textconv", `${base}...${item.head.sha}`]).stdout);
+    try {
+      writeFileSync(file, readGit(["diff", "--no-ext-diff", "--no-textconv", `${base}...${item.head.sha}`]).stdout);
+    } catch {
+      // An unrelated orphan or oversized PR must not fail this repair.
+      return { ...snapshot, unavailable: true };
+    }
     return { ...snapshot, diff: file };
   });
   const file = join(logDir, "work-context.json");
@@ -459,8 +466,8 @@ function writeWorkContext({ worktree, logDir, pull, pulls, ledger, base }) {
   return file;
 }
 
-/** Hold obsolete work across both repair kinds on the same head. */
-export const obsoleteHead = (ledger, sha) => [ledger[sha], ledger[`${sha}:conflict`]].some(entry => entry?.outcome === "obsolete");
+/** Same-head holds span both repair kinds; only an explicit owner retry releases one. */
+const obsoleteEntry = (ledger, sha) => [ledger[sha], ledger[`${sha}:conflict`]].find(entry => entry?.outcome === "obsolete");
 
 function noRemainingChange(worktree, base) {
   // Instruction files in the worktree are isolated. Their committed changes
@@ -1100,8 +1107,7 @@ export async function runCiFix({
 
   let chosen = null;
   for (const pull of servedPulls(pulls)) {
-    if (obsoleteHead(ledger, pull.head.sha)) continue;
-    const tried = ledger[pull.head.sha];
+    const tried = obsoleteEntry(ledger, pull.head.sha) ?? ledger[pull.head.sha];
     if (busy(ledger[`${pull.head.sha}:conflict`])) continue;
     const ability = abilityOf(pull, "ci");
     const retry = tried ? retryable(tried, await askedAgain(pull, tried), now, ability) : false;
@@ -1114,9 +1120,8 @@ export async function runCiFix({
   }
   if (!chosen && conflicts) {
     for (const pull of servedPulls(pulls)) {
-      if (obsoleteHead(ledger, pull.head.sha)) continue;
       const key = `${pull.head.sha}:conflict`;
-      const tried = ledger[key];
+      const tried = obsoleteEntry(ledger, pull.head.sha) ?? ledger[key];
       if (busy(ledger[pull.head.sha])) continue;
       const ability = abilityOf(pull, "conflict");
       const retry = tried ? retryable(tried, await askedAgain(pull, tried), now, ability) : false;
@@ -1150,6 +1155,11 @@ const busy = (entry) => entry?.outcome === "started" || entry?.outcome === "queu
 
 /** Starts a head's entry: a retry starts it afresh; one the label asked for is marked so it is the only one. */
 function start({ ledger, record }, { key, pull, retry, ability }, entry) {
+  if (retry === "label") {
+    for (const held of [pull.head.sha, `${pull.head.sha}:conflict`]) {
+      if (ledger[held]?.outcome === "obsolete") record(held, { outcome: "no_change", reason: "not_found", retried: true });
+    }
+  }
   if (retry) delete ledger[key];
   record(key, { pr: pull.number, ...entry, ability, outcome: "started", ...(retry === "label" ? { retried: true } : {}) });
 }

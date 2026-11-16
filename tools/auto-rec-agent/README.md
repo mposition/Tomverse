@@ -51,8 +51,9 @@ Auto router optimizer가 cycle마다 쌓는 `code` 권장안(예: "answer 호출
 ### 중복 작업 확인 (2026-11-16 운영자 요청)
 
 일일 모드는 구현 전에 credential gateway의 읽기 전용 `work_context`로 이 저장소의 열린 develop PR 목록을
-받고, 공개 PR ref를 가져와 head SHA를 확인합니다. 모델은 제목·제안 ID가 아니라 실제 diff와 현재 develop,
-같은 회차에서 앞서 처리한 결과를 대조합니다. 목록을 읽지 못하거나 스냅샷이 바뀌면 구현·게시하지 않습니다.
+받고, 같은 저장소의 공개 PR ref를 가져와 실제 head SHA를 확인합니다. 조회 뒤 push가 생기면 가져온 최신
+SHA를 쓰며 회차를 멈추지 않습니다. 임시 ref는 작업 뒤 지웁니다. 모델은 제목·제안 ID가 아니라 실제 diff와
+현재 develop, 같은 회차에서 앞서 처리한 결과를 대조합니다. 목록을 읽지 못하면 구현·게시하지 않습니다.
 GitHub 토큰은 계속 gateway에만 있으며 caller가 저장소·URL·읽기 경로를 지정할 수 없습니다.
 
 모델은 일일 결과에 disposition과 근거를 냅니다. `already_satisfied`는 기존 구현이 든 develop 조상 SHA를,

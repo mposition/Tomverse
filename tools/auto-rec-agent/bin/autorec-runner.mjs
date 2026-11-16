@@ -268,10 +268,14 @@ async function work(deps, claim, ctx) {
     }
     if (context.pulls.length) {
       const refs = context.pulls.map(pr => `+refs/pull/${pr.number}/head:refs/autorec/context/pr-${pr.number}`);
+      ctx.contextRefs = context.pulls.map(pr => `refs/autorec/context/pr-${pr.number}`);
       if ((await git(config.mirror, ["fetch", "--no-tags", "--quiet", REPO_URL, ...refs], LIMITS.setupMs)).code !== 0) return failed("setup_failed", "work_context_fetch");
       for (const pr of context.pulls) {
         const actual = await git(config.mirror, ["rev-parse", `refs/autorec/context/pr-${pr.number}`]);
-        if (actual.code !== 0 || actual.stdout.trim() !== pr.head) return failed("setup_failed", "work_context_changed");
+        if (actual.code !== 0 || !/^[0-9a-f]{40}$/.test(actual.stdout.trim())) return failed("setup_failed", "work_context_invalid");
+        // A push after the API listing is normal. Inspect the fetched commit,
+        // instead of stopping the entire batch on an unrelated PR update.
+        pr.head = actual.stdout.trim();
         const paths = await git(config.mirror, ["diff", "--name-only", `${base}...${pr.head}`]);
         if (paths.code !== 0) return failed("setup_failed", "work_context_diff");
         pr.paths = paths.stdout.slice(0, 1500);
@@ -425,6 +429,7 @@ async function cleanup(deps, ctx) {
   try {
     if (ctx.worktree) await git(["worktree", "remove", "--force", ctx.worktree]);
     if (ctx.branch) await git(["branch", "-D", ctx.branch]);
+    for (const ref of ctx.contextRefs ?? []) await git(["update-ref", "-d", ref]);
     await git(["worktree", "prune"]);
   } catch (error) {
     deps.log("cleanup_failed", { message: error.message });
