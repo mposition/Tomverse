@@ -186,7 +186,7 @@ test("a scenario runs only with a bounded request and the walker's own fixtures,
     assert.equal(admitScenario(bad), null, JSON.stringify(bad));
   }
   assert.equal(scenarioTask({ judged: false, reason: "model_off" }), null);
-  for (const name of Object.keys(SCOUT_FIXTURES)) assert.match(SCOUT_FIXTURES[name].mediaType, /^(image\/(png|jpeg)|text\/csv)$/);
+  for (const name of Object.keys(SCOUT_FIXTURES)) assert.match(SCOUT_FIXTURES[name].mediaType, /^(image\/(png|jpeg)|text\/(csv|plain))$/);
 });
 
 test("every signed-in screen and generation is a subject the route admits and the Admin view names", () => {

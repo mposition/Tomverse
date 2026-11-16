@@ -632,8 +632,10 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
     },
   },
   {
-    // The Scout walker (docs/policy/product-research-agent.md §10, §13): once a
-    // day at 18:00 UTC (04:00 Brisbane) it captures the public pages, generated
+    // The Scout walker (docs/policy/product-research-agent.md §10, §13): every
+    // hour it checks whether the app has a build it has not tried yet (one real
+    // turn, scoutRunMode in lib/productResearchScoutBrowserPolicy.mjs); once a
+    // day at 18:00 UTC (04:00 Brisbane) it also captures the public pages, generated
     // files and catalogue and posts each to its environment's app, which asks
     // the model. Its first run is also the check that Chromium keeps its
     // sandbox in a Railway container. dev first, where it sends to the dev
@@ -642,7 +644,7 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
     key: "product_research_scout",
     service: "Product Research Scout",
     startCommand: "npm run agent:product-research-scout",
-    cronSchedule: "0 18 * * *",
+    cronSchedule: "0 * * * *",
     dockerfile: {
       path: "docker/product-research-scout.Dockerfile",
       watchPatterns: [

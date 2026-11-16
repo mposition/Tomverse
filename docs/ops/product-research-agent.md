@@ -341,7 +341,7 @@ walker는 page origin과 `PRODUCT_RESEARCH_SCOUT_INGEST_URL`의 origin이 같을
    | Source | GitHub `mposition/Tomverse`, branch `develop`(dev) 또는 `main`(production), Root directory 비움 |
    | Build → Builder | **Dockerfile**, 경로 `docker/product-research-scout.Dockerfile`(앞에 `/` 없이) |
    | Deploy → Start command | `npm run agent:product-research-scout` |
-   | Deploy → Cron schedule | `0 18 * * *` |
+   | Deploy → Cron schedule | `0 * * * *` (매시; 18:00 UTC만 전체 실행, 나머지는 배포 점검) |
    | Deploy → Restart policy | **Never** |
    | Region | `asia-southeast1-eqsg3a`, replica 1 |
    | Networking | 공개 domain을 만들지 않음 |

@@ -18,6 +18,7 @@ import {
   runJourney,
 } from "@/lib/productResearchScoutJourneyCore";
 import { scoutLlmFor } from "@/lib/productResearchScoutLlm";
+import { readProductionFailures } from "@/lib/productResearchScoutProductionFailures";
 import { readScoutSettings, settleScoutCall, startScoutCall } from "@/lib/productResearchScoutSettings";
 import { recentSuggestionTitles } from "@/lib/productResearchScoutStore";
 
@@ -39,6 +40,7 @@ export async function POST(request: Request) {
     const answer = await runJourney({
       now: new Date(),
       recentTitles: () => recentSuggestionTitles(JOURNEY_FINDINGS_SUBJECT),
+      productionFailures: () => readProductionFailures(),
       model: async () => scoutLlmFor((await readScoutSettings()).modelId),
       reserve: (modelId) => startScoutCall({ subject: JOURNEY_SUBJECT, modelId, keepFree: JOURNEY_JUDGE_CALLS }),
       settle: settleScoutCall,

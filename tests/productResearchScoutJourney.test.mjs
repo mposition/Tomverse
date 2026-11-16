@@ -114,7 +114,7 @@ test("the planner is told the walker's actions, places, controls and files, and 
   for (const name of Object.keys(SCOUT_FIXTURES)) assert.ok(JOURNEY_SYSTEM_PROMPT.includes(`- ${name}:`), name);
   assert.match(JOURNEY_SYSTEM_PROMPT, /BETWEEN screens/);
   assert.deepEqual(JOURNEY_OUTPUT_SCHEMA.properties.start.properties.attachments.items.enum, Object.keys(SCOUT_FIXTURES));
-  assert.match(journeyPromptText(["초안이 사라짐"], new Date("2026-11-15T18:00:00Z")), /Today is 2026-11-15\. Today's family is \d\.\n<recent>\n- 초안이 사라짐\n<\/recent>/);
+  assert.match(journeyPromptText(["초안이 사라짐"], new Date("2026-11-15T18:00:00Z")), /Today is 2026-11-15\. Today's family is \d\.\n<production>\nnone\n<\/production>\n<recent>\n- 초안이 사라짐\n<\/recent>/);
   assert.match(JOURNEY_SYSTEM_PROMPT, /- attach: /);
   for (const family of JOURNEY_FAMILIES) assert.ok(JOURNEY_SYSTEM_PROMPT.includes(family), family);
   const families = new Set(Array.from({ length: JOURNEY_FAMILIES.length }, (_, day) =>

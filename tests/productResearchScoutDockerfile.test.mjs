@@ -75,7 +75,7 @@ test("a failed launch reports the host's sandbox conditions as short values only
   assert.match(walker, /product_research_scout_browser_launch_failed", \.\.\.failure, host: sandboxHost\(\)/);
 });
 
-test("the walker runs daily at 18:00 UTC with its switch, URL and secret, and no model key", async () => {
+test("the walker runs every hour, the full look at 18:00 UTC, with its switch, URL and secret, and no model key", async () => {
   const walker = read("scripts/agents/product-research-scout.mjs");
   const names = [...new Set([...walker.matchAll(/process\.env\.([A-Z0-9_]+)/g)].map((match) => match[1]))].sort();
   assert.deepEqual(names, [
@@ -90,10 +90,11 @@ test("the walker runs daily at 18:00 UTC with its switch, URL and secret, and no
 
   const { AGENT_RUNNER_SERVICES } = await import("../.railway/agent-runners.ts");
   const service = AGENT_RUNNER_SERVICES.find((runner) => runner.key === "product_research_scout");
-  assert.equal(service.cronSchedule, "0 18 * * *");
-  // The Admin "next run" reads this hour; the two move together.
+  assert.equal(service.cronSchedule, "0 * * * *");
+  // The Admin "next run" reads the daily hour; the walker's full look runs at that hour of its hourly schedule.
   const { SCOUT_SCHEDULE_UTC_HOUR } = await import("../lib/productResearchScoutCore.ts");
-  assert.equal(service.cronSchedule, `0 ${SCOUT_SCHEDULE_UTC_HOUR} * * *`);
+  const { SCOUT_DAILY_RUN_HOUR_UTC } = await import("../lib/productResearchScoutBrowserPolicy.mjs");
+  assert.equal(SCOUT_DAILY_RUN_HOUR_UTC, SCOUT_SCHEDULE_UTC_HOUR);
   assert.equal(service.startCommand, "npm run agent:product-research-scout");
   assert.equal(service.dockerfile.path, "docker/product-research-scout.Dockerfile");
   assert.deepEqual(Object.keys(service.environments).sort(), ["dev", "production"]);
