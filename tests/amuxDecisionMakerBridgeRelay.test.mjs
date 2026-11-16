@@ -12,7 +12,7 @@ import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 
 import { AUTHORITY_MANIFEST_VERSION } from "../lib/agentAuthorityFiles.ts";
-import { DM_POLICY_VERSION } from "../lib/amux/decisionMakerCore.ts";
+import { AMUX_DM_TICK_LIMIT, DM_CARD_TEXT_MAX_BYTES, DM_POLICY_VERSION } from "../lib/amux/decisionMakerCore.ts";
 import { dmOptionSetDigest, dmPayloadDigest, dmResultDigest } from "../lib/amux/decisionMakerBodyCore.ts";
 import {
   DM_BROKER_RESPONSE_DEADLINE_MS,
@@ -294,4 +294,12 @@ test("stage S2-2b4: the relay records a not-sent outcome only under the app's re
   assert.match(direct, /json!\(\{"card_id": answer\.card_id, "question_revision": answer\.question_revision\}\)/);
   // The walk looks back past the stale close, a day's margin over the 720 hours.
   assert.equal(product(constant(direct, "DM_DIRECT_ANSWER_LOOKBACK_SECS")) * 1000, DM_STALE_CLOSE_AFTER_MS + 24 * 60 * 60 * 1000);
+});
+
+test("the v22 sync answer the relay reads holds every card the app lists in one tick, each at the card cap", () => {
+  const cap = flow.match(/AppRoute::V22QuestionSync => (\d[\d *]*),/);
+  assert.ok(cap);
+  assert.ok(product(cap[1]) >= AMUX_DM_TICK_LIMIT * (DM_CARD_TEXT_MAX_BYTES * 6 + 64 * 1024));
+  assert.match(read("apps/tomverse-orchestrator/src/dm_relay.rs"), /pub const DM_RELAY_TICK_LIMIT: usize = 1000;/);
+  assert.ok(1000 >= AMUX_DM_TICK_LIMIT, "the relay takes every card the app lists");
 });

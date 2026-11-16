@@ -622,8 +622,8 @@ export const AMUX_DB_BOUNDARIES = {
   // A Decision Maker request's workspace evidence
   // (lib/amux/decisionMakerWorkspaceService.ts): setup + the request's card +
   // the one source row of that card + a pull request's patch + a settlement
-  // Task's rejected reviews + (with the workspace switched off) the card text +
-  // fence.
+  // Task's rejected reviews + fence (the card text read went with the
+  // workspace's kill switch, 2026-11-16).
   decisionMakerWorkspaceRead: {
     operation: "decision_maker_workspace_read",
     prismaCallCeiling: 7,

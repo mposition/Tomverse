@@ -35,9 +35,11 @@ export const DM_REQUEST_ROUTES = ["operator", "dm_proposal"] as const;
 export type DmRequestRoute = (typeof DM_REQUEST_ROUTES)[number];
 
 /**
- * Every refusal `routeDmQuestion()` can record, in its own order. The
+ * Every refusal `routeDmQuestion()` has recorded, in its own order. The
  * migration's array CHECK holds the same set; tests pin both to what the
- * router actually produces.
+ * router produces. Two are no longer made and stay for the rows that hold
+ * them: `throughput_exceeded` (its cap went on 2026-11-15) and
+ * `ask_type_not_allowed` (its allowlist went on 2026-11-16).
  */
 export const DM_ROUTING_REFUSAL_CODES = [
   "kill_switch_on",

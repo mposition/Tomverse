@@ -133,15 +133,17 @@ impl AppRoute {
     /// How large an answer the relay reads: the workspace's carries the
     /// card's whole evidence; a delivery's carries a confirmed answer (up to
     /// `DM_DELIVERY_MESSAGE_MAX_BYTES`, at most six bytes a byte as JSON); the
-    /// v22 sync's carries its cards (each up to the 256 KiB card cap, at most
-    /// six bytes a byte); every other route answers a few hundred bytes.
+    /// v22 sync's carries its cards -- at most `AMUX_DM_TICK_LIMIT` (25) of
+    /// lib/amux/decisionMakerCore.ts, each up to the 256 KiB card cap, at most
+    /// six bytes a byte, about 39 MiB; every other route answers a few hundred
+    /// bytes.
     pub fn answer_max_bytes(self) -> usize {
         match self {
             AppRoute::Workspace => super::workspace::DM_WORKSPACE_ANSWER_MAX_BYTES,
             AppRoute::DeliveriesNext | AppRoute::DeliveriesUnsettled => {
                 super::delivery::DM_DELIVERY_MESSAGE_MAX_BYTES * 6 + 64 * 1024
             }
-            AppRoute::V22QuestionSync => 16 * 1024 * 1024,
+            AppRoute::V22QuestionSync => 64 * 1024 * 1024,
             _ => super::io::DM_ROUTE_ANSWER_MAX_BYTES,
         }
     }

@@ -257,8 +257,15 @@ test("the refusal codes are the ones routeDmQuestion() records, and throughput_e
   for (const throughput of [{ lastHour: 20, lastDay: 100 }, { lastHour: 1_000_000, lastDay: 1_000_000 }]) {
     assert.deepEqual(route({ throughput }).refusals, []);
   }
+  // Every ask type may reach a DM (owner direction 2026-11-16): customer_outbound is routed like any
+  // other, and ask_type_not_allowed stays on the list only so a row recorded under it reads back.
+  assert.deepEqual(route({}, { askType: "customer_outbound" }).refusals, []);
   assert.ok(DM_ROUTING_REFUSAL_CODES.includes("throughput_exceeded"));
-  assert.deepEqual([...produced].sort(), DM_ROUTING_REFUSAL_CODES.filter((code) => code !== "throughput_exceeded").sort());
+  assert.ok(DM_ROUTING_REFUSAL_CODES.includes("ask_type_not_allowed"));
+  assert.deepEqual(
+    [...produced].sort(),
+    DM_ROUTING_REFUSAL_CODES.filter((code) => code !== "throughput_exceeded" && code !== "ask_type_not_allowed").sort(),
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -1639,7 +1646,7 @@ const SWITCH_READ = new RegExp(
     String.raw`r\."releasedAtEpochMs" AS "validationReleasedAtEpochMs"`,
     String.raw`FROM \(\s+SELECT DISTINCT ON \("scope"\) "scope", "value"\s+FROM "AmuxDecisionMakerSwitchEvent"\s+ORDER BY "scope", "sequence" DESC\s+\) n`,
     String.raw`LEFT JOIN LATERAL \(\s+SELECT l\."sequence"\s+FROM "AmuxDecisionMakerSwitchEvent" l\s+WHERE l\."scope" = n\."scope" AND l\."reasonCode" = 'validation_latch'\s+ORDER BY l\."sequence" DESC\s+LIMIT 1\s+\) v ON true`,
-    String.raw`LEFT JOIN LATERAL \(\s+SELECT h\."sequence", floor\(extract\(epoch FROM h\."createdAt"\) \* 1000\)::bigint AS "releasedAtEpochMs"\s+FROM "AmuxDecisionMakerSwitchEvent" h\s+WHERE h\."scope" = n\."scope" AND h\."actorKind" = 'human' AND h\."sequence" > v\."sequence"\s+ORDER BY h\."sequence" ASC\s+LIMIT 1\s+\) r ON true`,
+    String.raw`LEFT JOIN LATERAL \(\s+SELECT h\."sequence", floor\(extract\(epoch FROM h\."createdAt"\) \* 1000\)::bigint AS "releasedAtEpochMs"\s+FROM "AmuxDecisionMakerSwitchEvent" h\s+WHERE h\."scope" = n\."scope" AND \(h\."actorKind" = 'human' OR h\."reasonCode" = 'latch_release'\)\s+AND h\."sequence" > v\."sequence"\s+ORDER BY h\."sequence" ASC\s+LIMIT 1\s+\) r ON true`,
   ].join(String.raw`\s+`),
 );
 

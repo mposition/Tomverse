@@ -2,9 +2,6 @@ import { createHash } from "node:crypto";
 
 import { dmSnapshotManifestDigest } from "./decisionMakerBodyCore.ts";
 import {
-  DM_CARD_TEXT_MAX_BYTES,
-  DM_EVIDENCE_CLOSE,
-  DM_EVIDENCE_OPEN,
   isSecretRepositoryPath,
   isSnapshotTargetSha,
 } from "./decisionMakerCore.ts";
@@ -37,17 +34,11 @@ import { detectSecretsInFields } from "../engineeringAgentSecretPatterns.ts";
  * transmission intent's payload digest binds every evidence byte, and the
  * manifest digest (§10) binds the commit and the files.
  *
- * Kill switch: TOMVERSE_AMUX_DM_WORKSPACE=disabled returns to the card alone
- * (the cards then carry their evidence inline, whole). Default on.
+ * Always on (owner direction 2026-11-16): the kill switch that returned to the
+ * card alone, with the evidence inline under a 224 KiB room, is gone.
  *
  * Pure. Nothing here logs a file's text.
  */
-
-export const DM_WORKSPACE_ENV = "TOMVERSE_AMUX_DM_WORKSPACE";
-
-/** On unless exactly `disabled` (owner decision 2026-11-15: the new behaviour is the default). */
-export const amuxDmWorkspaceEnabled = (env: Record<string, string | undefined> = process.env) =>
-  env[DM_WORKSPACE_ENV]?.trim() !== "disabled";
 
 export const DM_WORKSPACE_REPOSITORY = "mposition/Tomverse";
 export const DM_WORKSPACE_REPOSITORY_NAME = `github.com/${DM_WORKSPACE_REPOSITORY}`;
@@ -456,32 +447,12 @@ export const dmWorkspaceCardPointer = (files: readonly DmWorkspaceEvidenceName[]
     "Read them before you answer; the card is only a summary.",
   ].join("\n");
 
-const CARD_CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
-/** What a card keeps for its fixed words when evidence rides inline (the kill switch). */
-const INLINE_ROOM_BYTES = DM_CARD_TEXT_MAX_BYTES - 32 * 1024;
-
 /**
- * A card's context for its evidence: with the workspace on, the pointer to
- * the files; with it off (the kill switch, the card alone), the evidence
- * itself, whole, in the evidence markers the term check may skip. Null when
- * the evidence cannot ride whole -- characters a card cannot carry, or more
- * than the card's one cap leaves room for: the caller files no card then and
- * the person decides, since a DM must never judge without the evidence.
+ * A card's context for its evidence: the pointer to the files in the
+ * workspace, where the evidence goes whole. The workspace is always on (owner
+ * direction 2026-11-16), so a card never carries its evidence inline and no
+ * card is left unfiled because its evidence is larger than a card.
  */
 export const dmCardEvidenceContext = (
   evidence: ReadonlyArray<{ name: DmWorkspaceEvidenceName; heading: string; text: string }>,
-  workspace: boolean = amuxDmWorkspaceEnabled(),
-): string | null => {
-  if (workspace) return dmWorkspaceCardPointer(evidence.map((item) => item.name));
-  const blocks: string[] = [];
-  let room = INLINE_ROOM_BYTES;
-  for (const item of evidence) {
-    if (CARD_CONTROL.test(item.text)) return null;
-    const block = `${DM_EVIDENCE_OPEN}\n${item.heading}:\n${item.text}\n${DM_EVIDENCE_CLOSE}`;
-    const bytes = Buffer.byteLength(JSON.stringify(block), "utf8");
-    if (bytes > room) return null;
-    room -= bytes;
-    blocks.push(block);
-  }
-  return blocks.join("\n");
-};
+): string => dmWorkspaceCardPointer(evidence.map((item) => item.name));

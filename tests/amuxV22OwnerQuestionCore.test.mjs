@@ -189,31 +189,29 @@ test("the Decision Maker's card names the asking card and carries the worker's c
     paths: ["lib/amux/fileRetry.ts"] }));
   const card = amuxV22QuestionDmCard({ questionId: "q-1", worker: "codex-impl", providerClass: "codex",
     taskId: "cdd90973-16bd-4729-8940-1219cc639be5", sequence: 1, displayKey: "AMUX-AUTOFILE-003",
-    cardTitle: "File retry trailer signal", question, workspace: false });
+    cardTitle: "File retry trailer signal", question });
   assert.equal(card.title, "AMUX-AUTOFILE-003 File retry trailer signal");
-  assert.equal(card.context, 'Card: AMUX-AUTOFILE-003 "File retry trailer signal", question 1 from worker codex-impl.\n\nTwo retry paths exist.');
+  // The workspace is always on (owner direction 2026-11-16): what the worker found is evidence/CONTEXT.md.
+  assert.equal(card.context, `Card: AMUX-AUTOFILE-003 "File retry trailer signal", question 1 from worker codex-impl.\n\n${dmWorkspaceCardPointer(["CONTEXT.md"])}`);
   assert.deepEqual(card.context_paths, ["lib/amux/fileRetry.ts"]);
   assert.deepEqual(card.options, asked.options);
   assert.equal(card.provider, "codex");
   // No key or title: the Task id, as before, and still the card line.
   const bare = amuxV22QuestionDmCard({ questionId: "q-1", worker: "codex-impl", providerClass: "codex",
-    taskId: "t-1", sequence: 2, displayKey: null, cardTitle: null, question: parseAmuxV22OwnerQuestion(line(asked)),
-    workspace: true });
+    taskId: "t-1", sequence: 2, displayKey: null, cardTitle: null, question: parseAmuxV22OwnerQuestion(line(asked)) });
   assert.equal(bare.title, "v22 Task t-1 question 2");
   assert.equal(bare.context, "Card: v22 Task t-1, question 2 from worker codex-impl.");
   assert.deepEqual(bare.context_paths, []);
   // Nothing is cut: no 200-unit title, no 4000-unit context (owner decision 2026-11-15).
   const long = amuxV22QuestionDmCard({ questionId: "q-1", worker: "w", providerClass: "codex", taskId: "t",
     sequence: 1, displayKey: "K-1", cardTitle: "가".repeat(400),
-    question: { ...question, context: "y".repeat(10_000) }, workspace: false });
+    question: { ...question, context: "y".repeat(10_000) } });
   assert.equal(long.title, `K-1 ${"가".repeat(400)}`);
   assert.ok(!long.title.endsWith("…"));
-  assert.equal(long.context, `Card: K-1 "${"가".repeat(400)}", question 1 from worker w.\n\n${"y".repeat(10_000)}`);
-  // With the workspace on (the default), what the worker found is the
-  // workspace's evidence/CONTEXT.md, whole; the card points at it.
+  assert.equal(long.context, `Card: K-1 "${"가".repeat(400)}", question 1 from worker w.\n\n${dmWorkspaceCardPointer(["CONTEXT.md"])}`);
+  // What the worker found is the workspace's evidence/CONTEXT.md, whole, however large; the card points at it.
   const huge = amuxV22QuestionDmCard({ questionId: "q-1", worker: "w", providerClass: "codex", taskId: "t",
-    sequence: 1, displayKey: "K-1", cardTitle: null, question: { ...question, context: "z".repeat(400_000) },
-    workspace: true });
+    sequence: 1, displayKey: "K-1", cardTitle: null, question: { ...question, context: "z".repeat(400_000) } });
   assert.equal(huge.context, `Card: K-1, question 1 from worker w.\n\n${dmWorkspaceCardPointer(["CONTEXT.md"])}`);
   assert.deepEqual(huge.context_paths, ["lib/amux/fileRetry.ts"]);
 });
@@ -232,13 +230,13 @@ test("a card keeps every part of what the worker wrote: nothing is given up to f
   const question = parseAmuxV22OwnerQuestion(line(big));
   assert.equal(question.paths.length, 64);
   const card = amuxV22QuestionDmCard({ questionId: "q-1", worker: "codex-impl", providerClass: "codex",
-    taskId: "t", sequence: 1, displayKey: "AMUX-AUTOFILE-003", cardTitle: "File retry", question, workspace: false });
+    taskId: "t", sequence: 1, displayKey: "AMUX-AUTOFILE-003", cardTitle: "File retry", question });
   // Far past the 16 KiB the card used to be fitted into: still every path, option and word.
   assert.ok(Buffer.byteLength(JSON.stringify(card), "utf8") > 16 * 1_024);
   assert.equal(card.question, big.question);
   assert.equal(card.unblocks, big.unblocks);
   assert.deepEqual(card.options, big.options);
-  assert.equal(card.context, `Card: AMUX-AUTOFILE-003 "File retry", question 1 from worker codex-impl.\n\n${big.context}`);
+  assert.equal(card.context, `Card: AMUX-AUTOFILE-003 "File retry", question 1 from worker codex-impl.\n\n${dmWorkspaceCardPointer(["CONTEXT.md"])}`);
   assert.deepEqual(card.context_paths, big.paths);
   // A small card keeps everything.
   const small = amuxV22QuestionDmCard({ questionId: "q-1", worker: "w", providerClass: "codex", taskId: "t",
