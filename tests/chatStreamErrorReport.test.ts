@@ -125,7 +125,7 @@ test("a provider's own stream error keeps the provider layer, its code and its r
   assert.deepEqual(traceEvidenceRecordability(grant.errorCode, grant.httpStatus), { record: true });
 });
 
-test("what the grant hands to Sentry carries no provider text, only codes and code locations", () => {
+test("what the grant hands to Sentry carries no provider text, only codes", () => {
   const CONTENT = "SYNTHETIC-USER-PROMPT-MARKER";
   const providerError = Object.assign(new Error(`Bad request: ${CONTENT}`), {
     name: "AI_APICallError",
@@ -155,8 +155,46 @@ test("what the grant hands to Sentry carries no provider text, only codes and co
   // Everything Sentry could serialise off it, stack included.
   const serialised = JSON.stringify({ ...captured, message: captured.message, stack: captured.stack });
   assert.equal(serialised.includes(CONTENT), false);
-  // The frames survive: they are where the failure was raised.
-  assert.match(captured.stack ?? "", /\n\s+at /);
+  // Nothing of the original stack either: it begins with the message.
+  assert.equal(captured.stack, "AI_APICallError: HTTP_400");
+});
+
+test("no part of the original stack survives, frame-shaped message lines included", () => {
+  const MARKER = "PRIVATE_PROMPT_MARKER";
+  const cases: unknown[] = [
+    // The review's case: a provider echo that looks exactly like a frame.
+    new Error(`Provider echoed request:\n    at ${MARKER} (/app/chat.ts:1:1)`),
+    Object.assign(new Error(`first line\n    at ${MARKER} (/a.ts:1:1)\nlast`), { name: "AI_APICallError" }),
+    // A message reassigned to a prefix after construction: the old one is
+    // still in the stack, with nothing to mark where it ends.
+    Object.assign(new Error(`Provider echoed request:\n    at ${MARKER} (/app/chat.ts:1:1)`), {
+      message: "Provider echoed request:",
+    }),
+    Object.assign(new Error("short"), { stack: `Error: other\n    at ${MARKER} (/a.ts:1:1)` }),
+    Object.assign(new Error(""), { stack: `Error\n    at real (/a.ts:1:1)\n${MARKER}\n    at ${MARKER} (/b.ts:2:2)` }),
+  ];
+  for (const error of cases) {
+    const grant = streamFailureGrantInput({
+      traceId: TRACE,
+      root: "AI_STREAM_FAILED",
+      diagnosticCode: "AI_STREAM_FAILED.Error",
+      provider: "openai",
+      modelId: "gpt-6-luna",
+      error,
+    });
+    const captured = grant.error as Error;
+    assert.equal(`${captured.message}\n${captured.stack}`.includes(MARKER), false, String((error as Error).stack));
+  }
+  // A Node error keeps its code, and only its code.
+  const ordinary = streamFailureGrantInput({
+    traceId: TRACE,
+    root: "AI_STREAM_FAILED",
+    diagnosticCode: "AI_STREAM_FAILED.Error",
+    provider: "openai",
+    modelId: "gpt-6-luna",
+    error: nodeError("TypeError", "ERR_INVALID_STATE", "Invalid state: Controller is already closed"),
+  });
+  assert.equal((ordinary.error as Error).stack, "TypeError: ERR_INVALID_STATE");
 });
 
 test("a layer the route already knows is kept, and the code can never hold prose", () => {

@@ -42,16 +42,18 @@ export const isLocalRuntimeError = (error: unknown): boolean => {
 /**
  * The caught error, reduced to what may leave this process.
  *
- * The grant hands its `error` to Sentry. A provider error's message and
- * `cause` can quote the request or the answer -- `AI_APICallError` carries
- * both bodies -- and Sentry's sanitizer only masks credentials, so the
- * original object must never be the one captured. What survives is the
- * content-free metadata every stream-error log line already uses, plus the
- * stack frames: `at` lines are code locations, and for a failure this
- * process caused they are the part worth reading.
+ * The grant hands its `error` to Sentry. A provider error's message, `cause`
+ * and bodies can quote the request or the answer -- `AI_APICallError` carries
+ * both -- and Sentry's sanitizer only masks credentials. Its stack cannot be
+ * trusted either: the stack starts with the message, a message can span lines
+ * that look exactly like frames, and a message reassigned after construction
+ * leaves the old one in the stack with nothing to mark where it ends.
+ *
+ * So nothing of the original object goes: only the content-free metadata
+ * every stream-error log line already uses, on a new error whose stack is that
+ * one line. The trace, the occurrence and the code are what identify the
+ * failure; no step of the report pipeline reads a frame.
  */
-const STACK_FRAME = /^\s+at [^\n]{1,300}$/;
-
 export const contentFreeError = (error: unknown): Error | undefined => {
   if (!error || typeof error !== "object") return undefined;
   const metadata = contentFreeErrorMetadata(error);
@@ -65,12 +67,7 @@ export const contentFreeError = (error: unknown): Error | undefined => {
       .join(" ") || "stream failure"
   );
   safe.name = metadata.name;
-  const original = (error as { stack?: unknown }).stack;
-  const frames =
-    typeof original === "string"
-      ? original.split("\n").filter((line) => STACK_FRAME.test(line))
-      : [];
-  safe.stack = [`${safe.name}: ${safe.message}`, ...frames].join("\n");
+  safe.stack = `${safe.name}: ${safe.message}`;
   return safe;
 };
 
