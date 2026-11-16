@@ -344,7 +344,6 @@ export function ModelsPageContent() {
                 </span>
                 <div className="min-w-0">
                   <h2 className="font-bold">{model.name}</h2>
-                  <p className="break-words text-sm font-semibold leading-5 text-zinc-600 dark:text-zinc-300">{model.id}</p>
                 </div>
               </div>
               <p data-testid={lang === "ko" || lang === "en" ? "model-selection-criteria" : undefined} className="mt-4 text-sm leading-6 text-zinc-600 dark:text-zinc-300">

@@ -39,3 +39,12 @@ test("English mobile card summary does not repeat access plan and base credits",
   assert.match(desktop, /hidden sm:inline/);
   assert.match(desktop, /Access from: .* Short request: /);
 });
+
+test("model cards show the user-facing name without the internal model id", () => {
+  const start = source.indexOf("<article");
+  assert.ok(start > 0, "model card is rendered");
+  const card = source.slice(start, source.indexOf("</article>", start));
+  assert.match(card, /\{model\.name\}<\/h2>/);
+  const visible = card.replace(/(key|data-model-id)=\{model\.id\}/g, "");
+  assert.doesNotMatch(visible, /\{model\.id\}/);
+});
