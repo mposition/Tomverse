@@ -24,9 +24,6 @@ test("transport error preserves the complete markdown body and separates its not
   assert.match(html, /First paragraph/);
   assert.match(html, /Second <strong>paragraph<\/strong>/);
   assert.match(html, /data-testid="chat-recovery-notice"[^>]*>Connection interrupted/);
-  // The trace ID sits in a collapsed "Error details" disclosure, not on the card face.
-  assert.match(html, /<details data-testid="chat-error-auxiliary-info"[^>]*><summary[^>]*>Error details<\/summary>/);
-  assert.doesNotMatch(html, /<details data-testid="chat-error-auxiliary-info"[^>]*\sopen/);
   assert.match(html, /Trace ID: local-trace/);
   // The trace ID sits in a collapsed "Diagnostic details" disclosure, not on the card face.
   assert.match(html, /<details(?![^>]*\bopen\b)[^>]*data-testid="chat-error-auxiliary-info"[^>]*><summary[^>]*>Diagnostic details<\/summary>/);
