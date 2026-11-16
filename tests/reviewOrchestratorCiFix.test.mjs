@@ -593,6 +593,38 @@ function passFixture({ branch = "claude/to-develop/broken", author, base = "deve
   return { root, config, outbox, workDir: join(root, "work"), sha, github, requests };
 }
 
+test("an obsolete CI repair is recorded without dispatch and is not retried on an ability change", async () => {
+  const f = passFixture();
+  try {
+    const options = { ...f, model: "sonnet", minRemainingPercent: 0, quota: async () => ({ state: "available", remainingPercent: 90 }), clock: () => 5000, log: () => {} };
+    const result = await runCiFix({ ...options, claude: ({ cwd, logDir, prompt }) => {
+      const context = JSON.parse(readFileSync(join(logDir, "work-context.json"), "utf8"));
+      assert.match(readFileSync(context.versusLatestBase, "utf8"), /app\.js/);
+      assert.match(prompt, /RESULT: obsolete/);
+      writeFileSync(join(cwd, "unused-copy.js"), "export const label = 'Unused';\n");
+      return { ok: true, tail: "The base already satisfies the original requirement.\nRESULT: obsolete" };
+    } });
+    assert.equal(result.outcome, "obsolete");
+    assert.equal(existsSync(join(f.outbox, `${f.sha}.json`)), false);
+    assert.equal((await runCiFix({ ...options, regenerate: true, conflicts: true, claude: () => assert.fail("obsolete work must stay stopped") })).outcome, "nothing_to_fix");
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test("a useful copy-only repair is not rejected merely because only a locale changes", async () => {
+  const f = passFixture({ files: { "locales/en.js": "export const label = 'Recieve';\n" } });
+  try {
+    const result = await runCiFix({ ...f, model: "sonnet", minRemainingPercent: 0,
+      quota: async () => ({ state: "available", remainingPercent: 90 }), clock: () => 5000, log: () => {},
+      claude: ({ cwd }) => {
+        writeFileSync(join(cwd, "locales/en.js"), "export const label = 'Receive';\n");
+        return { ok: true, tail: "Corrects the displayed label.\nRESULT: fixed" };
+      } });
+    assert.equal(result.outcome, "queued");
+    const request = JSON.parse(readFileSync(join(f.outbox, `${f.sha}.json`), "utf8"));
+    assert.match(gunzipSync(Buffer.from(request.patchGzB64, "base64")).toString(), /locales\/en\.js/);
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
 test("a pass asks the model once on an isolated checkout and queues only the application change", async () => {
   const f = passFixture();
   try {

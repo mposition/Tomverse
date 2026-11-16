@@ -36,6 +36,8 @@ export const OUTCOME_FAILED = "failed";
 export const FAILURE_REASONS = Object.freeze([
   "out_of_scope",
   "no_change",
+  "already_satisfied",
+  "covered_by_pr",
   "tests",
   "review_reject",
   "review_unknown",

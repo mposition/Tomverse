@@ -20,6 +20,12 @@ const RECEIVED = "2026-10-27T03:00:00.000Z";
 const NOW = Date.parse(RECEIVED) + 60_000;
 
 const entry = (pr, head, outcome, extra = {}) => ({ pr, head, kind: "ci", outcome, reason: null, retried: false, ageSeconds: 120, ...extra });
+
+test("an obsolete repair is visible but never offered an automatic re-analysis", () => {
+  const fix = { head: A, kind: "conflict", outcome: "obsolete", reason: "obsolete", retried: false, settled: null, at: new Date(NOW).toISOString() };
+  assert.equal(ciFixState(fix, A, NOW), "not_fixed");
+  assert.equal(ciFixRetryable(fix, A, NOW), false);
+});
 const stored = (entries, extra = {}) => ({
   state: "observed",
   receivedAt: RECEIVED,
