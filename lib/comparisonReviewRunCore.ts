@@ -384,6 +384,18 @@ export const comparisonReviewPrimaryOnlyCause = (
               : ("secondary_refused" as const),
         secondaryAttempts: secondaryAttempts.length,
         secondaryFailed: failed,
+        // How many second reviewers hit their own deadline, and how long the
+        // run waited on all of them: together they say whether a slow
+        // primary-only run was a timeout or a fast provider failure.
+        secondaryTimedOut: secondaryAttempts.filter(
+            (attempt) =>
+                attempt.errorCategory === "TimeoutError" ||
+                attempt.errorCategory === "AbortError"
+        ).length,
+        secondaryMs: secondaryAttempts.reduce(
+            (total, attempt) => total + (attempt.durationMs ?? 0),
+            0
+        ),
         lastErrorCode: last?.errorCode ?? null,
     };
 };

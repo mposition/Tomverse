@@ -44,6 +44,26 @@ Auto router optimizer가 cycle마다 쌓는 `code` 권장안(예: "answer 호출
   AMUX 전달이 실패하거나 불명이면 예약을 보존하고, 같은 Send to AMUX를 다시 사용해 기존의
   결정적 request id로 결과를 읽어 마칩니다. 예약을 자동 삭제하거나 에이전트가 인수하지 않습니다.
 
+테스트 전과 검토 요청 직전에는 정확한 base/head를 코드 로그에 남깁니다. 제출 거절·검토 거절·검토 불명은 stdout/stderr의
+비밀값을 가린 마지막 12,000자를 해당 작업의 비공개 `review_submit`/`review_wait` 로그에 보존합니다.
+명령 출력은 앱 결과·중단 알림·journal event에 보내지 않으며, 검토를 자동 재제출하거나 불명 상태를 풀지 않습니다.
+
+### 중복 작업 확인 (2026-11-16 운영자 요청)
+
+일일 모드는 구현 전에 credential gateway의 읽기 전용 `work_context`로 이 저장소의 열린 develop PR 목록을
+받고, 같은 저장소의 공개 PR ref를 가져와 실제 head SHA를 확인합니다. 조회 뒤 push가 생기면 가져온 최신
+SHA를 쓰며 회차를 멈추지 않습니다. 임시 ref는 작업 뒤 지웁니다. 모델은 제목·제안 ID가 아니라 실제 diff와
+현재 develop, 같은 회차에서 앞서 처리한 결과를 대조합니다. 목록을 읽지 못하면 구현·게시하지 않습니다.
+GitHub 토큰은 계속 gateway에만 있으며 caller가 저장소·URL·읽기 경로를 지정할 수 없습니다.
+
+모델은 일일 결과에 disposition과 근거를 냅니다. `already_satisfied`는 기존 구현이 든 develop 조상 SHA를,
+`covered_by_pr`는 제공된 열린 PR 번호를 확인해야 기록합니다. 두 사유는 기존 결과 기록/감사 경로에 남고
+자동 재시도하지 않습니다. 최근 재인증한 owner의 명시적 재예약은 유지합니다. 원본 제안을 완료·거절하거나
+기존 PR을 닫지는 않습니다. 일반 `no_change`와 누락된 판단은 기존 제한된 재시도 규칙을 유지합니다.
+
+새 결과 코드를 받는 앱을 먼저 배포한 뒤 runner/gateway를 함께 갱신합니다. 코드 작성·draft PR만으로
+기존 Ubuntu 설치를 교체하거나 실행하지 않습니다.
+
 ### 제한된 자동 재시도 (2026-11-15 운영자 요청)
 
 앱의 `DAILY_PRODUCT_AGENT_RETRIES_ENABLED=true`를 켜면 `tests`·`no_change`만 최초 포함 최대

@@ -623,6 +623,23 @@ test("guidance freezes without holdout results and evaluation keeps the existing
   assert.equal([...result.spentByProvider.values()].reduce((sum, value) => sum + value, 0), result.spentMicroUsd);
 });
 
+test("each direct comparison records both sides' answer latency on the same message", async () => {
+  const { deps } = rankedDeps({
+    answer: async (modelId) => {
+      if (modelId === "strong") await new Promise((resolve) => setTimeout(resolve, 40));
+      return { value: modelId === "rival" ? "" : RANKED[modelId], costMicroUsd: 30, provider: `${modelId}-co` };
+    },
+  });
+  const result = await runOptimizerCycle({ decisions: trioDecisions, incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE }, deps);
+  assert.equal(result.comparisons.length, 12);
+  for (const item of result.comparisons) {
+    // rival never answered, so the pair is undecided and its side has no latency.
+    assert.equal(item.verdict, "undecided");
+    assert.ok(item.answerMs.a >= 30);
+    assert.equal(item.answerMs.b, null);
+  }
+});
+
 test("a proposal that picks the direct challenger reuses its answers and judgement", async () => {
   const answered = [];
   const judged = [];

@@ -24,6 +24,7 @@ import { PricingKoreanPlanLimits } from "./PricingKoreanPlanLimits";
 import { PricingCreditExample } from "./PricingCreditExample";
 import { PricingPlanCapabilities } from "./PricingPlanCapabilities";
 import { pricingMobilePlanSummaryCopy } from "./pricingMobilePlanSummary";
+import { getPricingStarterLabelKey } from "@/lib/pricingStarterNotice";
 import { UpgradeInterestButton } from "@/components/marketing/UpgradeInterestButton";
 import { usePublicBilling } from "@/components/marketing/usePublicBilling";
 import { usePricingAccount } from "@/components/marketing/usePricingAccount";
@@ -73,6 +74,17 @@ const annualLabelByLanguage: Partial<Record<Language, { annual: string; save: st
   de: { annual: "Jährlich", save: "20 % sparen", checkout: "Beim Checkout wird der angezeigte lokale Festpreis berechnet." },
   es: { annual: "Anual", save: "20 % de descuento", checkout: "Se cobra el precio local fijo mostrado." },
   pt: { annual: "Anual", save: "20% de desconto", checkout: "O preço local fixo exibido é cobrado no checkout." },
+};
+
+const starterNoticePrefix: Record<Language, string> = {
+  en: "You came from ",
+  ko: "다음 기능에서 오셨습니다: ",
+  zh: "您来自此功能：",
+  "zh-Hant": "您來自此功能：",
+  fr: "Vous venez de ",
+  de: "Sie kommen von ",
+  es: "Vienes de ",
+  pt: "Você veio de ",
 };
 
 // The public catalogue always offers exactly these three packs, so the
@@ -926,7 +938,7 @@ type BillingOutcome = {
 };
 
 export function PricingPageContent() {
-  const { lang } = useLanguage();
+  const { lang, t } = useLanguage();
   const content = copy[lang] ?? copy.en;
   const billing = usePublicBilling();
   const account = usePricingAccount();
@@ -941,6 +953,7 @@ export function PricingPageContent() {
   // static HTML intact and cannot produce a hydration mismatch, and it is the
   // pattern UpgradeCtaLink already uses for the same reason.
   const [pageIntent, setPageIntent] = useState<PurchaseIntent | null>(null);
+  const [starterLabelKey, setStarterLabelKey] = useState<string | null>(null);
   const [subscriptionInterval, setSubscriptionInterval] = useState<"monthly" | "annual">("monthly");
   const [billingOutcome, setBillingOutcome] = useState<BillingOutcome | null>(
     null
@@ -1021,6 +1034,7 @@ export function PricingPageContent() {
     const search = window.location.search;
     const intent = parsePurchaseIntent(search);
     const params = new URLSearchParams(search);
+    const starterLabelKeyFromUrl = getPricingStarterLabelKey(params.get("starter"));
     const billingParam = params.get("billing");
     const planParam = params.get("plan");
     const outcome: BillingOutcome | null =
@@ -1037,6 +1051,7 @@ export function PricingPageContent() {
     // the shape the repo's React Compiler lint rejects.
     queueMicrotask(() => {
       setPageIntent(intent);
+      setStarterLabelKey(starterLabelKeyFromUrl);
       if (intent.billingInterval) setSubscriptionInterval(intent.billingInterval);
       if (outcome) setBillingOutcome(outcome);
     });
@@ -1419,6 +1434,7 @@ export function PricingPageContent() {
         <div className="mx-auto max-w-4xl text-center">
           <p className="text-sm font-bold uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400">{content.eyebrow}</p>
           <h1 className={`mt-4 text-4xl font-bold leading-tight sm:text-6xl ${displayHeadingClass(lang)}`}>{content.title}</h1>
+          {starterLabelKey && <p data-testid="pricing-starter-notice" className="mt-3 text-sm text-zinc-600 dark:text-zinc-300">{starterNoticePrefix[lang]}{t(starterLabelKey)}</p>}
           <p className={`mx-auto mt-5 max-w-2xl text-lg leading-8 text-zinc-600 dark:text-zinc-300 ${mobileSummary ? "hidden sm:block" : ""}`}>{content.description}</p>
           {mobileSummary && <p className="mt-4 text-base leading-7 text-zinc-600 dark:text-zinc-300 sm:hidden">{mobileSummary.lead}</p>}
           {mobileSummary && <section aria-label={mobileSummary.label} data-testid="pricing-mobile-plan-summary" className="mt-7 rounded-2xl border border-zinc-200 bg-zinc-50 p-3 text-left dark:border-zinc-800 dark:bg-zinc-900/40 sm:hidden">

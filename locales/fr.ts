@@ -405,6 +405,8 @@ export const fr = {
         responseIncompleteNotice: "La réponse a été interrompue par la limite de longueur de sortie. Vous pouvez poursuivre avec une question complémentaire.",
         responseFailed: "La requête a échoué.",
         traceId: "ID de suivi",
+        showDiagnostics: "Afficher les informations de diagnostic",
+        errorDiagnostics: "Détails de diagnostic",
         retry: "Réessayer",
         reduceModelCount: "Réduire le nombre de modèles",
         chooseAnotherModel: "Choisir un autre modèle",

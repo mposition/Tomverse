@@ -448,6 +448,17 @@ const routerPrices = (model: AiModel) => {
     }
 };
 
+// Same test as autoLlmRouterWorstCaseMicroUsd: only a priced router is checked.
+const pricedRouter = (prices: ReturnType<typeof routerPrices>) => prices !== null &&
+    [prices.inputUsdPerMillionTokens, prices.outputUsdPerMillionTokens].every(value => Number.isFinite(value) && value > 0);
+// A started check that loses to a failed read must not become an unhandled rejection.
+const settled = <T>(promise: Promise<T>) =>
+    promise.then(value => ({ ok: true as const, value }), (error: unknown) => ({ ok: false as const, error }));
+const unsettled = <T>(result: { ok: true; value: T } | { ok: false; error: unknown }) => {
+    if (!result.ok) throw result.error;
+    return result.value;
+};
+
 /**
  * Ask a small model which eligible candidate should answer this prompt.
  *
@@ -538,6 +549,14 @@ export async function pickAutoModelWithLlm(input: {
     // a rewrite. For eligible turns only the Admin switch gates its guidance.
     const canRewrite = !input.importedSource && input.rewriteAllowed === true &&
         input.prompt.trim().length <= AUTO_LLM_ROUTER_REWRITE_SOURCE_MAX_CHARS;
+    const prices = routerPrices(routerModel);
+    // Experiment (off unless CHAT_ROUTER_PARALLEL_CONTEXT_PRECHECK_ENABLED):
+    // the context precheck overlaps the session and guidance reads. It is
+    // still awaited before the hold and the provider call, and only starts
+    // where the check below would run: a priced router outside location fusion.
+    const earlyPrecheck = input.verifyPreparedContext && !input.locationFusion && pricedRouter(prices) &&
+        process.env.CHAT_ROUTER_PARALLEL_CONTEXT_PRECHECK_ENABLED === "true"
+        ? settled(input.verifyPreparedContext()) : null;
     const [session, active, rewriteGuidance, preparedImageIntent] = await Promise.all([
         readRouterSession(input.conversationId, input.locationFusion?.resume?.traceId),
         readActiveRouterGuidance(),
@@ -578,7 +597,6 @@ export async function pickAutoModelWithLlm(input: {
         // A rewrite needs its own longer deadline; a tuned one only ever adds to it.
         timeoutMs: Math.max(rewrite ? AUTO_LLM_ROUTER_REWRITE_TIMEOUT_MS : timeoutMs, timeoutMs, imageIntent?.timeoutMs ?? 0),
     };
-    const prices = routerPrices(routerModel);
     const request = routerRequest(call);
     const worstCase = prices ? routerRequestWorstCase(call, request, prices) : null;
     if (input.locationFusion) {
@@ -597,7 +615,8 @@ export async function pickAutoModelWithLlm(input: {
             return input.locationFusion.resume.pick;
         }
     }
-    if (worstCase !== null && input.verifyPreparedContext && !(await input.verifyPreparedContext())) return null;
+    if (worstCase !== null && input.verifyPreparedContext &&
+        !(await (earlyPrecheck ? earlyPrecheck.then(unsettled) : input.verifyPreparedContext()))) return null;
     if (input.importedSource && (!input.verifyImportedSource || !(await input.verifyImportedSource()))) return null;
     const reservedAt = new Date();
     if (worstCase === null || !(await reserveRouterCost(routerModel.provider, worstCase, reservedAt))) {

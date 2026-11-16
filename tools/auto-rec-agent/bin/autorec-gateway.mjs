@@ -298,6 +298,27 @@ async function findOpenPr(deps, branch) {
   return { known: true, pr: answer.json[0] ?? null };
 }
 
+/** Fixed-repository read only. Never accepts a caller URL, query, token or write. */
+async function workContext(deps) {
+  if (!deps.config.dailyProduct) return { status: "error", code: "daily_mode_required" };
+  const pulls = [];
+  for (let page = 1; page <= 3; page += 1) {
+    const answer = await githubRequest(deps, "GET", `/repos/${REPO_SLUG}/pulls?base=develop&state=open&per_page=100&page=${page}`);
+    if (!answer.ok || answer.status !== 200 || !Array.isArray(answer.json)) return { status: "error", code: "work_context_unavailable" };
+    for (const pr of answer.json) {
+      // Match the repair agent's same-repository scope. Outsider PR metadata
+      // does not become evidence for suppressing an operator's task.
+      if (pr.head?.repo?.full_name !== REPO_SLUG) continue;
+      if (!Number.isSafeInteger(pr.number) || pr.number < 1 || pr.number > 999999999 ||
+          !SHA.test(pr.head?.sha ?? "") || pr.base?.ref !== "develop") return { status: "error", code: "work_context_invalid" };
+      pulls.push({ number: pr.number, head: pr.head.sha, title: String(pr.title ?? "").slice(0, 120), body: String(pr.body ?? "").slice(0, 200) });
+    }
+    if (pulls.length > 200) return { status: "error", code: "work_context_incomplete" };
+    if (answer.json.length < 100) return { status: "context", pulls };
+  }
+  return { status: "error", code: "work_context_incomplete" };
+}
+
 /**
  * Open the held draft immediately after push. Waiting for Auto PR left its
  * unlabelled draft in the CI admission queue until our next poll. If that
@@ -436,6 +457,7 @@ export async function handleRequest(deps, header, payload) {
   if (header.op === "result") return result(deps, header);
   if (header.op === "publish") return publish(deps, header, payload);
   if (header.op === "halt_notice") return haltNotice(deps, header);
+  if (header.op === "work_context") return workContext(deps);
   return { status: "error", code: "op_invalid" };
 }
 

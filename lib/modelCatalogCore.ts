@@ -60,6 +60,8 @@ export const OFFICIAL_SOURCE_HOSTS: Readonly<Record<string, readonly string[]>> 
   google: ["ai.google.dev", "cloud.google.com", "aistudio.google.com/docs/"],
   xai: ["docs.x.ai", "x.ai"],
   fal: ["fal.ai"],
+  // bfl.ai also serves the playground and account pages, so only /pricing there.
+  bfl: ["docs.bfl.ai", "bfl.ai/pricing"],
   deepseek: ["api-docs.deepseek.com"],
   mistral: ["docs.mistral.ai", "mistral.ai"],
   // platform.moonshot.ai answers 301 to platform.kimi.ai since 2026-11.
