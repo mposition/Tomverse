@@ -405,6 +405,7 @@ export const es = {
         responseIncompleteNotice: "La respuesta se cortó por el límite de longitud de salida. Puedes continuar con una pregunta de seguimiento.",
         responseFailed: "La solicitud falló.",
         traceId: "ID de seguimiento",
+        errorDetails: "Detalles del error",
         retry: "Reintentar",
         reduceModelCount: "Reducir el número de modelos",
         chooseAnotherModel: "Elegir otro modelo",

@@ -1881,7 +1881,14 @@ export function ChatMessageList({
                           </p>
                         )}
                         {errorAuxiliaryLines.length > 0 && (
-                          <div data-testid="chat-error-auxiliary-info" className="mt-2 space-y-0.5">
+                          // Collapsed by default: the card leads with the problem
+                          // and its recovery actions; the trace ID is for support
+                          // and already travels with the error report.
+                          <details data-testid="chat-error-auxiliary-info" className="mt-2">
+                            <summary className="cursor-pointer text-[11px] leading-4 text-zinc-600 dark:text-zinc-400">
+                              {t("chat.errorDetails")}
+                            </summary>
+                            <div className="mt-1 space-y-0.5">
                             {errorAuxiliaryLines.map((line, lineIndex) => (
                               <p
                                 key={lineIndex}
@@ -1898,7 +1905,8 @@ export function ChatMessageList({
                                 {line}
                               </p>
                             ))}
-                          </div>
+                            </div>
+                          </details>
                         )}
                       </div>
                     );

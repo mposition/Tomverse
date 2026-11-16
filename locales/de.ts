@@ -394,6 +394,7 @@ export const de = {
         responseIncompleteNotice: "Die Antwort wurde durch das Ausgabelängenlimit abgeschnitten. Mit einer Anschlussfrage können Sie fortfahren.",
         responseFailed: "Die Anfrage ist fehlgeschlagen.",
         traceId: "Trace-ID",
+        errorDetails: "Fehlerdetails",
         retry: "Erneut versuchen",
         reduceModelCount: "Anzahl der Modelle verringern",
         chooseAnotherModel: "Anderes Modell wählen",

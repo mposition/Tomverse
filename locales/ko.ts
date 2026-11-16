@@ -386,6 +386,7 @@ export const ko = {
         responseIncompleteNotice: "출력 길이 제한으로 답변이 중단되었습니다. 후속 질문으로 이어서 요청할 수 있습니다.",
         responseFailed: "요청이 실패했습니다.",
         traceId: "추적 ID",
+        errorDetails: "오류 상세",
         retry: "다시 시도",
         reduceModelCount: "모델 수 줄이기",
         chooseAnotherModel: "다른 모델 선택",
