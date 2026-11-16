@@ -349,8 +349,25 @@ test.describe("promotions that can be charged still work", () => {
           },
         },
       });
+      // With the analytics consent bar pending: it is fixed to the bottom of
+      // the screen, and on a phone it used to sit above this modal and take
+      // the taps meant for Apply and Continue.
+      await page.context().addCookies([
+        { name: "__tomverse_e2e_analytics", value: "1", url: "http://127.0.0.1:3100" },
+      ]);
       await openProCheckout(page, "?lang=en");
+      await expect(page.getByTestId("chat-consent-notice")).toBeVisible();
       await applyCode(page, "OZB50");
+      const continueButton = page.getByRole("button", { name: /Continue to checkout/ });
+      await continueButton.scrollIntoViewIfNeeded();
+      expect(
+        await continueButton.evaluate((el) => {
+          const rect = el.getBoundingClientRect();
+          const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+          return hit !== null && el.contains(hit);
+        }),
+        "the consent bar never covers the checkout dialog"
+      ).toBe(true);
 
       // "-50%" beside "renews every month at A$20.00" read as a one-month
       // offer; the period and the post-offer price are both spelled out.

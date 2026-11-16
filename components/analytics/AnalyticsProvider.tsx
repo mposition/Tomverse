@@ -985,7 +985,11 @@ export function AnalyticsProvider({
             aria-label={promptCopy.title}
             data-testid="chat-consent-notice"
             data-variant="bottom-bar"
-            className="fixed inset-x-0 bottom-0 z-[80] border-t border-zinc-200 bg-white/95 pb-[env(safe-area-inset-bottom)] text-zinc-700 shadow-[0_-4px_16px_rgba(24,24,27,0.08)] backdrop-blur dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-200 dark:shadow-[0_-4px_16px_rgba(0,0,0,0.35)]"
+            // z-30 keeps the bar above page content but under the sticky
+            // header and its menu (z-40) and every dialog (checkout is z-90):
+            // at z-100 it sat on top of the checkout modal on phones and took
+            // the taps meant for Apply and Continue.
+            className="fixed inset-x-0 bottom-0 z-30 border-t border-zinc-200 bg-white/95 pb-[env(safe-area-inset-bottom)] text-zinc-700 shadow-[0_-4px_16px_rgba(24,24,27,0.08)] backdrop-blur dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-200 dark:shadow-[0_-4px_16px_rgba(0,0,0,0.35)]"
           >
             <div className="@container/notice mx-auto max-w-7xl py-1.5 pl-3 pr-1 sm:px-6">
               <div className="flex items-center gap-1.5 @2xl/notice:gap-4">
