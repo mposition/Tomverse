@@ -64,6 +64,8 @@ export const adminAutoRouterOptimizerMessages = defineAdminMessages({
     recommendationFailureReasons: {
       out_of_scope: "it touched files the agent may not change",
       no_change: "it changed nothing",
+      already_satisfied: "already implemented on develop; no retry needed",
+      covered_by_pr: "covered by an existing PR; no duplicate PR needed",
       tests: "tests failed",
       review_reject: "the independent review rejected it",
       review_unknown: "the review gave no verdict",
@@ -256,6 +258,8 @@ export const adminAutoRouterOptimizerMessages = defineAdminMessages({
     recommendationFailureReasons: {
       out_of_scope: "에이전트가 바꾸면 안 되는 파일을 건드림",
       no_change: "바뀐 것이 없음",
+      already_satisfied: "develop에 이미 구현됨 · 재시도 불필요",
+      covered_by_pr: "기존 PR이 처리 중 · 중복 PR 불필요",
       tests: "테스트 실패",
       review_reject: "독립 검토에서 거절됨",
       review_unknown: "검토 결과를 받지 못함",

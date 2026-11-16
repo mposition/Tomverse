@@ -18,7 +18,7 @@ test("automatic retries require opt-in, cooldown and fewer than three attempts",
 
 test("only known test/no-change failures qualify; publication and ownership remain fenced", () => {
   assert.equal(automaticDailyRetry({ ...failed, reason: "no_change" }, now, true), true);
-  for (const reason of ["review_unknown", "push_failed", "pr_failed", "out_of_scope", "review_reject", "timeout", "agent_error"]) {
+  for (const reason of ["already_satisfied", "covered_by_pr", "review_unknown", "push_failed", "pr_failed", "out_of_scope", "review_reject", "timeout", "agent_error"]) {
     assert.equal(automaticDailyRetry({ ...failed, reason }, now, true), false);
   }
   for (const status of ["claimed", "pr_opened", "done", "dismissed", "sent_to_amux"]) {
