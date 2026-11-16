@@ -38,3 +38,26 @@ export const writeDecisionMakerLatchAudit = (
     summary: "Latched an AMUX Decision Maker instance off.",
     metadata: entry.metadata,
   });
+
+/**
+ * The system audit of a latch's release (owner direction 2026-11-16, migration
+ * 20261116140100_amux_dm_latch_release): `amux.decision.latch_release`,
+ * recorded by the released instance's own actor, as its latch was.
+ */
+export const writeDecisionMakerLatchReleaseAudit = (
+  tx: Prisma.TransactionClient,
+  entry: {
+    instance: DmInstanceScope;
+    eventId: string;
+    metadata: Record<string, string>;
+  },
+): Promise<string> =>
+  writeSystemAuditLog({
+    tx,
+    systemActor: DM_SWITCH_LATCH_ACTOR_FOR_INSTANCE[entry.instance],
+    action: DM_SWITCH_AUDIT_ACTIONS.latchRelease,
+    targetType: DM_SWITCH_AUDIT_TARGET_TYPE,
+    targetId: entry.eventId,
+    summary: "Released an AMUX Decision Maker latch an hour after it.",
+    metadata: entry.metadata,
+  });

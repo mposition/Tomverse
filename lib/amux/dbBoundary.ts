@@ -471,6 +471,13 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 10,
     isolation: "mutation",
   },
+  // The system's release of a latch an hour after it (owner direction
+  // 2026-11-16; lock, read, the instance's audit 4, the event: 7).
+  decisionMakerLatchRelease: {
+    operation: "decision_maker_latch_release",
+    prismaCallCeiling: 9,
+    isolation: "mutation",
+  },
   // §5's cleanup report of docs/policy/amux-decision-maker.md, stage S2-2a3
   // (lock, state, the instance's audit 4, the event: 7, pinned by
   // tests/amuxDecisionMakerRequest.test.mjs).
