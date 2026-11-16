@@ -33,6 +33,9 @@ const approved = { approvalId: "catalog-one", catalogDigest: receipt.catalogDige
 // runaway guard of thirty (infrastructure failures left out).
 const attempts: Record<string, number> = { [spentTask]: 30, [freshTask]: 0 };
 const assigned: string[] = [];
+// Tasks whose newest run ended as a platform failure a second ago.
+const backingOff = new Set<string>();
+const INFRA_REASON = "infra_no_result";
 const auditMetadata: Array<Record<string, unknown>> = [];
 
 const workers = [workerName, "copilot-chore", "claude-review"].map((name) => ({
@@ -55,9 +58,14 @@ const tx = {
         sql.includes("FOR UPDATE")) return [{ id: values[0] }];
     // readAmuxAttemptBudgetFacts: one statement for the budget.
     if (sql.includes('COUNT(*)::int AS "rows"')) {
-      const used = attempts[String(values.at(-1))] ?? 0;
-      return [{ rows: used, greatest: used || null, infra: 0,
-        reserved: BigInt(used) * BigInt("3400000") }];
+      const id = String(values.at(-1));
+      const used = attempts[id] ?? 0;
+      // The wait starts at the third platform failure in a row (amuxInfraRetryDelayMs).
+      const infra = backingOff.has(id) ? 3 : 0;
+      return [{ rows: used, greatest: used || null, infra, infraWindow: infra,
+        reserved: BigInt(used) * BigInt("3400000"),
+        lastEndedAt: infra ? new Date(now.getTime() - 1_000) : null,
+        lastEndedReason: infra ? INFRA_REASON : null }];
     }
     if (sql.includes("FROM \"AmuxExecutionAttempt\" a")) return [];
     if (sql.includes("FROM \"AmuxWorkerRuntime\"") && sql.includes("FOR UPDATE"))
@@ -187,5 +195,22 @@ test("a Task with its attempts spent is skipped and the next Task is assigned", 
     assert.equal(logged[0].projectedMicroUsd, overrun.projectedMicroUsd);
   } finally {
     // nothing to restore
+  }
+});
+
+test("a Task waiting out its platform-failure backoff is passed over and the next Task is assigned", async () => {
+  const { AMUX_INFRA_FAILURE_REASONS } = await import(mod("lib/amux/infraFailureCore.ts"));
+  assert.ok(AMUX_INFRA_FAILURE_REASONS.includes(INFRA_REASON), "the fixture uses a real infra reason");
+  assigned.length = 0;
+  attempts[spentTask] = 3;
+  attempts[freshTask] = 0;
+  backingOff.add(spentTask);
+  try {
+    const result = await (await service).tickV22WorkerClaim();
+    assert.equal(result.claimed, true);
+    assert.equal(result.claimed && result.taskId, freshTask);
+    assert.deepEqual(assigned, [freshTask], "the waiting Task holds nothing after it");
+  } finally {
+    backingOff.clear();
   }
 });

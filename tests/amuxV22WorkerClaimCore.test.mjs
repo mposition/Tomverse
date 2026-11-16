@@ -188,6 +188,9 @@ test("claim only selects routes the environment-gated one-shot sidecar can execu
   assert.match(claim, /worker\.routing_roles\.includes\(executionRole\)/);
   assert.match(claim, /amuxV22OneShotRouteSupported\(route\.provider, route\.modelId\)/);
   assert.match(claim, /const SKIPPED_CODES = new Set\(\[[^\]]*"one_shot_role_unavailable"/);
+  // A card waiting out its infrastructure backoff is passed over, not a stop
+  // for every candidate after it.
+  assert.match(claim, /const SKIPPED_CODES = new Set\(\[[^\]]*"infra_retry_backoff"/);
 });
 
 test("v22 tick wire never disguises a receipt as a v8 grant", () => {

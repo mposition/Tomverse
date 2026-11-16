@@ -583,7 +583,10 @@ const SKIPPED_CODES = new Set(["not_unassigned_todo", "task_not_ready",
   "worker_unavailable", "one_shot_role_unavailable", "attempt_budget_exhausted",
   "review_author_unknown", "conflict", "usage_unverified", "no_worker_for_grade",
   "cost_reconfirmation_required", "lane_unbound", "recovery_approval_changed",
-  "role_unavailable", "worker_quarantined"]);
+  "role_unavailable", "worker_quarantined",
+  // One card waiting out its platform-failure backoff never holds the rest
+  // (review r-20261116-184542-69dcb8).
+  "infra_retry_backoff"]);
 
 /**
  * One admitted tick assigns every ready Task it can, one transaction each, up
