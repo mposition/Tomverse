@@ -106,4 +106,16 @@ test("Chat error cards offer the model picker beside question restoration; Revie
   assert.match(chat, /restore-chat-question/);
   assert.doesNotMatch(withPicker(false, () => {}), /chat-error-choose-model/);
   assert.doesNotMatch(render([question, failed]), /chat-error-choose-model/);
+  // Chat wires both handlers to the same picker: the card shows it once.
+  const both = renderToStaticMarkup(
+    <SessionProvider session={null}>
+      <LanguageProvider initialLang="en">
+        <ChatMessageList messages={[question, failed]} currentChatId="c"
+          onRestoreQuestion={() => {}} onRetryQuestion={() => {}}
+          onRequestCloseModel={() => {}} onChooseAnotherModel={() => {}} />
+      </LanguageProvider>
+    </SessionProvider>
+  );
+  assert.equal((both.match(/Choose another model/g) ?? []).length, 1);
+  assert.match(both, /data-testid="retry-chat-question"/);
 });
