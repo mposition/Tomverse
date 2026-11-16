@@ -223,6 +223,40 @@ seed는 입력 토큰이며 **기존 규칙대로 사용자 크레딧에 반영�
 내부 USD는 사용자 응답에 노출하지 않습니다
 (`docs/policy/credit-and-cost-limits.md`).
 
+### 답변별 Review handoff (2026-11-15 로컬 구현)
+
+Chat continuation의 저장 완료된 텍스트 답변을 비교하면
+`POST /api/conversations/[id]/continuation/review-handoff`가 새 Review/manual
+대화·bridge·질문 초안을 한 transaction으로 만듭니다. 원문 단위
+`continuation/review` fork와 별개이며 기존 Chat 행은 변경하지 않습니다.
+요청에는 assistant ID와 idempotency key만 받습니다. key는 계정·부모·답변에
+결속되며 다른 anchor에 재사용하면 conflict입니다. 준비에는 Message·provider
+실행·크레딧 예약이 없고, 사용자가 모델을 선택하고 Send해야 실행됩니다.
+
+완료 답변의 `ChatResponseAttempt.continuationSourcePlan`은 실제 저장된 답변을
+생성한 provider attempt와 snapshot, ordinal, UTF-16 ranges, selected/recent/
+retrieved 구분을 담습니다. 본문은 저장하지 않습니다. 완료 Message와 같은
+transaction의 owner/revision CAS로 기록하며 실패·unknown·불완전 답변에는 성공
+evidence를 쓰지 않습니다. 과거 null manifest는 recent source로 재구성하고 당시
+선택·검색 문맥의 복원 한계를 표시합니다. 현재 미전송 picker는 읽지 않습니다.
+
+`bridge.reviewHandoff`는 질문 이전 native 메시지 ID·순서·내용 digest를 참조합니다.
+native 후보는 최근 100행, 본문과 출처 라벨은 3,000 추정 토큰 이내이며 누락을
+고지합니다. imported source의 기존 상한도 유지합니다. 두 출처 모두 user-role
+참고자료로 조립하고 부모 assistant를 새 모델의 assistant history로 넣지 않습니다.
+모든 모델·후속 질문·retry에 같은 참조를 적용하며 공통 조립 결과를 preflight와
+실제 send의 기존 입력 비용에 포함합니다. 과거 provider prompt byte replay는
+약속하지 않습니다.
+
+bootstrap·preflight·send는 부모와 source 각각의 소유권·passwordVersion 잠금·삭제,
+native membership/digest와 source 범위를 검증합니다. 이 handoff에서 검증 실패는
+참조 없는 실행으로 우회하지 않습니다. target의 기존 native 메시지는 읽을 수 있습니다.
+질문 초안은 target 전용 draft endpoint에서 기존 CAS를 사용하고, user Message 저장과
+동시에 소비합니다. 일반 Review에는 Chat recovery 접근을 열지 않습니다.
+첨부가 필요한 질문/prefix, Research·image·voice·Guest·public share는 지원하지 않습니다.
+참조 본문은 URL·localStorage·target Message·일반 export에 복제하지 않으며 기존
+bridge share 거절과 source opt-in export 계약을 유지합니다.
+
 Chat에서는 다음 일반 텍스트 질문에 한해 원문 메시지에서 직접 고른 구간과 최근 자동 발췌를 함께(최대 3개, 각각 UTF-16 단위 500자)을 쓸 수 있다. 브라우저는 원문 문자열을 채팅 본문으로 복사하지 않고 위치만 보낸다. 서버는 동일 소유권·잠금·삭제·기능 플래그 판단 뒤 해당 원본 안에서만 구간을 읽고 기존 역할·토큰 제한과 비활성 원문 형식을 적용한다. 잘못된 지정은 다른 원문으로 대체하지 않는다. 선택 이력이나 원문 사본을 계정 기억으로 새로 저장하지 않는다. 선택이 없으면 기존 `ext-seed-v2` 결과를 유지한다. 선택이 있으면 `ext-seed-v3-selected-recent`가 선택 구간을 먼저 보존하고 같은 본문 3,000 추정 토큰·메시지당 4,000 코드 포인트 안에서 최근 원문을 합성한다. ordinal과 UTF-16 문자 범위로 겹침을 제거하며 선택/최근/고유 메시지 개수는 각각 계산한다.
 
 ### 4.5 요청 단위 Auto 맥락과 전달 결과 (로컬 구현)
