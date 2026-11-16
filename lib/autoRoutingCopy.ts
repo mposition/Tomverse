@@ -30,6 +30,11 @@ export type AutoRoutingCopy = {
   compactLabel: string;
   /** One line under it. Says what happens, never how well. */
   description: string;
+  /**
+   * Short help tying the switch to the model menu: both control the same mode,
+   * and the menu's compact label is what the switch looks like while it is on.
+   */
+  modeHint: string;
   /** Shown on the picker row while Auto is on, in place of a model name. */
   activeSummary: string;
   /** The stored manual choice remains available, but is not the active answer model. */
@@ -58,6 +63,8 @@ export const autoRoutingCopy: Record<AutoRoutingLanguage, AutoRoutingCopy> = {
     compactLabel: "Auto",
     description:
       "Tomverse picks a model for each message. The one that answered is shown on the reply.",
+    modeHint:
+      "When Smart Adaptive is on, a model is chosen for each message and the model menu shows Auto. When it is off, the model you pick in the menu answers.",
     activeSummary: "Smart Adaptive — a model is chosen per message",
     manualFallbackLabel: "Manual return model",
     manualFallbackDescription: "Used after Smart Adaptive is turned off.",
@@ -75,6 +82,8 @@ export const autoRoutingCopy: Record<AutoRoutingLanguage, AutoRoutingCopy> = {
     compactLabel: "자동",
     description:
       "메시지마다 Tomverse가 모델을 고릅니다. 답변한 모델은 답변에 표시됩니다.",
+    modeHint:
+      "스마트 자동을 켜면 메시지마다 모델을 고르고 모델 메뉴에 ‘자동’으로 표시됩니다. 끄면 모델 메뉴에서 고른 모델이 답변합니다.",
     activeSummary: "스마트 자동 — 메시지마다 모델을 고릅니다",
     manualFallbackLabel: "수동 전환 모델",
     manualFallbackDescription: "스마트 자동을 끄면 이 모델을 사용합니다.",
@@ -91,6 +100,7 @@ export const autoRoutingCopy: Record<AutoRoutingLanguage, AutoRoutingCopy> = {
     label: "智能自动",
     compactLabel: "自动",
     description: "Tomverse 会为每条消息挑选模型。回答的模型会显示在回复上。",
+    modeHint: "开启智能自动后，每条消息都会挑选模型，模型菜单显示“自动”。关闭后，由你在菜单中选择的模型回答。",
     activeSummary: "智能自动 — 每条消息挑选一个模型",
     manualFallbackLabel: "手动模式模型",
     manualFallbackDescription: "关闭智能自动后使用此模型。",
@@ -107,6 +117,7 @@ export const autoRoutingCopy: Record<AutoRoutingLanguage, AutoRoutingCopy> = {
     label: "智慧自動",
     compactLabel: "自動",
     description: "Tomverse 會為每則訊息挑選模型。回答的模型會顯示在回覆上。",
+    modeHint: "開啟智慧自動後，每則訊息都會挑選模型，模型選單顯示「自動」。關閉後，由你在選單中選擇的模型回答。",
     activeSummary: "智慧自動 — 每則訊息挑選一個模型",
     manualFallbackLabel: "手動模式模型",
     manualFallbackDescription: "關閉智慧自動後使用此模型。",
@@ -124,6 +135,8 @@ export const autoRoutingCopy: Record<AutoRoutingLanguage, AutoRoutingCopy> = {
     compactLabel: "Auto",
     description:
       "Tomverse choisit un modèle pour chaque message. Celui qui a répondu est indiqué sur la réponse.",
+    modeHint:
+      "Quand l’adaptation intelligente est activée, un modèle est choisi pour chaque message et le menu des modèles affiche Auto. Désactivée, c’est le modèle choisi dans le menu qui répond.",
     activeSummary: "Adaptation intelligente — un modèle est choisi par message",
     manualFallbackLabel: "Modèle de retour manuel",
     manualFallbackDescription: "Utilisé après la désactivation de l’adaptation intelligente.",
@@ -141,6 +154,8 @@ export const autoRoutingCopy: Record<AutoRoutingLanguage, AutoRoutingCopy> = {
     compactLabel: "Auto",
     description:
       "Tomverse wählt für jede Nachricht ein Modell. Das antwortende Modell steht an der Antwort.",
+    modeHint:
+      "Ist die intelligente Automatik an, wird pro Nachricht ein Modell gewählt und das Modellmenü zeigt Auto. Ist sie aus, antwortet das im Menü gewählte Modell.",
     activeSummary: "Intelligente Automatik — pro Nachricht wird ein Modell gewählt",
     manualFallbackLabel: "Modell für den manuellen Modus",
     manualFallbackDescription: "Wird nach dem Ausschalten der intelligenten Automatik verwendet.",
@@ -158,6 +173,8 @@ export const autoRoutingCopy: Record<AutoRoutingLanguage, AutoRoutingCopy> = {
     compactLabel: "Auto",
     description:
       "Tomverse elige un modelo para cada mensaje. El que respondió aparece en la respuesta.",
+    modeHint:
+      "Con la adaptación inteligente activada, se elige un modelo para cada mensaje y el menú de modelos muestra Auto. Desactivada, responde el modelo que elijas en el menú.",
     activeSummary: "Adaptación inteligente — se elige un modelo por mensaje",
     manualFallbackLabel: "Modelo para el modo manual",
     manualFallbackDescription: "Se usa después de desactivar la adaptación inteligente.",
@@ -175,6 +192,8 @@ export const autoRoutingCopy: Record<AutoRoutingLanguage, AutoRoutingCopy> = {
     compactLabel: "Auto",
     description:
       "O Tomverse escolhe um modelo para cada mensagem. O que respondeu aparece na resposta.",
+    modeHint:
+      "Com a adaptação inteligente ligada, um modelo é escolhido para cada mensagem e o menu de modelos mostra Auto. Desligada, responde o modelo escolhido no menu.",
     activeSummary: "Adaptação inteligente — um modelo é escolhido por mensagem",
     manualFallbackLabel: "Modelo para o modo manual",
     manualFallbackDescription: "Usado após desligar a adaptação inteligente.",
