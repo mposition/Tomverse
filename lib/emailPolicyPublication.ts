@@ -118,9 +118,11 @@ export const AMENDED_DOCUMENT_EVIDENCE: Readonly<
   // in APPROVED_AMENDED_DIGESTS.
   // The fallback-provider disclosure in English and Korean changes the observed
   // content on 2026-11-15. This records that content, not publication approval.
+  // The Memory semantic-search copy correction also changes the source digest
+  // while its notice remains hidden. Record the observation without approving it.
   "/privacy": {
     date: "2026-11-16",
-    contentSha256: "b1e897e3b94c044847919b627354ace36f1046b73af934f815b7611a21973020",
+    contentSha256: "bc4dd8939516d84004a355ad6591edf9a6da60d62c291a7ffbd2562cd2fae3aa",
   },
   "/terms": {
     date: "2026-11-16",

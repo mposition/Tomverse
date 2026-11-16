@@ -40,7 +40,7 @@ import { MobileChatShell } from "@/components/chat/MobileChatShell";
 import { VoiceConversationControl } from "@/components/chat/VoiceConversationControl";
 import type { VoiceAnswerReceipt } from "@/components/chat/voiceConversationClient";
 import { TomverseWordmark } from "@/components/chat/TomverseWordmark";
-import { prepareChatContextBundle } from "@/lib/chatContextBundleClient";
+import { prepareChatContextBundle, type ChatContextPreparationInput } from "@/lib/chatContextBundleClient";
 import { prepareChatSendInputs } from "@/lib/chatSendPreparation";
 import { boundedLatencyMs, createLatencyStages } from "@/lib/responseLatencyStages";
 import type { ClientLatencyStages } from "@/lib/responseLatencyCore";
@@ -2384,7 +2384,7 @@ export function ChatPageClient({
   const contextRepreflightInputsRef = useRef(
     new Map<
       string,
-      { conversationId: string | null; modelIds: string[]; prompt: string }
+      ChatContextPreparationInput
     >()
   );
   /**
@@ -7466,6 +7466,7 @@ export function ChatPageClient({
         conversationId: isGuestMode ? null : activeChatId,
         modelIds: activeModelIds,
         prompt: authoredPrompt,
+        ...(contextBundle ? { previousContextBundle: contextBundle } : {}),
       });
       localComparisonQuestionsRef.current.set(comparisonId, authoredPrompt);
       /*

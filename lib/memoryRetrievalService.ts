@@ -1,13 +1,17 @@
 import "server-only";
 
 import { createHash } from "node:crypto";
-import { buildMemoryQueryPlan } from "@/lib/memoryQueryPlan";
+import {
+    buildMemoryQueryPlan, memoryRelevanceContextEnabled,
+    type MemoryQueryPolicy, type MemorySemanticContext,
+} from "@/lib/memoryQueryPlan";
 import {
     CORE_MEMORY_KINDS,
     MEMORY_RETRIEVAL_ALGORITHM_VERSION,
     MEMORY_SEMANTIC_DEFAULTS,
     MEMORY_SEMANTIC_RETRIEVAL_ALGORITHM_VERSION,
     memoryRerankCandidates,
+    contextualRankingDisplacesCurrentQuery,
     selectMemoryContext,
     type MemoryContextBudget,
     type MemoryContextSelection,
@@ -16,7 +20,7 @@ import {
 import { getMemorySettings } from "@/lib/memoryService";
 import { STYLE_MEMORY_KINDS } from "@/lib/memoryValidatorCore";
 import { prisma } from "@/lib/prisma";
-import { rerankForRetrieval, semanticFeatureReady } from "@/lib/semanticRetrieval";
+import { rerankForRetrieval, rerankMemoryForRetrieval, semanticFeatureReady } from "@/lib/semanticRetrieval";
 import type { SemanticCallMode } from "@/lib/semanticRetrievalCore";
 
 /**
@@ -78,6 +82,14 @@ export type MemoryRetrievalResult = MemoryContextSelection & {
     consideredCount: number;
     /** Whether an external ranking shaped this selection (§9a). */
     semanticRerank: boolean;
+    /** The plan actually adopted; unsuccessful contextual attempts are excluded. */
+    effectiveQueryPlan: ReturnType<typeof buildMemoryQueryPlan> & {
+        model?: string;
+        historySources?: { id: string; digest: string }[];
+    };
+    memoryQueryPolicy: MemoryQueryPolicy;
+    memoryHistorySources?: { id: string; digest: string }[];
+    semanticFallbackReason?: string | null;
 };
 
 const EMPTY_RESULT: MemoryRetrievalResult = {
@@ -96,6 +108,8 @@ const EMPTY_RESULT: MemoryRetrievalResult = {
     algorithmVersion: MEMORY_RETRIEVAL_ALGORITHM_VERSION,
     consideredCount: 0,
     semanticRerank: false,
+    effectiveQueryPlan: buildMemoryQueryPlan(""),
+    memoryQueryPolicy: "legacy",
 };
 
 const hashSignature = (signature: string) =>
@@ -175,6 +189,7 @@ export async function retrieveMemoryContext(input: {
      * Defaults to "allow".
      */
     semantic?: SemanticCallMode;
+    memorySemanticContext?: MemorySemanticContext;
     /**
      * Extraction pairs whose memories may be injected (§12.4). Omit to
      * consider every stored memory — which is right for diagnostics and for
@@ -191,7 +206,10 @@ export async function retrieveMemoryContext(input: {
         return { ...EMPTY_RESULT, resultHash: hashSignature(EMPTY_RESULT.signature) };
     }
 
-    const queryPlan = buildMemoryQueryPlan(input.query);
+    const memoryQueryPolicy = input.memorySemanticContext?.queryPolicy ??
+        (memoryRelevanceContextEnabled() ? "full" : "legacy");
+    // The lexical plan always comes solely from the authored current question.
+    const queryPlan = buildMemoryQueryPlan(input.query, { queryPolicy: memoryQueryPolicy });
     const queryTerms = queryPlan.terms;
 
     // What every candidate has to satisfy, whichever query fetches it.
@@ -330,29 +348,62 @@ export async function retrieveMemoryContext(input: {
 
     // Core/pinned/style never leave the app. Both relevant pools get slots;
     // lexical rows without a score still retain their lexical eligibility.
-    const externalRelevance = rerank
-        ? await rerankForRetrieval({
-              feature: "memoryRerank",
+    const documents = rerank
+        ? memoryRerankCandidates({ lexical: memories, extras, now })
+            .map((memory) => ({ id: memory.id, text: memory.statement }))
+        : [];
+    const fullRanking = rerank && memoryQueryPolicy === "full"
+        ? await rerankMemoryForRetrieval({
               userId: input.userId,
-              query: queryPlan.semanticQuery,
-              documents: memoryRerankCandidates({ lexical: memories, extras, now })
-                  .map((memory) => ({ id: memory.id, text: memory.statement })),
+              currentQuery: input.query,
+              history: input.memorySemanticContext?.history.map((source) => source.content) ?? [],
+              documents,
               now,
               mode: input.semantic,
           })
         : null;
-
-    const selection = selectMemoryContext({
-        // Without a ranking the extras were never candidates.
-        memories: externalRelevance
-            ? [...memories, ...extras.filter(memory => externalRelevance.has(memory.id))]
+    let externalRelevance = memoryQueryPolicy === "full" ? fullRanking?.scores ?? null
+        : rerank ? await rerankForRetrieval({
+              feature: "memoryRerank",
+              userId: input.userId,
+              query: queryPlan.semanticQuery,
+              documents,
+              now,
+              mode: input.semantic,
+          })
+        : null;
+    const selectionInput = {
+        query: queryTerms, now, styleEnabled: settings.styleEnabled, budget: input.budget,
+    };
+    const receivedRelevance = externalRelevance;
+    let selection = selectMemoryContext({
+        ...selectionInput,
+        memories: receivedRelevance
+            ? [...memories, ...extras.filter(memory => receivedRelevance.has(memory.id))]
             : memories,
-        query: queryTerms,
-        now,
-        styleEnabled: settings.styleEnabled,
-        budget: input.budget,
         ...(externalRelevance ? { externalRelevance } : {}),
     });
+    let semanticFallbackReason: MemoryRetrievalResult["semanticFallbackReason"] = fullRanking?.fallbackReason;
+    if (externalRelevance && fullRanking?.adopted && fullRanking.adopted.historyCount > 0) {
+        const lexical = selectMemoryContext({ ...selectionInput, memories });
+        if (contextualRankingDisplacesCurrentQuery(lexical, selection)) {
+            // Reuse the existing fallback, not a second call or a hybrid score.
+            selection = lexical;
+            externalRelevance = null;
+            semanticFallbackReason = "history_displaced_current_query";
+        }
+    }
+    const adopted = externalRelevance ? fullRanking?.adopted : null;
+    const memoryHistorySources = adopted && adopted.historyCount > 0
+        ? input.memorySemanticContext?.history.slice(-adopted.historyCount)
+            .map(({ id, digest }) => ({ id, digest }))
+        : undefined;
+    const effectiveQueryPlan = adopted ? {
+        ...queryPlan,
+        semanticQuery: adopted.effectiveQuery,
+        model: adopted.model,
+        ...(memoryHistorySources ? { historySources: memoryHistorySources } : {}),
+    } : queryPlan;
 
     return {
         ...selection,
@@ -363,5 +414,9 @@ export async function retrieveMemoryContext(input: {
         consideredCount: rows.length + (externalRelevance
             ? extras.filter(memory => externalRelevance.has(memory.id)).length : 0),
         semanticRerank: externalRelevance !== null,
+        effectiveQueryPlan,
+        memoryQueryPolicy,
+        memoryHistorySources,
+        semanticFallbackReason,
     };
 }

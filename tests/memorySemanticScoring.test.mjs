@@ -19,6 +19,7 @@ import {
     memoryRerankCandidates,
     memoryTier,
     selectMemoryContext,
+    contextualRankingDisplacesCurrentQuery,
 } from "../lib/memoryRetrievalScoring.ts";
 import { STYLE_MEMORY_KINDS } from "../lib/memoryValidatorCore.ts";
 
@@ -47,6 +48,46 @@ const select = (memories, extra = {}) =>
     selectMemoryContext({ memories, query: QUERY, now: NOW, ...extra });
 const idsOf = (selection) => selection.selected.map((row) => row.memory.id);
 const byId = (selection, id) => selection.selected.find((row) => row.memory.id === id);
+
+test("history cannot replace every current-query match with zero-overlap memories", () => {
+    const memories = [memory("coffee", MATCHING), memory("atlas", { searchTerms: ["atlas"] })];
+    const lexical = select(memories);
+    const contextual = select(memories, { externalRelevance: new Map([["coffee", 0.0757], ["atlas", 0.1268]]) });
+    assert.deepEqual(idsOf(lexical), ["coffee"]);
+    assert.deepEqual(idsOf(contextual), ["atlas"]);
+    assert.equal(contextualRankingDisplacesCurrentQuery(lexical, contextual), true);
+});
+
+test("core and style matches do not conceal displacement of ordinary current-query matches", () => {
+    const memories = [memory("coffee", MATCHING), memory("atlas"),
+        memory("core", { ...MATCHING, kind: "identity" }), memory("style", { ...MATCHING, kind: STYLE_MEMORY_KINDS[0] })];
+    const contextual = select(memories, { externalRelevance: new Map([["coffee", 0.01], ["atlas", 0.9]]) });
+    assert.equal(contextualRankingDisplacesCurrentQuery(select(memories), contextual), true);
+});
+
+test("contextual abstention and retained current-query matches remain valid", () => {
+    const memories = [memory("coffee", MATCHING), memory("atlas")];
+    const lexical = select(memories);
+    for (const scores of [new Map([["coffee", 0], ["atlas", 0]]), new Map([["coffee", 0.4], ["atlas", 0.9]])]) {
+        assert.equal(contextualRankingDisplacesCurrentQuery(lexical, select(memories, { externalRelevance: scores })), false);
+    }
+});
+
+test("history may resolve zero-overlap references when the current lexical selection has no relevant match", () => {
+    const memories = [memory("atlas"), memory("core", { ...MATCHING, kind: "identity" })];
+    const contextual = select(memories, { externalRelevance: new Map([["atlas", 0.9]]) });
+    assert.equal(contextualRankingDisplacesCurrentQuery(select(memories), contextual), false);
+});
+
+test("expired and budget-omitted lexical rows cannot veto contextual selection", () => {
+    const memories = [memory("coffee", { ...MATCHING, expiresAt: new Date("2020-01-01") }), memory("atlas")];
+    const contextual = select(memories, { externalRelevance: new Map([["atlas", 0.9]]) });
+    assert.equal(contextualRankingDisplacesCurrentQuery(select(memories), contextual), false);
+    const withCore = [memory("coffee", MATCHING), memory("core", { kind: "identity" }), memory("atlas")];
+    const budget = { maxItems: 1 };
+    assert.equal(contextualRankingDisplacesCurrentQuery(select(withCore, { budget }),
+        select(withCore, { budget, externalRelevance: new Map([["atlas", 0.9]]) })), false);
+});
 
 /* ------------------------------------------------------- versions and defaults */
 

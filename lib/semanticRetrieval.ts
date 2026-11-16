@@ -8,7 +8,7 @@ import {
     RETRIEVAL_PROVIDER_BUCKET_KEY,
     SEMANTIC_RETRIEVAL_LIMITS,
     boundQuery,
-    boundRerankQuery,
+    effectiveRerankQuery,
     decodeVector,
     embedCostMicroUsd,
     embedTextWorstCaseTokens,
@@ -27,8 +27,15 @@ import {
     type SemanticCallMode,
     type SemanticRetrievalConfig,
     type SemanticRetrievalFeature,
+    type RerankQueryPolicy,
 } from "@/lib/semanticRetrievalCore";
 import { readSemanticRetrievalSwitch } from "@/lib/semanticRetrievalSettings";
+import {
+    memoryRelevanceContextEnabled,
+    prepareMemorySemanticInput,
+    MEMORY_RERANK_QUERY_POLICY,
+    type MemorySemanticFallbackReason,
+} from "@/lib/memorySemanticInput";
 
 /**
  * Semantic retrieval calls, each behind its switch, its configuration, the
@@ -244,44 +251,90 @@ export async function sweepSemanticRetrievalCache(limit = 5_000): Promise<number
  * At most `maxRerankDocuments` are sent, in the order given; the caller's
  * order is already deterministic, so the same request ranks the same slice.
  */
-export async function rerankForRetrieval(input: {
+type RerankRuntimeFallbackReason =
+    | "off"
+    | "empty_query"
+    | "empty_documents"
+    | "provider_or_budget_unavailable"
+    | "cached_failure"
+    | "not_cached"
+    | "cost_not_finite"
+    | "budget_refused"
+    | "cache_unconfirmed"
+    | "not_configured"
+    | "unauthorized"
+    | "rate_limited"
+    | "timeout"
+    | "provider_error"
+    | "invalid_response";
+
+type RerankExecutionResult = {
+    scores: ReadonlyMap<string, number> | null;
+    model: string | null;
+    fallbackReason: RerankRuntimeFallbackReason | null;
+};
+
+type RerankExecutionInput = {
     feature: Extract<SemanticRetrievalFeature, "knowledgeRerank" | "memoryRerank">;
     userId: string;
     query: string;
     documents: ReadonlyArray<{ id: string; text: string }>;
     now?: Date;
-    /** "cached_only" on the route that verifies a bundle. Defaults to "allow". */
     mode?: SemanticCallMode;
-}): Promise<ReadonlyMap<string, number> | null> {
-    if (input.mode === "off") return null;
-    // The question as it will be sent, so the cache key, the reserved worst
-    // case and the request all describe the same thing.
-    const query = boundRerankQuery(input.query).trim();
+    queryPolicy?: RerankQueryPolicy;
+    queryTokensUpperBound?: number;
+    ready?: ReadyFeature;
+};
+
+const executeRerank = async (input: RerankExecutionInput): Promise<RerankExecutionResult> => {
+    if (input.mode === "off") return { scores: null, model: null, fallbackReason: "off" };
+    const normalizedQuery = effectiveRerankQuery(input.query, input.queryPolicy);
+    const query = input.queryPolicy === "memory-v3" ? normalizedQuery : normalizedQuery.trim();
     const documents = input.documents.slice(0, SEMANTIC_RETRIEVAL_LIMITS.maxRerankDocuments);
-    if (!query || documents.length === 0) return null;
+    if (!query.trim()) return { scores: null, model: null, fallbackReason: "empty_query" };
+    if (documents.length === 0) return { scores: null, model: null, fallbackReason: "empty_documents" };
 
-    const ready = await semanticFeatureReady(input.feature);
-    if (!ready?.config.rerank) return null;
+    const ready = input.ready ?? await semanticFeatureReady(input.feature);
+    if (!ready?.config.rerank) {
+        return { scores: null, model: null, fallbackReason: "provider_or_budget_unavailable" };
+    }
     const { model, billing } = ready.config.rerank;
-
-    const key = rerankCacheKey({ feature: input.feature, userId: input.userId, model, query, documents });
+    const key = rerankCacheKey({
+        feature: input.feature,
+        userId: input.userId,
+        model,
+        query,
+        queryPolicy: input.queryPolicy,
+        documents,
+    });
     const cached = await readCache(key);
     if (cached) {
         log({ feature: input.feature, api: "rerank", outcome: cached.kind === "rerank" ? "cached" : "cached_failure" });
-        return cached.kind === "rerank" ? new Map(cached.scores) : null;
+        return cached.kind === "rerank"
+            ? { scores: new Map(cached.scores), model, fallbackReason: null }
+            : { scores: null, model, fallbackReason: "cached_failure" };
     }
     if (input.mode === "cached_only") {
-        // Nothing was stored for this turn, so the bundle being verified was
-        // signed over the lexical selection. Asking now could only disagree.
         log({ feature: input.feature, api: "rerank", outcome: "not_cached" });
-        return null;
+        return { scores: null, model, fallbackReason: "not_cached" };
     }
 
     const startedAt = Date.now();
     const reservedAt = input.now ?? new Date();
     const texts = documents.map((document) => document.text);
-    const worstCase = rerankWorstCaseMicroUsd(billing, query, texts);
-    const finish = async (value: SemanticCacheValue, fields: Record<string, unknown>) => {
+    const worstCase = rerankWorstCaseMicroUsd(billing, query, texts, {
+        queryPolicy: input.queryPolicy,
+        queryTokensUpperBound: input.queryTokensUpperBound,
+    });
+    if (worstCase === null) {
+        log({ feature: input.feature, api: "rerank", model, outcome: "cost_not_finite" });
+        return { scores: null, model, fallbackReason: "cost_not_finite" };
+    }
+    const finish = async (
+        value: SemanticCacheValue,
+        fields: Record<string, unknown>,
+        failureReason: RerankRuntimeFallbackReason | null
+    ): Promise<RerankExecutionResult> => {
         const stored = await writeCache(key, input.userId, value);
         log({
             feature: input.feature,
@@ -292,43 +345,42 @@ export async function rerankForRetrieval(input: {
             ...fields,
             ...(stored ? {} : { cache: "unconfirmed" }),
         });
-        return stored?.kind === "rerank" ? new Map(stored.scores) : null;
+        if (stored?.kind === "rerank") {
+            return { scores: new Map(stored.scores), model, fallbackReason: null };
+        }
+        return { scores: null, model, fallbackReason: stored ? failureReason : "cache_unconfirmed" };
     };
 
     if (!(await reserveRetrievalCost(worstCase, ready.budget, reservedAt))) {
-        return finish({ kind: "failed" }, { outcome: "budget_refused" });
+        return finish({ kind: "failed" }, { outcome: "budget_refused" }, "budget_refused");
     }
-    const result = await callRerank({ model, query, documents: texts });
+    const result = await callRerank({
+        model,
+        query,
+        documents: texts,
+        queryPolicy: input.queryPolicy,
+    });
     if (!result.ok) {
-        // Nothing left this process: give the whole hold back.
         if (!result.sent) await settleRetrievalCost(-worstCase, reservedAt);
-        return finish({ kind: "failed" }, { outcome: result.failure });
+        return finish({ kind: "failed" }, { outcome: result.failure }, result.failure);
     }
     const billed = rerankBilledMicroUsd(billing, result.value);
     if (billed === null) {
-        // Nothing reported in the configured unit: the whole hold stays, and
-        // the operator learns the configuration may not match the invoice.
-        console.error(
-            JSON.stringify({
-                event: "semantic_retrieval_billing_unit_missing",
-                feature: input.feature,
-                configured: billing.unit,
-                searchUnits: result.value.searchUnits,
-                inputTokens: result.value.inputTokens,
-            })
-        );
+        console.error(JSON.stringify({
+            event: "semantic_retrieval_billing_unit_missing",
+            feature: input.feature,
+            configured: billing.unit,
+            searchUnits: result.value.searchUnits,
+            inputTokens: result.value.inputTokens,
+        }));
     } else {
         if (billed > worstCase) {
-            // The bound is meant to make this impossible. Recorded rather than
-            // hidden, and the bucket still learns the true figure below.
-            console.error(
-                JSON.stringify({
-                    event: "semantic_retrieval_billed_above_reservation",
-                    feature: input.feature,
-                    reserved: worstCase,
-                    billed,
-                })
-            );
+            console.error(JSON.stringify({
+                event: "semantic_retrieval_billed_above_reservation",
+                feature: input.feature,
+                reserved: worstCase,
+                billed,
+            }));
         }
         await settleRetrievalCost(billed - worstCase, reservedAt);
     }
@@ -341,8 +393,86 @@ export async function rerankForRetrieval(input: {
             outcome: "ranked",
             searchUnits: result.value.searchUnits,
             inputTokens: result.value.inputTokens,
-        }
+        },
+        null
     );
+};
+
+export async function rerankForRetrieval(input: {
+    feature: Extract<SemanticRetrievalFeature, "knowledgeRerank" | "memoryRerank">;
+    userId: string;
+    query: string;
+    documents: ReadonlyArray<{ id: string; text: string }>;
+    now?: Date;
+    mode?: SemanticCallMode;
+}): Promise<ReadonlyMap<string, number> | null> {
+    return (await executeRerank(input)).scores;
+}
+
+export type MemoryRerankFallbackReason = MemorySemanticFallbackReason | RerankRuntimeFallbackReason;
+
+export type MemoryRerankResult = {
+    scores: ReadonlyMap<string, number> | null;
+    adopted: {
+        effectiveQuery: string;
+        historyCount: number;
+        policy: typeof MEMORY_RERANK_QUERY_POLICY;
+        model: string;
+    } | null;
+    fallbackReason: MemoryRerankFallbackReason | null;
+};
+
+/** Memory v3 keeps one prepared query identical through cache, cost and wire. */
+export async function rerankMemoryForRetrieval(input: {
+    userId: string;
+    currentQuery: string;
+    history?: readonly string[];
+    documents: ReadonlyArray<{ id: string; text: string }>;
+    now?: Date;
+    mode?: SemanticCallMode;
+}): Promise<MemoryRerankResult> {
+    if (input.mode === "off") return { scores: null, adopted: null, fallbackReason: "off" };
+    if (!memoryRelevanceContextEnabled()) {
+        return { scores: null, adopted: null, fallbackReason: "context_policy_disabled" };
+    }
+    const ready = await semanticFeatureReady("memoryRerank");
+    if (!ready?.config.rerank) {
+        return { scores: null, adopted: null, fallbackReason: "provider_or_budget_unavailable" };
+    }
+    const { model, billing } = ready.config.rerank;
+    const prepared = prepareMemorySemanticInput({
+        model,
+        billing,
+        currentQuery: input.currentQuery,
+        history: input.history,
+    });
+    if (!prepared.ok) {
+        log({ feature: "memoryRerank", api: "rerank", model, outcome: prepared.reason });
+        return { scores: null, adopted: null, fallbackReason: prepared.reason };
+    }
+    const execution = await executeRerank({
+        feature: "memoryRerank",
+        userId: input.userId,
+        query: prepared.value.effectiveQuery,
+        queryPolicy: "memory-v3",
+        queryTokensUpperBound: prepared.value.queryTokensUpperBound,
+        documents: input.documents,
+        now: input.now,
+        mode: input.mode,
+        ready,
+    });
+    return {
+        scores: execution.scores,
+        adopted: execution.scores && execution.model
+            ? {
+                  effectiveQuery: prepared.value.effectiveQuery,
+                  historyCount: prepared.value.historyCount,
+                  policy: prepared.value.policy,
+                  model: execution.model,
+              }
+            : null,
+        fallbackReason: execution.fallbackReason,
+    };
 }
 
 // ---------------------------------------------------------------------------

@@ -1,3 +1,4 @@
+import { prepareMemoryHistoryContext } from "@/lib/memoryHistorySnapshot";
 import { randomUUID } from "node:crypto";
 import { getServerSession } from "next-auth/next";
 import { z } from "zod";
@@ -7,7 +8,7 @@ import {
     readLimitedJson,
 } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
-import { chatErrorResponse } from "@/lib/chatSecurity";
+import { ChatAccessError, chatErrorResponse } from "@/lib/chatSecurity";
 import { buildChatTurnContext } from "@/lib/chatTurnContext";
 import { issueChatContextBundle } from "@/lib/chatContextBundleService";
 import { getUserBillingPlan } from "@/lib/billingEntitlements";
@@ -55,6 +56,7 @@ const contextSchema = z
         conversationId: z.string().min(1).max(64).nullable().optional(),
         modelIds: z.array(z.string().min(1).max(100)).min(1).max(3),
         prompt: z.string().max(50_000),
+        previousContextBundle: z.string().min(1).max(8_192).optional(),
     })
     .strict();
 
@@ -77,6 +79,9 @@ export async function POST(request: Request) {
             { minute: 60, day: 2_000 }
         );
         const payload = await readLimitedJson(request, 64 * 1024, contextSchema);
+        if (payload.previousContextBundle !== undefined && !userId) {
+            throw new ChatAccessError(400, "INVALID_CONTEXT_BUNDLE", "Invalid chat context.");
+        }
 
         const headers = new Headers({
             "Cache-Control": "no-store",
@@ -148,6 +153,10 @@ export async function POST(request: Request) {
         const context = await buildChatTurnContext({
             userId,
             query: payload.prompt,
+            memorySemanticContext: prepareMemoryHistoryContext({
+                request, userId, conversationId, query: payload.prompt, modelIds: payload.modelIds,
+                previousContextBundle: payload.previousContextBundle,
+            }),
             conversationMode: conversationMemoryMode,
             profileVersionId,
             // Only a bound profile uses the tier to check its model entitlement.

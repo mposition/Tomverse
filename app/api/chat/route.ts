@@ -1,3 +1,4 @@
+import { replayMemoryHistoryContext } from "@/lib/memoryHistorySnapshot";
 import { appendRouterSearchEvidence, prepareRouterSearch, withGroundedSourceGuidance } from "@/lib/chatRouterPresearch";
 import { createGroundedCitationStream } from "@/lib/groundedCitationLinks";
 import { createChatSearchObservation, type ChatSearchObservation } from "@/lib/chatSearchObservation";
@@ -462,7 +463,6 @@ import { verifyingSemanticModes } from "@/lib/semanticRetrievalCore";
 import { latestUserPromptText } from "@/lib/chatMemoryContextCore";
 import {
     consumeContextBundle,
-    readChatContextBundleSemanticSteps,
     verifyChatContextBundle,
 } from "@/lib/chatContextBundleService";
 import {
@@ -2501,9 +2501,23 @@ async function handleChatPost(
         // A user can revoke memory or change the profile while the Router runs:
         // only the later, freshly rebuilt context may reach the answer model.
         const checkPricedContext = async (token: string, userId: string, profileVersionId: string | null, memoryMode: string | null) => {
+            const envelope = verifyChatContextBundle(token, {
+                subjectKey: userId, conversationId: conversationId ?? null, modelId: requestedModelId,
+            });
+            if (!envelope.ok) return { turnContext: null, verification: envelope };
+            const query = latestUserPromptText(messages);
+            let historyStale = false;
+            const memorySemanticContext = async () => {
+                const replay = conversationId ? await replayMemoryHistoryContext({
+                    request: req, userId, conversationId, query, payload: envelope.payload,
+                }) : { queryPolicy: envelope.payload.memoryQueryPolicy ?? "legacy", history: [] } as const;
+                historyStale = replay === null;
+                return replay ?? { queryPolicy: "full" as const, history: [] };
+            };
             const turnContext = await buildChatTurnContext({
                 userId,
-                query: latestUserPromptText(messages),
+                query,
+                memorySemanticContext,
                 profileVersionId,
                 plan: accountPlan?.tier ?? null,
                 conversationMode: memoryMode,
@@ -2511,8 +2525,9 @@ async function handleChatPost(
                 // asks the retrieval provider. The bundle says which semantic
                 // steps shaped its selection; those are rebuilt from what the
                 // issuing route stored and every other step is off.
-                semantic: verifyingSemanticModes(readChatContextBundleSemanticSteps(token)),
+                semantic: verifyingSemanticModes(envelope.payload.semanticSteps),
             });
+            if (historyStale) return { turnContext: null, verification: { ok: false as const, reason: "stale" as const } };
             const verification = verifyChatContextBundle(token, {
                 subjectKey: userId, conversationId: conversationId ?? null, modelId: requestedModelId,
                 currentFingerprint: turnContext.fingerprint,
@@ -3487,7 +3502,7 @@ async function handleChatPost(
             const { turnContext, verification } = await checkPricedContext(contextBundle, session.user.id,
                 conversationProfileVersionId, conversationMemoryMode);
             finishContextTiming();
-            if (!verification.ok) return await refuseContext(verification.reason, Boolean(fusion && !fusion.resume));
+            if (!verification.ok || !turnContext) return await refuseContext(!verification.ok ? verification.reason : "stale", Boolean(fusion && !fusion.resume));
             verifiedContext = {
                 bundleId: verification.payload.bundleId,
                 expiresAt: new Date(verification.payload.expiresAtMs),
