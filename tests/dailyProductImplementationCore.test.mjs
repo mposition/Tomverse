@@ -24,6 +24,11 @@ test("closed attempts do not hide useful prior work, and closed without merge is
     pull(2, "scout.one", { state: "closed", merged_at: "2026-11-16T00:00:00Z" }), pull(4, "scout.one"),
     pull(5, "scout.closed", { state: "closed", body: "Goal-Step: daily-product-improvements/scout.closed completes\r\n" })]);
   assert.equal(taskImplementation(lookup, "cycle:0").state, "open");
-  assert.equal(taskImplementation(lookup, "scout.one").state, "merged");
+  assert.deepEqual(taskImplementation(lookup, "scout.one"), { prUrl: "https://github.com/mposition/Tomverse/pull/4", state: "open" });
   assert.equal(implementationCoversTask(taskImplementation(lookup, "scout.closed")), false);
+});
+
+test("a newer recovery PR supersedes an older merged partial implementation of the same task", () => {
+  const lookup = dailyImplementationLookup([pull(4029, "cycle:5", { state: "closed", merged_at: "2026-11-16T00:00:00Z" }), pull(4057, "cycle:5")]);
+  assert.deepEqual(taskImplementation(lookup, "cycle:5"), { prUrl: "https://github.com/mposition/Tomverse/pull/4057", state: "open" });
 });

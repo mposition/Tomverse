@@ -27,7 +27,7 @@ export function dailyImplementationLookup(pulls: readonly unknown[]): DailyImple
       if (!taskPattern.test(task)) continue;
       const prior = result.byTask[task];
       // A newer closed/abandoned attempt cannot erase a useful existing PR.
-      if (prior?.state === "merged" && implementation.state !== "merged" || prior?.state === "open" && implementation.state === "closed") continue;
+      if (prior && prior.state !== "closed" && implementation.state === "closed") continue;
       result.byTask[task] = implementation;
     }
   }
