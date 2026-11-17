@@ -12,8 +12,7 @@ const secret = "v19_manifest_agent_secret_01234567890123456789";
 const ideaId = "ea86a25b-919f-4714-a3d8-45ef5a18b175";
 const manifestId = "dc86a25b-919f-4714-a3d8-45ef5a18b175";
 const envNames = ["TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET",
-  "TOMVERSE_AMUX_SYNC_SECRET", "TOMVERSE_AMUX_V19_READ_MANIFEST_WRITE",
-  "TOMVERSE_AMUX_V19_READ_MANIFEST_READ",
+  "TOMVERSE_AMUX_SYNC_SECRET",
   "TOMVERSE_AMUX_V4_CONTENT_RETENTION",
   "TOMVERSE_AMUX_V19_READ_MANIFEST_RETENTION"] as const;
 const previousEnv = Object.fromEntries(envNames.map((name) => [name, process.env[name]]));
@@ -103,8 +102,6 @@ const reset = () => {
   readFails = false;
   process.env.TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET = secret;
   delete process.env.TOMVERSE_AMUX_SYNC_SECRET;
-  process.env.TOMVERSE_AMUX_V19_READ_MANIFEST_WRITE = "enabled";
-  process.env.TOMVERSE_AMUX_V19_READ_MANIFEST_READ = "enabled";
   process.env.TOMVERSE_AMUX_V4_CONTENT_RETENTION = "enabled";
   process.env.TOMVERSE_AMUX_V19_READ_MANIFEST_RETENTION = "enabled";
 };
@@ -123,20 +120,12 @@ const get = (query = `?ideaId=${ideaId}&referenceOrdinal=0`,
   `https://tomverse.test/api/internal/amux/v19/read-manifest${query}`,
   { headers: { ...headers, ...extraHeaders } });
 
-test("dedicated worker auth and both gates guard manifest writes", async () => {
+test("dedicated worker auth and the retention switch guard manifest writes", async () => {
   reset();
   assert.equal((await route.POST(post(body, { authorization: "" }))).status, 401);
   assert.equal((await route.GET(get(undefined, { "x-amux-agent-id": "other" }))).status, 401);
   process.env.TOMVERSE_AMUX_SYNC_SECRET = secret;
   assert.equal((await route.POST(post())).status, 401);
-  reset();
-  delete process.env.TOMVERSE_AMUX_V19_READ_MANIFEST_WRITE;
-  assert.equal((await route.POST(post())).status, 409);
-  assert.equal((await route.GET(get())).status, 404);
-  delete process.env.TOMVERSE_AMUX_V19_READ_MANIFEST_READ;
-  process.env.TOMVERSE_AMUX_V19_READ_MANIFEST_WRITE = "enabled";
-  assert.equal((await route.POST(post())).status, 409);
-  assert.equal((await route.GET(get())).status, 409);
   reset();
   delete process.env.TOMVERSE_AMUX_V19_READ_MANIFEST_RETENTION;
   assert.equal((await route.POST(post())).status, 409);

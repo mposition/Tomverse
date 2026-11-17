@@ -8,8 +8,6 @@ import {
   AMUX_V4_FRONTIER_CATALOG_BODY_MAX_BYTES,
   decideFrontierCatalogApprovalVersion,
   frontierApprovalAuditMetadata,
-  frontierCatalogReadPermitted,
-  frontierCatalogWritePermitted,
   frontierRevocationAuditMetadata,
   inspectFrontierCatalogWrite,
 } from "../lib/amux/ideaFrontierCatalogWriteCore.ts";
@@ -84,13 +82,6 @@ test("approval version only advances from absent or revoked latest history", () 
   assert.deepEqual(decideFrontierCatalogApprovalVersion({
     version: 0, status: "revoked",
   }, 0), { decision: "hold", reason: "catalog_state_unverified" });
-});
-
-test("the new catalog writer and reader require their dedicated environment values", () => {
-  assert.equal(frontierCatalogWritePermitted(undefined), false);
-  assert.equal(frontierCatalogWritePermitted("enabled"), true);
-  assert.equal(frontierCatalogReadPermitted(undefined), false);
-  assert.equal(frontierCatalogReadPermitted("enabled"), true);
 });
 
 test("only the catalog service may call its latch-bypassing transaction body", () => {

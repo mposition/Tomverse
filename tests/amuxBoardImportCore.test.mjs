@@ -17,13 +17,10 @@ import {
   BOARD_IMPORT_APPLY_CODE_LATCH,
   BOARD_IMPORT_MAX_ITEMS,
   BOARD_IMPORT_APPROVAL_STATUSES,
-  BOARD_IMPORT_PREVIEW_LIMIT,
-  BOARD_IMPORT_PREVIEW_WINDOW_MS,
   BOARD_IMPORT_RAW_BODY_MAX_BYTES,
   BOARD_IMPORT_SCANNER_RULESET,
   BOARD_IMPORT_SCANNER_RULESET_DIGEST,
   BOARD_IMPORT_SNAPSHOT_KEYS,
-  admitBoardImportPreview,
   boardImportApplyPermitted,
   boardImportAuditEntryHashMatches,
   boardImportCardData,
@@ -47,7 +44,6 @@ import {
   digestAmuxManifest,
   parseBoardImportItemBindings,
   parseBoardImportManifest,
-  pruneBoardImportPreviewHits,
 } from "../lib/amux/boardImportCore.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -355,30 +351,9 @@ test("approval transitions and same-operator approval stay inside the v2 excepti
   assert.equal(boardImportSameOperatorApproval("", ""), false);
 });
 
-test("preview admission is ten a minute and an unknown database failure is not a retry", () => {
-  const start = 1_000_000;
-  let retained = [];
-  for (let index = 0; index < BOARD_IMPORT_PREVIEW_LIMIT; index += 1) {
-    const decision = admitBoardImportPreview(retained, start + index);
-    assert.equal(decision.allowed, true);
-    retained = decision.retained;
-  }
-  assert.equal(admitBoardImportPreview(retained, start + 10).allowed, false);
-  assert.equal(
-    admitBoardImportPreview(retained, start + BOARD_IMPORT_PREVIEW_WINDOW_MS).allowed,
-    true,
-  );
+test("an unknown database failure is not a retry, and preview has no request-rate limit", () => {
   assert.equal(boardImportFailureIsAmbiguous("P2028"), true);
   assert.equal(boardImportFailureIsAmbiguous("P2002"), false);
-  const stale = start - BOARD_IMPORT_PREVIEW_WINDOW_MS - 1;
-  const pruned = pruneBoardImportPreviewHits(
-    [
-      ["gone", [stale]],
-      ["kept", [start]],
-    ],
-    start + 1,
-  );
-  assert.deepEqual(pruned, [["kept", [start]]]);
 });
 
 test("a matching digest with a different snapshot is a conflict, and a forged audit hash does not bind", () => {
@@ -473,10 +448,8 @@ test("preview does not write, apply has no caller latch, and the worker boundary
   assert.equal(service.includes("applyLatch"), false);
   assert.equal(service.includes("boardImportTransitionAllowed"), true);
   const core = read("lib/amux/boardImportCore.ts");
-  const commentAt = core.indexOf("Ten requests a minute");
-  const admitAt = core.indexOf("export const admitBoardImportPreview");
-  const contentAt = core.indexOf("export const boardImportContentTypeAccepted");
-  assert.ok(contentAt >= 0 && contentAt < commentAt && commentAt < admitAt);
+  assert.equal(core.includes("admitBoardImportPreview"), false);
+  assert.equal(core.includes("BOARD_IMPORT_PREVIEW_LIMIT"), false);
   assert.match(service, /expireDueBoardImports[\s\S]*writeHumanAudit/);
   assert.match(service, /markBoardImportOutcomeUnknown[\s\S]*boardImportSameOperatorApproval/);
   assert.match(service, /outcomeUnknownAt: now, status: "expired", expiredAt: now/);
@@ -486,11 +459,11 @@ test("preview does not write, apply has no caller latch, and the worker boundary
   assert.equal(route.includes("applyLatch"), false);
   assert.equal(route.includes("outcome_unknown"), true);
   assert.equal(route.includes("retry: false"), true);
-  assert.equal(route.includes("previewHits.delete"), true);
+  assert.equal(route.includes("previewHits"), false);
   assert.match(route, /expireDueBoardImports\(\{[\s\S]*session:/);
   const previewBranch = route.slice(route.indexOf('if (action === "preview")'), route.indexOf('if (action === "prepare")'));
   assert.equal(previewBranch.includes("consumeApiRateLimit"), false);
-  assert.ok(previewBranch.indexOf("admitBoardImportPreview") < previewBranch.indexOf("readLimitedText"));
+  assert.equal(previewBranch.includes("admitBoardImportPreview"), false);
   assert.ok(route.indexOf("boardImportContentTypeAccepted(") < route.indexOf("readLimitedText("));
   assert.equal(boardImportContentTypeAccepted("application/json"), true);
   assert.equal(boardImportContentTypeAccepted("application/json; charset=utf-8"), true);

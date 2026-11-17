@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "migrationSqlSha256": "9012d5e401cab30a4fbdc48eca51a24171ed54273b5c9e26a2436935e2552d40",
+  "replacedChecks": [
+    {
+      "table": "AmuxV22TaskRecoveryEvidence",
+      "constraint": "AmuxV22RecoveryEvidence_shape_check",
+      "previousDefinitionSha256": "fa319d5b2d54764ab77d2e9525c1accbb2eed56444c28a0d6f67a3657c56c307"
+    },
+    {
+      "table": "AmuxV22ReadOnlyLaunchProof",
+      "constraint": "AmuxV22ReadOnlyLaunchProof_shape_check",
+      "previousDefinitionSha256": "c0828fcee14dcb49534297f486a11665d8d9a24e6ff7c4b1cdb55b2dc35e0070"
+    },
+    {
+      "table": "AmuxV22ReadOnlyLaunchCheck",
+      "constraint": "AmuxV22ReadOnlyLaunchCheck_shape_check",
+      "previousDefinitionSha256": "ee95c3822a05d9e8c20488f2024b38b7bd107dce9f3ace6bfd3f22016289a0e8"
+    },
+    {
+      "table": "AmuxCardWaitReason",
+      "constraint": "AmuxCardWaitReason_shape_check",
+      "previousDefinitionSha256": "81dc3117e115a0ef9d5577999ea2c4060e64e106cd03c10f0201c18551f196c9"
+    },
+    {
+      "table": "AmuxWorkerHealthSignal",
+      "constraint": "AmuxWorkerHealthSignal_shape_check",
+      "previousDefinitionSha256": "27a0eada52b773179a768493d2fa30f746ad799fa338aadec3f82b79bf305839"
+    }
+  ]
+}

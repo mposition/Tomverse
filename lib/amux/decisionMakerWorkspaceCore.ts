@@ -2,9 +2,6 @@ import { createHash } from "node:crypto";
 
 import { dmSnapshotManifestDigest } from "./decisionMakerBodyCore.ts";
 import {
-  DM_CARD_TEXT_MAX_BYTES,
-  DM_EVIDENCE_CLOSE,
-  DM_EVIDENCE_OPEN,
   isSecretRepositoryPath,
   isSnapshotTargetSha,
 } from "./decisionMakerCore.ts";
@@ -37,17 +34,11 @@ import { detectSecretsInFields } from "../engineeringAgentSecretPatterns.ts";
  * transmission intent's payload digest binds every evidence byte, and the
  * manifest digest (§10) binds the commit and the files.
  *
- * Kill switch: TOMVERSE_AMUX_DM_WORKSPACE=disabled returns to the card alone
- * (the cards then carry their evidence inline, whole). Default on.
+ * Always on (owner direction 2026-11-16): the kill switch that returned to the
+ * card alone, with the evidence inline under a 224 KiB room, is gone.
  *
  * Pure. Nothing here logs a file's text.
  */
-
-export const DM_WORKSPACE_ENV = "TOMVERSE_AMUX_DM_WORKSPACE";
-
-/** On unless exactly `disabled` (owner decision 2026-11-15: the new behaviour is the default). */
-export const amuxDmWorkspaceEnabled = (env: Record<string, string | undefined> = process.env) =>
-  env[DM_WORKSPACE_ENV]?.trim() !== "disabled";
 
 export const DM_WORKSPACE_REPOSITORY = "mposition/Tomverse";
 export const DM_WORKSPACE_REPOSITORY_NAME = `github.com/${DM_WORKSPACE_REPOSITORY}`;
@@ -56,8 +47,12 @@ export const DM_WORKSPACE_CLONE_URL = `https://github.com/${DM_WORKSPACE_REPOSIT
 export const DM_WORKSPACE_API_ORIGIN = "https://api.github.com";
 export const DM_WORKSPACE_TARGET_BRANCH = "develop";
 
-/** The commits of history the checkout keeps, so `git log` and `git blame` reach back that far. */
-export const DM_WORKSPACE_HISTORY_DEPTH = 100;
+/**
+ * The commits of history the checkout keeps, so `git log` and `git blame`
+ * reach back that far: one generous depth (owner direction 2026-11-16; it was
+ * 100).
+ */
+export const DM_WORKSPACE_HISTORY_DEPTH = 1000;
 
 // ---------------------------------------------------------------------------
 // Safety caps. Each is one real limit, not a size the card must fit.
@@ -73,21 +68,22 @@ export const DM_WORKSPACE_HISTORY_DEPTH = 100;
  * The broker and the bridge mirror it (dm_relay/workspace.rs).
  */
 export const DM_WORKSPACE_EVIDENCE_MAX_BYTES = 2 * AMUX_V22_TRANSPORT_MAX_BYTES;
-/** The request directory on the box's disk after the checkout: two requests may run at once (one per instance). */
-export const DM_WORKSPACE_DISK_MAX_BYTES = 4 * 1024 * 1024 * 1024;
 /**
- * The whole workspace build at launch (every git step, the fetch included),
- * before the launcher is asked. It comes out of the request's result window
- * (30 minutes from the assignment, the database's), so it is short; the
- * broker's answer deadline grows by it (DM_BROKER_RESPONSE_DEADLINE_MS).
+ * The request directory on the box's disk after the checkout, a backstop for
+ * the box's own disk (it was 4 GiB; owner direction 2026-11-16).
  */
-export const DM_WORKSPACE_BUILD_MAX_MS = 5 * 60 * 1000;
-/** One `git fetch` of the commit and its history: all of the build's time if it needs it. */
-export const DM_WORKSPACE_FETCH_TIMEOUT_MS = DM_WORKSPACE_BUILD_MAX_MS;
-/** Every other git step (init, checkout, worktree, apply). */
-export const DM_WORKSPACE_GIT_STEP_TIMEOUT_MS = 2 * 60 * 1000;
-/** One public commit lookup. */
-export const DM_WORKSPACE_LOOKUP_TIMEOUT_MS = 15_000;
+export const DM_WORKSPACE_DISK_MAX_BYTES = 16 * 1024 * 1024 * 1024;
+/**
+ * The workspace's one time limit (owner direction 2026-11-16: one generous
+ * value in place of a five-minute build, two-minute git steps and a
+ * fifteen-second lookup): the whole build at launch -- every git step, the
+ * fetch included -- and each public commit lookup before it. It comes out of
+ * the request's result window (eight hours from the assignment, the
+ * database's), and the broker's answer deadline grows by it
+ * (DM_BROKER_RESPONSE_DEADLINE_MS); the relay waits as long for the
+ * workspace's check (DM_WORKSPACE_WAIT in dm_relay/workspace.rs).
+ */
+export const DM_WORKSPACE_TIME_LIMIT_MS = 60 * 60 * 1000;
 
 // ---------------------------------------------------------------------------
 // Evidence files
@@ -451,32 +447,12 @@ export const dmWorkspaceCardPointer = (files: readonly DmWorkspaceEvidenceName[]
     "Read them before you answer; the card is only a summary.",
   ].join("\n");
 
-const CARD_CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
-/** What a card keeps for its fixed words when evidence rides inline (the kill switch). */
-const INLINE_ROOM_BYTES = DM_CARD_TEXT_MAX_BYTES - 32 * 1024;
-
 /**
- * A card's context for its evidence: with the workspace on, the pointer to
- * the files; with it off (the kill switch, the card alone), the evidence
- * itself, whole, in the evidence markers the term check may skip. Null when
- * the evidence cannot ride whole -- characters a card cannot carry, or more
- * than the card's one cap leaves room for: the caller files no card then and
- * the person decides, since a DM must never judge without the evidence.
+ * A card's context for its evidence: the pointer to the files in the
+ * workspace, where the evidence goes whole. The workspace is always on (owner
+ * direction 2026-11-16), so a card never carries its evidence inline and no
+ * card is left unfiled because its evidence is larger than a card.
  */
 export const dmCardEvidenceContext = (
   evidence: ReadonlyArray<{ name: DmWorkspaceEvidenceName; heading: string; text: string }>,
-  workspace: boolean = amuxDmWorkspaceEnabled(),
-): string | null => {
-  if (workspace) return dmWorkspaceCardPointer(evidence.map((item) => item.name));
-  const blocks: string[] = [];
-  let room = INLINE_ROOM_BYTES;
-  for (const item of evidence) {
-    if (CARD_CONTROL.test(item.text)) return null;
-    const block = `${DM_EVIDENCE_OPEN}\n${item.heading}:\n${item.text}\n${DM_EVIDENCE_CLOSE}`;
-    const bytes = Buffer.byteLength(JSON.stringify(block), "utf8");
-    if (bytes > room) return null;
-    room -= bytes;
-    blocks.push(block);
-  }
-  return blocks.join("\n");
-};
+): string => dmWorkspaceCardPointer(evidence.map((item) => item.name));

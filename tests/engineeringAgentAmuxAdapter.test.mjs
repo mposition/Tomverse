@@ -11,9 +11,7 @@ import {
   AMUX_DB_MAX_WAIT_MS,
   AMUX_DB_STATEMENT_TIMEOUT_MS,
 } from "../lib/amux/dbBoundary.ts";
-import { isAmuxExecutionApiEnabled } from "../lib/amux/executionGate.ts";
 import {
-  ENGINEERING_AGENT_AMUX_ADAPTER_CODE_LATCH,
   ENGINEERING_AGENT_AMUX_ROUTE_BUDGET_MS,
   ENGINEERING_AGENT_AMUX_WORKER,
   amuxSettlementForRunOutcome,
@@ -22,7 +20,6 @@ import {
   engineeringRunEndAttachment,
   engineeringRunHeartbeatAttachment,
   engineeringRunStartAttachment,
-  isEngineeringAgentAmuxAdapterOpen,
   mintEngineeringAgentRunId,
 } from "../lib/engineeringAgentAmuxAdapter.ts";
 import {
@@ -45,18 +42,12 @@ import {
 // docs/policy/development-agent-orchestration.md, Authority, version 12) and
 // the round-5 review fixes that sit beside it.
 
-test("the latch ships on, and the adapter opens only with it, the execution API and a mode that is not off", () => {
-  assert.equal(ENGINEERING_AGENT_AMUX_ADAPTER_CODE_LATCH, true, "version 25 turns the latch on");
-  // With the latch on, the fast check is exactly the execution API gate.
-  assert.equal(isEngineeringAgentAmuxAdapterOpen(), isAmuxExecutionApiEnabled());
+test("the adapter opens for every mode except off", () => {
   for (const mode of ["shadow", "t1"]) {
-    assert.equal(engineeringAgentAmuxAdapterPermitted({ codeLatch: true, executionApiEnabled: true, mode }), true, mode);
-    assert.equal(engineeringAgentAmuxAdapterPermitted({ codeLatch: true, executionApiEnabled: false, mode }), false, mode);
-    assert.equal(engineeringAgentAmuxAdapterPermitted({ codeLatch: false, executionApiEnabled: true, mode }), false, mode);
+    assert.equal(engineeringAgentAmuxAdapterPermitted({ mode }), true, mode);
   }
-  // Authority: the writer path runs only when the latch and the operating mode
-  // are both open. Mode off closes every adapter call, not only a new run.
-  assert.equal(engineeringAgentAmuxAdapterPermitted({ codeLatch: true, executionApiEnabled: true, mode: "off" }), false);
+  // Mode off closes every adapter call, not only a new run.
+  assert.equal(engineeringAgentAmuxAdapterPermitted({ mode: "off" }), false);
 });
 
 test("every adapter operation checks the whole gate, mode included, before it touches AMUX", () => {
@@ -182,7 +173,6 @@ test("the adapter reaches only the AMUX writers version 12 allows it", () => {
     "dbBoundary",
     "delivery",
     "execution",
-    "executionGate",
     "reviewPullRequest",
     "store",
     // Orchestration policy version 35, section 3 names the adapter among the
@@ -199,27 +189,25 @@ test("the adapter reaches only the AMUX writers version 12 allows it", () => {
 });
 
 test("a run's halt is the runner's report combined with the app's, and a report of none lowers nothing", () => {
-  assert.equal(combineRunHalt({ reported: "none", circuitLatched: true, openStateMismatches: 0 }), "circuit_open");
-  assert.equal(combineRunHalt({ reported: "none", circuitLatched: false, openStateMismatches: 2 }), "state_mismatch");
-  assert.equal(combineRunHalt({ reported: "none", circuitLatched: false, openStateMismatches: 0 }), "none");
-  // The circuit and a mismatch are the app's readings, never a runner's report.
+  assert.equal(combineRunHalt({ reported: "none", openStateMismatches: 2 }), "state_mismatch");
+  assert.equal(combineRunHalt({ reported: "none", openStateMismatches: 0 }), "none");
+  // A mismatch is the app's reading, never a runner's report; nothing writes circuit_open.
   assert.deepEqual([...RUNNER_REPORTABLE_HALTS].sort(), ["config_missing", "none", "unbound_app_pr", "unbound_app_ref"]);
   const finish = readFileSync("app/api/internal/engineering-agent/run/finish/route.ts", "utf8");
   assert.match(finish, /halt: z\.enum\(RUNNER_REPORTABLE_HALTS\)/);
   for (const reported of RUNNER_REPORTABLE_HALTS) {
-    for (const circuitLatched of [false, true]) {
-      for (const openStateMismatches of [0, 1]) {
-        const halt = combineRunHalt({ reported, circuitLatched, openStateMismatches });
-        if (reported !== "none") assert.notEqual(halt, "none", `${reported} is never lowered`);
-        if (circuitLatched || openStateMismatches > 0) assert.notEqual(halt, "none");
-        // The result is a value decideHalt can give.
-        assert.ok(HALT_VALUES.includes(halt));
-      }
+    for (const openStateMismatches of [0, 1]) {
+      const halt = combineRunHalt({ reported, openStateMismatches });
+      if (reported !== "none") assert.notEqual(halt, "none", `${reported} is never lowered`);
+      if (openStateMismatches > 0) assert.notEqual(halt, "none");
+      assert.notEqual(halt, "circuit_open");
+      // The result is a value decideHalt can give.
+      assert.ok(HALT_VALUES.includes(halt));
     }
   }
   assert.equal(
-    combineRunHalt({ reported: "config_missing", circuitLatched: true, openStateMismatches: 1 }),
-    decideHalt({ appIdentityConfigured: false, circuitLatched: true, unboundAppPrs: 0, unboundAppRefs: 0, openStateMismatches: 1 }),
+    combineRunHalt({ reported: "config_missing", openStateMismatches: 1 }),
+    decideHalt({ appIdentityConfigured: false, unboundAppPrs: 0, unboundAppRefs: 0, openStateMismatches: 1 }),
   );
 });
 

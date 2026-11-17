@@ -3,7 +3,8 @@ import test from "node:test";
 
 import { claimAmuxV19MaxShadowBudgetOnce } from
   "../lib/amux/ideaLocalMaxShadowClaimOnce.mjs";
-import { verifyAmuxV19MaxClaimAttestation } from
+import { AMUX_V19_MAX_CLAIM_RUNNER_MARKER,
+  verifyAmuxV19MaxClaimAttestation } from
   "../lib/amux/ideaSessionMaxLauncherAttestation.mjs";
 import { installAmuxV19FakeAppTiming } from "./support/amuxV19FakeAppTiming.mjs";
 
@@ -262,6 +263,29 @@ test("a claim POST that never left the host is sent again with the same bytes",
     assert.equal(bodies.length, 3);
     assert.equal(new Set(bodies).size, 1, "every attempt sends the same bytes");
     assert.equal(reads, 0);
+  }));
+
+// A runner marks its claim so that recovery of a marker an older runner left
+// (which names no claim) never closes a claim a current runner is working on.
+test("every claim POST carries the fixed runner mark, outside the signed identity", () =>
+  withLauncherEnv(async () => {
+    const bodies = [];
+    const result = await claimAmuxV19MaxShadowBudgetOnce({ origin, identity,
+      fetchImpl: async (_url, options) => {
+        bodies.push(JSON.parse(options.body));
+        return Response.json({ claimId: identity.claimId,
+          requestId: identity.requestId, reservationId: identity.reservationId,
+          invocationOrdinal: 0, reservedMicroUsd: "0",
+          auditId: "synthetic-audit" });
+      },
+    }, prepareReady);
+    assert.equal(result.kind, "claimed");
+    assert.equal(bodies.length, 1);
+    assert.equal(bodies[0].runnerMarker, "claim_named");
+    assert.equal(AMUX_V19_MAX_CLAIM_RUNNER_MARKER, "claim_named");
+    // The signed proof names the identity fields only: the mark is not one.
+    assert.deepEqual(Object.keys(bodies[0]).sort(), [...Object.keys(identity),
+      "provider", "authVerifiedAt", "authProof", "runnerMarker"].sort());
   }));
 
 test("a claim POST that never left within the budget reads back and names why",

@@ -7,7 +7,14 @@ import { AMUX_MAX_EXPECTED_REVISION, AMUX_PRISMA_INT_MAX,
 import { AMUX_V22_EXECUTION_ROUTE_BUDGET_MS,
   withAmuxRouteBudget } from "@/lib/amux/dbBoundary";
 import { recordAmuxV52Review } from "@/lib/amux/execution";
+import { AMUX_V22_PATCH_ENVELOPE_MAX_BYTES } from "@/lib/amux/v22PatchLimit";
 import { AMUX_V52_FINDINGS_SUMMARY_INPUT_MAX_CHARS } from "@/lib/amux/v52ReviewFindingsCore";
+
+/** The body holds the largest summary the schema takes even fully JSON-escaped
+ * (six bytes a character) and never less than a patch envelope (review
+ * r-20261116-212113-1a6291). */
+const REVIEW_RECORD_BODY_MAX_BYTES = Math.max(AMUX_V22_PATCH_ENVELOPE_MAX_BYTES,
+  AMUX_V52_FINDINGS_SUMMARY_INPUT_MAX_CHARS * 6 + 1024 * 1024);
 import { prepareAmuxV52ReviewFindings } from "@/lib/amux/v52ReviewFindingsStore";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 import { amuxInternalErrorResponse, amuxJsonNoStore,
@@ -28,7 +35,7 @@ const requestSchema = z.object({
   instance_id: z.string().uuid(),
   generation: z.number().int().min(1).max(AMUX_PRISMA_INT_MAX),
   task_revision: z.number().int().min(0).max(AMUX_MAX_EXPECTED_REVISION),
-  changed_paths: z.array(z.string().min(1)).min(1).max(4_096),
+  changed_paths: z.array(z.string().min(1)).min(1),
   evidence: evidenceSchema,
   // A reject's findings: the launcher's JSON document, or plain lines from an
   // older launcher. Normalised and sealed before they are stored.
@@ -76,7 +83,7 @@ export async function POST(request: Request) {
     return amuxJsonNoStore({ error: "Invalid content type." }, 415);
   return withAmuxRouteBudget(async () => {
     try {
-      const body = await readLimitedJson(request, 16 * 1_024 * 1_024, requestSchema);
+      const body = await readLimitedJson(request, REVIEW_RECORD_BODY_MAX_BYTES, requestSchema);
       // A reject's findings are sealed under the attempt's own key, made here
       // before the record's transaction; without them the verdict is recorded.
       const findings = await prepareAmuxV52ReviewFindings({

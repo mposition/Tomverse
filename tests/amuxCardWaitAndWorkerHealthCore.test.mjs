@@ -95,15 +95,15 @@ const view = (over = {}) => ({ workerName: "claude-impl",
   signals: [], ...over });
 
 test("can take work means the claim would assign it work", () => {
-  const anthropic = { provider: "claude", nonClaudeQuotaGate: false };
+  const anthropic = { provider: "claude" };
   assert.equal(amuxWorkerHealthHold(view(), anthropic), null);
   // 2026-11-15: the Claude login expired and the bridge could no longer read usage.
   assert.equal(amuxWorkerHealthHold(view({ usage: { state: "stale", observedAt: null, exhausted: false } }), anthropic),
     "usage_unobserved");
   assert.equal(amuxWorkerHealthHold(view({ usage: { state: "missing", observedAt: null, exhausted: false } }),
-    { provider: "cursor", nonClaudeQuotaGate: false }), null, "another provider is not gated on a reading");
+    { provider: "cursor" }), null, "another provider is not gated on a missing reading");
   assert.equal(amuxWorkerHealthHold(view({ usage: { state: "fresh", observedAt: null, exhausted: true } }),
-    { provider: "cursor", nonClaudeQuotaGate: true }), "usage_exhausted");
+    { provider: "cursor" }), "usage_exhausted");
   assert.equal(amuxWorkerHealthHold(view({ circuit: { state: "open", consecutive: 3, lastKind: "early_exit",
     lastAt: null, retryAt: null } }), anthropic), "infra_quarantined");
   // A box sign-in signal warns; it never claims a hold the claim does not apply.
@@ -116,8 +116,8 @@ test("can take work means the claim would assign it work", () => {
   assert.equal(amuxWorkerHealthNotice(view({ circuit: { state: "probing", consecutive: 3, lastKind: "early_exit",
     lastAt: null, retryAt: null } })), "probing");
   assert.equal(amuxWorkerUsageState(null, 0), "missing");
-  assert.equal(amuxWorkerUsageState(0, 15 * 60_000), "fresh");
-  assert.equal(amuxWorkerUsageState(0, 15 * 60_000 + 1), "stale");
+  assert.equal(amuxWorkerUsageState(0, 60 * 60_000), "fresh");
+  assert.equal(amuxWorkerUsageState(0, 60 * 60_000 + 1), "stale");
 });
 
 test("the box writes a health signal next to the copy and the sidecar reads it back, codes only", async () => {

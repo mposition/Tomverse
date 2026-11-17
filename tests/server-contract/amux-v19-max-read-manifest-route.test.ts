@@ -13,10 +13,6 @@ const ideaId = "7542f64d-a8c1-4da7-8292-d953095f217e";
 const manifestId = "9b7e4b8e-2d34-48b2-95a5-333360b10816";
 const envNames = ["TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET",
   "TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET", "TOMVERSE_AMUX_SYNC_SECRET",
-  "TOMVERSE_AMUX_V19_MAX_READ_MANIFEST_WRITE",
-  "TOMVERSE_AMUX_V19_MAX_READ_MANIFEST_READ",
-  "TOMVERSE_AMUX_V19_READ_MANIFEST_WRITE",
-  "TOMVERSE_AMUX_V19_READ_MANIFEST_READ",
   "TOMVERSE_AMUX_V19_READ_MANIFEST_RETENTION"] as const;
 const oldEnv = Object.fromEntries(envNames.map((name) => [name, process.env[name]]));
 let prepares = 0;
@@ -87,9 +83,7 @@ const reset = () => {
   process.env.TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET = secret;
   delete process.env.TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET;
   delete process.env.TOMVERSE_AMUX_SYNC_SECRET;
-  for (const name of envNames.filter((name) => name.includes("MANIFEST_") &&
-      (name.endsWith("WRITE") || name.endsWith("READ") ||
-        name.endsWith("RETENTION")))) process.env[name] = "enabled";
+  process.env.TOMVERSE_AMUX_V19_READ_MANIFEST_RETENTION = "enabled";
 };
 const body = { ...claim, ideaId, referenceOrdinal: 0, manifestId,
   pinnedCommitSha: "a".repeat(40),
@@ -110,19 +104,17 @@ const get = (query?: string, extra: Record<string, string> = {}) => {
     { headers: { ...headers, ...extra } });
 };
 
-test("Max manifest needs a separate credential and both readback gates", async () => {
+test("Max manifest needs a separate credential and the retention switch", async () => {
   reset();
   assert.equal((await route.POST(post(body,
     { "x-amux-agent-id": "amux-intake" }))).status, 401);
   process.env.TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET = secret;
   assert.equal((await route.POST(post())).status, 401);
   reset();
-  delete process.env.TOMVERSE_AMUX_V19_MAX_READ_MANIFEST_WRITE;
+  delete process.env.TOMVERSE_AMUX_V19_READ_MANIFEST_RETENTION;
   assert.equal((await route.POST(post())).status, 409);
   assert.equal(prepares, 0);
   assert.equal((await route.GET(get())).status, 404);
-  delete process.env.TOMVERSE_AMUX_V19_MAX_READ_MANIFEST_READ;
-  assert.equal((await route.GET(get())).status, 409);
 });
 
 test("malformed claim or paths never prepare an external key", async () => {

@@ -4,7 +4,6 @@ export const adminAmuxPortfolioMessages = defineAdminMessages({
   en: {
     title: "Strategic portfolio assessment",
     hint: "Confirm evidence for each Initiative, Epic, Feature, Story (when present), and Task. Then calculate a Task score. A score never promotes or claims a card.",
-    disabled: "Portfolio writes are disabled. Preview and evidence inspection remain available.",
     subjectKind: "Subject type",
     subjectId: "Exact node or card ID",
     evidenceRefs: "Evidence IDs (one per line, no source text)",
@@ -39,7 +38,6 @@ export const adminAmuxPortfolioMessages = defineAdminMessages({
   ko: {
     title: "전략 포트폴리오 평가",
     hint: "Initiative·Epic·Feature·Story(있는 경우)·Task의 근거를 각각 확인한 뒤 Task 점수를 계산합니다. 점수만으로 카드가 승격되거나 할당되지 않습니다.",
-    disabled: "포트폴리오 쓰기가 꺼져 있습니다. 미리보기와 근거 확인은 가능합니다.",
     subjectKind: "평가 대상 유형",
     subjectId: "정확한 노드 또는 카드 ID",
     evidenceRefs: "근거 ID (한 줄에 하나, 원문 제외)",

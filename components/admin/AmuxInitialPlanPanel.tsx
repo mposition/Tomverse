@@ -25,9 +25,9 @@ const receiptStore = (): Storage | null => {
 };
 
 /** Idea-only plan preparation. The opaque idea ID is the recovery key. */
-export function AmuxInitialPlanPanel({ ideaId, operatorId, available, declaredExternalSources,
+export function AmuxInitialPlanPanel({ ideaId, operatorId, declaredExternalSources,
   onCommitted }: {
-  ideaId: string | null; operatorId: string; available: boolean; declaredExternalSources: boolean;
+  ideaId: string | null; operatorId: string; declaredExternalSources: boolean;
   onCommitted?: (ideaId: string) => void;
 }) {
   const m = useAdminMessages(adminAmuxIdeaInputMessages);
@@ -70,7 +70,7 @@ export function AmuxInitialPlanPanel({ ideaId, operatorId, available, declaredEx
         void readBack(receipt.ideaId);
       } else if (receipt.kind === "unavailable") {
         setState({ kind: "recovery_unavailable" });
-      } else if (ideaId && available && !declaredExternalSources) {
+      } else if (ideaId && !declaredExternalSources) {
         void (async () => {
           try {
             const query = new URLSearchParams({ ideaId });
@@ -102,11 +102,11 @@ export function AmuxInitialPlanPanel({ ideaId, operatorId, available, declaredEx
       setRecoveryChecked(true);
     });
     return () => { active = false; };
-  }, [operatorId, readBack, ideaId, available, declaredExternalSources, locale,
+  }, [operatorId, readBack, ideaId, declaredExternalSources, locale,
     m.initialPlanUnavailable, onCommitted]);
 
   const prepare = async () => {
-    if (!ideaId || !available || declaredExternalSources || !recoveryChecked ||
+    if (!ideaId || declaredExternalSources || !recoveryChecked ||
         checkedIdeaId !== ideaId ||
         state.kind !== "idle") return;
     if (!reservePendingInitialPlan(receiptStore(), operatorId, ideaId)) {
@@ -146,14 +146,13 @@ export function AmuxInitialPlanPanel({ ideaId, operatorId, available, declaredEx
       <p className="text-zinc-300">{m.initialPlanHint}</p>
       {ideaId && declaredExternalSources ? <p>{m.initialPlanExternalScope}</p> : null}
       {ideaId && !declaredExternalSources && state.kind === "idle" ? (
-        <button type="button" onClick={prepare} disabled={!available || !recoveryChecked || checkedIdeaId !== ideaId}
+        <button type="button" onClick={prepare} disabled={!recoveryChecked || checkedIdeaId !== ideaId}
           className="min-h-11 rounded-lg border px-4 font-medium disabled:opacity-50 border-blue-400 text-blue-200">
           {m.initialPlanPrepare}
         </button>
       ) : null}
-      {!available ? <p className="text-zinc-400">{m.initialPlanUnavailable}</p> : null}
       {/* The button above stays disabled until this idea's plan has read back as absent. */}
-      {ideaId && available && !declaredExternalSources && state.kind === "idle" &&
+      {ideaId && !declaredExternalSources && state.kind === "idle" &&
         (!recoveryChecked || checkedIdeaId !== ideaId) ?
         <p role="status" className="text-zinc-400">{m.initialPlanChecking}</p> : null}
       {state.kind === "pending" ? <p role="status">{m.initialPlanPreparing}</p> : null}

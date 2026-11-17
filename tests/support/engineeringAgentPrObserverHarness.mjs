@@ -204,16 +204,9 @@ for (const approval of [null, { verdict: "approved", reviewId: 9, observedAt: "2
     assert.equal(recorded()[1][2].approvedByMerge, true);
     assert.equal(recorded().some(([kind]) => kind === "mismatch"), false);
   }
-  // ENGINEERING_AGENT_LEGACY_HALTS: the moved head is not verified, as before.
-  process.env.ENGINEERING_AGENT_LEGACY_HALTS = "enabled";
-  for (const overrides of movedCases) {
-    assert.deepEqual(await run([binding()], async () => pull({ ...ownMerge, ...overrides })),
-      [{ bindingId: "binding", outcome: "merged_without_approval" }]);
-    assert.equal(recorded().at(-1)[2].causeKey, "unapproved_merge:binding");
-  }
+  // Without a readable bound diff the approver's merge still approves the moved head.
   assert.deepEqual(await run([binding({ snapshot: { baseSha: BASE } })], async () => pull({ ...ownMerge, headSha: moved })),
-    [{ bindingId: "binding", outcome: "merged_without_approval" }], "without a readable bound diff, a moved head is not verified");
-  delete process.env.ENGINEERING_AGENT_LEGACY_HALTS;
+    [{ bindingId: "binding", outcome: "completed" }]);
 
   // #3828 (2026-11-13): develop merged into the branch moved the head, but the
   // pull request's diff is byte for byte the verified one, so the approver's

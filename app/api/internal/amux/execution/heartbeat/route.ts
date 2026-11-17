@@ -17,7 +17,6 @@ import {
 } from "@/lib/amux/internalRoute";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 import { heartbeatAmuxExecution } from "@/lib/amux/execution";
-import { isAmuxExecutionApiEnabled } from "@/lib/amux/executionGate";
 
 const requestSchema = z
   .object({
@@ -40,18 +39,6 @@ export async function POST(request: Request) {
     );
   }
 
-  if (!isAmuxExecutionApiEnabled()) {
-    return Response.json(
-      {
-        accepted: false,
-        reason: "execution_api_disabled",
-      },
-      {
-        status: 409,
-        headers: { "Cache-Control": "no-store" },
-      },
-    );
-  }
 
   return withAmuxRouteBudget(async () => {
     try {

@@ -1517,6 +1517,9 @@ test("the retention sweep rotates the next key in, closes a stale request, purge
     cleanupLatchUnsettled: 0,
     validationLatched: 0,
     validationLatchUnsettled: 0,
+    // No latch stands, so the system releases none (2026-11-16).
+    latchesReleased: 0,
+    latchReleaseUnsettled: 0,
     keyRing: "loaded",
     keysRotated: 1,
     staleClosed: 1,
@@ -1540,10 +1543,10 @@ test("the retention sweep rotates the next key in, closes a stale request, purge
 
   // The next run finds the expired request's period empty and destroys its key; the one after finds nothing.
   const second = await sweep();
-  assert.deepEqual(second, { cleanupLatched: 0, cleanupLatchUnsettled: 0, validationLatched: 0, validationLatchUnsettled: 0, keyRing: "loaded", keysRotated: 0, staleClosed: 0, purged: 0, keysDestroyed: 1, refused: 0, stopped: null });
+  assert.deepEqual(second, { cleanupLatched: 0, cleanupLatchUnsettled: 0, validationLatched: 0, validationLatchUnsettled: 0, latchesReleased: 0, latchReleaseUnsettled: 0, keyRing: "loaded", keysRotated: 0, staleClosed: 0, purged: 0, keysDestroyed: 1, refused: 0, stopped: null });
   assert.ok(new Set((await keyEvents()).filter((row) => row.kind === "destroy").map((row) => Number(row.keyPeriod))).has(expiredPeriod));
   const third = await sweep();
-  assert.deepEqual(third, { cleanupLatched: 0, cleanupLatchUnsettled: 0, validationLatched: 0, validationLatchUnsettled: 0, keyRing: "loaded", keysRotated: 0, staleClosed: 0, purged: 0, keysDestroyed: 0, refused: 0, stopped: null });
+  assert.deepEqual(third, { cleanupLatched: 0, cleanupLatchUnsettled: 0, validationLatched: 0, validationLatchUnsettled: 0, latchesReleased: 0, latchReleaseUnsettled: 0, keyRing: "loaded", keysRotated: 0, staleClosed: 0, purged: 0, keysDestroyed: 0, refused: 0, stopped: null });
 
   // Each write is the router's own, under the audit its row names.
   const audits = await prisma.$queryRaw<Array<{ action: string; systemActor: string | null }>>`

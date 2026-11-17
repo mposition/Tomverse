@@ -36,10 +36,6 @@ mock.module(mod("lib/amux/adminBacklogRead.ts"), { namedExports: {
 mock.module(mod("lib/adminLocaleServer.ts"), { namedExports: {
   getAdminMessages: async (messages) => { messageReads++; return messages.en; },
 } });
-mock.module(mod("lib/amux/portfolioAssessmentService.ts"), { namedExports: {
-  AMUX_V4_PORTFOLIO_WRITE_ENV: "TOMVERSE_AMUX_V4_PORTFOLIO_WRITE",
-  amuxV4PortfolioWriteEnabled: () => false,
-} });
 mock.module(mod("lib/amux/ideaProgressRead.ts"), { namedExports: {
   readAmuxIdeaProgressForOwner: async () => [],
 } });
@@ -76,7 +72,7 @@ test("default and unknown tabs render Ideas without offering legacy intake", asy
     assert.equal(tabs.activeTabId, "ideas");
     assert.deepEqual(tabs.tabs.map((tab) => tab.id),
       ["ideas", "list", "portfolio"]);
-    assert.equal("intake" in tabs.chips, false);
+    assert.equal(tabs.chips?.intake, undefined);
     assert.ok(tree.some((element) => element.type === panels.AmuxIdeaInputPanel));
     assert.equal(tree.some((element) => element.type === panels.AmuxBacklogListPanel), false);
   }
@@ -157,29 +153,22 @@ test("retired Cleanup and recovery redirects to Reservations & claims before any
 });
 
 test("the redirected Ideas page still renders recovery for the exact preserved hold", async () => {
-  const prior = process.env.TOMVERSE_AMUX_V4_ANALYSIS_CLAIM_RESOLUTION_READ;
-  process.env.TOMVERSE_AMUX_V4_ANALYSIS_CLAIM_RESOLUTION_READ = "enabled";
   const holdId = "12345678-1234-4123-8123-123456789abc";
-  try {
-    let destination;
-    await assert.rejects(open(query({ tab: "intake", analysisHoldId: holdId })), (error) => {
-      assert.ok(error instanceof Redirect);
-      destination = error.destination;
-      return true;
-    });
-    const redirected = Object.fromEntries(new URL(destination, "https://fixture.invalid").searchParams);
-    assert.equal(redirected.tab, "ideas");
-    assert.equal(redirected.analysisHoldId, holdId);
-    const tree = elements(await open(query(redirected)));
-    const recovery = tree.filter((element) => element.type === panels.AmuxAnalysisClaimResolutionPanel);
-    assert.equal(recovery.length, 1);
-    assert.equal(recovery[0].props.holdId, holdId);
-    // React.Children.toArray prefixes explicit keys in the traversal helper.
-    assert.equal(recovery[0].key, `.$${holdId}`);
-  } finally {
-    if (prior === undefined) delete process.env.TOMVERSE_AMUX_V4_ANALYSIS_CLAIM_RESOLUTION_READ;
-    else process.env.TOMVERSE_AMUX_V4_ANALYSIS_CLAIM_RESOLUTION_READ = prior;
-  }
+  let destination;
+  await assert.rejects(open(query({ tab: "intake", analysisHoldId: holdId })), (error) => {
+    assert.ok(error instanceof Redirect);
+    destination = error.destination;
+    return true;
+  });
+  const redirected = Object.fromEntries(new URL(destination, "https://fixture.invalid").searchParams);
+  assert.equal(redirected.tab, "ideas");
+  assert.equal(redirected.analysisHoldId, holdId);
+  const tree = elements(await open(query(redirected)));
+  const recovery = tree.filter((element) => element.type === panels.AmuxAnalysisClaimResolutionPanel);
+  assert.equal(recovery.length, 1);
+  assert.equal(recovery[0].props.holdId, holdId);
+  // React.Children.toArray prefixes explicit keys in the traversal helper.
+  assert.equal(recovery[0].key, `.$${holdId}`);
 });
 
 test("non-owners are refused before a legacy tab redirect or any panel read", async () => {

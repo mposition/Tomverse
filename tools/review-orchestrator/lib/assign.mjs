@@ -91,8 +91,8 @@ function preferOtherVendors(eligible, avoidVendors, blockedProviders, requestedP
 /**
  * One reviewer for one slot.
  *
- * - `impossible`: no enabled provider of an allowed vendor exists, so waiting
- *   will not help.
+ * - `impossible`: no enabled provider of an allowed vendor exists right now.
+ *   The caller leaves the slot queued: a provider may be enabled later.
  * - `wait`: an allowed provider exists but every one is at its concurrency cap.
  * - `assign`: the least-loaded allowed provider.
  */
@@ -130,6 +130,8 @@ export function planAssignments({ jobs, providers, load, now, blockedProviders =
     const reserved = (job.reviewerProviders ?? []).map((id) => providers.find((p) => p.id === id)?.vendor).filter(Boolean);
     for (const slot of slots) {
       if (slot.status !== "queued") continue;
+      // A slot every vendor has failed waits out its delay before going round again.
+      if (Number.isFinite(slot.notBefore) && slot.notBefore > now) continue;
       const requestedProvider = job.reviewerProviders?.[slot.index];
       const pick = pickReviewer({
         providers,

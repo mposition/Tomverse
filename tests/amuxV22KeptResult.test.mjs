@@ -6,18 +6,15 @@ import test from "node:test";
 
 // Owner decision 2026-11-15: one card's events hold that card only, a
 // successful result is never thrown away, and nothing runs a reviewed result
-// again for want of a pull request. One kill switch, ENGINEERING_AGENT_LEGACY_HALTS.
+// again for want of a pull request. (The ENGINEERING_AGENT_LEGACY_HALTS kill switch was removed, 2026-11-16.)
 
 const read = (path) => readFileSync(path, "utf8");
 
-test("card-scoped halts are the default; the kill switch is the one way back", async () => {
+test("card-scoped halts are the only behaviour", async () => {
   const core = await import("../lib/engineeringAgentCore.ts");
-  assert.equal(core.ENGINEERING_AGENT_LEGACY_HALTS_ENV, "ENGINEERING_AGENT_LEGACY_HALTS");
-  assert.equal(core.engineeringAgentLegacyHalts(undefined), false);
-  assert.equal(core.engineeringAgentLegacyHalts(" enabled "), true);
-  assert.equal(core.engineeringAgentLegacyHalts("true"), false, "exactly `enabled`");
-  assert.equal(core.engineeringAgentMismatchCardScoped(undefined), true);
-  assert.equal(core.engineeringAgentMismatchCardScoped("enabled"), false);
+  assert.equal("ENGINEERING_AGENT_LEGACY_HALTS_ENV" in core, false);
+  assert.equal("engineeringAgentLegacyHalts" in core, false);
+  assert.equal("engineeringAgentMismatchCardScoped" in core, false);
   // A review_pr: mismatch (no run of its own) holds the card of the publish item it names, everywhere a card is held.
   const store = read("lib/engineeringAgentStore.ts");
   assert.equal(store.split('JOIN "EngineeringAgentWorkItem" m ON m."causeKey" = ${REVIEW_PR_MISMATCH_PREFIX} || p."id"').length, 2,
@@ -38,8 +35,6 @@ test("the global halts are named, and each is a security boundary or has no card
     HALT_VALUES.filter((h) => h !== "none" && h !== "circuit_open").sort(), "the circuit halts only with the kill switch");
   assert.match(ENGINEERING_AGENT_GLOBAL_HALTS.state_mismatch, /no card/);
   assert.match(ENGINEERING_AGENT_GLOBAL_HALTS.unbound_app_pr, /clears once a later reading explains it/);
-  const store = read("lib/engineeringAgentStore.ts");
-  assert.match(store, /circuitLatched: legacy && isCircuitLatched\(\{ runs, acknowledgedAt \}\)/);
 });
 
 test("an observed halt names its pull request or branch, and nothing else", async () => {
@@ -60,7 +55,7 @@ test("a card's review is its newest accepted result; a later failure does not hi
   // AMUX-IMGOUT-003: attempts 2 and 3 passed review, 4 and 5 failed.
   const imgout = [failed("a5"), failed("a4"), ok("a3"), ok("a2"), failed("a1")];
   assert.equal(amuxV22ReviewAttempt(imgout)?.id, "a3");
-  assert.equal(amuxV22ReviewAttempt(imgout, true), null, "legacy: only the newest counts");
+  assert.equal(amuxV22ReviewAttempt(imgout, true), null, "a card that is not a v4 card: only the newest counts");
   assert.equal(amuxV22ReviewAttempt([ok("a2"), failed("a1")])?.id, "a2");
   assert.equal(amuxV22ReviewAttempt([ok("a2")], true)?.id, "a2");
   // A result rejected back to todo holds no review; anything still open holds every review.
@@ -71,7 +66,7 @@ test("a card's review is its newest accepted result; a later failure does not hi
 
 test("a kept result is published once publication could open, the way settlement would have", async () => {
   const { decideAmuxV22KeptResult, amuxV22KeptResultPublicationEnabled } = await import("../lib/amux/v22KeptResultCore.ts");
-  const open = { publicationEnabled: true, legacy: false, orchestratorHalted: false, claimAllowed: true,
+  const open = { publicationEnabled: true, orchestratorHalted: false, claimAllowed: true,
     publishAllowed: true, mode: "t1", consent: true, taskStatus: "review" };
   assert.deepEqual(decideAmuxV22KeptResult(open), { publish: true, moveToReview: false, tierPending: true });
   assert.deepEqual(decideAmuxV22KeptResult({ ...open, taskStatus: "blocked" }),
@@ -80,7 +75,7 @@ test("a kept result is published once publication could open, the way settlement
   assert.deepEqual(decideAmuxV22KeptResult({ ...open, consent: false }), { publish: true, moveToReview: false, tierPending: false });
   // Review r-20261115-115151-9e04dc: under shadow it waits, since a shadow run's product can never become a PR.
   for (const [change, reason] of [
-    [{ publicationEnabled: false }, "disabled"], [{ legacy: true }, "disabled"],
+    [{ publicationEnabled: false }, "disabled"],
     [{ orchestratorHalted: true }, "orchestrator_halted"], [{ taskStatus: "todo" }, "task_moved"],
     [{ mode: "shadow", publishAllowed: false }, "shadow_mode"],
     [{ mode: "off", claimAllowed: false, publishAllowed: false }, "engineering_off"],
@@ -89,8 +84,6 @@ test("a kept result is published once publication could open, the way settlement
   // Whether kept results are published at all, which also decides whether the DM leaves them out.
   assert.equal(amuxV22KeptResultPublicationEnabled({ TOMVERSE_AMUX_V22_ENGINEERING_PUBLICATION: "enabled" }), true);
   assert.equal(amuxV22KeptResultPublicationEnabled({}), false);
-  assert.equal(amuxV22KeptResultPublicationEnabled({ TOMVERSE_AMUX_V22_ENGINEERING_PUBLICATION: "enabled",
-    ENGINEERING_AGENT_LEGACY_HALTS: "enabled" }), false);
 });
 
 test("the Decision Maker is never asked to run a kept result again, and the reads only read", () => {

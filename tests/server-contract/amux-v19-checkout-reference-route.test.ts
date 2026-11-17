@@ -11,12 +11,8 @@ const ideaId = "ea86a25b-919f-4714-a3d8-45ef5a18b175";
 const reservationId = "dc86a25b-919f-4714-a3d8-45ef5a18b175";
 const claimId = "bc86a25b-919f-4714-a3d8-45ef5a18b175";
 const names = ["TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET",
-  "TOMVERSE_AMUX_SYNC_SECRET", "TOMVERSE_AMUX_V19_CHECKOUT_REFERENCE_READ",
-  "TOMVERSE_AMUX_V19_REFERENCE_PIN_READ",
-  "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_QUEUE_READ",
-  "TOMVERSE_AMUX_SESSION_INTAKE", "TOMVERSE_AMUX_V4_ANALYSIS_QUEUE_READ",
-  "TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET",
-  "TOMVERSE_AMUX_V19_MAX_CHECKOUT_REFERENCE_READ"] as const;
+  "TOMVERSE_AMUX_SYNC_SECRET",
+  "TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET"] as const;
 const prior = Object.fromEntries(names.map((name) => [name, process.env[name]]));
 let reads = 0;
 let fail = false;
@@ -45,9 +41,7 @@ const reset = () => {
   reads = 0; fail = false; missing = false; received = undefined;
   process.env.TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET = secret;
   delete process.env.TOMVERSE_AMUX_SYNC_SECRET;
-  for (const name of names.slice(2, 7)) process.env[name] = "enabled";
   delete process.env.TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET;
-  delete process.env.TOMVERSE_AMUX_V19_MAX_CHECKOUT_REFERENCE_READ;
 };
 const post = (body: unknown = { ideaId, reservationId, claimId, referenceOrdinal: 0 },
   headers: Record<string, string> = {}) => new Request(
@@ -57,28 +51,20 @@ const post = (body: unknown = { ideaId, reservationId, claimId, referenceOrdinal
       ...headers }, body: JSON.stringify(body),
   });
 
-test("checkout reference is closed without the exact agent and all read switches", async () => {
+test("checkout reference is closed without the exact agent", async () => {
   reset();
   assert.equal((await route.POST(post(undefined, { authorization: "" }))).status, 401);
   process.env.TOMVERSE_AMUX_SYNC_SECRET = secret;
   assert.equal((await route.POST(post())).status, 401);
-  for (const name of names.slice(2, 7)) {
-    reset();
-    delete process.env[name];
-    assert.equal((await route.POST(post())).status, 409, name);
-    assert.equal(reads, 0, name);
-  }
+  assert.equal(reads, 0);
 });
 
-test("dedicated Max credential requires its switch and max-shadow claim mode", async () => {
+test("dedicated Max credential reads in max-shadow claim mode", async () => {
   reset();
   process.env.TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET = maxSecret;
   const maxPost = () => post(undefined, {
     authorization: `Bearer ${maxSecret}`,
     "x-amux-agent-id": "amux-intake-max" });
-  assert.equal((await route.POST(maxPost())).status, 409);
-  assert.equal(reads, 0);
-  process.env.TOMVERSE_AMUX_V19_MAX_CHECKOUT_REFERENCE_READ = "enabled";
   assert.equal((await route.POST(maxPost())).status, 200);
   assert.deepEqual(received, { ideaId, reservationId, claimId,
     referenceOrdinal: 0, requiredBudgetMode: "max_shadow" });

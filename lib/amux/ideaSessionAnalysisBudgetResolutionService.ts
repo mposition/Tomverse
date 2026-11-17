@@ -12,6 +12,7 @@ import { AMUX_V4_ANALYSIS_NAMESPACE } from "./ideaAnalysisBudgetCore.ts";
 import { readAmuxSessionBudgetClaimReceipt } from
   "./ideaSessionAnalysisBudgetClaimService.ts";
 import { resolveSessionUnknownClaim } from "./ideaSessionShadowBudgetCore.ts";
+import { AMUX_SESSION_SYSTEM_CLOSURE } from "./ideaSessionLateResult.ts";
 
 type Tx = Prisma.TransactionClient;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -36,16 +37,15 @@ function resolutionReadbackDigest(value: {
   })).digest("hex");
 }
 
-/** The newest unresolved unknown claims an owner list shows at once. */
-export const AMUX_V19_SESSION_BUDGET_UNKNOWN_LIST_LIMIT = 20;
-
 /** Owner list of the claims still held as outcome_unknown: IDs, ordinals,
- * budget mode and times only, newest first and bounded. It decides nothing;
- * each row is resolved only through its exact read-back below. */
+ * budget mode and times only, newest first, every one of them (operator,
+ * 2026-11-16: no list cap). Only a paid (bounded) claim waits here; the system
+ * closes an unknown subscription claim itself. It decides nothing; each row is
+ * resolved only through its exact read-back below. */
 export async function listAmuxSessionBudgetUnknownClaims(tx: Tx, input: {
   session: Session;
 }): Promise<{ rows: Array<{ claimId: string; invocationOrdinal: number;
-  budgetMode: string; createdAt: string }>; total: number; limit: number }> {
+  budgetMode: string; createdAt: string }>; total: number }> {
   if (!isAdminSession(input.session) ||
       getAdminRole(input.session) !== "owner" || !input.session.user?.id) {
     throw new AmuxSessionBudgetResolutionError("forbidden");
@@ -54,15 +54,12 @@ export async function listAmuxSessionBudgetUnknownClaims(tx: Tx, input: {
     status: "outcome_unknown", closedAt: null };
   const rows = await tx.amuxIdeaSessionAnalysisBudgetClaim.findMany({
     where, orderBy: [{ createdAt: "desc" }, { id: "asc" }],
-    take: AMUX_V19_SESSION_BUDGET_UNKNOWN_LIST_LIMIT,
     select: { id: true, invocationOrdinal: true, budgetMode: true,
       createdAt: true },
   });
-  const total = await tx.amuxIdeaSessionAnalysisBudgetClaim.count({ where });
   return { rows: rows.map((row) => ({ claimId: row.id,
     invocationOrdinal: row.invocationOrdinal, budgetMode: row.budgetMode,
-    createdAt: row.createdAt.toISOString() })),
-  total, limit: AMUX_V19_SESSION_BUDGET_UNKNOWN_LIST_LIMIT };
+    createdAt: row.createdAt.toISOString() })), total: rows.length };
 }
 
 /** Content-free owner read-back for an uncertain or terminal claim. It does
@@ -99,8 +96,14 @@ export async function readAmuxSessionBudgetResolution(tx: Tx, input: {
         actorEmail: true, ipAddress: true, userAgent: true },
     });
     const metadata = audit?.metadata;
-    const actorKind = ["released", "owner_consumed"].includes(claim.status)
-      ? "human" : "system";
+    // The system closes an unknown subscription claim itself (operator,
+    // 2026-11-16); its owner_consumed row names that closure.
+    const systemClosure = claim.status === "owner_consumed" &&
+      claim.budgetMode === "max_shadow" && !!metadata &&
+      typeof metadata === "object" && !Array.isArray(metadata) &&
+      (metadata as Record<string, unknown>).closedBy === AMUX_SESSION_SYSTEM_CLOSURE;
+    const actorKind = ["released", "owner_consumed"].includes(claim.status) &&
+      !systemClosure ? "human" : "system";
     if (!audit?.entryHash ||
         audit.action !== AMUX_V19_SESSION_BUDGET_RESOLVE_ACTION ||
         audit.targetType !== AMUX_V19_SESSION_BUDGET_TARGET ||
@@ -135,8 +138,11 @@ export async function readAmuxSessionBudgetResolution(tx: Tx, input: {
  * positive evidence of no CLI start releases zero. Otherwise a bounded claim
  * consumes its full reservation, and a subscription (max_shadow) claim closes
  * at zero with its shadow usage unknown: its headroom returns to the month
- * instead of filling it (owner decision 2026-10-20). This never retries or
- * resumes that claim. */
+ * instead of filling it (owner decision 2026-10-20). This never resumes that
+ * claim. The system closes an unknown subscription claim the same way on its
+ * own (operator, 2026-11-16), so this owner path is for a bounded claim and
+ * for any subscription claim still listed; a closed subscription idea is
+ * queued again after its wait (ideaSessionAnalysisRetryCore.ts). */
 export async function commitAmuxSessionBudgetUnknownResolution(tx: Tx, input: {
   claimId: string;
   session: Session;

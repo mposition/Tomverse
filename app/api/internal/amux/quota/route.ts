@@ -87,7 +87,9 @@ async function recordQuotaObservation(request: Request): Promise<Response> {
             : { accepted: false, reason: "observation_conflict" };
         }
         const age = context.dbNow.getTime() - observedAt.getTime();
-        if (age < -300_000 || age > 900_000) return { accepted: false, reason: "observation_not_fresh" };
+        // A reading from the future is a clock fault; an old one is recorded as
+        // the old reading it is (the claim judges its age, never this write).
+        if (age < -300_000) return { accepted: false, reason: "observation_not_fresh" };
         const observation = await tx.amuxQuotaObservation.create({ data: {
         id,
         worker: body.worker,

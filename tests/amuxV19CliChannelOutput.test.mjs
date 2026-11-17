@@ -63,6 +63,15 @@ test("a Copilot run yields its final answer, the traced reads and the served mod
   }
 });
 
+// Operator, 2026-11-16: a run whose CLI reported no usage is still an answer.
+test("a Copilot run with no usage report is a result with zero tokens", () => {
+  const { result, reason } = run("github-copilot", "gpt-5-mini", copilotStream({ noUsage: true }));
+  assert.equal(reason, null);
+  assert.equal(result.kind, "verified_success");
+  assert.equal(result.inputTokens, 0);
+  assert.equal(result.outputTokens, 0);
+});
+
 test("a Copilot run is refused on a write tool, an outside path or another model", () => {
   for (const [change, code] of [
     [{ tool: "bash" }, "tool_refused"],
@@ -72,7 +81,6 @@ test("a Copilot run is refused on a write tool, an outside path or another model
     [{ path: `${directory}/../x` }, "tool_path_outside"],
     [{ model: "gpt-5" }, "served_model_mismatch"],
     [{ usageModel: "claude-sonnet-4.5" }, "served_model_mismatch"],
-    [{ noUsage: true }, "usage_tokens"],
     [{ exitCode: 1 }, "result_error"],
     [{ answer: "  " }, "result_text_missing"],
   ]) {

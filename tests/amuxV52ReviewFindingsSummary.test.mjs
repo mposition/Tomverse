@@ -8,8 +8,6 @@ import { rejectionFindings, reviewStep } from "../scripts/amux-v52-review-runner
 import { AMUX_CONTENT_UNIT_MAX_BYTES } from "../lib/amux/ideaCrypto.ts";
 import {
   AMUX_V52_FINDINGS_MAX_BYTES,
-  AMUX_V52_FINDINGS_SUMMARY_MAX_CHARS,
-  AMUX_V52_FINDINGS_SUMMARY_MAX_LINES,
   amuxV52FindingLines,
   amuxV52FindingsRepeat,
   fitAmuxV52FindingsDoc,
@@ -328,7 +326,7 @@ test("the next review avoids only a vendor that rejected the two newest reviews 
   assert.deepEqual(amuxV52VendorsToAvoid([]), []);
 });
 
-test("the app drops credential-like lines, hides links and bounds a legacy summary", () => {
+test("the app drops credential-like lines, hides links and keeps a legacy summary whole", () => {
   const token = `ghp_${"A".repeat(36)}`;
   const normalized = normalizeAmuxV52FindingsSummary([
     "- [major] leaks the token " + token,
@@ -344,8 +342,9 @@ test("the app drops credential-like lines, hides links and bounds a legacy summa
   assert.equal(normalizeAmuxV52FindingsSummary(42), null);
   const long = normalizeAmuxV52FindingsSummary(
     Array.from({ length: 40 }, (_, index) => `- ${index} ${"y".repeat(500)}`).join("\n"));
-  assert.ok(long.length <= AMUX_V52_FINDINGS_SUMMARY_MAX_CHARS);
-  assert.ok(long.split("\n").length <= AMUX_V52_FINDINGS_SUMMARY_MAX_LINES);
+  // No 2,000-character or 12-line cut (until 2026-11-16): the summary is kept whole.
+  assert.ok(long.length > 20_000);
+  assert.equal(long.split("\n").length, 40);
 });
 
 test("the owner view is findings, a legacy summary, a purged or unreadable notice, the review job, or nothing", () => {

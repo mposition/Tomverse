@@ -262,8 +262,7 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
       closable: !idea.cancelled && amuxIdeaOwnerClosableState(idea.state, idea.submissionOrigin) &&
         (idea.state === "awaiting_owner" || (progress.waitingFor !== null &&
           WAITS_FOR_EXECUTION_APPROVAL.has(progress.waitingFor)) ||
-          lane?.state === "pr_open" || lane?.state === "pr_closed" || lane?.state === "queued" ||
-          lane?.state === "failed"),
+          lane?.state === "pr_open" || lane?.state === "pr_closed" || lane?.state === "queued"),
       requestId: idea.requestId,
       submittedAt: new Date(idea.submittedAtMs).toISOString(),
       displayKey: own.find((card) => card.displayKey)?.displayKey ?? null,

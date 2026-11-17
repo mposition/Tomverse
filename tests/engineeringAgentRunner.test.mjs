@@ -144,11 +144,6 @@ test("a branch or pull request passes only at a bound head or an allowed commit,
   assert.deepEqual(moved, { verdict: "none", subject: null, moved: 2 });
   // Another run's branch name on a bound number is still unbound.
   assert.equal(await observe([], [{ ...bound, headRef: "agent/engineering/222", headSha: C }]), "unbound_app_pr");
-  // ENGINEERING_AGENT_LEGACY_HALTS: every move is unbound, as before.
-  const legacy = { ...known, legacyHalts: true };
-  assert.equal(await observeUnbound({ refs: [{ ref: "refs/heads/agent/engineering/111", sha: B }], pulls: [], known: legacy, commitDigestAt }),
-    "unbound_app_ref");
-  assert.equal(await observeUnbound({ refs: [], pulls: [{ ...bound, headSha: B }], known: legacy, commitDigestAt }), "unbound_app_pr");
   assert.equal(
     await observe([{ ref: "refs/heads/agent/engineering/222", sha: C }], [{ number: 8, headRef: "agent/engineering/222", headSha: C, body: prBodyMarker("222") }]),
     "none",
@@ -176,13 +171,6 @@ test("a branch or pull request passes only at a bound head or an allowed commit,
   assert.equal(calls.some((call) => call.path === "run/start"), false, "nothing starts after an unbound observation");
   assert.equal(shouldSendSuccessHeartbeat(result), false);
 
-  // With the kill switch the round ends at the halt, as before.
-  const old = fakeApp({ "observe/known": { status: 200, json: { bindings: [], consumed: [], legacyHalts: true } } });
-  assert.deepEqual(await runRunnerCycle(ports(old.app, { refs: [{ ref: "refs/heads/agent/engineering/999", sha: A }], pulls: [] })),
-    { finishedNormally: true, halt: "unbound_app_ref", reason: "observed_unbound" });
-  assert.deepEqual(old.calls.map((call) => call.path), ["worker/register", "observe/known", "observe/known", "observe/halt"]);
-  assert.deepEqual(old.calls.at(-1).body, { halt: "unbound_app_ref" });
-
   // A later clean reading clears the halt an earlier one recorded; with none holding, nothing is sent.
   const at = "2026-11-15T01:02:03.004Z";
   const explained = fakeApp({ "observe/known": { status: 200,
@@ -190,11 +178,6 @@ test("a branch or pull request passes only at a bound head or an allowed commit,
   assert.deepEqual(await runRunnerCycle(ports(explained.app)), { finishedNormally: true, halt: "none", reason: "observed" });
   // It names the halt it saw (review r-20261115-120115-261135): a later halt is not cleared by this reading.
   assert.deepEqual(explained.calls.find((call) => call.path === "observe/halt").body, { halt: "none", observedAt: at });
-  const legacyExplained = fakeApp({ "observe/known": { status: 200,
-    json: { bindings: [], consumed: [], observedHalt: "unbound_app_pr", observedHaltAt: at, legacyHalts: true } } });
-  await runRunnerCycle(ports(legacyExplained.app));
-  assert.equal(legacyExplained.calls.some((call) => call.path === "observe/halt"), false, "only a person clears it then");
-
   const unreadable = fakeApp({ "observe/known": { status: 500, json: null } });
   assert.equal((await runRunnerCycle(ports(unreadable.app))).finishedNormally, false);
 });
@@ -235,13 +218,8 @@ test("an unreadable commit leaves the observation undetermined, and a bound run 
     bindings: [{ runId: "222", prNumber: 7, headSha: A, verifiedHeadSha: A }],
     consumed: [{ runId: "222", commitDigest: allowed }],
   };
-  assert.equal(
-    await observeUnbound({ refs: [{ ref: "refs/heads/agent/engineering/222", sha: C }], pulls: [],
-      known: { ...bound, legacyHalts: true }, commitDigestAt: async () => allowed }),
-    "unbound_app_ref",
-    "once bound, an earlier allowed commit is not the run's",
-  );
-  // By default a bound run's branch anywhere else is its card's moved pull request.
+  // A bound run's branch anywhere else is its card's moved pull request, and an
+  // earlier allowed commit is not the run's once bound.
   assert.equal(
     await observeUnbound({ refs: [{ ref: "refs/heads/agent/engineering/222", sha: C }], pulls: [], known: bound, commitDigestAt: async () => allowed }),
     "none",

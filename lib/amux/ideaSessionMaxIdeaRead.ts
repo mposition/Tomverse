@@ -154,7 +154,15 @@ export async function readAmuxV19MaxPagePromptInTx(
       now, keys });
   } catch { return null; }
   const retries = await readAmuxSessionPlanRetriesInTx(tx, input.ideaId);
-  if (context.chunkIndex + retries.count !== claim.invocationOrdinal) return null;
+  // Each earlier claim that ended without a result was asked again with the
+  // same page (ideaSessionAnalysisRetryCore.ts), so it moves the ordinal too.
+  const unanswered = await tx.amuxIdeaSessionAnalysisBudgetClaim.count({ where: {
+    reservationId: input.reservationId,
+    invocationOrdinal: { lt: claim.invocationOrdinal },
+    status: { not: "succeeded" } } });
+  if (context.chunkIndex + retries.count + unanswered !== claim.invocationOrdinal) {
+    return null;
+  }
   const built = buildAmuxSessionPagePrompt({ claimId: input.claimId,
     idea: read.idea, context });
   if (built.status !== "prompt_candidate") return null;

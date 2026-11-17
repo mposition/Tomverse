@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "migrationSqlSha256": "a29968090f8bca3bfa9809ebd0ded744cba09243f7875073100f62a61a2f9fe1",
+  "replacedChecks": [
+    {
+      "table": "AmuxIdeaSessionAnalysisBudgetClaim",
+      "constraint": "AmuxIdeaSessionAnalysisBudgetClaim_values_check",
+      "previousDefinitionSha256": "97e84f99ce453e93c54c8e61c95f475cf0ae91949b8c0dc7dccec3198a095037"
+    },
+    {
+      "table": "AmuxIdeaSessionAnalysisResult",
+      "constraint": "AmuxIdeaSessionAnalysisResult_shape_check",
+      "previousDefinitionSha256": "26dcee0c0e34b897760b025b23ee2a2064932c6a2ce2789b859ad7a17f69ab6c"
+    },
+    {
+      "table": "AmuxIdeaRetentionHold",
+      "constraint": "AmuxIdeaRetentionHold_clock_check",
+      "previousDefinitionSha256": "10efabcad5936aa74d5a4651fd50073c6acd000695092d73a38629292b380b0b"
+    }
+  ]
+}

@@ -14,9 +14,7 @@ import { authOptions } from "@/lib/auth";
 import {
   BOARD_IMPORT_RAW_BODY_MAX_BYTES,
   BoardImportError,
-  admitBoardImportPreview,
   boardImportContentTypeAccepted,
-  pruneBoardImportPreviewHits,
 } from "@/lib/amux/boardImportCore";
 import {
   applyBoardImport,
@@ -44,7 +42,6 @@ const approvalSchema = z
 
 const ACTIONS = new Set(["preview", "prepare", "approve", "reject", "expire", "expire-due", "apply"]);
 
-const previewHits = new Map<string, number[]>();
 
 const requireOwner = async () => {
   const session = await getServerSession(authOptions);
@@ -95,9 +92,8 @@ export async function POST(request: Request) {
     if (!boardImportContentTypeAccepted(request.headers.get("content-type"))) {
       return NextResponse.json({ error: "content_type_refused" }, { status: 415, headers: noStoreHeaders });
     }
-    // Preview does not call consumeApiRateLimit. That helper writes a usage
-    // bucket, and preview must not write. Its ceiling is the process-local
-    // map in admitBoardImportPreview, which does not span instances.
+    // Preview does not call consumeApiRateLimit: that helper writes a usage
+    // bucket, and preview must not write. It has no request-rate limit.
     if (action !== "preview") {
       await consumeApiRateLimit(request, auth.session.user.id, `admin-amux-board-import-${action}`, {
         minute: 10,
@@ -105,16 +101,6 @@ export async function POST(request: Request) {
       });
     }
     if (action === "preview") {
-      const now = Date.now();
-      const pruned = pruneBoardImportPreviewHits([...previewHits], now);
-      previewHits.clear();
-      for (const [userId, retained] of pruned) previewHits.set(userId, retained);
-      const decision = admitBoardImportPreview(previewHits.get(auth.session.user.id) ?? [], now);
-      if (decision.retained.length === 0) previewHits.delete(auth.session.user.id);
-      else previewHits.set(auth.session.user.id, decision.retained);
-      if (!decision.allowed) {
-        return NextResponse.json({ error: "preview_rate_limited" }, { status: 429, headers: noStoreHeaders });
-      }
       const raw = await readLimitedText(request, BOARD_IMPORT_RAW_BODY_MAX_BYTES);
       const preview = await previewBoardImport(raw);
       return NextResponse.json(preview, { headers: noStoreHeaders });

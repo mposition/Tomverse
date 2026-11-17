@@ -20,7 +20,7 @@
 ## 선행 조건
 
 1. 버전 15 코드가 main에 병합되고 production `Tomverse`와 `AMUX Orchestrator`가 그 커밋으로 배포됐다.
-2. production `Tomverse`에 `TOMVERSE_AMUX_EXECUTION_API_ENABLED=1`과 worker catalog가 있다.
+2. production `Tomverse`에 worker catalog가 있다(실행 API는 늘 열려 있다. `TOMVERSE_AMUX_EXECUTION_API_ENABLED`는 2026-11-16에 없앴다).
 3. `/admin/amux-execution?tab=cards`에서 실행할 카드가 `todo`, owner 없음, brief `승인됨`이다.
 
 ## 1. Review를 먼저 연다
@@ -28,7 +28,7 @@
 결과가 돌아오기 전에 사람이 받을 곳이 있어야 한다. production `Tomverse`에 두 값을 둔다.
 
 - `AMUX_REVIEW_GITHUB_READ_TOKEN`: `mposition/Tomverse`의 pull request 읽기만 가진 fine-grained token. 쓰기 권한을 주지 않는다.
-- `TOMVERSE_AMUX_AGENT_APPROVAL_ENABLED=true`
+- `TOMVERSE_AMUX_AGENT_APPROVAL_ENABLED=enabled`(이미 들어 있는 `true`도 같은 뜻)
 
 확인: `/admin/amux-execution?tab=assignment`의 escalation 목록이 열리고 오류가 없다.
 
@@ -41,7 +41,7 @@
 ## 3. claim을 한 장만 연다
 
 1. claim은 owner 없는 `todo` 가운데 우선순위가 가장 높은 카드부터 dispatch-ready worker에 간다. 한 번에 한 attempt만 보려면 worker별 bridge(`tomverse-amux-bridge@<worker>`) 하나만 실행하거나 Admin 등록부에서 나머지 worker를 일시 중지한다(정책 버전 55 S4부터 `TOMVERSE_AMUX_WSL_SESSIONS`는 읽지 않는다). 그 worker만 runtime으로 등록되고, attempt가 진행 중인 동안 그 세션은 dispatch-ready가 아니므로 두 번째 claim이 생기지 않는다. 어느 카드가 먼저 갈지는 `/admin/amux-execution?tab=cards`의 우선순위와 orchestrator 로그의 `selected task`로 미리 본다.
-2. production `AMUX Orchestrator`에 `TOMVERSE_AMUX_CLAIM=1`을 둔다. `TOMVERSE_AMUX_EXECUTE`는 두지 않는다. 둘을 함께 두면 orchestrator가 시작하지 않는다.
+2. production `AMUX Orchestrator`에 `TOMVERSE_AMUX_CLAIM=enabled`를 둔다(이전 값 `1`도 같은 뜻). `TOMVERSE_AMUX_EXECUTE`는 두지 않는다. 둘을 함께 두면 orchestrator가 시작하지 않는다.
 3. orchestrator 로그에서 `Tomverse task claim result`와 `claimed = true`를 확인한다.
 4. `/admin/amux-execution?tab=cards`에서 그 카드의 owner와 `doing`, 실행 1을 확인한다.
 5. 로컬 AMUX Board에 그 attempt의 영수증 카드가 생기고, 해당 세션이 brief를 받았는지 확인한다.
@@ -66,7 +66,7 @@ worker가 PR을 열고 로컬 카드를 끝내면 bridge가 다음 tick에 정�
 |---|---|---|
 | 새 claim | `AMUX Orchestrator`에서 `TOMVERSE_AMUX_CLAIM` 제거 | claim된 카드는 180초 뒤 owner가 풀린다 |
 | 새 배정과 정산 | `systemctl --user stop tomverse-wsl-bridge` | 진행 중 attempt는 heartbeat가 끊겨 90초 뒤 `todo`로 돌아간다 |
-| 실행 API 전체 | `Tomverse`에서 `TOMVERSE_AMUX_EXECUTION_API_ENABLED` 제거 | claim, 시작, 정산이 모두 409 |
-| Review | `TOMVERSE_AMUX_AGENT_APPROVAL_ENABLED` 제거 | `review` 카드는 그대로 남는다 |
+| 실행 API 전체 | 이제 끄는 스위치가 없다. orchestrator(`TOMVERSE_AMUX_ENABLED`, `TOMVERSE_AMUX_CLAIM`)나 bridge를 멈춘다 | 새 claim이 시작되지 않는다 |
+| Review | `TOMVERSE_AMUX_AGENT_APPROVAL_ENABLED` 제거(또는 `disabled`) | `review` 카드는 그대로 남는다 |
 
 halt한 bridge는 종료 코드 3으로 끝나고 다시 시작하지 않는다. 로그와 `/admin/amux-execution?tab=cards`를 확인한 뒤 사람이 다시 시작한다.

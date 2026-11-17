@@ -13,11 +13,7 @@ import { isAmuxIdeaRequestId } from "@/lib/amux/ideaSubmissionCore";
 import { readIdeaTransferBrowserNonce } from "@/lib/amux/ideaTransferBrowserCore";
 import {
   AMUX_V4_TRANSFER_CONFIRM_MAX_BYTES,
-  AMUX_V4_TRANSFER_CONFIRM_READ_ENV,
-  AMUX_V4_TRANSFER_CONFIRM_WRITE_ENV,
   inspectIdeaTransferConfirmationRequest,
-  transferConfirmReadPermitted,
-  transferConfirmWritePermitted,
 } from "@/lib/amux/ideaTransferConfirmationCore";
 import {
   IdeaTransferConfirmationError,
@@ -62,16 +58,11 @@ function failure(error: unknown): Response {
     { status: 503, headers: noStore });
 }
 
-/** A dark human confirmation writer. It records a decision but cannot call a model. */
+/** A human confirmation writer. It records a decision but cannot call a model. */
 export async function POST(request: Request) {
   try {
     const session = await owner();
     if (session instanceof NextResponse) return session;
-    if (!transferConfirmWritePermitted(process.env[AMUX_V4_TRANSFER_CONFIRM_WRITE_ENV]) ||
-        !transferConfirmReadPermitted(process.env[AMUX_V4_TRANSFER_CONFIRM_READ_ENV])) {
-      return NextResponse.json({ error: "confirmation_disabled", modelCallStarted: false },
-        { status: 503, headers: noStore });
-    }
     if (request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !== "application/json") {
       return NextResponse.json({ error: "content_type_refused", modelCallStarted: false },
         { status: 415, headers: noStore });
@@ -111,10 +102,6 @@ export async function GET(request: Request) {
   try {
     const session = await owner();
     if (session instanceof NextResponse) return session;
-    if (!transferConfirmReadPermitted(process.env[AMUX_V4_TRANSFER_CONFIRM_READ_ENV])) {
-      return NextResponse.json({ error: "confirmation_disabled", modelCallStarted: false },
-        { status: 503, headers: noStore });
-    }
     await consumeApiRateLimit(request, session.user!.id!, "admin-amux-v4-transfer-confirm-read",
       { minute: 10, day: 100 });
     const params = new URL(request.url).searchParams;

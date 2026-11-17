@@ -4,13 +4,13 @@ import test from "node:test";
 
 import {
   AMUX_IDEA_LANE_FAILURES,
-  AMUX_IDEA_LANE_MAX_ATTEMPTS,
-  AMUX_IDEA_LANE_REPEATED_FAILURE_STOP,
+  AMUX_IDEA_LANE_BACKOFF_BASE_MS,
+  AMUX_IDEA_LANE_BACKOFF_MAX_MS,
+  amuxIdeaLaneBackoffMs,
   amuxIdeaLaneBranch,
   amuxIdeaLaneClaimable,
   amuxIdeaLaneDailyAttempts,
   amuxIdeaLaneEnabled,
-  amuxIdeaLaneGivesUp,
   amuxIdeaLaneState,
   amuxIdeaLaneView,
   inspectAmuxIdeaLaneFence,
@@ -21,8 +21,8 @@ import { amuxIdeaProgress } from "../lib/amux/ideaProgressCore.ts";
 const NOW = 1_800_000_000_000;
 const run = (overrides = {}) => ({ claimedAtMs: NOW - 60_000, leaseUntilMs: NOW + 60_000, outcome: null,
   prNumber: null, ...overrides });
-const failed = (minutesAgo, outcome = "cli_failed") =>
-  run({ claimedAtMs: NOW - minutesAgo * 60_000, leaseUntilMs: NOW - 1, outcome });
+const failed = (minutesAgo, outcome = "cli_failed", extra = {}) =>
+  run({ claimedAtMs: NOW - minutesAgo * 60_000, leaseUntilMs: NOW - 1, outcome, ...extra });
 const ID = "0f8fad5b-d9cb-469f-a165-70867728950e";
 const PART1 = { part: 1, continues: false, previousPrNumber: null };
 
@@ -31,60 +31,53 @@ test("an idea's runs decide whether the lane runs it again", () => {
   assert.equal(amuxIdeaLaneClaimable(null), true);
   assert.deepEqual(amuxIdeaLaneState([run()], NOW),
     { ...PART1, state: "running", attempts: 1, prNumber: null, lastOutcome: null });
+  // A run that never reported ends at its lease and is retried, not held for a
+  // proof: after the backoff.
   const vanished = amuxIdeaLaneState([run({ leaseUntilMs: NOW - 1 })], NOW);
-  assert.deepEqual(vanished, { ...PART1, state: "queued", attempts: 1, prNumber: null, lastOutcome: "lease_expired" },
-    "a run that never reported is retried, not held for a proof");
-  assert.equal(amuxIdeaLaneClaimable(vanished), true);
-  assert.deepEqual(amuxIdeaLaneState([failed(30), failed(10, "no_change")], NOW),
-    { ...PART1, state: "queued", attempts: 2, prNumber: null, lastOutcome: "no_change" });
-  const spent = amuxIdeaLaneState(Array.from({ length: AMUX_IDEA_LANE_REPEATED_FAILURE_STOP },
-    (_, i) => failed(i + 1)), NOW);
-  assert.equal(spent.state, "failed", "the same failure three times in a row stops it");
-  assert.equal(amuxIdeaLaneClaimable(spent), false);
+  assert.deepEqual(vanished, { ...PART1, state: "queued", attempts: 1, prNumber: null, lastOutcome: "lease_expired",
+    retryAtMs: NOW - 1 + AMUX_IDEA_LANE_BACKOFF_BASE_MS });
+  assert.equal(amuxIdeaLaneClaimable(vanished), false, "it waits out the backoff");
+  const waited = amuxIdeaLaneState([run({ leaseUntilMs: NOW - AMUX_IDEA_LANE_BACKOFF_BASE_MS })], NOW);
+  assert.deepEqual(waited, { ...PART1, state: "queued", attempts: 1, prNumber: null, lastOutcome: "lease_expired",
+    retryAtMs: null });
+  assert.equal(amuxIdeaLaneClaimable(waited), true);
+  const two = amuxIdeaLaneState([failed(30), failed(10, "no_change")], NOW);
+  assert.deepEqual(two, { ...PART1, state: "queued", attempts: 2, prNumber: null, lastOutcome: "no_change",
+    retryAtMs: NOW - 1 + 2 * AMUX_IDEA_LANE_BACKOFF_BASE_MS });
+  assert.equal(amuxIdeaLaneClaimable(two), false);
+  // A failed run that reported is dated by when it reported, not by its lease.
+  const reported = amuxIdeaLaneState([failed(30, "cli_failed", { finishedAtMs: NOW - 4 * 60_000 })], NOW);
+  assert.equal(reported.retryAtMs, NOW + 60_000);
   const opened = amuxIdeaLaneState([failed(30), run({ outcome: "pr_open", prNumber: 42, leaseUntilMs: NOW - 1 })], NOW);
   assert.deepEqual(opened, { ...PART1, state: "pr_open", attempts: 2, prNumber: 42, lastOutcome: "pr_open" });
   assert.equal(amuxIdeaLaneClaimable(opened), false, "an opened PR ends the lane's work");
   assert.equal(amuxIdeaLaneClaimable(amuxIdeaLaneState([run()], NOW)), false, "never two runs at once");
 });
 
-test("the lane stops a part only when the same failure repeats (owner direction 2026-11-15)", () => {
-  assert.equal(AMUX_IDEA_LANE_REPEATED_FAILURE_STOP, 3);
+test("a failed part is never dropped: it waits 5 minutes, doubling to 24 hours (owner direction 2026-11-16)", () => {
+  assert.deepEqual([0, 1, 2, 3, 4, 9, 10, 11, 1000].map(amuxIdeaLaneBackoffMs),
+    [0, 5, 10, 20, 40, 1280, 1440, 1440, 1440].map((minutes) => minutes * 60_000));
+  assert.equal(AMUX_IDEA_LANE_BACKOFF_MAX_MS, 24 * 60 * 60_000);
   const expired = (minutesAgo) => run({ claimedAtMs: NOW - minutesAgo * 60_000, leaseUntilMs: NOW - 1 });
-  // Different failures are new problems: the part keeps its turn, however many runs it took.
-  const varied = [failed(9), failed(8, "no_change"), failed(7), failed(6, "push_failed"), failed(5),
-    expired(4), failed(3, "no_change")];
-  assert.deepEqual(amuxIdeaLaneState(varied, NOW, false),
-    { ...PART1, state: "queued", attempts: 7, prNumber: null, lastOutcome: "no_change" });
-  assert.equal(amuxIdeaLaneClaimable(amuxIdeaLaneState(varied, NOW, false)), true);
-  // The newest three ended the same way: it stops, whatever came before.
-  const repeated = [...varied, failed(2, "no_change"), failed(1, "no_change")];
-  assert.equal(amuxIdeaLaneState(repeated, NOW, false).state, "failed");
-  assert.equal(amuxIdeaLaneGivesUp(repeated.slice(0, -1), false), false, "two in a row is not three");
-  // A run that never reported counts as lease_expired, so a run that keeps vanishing stops too.
-  assert.equal(amuxIdeaLaneState([expired(3), expired(2), expired(1)], NOW, false).state, "failed");
-  assert.equal(amuxIdeaLaneState([expired(3), failed(2), expired(1)], NOW, false).state, "queued");
-  // Order is by claim time, not by the order the rows arrive in.
-  assert.equal(amuxIdeaLaneState([failed(1), failed(9, "no_change"), failed(2), failed(3)], NOW, false).state, "failed");
-  assert.equal(amuxIdeaLaneState([failed(3), failed(1, "no_change"), failed(2)], NOW, false).state, "queued");
-  // With the legacy switch, the former rule: three runs of any outcome.
-  assert.equal(AMUX_IDEA_LANE_MAX_ATTEMPTS, 3);
-  assert.equal(amuxIdeaLaneState(varied.slice(0, 3), NOW, true).state, "failed");
-  assert.equal(amuxIdeaLaneState(varied.slice(0, 2), NOW, true).state, "queued");
-  const previous = process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS;
-  try {
-    process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS = "enabled";
-    assert.equal(amuxIdeaLaneState(varied.slice(0, 3), NOW).state, "failed", "the switch is read from the environment");
-    delete process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS;
-    assert.equal(amuxIdeaLaneState(varied.slice(0, 3), NOW).state, "queued", "the new rule is the default");
-  } finally {
-    if (previous === undefined) delete process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS;
-    else process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS = previous;
-  }
-  // The claim query repeats the rule in SQL, under the same switch.
+  // However many runs failed, and however they failed, the part stays queued.
+  const many = Array.from({ length: 40 }, (_, i) => failed(1000 + i, i % 2 ? "no_change" : "cli_failed"));
+  const waiting = amuxIdeaLaneState(many, NOW);
+  assert.equal(waiting.state, "queued");
+  assert.equal(waiting.retryAtMs, NOW - 1 + AMUX_IDEA_LANE_BACKOFF_MAX_MS);
+  assert.equal(amuxIdeaLaneClaimable(waiting), false);
+  // Once the backoff has passed, it is claimable again.
+  const later = amuxIdeaLaneState(many, NOW + AMUX_IDEA_LANE_BACKOFF_MAX_MS);
+  assert.equal(later.retryAtMs, null);
+  assert.equal(amuxIdeaLaneClaimable(later), true);
+  // A run that never reported counts like any failure; order is by claim time.
+  assert.equal(amuxIdeaLaneState([expired(3), expired(2), expired(1)], NOW).state, "queued");
+  // The claim query repeats the backoff in SQL.
   const service = readFileSync("lib/amux/ideaLaneService.ts", "utf8");
-  assert.match(service, /CASE WHEN \$\{legacy\}::boolean THEN/);
-  assert.match(service, /LIMIT \$\{AMUX_IDEA_LANE_REPEATED_FAILURE_STOP\}\) newest/);
-  assert.match(service, /count\(DISTINCT newest\."outcome"\) = 1/);
+  assert.doesNotMatch(service, /legacy/);
+  assert.match(service, /power\(2, LEAST\(f\."failures", 30\) - 1\)/);
+  assert.match(service, /\$\{AMUX_IDEA_LANE_BACKOFF_BASE_MS\}::double precision/);
+  assert.match(service, /\$\{AMUX_IDEA_LANE_BACKOFF_MAX_MS\}::double precision/);
+  assert.doesNotMatch(service, /REPEATED_FAILURE_STOP/);
   // The daily limit is a spending bound and stays.
   assert.match(service, /if \(today >= amuxIdeaLaneDailyAttempts\(\)\) return null;/);
 });
@@ -197,8 +190,8 @@ test("a lane idea skips analysis and approvals on the Ideas list", () => {
   assert.deepEqual(view(amuxIdeaLaneState([run()], NOW)), ["execution", null, false]);
   assert.deepEqual(view(amuxIdeaLaneState([failed(5)], NOW)), ["execution", null, false], "a retry asks nothing");
   assert.deepEqual(view(amuxIdeaLaneState([run({ outcome: "pr_open", prNumber: 7 })], NOW)), ["review", null, false]);
-  assert.deepEqual(view(amuxIdeaLaneState([failed(3), failed(2), failed(1)], NOW)), ["execution", null, true],
-    "out of attempts is flagged for the owner");
+  assert.deepEqual(view(amuxIdeaLaneState([failed(3), failed(2), failed(1)], NOW)), ["execution", null, false],
+    "failed runs are retried after a backoff, not flagged for the owner");
 });
 
 test("an owner idea the lane will take next waits for the lane's turn, not an execution approval", () => {

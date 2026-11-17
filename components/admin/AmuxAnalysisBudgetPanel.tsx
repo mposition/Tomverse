@@ -48,8 +48,8 @@ function holdReply(value: unknown): HoldReply | null {
     { state: "found", hold: hold as Hold } : null;
 }
 
-export function AmuxAnalysisBudgetPanel({ confirmed, available, stopAvailable }: {
-  confirmed: ConfirmedIdeaTransfer; available: boolean; stopAvailable: boolean;
+export function AmuxAnalysisBudgetPanel({ confirmed, available }: {
+  confirmed: ConfirmedIdeaTransfer; available: boolean;
 }) {
   const m = useAdminMessages(adminAmuxAnalysisBudgetMessages);
   const [price, setPrice] = useState<PriceReply | null>(null);
@@ -243,7 +243,7 @@ export function AmuxAnalysisBudgetPanel({ confirmed, available, stopAvailable }:
         className="min-h-11 rounded-lg border border-zinc-600 px-4 disabled:opacity-50">
         {m.refreshHold}
       </button> : null}
-    {stopAvailable && hold?.state === "found" &&
+    {hold?.state === "found" &&
       ["in_flight", "outcome_unknown"].includes(hold.hold.status) ?
       <AmuxIdeaAnalysisStopPanel key={hold.hold.id} holdId={hold.hold.id}
         previewId={hold.hold.previewId} ideaId={confirmed.ideaId}

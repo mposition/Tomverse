@@ -1,12 +1,10 @@
 # AMUX v52 review launcher staging 준비
 
 v52의 검토 호출은 worker의 모델이나 sidecar가 아니라 worker별 v22 bridge의
-결정적 코드가 수행한다. `AMUX_EXECUTION_GRADE_CODE_LATCH`는 true다.
-래치가 켜지면 운영 스위치와 별개로 비용 catalog 승인 때 route와 worker의
-단일 등급 일치 검사가 적용된다. 실행의 같은 등급 배정·contract 경로 검사·
-검토 서버 호출은 `TOMVERSE_AMUX_EXECUTION_GRADE`가 정확히 `enabled`일 때만
-열린다. 운영자가 staging에서 스위치를 켜기 전에는 실행 경로가 닫혀 있다.
-이 문서는 배치 준비이며 스위치 활성화 승인이 아니다.
+결정적 코드가 수행한다. 등급 검사의 코드 래치와 운영 스위치(`TOMVERSE_AMUX_EXECUTION_GRADE`)는
+2026-11-16에 없앴다. 비용 catalog 승인 때 route와 worker의 단일 등급 일치 검사,
+실행의 같은 등급 배정·contract 경로 검사·검토 서버 호출은 늘 적용된다.
+이 문서는 배치 준비다.
 
 worker별 bridge system unit의 전용 계정에 다음을 준비한다.
 
@@ -37,9 +35,12 @@ ref를 수정하지 않는다.
 review client, bridge별 object 읽기 권한과 state directory 순이다. 검토 서버가 사용하는
 기존 독립 reviewer 선정 규칙은 그대로다. v52 contract 경로는 서버의 별도
 경로 목록과 관계없이 두 독립 vendor를 명시적으로 요청하고 검증한다. helper 또는 review
-서버 오류는 `unknown`으로 기록해 Task를 `blocked`로 넘기며, 제출 claim이 있으면
-같은 diff를 다시 제출하지 않는다. 앱 기록 route의 응답이 불명확하면 앱 DB의
-시도별 검토 기록을 먼저 읽는다.
+서버가 job id를 돌려주지 않으면(요청 실패) attempt를 `unknown`으로 닫지 않고, state 파일에
+실패 횟수와 다음 시각을 적어 15초에서 시작해 두 배씩(최대 5분) 기다린 뒤 같은 diff를 다시
+제출한다(운영자 결정 2026-11-16). bridge는 이 응답(`waiting`)을 진행 중으로 본다. 같은
+commit의 job이 둘 생겨도 attempt가 저장한 job id만 읽으므로 판정은 틀리지 않는다. job id를
+아는 attempt는 읽기만 다시 하고 제출하지 않는다. helper가 저장소를 준비하지 못해도 같은
+방식으로 기다린다. 앱 기록 route의 응답이 불명확하면 앱 DB의 시도별 검토 기록을 먼저 읽는다.
 
 판정이 `reject`이면 helper는 검토 서버 `status`가 이미 돌려준 구조화 findings와 reviewer별 이유 코드로
 지적 문서(JSON, reviewer·severity·summary·file·line, 한도 없음)를 만들어 최종 결과와 state 파일에 함께
@@ -56,8 +57,8 @@ bridge와 helper다. 앱은 JSON 문서와 이전 helper의 줄 텍스트를 모
 같은 reviewer 공급사가 한 Task의 최근 두 검토를 연달아 거절하면 앱은 다음 시도의 delivery에
 `review_avoid_vendors`를 싣고, bridge는 helper 입력의 `avoidReviewerVendors`로, helper는 review client에
 `--avoid-vendor`로 넘긴다. bridge의 delivery profile은 모르는 필드를 거절하므로 앱은
-`TOMVERSE_AMUX_V52_REVIEW_AVOID_VENDORS=enabled`일 때만 이 필드를 보낸다(기본 꺼짐). 새 bridge와 helper,
-review client·서버를 모두 배치한 뒤에만 켠다.
+이 필드를 늘 보낸다(`TOMVERSE_AMUX_V52_REVIEW_AVOID_VENDORS` 스위치는 2026-11-16에 없앴다). 새 bridge와 helper,
+review client·서버가 배치돼 있어야 한다.
 
 검증할 때는 staging의 한 v4 Task에서 Task 등록, 같은 등급 배정, 정상 종료 후
 로컬 commit과 검토 job, 앱의 `amux.review.recorded` 감사, 판정에 따른 상태 전이,

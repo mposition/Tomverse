@@ -5,7 +5,6 @@ import type { Prisma } from "@prisma/client";
 import { isDmRequestId } from "@/lib/amux/decisionMakerRequestCore";
 import { readDecisionMakerRequestCardId } from "@/lib/amux/decisionMakerRequestStore";
 import {
-  amuxDmWorkspaceEnabled,
   dmWorkspaceAcceptFiles,
   type DmWorkspaceEvidenceName,
   type DmWorkspaceExclusion,
@@ -166,13 +165,11 @@ const openCriteria = async (row: SealedBody & SealedResult) => {
 };
 
 /**
- * The workspace evidence, opened outside the read transaction. Null while the
- * workspace is switched off (TOMVERSE_AMUX_DM_WORKSPACE=disabled): the card
- * goes alone. Evidence that cannot be opened is left out; the checkout still
- * goes.
+ * The workspace evidence, opened outside the read transaction. The workspace
+ * is always on (owner direction 2026-11-16). Evidence that cannot be opened is
+ * left out; the checkout still goes.
  */
 export async function openDecisionMakerWorkspaceEvidence(source: DmWorkspaceSource): Promise<DmWorkspaceEvidence | null> {
-  if (!amuxDmWorkspaceEnabled()) return null;
   // `missing`: the card points at this text, so one that cannot be read is
   // counted as left out (`unreadable`), and the bridge then sends nothing --
   // a DM never judges a card without the evidence it names.

@@ -92,15 +92,6 @@ export const AMUX_WORKER_CAPABILITY_LIMITS = Object.freeze({
 export const AMUX_WORKER_CAPABILITY_AUDIT_ACTION = "amux.worker.capability" as const;
 export const AMUX_WORKER_CAPABILITY_AUDIT_TARGET_TYPE = "AmuxWorkerCapabilityEvent" as const;
 
-/**
- * R2a shipped with its code latch off (version 31 section 8, version 35 section
- * 5); version 36 (approved 2026-10-13) is the operator's activation record and
- * sets it true, so the owner may record capabilities. While it is false the
- * route refuses every write. Reading is never latched.
- */
-export const AMUX_WORKER_CAPABILITY_WRITES_LATCH = true;
-export const amuxWorkerCapabilityWritesOpen = (): boolean => AMUX_WORKER_CAPABILITY_WRITES_LATCH;
-
 export type AmuxWorkerV22Profile = {
   model: string;
   roles: string[];
@@ -274,7 +265,6 @@ export type AmuxWorkerCapabilityAdminRow = {
  * nothing here is read from the environment.
  */
 export type AmuxWorkerCapabilityAdminView = {
-  writesLatch: boolean;
   rows: AmuxWorkerCapabilityAdminRow[];
   /** Each CLI's model names and the Tomverse models they price from; null when unread. */
   cliModels: AmuxCliModelCatalogAdminView | null;
@@ -285,7 +275,6 @@ export function buildAmuxWorkerCapabilityAdminView(input: {
   registrations: readonly AmuxWorkerRegistration[];
   current: ReadonlyMap<string, { revision: number; capability: AmuxWorkerCapability; changedAt: string }>;
   cliModels?: AmuxCliModelCatalogAdminView | null;
-  writesLatch?: boolean;
 }): AmuxWorkerCapabilityAdminView {
   const rows = [...input.registrations]
     .filter((registration) => registration.desiredState !== "retired")
@@ -298,7 +287,6 @@ export function buildAmuxWorkerCapabilityAdminView(input: {
       current: input.current.get(registration.workerName) ?? null,
     }));
   return {
-    writesLatch: input.writesLatch ?? amuxWorkerCapabilityWritesOpen(),
     rows,
     cliModels: input.cliModels ?? null,
   };
@@ -336,7 +324,7 @@ const DESIRED_STATES: readonly string[] = ["requested", "active", "paused", "ret
  * A body that does not parse is a failed read, never a guessed capability.
  */
 export function parseAmuxWorkerCapabilityAdminView(body: unknown): AmuxWorkerCapabilityAdminView | null {
-  if (!isPlainRecord(body) || typeof body.writesLatch !== "boolean" || !Array.isArray(body.rows)) {
+  if (!isPlainRecord(body) || !Array.isArray(body.rows)) {
     return null;
   }
   const rows: AmuxWorkerCapabilityAdminRow[] = [];
@@ -369,5 +357,5 @@ export function parseAmuxWorkerCapabilityAdminView(body: unknown): AmuxWorkerCap
     cliModels = parseAmuxCliModelCatalogAdminView(body.cliModels);
     if (cliModels === null) return null;
   }
-  return { writesLatch: body.writesLatch, rows, cliModels };
+  return { rows, cliModels };
 }

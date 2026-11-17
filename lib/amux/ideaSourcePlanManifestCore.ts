@@ -1,12 +1,7 @@
 import { createHmac, timingSafeEqual, type Hmac } from "node:crypto";
 
 import type { AmuxDigestKey } from "./ideaCrypto.ts";
-import { AMUX_INTAKE_SAFETY_MAX_BYTES, amuxIntakeLegacyLimits } from "./intakeLimitsCore.ts";
-
-/** The former per-unit ceiling, kept only under TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS
- * (owner direction 2026-11-15); otherwise a unit may be up to
- * AMUX_INTAKE_SAFETY_MAX_BYTES. */
-export const AMUX_SOURCE_PLAN_UNIT_MAX_BYTES = 8_192;
+import { AMUX_INTAKE_SAFETY_MAX_BYTES } from "./intakeLimitsCore.ts";
 
 export type AmuxSourcePlanUnit = {
   sourceKind: "operator_idea" | "approved_excerpt" | "owner_answer";
@@ -183,9 +178,8 @@ export function buildAmuxSourcePlanManifest(
       }
       // Copy a potentially mutable caller-owned Buffer before hashing this unit.
       // Owner direction 2026-11-15: a unit, a session idea above all, is not
-      // refused for its size; the former 8 KiB holds only under the legacy switch.
-      const exactBytes = copyPlainBuffer(unit.bytes, amuxIntakeLegacyLimits()
-        ? AMUX_SOURCE_PLAN_UNIT_MAX_BYTES : AMUX_INTAKE_SAFETY_MAX_BYTES);
+      // refused for its size; it may be up to AMUX_INTAKE_SAFETY_MAX_BYTES.
+      const exactBytes = copyPlainBuffer(unit.bytes, AMUX_INTAKE_SAFETY_MAX_BYTES);
       if (!exactBytes) return { decision: "hold", reason: "invalid_units" };
       try {
         const hmac = createHmac("sha256", sourceKey);

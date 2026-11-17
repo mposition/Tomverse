@@ -48,7 +48,6 @@ mock.module(mod("lib/amux/ideaTransferConfirmationService.ts"), {
 });
 mock.module(mod("lib/amux/ideaAnalysisBudgetReservationService.ts"), {
   namedExports: {
-    AMUX_V4_ANALYSIS_BUDGET_RESERVE_CODE_LATCH: true,
     AmuxIdeaAnalysisReservationError: ReservationError,
     commitAmuxIdeaAnalysisBudgetReservation: async (tx, input) => {
       calls.push(["reserve", tx, input.holdId, input.previewId, input.priceVersionId, input.runner]);
@@ -61,10 +60,7 @@ mock.module(mod("lib/amux/ideaAnalysisBudgetReservationService.ts"), {
 const { approveIdeaExecution, IdeaExecutionApprovalError } = await import(mod("lib/amux/ideaExecutionApprovalService.ts"));
 
 const switches = {
-  TOMVERSE_AMUX_V4_TRANSFER_CONFIRM_WRITE: "enabled",
-  TOMVERSE_AMUX_V4_TRANSFER_CONFIRM_READ: "enabled",
   TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_RESERVE: "enabled",
-  TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_READ: "enabled",
 };
 const owner = { user: { id: "owner-1" }, role: "owner" };
 const input = { confirmation: { previewId: "preview", ideaId: "idea", payloadDigest: "d".repeat(64), payloadDigestKeyId: "k" },
@@ -95,7 +91,7 @@ reset(); commitFails = true;
 await assert.rejects(approveIdeaExecution(owner, new Request("https://t.test"), input, "nonce"),
   (error) => error instanceof IdeaExecutionApprovalError && code(error) === "outcome_unknown");
 
-// Nothing runs without every switch, the owner, the owned idea and the approved price profile.
+// Nothing runs without the budget switch, the owner, the owned idea and the approved price profile.
 for (const name of Object.keys(switches)) {
   reset(); process.env[name] = "disabled";
   await assert.rejects(approveIdeaExecution(owner, new Request("https://t.test"), input, "nonce"),

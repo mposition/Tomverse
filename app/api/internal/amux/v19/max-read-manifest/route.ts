@@ -17,10 +17,6 @@ import { AmuxTrackedCheckoutReadManifestError,
   "@/lib/amux/ideaTrackedCheckoutReadManifestStore";
 import { prisma } from "@/lib/prisma";
 
-const WRITE_ENV = "TOMVERSE_AMUX_V19_MAX_READ_MANIFEST_WRITE";
-const READ_ENV = "TOMVERSE_AMUX_V19_MAX_READ_MANIFEST_READ";
-const SHARED_WRITE_ENV = "TOMVERSE_AMUX_V19_READ_MANIFEST_WRITE";
-const SHARED_READ_ENV = "TOMVERSE_AMUX_V19_READ_MANIFEST_READ";
 const uuid = z.string().uuid();
 const ordinal = z.number().int().safe().min(0).max(2_147_483_647);
 const identity = z.object({ claimId: uuid, requestId: uuid,
@@ -43,9 +39,7 @@ function authorized(request: Request): boolean {
  * Max claim whose checkout proof was already bound to that exact claim. */
 export async function POST(request: Request): Promise<Response> {
   if (!authorized(request)) return amuxJsonNoStore({ error: "Unauthorized" }, 401);
-  if ([WRITE_ENV, READ_ENV, SHARED_WRITE_ENV, SHARED_READ_ENV].some(
-    (name) => process.env[name] !== "enabled") ||
-      !amuxV19ReadManifestRetentionEnabled(
+  if (!amuxV19ReadManifestRetentionEnabled(
         process.env[AMUX_V19_READ_MANIFEST_RETENTION_ENV])) {
     return amuxJsonNoStore({ available: false,
       reason: "max_read_manifest_write_disabled" }, 409);
@@ -96,15 +90,10 @@ export async function POST(request: Request): Promise<Response> {
   }
 }
 
-/** A pending key intent or completed manifest can be read for its claim after
- * writes stop. A lost POST never authorizes another key creation attempt. */
+/** A pending key intent or completed manifest can be read for its claim. A
+ * lost POST never authorizes another key creation attempt. */
 export async function GET(request: Request): Promise<Response> {
   if (!authorized(request)) return amuxJsonNoStore({ error: "Unauthorized" }, 401);
-  if (process.env[READ_ENV] !== "enabled" ||
-      process.env[SHARED_READ_ENV] !== "enabled") {
-    return amuxJsonNoStore({ available: false,
-      reason: "max_read_manifest_read_disabled" }, 409);
-  }
   const params = new URL(request.url).searchParams;
   const keys = ["claimId", "requestId", "reservationId", "ideaId",
     "invocationOrdinal", "referenceOrdinal"];

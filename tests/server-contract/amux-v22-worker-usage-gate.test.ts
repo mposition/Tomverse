@@ -150,19 +150,14 @@ test("with read-back proceed on, only a budget-bound (paid) attempt holds a work
   assert.ok(sql.includes(`AND (? OR EXISTS (SELECT 1 FROM "AmuxV22WorkerAssignment" g JOIN "AmuxV22TaskRecoveryApproval" ap ON ap."id" = g."recoveryApprovalId" WHERE g."id" = a."v22AssignmentId" AND ap."riskAcceptanceId" IS NOT NULL))`), sql);
 });
 
-test("the read-back proceed switch is on unless exactly disabled", async () => {
-  // Owner direction 2026-11-15: on by default; only a paid API write whose
-  // outcome is unknown stays with a person.
+test("read back, then proceed has no switch: the lease is 180 s and only a paid route is more than a record", async () => {
+  // Owner direction 2026-11-15, switch removed 2026-11-16: only a paid API
+  // write whose outcome is unknown stays with a person.
   const core = await import(mod("lib/amux/v22ReadBackProceedCore.ts"));
-  assert.equal(core.amuxV22ReadBackProceedEnabled(undefined), true);
-  assert.equal(core.amuxV22ReadBackProceedEnabled("true"), true);
-  assert.equal(core.amuxV22ReadBackProceedEnabled("enabled"), true);
-  assert.equal(core.amuxV22ReadBackProceedEnabled("disabled"), false);
-  assert.equal(core.amuxV22ReadBackProceedEnabled(" disabled "), false);
-  assert.equal(core.amuxExecutionLeaseMs(false), 90_000);
-  assert.equal(core.amuxExecutionLeaseMs(true), 180_000);
-  assert.equal(core.amuxV22CliUsageRecordOnly({ enabled: true, budgetBound: false, apiReceipt: false }), true);
-  assert.equal(core.amuxV22CliUsageRecordOnly({ enabled: true, budgetBound: true, apiReceipt: false }), false);
-  assert.equal(core.amuxV22CliUsageRecordOnly({ enabled: true, budgetBound: false, apiReceipt: true }), false);
-  assert.equal(core.amuxV22CliUsageRecordOnly({ enabled: false, budgetBound: false, apiReceipt: false }), false);
+  assert.equal(core.amuxV22ReadBackProceedEnabled, undefined);
+  assert.equal(core.AMUX_V22_READ_BACK_PROCEED_ENV, undefined);
+  assert.equal(core.amuxExecutionLeaseMs(), 180_000);
+  assert.equal(core.amuxV22CliUsageRecordOnly({ budgetBound: false, apiReceipt: false }), true);
+  assert.equal(core.amuxV22CliUsageRecordOnly({ budgetBound: true, apiReceipt: false }), false);
+  assert.equal(core.amuxV22CliUsageRecordOnly({ budgetBound: false, apiReceipt: true }), false);
 });

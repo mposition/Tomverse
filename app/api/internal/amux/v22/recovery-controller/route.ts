@@ -5,7 +5,7 @@ import { BoardImportError } from "@/lib/amux/boardImportCore";
 import { AMUX_LIFECYCLE_ROUTE_BUDGET_MS, withAmuxRouteBudget } from "@/lib/amux/dbBoundary";
 import { amuxJsonNoStore, amuxInternalErrorResponse, isAmuxInputError } from
   "@/lib/amux/internalRoute";
-import { AMUX_V22_LEGACY_SAFE_STOP_ENABLED_ENV,
+import { AMUX_V22_LEGACY_SAFE_STOP_ENABLED_ENV, AMUX_V22_RECOVERY_CONTROLLER_BODY_MAX_BYTES,
   AMUX_V22_TASK_RECOVERY_ENABLED_ENV, amuxV22LegacySafeStopEnabled,
   amuxV22RecoveryControllerReportSchema, amuxV22TaskRecoveryEnabled,
   isAmuxV22RecoveryControllerAuthorized } from "@/lib/amux/v22TaskRecoveryCore";
@@ -59,7 +59,7 @@ export async function POST(request: Request) {
     try {
       await consumeApiRateLimit(request, "amux-v22-recovery-controller",
         "amux-recovery-safe-stop-report", { minute: 20, day: 1_000 });
-      const body = await readLimitedJson(request, 8_192,
+      const body = await readLimitedJson(request, AMUX_V22_RECOVERY_CONTROLLER_BODY_MAX_BYTES,
         amuxV22RecoveryControllerReportSchema);
       return amuxJsonNoStore(body.requestKind === "safe_stop" ?
         await reportAmuxV22LegacySafeStopEvidence(body) :

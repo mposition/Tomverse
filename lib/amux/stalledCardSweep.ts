@@ -3,9 +3,8 @@ import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/amux/auditContract";
 import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import { openAmuxHumanEscalation } from "@/lib/amux/escalation";
 import { amuxDefaultMaxAttempts } from "@/lib/amux/executionBudgetCore";
-import { AMUX_INFRA_FAILURE_REASONS, AMUX_MAX_INFRA_FAILURES_PER_TASK,
-  amuxInfraFailureRoutingEnabled } from "@/lib/amux/infraFailureCore";
-import { AMUX_INFRA_WINDOW_RETRY_SQL } from "@/lib/amux/infraFailureStore";
+import { AMUX_INFRA_FAILURE_REASONS } from
+  "@/lib/amux/infraFailureCore";
 
 /**
  * One definition of a stopped card (owner decision 2026-11-14, AMUX process
@@ -25,16 +24,11 @@ import { AMUX_INFRA_WINDOW_RETRY_SQL } from "@/lib/amux/infraFailureStore";
  * where retry, done, close or remake settles it. It only moves a card's state
  * the way settlement already does; it deletes nothing and runs nothing.
  *
- * On unless TOMVERSE_AMUX_STALLED_CARD_SWEEP=disabled (owner direction
- * 2026-11-15: a card no screen shows is never acceptable; it was off unless
- * `enabled`). The budget it reads is the claim's own (executionBudgetCore.ts):
- * infrastructure failures do not count, and their own bound does.
+ * Always on (owner direction 2026-11-15: a card no screen shows is never
+ * acceptable; the TOMVERSE_AMUX_STALLED_CARD_SWEEP switch was removed, owner
+ * decision 2026-11-16). The budget it reads is the claim's own (executionBudgetCore.ts):
+ * infrastructure failures do not count and have no bound of their own.
  */
-export const AMUX_STALLED_CARD_SWEEP_ENV = "TOMVERSE_AMUX_STALLED_CARD_SWEEP";
-export const amuxStalledCardSweepEnabled = (
-  value: string | undefined = process.env[AMUX_STALLED_CARD_SWEEP_ENV],
-) => value?.trim() !== "disabled";
-
 export const AMUX_STALLED_BUDGET_REASON = "attempt_budget_exhausted";
 export const AMUX_STALLED_CARD_SWEPT_ACTION = "amux.v22.stalled_card.blocked";
 const SWEEPER = "system:amux-stalled-card-sweep";
@@ -49,7 +43,7 @@ export async function readAmuxStalledCards(
   tx: { $queryRaw: <T>(strings: TemplateStringsArray, ...values: unknown[]) => Promise<T> },
   limit: number, taskId: string | null = null,
 ): Promise<AmuxStalledCardCandidate[]> {
-  const infra = amuxInfraFailureRoutingEnabled() ? [...AMUX_INFRA_FAILURE_REASONS] : [];
+  const infra = [...AMUX_INFRA_FAILURE_REASONS];
   const max = amuxDefaultMaxAttempts();
   return tx.$queryRaw<AmuxStalledCardCandidate[]>`
     SELECT w."id", ${AMUX_STALLED_BUDGET_REASON}::text AS "reason"
@@ -62,16 +56,10 @@ export async function readAmuxStalledCards(
       AND w."status" = 'todo' AND w."v22ReceiptId" IS NOT NULL
       AND EXISTS (SELECT 1 FROM (
           SELECT GREATEST(COUNT(*), COALESCE(MAX(a."attemptNumber"), 0)) AS "numbered",
-            COUNT(*) FILTER (WHERE a."reason" = ANY(${infra}::text[])) AS "infra",
-            -- The bound counts the failures since a person's last retry
-            -- (lib/amux/infraFailureStore.ts).
-            COUNT(*) FILTER (WHERE a."reason" = ANY(${infra}::text[]) AND (r."at" IS NULL OR
-              a."startedAt" > r."at")) AS "infraWindow"
-          FROM "AmuxExecutionAttempt" a CROSS JOIN (SELECT MAX(e."resolvedAt") AS "at"
-            FROM "AmuxHumanEscalation" e WHERE e."taskId" = w."id" AND ${AMUX_INFRA_WINDOW_RETRY_SQL}) r
+            COUNT(*) FILTER (WHERE a."reason" = ANY(${infra}::text[])) AS "infra"
+          FROM "AmuxExecutionAttempt" a
           WHERE a."taskId" = w."id") b
-        WHERE b."numbered" - b."infra" >= ${max}
-          OR b."infraWindow" >= ${AMUX_MAX_INFRA_FAILURES_PER_TASK})
+        WHERE b."numbered" - b."infra" >= ${max})
     ORDER BY w."updatedAt", w."id"
     LIMIT ${limit}`;
 }
@@ -81,7 +69,6 @@ export async function readAmuxStalledCards(
  * transaction so one card never holds the rest. Returns the ids it moved.
  */
 export async function sweepAmuxStalledCards(limit = 5): Promise<string[]> {
-  if (!amuxStalledCardSweepEnabled()) return [];
   const candidates = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.executionRecoveryRead,
     (tx) => readAmuxStalledCards(tx, Math.min(Math.max(limit, 1), 20)));
   const moved: string[] = [];

@@ -17,8 +17,6 @@ import { AmuxSessionBudgetResolutionError,
 import { prisma } from "@/lib/prisma";
 import { hasValidMutationOrigin } from "@/lib/requestOrigin";
 
-const READ_ENV = "TOMVERSE_AMUX_V19_SESSION_BUDGET_RESOLUTION_READ";
-const WRITE_ENV = "TOMVERSE_AMUX_V19_SESSION_BUDGET_RESOLUTION_WRITE";
 const noStore = { "Cache-Control": "private, no-store, max-age=0" };
 const uuid = z.string().uuid();
 const bodySchema = z.object({ claimId: uuid,
@@ -54,8 +52,8 @@ function failure(error: unknown): Response {
     { status: 503, headers: noStore });
 }
 
-/** Owner-only content-free exact-claim readback. It remains available after
- * writes are switched off so an unknown POST can be reconciled.
+/** Owner-only content-free exact-claim readback, so an unknown POST can be
+ * reconciled.
  * `?list=outcome_unknown` instead lists the newest unresolved unknown claims
  * (IDs, ordinals and times only) so the owner can pick one to read back. */
 export async function GET(request: Request): Promise<Response> {
@@ -65,10 +63,6 @@ export async function GET(request: Request): Promise<Response> {
       { status: 404, headers: noStore });
     if (session === "forbidden") return NextResponse.json({ error: "Forbidden." },
       { status: 403, headers: noStore });
-    if (process.env[READ_ENV] !== "enabled") {
-      return NextResponse.json({ error: "session_budget_resolution_read_disabled" },
-        { status: 409, headers: noStore });
-    }
     const params = new URL(request.url).searchParams;
     if ([...params.keys()].length === 1 && params.getAll("list").length === 1) {
       if (params.get("list") !== "outcome_unknown") return NextResponse.json(
@@ -107,11 +101,6 @@ export async function POST(request: Request): Promise<Response> {
       { status: 404, headers: noStore });
     if (session === "forbidden") return NextResponse.json({ error: "Forbidden." },
       { status: 403, headers: noStore });
-    if (process.env[READ_ENV] !== "enabled" ||
-        process.env[WRITE_ENV] !== "enabled") {
-      return NextResponse.json({ error: "session_budget_resolution_disabled" },
-        { status: 409, headers: noStore });
-    }
     if (!hasValidMutationOrigin(request)) return NextResponse.json(
       { error: "Forbidden." }, { status: 403, headers: noStore });
     if (request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !==

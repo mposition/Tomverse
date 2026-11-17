@@ -23,9 +23,9 @@ import {
  *   handed over for any other reason, is refused.
  * - `request`: a stopped Task's escalation with no settlement yet is filed as
  *   one, if the settlement scan would file it (no other path holds the Task,
- *   nothing runs); while TOMVERSE_AMUX_DM_OWNER_SETTLEMENT is off, the tick
- *   files only the settlements requested this way. An open settlement with no
- *   card is marked requested.
+ *   nothing runs). An open settlement with no card is marked requested. The
+ *   owner queue no longer offers it (the tick files every eligible settlement),
+ *   but the route still takes it.
  *
  * Each press is one transaction: the audit chain lock, the change, and the
  * person's hash-chained audit entry. A failure whose outcome is unknown is

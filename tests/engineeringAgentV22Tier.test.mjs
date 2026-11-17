@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { CONVENTION_VERSIONS } from
-  "../lib/agentAuthorityFiles.ts";
 import { decideEngineeringAgentV22Tier } from
   "../lib/engineeringAgentV22Tier.ts";
 
@@ -29,7 +27,7 @@ const modified = (path, newText) => ({
 });
 const input = (change) => ({
   changes: [change], baseFiles, workflows: [],
-  installedVersions: { ...CONVENTION_VERSIONS }, policyDocuments: [],
+  policyDocuments: [],
 });
 
 test("v22 T1 tier: a product file no gate reaches is T1, one a gate imports is T2", () => {

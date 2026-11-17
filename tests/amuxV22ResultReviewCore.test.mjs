@@ -10,7 +10,6 @@ import {
   amuxDmApproverEnabled,
   amuxDmProposalAutoApplicable,
   amuxV22ResultReviewDecisionFromAnswer,
-  amuxV22ResultReviewDmEnabled,
   amuxV22ResultReviewKind,
   amuxV22ResultReviewRelayCard,
   amuxV22ResultReviewTarget,
@@ -18,13 +17,7 @@ import {
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 
-test("both switches are on unless set to disabled", () => {
-  // Owner decision 2026-11-15: the switches that make the Decision Maker work default on, and are kill switches.
-  assert.equal(amuxV22ResultReviewDmEnabled({}), true);
-  assert.equal(amuxV22ResultReviewDmEnabled({ TOMVERSE_AMUX_V22_RESULT_REVIEW_DM: undefined }), true);
-  assert.equal(amuxV22ResultReviewDmEnabled({ TOMVERSE_AMUX_V22_RESULT_REVIEW_DM: "true" }), true);
-  assert.equal(amuxV22ResultReviewDmEnabled({ TOMVERSE_AMUX_V22_RESULT_REVIEW_DM: "enabled" }), true);
-  assert.equal(amuxV22ResultReviewDmEnabled({ TOMVERSE_AMUX_V22_RESULT_REVIEW_DM: "disabled" }), false);
+test("the DM approver is on unless set to disabled", () => {
   assert.equal(amuxDmApproverEnabled({}), true);
   assert.equal(amuxDmApproverEnabled({ TOMVERSE_AMUX_DM_APPROVER: undefined }), true);
   assert.equal(amuxDmApproverEnabled({ TOMVERSE_AMUX_DM_APPROVER: "enabled" }), true);
@@ -63,19 +56,15 @@ test("the card's fixed words hit no routing term, so it reaches a DM", () => {
   const input = { reviewId: "00000000-0000-4000-8000-00000000000a",
     taskLabel: "T", role: null, kind: "needs_owner", criteria: ["A", "B"], findings: "done" };
   // A workspace: the findings are evidence/FINDINGS.md, and the card only points at it.
-  const whole = amuxV22ResultReviewRelayCard({ ...input, workspace: true });
+  const whole = amuxV22ResultReviewRelayCard({ ...input });
   assert.match(whole.question, /Its completion criteria:\n- A\n- B\nIts run's report is in the evidence named below\./);
   assert.doesNotMatch(whole.question, /done\n|Its findings/, "the report is not in the question");
   assert.equal(whole.context, dmWorkspaceCardPointer(["FINDINGS.md"]));
-  // The kill switch: the findings ride in the context, whole, in an evidence block.
-  assert.equal(amuxV22ResultReviewRelayCard({ ...input, workspace: false }).context,
-    "[evidence]\nIts run's report:\ndone\n[/evidence]");
-  // No size is too long for it (the old 1,700-character findings left the card unfiled): the whole report is in.
-  const long = `${"x".repeat(100_000)}END`;
-  assert.equal(amuxV22ResultReviewRelayCard({ ...input, findings: long, workspace: false }).context,
-    `[evidence]\nIts run's report:\n${long}\n[/evidence]`);
-  assert.equal(amuxV22ResultReviewRelayCard({ ...input, findings: "x".repeat(2_000), workspace: true }).context,
-    dmWorkspaceCardPointer(["FINDINGS.md"]));
+  // No size is too long for it (the old 1,700-character findings left the card unfiled): the card points at the
+  // whole report, and the workspace is always on (owner direction 2026-11-16).
+  for (const findings of [`${"x".repeat(100_000)}END`, "x".repeat(2_000)]) {
+    assert.equal(amuxV22ResultReviewRelayCard({ ...input, findings }).context, dmWorkspaceCardPointer(["FINDINGS.md"]));
+  }
   // Only missing evidence is left to the person.
   for (const [criteria, findings] of [[[], "done"], [["A"], " "]])
     assert.equal(amuxV22ResultReviewRelayCard({ ...input, criteria, findings }), null,
@@ -120,9 +109,9 @@ test("applying a review: system resolution in one transaction through the chain 
   assert.doesNotMatch(source, /adminAuditLog\./);
 });
 
-test("settlement files a review only behind its switch, beside the person's escalation", () => {
+test("settlement files a review beside the person's escalation", () => {
   const source = read("lib/amux/execution.ts");
-  assert.match(source, /const resultReviewKind = resultReviewDm && humanReview && !questionPlan &&/);
+  assert.match(source, /const resultReviewKind = humanReview && !questionPlan &&/);
   assert.match(source, /if \(\(humanReview \|\| next === "blocked"\) &&\s+\(!questionPlan \|\| questionPlan\.openEscalation\)\)\s+await openAmuxHumanEscalation/,
     "the human escalation still opens first");
 });

@@ -12,8 +12,8 @@ import { authOptions } from "@/lib/auth";
 import { AmuxV4CardPlanError } from "@/lib/amux/ideaCardPlanApprovalService";
 import { AmuxV4NodePlanError } from "@/lib/amux/ideaNodePlanApprovalService";
 import { AmuxV4PlanError, approveAmuxV4Plan } from "@/lib/amux/ideaPlanApprovalService";
-import { AMUX_V4_UNIT_WRITE_ENV, AmuxV4DuplicateReasonRequired,
-  AmuxV4UnitDecisionError, amuxV4UnitWriteEnabled } from "@/lib/amux/ideaUnitDecisionStore";
+import { AmuxV4DuplicateReasonRequired,
+  AmuxV4UnitDecisionError } from "@/lib/amux/ideaUnitDecisionStore";
 import { isAmuxV20TaskRegistrationRefusal } from
   "@/lib/amux/ideaUnitRegistrationCore";
 import { amuxDatabaseDiagnosticCode } from "@/lib/amux/readFailureCore";
@@ -66,7 +66,6 @@ export async function POST(request: Request) {
     if (!session?.user?.id || !isAdminSession(session)) return refuse(404, "not_found");
     if (getAdminRole(session) !== "owner" || !hasValidMutationOrigin(request)) return refuse(403, "forbidden");
     await assertRecentAdminAuthentication(session);
-    if (!amuxV4UnitWriteEnabled(process.env[AMUX_V4_UNIT_WRITE_ENV])) return refuse(503, "unit_write_disabled");
     if (request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !==
         "application/json") return refuse(415, "content_type_refused");
     await consumeApiRateLimit(request, session.user.id, "admin-amux-v4-plan",

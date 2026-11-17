@@ -46,11 +46,9 @@ test("unknown outcomes may lack a job but cannot be resubmitted as accepted", ()
   assert.equal(validAmuxV52ReviewEvidence(evidence({
     verdict: "unknown", jobId: null, reviewerVendors: [],
   })), true);
-  // An unknown review runs the Task again (a fresh review); the old rule blocks it.
+  // An unknown review runs the Task again (a fresh review).
   assert.deepEqual(decideAmuxV52ReviewDisposition("unknown", 0),
     { status: "todo", reason: "review_server_unknown" });
-  assert.deepEqual(decideAmuxV52ReviewDisposition("unknown", 0, false),
-    { status: "blocked", reason: "review_server_unknown" });
 });
 
 test("a rejection runs the Task again; only the same finding rejected again blocks it", () => {
@@ -60,12 +58,10 @@ test("a rejection runs the Task again; only the same finding rejected again bloc
     { status: "todo", reason: "review_server_rejected" });
   assert.deepEqual(decideAmuxV52ReviewDisposition("reject", 6),
     { status: "todo", reason: "review_server_rejected" }, "no fixed count blocks");
-  assert.deepEqual(decideAmuxV52ReviewDisposition("reject", 1, undefined, true),
+  assert.deepEqual(decideAmuxV52ReviewDisposition("reject", 1, true),
     { status: "blocked", reason: "review_server_rejected_twice" });
-  assert.deepEqual(decideAmuxV52ReviewDisposition("reject", 0, undefined, true),
+  assert.deepEqual(decideAmuxV52ReviewDisposition("reject", 0, true),
     { status: "todo", reason: "review_server_rejected" }, "nothing earlier to repeat since an owner retry");
-  assert.deepEqual(decideAmuxV52ReviewDisposition("reject", 1, false),
-    { status: "blocked", reason: "review_server_rejected_twice" }, "the old rule, switched off");
   assert.deepEqual(decideAmuxV52ReviewDisposition("accept", 1),
     { status: "review", reason: "review_server_accepted" });
   assert.deepEqual(decideAmuxV52ReviewDisposition("accept", -1),

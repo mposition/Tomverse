@@ -3,8 +3,6 @@ import test from "node:test";
 
 import {
   inspectIdeaOnlyTransferPreviewRequest,
-  transferPreviewReadPermitted,
-  transferPreviewWritePermitted,
 } from "../lib/amux/ideaTransferPreviewInputCore.ts";
 
 const input = {
@@ -28,10 +26,6 @@ test("an exact owner choice is admitted without enabling a live transfer", () =>
       chunkIndex: 0,
     },
   });
-  assert.equal(transferPreviewWritePermitted(undefined), false);
-  assert.equal(transferPreviewReadPermitted(undefined), false);
-  assert.equal(transferPreviewWritePermitted("enabled"), true);
-  assert.equal(transferPreviewReadPermitted("enabled"), true);
 });
 
 test("a later output page requires an exact positive chunk identity", () => {

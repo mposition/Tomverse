@@ -10,10 +10,6 @@ import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib
 import { ideaSendPath } from "@/lib/amux/ideaSendPath";
 import { amuxIdeaSessionPrewriteStatus } from "@/lib/amux/ideaSessionSubmissionCore";
 import { AmuxIdeaSessionSubmissionError } from "@/lib/amux/ideaSessionSubmissionService";
-import {
-  AMUX_V4_IDEA_READBACK_ENV, AMUX_V4_IDEA_SUBMISSION_ENV,
-  ideaSubmissionReadBackPermitted, ideaSubmissionWritePermitted,
-} from "@/lib/amux/ideaSubmissionCore";
 import { IdeaSubmissionError } from "@/lib/amux/ideaSubmissionService";
 import { amuxLegacyCardRecreateRequestId } from "@/lib/amux/legacyCardCore";
 import { readAmuxExecutionTaskDetail } from "@/lib/amux/adminExecutionRead";
@@ -141,10 +137,6 @@ export async function POST(request: Request): Promise<Response> {
 
     const idea = view.idea;
     if (idea.state !== "ready") return json({ error: "idea_refused", reason: idea.code }, 400);
-    if (!ideaSubmissionWritePermitted(process.env[AMUX_V4_IDEA_SUBMISSION_ENV]) ||
-        !ideaSubmissionReadBackPermitted(process.env[AMUX_V4_IDEA_READBACK_ENV])) {
-      return json({ error: "amux_submission_disabled" }, 503);
-    }
     const requestId = amuxLegacyCardRecreateRequestId(parsed.taskId, idea.text);
     const path = await ideaSendPath({ session, request, requestId, idea: idea.text,
       sessionDisplay: view.kind === "workboard" ? "Legacy WORKBOARD card" :

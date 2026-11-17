@@ -4,9 +4,9 @@
 
 AMUX runtime 이상 시 가장 먼저 execution surface를 닫는다.
 
-1. `TOMVERSE_AMUX_EXECUTE`를 제거하거나 `1` 이외 값으로 바꾼다.
-2. `TOMVERSE_AMUX_EXECUTION_API_ENABLED`를 제거하거나 `1` 이외 값으로 바꾼다.
-3. 필요하면 `TOMVERSE_AMUX_ENABLED`도 제거한다.
+1. `TOMVERSE_AMUX_EXECUTE`를 제거하거나 `enabled`(이전 값 `1`) 이외 값으로 바꾼다.
+2. `TOMVERSE_AMUX_EXECUTION_API_ENABLED`는 2026-11-16에 없앴다. 실행을 멈추려면 `TOMVERSE_AMUX_ENABLED`(와 `TOMVERSE_AMUX_CLAIM`)를 제거하고 bridge를 멈춘다.
+3. (예전 2번의 보조) 필요하면 `TOMVERSE_AMUX_ENABLED`도 제거한다.
 4. `/api/internal/amux/health`와 serving SHA를 다시 확인한다.
 
 Feature-OFF는 새 claim과 execution을 막는 containment다. 이미 남아 있는 durable

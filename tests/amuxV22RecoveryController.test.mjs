@@ -5,7 +5,8 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
-import { amuxV22RecoveryDigest, amuxV22SafeStopEvidenceSchema } from "../lib/amux/v22TaskRecoveryCore.ts";
+import { amuxV22LegacySafeStopEnabled, amuxV22RecoveryDigest, amuxV22SafeStopEvidenceSchema,
+  amuxV22TaskRecoveryEnabled } from "../lib/amux/v22TaskRecoveryCore.ts";
 import { AMUX_V22_RECOVERY_INTENT_DIR, bindAmuxV22StopIntent,
   bindAmuxV22ReadOnlyLaunchProof,
   executeAmuxV22ReadOnlyLaunchCheck, executeAmuxV22SafeStop,
@@ -426,7 +427,7 @@ test("one recorded intent issues only the fixed systemctl stop argv and proves t
     assert.equal(serialised.includes(forbidden), false, forbidden);
 });
 
-test("unknown or reused intent never reissues stop", async () => {
+test("an unknown intent never stops; a reused one stops again only while its captured run is alive", async () => {
   let stops = 0;
   const unknown = await executeAmuxV22SafeStop(request, baseOptions({
     inspectUnit: async () => inspected(unitState(true)), bindIntent: async () => { throw new Error("partial"); },
@@ -439,8 +440,10 @@ test("unknown or reused intent never reissues stop", async () => {
     bindIntent: async value => ({ entry: intentFor(value), disposition: "intent_reused", mayStop: false }),
     cgroupEmpty: async () => false, stopUnit: async () => { stops += 1; },
   }));
+  // The earlier stop's outcome is unknown and the unit still runs the captured
+  // invocation: it is stopped again, and the kernel proof still decides.
   assert.equal(reused.reason, "safe_stop_process_present");
-  assert.equal(reused.stopProof.stopAcknowledgement, "outcome_unknown"); assert.equal(stops, 0);
+  assert.equal(reused.stopProof.stopAcknowledgement, "acknowledged"); assert.equal(stops, 1);
 });
 
 test("a mismatched profile alias closes as non-unique after read-only unit verification and never stops", async () => {
@@ -540,6 +543,24 @@ test("stale proof, changed identity and unverified restart policy fail closed", 
     inspectUnit: async () => ({ ...inspected(unitState(true)), restartDisabled: false }),
   }));
   assert.equal(bad.reason, "safe_stop_config_unverified");
+});
+
+test("the recovery switches read enabled, and the earlier true that production already holds", async () => {
+  for (const read of [amuxV22TaskRecoveryEnabled, amuxV22LegacySafeStopEnabled]) {
+    assert.equal(read("enabled"), true);
+    assert.equal(read("true"), true);
+    for (const value of [undefined, "", "false", "disabled", "1", " enabled", "ENABLED"])
+      assert.equal(read(value), false, String(value));
+  }
+  for (const value of ["enabled", "true"]) {
+    const result = await runAmuxV22RecoveryControllerOnce({ recoveryEnabled: value,
+      safeStopEnabled: value, internalUrl: "https://internal.test/", controllerSecret: "s".repeat(32) },
+    { platform: "linux", uid: 1000 });
+    assert.deepEqual(result, { state: "unavailable" }, `${value} passes the switch gate`);
+  }
+  assert.deepEqual(await runAmuxV22RecoveryControllerOnce({ recoveryEnabled: "disabled",
+    safeStopEnabled: "enabled", internalUrl: "https://internal.test/", controllerSecret: "s".repeat(32) },
+  { platform: "linux", uid: 0 }), { state: "disabled" });
 });
 
 test("root controller is default-off, refuses non-root, and rejects a multi-task queue without stopping", async () => {
@@ -783,7 +804,7 @@ test("install preparation remains manual, disabled and without start/restart/ena
   assert.equal(JSON.parse(packageSource).scripts["build:amux-v22-recovery-controller"],
     "esbuild scripts/amux-v22-recovery-controller.mjs --bundle --platform=node --format=esm " +
     "--outfile=.next/recovery-controller.mjs");
-  assert.match(env, /TASK_RECOVERY_ENABLED=false/); assert.match(env, /LEGACY_SAFE_STOP_ENABLED=false/);
+  assert.match(env, /TASK_RECOVERY_ENABLED=disabled/); assert.match(env, /LEGACY_SAFE_STOP_ENABLED=disabled/);
   assert.doesNotMatch(env, /DATABASE_URL|GITHUB_TOKEN|AMUX_SYNC_SECRET|API_KEY/);
 });
 

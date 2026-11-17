@@ -5,6 +5,9 @@ import { prisma } from "@/lib/prisma";
 import { encodeAmuxSessionAnalysisQueueCursor,
   type AmuxSessionAnalysisQueueCursor } from "./ideaSessionAnalysisQueueCursorCore.ts";
 import { buildAmuxSessionAnalysisQueueWhere } from "./ideaSessionAnalysisQueueWhereCore.ts";
+import { amuxSessionNextClaimDue } from "./ideaSessionAnalysisRetryCore.ts";
+import { AMUX_V19_SESSION_BUDGET_TARGET } from "@/lib/adminAuditSystemActors";
+import { AMUX_V19_SESSION_ANALYSIS_STOP_ACTION } from "./ideaSessionLateResult.ts";
 
 const PAGE_SIZE = 32;
 
@@ -39,11 +42,25 @@ export async function listAmuxSessionAnalysisCandidates(
       select: { id: true, ideaId: true, modelProvider: true, modelId: true,
         createdAt: true,
         idea: { select: { analysisDeadlineAt: true } },
-        budgetClaims: { orderBy: { invocationOrdinal: "desc" }, take: 1,
-          select: { invocationOrdinal: true } } },
+        // The retry wait reads the claims back to the last result, and it
+        // stops growing at its 24-hour cap by the tenth failure in a row.
+        budgetClaims: { orderBy: { invocationOrdinal: "desc" }, take: 16,
+          select: { id: true, invocationOrdinal: true, status: true,
+            budgetMode: true, closedAt: true } } },
     });
-    const candidates = rows.slice(0, PAGE_SIZE);
-    const last = candidates.at(-1);
+    const scanned = rows.slice(0, PAGE_SIZE);
+    const latestIds = scanned.flatMap((row) => row.budgetClaims[0]
+      ? [row.budgetClaims[0].id] : []);
+    const stopped = new Set(latestIds.length === 0 ? [] : (await tx.adminAuditLog
+      .findMany({ where: { action: AMUX_V19_SESSION_ANALYSIS_STOP_ACTION,
+        targetType: AMUX_V19_SESSION_BUDGET_TARGET, targetId: { in: latestIds } },
+      select: { targetId: true } })).map((row) => row.targetId));
+    // A retry waits its turn here instead of being refused at the claim.
+    const candidates = scanned.filter((row) => amuxSessionNextClaimDue(
+      row.budgetClaims.map((claim, index) => ({ status: claim.status,
+        budgetMode: claim.budgetMode, closedAt: claim.closedAt,
+        ownerStopped: index === 0 && stopped.has(claim.id) })), now).due);
+    const last = scanned.at(-1);
     return {
       candidates: candidates.map((row) => ({ reservationId: row.id,
         ideaId: row.ideaId, provider: row.modelProvider, modelId: row.modelId,

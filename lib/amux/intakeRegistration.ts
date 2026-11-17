@@ -17,7 +17,6 @@ import {
   classifyAmuxIntakeReadBack,
   type AmuxIntakeRegistrationPlan,
 } from "@/lib/amux/intakeRegistrationCore";
-import { AMUX_INTAKE_APPLY_ENV, amuxIntakeApplyPermitted } from "@/lib/amux/intakeCore";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -25,8 +24,7 @@ import { prisma } from "@/lib/prisma";
  *
  * docs/policy/amux-intake.md (policy version 1).
  *
- * applyAmuxIntakeRegistration checks the shipped latch before it opens a
- * transaction. commitAmuxIntakeRegistration is the transaction body. The
+ * applyAmuxIntakeRegistration opens the transaction; commitAmuxIntakeRegistration is the transaction body. The
  * admin route does not call the commit function.
  */
 
@@ -231,9 +229,6 @@ export async function applyAmuxIntakeRegistration(input: {
   request: Request;
   plan: AmuxIntakeRegistrationPlan;
 }): Promise<AmuxIntakeCommitResult> {
-  if (!amuxIntakeApplyPermitted(process.env[AMUX_INTAKE_APPLY_ENV])) {
-    throw new BoardImportError("apply_disabled", 409);
-  }
   const approvalId = randomUUID();
   try {
     return await prisma.$transaction(

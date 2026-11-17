@@ -216,8 +216,6 @@ export function buildAmuxWorkerOverview(input: {
    * never shown as able to take work (owner decision 2026-11-15).
    */
   health?: Readonly<Record<string, AmuxWorkerHealthView>> | null;
-  /** TOMVERSE_AMUX_V22_NON_CLAUDE_QUOTA_GATE, so another provider's exhausted reading holds it too. */
-  nonClaudeQuotaGate?: boolean;
 }): AmuxWorkerOverview | null {
   const { registry, capabilities, live, nowMs } = input;
   if (registry === null || !registry.registryReadable) return null;
@@ -241,8 +239,7 @@ export function buildAmuxWorkerOverview(input: {
     // A worker that would take work by its bridge, but that the claim leaves
     // out, says why instead (a busy one is still working).
     const hold = base === "assignable_ready" || base === "assignable_starting" ?
-      amuxWorkerHealthHold(health, { provider: row.providerClass,
-        nonClaudeQuotaGate: input.nonClaudeQuotaGate === true }) : null;
+      amuxWorkerHealthHold(health, { provider: row.providerClass }) : null;
     const status: AmuxWorkerStatusKind = hold ?? base;
     const group = STATUS_GROUP[status];
     const heartbeat = reading?.heartbeatAt ? Date.parse(reading.heartbeatAt) : NaN;

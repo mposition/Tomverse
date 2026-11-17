@@ -11,8 +11,7 @@ import {
   type AmuxAttachment,
 } from "@/lib/amux/dbBoundary";
 import { amuxV22TaskWritesPatch } from "@/lib/amux/v22WorkerClaimCore";
-import { AMUX_V22_REVIEW_ATTEMPT_SCAN, amuxV22ReviewAttempt } from "@/lib/amux/v22KeptResultCore";
-import { ENGINEERING_AGENT_LEGACY_HALTS_ENV, engineeringAgentLegacyHalts } from "@/lib/engineeringAgentCore";
+import { amuxV22ReviewAttempt } from "@/lib/amux/v22KeptResultCore";
 
 /** What an attachment to the review pull request record sees. */
 export type AmuxReviewPullRequestFact = {
@@ -129,17 +128,14 @@ export async function recordAmuxReviewPullRequest(
       // succeeded into review, none running (amuxV22ReviewAttempt). A later
       // attempt that failed holds no review of its own, so a kept result
       // published after the card's budget ran out is still its review (owner
-      // decision 2026-11-15). Any other card, and every card with
-      // ENGINEERING_AGENT_LEGACY_HALTS, has only its newest.
+      // decision 2026-11-15). Any other card has only its newest.
       const attempts = await tx.$queryRaw<AttemptRow[]>`
         SELECT "id", "worker", "outcome", "toStatus", "endedAt"
         FROM "AmuxExecutionAttempt"
         WHERE "taskId" = ${input.taskId}
         ORDER BY "attemptNumber" DESC NULLS LAST, "startedAt" DESC, "id" DESC
-        LIMIT ${AMUX_V22_REVIEW_ATTEMPT_SCAN}
       `;
-      const last = amuxV22ReviewAttempt(attempts, task.sourceSystem !== "admin-idea-v4" ||
-        engineeringAgentLegacyHalts(process.env[ENGINEERING_AGENT_LEGACY_HALTS_ENV]));
+      const last = amuxV22ReviewAttempt(attempts, task.sourceSystem !== "admin-idea-v4");
       if (
         !last ||
         last.id !== input.attemptId ||

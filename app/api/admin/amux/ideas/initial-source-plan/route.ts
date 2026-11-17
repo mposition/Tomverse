@@ -10,10 +10,6 @@ import { assertRecentAdminAuthentication, isAdminReauthenticationError } from "@
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedText } from "@/lib/apiSecurity";
 import {
   AMUX_V4_INITIAL_PLAN_MAX_BYTES,
-  AMUX_V4_INITIAL_PLAN_READBACK_ENV,
-  AMUX_V4_INITIAL_PLAN_WRITE_ENV,
-  initialPlanReadbackPermitted,
-  initialPlanWritePermitted,
   inspectInitialPlanRequest,
 } from "@/lib/amux/ideaInitialSourcePlanCore";
 import {
@@ -69,10 +65,6 @@ export async function POST(request: Request) {
   try {
     const session = await owner();
     if (session instanceof NextResponse) return session;
-    if (!initialPlanWritePermitted(process.env[AMUX_V4_INITIAL_PLAN_WRITE_ENV]) ||
-        !initialPlanReadbackPermitted(process.env[AMUX_V4_INITIAL_PLAN_READBACK_ENV])) {
-      return NextResponse.json({ error: "plan_disabled" }, { status: 503, headers: noStore });
-    }
     if (request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !== "application/json") {
       return NextResponse.json({ error: "content_type_refused" }, { status: 415, headers: noStore });
     }
@@ -95,9 +87,6 @@ export async function GET(request: Request) {
   try {
     const session = await owner();
     if (session instanceof NextResponse) return session;
-    if (!initialPlanReadbackPermitted(process.env[AMUX_V4_INITIAL_PLAN_READBACK_ENV])) {
-      return NextResponse.json({ error: "plan_disabled" }, { status: 503, headers: noStore });
-    }
     await consumeApiRateLimit(request, session.user!.id!, "admin-amux-v4-initial-plan-readback", {
       minute: 10, day: 100,
     });

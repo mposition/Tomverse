@@ -30,9 +30,7 @@ const db = {
 mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: db } });
 
 test("the candidate window leaves out Tasks still waiting on a dependency", async () => {
-  const previous = process.env.TOMVERSE_AMUX_V22_AUTO_PROMOTE;
-  process.env.TOMVERSE_AMUX_V22_AUTO_PROMOTE = "enabled";
-  try {
+  {
     const { tickV22AutoPromotion } = await import(mod("lib/amux/v22AutoPromotionService.ts"));
     assert.equal((await tickV22AutoPromotion()).reason, "no_candidate");
     const candidates = queries.find((sql) => sql.includes(`FROM "AmuxPortfolioScoreSnapshot"`));
@@ -48,8 +46,5 @@ test("the candidate window leaves out Tasks still waiting on a dependency", asyn
     assert.match(unpublished, /a\."taskId" = dep\."id"/);
     // The exclusion comes before the window is cut.
     assert.ok(flat.indexOf(`"AmuxWorkDependency"`) < flat.indexOf("LIMIT"));
-  } finally {
-    if (previous === undefined) delete process.env.TOMVERSE_AMUX_V22_AUTO_PROMOTE;
-    else process.env.TOMVERSE_AMUX_V22_AUTO_PROMOTE = previous;
   }
 });

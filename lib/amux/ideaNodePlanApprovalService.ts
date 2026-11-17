@@ -16,12 +16,10 @@ import { createAmuxContentKeyRing } from "./ideaKeyStore.ts";
 import { amuxV4UnitBrowserDigest } from "./ideaUnitBrowserCore.ts";
 import { deriveAmuxIdeaUnitConfirmation, sameAmuxIdeaUnitConfirmation } from
   "./ideaUnitConfirmationCore.ts";
-import { AMUX_V4_UNIT_WRITE_ENV, AmuxV4UnitDecisionError, amuxV4UnitWriteEnabled,
-  commitAmuxV4NodeCreation } from "./ideaUnitDecisionStore.ts";
+import { AmuxV4UnitDecisionError, commitAmuxV4NodeCreation } from "./ideaUnitDecisionStore.ts";
 import { readVerifiedAmuxNodeProposal } from "./ideaUnitProposalReadService.ts";
-import { AMUX_V4_NODE_PLAN_MAX_UNITS, AmuxV4NodePlanError, amuxV4NodePlanRound,
+import { AmuxV4NodePlanError, amuxV4NodePlanRound,
   orderAmuxV4NodePlan } from "./ideaNodePlanCore.ts";
-import { amuxIntakeLegacyLimits } from "./intakeLimitsCore.ts";
 
 export { AmuxV4NodePlanError } from "./ideaNodePlanCore.ts";
 
@@ -76,9 +74,6 @@ export async function prepareAmuxV4NodePlan(session: Session, request: Request,
     throw new AmuxV4UnitDecisionError("forbidden");
   }
   await assertRecentAdminAuthentication(session);
-  if (!amuxV4UnitWriteEnabled(process.env[AMUX_V4_UNIT_WRITE_ENV])) {
-    throw new AmuxV4UnitDecisionError("write_disabled");
-  }
   if (!ID.test(input.ideaId)) throw new AmuxV4UnitDecisionError("not_ready");
   for (const [unitId, reason] of Object.entries(input.reasons)) {
     if (!ID.test(unitId) || reason.length < 3 || reason.length > 500 || reason !== reason.trim()) {
@@ -86,8 +81,7 @@ export async function prepareAmuxV4NodePlan(session: Session, request: Request,
     }
   }
   // Owner direction 2026-11-15: a plan with more nodes than one round holds is
-  // approved over several rounds; only the legacy switch refuses it.
-  const legacy = amuxIntakeLegacyLimits();
+  // approved over several rounds.
   const proposed = await prisma.amuxIdeaDraftUnit.findMany({
     // The analysis's own units only. A unit derived by split or merge keeps its
     // own flow, and the plan screen (which reads the analysis result) never
@@ -95,10 +89,8 @@ export async function prepareAmuxV4NodePlan(session: Session, request: Request,
     where: { ideaId: input.ideaId, actorUserId, unitKind: "node", state: "proposed",
       derivationGroupId: null },
     select: { id: true }, orderBy: { id: "asc" },
-    ...(legacy ? { take: AMUX_V4_NODE_PLAN_MAX_UNITS + 1 } : {}),
   });
   if (proposed.length === 0 && !options.allowEmpty) throw new AmuxV4NodePlanError("nothing_to_approve");
-  if (legacy && proposed.length > AMUX_V4_NODE_PLAN_MAX_UNITS) throw new AmuxV4NodePlanError("too_many_units");
   const verified = await Promise.all(proposed.map((unit) =>
     readVerifiedAmuxNodeProposal(session, input.ideaId, unit.id)));
 

@@ -9,7 +9,6 @@ import { BoardImportError } from "@/lib/amux/boardImportCore";
 import {
   commitRecommendationDecision,
   commitRecommendationSnapshot,
-  prepareRecommendation,
 } from "@/lib/amux/recommendationPoolService";
 import { markRecommendationOutcomeUnknown } from "@/lib/amux/recommendationPoolService";
 import { prisma } from "@/lib/prisma";
@@ -141,7 +140,7 @@ after(async () => {
   await prisma.$disconnect();
 });
 
-test("recommendation decisions honour capacity, rollback, and an unset env", async () => {
+test("recommendation decisions honour capacity and rollback", async () => {
   const storedIncident = await prisma.appSetting.findUnique({ where: { key: INCIDENT_KEY }, select: { value: true } });
   previousIncident = storedIncident?.value ?? null;
   await prisma.appSetting.upsert({
@@ -160,16 +159,6 @@ test("recommendation decisions honour capacity, rollback, and an unset env", asy
   const third = await seedCard("C");
   const fourth = await seedCard("D");
   await prisma.amuxRecommendationCapacity.deleteMany({ where: { id: "queue" } });
-
-  await assert.rejects(
-    prepareRecommendation({
-      session,
-      request,
-      raw: JSON.stringify({ canonicalizationVersion: "amux-json-v1", policyVersion: 7 }),
-    }),
-    (error: unknown) => error instanceof BoardImportError && error.code === "apply_disabled",
-  );
-  assert.equal(await prisma.amuxRecommendationSnapshot.count({ where: { actorUserId } }), 0);
 
   const unconfiguredId = randomUUID();
   await prisma.$transaction(async (tx) => {

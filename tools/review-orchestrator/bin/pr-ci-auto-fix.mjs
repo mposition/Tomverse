@@ -16,14 +16,18 @@
  *   PR_CI_AUTO_FIX_WORK                    absolute directory for the model's checkout and log,
  *                                          outside HOME, the review stateDir and the outbox
  *   PR_CI_AUTO_FIX_MODEL                   optional, default sonnet
- *   PR_CI_AUTO_FIX_MIN_REMAINING_PERCENT   optional, default 30: the account quota a pass needs
- *   PR_CI_AUTO_FIX_CONFLICTS               optional: "on" also resolves conflicts with the base branch
+ *   PR_CI_AUTO_FIX_MIN_REMAINING_PERCENT   optional, default 30: the account quota a pass needs. The
+ *                                          subscription account is shared with AMUX and the reviews,
+ *                                          and a pass can run for hours (retries come on their own, with
+ *                                          backoff), so the rest of the account is kept for them; 0 turns
+ *                                          the floor off, and a spent account still stops a pass
+ *   PR_CI_AUTO_FIX_CONFLICTS               optional: "enabled" (or the earlier "on") also resolves conflicts with the base branch
  *                                          (the workflow publishes them only when the repository
  *                                          variable PR_AUTO_FIX_CONFLICTS_ENABLED is "true")
- *   PR_CI_AUTO_FIX_INSTALL                 optional: "on" installs the head's packages
+ *   PR_CI_AUTO_FIX_INSTALL                 optional: "enabled" (or "on") installs the head's packages
  *                                          (npm ci --ignore-scripts) so the model can read their
  *                                          API; off, the model sees the source tree only
- *   PR_CI_AUTO_FIX_REGENERATE              optional: "on" regenerates the marketing admission manifest
+ *   PR_CI_AUTO_FIX_REGENERATE              optional: "enabled" (or "on") regenerates the marketing admission manifest
  *                                          when only its files' bytes changed; off, a stale one stays failing
  *
  * Exit 0 after a pass whatever it found, 64 when the settings cannot run, 65 on error.
@@ -72,9 +76,11 @@ export function ciFixSettings(env, config) {
   // reviewerEnv hands a CLI only the names it lists plus passEnv.
   const leaky = config.providers.find((p) => (p.passEnv ?? []).some((name) => name === READ_TOKEN_ENV || name === DISPATCH_TOKEN_ENV));
   if (leaky) return { error: `providers.${leaky.id}: passEnv must not carry a GitHub token` };
-  const conflicts = env.PR_CI_AUTO_FIX_CONFLICTS === "on";
-  const install = env.PR_CI_AUTO_FIX_INSTALL === "on";
-  const regenerate = env.PR_CI_AUTO_FIX_REGENERATE === "on";
+  // `enabled` is the documented value; the `on` already in read.env reads the same way.
+  const switchedOn = (value) => value === "enabled" || value === "on";
+  const conflicts = switchedOn(env.PR_CI_AUTO_FIX_CONFLICTS);
+  const install = switchedOn(env.PR_CI_AUTO_FIX_INSTALL);
+  const regenerate = switchedOn(env.PR_CI_AUTO_FIX_REGENERATE);
   return { token, repo: env.PR_CI_AUTO_FIX_REPO, outbox, workDir, home, model, minRemainingPercent, conflicts, install, regenerate };
 }
 

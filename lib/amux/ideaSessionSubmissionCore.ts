@@ -4,20 +4,8 @@ import type { IdeaInput } from "./ideaInputCore.ts";
 import { isAmuxIdeaRequestId } from "./ideaRequestIdCore.ts";
 import type { AmuxOperatingScopeAuthority } from "./ideaOperatingScopeStore.ts";
 
-export const AMUX_SESSION_INTAKE_ENV = "TOMVERSE_AMUX_SESSION_INTAKE";
-export const AMUX_SESSION_INTAKE_CODE_LATCH = true;
-
-export const amuxSessionIntakeWritePermitted = (
-  sessionSwitch: string | undefined,
-  existingIntakeSwitch: string | undefined,
-) =>
-  AMUX_SESSION_INTAKE_CODE_LATCH &&
-  sessionSwitch === "enabled" &&
-  existingIntakeSwitch === "enabled";
-
 /** Refused before the intake transaction starts, so nothing was written. */
 const SESSION_PREWRITE_STATUS: Readonly<Record<string, number>> = {
-  submission_disabled: 503,
   audit_unavailable: 503,
   scope_unavailable: 409,
   outside_scope: 409,

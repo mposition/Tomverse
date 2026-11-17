@@ -23,9 +23,6 @@ import {
   quarantineExpiredAmuxV22TaskExecutions,
   releaseUnstartedAmuxV22Assignments,
 } from "@/lib/amux/execution";
-import { AMUX_V22_TASK_EXECUTION_CODE_LATCH } from
-  "@/lib/amux/v22TaskExecutionCore";
-import { isAmuxExecutionApiEnabled } from "@/lib/amux/executionGate";
 import { amuxRecoverFailureFields, type AmuxRecoverStep } from "@/lib/amux/recoverFailure";
 import { sweepExpiredAmuxQuotaObservations } from "@/lib/amux/telemetry";
 
@@ -62,19 +59,6 @@ export async function POST(request: Request) {
       const quotaObservationsDeleted =
         await sweepExpiredAmuxQuotaObservations();
 
-      if (!isAmuxExecutionApiEnabled()) {
-        return Response.json(
-          {
-            recovered: false,
-            reason: "execution_api_disabled",
-            quota_observations_deleted: quotaObservationsDeleted,
-          },
-          {
-            status: 409,
-            headers: { "Cache-Control": "no-store" },
-          },
-        );
-      }
 
       let more = false;
       step = "reclaim_executions";
@@ -98,17 +82,12 @@ export async function POST(request: Request) {
 
       let quarantinedV22 = 0;
       let releasedUnstartedV22 = 0;
-      // Recovery drains or quarantines work already admitted before the
-      // environment kill switch was closed. A code-latch-off deployment has
-      // never admitted v22 work and must not query its new tables.
-      if (AMUX_V22_TASK_EXECUTION_CODE_LATCH) {
-        if (amuxRouteHasBudgetFor(AMUX_DB_BOUNDARIES.executionRecoveryWrite)) {
-          quarantinedV22 = await quarantineExpiredAmuxV22TaskExecutions(20);
-        } else more = true;
-        if (amuxRouteHasBudgetFor(AMUX_DB_BOUNDARIES.ownershipRecoveryWrite)) {
-          releasedUnstartedV22 = await releaseUnstartedAmuxV22Assignments(20);
-        } else more = true;
-      }
+      if (amuxRouteHasBudgetFor(AMUX_DB_BOUNDARIES.executionRecoveryWrite)) {
+        quarantinedV22 = await quarantineExpiredAmuxV22TaskExecutions(20);
+      } else more = true;
+      if (amuxRouteHasBudgetFor(AMUX_DB_BOUNDARIES.ownershipRecoveryWrite)) {
+        releasedUnstartedV22 = await releaseUnstartedAmuxV22Assignments(20);
+      } else more = true;
 
       return Response.json(
         {
@@ -116,9 +95,8 @@ export async function POST(request: Request) {
           reclaimed,
           reclaimed_claims: reclaimedClaims,
           quota_observations_deleted: quotaObservationsDeleted,
-          ...(AMUX_V22_TASK_EXECUTION_CODE_LATCH ?
-            { quarantined_v22: quarantinedV22,
-              released_unstarted_v22: releasedUnstartedV22 } : {}),
+          quarantined_v22: quarantinedV22,
+          released_unstarted_v22: releasedUnstartedV22,
           more,
         },
         {

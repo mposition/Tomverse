@@ -10,22 +10,19 @@ import { lockAmuxAdmissionAndReadIncident } from "@/lib/amux/incident";
 import { loadAmuxContentKeyRing } from "@/lib/amux/ideaKeyStore";
 import { openAmuxContent, verifyAmuxContentDigest,
   type AmuxContentKeys } from "@/lib/amux/ideaCrypto";
-import { AMUX_V22_DELIVERY_BASE_SHA_ENV, AMUX_V22_TASK_EXECUTION_ENV,
-  AMUX_V22_SEALED_DELIVERY_MARKER,
-  amuxV22DeliveryBaseShaEnabled,
-  amuxV22DeliveryBudgetMicrousd,
-  amuxV22TaskExecutionEnabled } from
+import { AMUX_V22_SEALED_DELIVERY_MARKER,
+  amuxV22DeliveryBudgetMicrousd } from
   "@/lib/amux/v22TaskExecutionCore";
 import { AMUX_V22_WORKER_AUTHORITY_NOTICE, amuxV22WorkspaceNotice } from
   "@/lib/amux/v22ExternalAuthorityCore";
 import { AMUX_V22_OWNER_QUESTION_RULES, AMUX_V22_RESUME_PROMPT_MAX_BYTES,
   buildAmuxV22ResumeContextFile, buildAmuxV22ResumeSection } from
   "@/lib/amux/v22OwnerQuestionCore";
-import { AMUX_V22_CONCLUSION_ENV, amuxV22ConclusionRules,
+import { AMUX_V22_CONCLUSION_ENV, AMUX_V22_CONCLUSION_RULES,
   amuxV22ConclusionMode, buildAmuxV22PriorConclusionSection } from
   "@/lib/amux/v22ConclusionCore";
 import { AMUX_V22_CONTEXT_DIR, AMUX_V22_CONTEXT_FILES,
-  amuxV22ContextPromptSection, amuxV22EmbedContextFiles, amuxV22LocalCliFlowEnabled,
+  amuxV22ContextPromptSection, amuxV22EmbedContextFiles,
   type AmuxV22ContextFile } from "@/lib/amux/v22LocalCliFlowCore";
 import { AMUX_V22_PRIOR_CONCLUSION_ROWS_PRISMA_CALLS,
   openAmuxV22PriorConclusions, readAmuxV22PriorConclusionRows } from
@@ -50,7 +47,7 @@ import { AMUX_V22_READ_ONLY_API_EXECUTOR_KIND,
   "@/lib/amux/v22ReadOnlyApiProtocol.mjs";
 import { amuxWorkerRuntimeHasExactCapability,
   amuxWorkerRuntimeUsesReadOnlyApi } from "@/lib/amux/workerRuntime";
-import { amuxV52ReviewAvoidVendorsEnabled, formatAmuxV52ReviewScope } from
+import { formatAmuxV52ReviewScope } from
   "@/lib/amux/v52ReviewCore";
 import { AMUX_V52_REVIEW_HISTORY_PRISMA_CALLS, openAmuxV52ReviewHistory,
   readAmuxV52ReviewHistory } from "@/lib/amux/v52ReviewFindingsStore";
@@ -319,11 +316,8 @@ export async function pullAmuxWorkDelivery(input: {
   // Key-store I/O is outside the DB transaction. The locked row below must
   // still match this candidate; a race refuses delivery rather than opening
   // another Task's sealed brief with stale keys.
-  const v22Enabled = amuxV22TaskExecutionEnabled(
-    process.env[AMUX_V22_TASK_EXECUTION_ENV]);
   const conclusionMode = amuxV22ConclusionMode(process.env[AMUX_V22_CONCLUSION_ENV]);
-  const localCliFlow = amuxV22LocalCliFlowEnabled();
-  const { sealedCandidate, candidateCard, resumeRows, priorRows, reviewHistory } = v22Enabled ?
+  const { sealedCandidate, candidateCard, resumeRows, priorRows, reviewHistory } =
     await withAmuxDbBoundary({ ...AMUX_DB_BOUNDARIES.deliveryKeyRead,
       prismaCallCeiling: AMUX_DB_BOUNDARIES.deliveryKeyRead.prismaCallCeiling +
         AMUX_V22_RESUME_ROWS_PRISMA_CALLS + AMUX_V22_PRIOR_CONCLUSION_ROWS_PRISMA_CALLS +
@@ -356,8 +350,7 @@ export async function pullAmuxWorkDelivery(input: {
       const reviewHistory = sealedCandidate ?
         await readAmuxV52ReviewHistory(tx, sealedCandidate.taskId) : null;
       return { sealedCandidate, candidateCard, resumeRows, priorRows, reviewHistory };
-    }) : { sealedCandidate: null, candidateCard: null, resumeRows: null,
-      priorRows: null, reviewHistory: null };
+    });
   const snapshot = candidateCard?.sourceSnapshot;
   const ideaId = snapshot && typeof snapshot === "object" &&
     !Array.isArray(snapshot) && typeof snapshot.ideaId === "string" ?
@@ -394,8 +387,7 @@ export async function pullAmuxWorkDelivery(input: {
   const earlierForReview = formatAmuxV52ReviewEntries(reviewOpened.flatMap((row) =>
     row.verdict === "reject" && row.opened?.doc ?
       [{ attemptNumber: row.attemptNumber, doc: row.opened.doc }] : []), 10_000);
-  const reviewAvoidVendors = amuxV52ReviewAvoidVendorsEnabled() ?
-    amuxV52VendorsToAvoid(reviewOpened) : [];
+  const reviewAvoidVendors = amuxV52VendorsToAvoid(reviewOpened);
   const deliveryContent = async (tx: Prisma.TransactionClient,
     delivery: DeliveryLockRow, now: Date,
     protocolCapabilities: readonly string[]) => {
@@ -405,7 +397,6 @@ export async function pullAmuxWorkDelivery(input: {
       return { prompt: delivery.prompt, v22Execution: null,
         priorConclusionDigest: null, reviewFeedbackDigest: null };
     }
-    if (!v22Enabled) throw new Error("v22 sealed delivery is disabled");
     if (!briefKeys || sealedCandidate?.attemptId !== delivery.attemptId ||
         sealedCandidate.taskId !== delivery.taskId)
       throw new Error("v22 sealed delivery key binding changed");
@@ -462,8 +453,7 @@ export async function pullAmuxWorkDelivery(input: {
       throw new Error("v22 delivery assignment audit is invalid");
     // Settlement accepts a patch only on the base its publication run was
     // pinned to at start, so the sidecar checks that commit out first.
-    const publicationRun = amuxV22TaskWritesPatch(assignment.role) &&
-      amuxV22DeliveryBaseShaEnabled(process.env[AMUX_V22_DELIVERY_BASE_SHA_ENV]) ?
+    const publicationRun = amuxV22TaskWritesPatch(assignment.role) ?
       await tx.engineeringAgentRun.findUnique({
         where: { amuxAttemptId: delivery.attemptId },
         select: { baseSha: true },
@@ -619,7 +609,7 @@ export async function pullAmuxWorkDelivery(input: {
       // An investigate (or verify) run ends with a structured conclusion.
       const conclusionRules = conclusionMode !== "off" &&
         amuxV22ExecutionRole(assignment.role) === "investigate" ?
-        `${amuxV22ConclusionRules(localCliFlow)}\n\n` : "";
+        `${AMUX_V22_CONCLUSION_RULES}\n\n` : "";
       // The sidecar runs the execution role; the assignment keeps the Task's.
       const v22ExecutionProfile = () => ({ modelId: assignment.modelId,
         role: amuxV22ExecutionRole(assignment.role),
@@ -652,7 +642,7 @@ export async function pullAmuxWorkDelivery(input: {
       // as whole files in that checkout, and a prompt that points at them. No
       // byte budget leaves anything out. A risk-accepted read-only retry (CLI
       // or API) keeps its exact earlier launch and inline prompt.
-      if (localCliFlow && workspace !== "" && !readOnlyRetry) {
+      if (workspace !== "" && !readOnlyRetry) {
         const contextFiles: AmuxV22ContextFile[] = [
           { name: AMUX_V22_CONTEXT_FILES.brief, text: plain.toString("utf8") }];
         if (resume) {
@@ -713,7 +703,7 @@ export async function pullAmuxWorkDelivery(input: {
           budgetBytes: AMUX_V22_RESUME_PROMPT_MAX_BYTES - 2 -
             Buffer.byteLength(head + resumeSection + tail, "utf8") }) : null;
       const priorSection = prior ? `${prior.section}\n` : "";
-      // The earlier flow (TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW=disabled): the
+      // A risk-accepted read-only retry or a run with no checkout: the
       // rejections inline, newest first, in the room the 30 KiB prompt has left.
       const review = rejected.length > 0 ? buildAmuxV52PriorReviewSection({
         entries: rejected, budgetBytes: AMUX_V22_RESUME_PROMPT_MAX_BYTES - 2 -

@@ -8,8 +8,7 @@ import { AMUX_V22_WORKER_CLAIM_AUDIT_ACTOR } from
   "@/lib/adminAuditSystemActors";
 import { prisma } from "@/lib/prisma";
 import { BoardImportError } from "./boardImportCore.ts";
-import { AMUX_EXECUTION_GRADE_ENV,
-  amuxExecutionGradeRoutingEnabled, amuxWorkerMatchesExecutionGrade,
+import { amuxWorkerMatchesExecutionGrade,
   isAmuxV52TaskConfirmation } from "./executionGradeCore.ts";
 import { type AmuxOrchestratorReceiptRecorder, amuxRouteHasBudgetForMs } from "./dbBoundary.ts";
 import { AUTO_TICK_TRANSACTION_MAX_MS } from "./autoPromotionCore.ts";
@@ -38,6 +37,7 @@ import { amuxV22SafeStopFencedWorkers } from "./v22LegacySafeStopFence.ts";
 import { amuxWorkerRuntimeUsesReadOnlyApi } from "./workerRuntime.ts";
 import { amuxV22RoutesWithSettledUsage } from "./v22WorkerUsageGate.ts";
 import { amuxApprovedCeilingOverrun, decideAmuxAttemptBudget } from "./executionBudgetCore.ts";
+import { amuxInfraRetryDelayMs } from "./infraFailureCore.ts";
 import { readAmuxAttemptBudgetFacts, recentAmuxInfraFailureWorkers } from "./infraFailureStore.ts";
 import { type AmuxWorkerCircuit, amuxWorkerCircuitAdmits } from "./workerCircuitCore.ts";
 import { readAmuxWorkerCircuits, reportOpenAmuxWorkerCircuits } from "./workerHealthStore.ts";
@@ -48,8 +48,8 @@ import { evaluateAmuxV4TaskReadyInTransaction,
   loadAmuxV4TaskReadyContext } from "./v4TaskReadyService.ts";
 import { amuxV22ClaimCapacity, amuxV22ExecutionRole, amuxV22RequiredTool,
   amuxV22TaskRoleSupported, amuxV22OneShotRouteSupported, amuxV22Provider,
-  amuxV22ResumeRoutes, amuxV22WorkerClaimEnabled, chooseAmuxV22WorkerRoute,
-  AMUX_V22_WORKER_CLAIM_ENV, type AmuxV22ClaimLane } from
+  amuxV22ResumeRoutes, chooseAmuxV22WorkerRoute,
+  type AmuxV22ClaimLane } from
   "./v22WorkerClaimCore.ts";
 
 type Candidate = { id: string };
@@ -192,12 +192,20 @@ async function claimCandidate(taskId: string, assignmentId: string,
       const prior = await readAmuxAttemptBudgetFacts(tx, taskId);
       const priorReserved = prior.reservedMicrousd;
       const attemptBudget = decideAmuxAttemptBudget({ historical_rows: prior.historicalRows,
-        greatest_attempt_number: prior.greatestAttemptNumber, infra_rows: prior.infraRows,
-        infra_window_rows: prior.infraWindowRows });
+        greatest_attempt_number: prior.greatestAttemptNumber, infra_rows: prior.infraRows });
       if (!attemptBudget.allowed) {
         throw new AmuxClaimSkipError("attempt_budget_exhausted", {
           limit: attemptBudget.exhausted_limit, attemptsUsed: attemptBudget.attempts_used,
           maxAttempts: attemptBudget.max_attempts });
+      }
+      // A card whose newest run was a platform failure waits before a worker
+      // takes it again (infraFailureCore.ts amuxInfraRetryDelayMs); it is never
+      // parked for a person.
+      const infraWaitMs = amuxInfraRetryDelayMs(prior.infraWindowRows);
+      if (infraWaitMs > 0 && prior.lastEndedIsInfra && prior.lastEndedAt &&
+          now.getTime() - prior.lastEndedAt.getTime() < infraWaitMs) {
+        throw new AmuxClaimSkipError("infra_retry_backoff", {
+          attemptsUsed: prior.infraWindowRows });
       }
       const lane = await currentLane(tx, taskId);
       // Orchestration policy version 35, section 3: the variables while R2c is
@@ -269,8 +277,7 @@ async function claimCandidate(taskId: string, assignmentId: string,
       const sourceGrade = sourceApprovedCost && typeof sourceApprovedCost === "object" &&
         !Array.isArray(sourceApprovedCost) && "grade" in sourceApprovedCost ?
         sourceApprovedCost.grade : null;
-      const exactGradeRouting = amuxExecutionGradeRoutingEnabled(
-        process.env[AMUX_EXECUTION_GRADE_ENV]) &&
+      const exactGradeRouting =
         isAmuxV52TaskConfirmation(snapshot, sourceGrade) &&
         approvedCost !== null;
       if (exactGradeRouting &&
@@ -357,9 +364,8 @@ async function claimCandidate(taskId: string, assignmentId: string,
           return apiModelAccessCurrent ? null : "api_model_access_stale";
         const quota = telemetry.get(route.workerName);
         // Another provider's limit shows up as a failed attempt, not a
-        // blocked claim: its reading reaches this check only while
-        // TOMVERSE_AMUX_V22_NON_CLAUDE_QUOTA_GATE is enabled (telemetry.ts),
-        // and then only a fresh exhausted one holds the route.
+        // blocked claim: its reading reaches this check from telemetry.ts,
+        // and only a fresh exhausted one holds the route.
         if (amuxV22Provider(route.provider) !== "anthropic")
           return quota?.scoring.provider_exhausted ? "quota_exhausted" : null;
         // An Anthropic route needs a fresh reading: a sign-in whose usage
@@ -577,7 +583,10 @@ const SKIPPED_CODES = new Set(["not_unassigned_todo", "task_not_ready",
   "worker_unavailable", "one_shot_role_unavailable", "attempt_budget_exhausted",
   "review_author_unknown", "conflict", "usage_unverified", "no_worker_for_grade",
   "cost_reconfirmation_required", "lane_unbound", "recovery_approval_changed",
-  "role_unavailable", "worker_quarantined"]);
+  "role_unavailable", "worker_quarantined",
+  // One card waiting out its platform-failure backoff never holds the rest
+  // (review r-20261116-184542-69dcb8).
+  "infra_retry_backoff"]);
 
 /**
  * One admitted tick assigns every ready Task it can, one transaction each, up
@@ -587,9 +596,6 @@ const SKIPPED_CODES = new Set(["not_unassigned_todo", "task_not_ready",
  * of log names how many were made and why the others were passed over.
  */
 export async function tickV22WorkerClaim(): Promise<ClaimTickResult> {
-  if (!amuxV22WorkerClaimEnabled(process.env[AMUX_V22_WORKER_CLAIM_ENV])) {
-    return { claimed: false as const, reason: "apply_disabled" as const };
-  }
   const rows = await prisma.$transaction((tx) => candidates(tx));
   // Read once per tick, before any claim: which workers wait out a quarantine
   // after repeated infrastructure failures (owner decision 2026-11-15). A

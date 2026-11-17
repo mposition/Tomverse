@@ -42,21 +42,18 @@ const EMPTY = buildAmuxWorkerRegistryAdminView({
   registrations: [],
   latches: new Map(),
   observations: new Map(),
-  writesLatch: true,
 });
 
 const PARTIAL = buildAmuxWorkerRegistryAdminView({
   registrations: [registration("claude-impl", "active", "implementation"), registration("cursor-impl", "requested", "implementation")],
   latches: new Map(),
   observations: new Map(),
-  writesLatch: true,
 });
 
 const FULL = buildAmuxWorkerRegistryAdminView({
   registrations: AMUX_WORKER_REGISTRY_V31_SEED.map((entry) => registration(entry.workerName, entry.desiredState, entry.roleCeiling)),
   latches: new Map(),
   observations: new Map(),
-  writesLatch: true,
 });
 
 // ---------------------------------------------------------------------------
@@ -130,13 +127,6 @@ test("a refusal by the change rule stops the run on that worker; nothing more is
   assert.deepEqual(last("refusal"), { workerName: SEED[1]!.workerName, code: "stale_revision" });
 });
 
-test("the code latch's refusal stops the run before anything is written", async () => {
-  const { posted, last } = await runWith([() => Promise.resolve(json(409, { error: "registry_writes_off" }))], EMPTY);
-  assert.equal(posted.length, 1);
-  assert.equal(last("notice"), "stopped");
-  assert.deepEqual(last("refusal"), { workerName: SEED[0]!.workerName, code: "registry_writes_off" });
-});
-
 for (const [label, answer] of [
   ["a stale step-up", () => Promise.resolve(json(428, { code: "ADMIN_REAUTHENTICATION_REQUIRED" }))],
   ["a missing role", () => Promise.resolve(json(403, { error: "Forbidden." }))],
@@ -206,7 +196,6 @@ test("the GET body is accepted only in its exact shape", () => {
   for (const broken of [
     null,
     "x",
-    { ...body, writesLatch: "yes" },
     { ...body, rows: [{ ...body.rows[0], desiredState: "autonomous" }] },
     { ...body, rows: [{ ...body.rows[0], providerClass: "devin" }] },
     { ...body, seed: body.seed.map((entry: { providerClass: string }, index: number) => (index === 0 ? { ...entry, providerClass: "codex" } : entry)) },
@@ -273,7 +262,7 @@ test("a state change is sent once with the revision the person saw, then the reg
 });
 
 test("the server's own refusal of a turn-on is shown as a refusal and writes nothing", async () => {
-  for (const code of ["role_widening_requires_trial", "stale_revision", "registry_writes_off", "retired"]) {
+  for (const code of ["role_widening_requires_trial", "stale_revision", "retired"]) {
     const { posted, last } = await changeWith(() => Promise.resolve(json(409, { error: code })), PARTIAL);
     assert.equal(posted.length, 1, code);
     assert.equal(last("notice"), "stopped", code);

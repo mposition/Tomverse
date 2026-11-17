@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
-  AMUX_V19_SYSTEM_REGISTRATION_CODE_ENABLED,
   AMUX_V19_SYSTEM_REGISTRATION_ENV,
   AMUX_V19_UNIT_REGISTRATION_AUTHORITY,
   amuxUnitDecisionAuditActorValid,
@@ -23,28 +22,12 @@ const serviceSource = readFileSync(
   "utf8",
 );
 
-test("system registration needs the open code latch and every env switch, the dedicated one included", () => {
-  const env = {
-    [AMUX_V19_SYSTEM_REGISTRATION_ENV]: "enabled",
-    TOMVERSE_AMUX_SESSION_INTAKE: "enabled",
-    TOMVERSE_AMUX_V4_ANALYSIS_QUEUE_READ: "enabled",
-    TOMVERSE_AMUX_V4_ANALYSIS_RESULT_READ: "enabled",
-    TOMVERSE_AMUX_V4_ANALYSIS_RESULT_WRITE: "enabled",
-    TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_RESERVE: "enabled",
-    TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_READ: "enabled",
-    TOMVERSE_AMUX_V4_UNIT_WRITE: "enabled",
-    TOMVERSE_AMUX_V4_PORTFOLIO_WRITE: "enabled",
-  };
-  // Owner approval in chat, 2026-10-21: the code latch is open; environments
-  // still decide with their switches (production has none set).
-  assert.equal(AMUX_V19_SYSTEM_REGISTRATION_CODE_ENABLED, true);
+test("system registration needs only its dedicated switch, set exactly to enabled", () => {
+  // Owner approval in chat, 2026-10-21; the route and plan switches were
+  // removed on 2026-11-16, so environments decide with this one value.
+  const env = { [AMUX_V19_SYSTEM_REGISTRATION_ENV]: "enabled" };
   assert.equal(amuxV19SystemRegistrationEnabled(env), true);
-  for (const name of Object.keys(env)) {
-    const missing = { ...env };
-    delete missing[name];
-    assert.equal(amuxV19SystemRegistrationEnabled(missing), false, name);
-    assert.equal(amuxV19SystemRegistrationEnabled({ ...env, [name]: "true" }), false, name);
-  }
+  assert.equal(amuxV19SystemRegistrationEnabled({ [AMUX_V19_SYSTEM_REGISTRATION_ENV]: "true" }), false);
   assert.equal(amuxV19SystemRegistrationEnabled({}), false);
 });
 

@@ -40,10 +40,8 @@ mock.module(mod("lib/requestOrigin.ts"), { namedExports: {
   hasValidMutationOrigin: () => true,
 } });
 mock.module(mod("lib/amux/ideaUnitDecisionStore.ts"), { namedExports: {
-  AMUX_V4_UNIT_WRITE_ENV: "UNIT_WRITE_TEST",
   AmuxV4DuplicateReasonRequired: class extends FakeCodeError {},
   AmuxV4UnitDecisionError: FakeCodeError,
-  amuxV4UnitWriteEnabled: () => true,
 } });
 mock.module(mod("lib/amux/ideaUnitBrowserCore.ts"), { namedExports: {
   readAmuxV4UnitBrowserNonce: () => "browser-nonce",

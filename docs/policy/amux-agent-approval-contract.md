@@ -39,8 +39,8 @@ sole-approver 예외 목록을 대용하지 않는다.
 **되돌릴 수 있는 승인의 승인자 (운영자 결정 2026-11-07(채팅 원문: "승인은 사람만 할수 있다는 승인 정책들또한 없애주세요. Decision Maker가 대부분 운영자를 대체하는 자동화 시스템으로 진행됩니다.")).** 되돌릴 수 있는 작업 진행 승인은 Decision Maker나
 시스템 actor도 한다. 대상은 PR 없는 결과의 검토(`approve`·`retry`·`block`), 패치 없이 끝난
 `implement` 결과의 검토, 막힌 Task의 재실행, 아이디어 남은 카드 닫기, 세션 분석 답의 계획 거부 결정,
-investigate 결론에 따른 완료(`proceed`)다. 각각 기본 꺼진 스위치 뒤에 있다(`TOMVERSE_AMUX_V22_CONCLUSION`,
-`TOMVERSE_AMUX_V22_RESULT_REVIEW_DM`, `TOMVERSE_AMUX_DM_APPROVER`). 시스템·DM의 승인도 호출자
+investigate 결론에 따른 완료(`proceed`)다. 각각 스위치 뒤에 있다(`TOMVERSE_AMUX_V22_CONCLUSION`,
+`TOMVERSE_AMUX_DM_APPROVER`). 결과 검토 DM 스위치는 2026-11-16에 없앴다. 시스템·DM의 승인도 호출자
 트랜잭션 안의 해시 체인 시스템 감사로 남고, DM이 `irreversible`로 표시한 제안과 질문의 고정 답이 아닌
 답은 사람에게 남는다. **사람 승인으로 남는 것**은 Frontier 절의 되돌릴 수 없는 목록이다. 실제 돈이 나가는
 새 유료 호출의 승인과 비용 한도 상향(예: 복구 화면의 "추가 실행 1회 승인", 비용 상한 변경), 외부 게시와
@@ -262,7 +262,7 @@ v4 비코드 Task의 PR 없는 예외는 현재 revision·암호화 제목/범�
 `implement`·기존 카드·본문 삭제/잠금·결과 교체·잘린 표시·비-owner 반례를 포함한다.
 승인·거절의 감사 해시 체인을 검증하고, 검토 화면·로그·증거 파일이 prompt나
 비밀값을 노출하지 않는지도 확인한다. 운영값·staging 관측을 합성하지 않는다.
-활성화 스위치는 `TOMVERSE_AMUX_AGENT_APPROVAL_ENABLED=true`만 켜짐이며
+활성화 스위치는 `TOMVERSE_AMUX_AGENT_APPROVAL_ENABLED=enabled`(이미 들어 있는 `true`도 같은 뜻)만 켜짐이며
 미설정·읽기 실패·다른 값은 꺼짐이다. 기존 차용 금지 회귀 테스트는 삭제하지 않고
 새 계약 검증으로 강화한다. `AdminActionApproval`·sole-approver 재사용과 외부 행위
 승인은 계속 거절해야 한다. step-up 거절 UI에는 재인증 링크를 제공하고,

@@ -34,7 +34,11 @@ export const AMUX_ASK_TYPES = [
   "judgment",
 ] as const;
 
-/** Section 0-1: the six types a DM may draft for. `customer_outbound` is never one. */
+/**
+ * Section 0-1: the types a DM may draft for. `customer_outbound` is never one:
+ * a message to a customer leaves Tomverse, and the DM approver (§0a-1) would
+ * otherwise apply it without a person.
+ */
 export const DM_ALLOWED_ASK_TYPES = [
   "decision",
   "judgment",
@@ -52,6 +56,19 @@ export const DM_RESOLUTIONS = [
   "needs_contact",
   "decision_only",
 ] as const;
+
+/**
+ * The one generous per-tick count of the Decision Maker's card services
+ * (owner direction 2026-11-16: "넉넉한 값 하나로"): the cards each service hands
+ * the relay per tick -- a v22 worker's questions, result reviews, owner
+ * settlements, engineering T2 drafts, idea card closes -- each was 3. A
+ * service's scan of pending rows reads `AMUX_DM_PENDING_SCAN`, so rows that
+ * cannot be filed never hide the rest. The relay reads the sync answer up to
+ * its cap (dm_relay/flow.rs, `V22QuestionSync`), which holds this many cards
+ * at the card's one cap, six bytes a byte as JSON.
+ */
+export const AMUX_DM_TICK_LIMIT = 25;
+export const AMUX_DM_PENDING_SCAN = AMUX_DM_TICK_LIMIT * 8;
 
 /** Section 7: the DM serves the vendor that is not the asking worker's. */
 export const DM_INSTANCE_FOR_PROVIDER: Readonly<Record<string, string>> = Object.freeze({
@@ -162,10 +179,18 @@ export const DM_RATIONALE_MAX_BYTES = DM_OUTPUT_TEXT_MAX_BYTES;
 export const DM_ESCALATION_MAX_BYTES = DM_OUTPUT_TEXT_MAX_BYTES;
 
 /**
- * Section 3-3, the v1 term list. A hit sends the question to the operator
- * without a DM. Korean terms match as substrings; English terms match whole
- * words, case-insensitively. A false positive only costs the operator a draft,
- * so the list errs wide. Changing it is a policy version change.
+ * Section 3-3's term list. A hit sends the question to the operator without a
+ * DM. Korean terms match as substrings; English terms match whole words,
+ * case-insensitively.
+ *
+ * The DM approver applies a DM proposal without the operator (§0a-1), so this
+ * list is the deterministic check that keeps §0a-4's human boundaries with a
+ * person: money, deletion, a main merge, production, a secret, an external
+ * post or send, an access grant and a gate change. Owner direction 2026-11-16
+ * dropped the migration category and the broad words that only looked like a
+ * boundary ("ship", "release", "deploy", "배포", "덮어쓰", "초기화",
+ * "overwrite", a bare "drop"). The secret check of the card's text
+ * (`card_secret_detected`) is a separate check and stays.
  */
 /**
  * The only clauses the exception admits, whole from the clause's start (after
@@ -219,9 +244,8 @@ export const DM_IRREVERSIBLE_TERMS: ReadonlyArray<{
   english: readonly string[];
 }> = [
   { category: "main_merge", korean: ["main 병합", "main에 병합", "main으로 병합"], english: ["merge to main", "merge into main", "merge main"] },
-  { category: "release", korean: ["배포", "릴리스", "프로덕션", "운영 환경"], english: ["ship", "release", "deploy", "deployment", "production", "prod"] },
-  { category: "destroy", korean: ["삭제", "덮어쓰", "초기화"], english: ["delete", "drop", "truncate", "overwrite", "force push", "force-push", "wipe", "purge"] },
-  { category: "migration", korean: ["마이그레이션"], english: ["migration", "migrate"] },
+  { category: "release", korean: ["프로덕션", "운영 환경", "운영 배포"], english: ["production", "prod"] },
+  { category: "destroy", korean: ["삭제"], english: ["delete", "drop table", "drop database", "truncate", "wipe", "purge", "force push", "force-push"] },
   { category: "money", korean: ["결제", "환불", "청구"], english: ["payment", "refund", "charge", "invoice"] },
   { category: "outbound", korean: ["게시", "발송", "연락"], english: ["publish", "post to", "send to", "send email", "send an email", "email the", "tweet", "notify", "contact"] },
   { category: "secret", korean: ["비밀번호", "비밀값", "토큰", "API 키"], english: ["secret", "token", "password", "api key", "apikey", "credential"] },
@@ -333,8 +357,7 @@ const utf8Bytes = (value: string) => Buffer.byteLength(value, "utf8");
  *
  * Format `amux-dm-card-text-v2` (2026-10-18, stage S2-2b1) added each option's
  * `effect` and `paths`. The v1 layout, whose options were `{ id, label }`, is
- * not read back: its only writer was the routing route, closed by
- * `TOMVERSE_AMUX_DM_ROUTING` since it was added, and a stored text this module
+ * not read back: its only writer was a routing route that never wrote it, and a stored text this module
  * cannot read is shown as unreadable, never as a card.
  */
 export const DM_CARD_TEXT_FORMAT = "amux-dm-card-text-v2";

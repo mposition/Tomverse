@@ -16,10 +16,6 @@ import { AmuxIdeaAnalysisClaimResolutionError,
   "@/lib/amux/ideaAnalysisClaimResolutionService";
 import { prisma } from "@/lib/prisma";
 
-const READ_ENV = "TOMVERSE_AMUX_V4_ANALYSIS_CLAIM_RESOLUTION_READ";
-const WRITE_ENV = "TOMVERSE_AMUX_V4_ANALYSIS_CLAIM_RESOLUTION_WRITE";
-const READ_CODE_LATCH = true;
-const WRITE_CODE_LATCH = true;
 const noStore = { "Cache-Control": "private, no-store, max-age=0" };
 const id = z.string().regex(/^[A-Za-z0-9:_-]{1,128}$/);
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
@@ -66,10 +62,6 @@ export async function GET(request: Request): Promise<Response> {
       { status: 404, headers: noStore });
     if (session === "forbidden") return NextResponse.json({ error: "Forbidden." },
       { status: 403, headers: noStore });
-    if (!READ_CODE_LATCH || process.env[READ_ENV] !== "enabled") {
-      return NextResponse.json({ error: "analysis_claim_resolution_read_disabled" },
-        { status: 409, headers: noStore });
-    }
     await consumeApiRateLimit(request, session.user!.id!,
       "admin-amux-v4-analysis-claim-resolution-read", { minute: 15, day: 100 });
     const params = new URL(request.url).searchParams;
@@ -106,11 +98,6 @@ export async function POST(request: Request): Promise<Response> {
       { status: 404, headers: noStore });
     if (session === "forbidden") return NextResponse.json({ error: "Forbidden." },
       { status: 403, headers: noStore });
-    if (!READ_CODE_LATCH || process.env[READ_ENV] !== "enabled" ||
-        !WRITE_CODE_LATCH || process.env[WRITE_ENV] !== "enabled") {
-      return NextResponse.json({ error: "analysis_claim_resolution_disabled" },
-        { status: 409, headers: noStore });
-    }
     if (request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !==
         "application/json") return NextResponse.json({ error: "Invalid content type." },
       { status: 415, headers: noStore });

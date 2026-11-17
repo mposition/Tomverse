@@ -2,12 +2,11 @@
 
 export const AMUX_V4_NODE_LEVELS = ["initiative", "epic", "feature"] as const;
 /** One approval creates at most this many nodes; a larger plan takes more
- * rounds (amuxV4NodePlanRound). Under TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS a
- * larger plan is refused as before. */
+ * rounds (amuxV4NodePlanRound). */
 export const AMUX_V4_NODE_PLAN_MAX_UNITS = 12;
 
 export class AmuxV4NodePlanError extends Error {
-  constructor(readonly code: "nothing_to_approve" | "too_many_units" | "parent_unresolved" |
+  constructor(readonly code: "nothing_to_approve" | "parent_unresolved" |
     "reason_invalid", readonly draftUnitIds: string[] = []) {
     super(code);
     this.name = "AmuxV4NodePlanError";

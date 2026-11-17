@@ -30,10 +30,9 @@ canonical checklist다.
   origin을 `TOMVERSE_AMUX_REVIEW_INTERNAL_ORIGIN`에 설정한다. readiness는 명시적
   port가 Railway의 `PORT`와 같고 hostname이 `127.0.0.1` 또는 같은 app service의
   `RAILWAY_PRIVATE_DOMAIN`과 정확히 같지 않으면 fail-closed다.
-- 정책 버전 18부터 execution API는 코드 래치 `AMUX_EXECUTION_API_CODE_LATCH`(true로
-  출고)와 `TOMVERSE_AMUX_EXECUTION_API_ENABLED`(trim 후 정확히 `1`)가 모두 참일 때만
-  열린다. `NODE_ENV`와 무관하므로 flag를 켜면 production에서도 claim·시작·정산·
-  delivery가 실제로 열린다. local process executor는 여전히 코드에서 금지다.
+- 정책 버전 18의 execution API 게이트(코드 래치 `AMUX_EXECUTION_API_CODE_LATCH`와
+  `TOMVERSE_AMUX_EXECUTION_API_ENABLED`)는 2026-11-16에 없앴다. execution API는 늘 열려
+  있고 claim·시작·정산·delivery가 실제로 열린다. local process executor는 여전히 코드에서 금지다.
 - 운영 보류(코드가 아니라 사람의 규칙): DB의 late COMMIT 성공 기록 방지가 증명되기
   전에는 staging 검증 목적으로 flag를 켜지 않는다.
 - 검증 과정에서 production DB를 직접 수정하지 않는다.
@@ -45,9 +44,8 @@ canonical checklist다.
 ## A. Source identity와 feature-off
 
 - [ ] staging이 보고하는 deploy SHA가 기록의 40자리 `deploySha`와 정확히 같다.
-- [ ] `TOMVERSE_AMUX_ENABLED`가 unset 또는 `1` 이외 값인 상태를 관측한다.
-- [ ] `TOMVERSE_AMUX_EXECUTE`가 unset 또는 `1` 이외 값이다.
-- [ ] `TOMVERSE_AMUX_EXECUTION_API_ENABLED`가 unset 또는 `1` 이외 값이다.
+- [ ] `TOMVERSE_AMUX_ENABLED`가 unset 또는 `enabled`(이전 값 `1`) 이외 값인 상태를 관측한다.
+- [ ] `TOMVERSE_AMUX_EXECUTE`가 unset 또는 `enabled`(이전 값 `1`) 이외 값이다.
 - [ ] worker catalog와 executor command 설정이 activation 없이 주입되지 않았다.
 - [ ] production local executor가 flag/configuration과 무관하게 hard-disabled이며
       실제 child process는 test fixture에서만 가능한 상태임을 확인한다.
@@ -68,7 +66,7 @@ AMUX orchestrator가 완전히 꺼진 상태를 먼저 검증한다.
 
 이 구획은 scheduler만 관측하기 위한 staging 단계다.
 
-`TOMVERSE_AMUX_ENABLED=1`, `TOMVERSE_AMUX_EXECUTE` off 상태를 사용한다.
+`TOMVERSE_AMUX_ENABLED=enabled`(이전 값 `1`도 같은 뜻), `TOMVERSE_AMUX_EXECUTE` off 상태를 사용한다.
 
 - [ ] scheduler가 queue를 읽고 global-priority selection을 계산할 수 있다.
 - [ ] selection log가 선택과 실행을 분리해 표시한다.
@@ -165,8 +163,6 @@ turn의 비용·판별 목적을 실행 기록에 먼저 적는다. 캡처 자�
 ## H. Rollback
 
 - [ ] `TOMVERSE_AMUX_EXECUTE`를 off로 되돌리면 새 execution이 시작되지 않는다.
-- [ ] `TOMVERSE_AMUX_EXECUTION_API_ENABLED`를 off로 되돌리면 execution mutation
-      endpoint가 fail-closed다.
 - [ ] 필요 시 `TOMVERSE_AMUX_ENABLED`를 off로 내려 orchestrator 전체를 중단할 수
       있다.
 - [ ] rollback은 기존 execution/delivery row를 수동 DB UPDATE/DELETE하지 않는다.

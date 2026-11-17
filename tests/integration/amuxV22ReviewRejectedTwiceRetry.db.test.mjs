@@ -15,10 +15,9 @@ import { seedAmuxV4PortfolioRecoveryPrerequisites } from
 // reaches the same worker, the next run carries the latest findings, and its
 // first rejection returns to the same grade once more.
 
-// The CLI usage gate this suite proves is the one
-// TOMVERSE_AMUX_V22_READ_BACK_PROCEED=disabled restores; since 2026-11-15 the
-// switch is on by default and only a paid route's unknown usage holds a worker.
-process.env.TOMVERSE_AMUX_V22_READ_BACK_PROCEED = "disabled";
+// The usage gate is called here with the paid-only narrowing off, the older
+// rule this suite proves; at runtime only a paid route's unknown usage holds a
+// worker (the read-back switch was removed 2026-11-16).
 const raw = process.env.TEST_DATABASE_URL;
 const allowed = (() => {
   if (!raw || process.env.DATABASE_URL !== raw) return false;
@@ -153,7 +152,7 @@ test("a twice-rejected run reaches an owner retry, the claim and a fresh first r
     assert.equal(amuxV22ReviewRetryHasVerifiedOutcome({
       sourceSystem: "admin-idea-v4", attempt, rejectedReviewAttemptId }), true);
     // Its usage is unreported, so the worker is held for every Task until then.
-    assert.deepEqual(await amuxV22RoutesWithSettledUsage(tx, routes, null, taskId),
+    assert.deepEqual(await amuxV22RoutesWithSettledUsage(tx, routes, null, taskId, false),
       { routes: [], unsettled: true });
     // Without an owner retry, a further rejection would still be the second.
     assert.equal(await amuxV52PriorReviewRejections(tx, taskId, "next-attempt"), 1);
@@ -165,10 +164,10 @@ test("a twice-rejected run reaches an owner retry, the claim and a fresh first r
     assert.deepEqual(task, { status: "todo", revision: 5 });
 
     // 3. The claim may give the retried Task the same worker; no other Task.
-    assert.deepEqual(await amuxV22RoutesWithSettledUsage(tx, routes, null, taskId),
+    assert.deepEqual(await amuxV22RoutesWithSettledUsage(tx, routes, null, taskId, false),
       { routes, unsettled: false });
     assert.deepEqual(await amuxV22RoutesWithSettledUsage(tx, routes, null,
-      `other-${randomUUID()}`), { routes: [], unsettled: true });
+      `other-${randomUUID()}`, false), { routes: [], unsettled: true });
 
     // 4. The next run's prompt carries the latest rejection's findings.
     assert.equal(await amuxV52ReviewFeedbackJobId(tx, taskId), JOB_ID);
@@ -198,7 +197,7 @@ test("an unknown review result keeps retry closed even with a retry decision", {
     assert.equal(amuxV22ReviewRetryHasVerifiedOutcome({
       sourceSystem: "admin-idea-v4", attempt, rejectedReviewAttemptId }), false);
     await ownerRetries(db, taskId, priorAttemptId);
-    assert.deepEqual(await amuxV22RoutesWithSettledUsage(tx, routes, null, taskId),
+    assert.deepEqual(await amuxV22RoutesWithSettledUsage(tx, routes, null, taskId, false),
       { routes: [], unsettled: true });
   });
 });

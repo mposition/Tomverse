@@ -40,7 +40,7 @@ const handler = createAmuxV22SidecarHandler({ worker: config.worker, stateDir, p
     recoveryUnit: () => inspectAmuxV22RecoveryUnit({ worker: config.worker, invocationId }),
     recoveryWorkspace: () => captureAmuxV22PatchBaseline(config.worktreePath),
     // Each provider reads its own sign-in's subscription quota; what the
-    // app does with a non-Claude reading is TOMVERSE_AMUX_V22_NON_CLAUDE_QUOTA_GATE.
+    // app does with a non-Claude reading is to count it like Claude's.
     quota: () => provider === "anthropic" ? probeAmuxV22ClaudeQuota(config) :
       probeAmuxV22ChannelQuota(provider, { ...config, quotaGroup }),
     // What the sign-in stage and the login keepalive wrote next to this

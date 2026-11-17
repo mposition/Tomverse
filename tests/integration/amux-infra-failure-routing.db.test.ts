@@ -18,7 +18,6 @@ import { seedAmuxV4PortfolioRecoveryPrerequisites } from "./helpers/amuxV4Portfo
 
 process.env.ADMIN_AUDIT_INTEGRITY_KEY = "synthetic-amux-infra-failure-audit-key-2026";
 Object.assign(process.env, { NODE_ENV: "test" });
-delete process.env.TOMVERSE_AMUX_INFRA_FAILURE_ROUTING;
 
 const services = async () => ({
   ...(await import("@/lib/amux/infraFailureStore")),
@@ -99,7 +98,7 @@ test("a worker that exits right after start: attempts kept, other worker first, 
     assert.equal(budget.allowed, true);
     assert.equal((budget as { next_attempt_number: number }).next_attempt_number, 5,
       "the number stays unique; the count is the card's own");
-    assert.deepEqual(await s.countAmuxInfraAttemptsBefore(tx, taskId, randomUUID(), true),
+    assert.deepEqual(await s.countAmuxInfraAttemptsBefore(tx, taskId, randomUUID()),
       { total: 3, window: 3 });
     assert.deepEqual(await s.readAmuxRecentResultSignatures(tx, taskId, randomUUID(), 2),
       ["failed:reported_result"], "an infrastructure failure is never a repeat of the card's own result");
@@ -145,10 +144,10 @@ test("a worker that exits right after start: attempts kept, other worker first, 
   });
 });
 
-test("the twelfth platform failure is still counted, so the card stops at the bound", async () => {
-  // Review r-20261115-120153-60193b: the failure that reaches the bound keeps
-  // its own infra_<kind> reason (the escalation names the bound), so the
-  // budget reads twelve, not eleven, and the next claim is refused.
+test("platform failures have no bound: the card stays claimable and only waits longer", async () => {
+  // Owner decision 2026-11-16: twelve used to hand the card to a person. The
+  // failures keep their reason (so they are counted for the wait) and use none
+  // of the card's attempts.
   await lifecycle(async (tx) => {
     const seed = await seedAmuxV4PortfolioRecoveryPrerequisites(queryAdapter(tx),
       { taskRole: "investigate" }) as { taskId: string };
@@ -156,15 +155,21 @@ test("the twelfth platform failure is still counted, so the card stops at the bo
     await earlyExits(tx, taskId, [12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1]);
     await fixtureCommitted(tx);
     const s = await services();
+    const { amuxInfraRetryDelayMs } = await import("@/lib/amux/infraFailureCore");
     const facts = await s.readAmuxAttemptBudgetFacts(tx, taskId);
     assert.equal(facts.historicalRows, 13);
     assert.equal(facts.infraRows, 12);
+    assert.equal(facts.infraWindowRows, 12);
+    assert.equal(facts.lastEndedIsInfra, true);
+    assert.ok(facts.lastEndedAt instanceof Date);
     const budget = s.decideAmuxAttemptBudget({ historical_rows: facts.historicalRows,
       greatest_attempt_number: facts.greatestAttemptNumber, infra_rows: facts.infraRows });
-    assert.equal(budget.allowed, false);
-    assert.equal((budget as { exhausted_limit?: string }).exhausted_limit, "infra_attempts");
-    // A person sends the card back with retry after the twelve: the bound
-    // starts over, the earlier failures still use none of its attempts.
+    assert.deepEqual(budget, { allowed: true, next_attempt_number: 14,
+      max_attempts: s.AMUX_MAX_EXECUTION_ATTEMPTS });
+    // The wait doubles from a minute and holds at an hour.
+    assert.equal(amuxInfraRetryDelayMs(facts.infraWindowRows), 60 * 60_000);
+    // A person's retry starts the count of the wait over; the earlier failures
+    // still use none of the card's attempts.
     await withoutTriggers(tx, async () => {
       await tx.$executeRaw`INSERT INTO "AmuxHumanEscalation"
         ("id", "taskId", "specialty", "reason", "status", "openedBy", "resolvedById",
@@ -176,12 +181,8 @@ test("the twelfth platform failure is still counted, so the card stops at the bo
     const after = await s.readAmuxAttemptBudgetFacts(tx, taskId);
     assert.equal(after.infraRows, 12);
     assert.equal(after.infraWindowRows, 0);
-    const again = s.decideAmuxAttemptBudget({ historical_rows: after.historicalRows,
-      greatest_attempt_number: after.greatestAttemptNumber, infra_rows: after.infraRows,
-      infra_window_rows: after.infraWindowRows });
-    assert.deepEqual(again, { allowed: true, next_attempt_number: 14,
-      max_attempts: s.AMUX_MAX_EXECUTION_ATTEMPTS });
-    assert.deepEqual(await s.countAmuxInfraAttemptsBefore(tx, taskId, randomUUID(), true),
+    assert.equal(amuxInfraRetryDelayMs(after.infraWindowRows), 0);
+    assert.deepEqual(await s.countAmuxInfraAttemptsBefore(tx, taskId, randomUUID()),
       { total: 12, window: 0 });
   });
 });

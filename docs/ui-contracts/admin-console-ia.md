@@ -421,20 +421,22 @@ switch state. It carries no badge: a switch is a setting, not work waiting for
 a person. Operations settings carries the halt
 count; a failed halt read is shown as unknown, never as zero. Legacy Execution
 `?tab=halts` and `?tab=decision-maker` links redirect to their corresponding
-settings sections and preserve the remaining query fields. Each gated section's tab carries a chip
+settings sections and preserve the remaining query fields. Each section that still has an environment switch (the catalog import, which
+also keeps its shipped code latch, and auto-promotion) carries a chip
 -- "Preview · apply off" or "Apply on", and "Behind server switch" or "Server
 switch on" for auto-promotion -- computed by `lib/adminAmuxTabStatus.ts` from
 the environment variable and shipped code latch that section's own route
-reads (rule 8). Cards reads "Read only" because the card list issues no
+reads (rule 8). Intake, reconciliation, backlog metadata, recommendation and
+promotion lost their switches on 2026-11-16 and carry no chip. Cards reads "Read only" because the card list issues no
 request and writes nothing; Assignment reads "Read only" to a role without
 `ops:write`, the permission every decision route checks.
 
 Promotion's **Auto-promotion** section remains the legacy v8 grant, halt and
 resume surface. The separate owner-only v22 control lives in **Operations
-settings › Automatic admission**. Its chip reads only the v22 server switch;
-the legacy chip reads only the v8 switch, so enabling either path never labels
-the other as open. The v22 control reads actual graduation counts separately
-from the approved bootstrap exception, requires explicit confirmation and
+settings › Automatic admission**. It carries no chip (its server switch was
+removed 2026-11-16; the owner's activation row is the only setting) and the
+legacy chip reads only the v8 switch. The v22 control reads the measured
+graduation counts, requires explicit confirmation and
 recent authentication for writes, and preserves the read-only Cards surface.
 Unknown writes are not retried. The first-tab placement means the canonical
 step-up callback `/admin/amux-settings` returns an owner to this control, while

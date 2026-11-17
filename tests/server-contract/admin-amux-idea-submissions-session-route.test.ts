@@ -65,24 +65,6 @@ async function loadRoute(): Promise<{
   return import(mod("app/api/admin/amux/ideas/submissions/route.ts"));
 }
 
-const SWITCHES = { TOMVERSE_AMUX_SESSION_INTAKE: "enabled", TOMVERSE_AMUX_V4_IDEA_SUBMIT: "enabled",
-  TOMVERSE_AMUX_SESSION_INTAKE_READBACK: "enabled", TOMVERSE_AMUX_V4_IDEA_READBACK: "enabled" };
-
-async function withSwitches<T>(values: Record<string, string>, fn: () => Promise<T>) {
-  const old = Object.fromEntries(Object.keys(SWITCHES).map((name) => [name, process.env[name]]));
-  for (const name of Object.keys(SWITCHES)) {
-    if (values[name] === undefined) delete process.env[name];
-    else process.env[name] = values[name];
-  }
-  try { return await fn(); }
-  finally {
-    for (const [name, value] of Object.entries(old)) {
-      if (value === undefined) delete process.env[name];
-      else process.env[name] = value;
-    }
-  }
-}
-
 const post = (input: unknown, extra: Record<string, unknown> = {}) =>
   new Request("https://tomverse.test/api/admin/amux/ideas/submissions", {
     method: "POST", headers: { "content-type": "application/json" },
@@ -90,8 +72,7 @@ const post = (input: unknown, extra: Record<string, unknown> = {}) =>
 const idea = (repositories: string[]) => ({ version: 1,
   idea: "Show why a session analysis made no plan.", repositories, pullRequests: [] });
 
-test("with session intake on, an Admin idea enters the session writer as an Admin source", () =>
-  withSwitches(SWITCHES, async () => {
+test("an Admin idea enters the session writer as an Admin source", async () => {
     world.sessionCalls = []; world.v4Calls = 0; world.sessionError = null;
     const { POST } = await loadRoute();
     const response = await POST(post(idea(["mposition/Tomverse"])));
@@ -105,10 +86,9 @@ test("with session intake on, an Admin idea enters the session writer as an Admi
     assert.deepEqual(call.inspected.source, { toolName: "tomverse-admin",
       modelProvider: "operator", sessionDisplay: "Admin idea input" });
     assert.equal(call.model, null, "no choice keeps the scope's model");
-  }));
+});
 
-test("the owner's per-idea model choice reaches the session writer exactly", () =>
-  withSwitches(SWITCHES, async () => {
+test("the owner's per-idea model choice reaches the session writer exactly", async () => {
     world.sessionCalls = []; world.sessionError = null;
     const { POST } = await loadRoute();
     const model = { provider: "cursor", modelId: "grok-4.7-high", reasoningEffort: "high" };
@@ -123,20 +103,18 @@ test("the owner's per-idea model choice reaches the session writer exactly", () 
       assert.deepEqual(await refused.json(), { error: "schema_rejected" });
       assert.equal(world.sessionCalls.length, 0, "nothing is written for a malformed choice");
     }
-  }));
+});
 
-test("a session idea without any reference is refused before anything is written", () =>
-  withSwitches(SWITCHES, async () => {
+test("a session idea without any reference is refused before anything is written", async () => {
     world.sessionCalls = [];
     const { POST } = await loadRoute();
     const response = await POST(post(idea([])));
     assert.equal(response.status, 400);
     assert.deepEqual(await response.json(), { error: "references_required" });
     assert.equal(world.sessionCalls.length, 0);
-  }));
+});
 
-test("pre-write refusals keep their code; an uncertain write is read back", () =>
-  withSwitches(SWITCHES, async () => {
+test("pre-write refusals keep their code; an uncertain write is read back", async () => {
     const { POST } = await loadRoute();
     for (const [code, status] of [["outside_scope", 409], ["model_not_approved", 409],
       ["model_not_launchable", 409],
@@ -157,10 +135,9 @@ test("pre-write refusals keep their code; an uncertain write is read back", () =
     assert.equal(unknown.status, 503);
     assert.deepEqual(await unknown.json(), { error: "outcome_unknown", readBack: "unavailable" });
     world.sessionError = null;
-  }));
+});
 
-test("the read-back finds a session idea the owner path does not know", () =>
-  withSwitches(SWITCHES, async () => {
+test("the read-back finds a session idea the owner path does not know", async () => {
     world.seen = { requestId, status: "committed", ideaId: "session-idea",
       reservationId: "r", hasExternalSources: true };
     const { GET } = await loadRoute();
@@ -169,10 +146,9 @@ test("the read-back finds a session idea the owner path does not know", () =>
     assert.deepEqual(await response.json(), { requestId, status: "committed",
       ideaId: "session-idea", origin: "session", hasExternalSources: true });
     world.seen = { status: "absent" };
-  }));
+});
 
-test("a session idea reads back as committed even when the v4 owner read sees its row as partial", () =>
-  withSwitches(SWITCHES, async () => {
+test("a session idea reads back as committed even when the v4 owner read sees its row as partial", async () => {
     world.owned = { requestId, status: "partial", ideaId: "session-idea" };
     world.seen = { requestId, status: "committed", ideaId: "session-idea",
       reservationId: "r", hasExternalSources: true };
@@ -186,28 +162,9 @@ test("a session idea reads back as committed even when the v4 owner read sees it
       world.owned = { requestId, status: "absent" };
       world.seen = { status: "absent" };
     }
-  }));
+});
 
-test("a session idea still reads back after session writes are turned off", () =>
-  withSwitches({ TOMVERSE_AMUX_SESSION_INTAKE_READBACK: "enabled",
-    TOMVERSE_AMUX_V4_IDEA_READBACK: "enabled" }, async () => {
-    world.owned = { requestId, status: "partial", ideaId: "session-idea" };
-    world.seen = { requestId, status: "committed", ideaId: "session-idea",
-      reservationId: "r", hasExternalSources: false };
-    try {
-      const { GET } = await loadRoute();
-      const response = await GET(new Request(
-        `https://tomverse.test/api/admin/amux/ideas/submissions?requestId=${requestId}`));
-      assert.deepEqual(await response.json(), { requestId, status: "committed",
-        ideaId: "session-idea", origin: "session", hasExternalSources: false });
-    } finally {
-      world.owned = { requestId, status: "absent" };
-      world.seen = { status: "absent" };
-    }
-  }));
-
-test("a row that is not a session idea still reads back through the v4 owner path", () =>
-  withSwitches(SWITCHES, async () => {
+test("a row that is not a session idea still reads back through the v4 owner path", async () => {
     world.owned = { requestId, status: "committed", ideaId: "v4-idea" };
     try {
       const { GET } = await loadRoute();
@@ -220,19 +177,7 @@ test("a row that is not a session idea still reads back through the v4 owner pat
       assert.deepEqual(await lane.json(), { requestId, status: "committed", ideaId: "v4-idea", lane: true },
         "an idea the lane took says so, so the input hides its v4 steps");
     } finally { world.owned = { requestId, status: "absent" }; world.laneTook = false; }
-  }));
-
-test("with session intake off, the Admin input keeps the v4 owner path", () =>
-  withSwitches({ TOMVERSE_AMUX_V4_IDEA_SUBMIT: "enabled",
-    TOMVERSE_AMUX_V4_IDEA_READBACK: "enabled" }, async () => {
-    world.sessionCalls = []; world.v4Calls = 0;
-    const { POST } = await loadRoute();
-    const response = await POST(post(idea(["mposition/Tomverse"])));
-    assert.equal(response.status, 201);
-    assert.equal((await response.json()).origin, undefined);
-    assert.equal(world.v4Calls, 1);
-    assert.equal(world.sessionCalls.length, 0);
-  }));
+});
 
 // The idea lane's test entry: `?target=lane` saves through the v4 owner path,
 // the only ideas the lane claims, even while session intake is on.
@@ -252,8 +197,8 @@ async function withLane<T>(value: string | undefined, fn: () => Promise<T>) {
   }
 }
 
-test("with the lane on, a lane entry is an owner idea even while session intake is on", () =>
-  withSwitches(SWITCHES, () => withLane("true", async () => {
+test("with the lane on, a lane entry is an owner idea, never a session one", () =>
+  withLane("true", async () => {
     world.sessionCalls = []; world.v4Calls = 0; world.sessionError = null;
     const { POST } = await loadRoute();
     const response = await POST(postToLane(idea(["mposition/Tomverse"])));
@@ -263,10 +208,9 @@ test("with the lane on, a lane entry is an owner idea even while session intake 
     assert.equal(body.origin, undefined, "an owner idea, not a session one");
     assert.equal(world.v4Calls, 1);
     assert.equal(world.sessionCalls.length, 0, "the session queue never sees it");
-  })));
+  }));
 
-test("with the lane off, a lane entry is refused before anything is written", () =>
-  withSwitches(SWITCHES, async () => {
+test("with the lane off, a lane entry is refused before anything is written", async () => {
     for (const value of [undefined, "false", "1"]) {
       await withLane(value, async () => {
         world.sessionCalls = []; world.v4Calls = 0;
@@ -277,4 +221,4 @@ test("with the lane off, a lane entry is refused before anything is written", ()
         assert.equal(world.v4Calls + world.sessionCalls.length, 0);
       });
     }
-  }));
+});

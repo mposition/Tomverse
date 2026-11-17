@@ -14,16 +14,13 @@ import {
   boardImportFailureIsAmbiguous,
 } from "@/lib/amux/boardImportCore";
 import {
-  BACKLOG_METADATA_APPLY_ENV,
   BACKLOG_METADATA_AUDIT_ACTION,
   BACKLOG_METADATA_AUDIT_KEYS,
-  BACKLOG_METADATA_CODE_LATCH,
   BACKLOG_METADATA_POLICY_VERSION,
   type BacklogMetadataAuditMetadata,
   type BacklogMetadataCardFact,
   type BacklogMetadataRequest,
   BacklogMetadataConflict,
-  backlogMetadataApplyPermitted,
   backlogMetadataAuditMetadata,
   backlogMetadataCardWrite,
   backlogMetadataRefusal,
@@ -71,16 +68,6 @@ const disconnectMessage = (error: unknown): boolean => {
 };
 
 type Db = Prisma.TransactionClient | typeof prisma;
-
-/**
- * True only when the environment value is exactly `enabled` and the shipped
- * code latch is true. Takes no argument, so no caller can supply the latch.
- */
-export const backlogMetadataApplyOpen = (): boolean =>
-  backlogMetadataApplyPermitted({
-    envValue: process.env[BACKLOG_METADATA_APPLY_ENV],
-    codeLatch: BACKLOG_METADATA_CODE_LATCH,
-  });
 
 const withBacklogMetadataTransaction = async <T>(
   cardId: string,
@@ -227,7 +214,6 @@ const loadFact = async (db: Db, cardId: string): Promise<BacklogMetadataCardFact
   });
 
 export async function previewBacklogMetadata(raw: string) {
-  const applyPermitted = backlogMetadataApplyOpen();
   const parsed = parseBacklogMetadataRequest(raw);
   if (!parsed.ok) {
     return {
@@ -235,7 +221,6 @@ export async function previewBacklogMetadata(raw: string) {
       valid: false,
       code: parsed.code,
       refusal: null,
-      applyPermitted,
     };
   }
   const refusal = backlogMetadataRefusal(parsed.request, await loadFact(prisma, parsed.request.cardId));
@@ -245,7 +230,6 @@ export async function previewBacklogMetadata(raw: string) {
     code: null,
     refusal,
     cardId: parsed.request.cardId,
-    applyPermitted,
   };
 }
 
@@ -302,9 +286,6 @@ export async function commitBacklogMetadata(
 }
 
 export async function applyBacklogMetadata(input: { session: Session; request: Request; raw: string }) {
-  if (!backlogMetadataApplyOpen()) {
-    throw new BoardImportError("apply_disabled", 409);
-  }
   const parsed = parseBacklogMetadataRequest(input.raw);
   if (!parsed.ok) throw new BoardImportError(parsed.code, 400);
   const update = parsed.request;

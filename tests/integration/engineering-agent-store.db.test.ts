@@ -6,7 +6,10 @@ import type { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
 import { SYSTEM_AUDIT_ACTOR_METADATA_KEY } from "@/lib/adminAuditSystemActors";
-import { OWNER_QUEUE_LEGACY_LIMITS, unknownOutcomeDecisionCauseKey } from "@/lib/engineeringAgentCore";
+import { unknownOutcomeDecisionCauseKey } from "@/lib/engineeringAgentCore";
+
+/** The size of the owner queue cap that existed before owner decision 2026-11-15. */
+const OWNER_QUEUE_LEGACY_LIMITS = { pr: 8, decision: 8 } as const;
 import {
   ENGINEERING_AGENT_AUDIT_ACTIONS,
   EngineeringAgentStoreRefusedError,
@@ -33,7 +36,6 @@ import {
   recordEngineeringAgentBinding,
   recordEngineeringAgentBindingObservation,
   readEngineeringAgentOwnerQueues,
-  recordEngineeringAgentMonitorsConfirmed,
   recordEngineeringAgentRunStart,
   recordEngineeringAgentServiceFinish,
   removeEngineeringAgentReviewer,
@@ -1189,47 +1191,27 @@ test("a claim whose lease passed goes to a lookup, and a lost answer can be foun
   await retireBinding(bound.bindingId);
 });
 
-test("turning the mode on from off passes the armed gate; turning it off and freezing never do", async () => {
-  const keys = {
-    runner: "engineeringAgent.runnerLastFinishAt",
-    publisher: "engineeringAgent.publisherLastFinishAt",
-    monitors: "engineeringAgent.monitorsConfirmedAt",
-  };
+// Owner decision 2026-11-16: the armed gate is gone.
+test("the mode turns on from off with no record of the services' finishes or a monitor check", async () => {
+  const keys = ["engineeringAgent.runnerLastFinishAt", "engineeringAgent.publisherLastFinishAt", "engineeringAgent.monitorsConfirmedAt"];
   const setSwitch = (name: "mode" | "freeze", value: string) =>
     inTx((tx) => setEngineeringAgentSwitch(tx, { session: owner, name, value }));
-  const record = (key: string, at: Date) =>
-    prisma.appSetting.upsert({ where: { key }, create: { key, value: at.toISOString() }, update: { value: at.toISOString() } });
   try {
     await setSwitch("mode", "off");
-    await prisma.appSetting.deleteMany({ where: { key: { in: Object.values(keys) } } });
-    await refusedWith(setSwitch("mode", "shadow"), "armed_gate_runner_finish_publisher_finish_monitor_confirmation");
-
-    const now = new Date();
-    await record(keys.runner, now);
-    await record(keys.publisher, now);
-    // A monitor confirmation older than a week is no confirmation.
-    await record(keys.monitors, new Date(now.getTime() - 8 * 24 * 60 * 60 * 1000));
-    await refusedWith(setSwitch("mode", "shadow"), "armed_gate_monitor_confirmation");
-    await prisma.appSetting.update({ where: { key: keys.monitors }, data: { value: "not an instant" } });
-    await refusedWith(setSwitch("mode", "shadow"), "armed_gate_monitor_confirmation");
-
-    await record(keys.monitors, now);
+    await prisma.appSetting.deleteMany({ where: { key: { in: keys } } });
     await setSwitch("mode", "shadow");
-    await setSwitch("mode", "shadow");
-    // Stopping is always allowed, whatever the records say.
-    await prisma.appSetting.deleteMany({ where: { key: { in: Object.values(keys) } } });
     await setSwitch("freeze", "true");
     await setSwitch("freeze", "false");
     await setSwitch("mode", "off");
-    await refusedWith(setSwitch("mode", "shadow"), "armed_gate_runner_finish_publisher_finish_monitor_confirmation");
+    // Again from off, still with no record.
+    await setSwitch("mode", "shadow");
   } finally {
-    await prisma.appSetting.deleteMany({ where: { key: { in: Object.values(keys) } } });
     await prisma.appSetting.deleteMany({ where: { key: FREEZE_KEY } });
     await prisma.appSetting.upsert({ where: { key: MODE_KEY }, create: { key: MODE_KEY, value: "t1" }, update: { value: "t1" } });
   }
 });
 
-test("the owner queues are counted, never capped, unless the kill switch holds the old caps", async () => {
+test("the owner queues are counted, never capped", async () => {
   // Owner decision 2026-11-15: more active runs than the old cap of 8, and
   // neither the reading nor the run trigger refuses another.
   const runs = [];
@@ -1239,43 +1221,23 @@ test("the owner queues are counted, never capped, unless the kill switch holds t
   }
   assert.equal((await readEngineeringAgentOwnerQueues(prisma)).claimAllowed, true, "never full");
   runs.push(await startRun());
-  // ENGINEERING_AGENT_LEGACY_HALTS: the app holds the caps again; the trigger no longer does.
-  process.env.ENGINEERING_AGENT_LEGACY_HALTS = "enabled";
-  try {
-    assert.equal((await readEngineeringAgentOwnerQueues(prisma)).claimAllowed, false, "the reading says full");
-  } finally {
-    delete process.env.ENGINEERING_AGENT_LEGACY_HALTS;
-  }
   for (const run of runs) {
     await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, amuxAttemptId: run.amuxAttemptId, outcome: "no_change", halt: "none" }));
   }
   assert.equal((await readEngineeringAgentOwnerQueues(prisma)).claimAllowed, true);
 });
 
-test("the armed gate opens on the services' own finishes and a person's monitor record, and a person clears a halt", async () => {
-  const keys = [
-    "engineeringAgent.runnerLastFinishAt",
-    "engineeringAgent.publisherLastFinishAt",
-    "engineeringAgent.monitorsConfirmedAt",
-  ];
+test("a service records its own finish, a person clears an App identity halt, and a recorded mismatch holds nothing by itself", async () => {
+  const keys = ["engineeringAgent.runnerLastFinishAt", "engineeringAgent.publisherLastFinishAt"];
   try {
-    await inTx((tx) => setEngineeringAgentSwitch(tx, { session: owner, name: "mode", value: "off" }));
-    await prisma.appSetting.deleteMany({ where: { key: { in: keys } } });
     await inTx((tx) => recordEngineeringAgentServiceFinish(tx, { service: "runner" }));
     await inTx((tx) => recordEngineeringAgentServiceFinish(tx, { service: "publisher" }));
-    await refusedWith(
-      inTx((tx) => setEngineeringAgentSwitch(tx, { session: owner, name: "mode", value: "shadow" })),
-      "armed_gate_monitor_confirmation",
-    );
-    await inTx((tx) => recordEngineeringAgentMonitorsConfirmed(tx, { session: owner }));
-    await inTx((tx) => setEngineeringAgentSwitch(tx, { session: owner, name: "mode", value: "shadow" }));
     const finish = await prisma.adminAuditLog.findFirst({
       where: { action: "engineering_agent.service_finished", targetId: "engineeringAgent.runnerLastFinishAt" },
     });
     assert.equal(systemActorOf(finish!), "engineering-agent-runner", "a service speaks under its own actor");
 
-    // A recorded halt holds until the acknowledgement, which a person makes.
-    await prisma.appSetting.update({ where: { key: MODE_KEY }, data: { value: "t1" } });
+    // The App's identity missing holds until the acknowledgement, which a person makes.
     const run = await startRun();
     await inTx((tx) =>
       endEngineeringAgentRun(tx, { runId: run.runId, amuxAttemptId: run.amuxAttemptId, outcome: "no_change", halt: "config_missing" }),
@@ -1285,6 +1247,15 @@ test("the armed gate opens on the services' own finishes and a person's monitor 
     const entry = await prisma.adminAuditLog.findUniqueOrThrow({ where: { id: acknowledged.auditLogId } });
     assert.equal(entry.actorUserId, owner.user!.id);
     assert.equal((entry.metadata as Record<string, unknown>).unacknowledgedHalt, "config_missing");
+    assert.equal("circuitLatched" in (entry.metadata as Record<string, unknown>), false);
+
+    // A mismatch a run recorded (as the kill switch's mode does) holds nothing
+    // once it is no longer open: no acknowledgement is needed.
+    const mismatched = await startRun();
+    await inTx((tx) =>
+      endEngineeringAgentRun(tx, { runId: mismatched.runId, amuxAttemptId: mismatched.amuxAttemptId, outcome: "no_change", halt: "state_mismatch" }),
+    );
+    assert.equal((await readEngineeringAgentHaltState(prisma)).unacknowledgedHalt, null);
     const next = await startRun();
     await inTx((tx) => endEngineeringAgentRun(tx, { runId: next.runId, amuxAttemptId: next.amuxAttemptId, outcome: "no_change", halt: "none" }));
   } finally {
@@ -1343,20 +1314,11 @@ test("an unbound branch the runner observed halts like a recorded halt, until a 
     assert.equal((cleared.metadata as Record<string, unknown>).subjectPrNumber, 3942);
     assert.deepEqual(await inTx((tx) => clearEngineeringAgentObservedHalt(tx, { observedAt: seen.observedHaltAt! })),
       { cleared: false }, "once");
-    // With the kill switch only a person clears it.
     await inTx((tx) => recordEngineeringAgentObservedHalt(tx, { halt: "unbound_app_ref" }));
     const later = (await readEngineeringAgentKnownPublishes(prisma)).observedHaltAt!;
-    process.env.ENGINEERING_AGENT_LEGACY_HALTS = "enabled";
-    try {
-      assert.deepEqual(await inTx((tx) => clearEngineeringAgentObservedHalt(tx, { observedAt: later })), { cleared: false });
-      assert.equal((await readEngineeringAgentHaltState(prisma)).unacknowledgedHalt, "unbound_app_ref");
-    } finally {
-      delete process.env.ENGINEERING_AGENT_LEGACY_HALTS;
-    }
     await inTx((tx) => clearEngineeringAgentObservedHalt(tx, { observedAt: later }));
     const known = await readEngineeringAgentKnownPublishes(prisma);
     assert.ok(Array.isArray(known.bindings) && Array.isArray(known.consumed));
-    assert.equal(known.legacyHalts, false);
     assert.ok(known.consumed.every((row) => /^[0-9]{1,12}$/.test(row.runId) && /^[0-9a-f]{64}$/.test(row.commitDigest)), "identifiers and digests only");
     assert.ok(known.bindings.every((row) => /^[0-9a-f]{40}$/.test(row.verifiedHeadSha)));
   } finally {

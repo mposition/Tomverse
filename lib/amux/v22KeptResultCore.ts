@@ -30,10 +30,6 @@
  */
 
 import { AMUX_V22_ENGINEERING_PUBLICATION_ENV, amuxV22EngineeringPublicationEnabled } from "./v22TaskExecutionCore.ts";
-import { ENGINEERING_AGENT_LEGACY_HALTS_ENV, engineeringAgentLegacyHalts } from "../engineeringAgentCore.ts";
-
-/** Read newest first; more attempts than this are never a card's review (the budget is 5). */
-export const AMUX_V22_REVIEW_ATTEMPT_SCAN = 20;
 
 export type AmuxV22ReviewAttemptRow = {
   id: string;
@@ -48,8 +44,8 @@ export type AmuxV22ReviewAttemptRow = {
  * attempt that failed, expired, or whose result was rejected back to todo
  * holds no review of its own, so it does not hide the accepted result before
  * it -- the kept result of a card that then used up its budget is still that
- * card's review (owner decision 2026-11-15). With `legacy`
- * (ENGINEERING_AGENT_LEGACY_HALTS) only the newest attempt counts, as before.
+ * card's review (owner decision 2026-11-15). With `legacy` only the newest
+ * attempt counts (a card that is not a v4 card).
  */
 export function amuxV22ReviewAttempt<T extends AmuxV22ReviewAttemptRow>(
   attemptsNewestFirst: readonly T[], legacy = false,
@@ -66,17 +62,15 @@ export function amuxV22ReviewAttempt<T extends AmuxV22ReviewAttemptRow>(
 }
 
 /**
- * Whether kept results are published at all: v22 publication is on and the
- * kill switch is off. While they are not, a kept result is an ordinary private
- * result again, and the Decision Maker's owner settlement files it as before.
+ * Whether kept results are published at all: v22 publication is on. While it
+ * is not, a kept result is an ordinary private result again, and the Decision
+ * Maker's owner settlement files it as before.
  */
 export const amuxV22KeptResultPublicationEnabled = (env: Record<string, string | undefined> = process.env) =>
-  !engineeringAgentLegacyHalts(env[ENGINEERING_AGENT_LEGACY_HALTS_ENV]) &&
   amuxV22EngineeringPublicationEnabled(env[AMUX_V22_ENGINEERING_PUBLICATION_ENV]);
 
 export type AmuxV22KeptResultFacts = {
   publicationEnabled: boolean;
-  legacy: boolean;
   orchestratorHalted: boolean;
   /** A run may be admitted at all: the mode is shadow or t1 and nothing is frozen. */
   claimAllowed: boolean;
@@ -114,7 +108,7 @@ export type AmuxV22KeptResultVerdict =
  * review.
  */
 export function decideAmuxV22KeptResult(facts: AmuxV22KeptResultFacts): AmuxV22KeptResultVerdict {
-  if (!facts.publicationEnabled || facts.legacy) return { publish: false, reason: "disabled" };
+  if (!facts.publicationEnabled) return { publish: false, reason: "disabled" };
   if (facts.orchestratorHalted) return { publish: false, reason: "orchestrator_halted" };
   if (facts.taskStatus !== "review" && facts.taskStatus !== "blocked") return { publish: false, reason: "task_moved" };
   if (!facts.claimAllowed) return { publish: false, reason: "engineering_off" };

@@ -6,20 +6,17 @@ import { adminAuditIntegrityKeys } from "@/lib/adminAuditIntegrityCore";
 import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { prisma } from "@/lib/prisma";
 import { amuxV4ApprovedCliCostProfileMatches } from "./ideaAnalysisApprovedCostProfile.ts";
-import { AMUX_V4_ANALYSIS_BUDGET_RESERVE_CODE_LATCH, AmuxIdeaAnalysisReservationError,
+import { AmuxIdeaAnalysisReservationError,
   commitAmuxIdeaAnalysisBudgetReservation } from "./ideaAnalysisBudgetReservationService.ts";
 import type { AmuxContentKeys } from "./ideaCrypto.ts";
 import { loadAmuxContentKeyRing } from "./ideaKeyStore.ts";
 import { AMUX_IDEA_EXECUTION_APPROVAL_TRANSACTION } from "./ideaRequestTimeoutsCore.ts";
-import { AMUX_V4_TRANSFER_CONFIRM_READ_ENV, AMUX_V4_TRANSFER_CONFIRM_WRITE_ENV,
-  type IdeaTransferConfirmationRequest, transferConfirmReadPermitted,
-  transferConfirmWritePermitted } from "./ideaTransferConfirmationCore.ts";
+import type { IdeaTransferConfirmationRequest } from "./ideaTransferConfirmationCore.ts";
 import { IdeaTransferConfirmationError,
   commitIdeaTransferConfirmation } from "./ideaTransferConfirmationService.ts";
 
-/** The analysis reservation route's own switches; the composite honours them too. */
+/** The analysis reservation route's own switch (the monthly budget write); the composite honours it too. */
 export const AMUX_V4_ANALYSIS_BUDGET_RESERVE_ENV = "TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_RESERVE";
-export const AMUX_V4_ANALYSIS_BUDGET_READ_ENV = "TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_READ";
 
 export class IdeaExecutionApprovalError extends Error {
   constructor(readonly code: "not_found" | "disabled" | "price_profile_unapproved" |
@@ -36,11 +33,7 @@ export type IdeaExecutionApprovalRequest = {
 };
 
 export function ideaExecutionApprovalPermitted(env: Readonly<Record<string, string | undefined>>) {
-  return transferConfirmWritePermitted(env[AMUX_V4_TRANSFER_CONFIRM_WRITE_ENV]) &&
-    transferConfirmReadPermitted(env[AMUX_V4_TRANSFER_CONFIRM_READ_ENV]) &&
-    AMUX_V4_ANALYSIS_BUDGET_RESERVE_CODE_LATCH &&
-    env[AMUX_V4_ANALYSIS_BUDGET_RESERVE_ENV] === "enabled" &&
-    env[AMUX_V4_ANALYSIS_BUDGET_READ_ENV] === "enabled";
+  return env[AMUX_V4_ANALYSIS_BUDGET_RESERVE_ENV] === "enabled";
 }
 
 /**

@@ -17,9 +17,6 @@ const world = {
   session: { user: { id: "owner-1" } } as { user: { id: string } } | null,
   role: "owner",
   recent: true,
-  readOn: true,
-  writeOn: true,
-  catalogOn: true,
   writes: 0,
   unknown: false,
   reads: 0,
@@ -49,20 +46,14 @@ async function route(): Promise<{ POST: (request: Request) => Promise<Response>;
     } });
     mock.module(mod("lib/auth.ts"), { namedExports: { authOptions: {} } });
     mock.module(mod("lib/amux/ideaFrontierCatalogWriteCore.ts"), { namedExports: {
-      AMUX_V4_FRONTIER_CATALOG_READ_ENV: "FRONTIER_READ_TEST",
-      frontierCatalogReadPermitted: () => world.catalogOn,
     } });
     mock.module(mod("lib/amux/ideaSubmissionCore.ts"), { namedExports: {
       isAmuxIdeaRequestId: (id: string) => id === previewId,
     } });
     mock.module(mod("lib/amux/ideaTransferPreviewInputCore.ts"), { namedExports: {
       AMUX_V4_TRANSFER_PREVIEW_MAX_BYTES: 1024,
-      AMUX_V4_TRANSFER_PREVIEW_READ_ENV: "TRANSFER_READ_TEST",
-      AMUX_V4_TRANSFER_PREVIEW_WRITE_ENV: "TRANSFER_WRITE_TEST",
       inspectIdeaOnlyTransferPreviewRequest: (raw: string) => raw === JSON.stringify(choice)
         ? { ok: true, request: choice } : { ok: false, code: "schema_rejected" },
-      transferPreviewReadPermitted: () => world.readOn,
-      transferPreviewWritePermitted: () => world.writeOn,
     } });
     mock.module(mod("lib/amux/ideaTransferPreviewService.ts"), { namedExports: {
       IdeaTransferPreviewError: FakeIdeaTransferPreviewError,
@@ -88,18 +79,16 @@ const get = (query = `?previewId=${previewId}`) =>
 const reset = () => {
   world.session = { user: { id: "owner-1" } };
   world.role = "owner"; world.recent = true;
-  world.readOn = true; world.writeOn = true; world.catalogOn = true;
   world.writes = 0; world.reads = 0; world.unknown = false;
   world.body = JSON.stringify(choice);
 };
 
-test("preview write and read refuse unauthenticated, stale, or disabled callers", async () => {
+test("preview write and read refuse unauthenticated or stale callers", async () => {
   const { POST, GET } = await route();
   for (const setup of [
     () => { world.session = null; },
     () => { world.role = "admin"; },
     () => { world.recent = false; },
-    () => { world.readOn = false; },
   ]) {
     reset(); setup();
     assert.notEqual((await POST(post())).status, 201);
@@ -107,12 +96,6 @@ test("preview write and read refuse unauthenticated, stale, or disabled callers"
     assert.equal(world.writes, 0);
     assert.equal(world.reads, 0);
   }
-  reset(); world.writeOn = false;
-  assert.equal((await POST(post())).status, 503);
-  assert.equal(world.writes, 0);
-  reset(); world.catalogOn = false;
-  assert.equal((await POST(post())).status, 503);
-  assert.equal(world.writes, 0);
 });
 
 test("prepared preview is no-store and never represents transfer permission", async () => {

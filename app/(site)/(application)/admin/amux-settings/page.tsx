@@ -13,11 +13,7 @@ import { AmuxOperatingScopePanel } from "@/components/admin/AmuxOperatingScopePa
 import { AmuxSessionBudgetResolutionPanel } from "@/components/admin/AmuxSessionBudgetResolutionPanel";
 import { AmuxV22PromotionControl } from "@/components/admin/AmuxV22PromotionControl";
 import { AmuxWorkersOverviewPanel } from "@/components/admin/AmuxWorkersOverview";
-import {
-  amuxSwitchedTabStatus,
-  amuxTabChips,
-  type AmuxTabStatus,
-} from "@/lib/adminAmuxTabStatus";
+import { amuxTabChips, type AmuxTabStatus } from "@/lib/adminAmuxTabStatus";
 import { getAdminRole, hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
 import { getAdminMessages } from "@/lib/adminLocaleServer";
 import { adminAmuxWorkspaceMessages } from "@/lib/adminMessages/amuxWorkspace";
@@ -39,15 +35,7 @@ import { readAgentOfficeAmuxWorkers } from "@/lib/agentOfficeLiveRead";
 import { readAmuxWorkerCapabilitiesForAdmin } from "@/lib/amux/workerCapabilityAdminRead";
 import { readAmuxWorkerRegistryForAdmin } from "@/lib/amux/workerRegistryAdminRead";
 import { readAmuxWorkerHealthViews } from "@/lib/amux/workerHealthStore";
-import { AMUX_V22_NON_CLAUDE_QUOTA_GATE_ENV } from "@/lib/amux/v22WorkerClaimCore";
-import { amuxWorkerRegistryWritesOpen } from "@/lib/amux/workerRegistryCore";
 import { authOptions } from "@/lib/auth";
-import {
-  AMUX_V4_FRONTIER_CATALOG_READ_ENV,
-  AMUX_V4_FRONTIER_CATALOG_WRITE_ENV,
-  frontierCatalogReadPermitted,
-  frontierCatalogWritePermitted,
-} from "@/lib/amux/ideaFrontierCatalogWriteCore";
 
 const TABS = adminNavItemTabs("amux-settings");
 
@@ -72,12 +60,9 @@ export default async function AdminAmuxSettingsPage({
   const isOwner = role === "owner";
   const canChange = hasAdminPermission(session, "ops:write");
   const statuses: Record<string, AmuxTabStatus | undefined> = {
-    "automatic-admission": isOwner
-      ? amuxSwitchedTabStatus("automatic-admission")
-      : undefined,
     // A registry change takes the owner role, the stage's code latch and a
     // recent step-up (orchestration policy version 31, sections 3 and 8).
-    workers: !isOwner ? "read_only" : amuxWorkerRegistryWritesOpen() ? undefined : "behind_server_switch",
+    workers: !isOwner ? "read_only" : undefined,
     "decision-maker": canChange ? undefined : "read_only",
   };
   const tabs = <AdminPageTabs basePath="/admin/amux-settings" tabs={TABS}
@@ -103,27 +88,22 @@ export default async function AdminAmuxSettingsPage({
       registry.rows.map((row) => row.workerName)).catch(() => null) : null;
     return <div className="flex min-w-0 flex-col gap-5">{tabs}
       <AmuxWorkersOverviewPanel registry={registry} capabilities={capabilities} live={live}
-        readAtMs={currentTimeMs()} isOwner={isOwner} health={health}
-        nonClaudeQuotaGate={process.env[AMUX_V22_NON_CLAUDE_QUOTA_GATE_ENV] === "enabled"} /></div>;
+        readAtMs={currentTimeMs()} isOwner={isOwner} health={health} /></div>;
   }
   // Owner only (the tab's viewRoles); resolveAdminTabFor has already refused other roles.
-  // Approved backlog redesign, screen C: the monthly analysis budget, the
-  // approved analysis models, each behind the same server switches as before.
+  // Approved backlog redesign, screen C: the monthly analysis budget and the
+  // approved analysis models.
   // Task costs need no approval: they come from the worker registry and
   // Admin › Models (owner decision 2026-10-25).
   if (tab.id === "analysis") {
-    const budgetAvailable = process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_READ === "enabled" &&
-      process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_RESERVE === "enabled";
-    const modelWriteAvailable =
-      frontierCatalogReadPermitted(process.env[AMUX_V4_FRONTIER_CATALOG_READ_ENV]) &&
-      frontierCatalogWritePermitted(process.env[AMUX_V4_FRONTIER_CATALOG_WRITE_ENV]);
+    const budgetAvailable = process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_RESERVE === "enabled";
     // amux-intake v19 item 2: the operating scope is the one approval for
     // unattended intake, so it comes first on this owner-only tab.
     return <div className="flex min-w-0 flex-col gap-5">{tabs}
       <AmuxOperatingScopePanel operatorId={session.user.id} />
       <AmuxAnalysisMonthlyBudgetPanel available={budgetAvailable} operatorId={session.user.id} />
       <AmuxSessionBudgetResolutionPanel />
-      <AmuxFrontierModelRegistrationPanel writeAvailable={modelWriteAvailable} operatorId={session.user.id} /></div>;
+      <AmuxFrontierModelRegistrationPanel operatorId={session.user.id} /></div>;
   }
   if (tab.id === "decision-maker") {
     // The switch, the declaration-accuracy report and the request list are

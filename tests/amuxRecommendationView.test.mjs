@@ -27,7 +27,7 @@ test("the recommendation view lists included and excluded rows without titles or
   for (const body of [included, excluded]) {
     assert.doesNotMatch(body, /title|sourceKey|executionBrief\b|description/);
   }
-  const view = slice(service, "const viewOf", "const writesPermitted");
+  const view = slice(service, "const viewOf", "export async function previewRecommendation");
   assert.match(view, /included: includedView\(selection\.rows\)/);
   assert.match(view, /excluded: excludedView\(selection\.rows\)/);
 });

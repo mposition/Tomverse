@@ -6,7 +6,9 @@ import { setTimeout as sleep } from "node:timers/promises";
 import type { Session } from "next-auth";
 
 import { writeAdminAuditLog } from "@/lib/adminAudit";
-import { OWNER_QUEUE_LEGACY_LIMITS } from "@/lib/engineeringAgentCore";
+
+/** The size of the owner queue cap that existed before owner decision 2026-11-15. */
+const OWNER_QUEUE_LEGACY_LIMITS = { pr: 8, decision: 8 } as const;
 import { prisma } from "@/lib/prisma";
 
 // Real PostgreSQL evidence for the engineering agent's state tables
@@ -656,6 +658,15 @@ test("a binding's JSON holds digests, enums and review ids, never free text or a
   await snapshotRefused(replaceWith({ snapshot: snapshot({ baseSha: "main" }) }), "a snapshot's base is a commit id");
   await snapshotRefused(replaceWith({ snapshot: snapshot({ invalidatedReviewIds: ["mposition"] }) }), "invalidated reviews are ids");
   await snapshotRefused(replaceWith({ snapshot: snapshot({ invalidatedReviewIds: [1.5] }) }), "a review id is a whole number");
+  // Owner decision 2026-11-16: one 1 MiB bound for the record, and no review id count of its own.
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    await tx.engineeringAgentBinding.update({ where: { id: binding.id }, data: { supersededAt: new Date() } });
+    await tx.engineeringAgentBinding.create({ data: { ...bindingFor(run.id, prNumber),
+      snapshot: snapshot({ invalidatedReviewIds: Array.from({ length: 150 }, (_, i) => i + 1) }) } });
+    throw new Error("accepted_then_rolled_back");
+  }), /accepted_then_rolled_back/, "more than 100 invalidated reviews fit");
+  await snapshotRefused(replaceWith({ snapshot: snapshot({ invalidatedReviewIds: Array.from({ length: 140_000 }, (_, i) => 1_000_000 + i) }) }),
+    "a snapshot is at most 1 MiB");
 
   const observe = (data: Record<string, unknown>) =>
     prisma.engineeringAgentBinding.update({ where: { id: binding.id }, data });

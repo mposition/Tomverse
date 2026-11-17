@@ -157,7 +157,8 @@ test("an option's class and paths are not term-list input; its label still is", 
   const paths = [".github/workflows/ci.yml", "prisma/migrations/20261018000000_x/migration.sql"];
   assert.deepEqual(route(card({ options: [option("a", "Edit the files", "branch_code_change", paths)] })), PROPOSAL);
   assert.deepEqual(route(card({ contextPaths: paths })), PROPOSAL);
-  const labelled = route(card({ options: [option("a", "Edit .github/workflows/ci.yml", "branch_code_change", paths)] }));
+  // A label is read: a real boundary word (owner direction 2026-11-16: money, deletion, main, production, secrets).
+  const labelled = route(card({ options: [option("a", "Delete the workflow file", "branch_code_change", paths)] }));
   assert.equal(labelled.route, "operator");
   assert.deepEqual(labelled.refusals, ["irreversible_term"]);
 });

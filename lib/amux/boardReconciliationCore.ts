@@ -6,7 +6,6 @@ import {
   BOARD_IMPORT_SECTION_CODES,
   type BoardImportSectionCode,
   amuxCatalogTextRefused,
-  boardImportApplyPermitted,
 } from "./boardImportCore.ts";
 
 /**
@@ -16,8 +15,9 @@ import {
  *
  * Item identity is source key, section code and detail digest. A new manifest
  * digest is a property of the run, not of each card. This module does not write.
- * Preview reports applyPermitted from the shipped latch and the environment
- * value, and always returns writes 0. It does not throw when apply is closed.
+ * Preview reports applyPermitted when the plan is valid, and always returns
+ * writes 0. Apply has no environment switch or code latch (owner direction
+ * 2026-11-16).
  */
 
 export const AMUX_RECONCILIATION_RUN_STATUSES = [
@@ -30,15 +30,6 @@ export const AMUX_RECONCILIATION_RUN_STATUSES = [
 ] as const;
 
 export const AMUX_SOURCE_REVISION_STATES = ["observed", "accepted", "rejected"] as const;
-
-/** Armed for J's source read-back. A caller cannot supply the latch. */
-export const AMUX_RECONCILIATION_APPLY_CODE_LATCH = true;
-
-export const amuxReconciliationApplyPermitted = (envValue: string | undefined): boolean =>
-  boardImportApplyPermitted({
-    envValue,
-    codeLatch: AMUX_RECONCILIATION_APPLY_CODE_LATCH,
-  });
 
 export type AmuxReconciliationItem = {
   sourceKey: string;
@@ -110,7 +101,6 @@ export const AMUX_RECONCILIATION_PRESERVED_CARD = {
   claimedAt: null,
 } as const;
 
-export const AMUX_RECONCILIATION_APPLY_ENV = "TOMVERSE_AMUX_RECONCILIATION_APPLY";
 export const AMUX_RECONCILIATION_POLICY_VERSION = 1;
 export const AMUX_RECONCILIATION_RAW_BODY_MAX_BYTES = 65_536;
 export const AMUX_RECONCILIATION_SOURCE_SYSTEM = "tomverse_private_workboard";
@@ -196,7 +186,6 @@ export type AmuxReconciliationRefusal = {
 export type AmuxReconciliationPreview = {
   outcome: "preview" | "reject";
   code: string | null;
-  inactive: boolean;
   applyPermitted: boolean;
   writes: 0;
   globalSnapshotDrift: 0 | 1;
@@ -380,10 +369,9 @@ export const planAmuxReconciliation = (
   };
 };
 
-const emptyPreview = (code: string, inactive: boolean): AmuxReconciliationPreview => ({
+const emptyPreview = (code: string): AmuxReconciliationPreview => ({
   outcome: "reject",
   code,
-  inactive,
   applyPermitted: false,
   writes: 0,
   globalSnapshotDrift: 0,
@@ -397,14 +385,10 @@ const emptyPreview = (code: string, inactive: boolean): AmuxReconciliationPrevie
   rejectKeys: [],
 });
 
-/** Preview writes nothing. applyPermitted follows the shipped latch. */
-export const previewAmuxReconciliation = (
-  raw: string,
-  envValue: string | undefined,
-): AmuxReconciliationPreview => {
-  const inactive = !amuxReconciliationApplyPermitted(envValue);
+/** Preview writes nothing. applyPermitted is true when the plan is valid. */
+export const previewAmuxReconciliation = (raw: string): AmuxReconciliationPreview => {
   const planned = planAmuxReconciliation(raw);
-  if (!planned.ok) return emptyPreview(planned.code, inactive);
+  if (!planned.ok) return emptyPreview(planned.code);
   const acceptKeys = planned.revisions
     .filter((entry) => entry.decision === "accept_new_source_revision")
     .map((entry) => entry.sourceKey);
@@ -414,8 +398,7 @@ export const previewAmuxReconciliation = (
   return {
     outcome: "preview",
     code: null,
-    inactive,
-    applyPermitted: !inactive,
+    applyPermitted: true,
     writes: 0,
     globalSnapshotDrift: planned.globalSnapshotDrift,
     itemDriftCount: planned.itemDriftCount,

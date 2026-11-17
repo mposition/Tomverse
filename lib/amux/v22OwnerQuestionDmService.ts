@@ -4,6 +4,7 @@ import type { Prisma } from "@prisma/client";
 
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/amux/auditContract";
+import { AMUX_DM_PENDING_SCAN, AMUX_DM_TICK_LIMIT } from "@/lib/amux/decisionMakerCore";
 import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import { readDecisionMakerBodies, readDecisionMakerResultDetail } from
   "@/lib/amux/decisionMakerBodyStore";
@@ -69,11 +70,11 @@ import { readOpenAmuxDmOwnerSettlementOfCard,
 const CARD_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const QUESTION_ID = /^[0-9a-f-]{36}$/;
 
-/** At most this many questions or cards per relay tick. */
-export const AMUX_V22_QUESTION_SYNC_LIMIT = 3;
+/** At most this many questions or cards per relay tick: the Decision Maker's one per-tick count. */
+export const AMUX_V22_QUESTION_SYNC_LIMIT = AMUX_DM_TICK_LIMIT;
 /** Pending questions read per tick to find those that can be opened, so a
  * few that cannot never hide the ones behind them. */
-export const AMUX_V22_QUESTION_PENDING_SCAN = 24;
+export const AMUX_V22_QUESTION_PENDING_SCAN = AMUX_DM_PENDING_SCAN;
 
 /** Whether a Decision Maker request's card mirrors a question the app answers
  * itself: a v22 worker's, a refused session answer, or an idea card close

@@ -8,13 +8,10 @@ import { dmHostPath, type DmLauncherHost } from "./decisionMakerLauncherFs.ts";
 import type { DmInstanceScope } from "./decisionMakerSwitchCore.ts";
 import {
   DM_WORKSPACE_API_ORIGIN,
-  DM_WORKSPACE_BUILD_MAX_MS,
   DM_WORKSPACE_CLONE_URL,
   DM_WORKSPACE_DISK_MAX_BYTES,
-  DM_WORKSPACE_FETCH_TIMEOUT_MS,
-  DM_WORKSPACE_GIT_STEP_TIMEOUT_MS,
   DM_WORKSPACE_HISTORY_DEPTH,
-  DM_WORKSPACE_LOOKUP_TIMEOUT_MS,
+  DM_WORKSPACE_TIME_LIMIT_MS,
   DM_WORKSPACE_PATCH_NAME,
   DM_WORKSPACE_REPOSITORY,
   DM_WORKSPACE_TARGET_BRANCH,
@@ -112,7 +109,7 @@ export const dmWorkspaceHttpClient: DmWorkspaceHttp = async (url) => {
     redirect: "error",
     credentials: "omit",
     headers: { accept: "application/vnd.github+json", "user-agent": "tomverse-amux-dm-broker" },
-    signal: AbortSignal.timeout(DM_WORKSPACE_LOOKUP_TIMEOUT_MS),
+    signal: AbortSignal.timeout(DM_WORKSPACE_TIME_LIMIT_MS),
   });
   // A commit answer is a few KiB; a larger one is not what was asked for.
   const body = new Uint8Array(await response.arrayBuffer());
@@ -299,9 +296,9 @@ export async function buildDmWorkspace(
           "protocol.file.allow=always",
         ]);
   const cloneUrl = options.git?.cloneUrl ?? DM_WORKSPACE_CLONE_URL;
-  // One budget for every step (DM_WORKSPACE_BUILD_MAX_MS): a step that would
+  // One budget for every step (DM_WORKSPACE_TIME_LIMIT_MS): a step that would
   // run past it is not started, and the one running is cut at it.
-  const buildDeadline = Date.now() + DM_WORKSPACE_BUILD_MAX_MS;
+  const buildDeadline = Date.now() + DM_WORKSPACE_TIME_LIMIT_MS;
   // The disk cap holds while git writes, not only after: the directory is
   // measured every second, and the running git is stopped once it passes
   // DM_WORKSPACE_DISK_MAX_BYTES (it can overshoot by what it writes in that
@@ -338,9 +335,9 @@ export async function buildDmWorkspace(
   let patch: "applied" | "not_applied" | "none" = dmWorkspaceHasPatch(workspace) ? "not_applied" : "none";
   if (workspace.targetSha !== null) {
     const sha = workspace.targetSha;
-    const step = { cwd: directory, timeoutMs: DM_WORKSPACE_GIT_STEP_TIMEOUT_MS };
+    const step = { cwd: directory, timeoutMs: DM_WORKSPACE_TIME_LIMIT_MS };
     if (!(await bounded(["init", "-q", repo], step)).ok) return { ok: false, reason: "git_failed", step: "init" };
-    const inRepo = { cwd: repo, timeoutMs: DM_WORKSPACE_GIT_STEP_TIMEOUT_MS };
+    const inRepo = { cwd: repo, timeoutMs: DM_WORKSPACE_TIME_LIMIT_MS };
     // Kept in the repository's own config, so the worktree below and the DM's
     // own git reads see the same: links as plain files, and a stat check on
     // mtime and size only, since the hand-over below changes every mode (and
@@ -350,7 +347,7 @@ export async function buildDmWorkspace(
     }
     const fetched = await bounded(
       ["fetch", "-q", "--no-tags", "--no-recurse-submodules", `--depth=${DM_WORKSPACE_HISTORY_DEPTH}`, cloneUrl, sha],
-      { cwd: repo, timeoutMs: DM_WORKSPACE_FETCH_TIMEOUT_MS },
+      { cwd: repo, timeoutMs: DM_WORKSPACE_TIME_LIMIT_MS },
     );
     if (!fetched.ok) return { ok: false, reason: "git_failed", step: "fetch" };
     if (!(await bounded(["checkout", "-q", "--detach", sha], inRepo)).ok) return { ok: false, reason: "git_failed", step: "checkout" };
@@ -360,7 +357,7 @@ export async function buildDmWorkspace(
       const added = await bounded(["worktree", "add", "-q", "--detach", patched, sha], inRepo);
       if (!added.ok) return { ok: false, reason: "git_failed", step: "worktree" };
       // `git apply` is all or nothing: a patch that does not apply leaves the tree as it was.
-      const applied = await bounded(["apply", "--whitespace=nowarn", join(evidence, DM_WORKSPACE_PATCH_NAME)], { cwd: patched, timeoutMs: DM_WORKSPACE_GIT_STEP_TIMEOUT_MS });
+      const applied = await bounded(["apply", "--whitespace=nowarn", join(evidence, DM_WORKSPACE_PATCH_NAME)], { cwd: patched, timeoutMs: DM_WORKSPACE_TIME_LIMIT_MS });
       if (applied.ok) patch = "applied";
       else if (!(await bounded(["worktree", "remove", "--force", patched], inRepo)).ok) return { ok: false, reason: "git_failed", step: "worktree_remove" };
     }

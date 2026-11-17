@@ -11,7 +11,6 @@ import { readAmuxV19MaxPriceSelection } from
   "@/lib/amux/ideaSessionMaxPriceSelectionRead";
 import { prisma } from "@/lib/prisma";
 
-const READ_ENV = "TOMVERSE_AMUX_V19_SESSION_MAX_PRICE_READ";
 const identity = z.object({ reservationId: z.string().uuid(),
   ideaId: z.string().uuid() }).strict();
 
@@ -23,10 +22,6 @@ export async function GET(request: Request): Promise<Response> {
     process.env[AMUX_V4_ANALYSIS_AGENT_SECRET_ENV],
     process.env.TOMVERSE_AMUX_SYNC_SECRET)) {
     return amuxJsonNoStore({ error: "Unauthorized" }, 401);
-  }
-  if (process.env[READ_ENV] !== "enabled") {
-    return amuxJsonNoStore({ available: false,
-      reason: "session_max_price_read_disabled" }, 409);
   }
   const url = new URL(request.url);
   if ([...url.searchParams.keys()].length !== 2 ||

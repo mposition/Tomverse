@@ -14,7 +14,6 @@ type PromotionBody = {
   approvalId?: string;
   status?: string;
   refusal?: string | null;
-  applyPermitted?: boolean;
   cardCount?: number;
   error?: string;
   code?: string;
@@ -26,11 +25,7 @@ export function AmuxBoardPromotionPanel() {
   const [approvalId, setApprovalId] = useState("");
   const [pending, setPending] = useState(false);
   const [result, setResult] = useState<PromotionBody | null>(null);
-  // Apply needs two facts from two different responses: preview reports the
-  // server switch, and approve reports that this approval id was approved.
-  // Reading both from the latest response alone kept Apply disabled after
-  // approve, whose body does not repeat the switch.
-  const [applySwitch, setApplySwitch] = useState<boolean | null>(null);
+  // Apply opens only after approve reports that this approval id was approved.
   const [approvedId, setApprovedId] = useState<string | null>(null);
 
   const send = async (action: string, body: string) => {
@@ -45,7 +40,6 @@ export function AmuxBoardPromotionPanel() {
       const payload = (await response.json()) as PromotionBody;
       setResult(payload);
       if (payload.approvalId) setApprovalId(payload.approvalId);
-      if (typeof payload.applyPermitted === "boolean") setApplySwitch(payload.applyPermitted);
       // Only a successful approve opens Apply. Any failed response, any apply
       // (consumed or refused), and any other state change closes it again.
       if (response.ok && action === "approve" && payload.status === "approved" && payload.approvalId) {
@@ -63,8 +57,7 @@ export function AmuxBoardPromotionPanel() {
 
   const refusedForStepUp =
     result?.code === "ADMIN_REAUTHENTICATION_REQUIRED" || result?.error === "ADMIN_REAUTHENTICATION_REQUIRED";
-  const applyReady =
-    applySwitch === true && approvedId !== null && approvedId === approvalId.trim();
+  const applyReady = approvedId !== null && approvedId === approvalId.trim();
 
   return (
     <section className="mx-auto flex w-full max-w-3xl flex-col gap-4 p-4" data-testid="amux-board-promotion-panel">
@@ -148,11 +141,7 @@ export function AmuxBoardPromotionPanel() {
         </button>
       </div>
       <p id="amux-board-promotion-apply-reason" className="text-sm text-zinc-300">
-        {applyReady
-          ? messages.applyPermitted("true")
-          : applySwitch === false
-            ? messages.applyDisabled
-            : messages.applyWaiting}
+        {applyReady ? messages.applyPermitted : messages.applyWaiting}
       </p>
       {refusedForStepUp ? (
         <a className="text-sm font-medium underline text-zinc-100" href={STEP_UP_HREF}>
@@ -165,9 +154,6 @@ export function AmuxBoardPromotionPanel() {
           {result.status ? <p>{messages.status(result.status)}</p> : null}
           {result.refusal ? <p>{messages.refusal(result.refusal)}</p> : null}
           {typeof result.cardCount === "number" ? <p>{messages.cards(result.cardCount)}</p> : null}
-          {typeof result.applyPermitted === "boolean" ? (
-            <p>{messages.applyPermitted(result.applyPermitted ? "true" : "false")}</p>
-          ) : null}
         </div>
       ) : null}
     </section>
