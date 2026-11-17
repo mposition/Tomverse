@@ -9,25 +9,11 @@ import { prisma } from "@/lib/prisma";
 import { BoardImportError } from "./boardImportCore.ts";
 import { OWNER_TRANSACTION_LIMITS, withAutoTransaction } from
   "./autoPromotionService.ts";
-import { AMUX_V22_OWNER_QUESTION_RULES, AMUX_V22_RESUME_PROMPT_MAX_BYTES,
-  amuxV22ResumeMinimumBytes, normalizeAmuxV22OwnerAnswer,
+import { normalizeAmuxV22OwnerAnswer,
   parseAmuxV22OwnerQuestion, type AmuxV22OwnerAnswerSource } from
   "./v22OwnerQuestionCore.ts";
-import { AMUX_V22_WORKER_AUTHORITY_NOTICE, AMUX_V22_WORKSPACE_NOTICE_IMPLEMENT } from
-  "./v22ExternalAuthorityCore.ts";
 import { openAmuxV22TaskPatchRow, openAmuxV22TaskResultRow } from
   "./v22TaskResultStore.ts";
-import { amuxV22LocalCliFlowEnabled } from "./v22LocalCliFlowCore.ts";
-
-/** What a resumed prompt holds beside its resume section and its brief: the
- * Task and attempt lines (bounded), the notice twice, the workspace notice
- * (its longest, implement form) and the question rules.
- * The sealed brief's ciphertext length stands in for the brief: it is never
- * shorter than the text. */
-const PROMPT_FIXED_BYTES = 512 +
-  2 * Buffer.byteLength(AMUX_V22_WORKER_AUTHORITY_NOTICE, "utf8") +
-  Buffer.byteLength(AMUX_V22_WORKSPACE_NOTICE_IMPLEMENT, "utf8") + 1 +
-  Buffer.byteLength(AMUX_V22_OWNER_QUESTION_RULES, "utf8");
 
 /** The question a Task's newest result asked, for the owner's result view. */
 export async function readAmuxV22OwnerQuestionForResult(attemptId: string,
@@ -64,12 +50,11 @@ export async function answerAmuxV22OwnerQuestionInTransaction(
   const rows = await tx.$queryRaw<Array<{ id: string; taskId: string;
     attemptId: string; state: string; status: string; owner: string | null;
     claimedAt: Date | null; archivedAt: Date | null;
-    v22AssignmentId: string | null; revision: number; briefBytes: number | null;
+    v22AssignmentId: string | null; revision: number;
     parkedId: string | null; parkedToStatus: string | null;
     parkedReason: string | null }>>`
     SELECT q."id", q."taskId", q."attemptId", q."state", w."status", w."owner",
       w."claimedAt", w."archivedAt", w."v22AssignmentId", w."revision",
-      octet_length(w."v4BriefCiphertext") AS "briefBytes",
       a."id" AS "parkedId", a."toStatus" AS "parkedToStatus",
       a."reason" AS "parkedReason"
     FROM "AmuxV22TaskQuestion" q
@@ -91,13 +76,8 @@ export async function answerAmuxV22OwnerQuestionInTransaction(
       task.parkedId !== question.attemptId || task.parkedToStatus !== "blocked" ||
       task.parkedReason !== "owner_question")
     throw new BoardImportError("task_not_waiting", 409);
-  // The answer goes whole into the resumed prompt; one that cannot fit beside
-  // the brief is refused now, to be shortened, never cut at delivery. The
-  // local CLI flow carries it in a context file with no prompt bound.
-  if (!amuxV22LocalCliFlowEnabled() && PROMPT_FIXED_BYTES + Number(task.briefBytes ?? 0) +
-      amuxV22ResumeMinimumBytes(answer, input.source) + 2 >
-      AMUX_V22_RESUME_PROMPT_MAX_BYTES)
-    throw new BoardImportError("answer_too_long_for_prompt", 409);
+  // The answer goes whole into the resumed run's context file; it has no
+  // prompt bound.
   const auditId = await input.audit(question.taskId);
   await tx.amuxV22TaskQuestion.update({ where: { id: question.id }, data: {
     state: "answered", answerText: answer, answerSource: input.source,

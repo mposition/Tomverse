@@ -58,17 +58,6 @@ export const KNOWN_TOP_LEVEL_DIRECTORIES = [
 ] as const;
 
 /**
- * Framework conventions the push policy relies on -- which file names Next
- * turns into routes, which parser the slice analysis uses. When the installed
- * version differs from the one recorded here, nobody has re-checked the
- * conventions, and every change is tier two (rule (h)).
- */
-export const CONVENTION_VERSIONS = {
-  next: "16.4.6",
-  typescript: "6.0.3",
-} as const;
-
-/**
  * The name tokens of the safety net. A tracked path containing one of these
  * must be classified `control-plane`; the test fails otherwise. This is not a
  * judgement -- it is how a forgotten classification gets noticed.

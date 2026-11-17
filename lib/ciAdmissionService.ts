@@ -5,6 +5,7 @@ import type { Session } from "next-auth";
 import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import {
   CI_ADMISSION_MAX_CAPACITY,
+  CI_ADMISSION_MAX_EVENTS,
   CI_ADMISSION_STATE_SETTING_KEY,
   ciAdmissionUnits,
   moveCiAdmissionEntry,
@@ -180,7 +181,7 @@ async function stopPull(actor: AdminActor, number: number): Promise<CiAdmissionS
           shadow: false,
           detail: `${drafted ? "drafted " : ""}cancelled_runs:${cancelled}${failure ? ` ${failure}` : ""}`.slice(0, 120),
         },
-      ].slice(-50),
+      ].slice(-CI_ADMISSION_MAX_EVENTS),
     });
     await writeAdminAuditLog({
       ...actor,

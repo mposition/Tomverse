@@ -25,8 +25,9 @@ use serde_json::{json, Value};
 use super::flow::{AppRoute, DmApp, DmLocal, LocalRoute};
 use super::wire::{read_app_answer, AppAnswer, HttpAnswer};
 
-/// At most this many cards filed or closed per tick (the app lists three).
-pub const V22_QUESTION_TICK_LIMIT: usize = 3;
+/// At most this many cards filed or closed per tick: the relay's one generous
+/// per-tick count, as many as the app lists (`AMUX_DM_TICK_LIMIT`).
+pub const V22_QUESTION_TICK_LIMIT: usize = super::DM_RELAY_TICK_LIMIT;
 
 /// Where the walk over confirmed proposals goes next, as the app said.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]

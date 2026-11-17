@@ -112,11 +112,11 @@ test("a settlement's FINDINGS.md is the run's report, then every rejected review
     for (const attempt of [5, 4, 3, 2, 1]) assert.ok(findings.includes(`Finding ${attempt}.299`), `attempt ${attempt} is whole`);
     assert.match(findings, /\(1 more rejection of this Task left no findings that could be read/);
     assert.doesNotMatch(findings, /not shown here/);
-    // The card filed from the same rows carries the same text inline when the workspace is off.
+    // The card filed from the same rows points at that file (the workspace is always on, 2026-11-16).
     const card = amuxDmOwnerSettlementCard({ settlementId: "s", kind: "stopped", taskLabel: "T-1", title: null, role: null,
       grade: null, taskStatus: "blocked", reason: null, criteria: ["c"], findings: "The run's whole report.", rejections: 6,
-      reviews: reviewed as never, siblings: [], siblingTotal: 0, pull: null, workspace: false })!;
-    assert.ok(card.context.includes(`\n${expected}\n[/evidence]`));
+      reviews: reviewed as never, siblings: [], siblingTotal: 0, pull: null })!;
+    assert.match(card.context, /evidence\/FINDINGS\.md/);
     // A Task that never ran but was rejected: the findings alone, and nothing is missing.
     const never = (await openDecisionMakerWorkspaceEvidence({ kind: "settlement", settlementKind: "stopped", pullPatch: null,
       reviews: rows, ...sealed, resultIdeaId: null }))!;
@@ -149,11 +149,13 @@ test("evidence the card points at that cannot be read is left out, by count, so 
   }
 });
 
-test("the kill switch: no workspace at all, so the card goes alone", async () => {
+test("there is no kill switch: the old variable does not turn the workspace off (owner direction 2026-11-16)", async () => {
   const { openDecisionMakerWorkspaceEvidence } = await service;
   process.env.TOMVERSE_AMUX_DM_WORKSPACE = "disabled";
   try {
-    assert.equal(await openDecisionMakerWorkspaceEvidence({ kind: "t2_draft", patchBody: PATCH, baseSha: SHA }), null);
+    const evidence = await openDecisionMakerWorkspaceEvidence({ kind: "t2_draft", patchBody: PATCH, baseSha: SHA });
+    assert.notEqual(evidence, null);
+    assert.deepEqual(evidence!.files.map((file: { name: string }) => file.name), ["PATCH.diff"]);
   } finally {
     delete process.env.TOMVERSE_AMUX_DM_WORKSPACE;
   }

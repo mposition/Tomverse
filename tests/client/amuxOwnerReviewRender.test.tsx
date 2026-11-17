@@ -967,8 +967,8 @@ test("a card the recovery inspections do not apply to says so instead of offerin
   assert.equal(byTestId(legacy, "admin-amux-technical-recovery").length, 1);
   assert.equal(panel(legacy).length, 0);
   assert.equal(byTestId(legacy, "admin-amux-recovery-not-inspectable").length, 1);
-  assert.match(textOf(legacy), /not a v4 Task/);
-  // A v4 Task, or a server that does not send the flag, keeps the inspections.
+  assert.match(textOf(legacy), /not an idea Task/);
+  // An idea Task, or a server that does not send the flag, keeps the inspections.
   for (const task of [{ ...stopped.task, recovery_inspectable: true }, stopped.task]) {
     const tree = render({ ...stopped, task });
     assert.equal(panel(tree).length, 1);

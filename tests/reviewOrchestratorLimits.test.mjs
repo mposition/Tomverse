@@ -116,7 +116,9 @@ test("new objects over the size cap are refused before any worktree exists", () 
   }
 });
 
-test("concurrent submits cannot all pass the pending cap", async () => {
+// Owner decision 2026-11-16: the queue has no length cap. Every submit waits its turn.
+test("concurrent submits are all queued: the queue has no length cap", async () => {
+  // A leftover maxPendingJobs key in an old config file is ignored.
   const f = fixture({ maxPendingJobs: 1 });
   try {
     f.commit("a.txt", "two\n");
@@ -129,11 +131,8 @@ test("concurrent submits cannot all pass the pending cap", async () => {
         child.on("close", (code) => done({ code, stderr }));
       });
     const results = await Promise.all(Array.from({ length: 4 }, submitOnce));
-    const accepted = results.filter((r) => r.code === 3);
-    const refused = results.filter((r) => r.code === 64 && /queue_full/.test(r.stderr));
-    assert.equal(accepted.length, 1, JSON.stringify(results));
-    assert.equal(refused.length, 3, JSON.stringify(results));
-    assert.equal(new Store(f.config.stateDir).listJobs().length, 1);
+    assert.deepEqual(results.map((r) => r.code), [3, 3, 3, 3], JSON.stringify(results));
+    assert.equal(new Store(f.config.stateDir).listJobs().length, 4);
   } finally {
     f.cleanup();
   }
@@ -156,19 +155,6 @@ test("retention counts from when the last review finished, not from submission",
     assert.equal(existsSync(store.jobDir(jobId)), true);
     const later = new Orchestrator(f.config, { now: () => Date.now() + 2 * 24 * 60 * 60 * 1000 });
     assert.equal(await later.prune(), 1);
-  } finally {
-    f.cleanup();
-  }
-});
-
-test("the queue refuses new jobs once the pending cap is reached", () => {
-  const f = fixture({ maxPendingJobs: 1 });
-  try {
-    f.commit("a.txt", "two\n");
-    assert.equal(f.client("submit", "--author", "codex", "--repo", "demo").code, 3);
-    const refused = f.client("submit", "--author", "codex", "--repo", "demo");
-    assert.equal(refused.code, 64);
-    assert.match(refused.stderr, /queue_full/);
   } finally {
     f.cleanup();
   }

@@ -638,8 +638,9 @@ const splitLines = (text: string) => {
  * Lines added and removed between two texts, by Myers' shortest edit script,
  * computed only up to `maxEdits`. The count is exact within that bound. Past
  * it the answer is simply "exceeded", and the caller reads the whole new file
- * as added; memory stays proportional to the bound rather than to the files,
- * so a large file of unrelated lines costs nothing unbounded.
+ * as added. The walk back keeps, per round d, only the 2d-1 diagonals the
+ * previous round reached, so memory is about 4·D² bytes for D edits whatever
+ * the size of the files.
  */
 export const diffLines = (
   before: string,
@@ -658,7 +659,8 @@ export const diffLines = (
   const trace: Int32Array[] = [];
   let found = false;
   for (let d = 0; d <= limit && !found; d += 1) {
-    trace.push(v.slice());
+    // Diagonals -(d-1)..d-1, what the previous round reached: all the walk back reads.
+    trace.push(v.slice(offset - d + 1, offset + d));
     for (let k = -d; k <= d; k += 2) {
       let x =
         k === -d || (k !== d && v[offset + k - 1] < v[offset + k + 1])
@@ -685,10 +687,10 @@ export const diffLines = (
   let y = m;
   for (let d = trace.length - 1; d > 0; d -= 1) {
     const previous = trace[d];
+    const at = (diagonal: number) => previous[diagonal + d - 1];
     const k = x - y;
-    const prevK =
-      k === -d || (k !== d && previous[offset + k - 1] < previous[offset + k + 1]) ? k + 1 : k - 1;
-    const prevX = previous[offset + prevK];
+    const prevK = k === -d || (k !== d && at(k - 1) < at(k + 1)) ? k + 1 : k - 1;
+    const prevX = at(prevK);
     const prevY = prevX - prevK;
     while (x > prevX && y > prevY) {
       x -= 1;
@@ -712,10 +714,13 @@ export const diffLines = (
 };
 
 /**
- * How far one file's diff is walked. A performance bound, not a policy one:
- * the walk keeps a row per edit, so a budget of a thousand holds a few MiB.
+ * How far one file's diff is walked: a memory bound, not a policy one (about
+ * 100 MB at the worst, see `diffLines`). Until 2026-11-16 it was 1,000 edits,
+ * past which a file's every line was read by the decision-value alarms. Past
+ * it that still happens -- the alarms read more, never less -- so only a file
+ * of over 5,000 changed lines that names a reserved value anywhere is T2.
  */
-const DIFF_EDIT_BUDGET = 1_000;
+export const DIFF_EDIT_BUDGET = 5_000;
 
 export type PolicyChangesResult =
   | { ok: true; entries: ChangedEntry[] }
@@ -729,9 +734,9 @@ export type PolicyChangesResult =
  * the text of the tree that will be published -- a map that pairs an id with
  * other content is refused, not believed.
  *
- * A path that is not text is reported as such (the policy sends it to T2) with
- * zero lines rather than a guess; a diff past the size limit is reported just
- * over the limit, which is T2 whatever the exact number.
+ * A path that is not text is reported as such with zero lines rather than a
+ * guess; a diff past `DIFF_EDIT_BUDGET` counts every line of the new file as
+ * added.
  */
 export const toPolicyChanges = (
   verification: Extract<VerificationResult, { ok: true }>,

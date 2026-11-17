@@ -5,17 +5,13 @@ import {
   type IdeaInputInspection,
 } from "./ideaInputCore.ts";
 import { isAmuxIdeaRequestId } from "./ideaRequestIdCore.ts";
-import { amuxIntakeLegacyLimits } from "./intakeLimitsCore.ts";
 
 export { isAmuxIdeaRequestId } from "./ideaRequestIdCore.ts";
 
-/** The former submission envelope, kept only under the legacy switch. */
-export const AMUX_IDEA_SUBMISSION_ENVELOPE_MAX_BYTES = 70_000;
-
 /** One submission request (owner and session intake share the route): the
  * idea input plus its request id and source labels. */
-export const amuxIdeaSubmissionEnvelopeMaxBytes = (legacy: boolean = amuxIntakeLegacyLimits()): number =>
-  legacy ? AMUX_IDEA_SUBMISSION_ENVELOPE_MAX_BYTES : amuxIdeaInputEnvelopeMaxBytes(false) + 8 * 1024;
+export const amuxIdeaSubmissionEnvelopeMaxBytes = (): number =>
+  amuxIdeaInputEnvelopeMaxBytes() + 8 * 1024;
 
 const exactKeys = (value: Record<string, unknown>, names: readonly string[]) =>
   Object.keys(value).sort().join("\0") === [...names].sort().join("\0");
@@ -58,19 +54,6 @@ export function inspectAmuxIdeaSubmission(raw: string): IdeaSubmissionInspection
     },
   };
 }
-
-/** v4 code is available; only its dedicated environment gate opens writes. */
-export const AMUX_V4_IDEA_SUBMISSION_CODE_LATCH = true;
-export const AMUX_V4_IDEA_SUBMISSION_ENV = "TOMVERSE_AMUX_V4_IDEA_SUBMIT";
-export const ideaSubmissionWritePermitted = (value: string | undefined) =>
-  AMUX_V4_IDEA_SUBMISSION_CODE_LATCH && value === "enabled";
-
-/** Read-back has an independent gate so stopping new writes cannot hide an
- * uncertain in-flight submission. The environment gate remains independent. */
-export const AMUX_V4_IDEA_READBACK_CODE_LATCH = true;
-export const AMUX_V4_IDEA_READBACK_ENV = "TOMVERSE_AMUX_V4_IDEA_READBACK";
-export const ideaSubmissionReadBackPermitted = (value: string | undefined) =>
-  AMUX_V4_IDEA_READBACK_CODE_LATCH && value === "enabled";
 
 /** Only the requestId unique index means "this request was already seen".
  * Other unique failures must not be relabeled as an idempotency hit. */

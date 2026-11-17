@@ -7,8 +7,7 @@ import { AMUX_V19_MAX_LAUNCHER_ID } from
 
 const secret = "syntheticMaxLauncherSecret_0123456789abcdefgh";
 const endpoint = "https://test.invalid/api/internal/amux/v19/analysis-price";
-const names = ["TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET",
-  "TOMVERSE_AMUX_V19_SESSION_MAX_PRICE_READ"] as const;
+const names = ["TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET"] as const;
 
 async function withEnv(values: Record<string, string>, fn: () => Promise<void>) {
   const old = Object.fromEntries(names.map((name) => [name, process.env[name]]));
@@ -29,22 +28,14 @@ function request(url = endpoint): Request {
     "x-amux-agent-id": AMUX_V19_MAX_LAUNCHER_ID } });
 }
 
-test("price discovery requires the fixed Max credential and its own switch", async () => {
+test("price discovery requires the fixed Max credential", async () => {
   await withEnv({}, async () => {
     assert.equal((await GET(request())).status, 401);
   });
-  await withEnv({ TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET: secret },
-    async () => {
-      const response = await GET(request());
-      assert.equal(response.status, 409);
-      assert.equal((await response.json()).reason,
-        "session_max_price_read_disabled");
-    });
 });
 
-test("enabled price read rejects missing and extra query keys before DB access", async () => {
-  await withEnv({ TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET: secret,
-    TOMVERSE_AMUX_V19_SESSION_MAX_PRICE_READ: "enabled" }, async () => {
+test("price read rejects missing and extra query keys before DB access", async () => {
+  await withEnv({ TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET: secret }, async () => {
     assert.equal((await GET(request())).status, 400);
     assert.equal((await GET(request(endpoint +
       "?reservationId=9942fb52-4b78-4af6-931a-9eec8f66d394&ideaId=53d6918e-b05d-4531-a1ab-704dd756cc40&extra=1"))).status, 400);

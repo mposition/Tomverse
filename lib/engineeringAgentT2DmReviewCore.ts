@@ -20,16 +20,6 @@ import { repositoryPathRefusal } from "./amux/decisionMakerCore.ts";
 import { dmCardEvidenceContext } from "./amux/decisionMakerWorkspaceCore.ts";
 import { engineeringAgentPatchFiles } from "./engineeringAgentOwnerItemContextCore.ts";
 
-/**
- * Filing a card starts a Decision Maker turn. On unless exactly `disabled`
- * (owner decision 2026-11-15: the switches that make the Decision Maker work
- * default on, and are kill switches).
- */
-export const ENGINEERING_AGENT_T2_DM_REVIEW_ENV = "TOMVERSE_ENGINEERING_AGENT_T2_DM_REVIEW";
-
-export const engineeringAgentT2DmReviewEnabled = (env: Record<string, string | undefined> = process.env) =>
-  env[ENGINEERING_AGENT_T2_DM_REVIEW_ENV]?.trim() !== "disabled";
-
 /** The session name the relay files the card under: no worker session asks it. */
 export const ENGINEERING_AGENT_T2_DM_WORKER = "engineering-t2-review";
 /** As the v22 result review: `claude` routes to `decision-maker-openai`. */
@@ -55,22 +45,19 @@ export const patchContextPaths = (patch: string): string[] =>
 /**
  * The card the relay files, in the shape of a v22 question's pending entry,
  * or null when there is no patch to show. The question lists the draft's
- * files; the patch itself is in the workspace, whole (or, with the workspace
- * switched off, in the card's context, whole).
+ * files; the patch itself is in the workspace, whole (always on since
+ * 2026-11-16).
  */
 export function engineeringAgentT2DmCard(input: {
   workItemId: string;
   cardLabel: string;
   reason: string | null;
   patchBody: string | null;
-  /** Whether the Decision Maker has a workspace; the switch decides by default. */
-  workspace?: boolean;
 }) {
   if (!input.patchBody) return null;
   const files = engineeringAgentPatchFiles(input.patchBody);
   if (files.length === 0) return null;
-  const context = dmCardEvidenceContext([{ name: "PATCH.diff", heading: "The patch", text: input.patchBody }], input.workspace);
-  if (context === null) return null;
+  const context = dmCardEvidenceContext([{ name: "PATCH.diff", heading: "The patch", text: input.patchBody }]);
   const question = [
     "An engineering agent patch waits for the owner. The agent may not open a pull request for it on its own; a person approves it to apply by hand, or rejects it.",
     `Card: ${input.cardLabel}`,

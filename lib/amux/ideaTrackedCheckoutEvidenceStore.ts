@@ -19,8 +19,9 @@ import {
 } from "./ideaTrackedCheckoutEvidenceCore.ts";
 import { readAmuxSessionBudgetClaimReceipt } from
   "./ideaSessionAnalysisBudgetClaimService.ts";
-import { readAmuxSessionAnalysisStopState } from
-  "./ideaSessionAnalysisStopRead.ts";
+import { readAmuxSessionAnalysisIdeaLive,
+  readAmuxSessionAnalysisStopState } from "./ideaSessionAnalysisStopRead.ts";
+import { amuxSessionClaimTakesLateResult } from "./ideaSessionLateResult.ts";
 
 export type AmuxMaxCheckoutClaim = { claimId: string; requestId: string;
   reservationId: string; invocationOrdinal: number };
@@ -222,7 +223,8 @@ function readMaxClaimBindings(tx: Prisma.TransactionClient, evidenceId: string,
 
 /** The audit lock precedes this claim lock, matching budget settlement. */
 export async function requireActiveMaxCheckoutClaim(tx: Prisma.TransactionClient,
-  ideaId: string, claim: AmuxMaxCheckoutClaim): Promise<void> {
+  ideaId: string, claim: AmuxMaxCheckoutClaim,
+  options: { lateResult?: boolean } = {}): Promise<void> {
   if (!Number.isSafeInteger(claim.invocationOrdinal) ||
       claim.invocationOrdinal < 0 || claim.invocationOrdinal > 2_147_483_647) {
     throw new AmuxTrackedCheckoutEvidenceError("claim_unavailable");
@@ -236,11 +238,23 @@ export async function requireActiveMaxCheckoutClaim(tx: Prisma.TransactionClient
   }
   try {
     const receipt = await readAmuxSessionBudgetClaimReceipt(tx, claim);
-    const stop = await readAmuxSessionAnalysisStopState(tx,
-      claim.claimId, claim.reservationId, ideaId, "max_shadow");
-    if (receipt.status !== "committed" ||
-        receipt.claimId !== claim.claimId ||
-        receipt.claimStatus !== "in_flight" || stop.stop) {
+    if (receipt.status !== "committed" || receipt.claimId !== claim.claimId) {
+      throw new AmuxTrackedCheckoutEvidenceError("claim_unavailable");
+    }
+    if (receipt.claimStatus === "in_flight") {
+      const stop = await readAmuxSessionAnalysisStopState(tx,
+        claim.claimId, claim.reservationId, ideaId, "max_shadow");
+      if (stop.stop) throw new AmuxTrackedCheckoutEvidenceError("claim_unavailable");
+      return;
+    }
+    // Only the result write may follow a claim the system closed unknown
+    // (operator, 2026-11-16); a checkout or receipt for it never starts.
+    const row = options.lateResult === true
+      ? await tx.amuxIdeaSessionAnalysisBudgetClaim.findUnique({
+        where: { id: claim.claimId } }) : null;
+    if (!row || !await amuxSessionClaimTakesLateResult(tx, row) ||
+        !await readAmuxSessionAnalysisIdeaLive(tx, claim.claimId,
+          claim.reservationId, ideaId, "max_shadow")) {
       throw new AmuxTrackedCheckoutEvidenceError("claim_unavailable");
     }
   } catch {

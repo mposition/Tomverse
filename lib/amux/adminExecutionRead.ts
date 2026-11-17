@@ -16,7 +16,6 @@ import { amuxFeedbackTaskWhere, projectAmuxTaskFeedback,
   rollupAmuxTaskFeedback } from
   "./v22TaskFeedbackCore.ts";
 import { AMUX_V22_OUTCOME_ACTION, AMUX_V22_OUTCOME_TARGET,
-  AMUX_V22_OUTCOME_WRITE_ENV, amuxV22OutcomeWriteEnabled,
   readAmuxV22ObservationMetadata } from "./v22OutcomeObservationCore.ts";
 import { normalizeAmuxUntrustedReason,
   storedAmuxEscalationReasonCode } from "./escalation.ts";
@@ -29,7 +28,7 @@ import type { AmuxV52AttemptReviewView } from "./v52ReviewFindingsCore.ts";
 import { openAmuxV52ReviewFindingsRow } from "./v52ReviewFindingsStore.ts";
 import { amuxCardWaitFromState, amuxCardWaitVisible } from "./cardWaitReasonCore.ts";
 import { readAmuxCardWaitReasons } from "./cardWaitReasonStore.ts";
-import { amuxInfraFailureKindOfReason, amuxInfraFailureRoutingEnabled } from "./infraFailureCore.ts";
+import { amuxInfraFailureKindOfReason } from "./infraFailureCore.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -550,8 +549,6 @@ export async function readAmuxExecutionTaskDetail(taskId: string) {
   const legacyCard = await readAmuxLegacyCardView({ id: card.id, revision: card.revision,
     displayKey: card.displayKey, sourceSystem: card.sourceSystem, title: summary?.title ?? null, body, brief })
     .catch(() => null);
-  const currentDecision = feedbackDecisions.find((decision) =>
-    decision.proposal.taskRevision + 1 === card.revision);
   // The owner re-approves a waiting Task's ceiling at the current price
   // (v4TaskCeilingReapprovalCore.ts); a failed read shows no offer.
   const v4Task = card.sourceSystem === "admin-idea-v4" && card.cardType === "task";
@@ -561,12 +558,6 @@ export async function readAmuxExecutionTaskDetail(taskId: string) {
   ]);
   return { ...summary, revision: card.revision, body, brief,
     legacyCard, ceilingReapproval,
-    outcomeWriteEnabled: amuxV22OutcomeWriteEnabled(
-      process.env[AMUX_V22_OUTCOME_WRITE_ENV]) &&
-      card.sourceSystem === "admin-idea-v4" &&
-      ((currentDecision?.outcome === "approve" && card.status === "done") ||
-        (currentDecision?.outcome === "retry" && card.status === "todo") ||
-        (currentDecision?.outcome === "block" && card.status === "blocked")),
     feedback: card.cardType === "task" ? projectAmuxTaskFeedback({
       id: card.id, revision: card.revision, status: card.status,
       createdAt: card.createdAt,
@@ -619,8 +610,7 @@ export async function readAmuxExecutionTaskDetail(taskId: string) {
       usageAcceptance: (() => {
         const row = acceptanceByAttempt.get(attempt.id);
         if (row) return { source: row.source, acceptedAt: row.acceptedAt.toISOString() };
-        return amuxInfraFailureRoutingEnabled() &&
-          amuxInfraFailureKindOfReason(attempt.reason) && attempt.endedAt ?
+        return amuxInfraFailureKindOfReason(attempt.reason) && attempt.endedAt ?
           { source: "infra_failure", acceptedAt: attempt.endedAt.toISOString() } : null;
       })(),
       reason: normalizeAmuxUntrustedReason(attempt.reason),

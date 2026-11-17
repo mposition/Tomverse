@@ -69,18 +69,8 @@ mock.module("@/lib/requestOrigin", { namedExports: {
 } });
 
 const routePromise = import(mod("app/api/admin/amux/ideas/session-budget-resolution/route.ts"));
-const readSwitch = "TOMVERSE_AMUX_V19_SESSION_BUDGET_RESOLUTION_READ";
-const writeSwitch = "TOMVERSE_AMUX_V19_SESSION_BUDGET_RESOLUTION_WRITE";
-const priorRead = process.env[readSwitch];
-const priorWrite = process.env[writeSwitch];
-test.after(() => {
-  if (priorRead === undefined) delete process.env[readSwitch];
-  else process.env[readSwitch] = priorRead;
-  if (priorWrite === undefined) delete process.env[writeSwitch];
-  else process.env[writeSwitch] = priorWrite;
-});
 
-test("owner route refuses anonymous, non-owner and disabled requests before DB access", async () => {
+test("owner route refuses anonymous and non-owner requests before DB access", async () => {
   const route = await routePromise;
   readCount = 0;
   session = null;
@@ -88,9 +78,6 @@ test("owner route refuses anonymous, non-owner and disabled requests before DB a
   session = { user: { id: "owner-id" } };
   role = "admin";
   assert.equal((await route.GET(new Request(`${endpoint}?claimId=${claimId}`))).status, 403);
-  role = "owner";
-  delete process.env[readSwitch];
-  assert.equal((await route.GET(new Request(`${endpoint}?claimId=${claimId}`))).status, 409);
   assert.equal(readCount, 0);
 });
 
@@ -99,7 +86,6 @@ test("owner GET requires one exact claim ID and returns content-free unknown rea
   readCount = 0;
   session = { user: { id: "owner-id" } };
   role = "owner";
-  process.env[readSwitch] = "enabled";
   for (const query of ["", `?claimId=${claimId}&claimId=${claimId}`,
     `?claimId=${claimId}&extra=x`, "?claimId=invalid"]) {
     assert.equal((await route.GET(new Request(endpoint + query))).status, 400);
@@ -114,22 +100,18 @@ test("owner GET requires one exact claim ID and returns content-free unknown rea
   assert.equal(readCount, 1);
 });
 
-test("owner POST is separately switched, same-origin and exact-body gated", async () => {
+test("owner POST is same-origin and exact-body gated", async () => {
   const route = await routePromise;
   session = { user: { id: "owner-id" } };
   role = "owner";
   writeCount = 0;
   originAllowed = true;
-  process.env[readSwitch] = "enabled";
   const body = { claimId, verification: "not_proven",
     localEvidenceDigest: "b".repeat(64), readbackDigest: "a".repeat(64),
     ownerConfirmed: true };
   const send = (headers, value = body) => route.POST(new Request(endpoint, {
     method: "POST", headers, body: JSON.stringify(value),
   }));
-  delete process.env[writeSwitch];
-  assert.equal((await send({ "content-type": "application/json" })).status, 409);
-  process.env[writeSwitch] = "enabled";
   originAllowed = false;
   assert.equal((await send({ "content-type": "application/json" })).status, 403);
   originAllowed = true;
@@ -152,7 +134,6 @@ test("owner GET maps integrity failures without exposing claim content", async (
   const route = await routePromise;
   session = { user: { id: "owner-id" } };
   role = "owner";
-  process.env[readSwitch] = "enabled";
   try {
     for (const [error, status] of [
       [new AmuxSessionBudgetResolutionError("integrity_unavailable"), 503],
@@ -174,11 +155,6 @@ test("owner GET lists unresolved unknown claims only for the exact list query", 
   role = "admin";
   assert.equal((await route.GET(new Request(`${endpoint}?list=outcome_unknown`))).status, 403);
   role = "owner";
-  delete process.env[readSwitch];
-  const disabled = await route.GET(new Request(`${endpoint}?list=outcome_unknown`));
-  assert.equal(disabled.status, 409);
-  assert.equal((await disabled.json()).error, "session_budget_resolution_read_disabled");
-  process.env[readSwitch] = "enabled";
   for (const query of ["?list=in_flight", "?list=outcome_unknown&list=outcome_unknown",
     `?list=outcome_unknown&claimId=${claimId}`]) {
     assert.equal((await route.GET(new Request(endpoint + query))).status, 400, query);

@@ -32,10 +32,6 @@ import { AMUX_WORKER_PROVIDER_CLASS_TABLE, AMUX_WORKER_PROVIDER_CLASSES } from
 import { inspectAmuxV22WorkerAuth, stageAmuxV22WorkerAuth } from
   "../lib/amux/v22WorkerAuthStage.mjs";
 
-// The earlier flow (TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW=disabled), where a read
-// role has no shell; amuxV22LocalCliFlow.test.mjs covers the local CLI flow.
-process.env.TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW = "disabled";
-
 const ATTEMPT = "00000000-0000-4000-8000-000000000001";
 const WORKTREE = "/srv/tomverse/worktrees/antigravity-impl";
 const MODEL = "gemini-4-argon-medium";
@@ -334,19 +330,14 @@ test("an Antigravity implement run gets the jail first on PATH and the prompt on
     assert.deepEqual(JSON.parse(Buffer.concat(fake.calls[0].stdin).toString("utf8")),
       { event: "user", message: { content: "Change a small file." } });
     assert.ok(!fake.calls[0].args.includes("Change a small file."));
-    if (role === "implement") {
-      assert.deepEqual(made, [{ worktreePath: WORKTREE, tmpPath: tmp, homePath: "/run-home" },
-        "cleaned"]);
-      assert.equal(env.PATH, "/run-home/shell-1/bin:/usr/bin:/bin");
-      assert.equal(env.SHELL, "/run-home/shell-1/bin/bash");
-      assert.equal(env.TMPDIR, tmp);
-    } else {
-      assert.deepEqual(made, []);
-      assert.equal(env.PATH, "/usr/bin:/bin");
-      assert.equal(env.SHELL, undefined);
-      // A read role's stream with a command in it is never a result.
-      assert.deepEqual([outcome.kind, outcome.failure], ["outcome_unknown", "invalid_result"]);
-    }
+    // Every role has the jailed shell (the local CLI flow), so a read role's
+    // stream with a command in it is a result too.
+    assert.deepEqual(made, [{ worktreePath: WORKTREE, tmpPath: tmp, homePath: "/run-home" },
+      "cleaned"]);
+    assert.equal(env.PATH, "/run-home/shell-1/bin:/usr/bin:/bin");
+    assert.equal(env.SHELL, "/run-home/shell-1/bin/bash");
+    assert.equal(env.TMPDIR, tmp);
+    assert.equal(outcome.kind, "succeeded");
   }
   // No jail, no implement run: the shell would otherwise run open.
   const fake = fakeSpawn(output);

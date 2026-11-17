@@ -1,5 +1,12 @@
-/** Launcher-only review transport. A claim is durable before the first submit:
- * an interrupted or ambiguous submit can never cause a second submission. */
+/** Launcher-only review transport. A claim is durable before the first submit.
+ * A request that did not return a job id is sent again after a backoff (a
+ * second job for the same commit costs the review server a slot, never a
+ * wrong verdict: only the job id this attempt stored is ever read). A job
+ * that is known is only read again, never submitted again. */
+const SUBMIT_RETRY_BASE_MS = 15_000;
+const SUBMIT_RETRY_MAX_MS = 5 * 60_000;
+const submitBackoffMs = (failures) =>
+  Math.min(SUBMIT_RETRY_MAX_MS, SUBMIT_RETRY_BASE_MS * 2 ** Math.min(failures - 1, 10));
 import { spawnSync } from "node:child_process";
 import { constants, lstatSync, readFileSync, realpathSync, renameSync, unlinkSync,
   writeFileSync, openSync, closeSync, fsyncSync } from "node:fs";
@@ -162,20 +169,25 @@ export function reviewStep(input, options = {}) {
     throw new Error("unsafe review state directory");
   const path = join(directory, `${input.attemptId}.json`);
   const run = options.run ?? checkedRun;
-  const fresh = claim(path, input);
+  claim(path, input);
   let state = readState(path, input);
   if (state.final) return finalStep(state);
-  if (fresh) {
+  if (!JOB.test(state.jobId)) {
+    const now = (options.now ?? Date.now)();
+    if (typeof state.retryAt === "number" && now < state.retryAt)
+      return { kind: "waiting" };
+    const failed = () => {
+      const failures = (state.submitFailures ?? 0) + 1;
+      durableWrite(path, { input, submitFailures: failures,
+        retryAt: now + submitBackoffMs(failures) });
+      return { kind: "waiting" };
+    };
     let repository;
     try {
       repository = options.prepareRepository ?
         options.prepareRepository(input, directory, objectsDir, run) :
         prepareReviewRepository(input, directory, objectsDir, run);
-    } catch {
-      const final = evidence(input, "unknown");
-      durableWrite(path, { input, final });
-      return { kind: "final", evidence: final };
-    }
+    } catch { return failed(); }
     const args = [client, "submit", "--author", input.author,
       "--author-vendor", input.authorVendor,
       "--repo", options.repo ?? "tomverse",
@@ -189,20 +201,10 @@ export function reviewStep(input, options = {}) {
     const reply = run("/usr/bin/node", args, repository, 30_000, objectsDir);
     let submitted;
     try { submitted = JSON.parse(reply.stdout); } catch {}
-    if (reply.code !== 3 || !JOB.test(submitted?.jobId)) {
-      const final = evidence(input, "unknown");
-      durableWrite(path, { input, final });
-      return { kind: "final", evidence: final };
-    }
+    if (reply.code !== 3 || !JOB.test(submitted?.jobId)) return failed();
     state = { input, jobId: submitted.jobId };
     durableWrite(path, state);
     return { kind: "pending", jobId: state.jobId };
-  }
-  if (!JOB.test(state.jobId)) {
-    // A claim without a durable job id may have reached the review server.
-    const final = evidence(input, "unknown");
-    durableWrite(path, { input, final });
-    return { kind: "final", evidence: final };
   }
   const reply = run("/usr/bin/node", [client, "status", state.jobId], directory);
   if (reply.code === 65 && (state.statusFailures ?? 0) < 2) {

@@ -100,15 +100,22 @@ test("quota report authenticates, stores and audits once, and supports exact los
   authorized = true;
 });
 
-test("quota report cannot invent a worker/provider or launder old/future evidence", async () => {
+test("quota report cannot invent a worker/provider or launder future evidence; an old reading is recorded as old", async () => {
   assert.equal((await post({ ...body, worker: "other-worker" })).status, 409);
   assert.equal((await post({ ...body, provider: "openai" })).status, 409);
-  for (const observed_at of ["2026-10-11T23:00:00.000Z", "2026-10-12T01:00:00.000Z"]) {
-    const result = await post({ ...body, observation_id: "00000000-0000-4000-8000-000000000002", observed_at });
-    assert.equal(result.status, 409);
-    assert.equal((await result.json()).reason, "observation_not_fresh");
-  }
+  // A reading from the future is a clock fault.
+  const future = await post({ ...body, observation_id: "00000000-0000-4000-8000-000000000002",
+    observed_at: "2026-10-12T01:00:00.000Z" });
+  assert.equal(future.status, 409);
+  assert.equal((await future.json()).reason, "observation_not_fresh");
   assert.equal(writeCalls, 1); assert.equal(auditCalls, 1);
+  // An old one is accepted and stays old: the claim judges its age (an hour), never this write.
+  const old = await post({ ...body, observation_id: "00000000-0000-4000-8000-000000000009",
+    observed_at: "2026-10-11T23:00:00.000Z" });
+  assert.equal(old.status, 200);
+  assert.equal(writeCalls, 2); assert.equal(auditCalls, 2);
+  rows.delete("00000000-0000-4000-8000-000000000009");
+  writeCalls = 1; auditCalls = 1;
 });
 
 test("quota lookup is exact and distinct observations keep separate identities", async () => {

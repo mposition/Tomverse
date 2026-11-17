@@ -1,15 +1,18 @@
 /** One v19 session analysis cycle on the fixed Ubuntu worker, run by its
  * timer (amux-intake v19 item 4). Default off: it does nothing unless
  * TOMVERSE_AMUX_V19_MAX_SESSION_CYCLE=enabled and the tracked-checkout CLI
- * switch are both set. An unknown outcome exits non-zero and keeps the local
- * halt marker, so the next tick stays halted until the operator resolves it.
+ * switch are both set. An attempt that ends without a result exits non-zero
+ * after reporting its claim's outcome unknown to the app, which closes a
+ * subscription claim at zero and queues the idea again after a wait
+ * (`unknownReport`, `haltReleased`, with `reportReason` when the report
+ * stayed unconfirmed). Nothing waits for the operator (2026-11-16): a marker
+ * left by an unconfirmed report is reconciled by the next tick
+ * (`AMUX_V19_MAX_SESSION_CYCLE_recovered stage=recover`).
  * A claim the app refused before writing, confirmed absent by its exact
  * readback, keeps no marker and prints its fixed reason word.
- * A failed analysis also names why, in fixed words, and whether its claim was
- * held as outcome_unknown in the app (`unknownReport`, with `reportReason`
- * when that stayed unconfirmed). Every other stop names its fixed reason too,
- * such as stop_requested, stop_unreachable, read_unreachable,
- * readback_unreachable or network_unsent_retry_exhausted.
+ * A failed analysis also names why, in fixed words. Every other stop names
+ * its fixed reason too, such as stop_requested, stop_aborted or
+ * network_unsent_retry_exhausted.
  * With TOMVERSE_AMUX_V19_DIAGNOSTIC_DETAIL=enabled a failed analysis also
  * prints `detail=written` or `detail=unwritten`: the names themselves go to
  * a local 0600 file in the state directory, never to this line or the app. */
@@ -23,21 +26,22 @@ import { AMUX_V19_SESSION_ANALYSIS_APP_ORIGIN_ENV } from
 
 // A claim the app refused before writing (budget_hold, not_ready, the claim
 // switch off) leaves no claim and no halt marker: the next tick asks again.
-const QUIET = new Set(["recorded", "idle", "disabled",
+const QUIET = new Set(["recorded", "recovered", "idle", "disabled",
   "catalog_unapproved", "more_unexamined", "discovered",
   "budget_hold", "not_ready", "claim_disabled"]);
-// `halted` means an earlier unknown outcome still waits for the operator.
 // budget_unavailable and integrity_unavailable are pre-write refusals too,
 // but they exit non-zero so the operator looks at the ledger.
-const KINDS = new Set([...QUIET, "halted", "outcome_unknown", "refused",
+const KINDS = new Set([...QUIET, "outcome_unknown", "refused",
   "unavailable", "price_unavailable", "cursor_rejected", "halt_unavailable",
   "auth_unavailable", "budget_unavailable", "integrity_unavailable"]);
 const REFUSALS = new Set(["budget_hold", "not_ready", "claim_disabled",
   "budget_unavailable", "integrity_unavailable"]);
 // Kinds whose fixed reason word is printed: a refusal's code, or why a step
 // stopped (a stop answer, a dropped link, an unconfirmed write).
-const REASONED = new Set([...REFUSALS, "outcome_unknown", "unavailable"]);
-const STAGES = new Set(["claim", "idea_read", "prompt", "analysis", "result"]);
+const REASONED = new Set([...REFUSALS, "outcome_unknown", "unavailable",
+  "recovered"]);
+const STAGES = new Set(["recover", "claim", "idea_read", "prompt", "analysis",
+  "result"]);
 const STATES = AMUX_V19_SESSION_CYCLE_WORD;
 const ANALYSIS_WORDS = ["reason", "failure", "parser", "trace", "stderr",
   "cliError", "terminal"];
@@ -91,13 +95,19 @@ export function amuxV19MaxSessionCycleStatus(result) {
       }
     }
   }
-  if (analysis) {
-    parts.push(...analysisParts(result.analysis));
+  if (analysis) parts.push(...analysisParts(result.analysis));
+  if (kind === "outcome_unknown" || kind === "recovered") {
     for (const key of ["unknownReport", "receipt", "reportReason", "detail"]) {
       const value = result?.[key];
       if (typeof value === "string" && STATES.test(value)) {
         parts.push(`${key}=${value}`);
       }
+    }
+    // How many in-flight claims a marker that named none had settled.
+    if (Number.isSafeInteger(result?.claims) && result.claims >= 0 &&
+        result.claims <= 1_000_000) parts.push(`claims=${result.claims}`);
+    if (typeof result?.haltReleased === "boolean") {
+      parts.push(`haltReleased=${result.haltReleased}`);
     }
   }
   return { line: `${parts.join(" ")}\n`,

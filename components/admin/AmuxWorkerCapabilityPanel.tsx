@@ -109,7 +109,6 @@ export function AmuxWorkerCapabilityEditor({
   row,
   form,
   busy,
-  writesLatch,
   cliModels,
   onChange,
   onCancel,
@@ -119,7 +118,6 @@ export function AmuxWorkerCapabilityEditor({
   row: AmuxWorkerCapabilityAdminRow;
   form: AmuxWorkerCapabilityForm;
   busy: boolean;
-  writesLatch: boolean;
   /** Each CLI's model names; null when unread, and the model is then typed. */
   cliModels: AmuxCliModelCatalogAdminView | null;
   onChange: (form: AmuxWorkerCapabilityForm) => void;
@@ -140,7 +138,7 @@ export function AmuxWorkerCapabilityEditor({
       aria-labelledby={id("title")}
       onSubmit={(event) => {
         event.preventDefault();
-        if (refusal === null && changes && !busy && writesLatch) onSave(form);
+        if (refusal === null && changes && !busy) onSave(form);
       }}
     >
       <h3 id={id("title")} className="text-base font-semibold text-zinc-100">{m.editTitle(row.workerName)}</h3>
@@ -223,7 +221,7 @@ export function AmuxWorkerCapabilityEditor({
         <button
           type="submit"
           className={buttonClass}
-          disabled={busy || !writesLatch || refusal !== null || !changes}
+          disabled={busy || refusal !== null || !changes}
           data-testid="amux-worker-capability-edit-save"
         >
           {busy ? m.saving : m.save}
@@ -253,7 +251,6 @@ export type AmuxWorkerCapabilityIo = {
 
 const NO_WRITE_STATUSES: ReadonlySet<number> = new Set([400, 403, 404, 413, 428, 429]);
 const REFUSAL_CODES: ReadonlySet<string> = new Set([
-  "capability_writes_off",
   "stale_revision",
   "unreadable_registry",
   ...AMUX_WORKER_CAPABILITY_REFUSALS,
@@ -384,7 +381,7 @@ export async function runAmuxWorkerCapabilityEdit(
 export const AMUX_CLI_MODEL_LINK_NONE = "__none__";
 
 export type AmuxCliModelLinkChange = { cli: string; cliModel: string; pricedModelId: string | null };
-export type AmuxCliModelLinkRefusalCode = AmuxCliModelLinkRefusal | "capability_writes_off";
+export type AmuxCliModelLinkRefusalCode = AmuxCliModelLinkRefusal;
 
 /** The owner's link, as the select shows it: "" when none is recorded. */
 export function amuxCliModelLinkCurrentValue(view: AmuxCliModelCatalogAdminView, cli: string, cliModel: string): string {
@@ -432,7 +429,6 @@ export function AmuxCliModelLinkForm({
   cliModel,
   choice,
   busy,
-  writesLatch,
   onChoose,
   onSave,
 }: {
@@ -443,7 +439,6 @@ export function AmuxCliModelLinkForm({
   /** The owner's pick; null while it is what is recorded. */
   choice: string | null;
   busy: boolean;
-  writesLatch: boolean;
   onChoose: (value: string) => void;
   onSave: (change: AmuxCliModelLinkChange) => void;
 }) {
@@ -465,7 +460,7 @@ export function AmuxCliModelLinkForm({
       aria-labelledby={`${id}-title`}
       onSubmit={(event) => {
         event.preventDefault();
-        if (changed && !busy && writesLatch) {
+        if (changed && !busy) {
           onSave({ cli, cliModel, pricedModelId: value === AMUX_CLI_MODEL_LINK_NONE ? null : value });
         }
       }}
@@ -498,7 +493,7 @@ export function AmuxCliModelLinkForm({
       <button
         type="submit"
         className={`${buttonClass} w-fit`}
-        disabled={busy || !writesLatch || !changed}
+        disabled={busy || !changed}
         data-testid="amux-cli-model-link-save"
       >
         {busy ? m.saving : m.link.save}
@@ -531,7 +526,7 @@ export type AmuxCliModelLinkIo = {
   networkFailure: () => AdminApiFailure;
 };
 
-const LINK_REFUSAL_CODES: ReadonlySet<string> = new Set(["capability_writes_off", ...AMUX_CLI_MODEL_LINK_REFUSALS]);
+const LINK_REFUSAL_CODES: ReadonlySet<string> = new Set([...AMUX_CLI_MODEL_LINK_REFUSALS]);
 
 /** A 2xx proves only what its body says: this name's link, as sent. */
 const isLinkReceipt = async (response: Response, change: AmuxCliModelLinkChange): Promise<boolean> => {

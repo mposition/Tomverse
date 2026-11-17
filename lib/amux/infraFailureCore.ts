@@ -19,19 +19,11 @@
  * it is never read as zero (lib/amux/v22WorkerUsageGate.ts only stops counting
  * it against the worker).
  *
- * On unless TOMVERSE_AMUX_INFRA_FAILURE_ROUTING is `disabled`, which restores
- * the earlier behaviour: every attempt counts, no worker is quarantined.
+ * Always on (the TOMVERSE_AMUX_INFRA_FAILURE_ROUTING kill switch that restored
+ * the earlier behaviour was removed, owner decision 2026-11-16).
  *
  * Pure and dependency-free.
  */
-
-export const AMUX_INFRA_FAILURE_ROUTING_ENV = "TOMVERSE_AMUX_INFRA_FAILURE_ROUTING";
-
-export function amuxInfraFailureRoutingEnabled(
-  value: string | undefined = process.env[AMUX_INFRA_FAILURE_ROUTING_ENV],
-): boolean {
-  return value?.trim() !== "disabled";
-}
 
 export const AMUX_INFRA_FAILURE_KINDS = [
   "no_result",
@@ -63,17 +55,26 @@ export const amuxIsInfraFailureReason = (reason: string | null | undefined) =>
   amuxInfraFailureKindOfReason(reason) !== null;
 
 /**
- * The most infrastructure failures one card may collect. A card that keeps
- * failing the same way on every worker (a tree the CLIs refuse, a prompt that
- * crashes them) is then blocked for a person instead of circling for ever.
- * The workers' own quarantine (workerCircuitCore.ts) keeps this from filling
- * up during an ordinary outage.
+ * An infrastructure failure never hands a card to a person (owner decision
+ * 2026-11-16: no fixed count of platform failures stops a card; it was 12). The
+ * card goes back to the queue and waits before a worker takes it again: none
+ * for the first two failures, then a minute that doubles up to an hour, counted
+ * from the failures since a person last sent the card back. A card that fails
+ * the same way on every worker is slowed to one try an hour, never parked, and
+ * the workers' own quarantine (workerCircuitCore.ts) still keeps an ordinary
+ * outage from filling the queue.
  */
-export const AMUX_MAX_INFRA_FAILURES_PER_TASK = 12;
+export const AMUX_INFRA_RETRY_BASE_MS = 60_000;
+export const AMUX_INFRA_RETRY_MAX_MS = 60 * 60_000;
+export const amuxInfraRetryDelayMs = (failures: number): number => {
+  if (!Number.isFinite(failures) || failures <= 2) return 0;
+  return Math.min(AMUX_INFRA_RETRY_MAX_MS,
+    AMUX_INFRA_RETRY_BASE_MS * 2 ** Math.min(Math.trunc(failures) - 3, 20));
+};
 
 /**
- * The escalation reason of a card that reached that bound. The attempt that
- * reached it keeps its own `infra_<kind>` reason, so it is still counted.
+ * The escalation reason cards carried when they reached the earlier bound of
+ * 12. Nothing opens it now; rows that carry it stay readable.
  */
 export const AMUX_INFRA_ATTEMPTS_EXHAUSTED_REASON = "infra_attempts_exhausted";
 
@@ -92,7 +93,7 @@ export type AmuxSidecarFailureReport = {
 /**
  * Sidecar failures that mean the worker did the card's work: they count.
  * `stalled` is the local CLI flow's stop of a run that showed no sign of life
- * for 30 minutes (lib/amux/v22LocalCliFlowCore.ts), the worker's own run as
+ * for the stall window (lib/amux/v22LocalCliFlowCore.ts), the worker's own run as
  * the old deadline was. The flow's other stop reasons are not the worker's
  * doing and stay infrastructure (an unknown code below): `operator_stop` (a
  * person stopped it) and `transcript_write_failed` (the sidecar could not
@@ -137,7 +138,6 @@ export function classifyAmuxSidecarFailure(report: AmuxSidecarFailureReport):
  * partial one is a run whose usage was never reported.
  */
 export function amuxV22InfraFailureKind(input: {
-  enabled: boolean;
   outcome: "succeeded" | "failed" | "blocked";
   budgetBound: boolean;
   apiReceipt: boolean;
@@ -148,7 +148,7 @@ export function amuxV22InfraFailureKind(input: {
   usageEventCount: number;
   failure?: AmuxSidecarFailureReport | null;
 }): AmuxInfraFailureKind | null {
-  if (!input.enabled || input.outcome !== "blocked" || input.budgetBound ||
+  if (input.outcome !== "blocked" || input.budgetBound ||
       input.apiReceipt || input.receiptsComplete || input.knownCliFailure ||
       input.resultStored || input.patchStored) return null;
   if (input.failure) {

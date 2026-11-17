@@ -7,14 +7,12 @@ import test from "node:test";
 
 import {
   AMUX_SETTLEMENT_FOR_OUTCOME,
-  OWNER_QUEUE_LEGACY_LIMITS,
   PUBLISH_STATES,
   PUBLISH_TERMINAL_STATES,
   PUBLISH_TRANSITIONS,
   REQUEST_TRANSITIONS,
   RUN_OUTCOMES,
   commitObjectMatches,
-  decideArmedGate,
   decideHalt,
   decideOwnerQueues,
   decideWriteItemTransition,
@@ -22,7 +20,7 @@ import {
   expectedCommitObject,
   expireCommentMarker,
   isAllowedTransition,
-  isCircuitLatched,
+  heldRunHalt,
   parseEngineeringAgentMode,
   parseEngineeringBranchName,
   prBodyCarriesMarker,
@@ -443,10 +441,10 @@ test("unset, unknown and unreadable mode is off", () => {
 
 test("the kill switch turns everything off unless it is plainly empty or false", () => {
   const base = { mode: "t1", freeze: "false", registration: "on", readFailed: false };
-  for (const killSwitch of ["1", "true", "yes", "anything"]) {
+  for (const killSwitch of ["enabled", "1", "true", "yes", "anything"]) {
     assert.equal(resolveEngineeringAgentSwitches({ ...base, killSwitch }).mode, "off");
   }
-  for (const killSwitch of [undefined, null, "", "0", "false", "FALSE"]) {
+  for (const killSwitch of [undefined, null, "", "0", "false", "FALSE", "disabled", "DISABLED"]) {
     assert.equal(resolveEngineeringAgentSwitches({ ...base, killSwitch }).mode, "t1");
   }
 });
@@ -478,21 +476,11 @@ test("shadow claims but never publishes; a freeze stops claims and publishing, n
 
 /* Owner queues --------------------------------------------------------- */
 
-test("the owner queues are counted, never capped; the kill switch brings back eight and eight", () => {
-  // Owner decision 2026-11-15; the caps are owner decision 2026-11-09's.
+test("the owner queues are counted, never capped", () => {
+  // Owner decision 2026-11-15.
   for (const [prs, decisions] of [[0, 0], [8, 8], [500, 500]])
     assert.deepEqual(decideOwnerQueues({ openPrBindings: prs, pendingDecisions: decisions }),
-      { prFull: false, decisionFull: false, claimAllowed: true });
-  assert.deepEqual({ ...OWNER_QUEUE_LEGACY_LIMITS }, { pr: 8, decision: 8 });
-});
-
-test("with the kill switch either full queue stops the claim at its limit and not before", () => {
-  const verdict = (openPrBindings, pendingDecisions) =>
-    decideOwnerQueues({ openPrBindings, pendingDecisions }, true);
-  assert.deepEqual(verdict(7, 7), { prFull: false, decisionFull: false, claimAllowed: true });
-  assert.deepEqual(verdict(8, 0), { prFull: true, decisionFull: false, claimAllowed: false });
-  assert.deepEqual(verdict(0, 8), { prFull: false, decisionFull: true, claimAllowed: false });
-  assert.deepEqual(verdict(9, 9), { prFull: true, decisionFull: true, claimAllowed: false });
+      { openPrBindings: prs, pendingDecisions: decisions, prFull: false, decisionFull: false, claimAllowed: true });
 });
 
 /* Halt and circuit ----------------------------------------------------- */
@@ -500,17 +488,12 @@ test("with the kill switch either full queue stops the claim at its limit and no
 test("halt follows the policy priority and a missing App identity is never none", () => {
   const clear = {
     appIdentityConfigured: true,
-    circuitLatched: false,
     unboundAppPrs: 0,
     unboundAppRefs: 0,
     openStateMismatches: 0,
   };
   assert.equal(decideHalt(clear), "none");
   assert.equal(decideHalt({ ...clear, appIdentityConfigured: false }), "config_missing");
-  assert.equal(
-    decideHalt({ ...clear, circuitLatched: true, unboundAppPrs: 2, unboundAppRefs: 1 }),
-    "circuit_open",
-  );
   assert.equal(decideHalt({ ...clear, unboundAppPrs: 1, unboundAppRefs: 1 }), "unbound_app_pr");
   assert.equal(decideHalt({ ...clear, unboundAppRefs: 1 }), "unbound_app_ref");
   assert.equal(decideHalt({ ...clear, openStateMismatches: 1 }), "state_mismatch");
@@ -522,89 +505,29 @@ const run = (day, halt) => {
   return { startedAt: new Date(end.getTime() - HOUR), endedAt: end, halt };
 };
 
-test("one long halt is one incident; three separate incidents latch", () => {
-  const longHalt = [
-    run(10, "none"),
-    run(9, "unbound_app_pr"),
-    run(8, "unbound_app_pr"),
-    run(7, "unbound_app_pr"),
-    run(6, "unbound_app_pr"),
-  ];
-  assert.equal(isCircuitLatched({ runs: longHalt, acknowledgedAt: null }), false);
-
-  const three = [
-    run(10, "unbound_app_ref"),
-    run(9, "none"),
-    run(8, "state_mismatch"),
-    run(7, "none"),
-    run(6, "unbound_app_pr"),
-    run(5, "none"),
-  ];
-  assert.equal(isCircuitLatched({ runs: three, acknowledgedAt: null }), true);
+// Owner decision 2026-11-16: only the publisher App's identity and namespace
+// signals a run recorded wait for a person; nothing latches.
+test("a recorded App identity or namespace signal holds until acknowledged; nothing else a run recorded holds", () => {
+  assert.equal(heldRunHalt({ runs: [], acknowledgedAt: null }), null);
+  for (const halt of ["config_missing", "unbound_app_pr", "unbound_app_ref"]) {
+    assert.equal(heldRunHalt({ runs: [run(2, halt), run(1, "none")], acknowledgedAt: null }), halt, halt);
+    assert.equal(heldRunHalt({ runs: [run(2, halt), run(1, "none")],
+      acknowledgedAt: new Date(NOW.getTime() - 1.5 * DAY) }), null, `${halt} acknowledged`);
+  }
+  // A mismatch halts while it is open (read live); circuit_open is no longer written.
+  for (const halt of ["state_mismatch", "circuit_open"]) {
+    assert.equal(heldRunHalt({ runs: [run(1, halt)], acknowledgedAt: null }), null, halt);
+  }
+  // Many incidents in a short time latch nothing.
+  const many = Array.from({ length: 10 }, (_, i) => run(10 - i, "state_mismatch"));
+  assert.equal(heldRunHalt({ runs: many, acknowledgedAt: null }), null);
 });
 
-test("a latch does not wear off with time -- only an acknowledgement clears it", () => {
-  const latchedLongAgo = [
-    run(400, "unbound_app_ref"),
-    run(399, "none"),
-    run(398, "state_mismatch"),
-    run(397, "none"),
-    run(396, "unbound_app_pr"),
-    ...Array.from({ length: 30 }, (_, i) => run(300 - i * 10, "none")),
-  ];
-  assert.equal(isCircuitLatched({ runs: latchedLongAgo, acknowledgedAt: null }), true);
-  assert.equal(
-    isCircuitLatched({
-      runs: latchedLongAgo,
-      acknowledgedAt: new Date(NOW.getTime() - 395 * DAY),
-    }),
-    false,
-    "an acknowledgement after the incidents clears them",
-  );
-});
-
-test("three incidents spread wider than thirty days do not latch", () => {
-  const spread = [
-    run(90, "unbound_app_ref"),
-    run(89, "none"),
-    run(50, "state_mismatch"),
-    run(49, "none"),
-    run(10, "unbound_app_pr"),
-    run(9, "none"),
-  ];
-  assert.equal(isCircuitLatched({ runs: spread, acknowledgedAt: null }), false);
-  const closeTogether = [
-    run(40, "unbound_app_ref"),
-    run(39.5, "none"),
-    run(30, "state_mismatch"),
-    run(29, "none"),
-    run(11, "unbound_app_pr"),
-    run(10, "none"),
-  ];
-  assert.equal(isCircuitLatched({ runs: closeTogether, acknowledgedAt: null }), true);
-});
-
-test("incidents that started before the acknowledgement do not count", () => {
-  const recent = [
-    run(9, "unbound_app_ref"),
-    run(8.5, "none"),
-    run(8, "state_mismatch"),
-    run(7, "none"),
-    run(6, "unbound_app_pr"),
-    run(5, "none"),
-  ];
-  assert.equal(isCircuitLatched({ runs: recent, acknowledgedAt: null }), true);
-  assert.equal(
-    isCircuitLatched({ runs: recent, acknowledgedAt: new Date(NOW.getTime() - 8.2 * DAY) }),
-    false,
-  );
-});
-
-test("a latest run already circuit_open stays latched", () => {
-  assert.equal(
-    isCircuitLatched({ runs: [run(1, "none"), run(0.5, "circuit_open")], acknowledgedAt: null }),
-    true,
-  );
+test("the latest held signal is the one shown, whatever order the rows arrive in", () => {
+  assert.equal(heldRunHalt({ runs: [run(1, "unbound_app_ref"), run(3, "config_missing")], acknowledgedAt: null }),
+    "unbound_app_ref");
+  assert.equal(heldRunHalt({ runs: [run(1, "state_mismatch"), run(3, "unbound_app_pr")], acknowledgedAt: null }),
+    "unbound_app_pr");
 });
 
 test("no success heartbeat while halted", () => {
@@ -614,40 +537,6 @@ test("no success heartbeat while halted", () => {
     false,
   );
   assert.equal(shouldSendSuccessHeartbeat({ finishedNormally: false, halt: "none" }), false);
-});
-
-/* Armed gate ----------------------------------------------------------- */
-
-test("the armed gate names every missing condition", () => {
-  const now = at("2026-11-01T00:00:00Z");
-  assert.deepEqual(
-    decideArmedGate({
-      runnerLastFinishAt: new Date(now.getTime() - 25 * HOUR),
-      publisherLastFinishAt: new Date(now.getTime() - 27 * HOUR),
-      monitorsConfirmedAt: null,
-      now,
-    }),
-    { armed: false, missing: ["publisher_finish", "monitor_confirmation"] },
-  );
-  assert.deepEqual(
-    decideArmedGate({
-      runnerLastFinishAt: new Date(now.getTime() - HOUR),
-      publisherLastFinishAt: new Date(now.getTime() - HOUR),
-      monitorsConfirmedAt: new Date(now.getTime() - 6 * DAY),
-      now,
-    }),
-    { armed: true },
-  );
-  assert.equal(
-    decideArmedGate({
-      runnerLastFinishAt: new Date(now.getTime() + HOUR),
-      publisherLastFinishAt: new Date(now.getTime() - HOUR),
-      monitorsConfirmedAt: new Date(now.getTime() - DAY),
-      now,
-    }).armed,
-    false,
-    "a finish time in the future is not recent",
-  );
 });
 
 /* Publisher writes ----------------------------------------------------- */

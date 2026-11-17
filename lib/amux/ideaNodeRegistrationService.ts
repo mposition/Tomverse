@@ -20,9 +20,9 @@ import { deriveAmuxIdeaUnitConfirmation,
   sameAmuxIdeaUnitConfirmation,
   type AmuxIdeaUnitConfirmationSnapshot } from
   "./ideaUnitConfirmationCore.ts";
-import { AMUX_V4_UNIT_WRITE_ENV, AmuxV4DuplicateReasonRequired,
+import { AmuxV4DuplicateReasonRequired,
   AmuxV4UnitDecisionError,
-  amuxV4UnitWriteEnabled, commitAmuxV4NodeCreation,
+  commitAmuxV4NodeCreation,
   commitAmuxV4UnitPrepare,
   markAmuxV4UnitConsumeOutcomeUnknown } from "./ideaUnitDecisionStore.ts";
 import { isAmuxSystemRegistrationAuthority,
@@ -206,9 +206,6 @@ export async function prepareAmuxV4NodeCreation(input: {
 }) {
   const actorUserId = owner(input.session);
   await assertRecentAdminAuthentication(input.session);
-  if (!amuxV4UnitWriteEnabled(process.env[AMUX_V4_UNIT_WRITE_ENV])) {
-    throw new AmuxV4UnitDecisionError("write_disabled");
-  }
   const choice = input.choice;
   if (!ID.test(choice.ideaId) || !ID.test(choice.draftUnitId) ||
       (choice.parentNodeId !== null && !ID.test(choice.parentNodeId)) ||
@@ -258,9 +255,6 @@ export async function consumeAmuxV4NodeCreation(input: {
 }) {
   const actorUserId = owner(input.session);
   await assertRecentAdminAuthentication(input.session);
-  if (!amuxV4UnitWriteEnabled(process.env[AMUX_V4_UNIT_WRITE_ENV])) {
-    throw new AmuxV4UnitDecisionError("write_disabled");
-  }
   if (!ID.test(input.decisionId) || !UUID.test(input.consumeRequestId) ||
       !/^[a-f0-9]{64}$/.test(input.confirmationDigest)) {
     throw new AmuxV4UnitDecisionError("not_ready");

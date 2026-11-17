@@ -109,7 +109,6 @@ const FIX_BADGE: Record<CiFixState, string> = {
   failed: "bg-rose-400/15 text-rose-300",
   refused: "bg-rose-400/15 text-rose-300",
   not_published: "bg-rose-400/15 text-rose-300",
-  exhausted: "bg-rose-400/15 text-rose-300",
 };
 const COMMIT_URL = "https://github.com/mposition/Tomverse/commit/";
 const PAGE_PATH = "/admin/release?tab=ci";

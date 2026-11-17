@@ -1,29 +1,10 @@
-/** V22 Tasks need their own environment gate, not the legacy execution switch. */
-export const AMUX_V22_TASK_EXECUTION_CODE_LATCH = true;
-export const AMUX_V22_TASK_EXECUTION_ENV = "TOMVERSE_AMUX_V22_TASK_EXECUTION";
-
-export function amuxV22TaskExecutionEnabled(value: string | undefined) {
-  return AMUX_V22_TASK_EXECUTION_CODE_LATCH && value === "enabled";
-}
-
-/** Orchestration policy v49 opens the code latch for the public PR path. The
- * path still needs its own runtime switch, engineering mode t1 and a verified
- * image proof; opening this latch alone publishes nothing. */
-export const AMUX_V22_ENGINEERING_PUBLICATION_CODE_LATCH = true;
+/** Orchestration policy v49 opens the public PR path. The path still needs
+ * its own runtime switch (an external post boundary), engineering mode t1 and a
+ * verified image proof; the switch is exactly `enabled`. */
 export const AMUX_V22_ENGINEERING_PUBLICATION_ENV =
   "TOMVERSE_AMUX_V22_ENGINEERING_PUBLICATION";
 
 export function amuxV22EngineeringPublicationEnabled(value: string | undefined) {
-  return AMUX_V22_ENGINEERING_PUBLICATION_CODE_LATCH && value === "enabled";
-}
-
-/** The box bridge refuses unknown delivery fields, so the publication base
- * is sent only once the operator has rolled out a bridge and sidecar that
- * read it. Default off. */
-export const AMUX_V22_DELIVERY_BASE_SHA_ENV =
-  "TOMVERSE_AMUX_V22_DELIVERY_BASE_SHA";
-
-export function amuxV22DeliveryBaseShaEnabled(value: string | undefined) {
   return value === "enabled";
 }
 

@@ -200,7 +200,7 @@ receipt를 durable execution identity로 저장하면 안 된다.
 다음은 별도 activation 결정 전까지 유지한다.
 
 - `TOMVERSE_AMUX_EXECUTE` off
-- `TOMVERSE_AMUX_EXECUTION_API_ENABLED` off
+- (실행 API는 늘 열려 있다. `TOMVERSE_AMUX_EXECUTION_API_ENABLED`는 2026-11-16에 없앴다)
 - worker catalog unset unless explicitly staging-configured
 - `execution_ready=false`
 

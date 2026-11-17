@@ -409,9 +409,6 @@ test("the idea is the saved owner's: an account that stopped being an owner subm
     process.env.ADMIN_EMAILS = email;
     process.env.ADMIN_OWNER_EMAILS = email;
     process.env.ADMIN_USER_IDS = "";
-    // Past the owner check, as far as the submission switch this suite leaves off.
-    delete process.env.TOMVERSE_AMUX_V4_IDEA_SUBMIT;
-    assert.equal(await code(), "submission_disabled");
     process.env.ADMIN_OWNER_EMAILS = "someone-else@example.test";
     assert.equal(await code(), "forbidden");
     await prisma.user.delete({ where: { id: user.id } });

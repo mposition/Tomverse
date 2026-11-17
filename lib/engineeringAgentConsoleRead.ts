@@ -14,9 +14,6 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 
 import {
-  ENGINEERING_AGENT_LEGACY_HALTS_ENV,
-  OWNER_QUEUE_LEGACY_LIMITS,
-  engineeringAgentLegacyHalts,
   killSwitchEngaged,
   ENGINEERING_AGENT_KILL_SWITCH_ENV,
   unknownOutcomeDecisionWorkItemId,
@@ -247,7 +244,7 @@ async function readOwnerItemContexts(
     ),
   );
 
-  // A T2 draft's advice card (TOMVERSE_ENGINEERING_AGENT_T2_DM_REVIEW).
+  // A T2 draft's advice card.
   const draftIds = items.filter((item) => item.kind === "t2_draft").map((item) => item.id);
   const advice = draftIds.length
     ? await prisma.engineeringAgentDmReview.findMany({
@@ -470,7 +467,6 @@ export async function readEngineeringAgentConsole(
   }
 
   const switches = await readEngineeringAgentSwitches(prisma);
-  const legacyCaps = engineeringAgentLegacyHalts(process.env[ENGINEERING_AGENT_LEGACY_HALTS_ENV]);
   const [bindings, pendingPublish, activeRuns, openOwnerItems] = await Promise.all([
     prisma.engineeringAgentBinding.count({ where: { state: { in: ["open", "closed"] }, supersededAt: null } }),
     prisma.engineeringAgentWorkItem.count({
@@ -486,9 +482,9 @@ export async function readEngineeringAgentConsole(
       frozen: switches.frozen,
       killSwitch: killSwitchEngaged(process.env[ENGINEERING_AGENT_KILL_SWITCH_ENV]),
       pullRequests: { occupied: bindings + pendingPublish + activeRuns,
-        limit: legacyCaps ? OWNER_QUEUE_LEGACY_LIMITS.pr : null },
+        limit: null },
       decisions: { occupied: openOwnerItems + activeRuns,
-        limit: legacyCaps ? OWNER_QUEUE_LEGACY_LIMITS.decision : null },
+        limit: null },
     },
   };
 }

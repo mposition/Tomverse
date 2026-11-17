@@ -34,21 +34,6 @@ const claim = { previewId, ideaId, holdId: "hold_1", leaseGeneration: 1,
   auditId: "audit_1" };
 const response = (body, status = 200) => Response.json(body, { status });
 
-test("retention hold writes retain both independent environment switches", () => {
-  const route = readFileSync(new URL(
-    "../app/api/admin/amux/ideas/retention-holds/route.ts", import.meta.url),
-  "utf8");
-  assert.match(route, /const READ_CODE_LATCH = true;/);
-  assert.match(route, /const WRITE_CODE_LATCH = true;/);
-  assert.match(route, /export async function GET[\s\S]*?if \(!READ_CODE_LATCH/);
-  for (const method of ["POST", "DELETE"]) {
-    const body = route.split(`export async function ${method}`)[1];
-    assert.ok(body, `${method} route exists`);
-    assert.match(body, /if \(!READ_CODE_LATCH \|\| !WRITE_CODE_LATCH/);
-    assert.match(body, /process\.env\[READ_ENV\] !== "enabled" \|\|\s*process\.env\[WRITE_ENV\] !== "enabled"/);
-  }
-});
-
 test("read-only terminal statuses cannot be returned after a claim attempt", () => {
   const source = readFileSync(new URL(
     "../lib/amux/ideaLocalAnalysisAgentOnce.mjs", import.meta.url), "utf8");

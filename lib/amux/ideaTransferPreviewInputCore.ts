@@ -1,16 +1,7 @@
 import { isFrontierApprovalId } from "./ideaFrontierCatalogWriteCore.ts";
 import { isAmuxIdeaRequestId } from "./ideaSubmissionCore.ts";
 
-export const AMUX_V4_TRANSFER_PREVIEW_WRITE_ENV = "TOMVERSE_AMUX_V4_TRANSFER_PREVIEW_WRITE";
-export const AMUX_V4_TRANSFER_PREVIEW_READ_ENV = "TOMVERSE_AMUX_V4_TRANSFER_PREVIEW_READ";
-export const AMUX_V4_TRANSFER_PREVIEW_WRITE_CODE_ENABLED = true;
-export const AMUX_V4_TRANSFER_PREVIEW_READ_CODE_ENABLED = true;
 export const AMUX_V4_TRANSFER_PREVIEW_MAX_BYTES = 1_024;
-
-export const transferPreviewWritePermitted = (value: string | undefined): boolean =>
-  AMUX_V4_TRANSFER_PREVIEW_WRITE_CODE_ENABLED && value === "enabled";
-export const transferPreviewReadPermitted = (value: string | undefined): boolean =>
-  AMUX_V4_TRANSFER_PREVIEW_READ_CODE_ENABLED && value === "enabled";
 
 export type IdeaOnlyTransferPreviewRequest = {
   previewId: string;

@@ -35,10 +35,10 @@ const reg = (workerName, desiredState, roleCeiling = "implementation", revision 
 });
 
 const registryOf = (registrations, { latches = new Map(), observations = new Map() } = {}) =>
-  buildAmuxWorkerRegistryAdminView({ registrations, latches, observations, writesLatch: true });
+  buildAmuxWorkerRegistryAdminView({ registrations, latches, observations });
 
 const capabilitiesOf = (registrations, current = new Map()) =>
-  buildAmuxWorkerCapabilityAdminView({ registrations, current, writesLatch: true });
+  buildAmuxWorkerCapabilityAdminView({ registrations, current });
 
 const liveOf = (workers) => ({ kind: "observed", catalogConfigured: true, workers });
 const seat = (name, state, secondsAgo = 12) => ({
@@ -136,10 +136,10 @@ test("an active worker left out for having no recorded capability says so", () =
   assert.equal(rowOf(build(), "codex-impl").status, "assignable_ready");
 });
 
-test("an open stop latch is named when the worker is not in the assignment list", () => {
+test("a recorded stop latch is no longer a reason; the worker is described by its connection", () => {
   const registry = registryOf(REGISTRATIONS, { latches: new Map([["codex-impl", "opened"]]) });
   const overview = build({ registry, live: liveOf([seat("codex-impl", "not_admitted", null)]) });
-  assert.equal(rowOf(overview, "codex-impl").status, "latch_open");
+  assert.notEqual(rowOf(overview, "codex-impl").status, "latch_open");
 });
 
 test("an unread live reading never claims a connection", () => {

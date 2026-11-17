@@ -33,8 +33,6 @@ import { AmuxV19SystemRegistrationError,
   "@/lib/amux/ideaSystemRegistrationService";
 import { prisma } from "@/lib/prisma";
 
-const WRITE_ENV = "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_RESULT_WRITE";
-const READ_ENV = "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_RESULT_READ";
 const RETENTION_ENV = "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_RESULT_RETENTION";
 const uuid = z.string().uuid();
 const identity = z.object({ claimId: uuid, requestId: uuid,
@@ -57,7 +55,8 @@ const bodySchema = identity.extend({
   outputTokens: z.number().int().safe().nonnegative(),
   cliAttestation,
 }).refine((body) => Buffer.byteLength(body.rawModelOutput, "utf8") <=
-    amuxAnalysisChunkMaxBytes() && body.inputTokens + body.outputTokens > 0 &&
+    // A CLI that reported no tokens still answered (operator, 2026-11-16).
+    amuxAnalysisChunkMaxBytes() &&
     Number.isSafeInteger(body.inputTokens + body.outputTokens));
 const receiptSchema = identity.pick({ claimId: true, requestId: true,
   reservationId: true, ideaId: true, invocationOrdinal: true });
@@ -73,9 +72,7 @@ function authorized(request: Request): boolean {
  * exact GET receipt and an operator decision; a replay is never authorized. */
 export async function POST(request: Request): Promise<Response> {
   if (!authorized(request)) return amuxJsonNoStore({ error: "Unauthorized" }, 401);
-  if (process.env[WRITE_ENV] !== "enabled" ||
-      process.env[READ_ENV] !== "enabled" ||
-      process.env[RETENTION_ENV] !== "enabled" ||
+  if (process.env[RETENTION_ENV] !== "enabled" ||
       process.env.TOMVERSE_AMUX_V19_READ_MANIFEST_RETENTION !== "enabled") {
     return amuxJsonNoStore({ available: false,
       reason: "session_analysis_result_write_disabled" }, 409);
@@ -87,7 +84,7 @@ export async function POST(request: Request): Promise<Response> {
   let body: z.infer<typeof bodySchema>;
   // JSON escaping can nearly double a plaintext result.
   try {
-    body = await readLimitedJson(request, amuxAnalysisAnswerRequestMaxBytes(140 * 1024),
+    body = await readLimitedJson(request, amuxAnalysisAnswerRequestMaxBytes(),
       bodySchema);
   }
   catch { return amuxJsonNoStore({ error: "Invalid request." }, 400); }
@@ -178,10 +175,6 @@ async function registerSessionPlan(ideaId: string): Promise<{ state: string }> {
 
 export async function GET(request: Request): Promise<Response> {
   if (!authorized(request)) return amuxJsonNoStore({ error: "Unauthorized" }, 401);
-  if (process.env[READ_ENV] !== "enabled") {
-    return amuxJsonNoStore({ available: false,
-      reason: "session_analysis_result_read_disabled" }, 409);
-  }
   const url = new URL(request.url);
   const names = ["claimId", "requestId", "reservationId", "ideaId",
     "invocationOrdinal"];

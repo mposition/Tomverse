@@ -4,9 +4,6 @@ import { isAmuxIdeaRequestId } from "./ideaRequestIdCore.ts";
 
 export const AMUX_SESSION_INTAKE_CLIENT_SECRET_ENV =
   "TOMVERSE_AMUX_SESSION_INTAKE_CLIENT_SECRET";
-export const AMUX_SESSION_INTAKE_READBACK_ENV =
-  "TOMVERSE_AMUX_SESSION_INTAKE_READBACK";
-export const AMUX_SESSION_INTAKE_READBACK_CODE_LATCH = true;
 
 const SECRET_LIKE_ENV_NAME =
   /(?:^|_)(?:SECRET|TOKEN|API_KEY|PRIVATE_KEY|PASSWORD|CREDENTIAL|COOKIE|KEYRING|PEPPER|KEYS?)(?:_|$)|(?:^|_)(?:DATABASE_URL|POSTGRES)(?:_|$)/i;
@@ -33,12 +30,6 @@ const SECRET = /^[A-Za-z0-9_-]{32,256}$/;
 export const isAmuxSessionIntakeClientSecret = (
   value: unknown,
 ): value is string => typeof value === "string" && SECRET.test(value);
-
-export const amuxSessionIntakeReadbackEnabled = (
-  sessionIntakeReadback: string | undefined,
-  ideaReadback: string | undefined,
-): boolean => AMUX_SESSION_INTAKE_READBACK_CODE_LATCH &&
-  sessionIntakeReadback === "enabled" && ideaReadback === "enabled";
 
 /** This bearer grants only session intake/readback. A value shared with any
  * other configured secret-like environment value is refused. */

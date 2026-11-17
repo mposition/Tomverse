@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   AMUX_ASK_TYPES,
   DM_ALLOWED_ASK_TYPES,
+  DM_IRREVERSIBLE_TERMS,
   DM_CARD_TEXT_FORMAT,
   DM_CARD_TEXT_KEYS,
   DM_ANSWER_MAX_BYTES,
@@ -98,10 +99,14 @@ test("switches fail closed: kill switch, off instance and unreadable settings", 
 });
 
 test("customer_outbound and unknown ask types never reach a DM", () => {
+  // A message to a customer leaves Tomverse; the DM approver (§0a-1) would apply it without a person.
   for (const askType of ["customer_outbound", "approval", ""]) {
     const decision = routeDmQuestion(input({ card: card({ askType }) }));
     assert.equal(decision.route, "operator");
     assert.ok(decision.refusals.includes("ask_type_not_allowed"));
+  }
+  for (const askType of ["decision", "judgment", "budget"]) {
+    assert.deepEqual(routeDmQuestion(input({ card: card({ askType }) })), { route: "dm_proposal", instance: "decision-maker-openai", refusals: [] }, askType);
   }
 });
 
@@ -147,9 +152,14 @@ test("irreversible terms: Korean substrings, English whole words, case-insensiti
   assert.deepEqual(irreversibleTermCategories("Can I MERGE INTO MAIN?"), ["main_merge"]);
   assert.deepEqual(irreversibleTermCategories("이 행을 삭제할까요"), ["destroy"]);
   assert.deepEqual(irreversibleTermCategories("force-push the branch?"), ["destroy"]);
-  assert.deepEqual(irreversibleTermCategories("Run the migration?"), ["migration"]);
   assert.deepEqual(irreversibleTermCategories("환불 처리"), ["money"]);
   assert.deepEqual(irreversibleTermCategories("Paste the API key here"), ["secret"]);
+  assert.deepEqual(irreversibleTermCategories("프로덕션에 올릴까요?"), ["release"]);
+  assert.deepEqual(irreversibleTermCategories("Drop table users?"), ["destroy"]);
+  assert.deepEqual(irreversibleTermCategories("Publish the release notes?"), ["outbound"]);
+  assert.deepEqual(irreversibleTermCategories("고객에게 메일을 발송할까요?"), ["outbound"]);
+  assert.deepEqual(irreversibleTermCategories("GitHub 토큰을 교체할까요?"), ["secret"]);
+  assert.deepEqual(irreversibleTermCategories("Which permissions does the bot need?"), ["access"]);
   assert.deepEqual(irreversibleTermCategories("Edit .github/workflows/ci.yml?"), ["gate"]);
   assert.deepEqual(irreversibleTermCategories("Turn on branch protection"), ["gate"]);
   // Whole words only: these are not hits.
@@ -164,6 +174,19 @@ test("a DM run that ended unavailable is an operational incident naming only ins
   assert.equal(incident.severity, "warning");
   assert.deepEqual(incident.context, { instance: "decision-maker-anthropic", requestId: "d85a4806-a06a-40a4-ba65-8ecccdfd4da8" });
   assert.deepEqual(dmRunUnavailableIncident({ x: 1 }, 7).context, { instance: null, requestId: null });
+});
+
+test("the terms are the human boundaries; the migration category and broad words are gone", () => {
+  // Owner direction 2026-11-16: only what a person must still decide (§0a-4) stays.
+  assert.deepEqual(DM_IRREVERSIBLE_TERMS.map((entry) => entry.category),
+    ["main_merge", "release", "destroy", "money", "outbound", "secret", "access", "gate"]);
+  for (const text of [
+    "Run the migration?", "마이그레이션을 추가할까요?",
+    "배포 전에 확인할까요?", "Ship the cache layer?", "Release the latch?", "Deploy to the dev lane?",
+    "Overwrite the fixture?", "설정을 초기화할까요?", "Drop the option?",
+  ]) {
+    assert.deepEqual(irreversibleTermCategories(text), [], text);
+  }
 });
 
 test("Korean access terms name a grant or change, not a plan's entitlement", () => {
@@ -205,12 +228,12 @@ test("Korean access terms name a grant or change, not a plan's entitlement", () 
 test("the term check reads every card text field, including options and context", () => {
   for (const field of [
     { title: "Delete the cache?" },
-    { question: "배포 전에 확인할까요?" },
-    { unblocks: "The release" },
+    { question: "프로덕션 배포 전에 확인할까요?" },
+    { unblocks: "The production database" },
     { context: "This needs a refund" },
     { tags: ["production"] },
-    { type: "migration" },
-    { options: [option("a", "Drop the table")] },
+    { type: "payment" },
+    { options: [option("a", "Drop table users")] },
   ]) {
     const decision = routeDmQuestion(input({ card: card({ ...field, options: field.options ?? card().options }) }));
     assert.ok(decision.refusals.includes("irreversible_term"), JSON.stringify(field));
@@ -430,7 +453,7 @@ test("the secret check reads the card text as the body store keeps it, and the f
 });
 
 test("resolution is a closed list on every ask type, not only the three §3-4 checks", () => {
-  for (const askType of DM_ALLOWED_ASK_TYPES) {
+  for (const askType of AMUX_ASK_TYPES) {
     const decision = routeDmQuestion(input({ card: card({ askType, resolution: "ask the team lead" }) }));
     assert.equal(decision.route, "operator", askType);
     assert.ok(decision.refusals.includes("input_limit_exceeded"), askType);

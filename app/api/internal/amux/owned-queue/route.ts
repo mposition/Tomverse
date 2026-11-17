@@ -3,7 +3,6 @@ export const dynamic = "force-dynamic";
 import { readLimitedJson } from "@/lib/apiSecurity";
 import { withAmuxRouteBudget } from "@/lib/amux/dbBoundary";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
-import { isAmuxExecutionApiEnabled } from "@/lib/amux/executionGate";
 import {
   amuxBoundedJsonNoStore,
   amuxInternalErrorResponse,
@@ -25,12 +24,6 @@ export async function POST(request: Request) {
     return amuxJsonNoStore({ error: "Unauthorized" }, 401);
   }
 
-  if (!isAmuxExecutionApiEnabled()) {
-    return amuxJsonNoStore(
-      { available: false, reason: "execution_api_disabled" },
-      409,
-    );
-  }
 
   return withAmuxRouteBudget(async () => {
     try {

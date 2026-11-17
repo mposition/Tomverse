@@ -9,6 +9,7 @@ import {
   QaReleaseMergeLaneLate,
   consumeQaReleaseMergeInstruction,
   issueQaReleaseMergeInstruction,
+  releaseQaReleaseMergeLaneLatchBySystem,
   reportQaReleaseMergeResult,
 } from "@/lib/qaReleaseMergeLaneStore";
 import { releaseQaReleaseMergeLaneLatch } from "@/lib/qaReleaseMergeLaneRelease";
@@ -470,5 +471,78 @@ test("after a failed deploy the Admin read shows the closed attempt the latch na
   assert.equal(mergeLane.latchAttempt?.outcome, "deploy_failed");
   assert.equal(mergeLane.latchAttempt?.pullRequestNumber, 21);
   assert.deepEqual(mergeLane.latchAttempt?.deployObservation, failed);
+  await prisma.notificationDelivery.deleteMany({ where: { kind: "qa_release_merge_lane_latched" } });
+});
+
+// Owner decision 2026-11-16: the lane releases its own latch once every cause
+// since the last release was read again and closed; main, another base and the
+// operator's control stay a person's.
+const systemRelease = (overrides: Partial<{ callerRevision: number | null }> = {}) =>
+  releaseQaReleaseMergeLaneLatchBySystem({
+    callerRevision: overrides.callerRevision === undefined ? revision : overrides.callerRevision,
+    budget: budget(),
+  });
+
+test("the lane releases a latch it read again and closed, audited as the lane", async () => {
+  assert.deepEqual(await systemRelease(), { released: false, reason: "not_latched" });
+  // An unknown merge result latches; while the attempt is open the lane may not release.
+  const attemptId = await consumedAttempt();
+  await recorded(attemptId, { kind: "merge", result: "unknown" });
+  assert.deepEqual(await systemRelease(), { released: false, reason: "not_releasable" });
+  // The re-read finds it merged on develop, its deploy fails (a second cause), and dev recovers.
+  await recorded(attemptId, { kind: "reread", result: "merged_on_develop", mergeCommitSha: MERGE_SHA });
+  await recorded(attemptId, { kind: "deploy", outcome: "failed", observation: OBS });
+  assert.equal((await attemptRow(attemptId)).state, "closed");
+  assert.deepEqual(await systemRelease({ callerRevision: revision - 1 }), { released: false, reason: "revision_mismatch" });
+  const result = await systemRelease();
+  assert.equal(result.released, true);
+  assert.deepEqual((await latchEvents()).at(-1), { latched: false, reason: null, attemptId: null });
+  const audit = await prisma.adminAuditLog.findFirst({ where: { action: "qa_release.merge_lane_system_released" }, orderBy: { createdAt: "desc" } });
+  assert.equal(audit?.actorUserId, null);
+  assert.equal((audit?.metadata as Record<string, unknown>).systemActor, "qa-release-merge-lane");
+  assert.deepEqual((audit?.metadata as Record<string, unknown>).reasons, ["merge_result_unknown", "deploy_failed"]);
+  // Released, the lane issues again.
+  assert.equal((await issue({ number: 50 })).issued, true);
+  await prisma.notificationDelivery.deleteMany({ where: { kind: "qa_release_merge_lane_latched" } });
+});
+
+test("a cause the lane may not judge keeps the latch a person's", async () => {
+  // Merged onto another base: closed, latched, and never the lane's to release.
+  const offBase = await consumedAttempt();
+  await recorded(offBase, { kind: "reread", result: "merged_off_develop" });
+  assert.equal((await attemptRow(offBase)).state, "closed");
+  assert.deepEqual(await systemRelease(), { released: false, reason: "not_releasable" });
+  assert.equal((await release(null)).released, true);
+  // A revision mismatch is the operator's, even once its attempt closed deployed.
+  const attemptId = await consumedAttempt();
+  await report(attemptId, { kind: "merge", result: "merged", mergeCommitSha: MERGE_SHA });
+  await recordControl(true);
+  assert.equal((await report(attemptId, { kind: "deploy", outcome: "succeeded", observation: OBS },
+    { callerRevision: revision - 1 }) as { latched: string | null }).latched, "revision_mismatch");
+  await recorded(attemptId, { kind: "deploy", outcome: "succeeded", observation: OBS });
+  assert.equal((await attemptRow(attemptId)).outcome, "deployed");
+  assert.deepEqual(await systemRelease(), { released: false, reason: "not_releasable" });
+  assert.equal((await latchEvents()).at(-1)?.latched, true);
+  await prisma.notificationDelivery.deleteMany({ where: { kind: "qa_release_merge_lane_latched" } });
+});
+
+test("the database refuses a system release the rules do not allow, whoever builds it", async () => {
+  const attemptId = await consumedAttempt();
+  await recorded(attemptId, { kind: "merge", result: "unknown" });
+  // The attempt is still open: a hand-built system release is refused by the trigger.
+  const sequence = ((await latchEvents()).length) + 1;
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const auditLogId = await writeSystemAuditLog({ tx, systemActor: "qa-release-merge-lane",
+      action: "qa_release.merge_lane_system_released", targetType: "QaReleaseMergeLaneLatch", targetId: String(sequence), summary: "test" });
+    await tx.$executeRaw`INSERT INTO "QaReleaseMergeLaneLatch" ("sequence", "latched", "reason", "attemptId", "auditLogId")
+      VALUES (${sequence}, false, NULL, NULL, ${auditLogId})`;
+  }), /releases only a latch whose every cause it read again and closed/);
+  // Any other lane action is still not a release.
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const auditLogId = await writeSystemAuditLog({ tx, systemActor: "qa-release-merge-lane",
+      action: "qa_release.merge_lane_latched", targetType: "QaReleaseMergeLaneLatch", targetId: String(sequence), summary: "test" });
+    await tx.$executeRaw`INSERT INTO "QaReleaseMergeLaneLatch" ("sequence", "latched", "reason", "attemptId", "auditLogId")
+      VALUES (${sequence}, false, NULL, NULL, ${auditLogId})`;
+  }), /released by a person or by the lane/);
   await prisma.notificationDelivery.deleteMany({ where: { kind: "qa_release_merge_lane_latched" } });
 });

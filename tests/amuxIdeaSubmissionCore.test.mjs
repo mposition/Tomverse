@@ -2,10 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  AMUX_V4_IDEA_READBACK_CODE_LATCH,
-  AMUX_V4_IDEA_SUBMISSION_CODE_LATCH,
-  ideaSubmissionReadBackPermitted,
-  ideaSubmissionWritePermitted,
   inspectAmuxIdeaSubmission,
   isIdeaRequestIdUniqueViolation,
   submissionFailureKind,
@@ -28,16 +24,6 @@ test("submission parser accepts only a bounded exact v4 envelope", () => {
   assert.deepEqual(inspectAmuxIdeaSubmission(submission({ input: { ...input, unexpected: 1 } })), { ok: false, code: "schema_rejected" });
   assert.deepEqual(inspectAmuxIdeaSubmission(submission({ input: { ...input, idea: "" } })), { ok: false, code: "metadata_incomplete" });
   assert.deepEqual(inspectAmuxIdeaSubmission("{").code, "schema_rejected");
-});
-
-test("v4 submission and read-back require their separate environment gates", () => {
-  assert.equal(AMUX_V4_IDEA_SUBMISSION_CODE_LATCH, true);
-  assert.equal(ideaSubmissionWritePermitted(undefined), false);
-  assert.equal(ideaSubmissionWritePermitted("disabled"), false);
-  assert.equal(ideaSubmissionWritePermitted("enabled"), true);
-  assert.equal(AMUX_V4_IDEA_READBACK_CODE_LATCH, true);
-  assert.equal(ideaSubmissionReadBackPermitted(undefined), false);
-  assert.equal(ideaSubmissionReadBackPermitted("enabled"), true);
 });
 
 test("only a request-id unique conflict is labeled already seen", () => {

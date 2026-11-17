@@ -466,8 +466,14 @@ export type DmCleanupOutcome = { status: "verified" } | { status: "cleanup_unkno
  * output could never be recorded.
  */
 export const DM_LAUNCH_OUTPUT_MAX_BYTES = 256 * 1024;
-/** stdout kept in memory; beyond it the stream is drained and the run is `output_too_large`. */
-export const DM_LAUNCH_STDOUT_MAX_BYTES = 16 * 1024 * 1024;
+/**
+ * stdout kept in memory; beyond it the stream is drained and the run is
+ * `output_too_large`. A memory backstop only (owner direction 2026-11-16; it
+ * was 16 MiB): codex's event stream carries every command it ran in its
+ * workspace, and a long run's stream must not lose the result the `-o` file
+ * holds.
+ */
+export const DM_LAUNCH_STDOUT_MAX_BYTES = 256 * 1024 * 1024;
 
 // ---------------------------------------------------------------------------
 // The execution plan

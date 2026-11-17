@@ -49,13 +49,32 @@ export const CI_FIX_COMMIT_PREFIX = "auto-fix(ci): ";
 export const CI_FIX_MAX_RUN_IDS = 8;
 /** workflow_dispatch takes 65,535 characters of inputs in all. */
 export const CI_FIX_MAX_PATCH_CHARS = 60_000;
-// Internal development flow (owner decision 2026-11-15): the model reads far more of the log.
-export const CI_FIX_MAX_LOG_CHARS = 240_000;
+// Internal development flow (owner decisions 2026-11-15 and 2026-11-16). The log
+// goes to the subscription Claude CLI as a file it reads, not as a billed API
+// request, so this is not a cost cap: it keeps the file within the CLI's own
+// 200,000-token context (about 150,000 tokens at four characters each). The
+// excerpt picks failure lines, so an ordinary failure is far below it.
+export const CI_FIX_MAX_LOG_CHARS = 600_000;
 export const CI_FIX_LEDGER_DAYS = 90;
-/** The sender ignores a request older than 48 hours; this side clears a month-old one. */
+/**
+ * A request file this old is long handled (the sender sends within minutes,
+ * backing off at most half an hour while GitHub refuses), so this side
+ * clears it from the outbox. Disk hygiene, not a deadline: the sender no
+ * longer drops a request for its age.
+ */
 export const CI_FIX_OUTBOX_KEEP_MS = 30 * 86_400_000;
-/** The sender's own hourly cap: queueing no faster means nothing waits there to expire. */
-export const CI_FIX_MAX_QUEUED_PER_HOUR = 60;
+/**
+ * A head that failed for a reason that says nothing about its code (the model
+ * crashed or ran out of time, a pass broke, the fix was never published, a
+ * registry did not answer) is tried again by itself, later each time: the
+ * wait before try n+1 is 30 minutes doubled per earlier try, at most six
+ * hours. No person has to ask and no count ends it (owner 2026-11-16); the
+ * account's quota floor is what bounds it.
+ */
+export const CI_FIX_AUTO_RETRY_BASE_MS = 30 * 60_000;
+export const CI_FIX_AUTO_RETRY_MAX_MS = 6 * 3_600_000;
+export const ciFixAutoRetryDelayMs = (attempts) =>
+  Math.min(CI_FIX_AUTO_RETRY_BASE_MS * 2 ** Math.max(0, Math.min(Number.isFinite(attempts) ? attempts : 1, 30) - 1), CI_FIX_AUTO_RETRY_MAX_MS);
 /**
  * How much of each job log is read: its last 16 MB. The excerpt, not this
  * read, is what the model sees; a failure line can sit far from the end,
@@ -76,10 +95,10 @@ export const CI_FIX_NPM_MIN_MAJOR = 10;
 /**
  * The label CI admission puts on a pull request when the operator asks for
  * another try (Admin › Agent digests › CI admission, "Analyse again"): a head
- * already tried and not fixed is tried once more. Only a label put on after
- * that head's try counts (its "labeled" event, read from GitHub), so a label
- * left from an earlier head never retries a later one. The admission round
- * takes the label off once it has done its work.
+ * already tried and not fixed is tried again, as often as it is asked. Only a
+ * label put on after that head's latest try counts (its "labeled" event, read
+ * from GitHub), so a label left from an earlier head or try never retries a
+ * later one. The admission round takes the label off once it has done its work.
  */
 export const CI_FIX_AGAIN_LABEL = "ci:fix-again";
 /**
@@ -92,7 +111,20 @@ export const CI_FIX_SETTLED = Object.freeze(["pushed", "superseded", "not_publis
 /** Outcomes a retry may follow: the head was tried and nothing changed it. */
 const RETRYABLE_OUTCOMES = new Set([
   "no_change", "model_failed", "model_timeout", "patch_refused", "patch_too_large", "error", "not_published", "digest_unresolved",
+  // Written by a server that stopped after two fixes (the count is gone): its heads may go on.
+  "attempts_exhausted",
+  // The PR moved on or closed: tried again only when the operator's label asks (retryable).
   "obsolete",
+]);
+/**
+ * The outcomes that are not an answer about this head, so another try can
+ * differ: it is retried with backoff and nobody has to ask. The model's own
+ * answers (no_change, patch_refused, patch_too_large) are not here: a second
+ * ask gets the same answer from the same log, and an operator's label asks for
+ * it anyway. Nor is `obsolete`: the head is no longer the PR's.
+ */
+const AUTO_RETRY_OUTCOMES = new Set([
+  "model_failed", "model_timeout", "error", "not_published", "digest_unresolved", "attempts_exhausted",
 ]);
 /**
  * Registries an image digest is looked up from (resolveImageDigests): the
@@ -288,20 +320,27 @@ export function ciFixAbility({ kind, install = false, regenerate = false }) {
 }
 
 /**
- * Whether a head already in the ledger may be tried once more, and why:
- * `"label"` when the label was put on after this head's try (`labelledAt`,
- * ms) and it was not retried by label yet; `"ability"` when the pass can now
- * do something it could not when it tried (`ability`, ciFixAbility) -- a
- * capability turned on or the code updated -- so no person has to ask. Each
- * ability is tried once per head; the hourly cap and the quota still bound it.
+ * Whether a head already in the ledger may be tried again, and why:
+ * `"label"` when the label was put on after this head's latest try
+ * (`labelledAt`, ms), however many tries came before; `"ability"` when the
+ * pass can now do something it could not when it tried (`ability`,
+ * ciFixAbility) -- a capability turned on or the code updated -- so no person
+ * has to ask (each ability is tried once per head); `"auto"` when the try
+ * ended for a reason that says nothing about the head (AUTO_RETRY_OUTCOMES, or
+ * a try that started and never ended) and its backoff has passed
+ * (ciFixAutoRetryDelayMs of the tries so far). The account's quota floor
+ * still bounds all three.
  */
 export function retryable(entry, labelledAt, now, ability = null) {
-  const asked = Number.isFinite(labelledAt) && entry?.retried !== true && labelledAt > (entry?.at ?? Infinity);
-  const changed = typeof ability === "string" && entry?.ability !== ability;
-  if (entry?.outcome === "obsolete" && !asked) return false;
-  if (!asked && !changed) return false;
-  if (entry?.outcome === "started" ? !(now - (entry.at ?? now) > STARTED_STALE_MS) : !RETRYABLE_OUTCOMES.has(entry?.outcome)) return false;
-  return asked ? "label" : "ability";
+  const crashed = entry?.outcome === "started";
+  const started = entry?.at ?? now;
+  if (crashed ? !(now - started > STARTED_STALE_MS) : !RETRYABLE_OUTCOMES.has(entry?.outcome)) return false;
+  const asked = Number.isFinite(labelledAt) && labelledAt > (entry?.at ?? Infinity);
+  if (entry?.outcome === "obsolete") return asked ? "label" : false;
+  if (asked) return "label";
+  if (typeof ability === "string" && entry?.ability !== ability) return "ability";
+  if ((crashed || AUTO_RETRY_OUTCOMES.has(entry?.outcome)) && now - started >= ciFixAutoRetryDelayMs(entry?.attempts ?? 1)) return "auto";
+  return false;
 }
 
 /**
@@ -355,6 +394,7 @@ export function ciFixReport(ledger, now) {
       kind: entry.kind === "conflict" ? "conflict" : "ci",
       outcome: typeof entry.outcome === "string" ? entry.outcome : "unknown",
       reason: CI_FIX_RESULT_CODES.includes(entry.reason) ? entry.reason : null,
+      // The latest try on this head began because the label asked for it.
       retried: entry.retried === true,
       // The head a sent fix became, once seen: the screen says "pushed" only while it is the head.
       settled: entry.outcome === "pushed" && /^[0-9a-f]{40}$/.test(entry.settledHead ?? "") ? entry.settledHead : null,
@@ -1075,13 +1115,16 @@ End your answer with exactly one line: "RESULT: fixed" when the resolution leave
 
 /**
  * One pass: pick the oldest open pull request with a failed, settled head
- * not tried before, and try it once -- or once more, when the operator asked
- * by label (CI_FIX_AGAIN_LABEL). With `conflicts` on and no failed CI to
+ * not tried before, and try it -- or try it again, when the operator asked
+ * by label (CI_FIX_AGAIN_LABEL), the pass can do more than before, or the last
+ * try ended for a reason that says nothing about the head and its backoff has
+ * passed (retryable). With `conflicts` on and no failed CI to
  * fix, an open pull request that conflicts with its base is tried the same
  * way: the base merged in, the model resolving the markers.
- * The ledger is written before the model runs, so a crash or a queued
- * request is never tried again on the same head. Nothing is recorded for what
- * the next pass can simply try again (quota, the hourly cap, an unreadable log).
+ * The ledger is written before the model runs, so a try that crashed is
+ * known; a request already queued is never tried again on the same head.
+ * Nothing is recorded for what the next pass can simply try again (quota, an
+ * unreadable log).
  */
 export async function runCiFix({
   config, github, outbox, workDir, model, minRemainingPercent, quota, secrets = [], conflicts = false,
@@ -1097,9 +1140,6 @@ export async function runCiFix({
 
   const pulls = await openPulls(github, undefined, log);
   await settleSentFixes({ ledger, pulls, github, record, now });
-
-  const queuedLastHour = Object.values(ledger).filter((entry) => now - (entry?.queuedAt ?? -Infinity) < 3_600_000).length;
-  if (queuedLastHour >= CI_FIX_MAX_QUEUED_PER_HOUR) return { outcome: "rate_capped" };
 
   // The label's time is read only for a head already tried, labelled now.
   const askedAgain = async (pull, tried) => (tried && labelled(pull, CI_FIX_AGAIN_LABEL) ? againLabelledAt(github, pull.number) : null);
@@ -1153,15 +1193,20 @@ export async function runCiFix({
  */
 const busy = (entry) => entry?.outcome === "started" || entry?.outcome === "queued";
 
-/** Starts a head's entry: a retry starts it afresh; one the label asked for is marked so it is the only one. */
+/**
+ * Starts a head's entry: a retry starts it afresh, keeping only the count of
+ * tries (the backoff grows with it); one the label asked for is marked, so
+ * the screen can tell the operator's ask has been taken up.
+ */
 function start({ ledger, record }, { key, pull, retry, ability }, entry) {
+  const attempts = (ledger[key]?.attempts ?? 0) + 1;
   if (retry === "label") {
     for (const held of [pull.head.sha, `${pull.head.sha}:conflict`]) {
       if (ledger[held]?.outcome === "obsolete") record(held, { outcome: "no_change", reason: "not_found", retried: true });
     }
   }
   if (retry) delete ledger[key];
-  record(key, { pr: pull.number, ...entry, ability, outcome: "started", ...(retry === "label" ? { retried: true } : {}) });
+  record(key, { pr: pull.number, ...entry, ability, attempts, outcome: "started", ...(retry === "label" ? { retried: true } : {}) });
 }
 
 /**

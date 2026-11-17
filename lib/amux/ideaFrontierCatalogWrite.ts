@@ -9,12 +9,8 @@ import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import { prisma } from "@/lib/prisma";
 import {
-  AMUX_V4_FRONTIER_CATALOG_WRITE_ENV,
-  AMUX_V4_FRONTIER_CATALOG_READ_ENV,
   decideFrontierCatalogApprovalVersion,
   frontierApprovalAuditMetadata,
-  frontierCatalogWritePermitted,
-  frontierCatalogReadPermitted,
   frontierRevocationAuditMetadata,
   type FrontierCatalogWriteRequest,
 } from "@/lib/amux/ideaFrontierCatalogWriteCore";
@@ -191,14 +187,6 @@ export async function writeFrontierCatalogDecision(input: {
 }): Promise<FrontierCatalogWriteResult> {
   requireOwner(input.session);
   await assertRecentAdminAuthentication(input.session);
-  if (!frontierCatalogWritePermitted(process.env[AMUX_V4_FRONTIER_CATALOG_WRITE_ENV])) {
-    throw new FrontierCatalogWriteError("write_disabled", 503, input.decision.approvalId);
-  }
-  // Unknown COMMIT outcomes need an independent exact-ID read-back. Never
-  // enable a writer whose read-back gate remains closed.
-  if (!frontierCatalogReadPermitted(process.env[AMUX_V4_FRONTIER_CATALOG_READ_ENV])) {
-    throw new FrontierCatalogWriteError("write_disabled", 503, input.decision.approvalId);
-  }
   if (adminAuditIntegrityKeys(process.env).length === 0) {
     throw new FrontierCatalogWriteError("audit_unavailable", 503, input.decision.approvalId);
   }

@@ -22,6 +22,7 @@ import {
   staleCloseDecisionMakerRequest,
 } from "@/lib/amux/decisionMakerRequestStore";
 import { DM_INSTANCE_SCOPES, type DmInstanceScope } from "@/lib/amux/decisionMakerSwitchCore";
+import { releaseDecisionMakerLatchBySystem } from "@/lib/amux/decisionMakerSwitchStore";
 
 /**
  * The AMUX Decision Maker's system retention work
@@ -44,7 +45,12 @@ import { DM_INSTANCE_SCOPES, type DmInstanceScope } from "@/lib/amux/decisionMak
  * routing and a transmission intent refuse the instance themselves. Since
  * stage S2-2a3 each instance's check is two: §5's cleanup latch first -- the
  * latch a `cleanup_unknown` report owes when the cleanup route's own check did
- * not commit -- and then §8's, each a failure boundary of its own.
+ * not commit -- and then §8's, each a failure boundary of its own. Since
+ * 2026-11-16 a third: the system releases an instance's latch an hour after
+ * it (owner direction: "일정 시간 뒤 자동으로 다시 켭니다"), back to the proposal
+ * mode a person last chose and never over a person's `off`
+ * (`releaseDecisionMakerLatchBySystem`); a latch written in this run is not
+ * an hour old, so it stands until a later run.
  *
  * Every candidate is read first, in one read transaction, and each is then
  * written in a transaction of its own inside the AMUX DB boundary, by the
@@ -127,6 +133,10 @@ export type DecisionMakerRetentionSweepResult = {
   validationLatched: number;
   /** Instances whose latch check failed in this run; each is logged by its code. */
   validationLatchUnsettled: number;
+  /** Instances whose latch the system released in this run (2026-11-16). */
+  latchesReleased: number;
+  /** Instances whose release check failed in this run; each is logged by its code. */
+  latchReleaseUnsettled: number;
   /** Whether the key ring could be loaded; without it no key is rotated in. */
   keyRing: "loaded" | "not_configured" | "malformed";
   keysRotated: number;
@@ -142,6 +152,7 @@ export type DecisionMakerRetentionSweepResult = {
 export type DecisionMakerRetentionSweepDeps = {
   cleanupLatch: (instance: DmInstanceScope) => Promise<{ latched: boolean }>;
   validationLatch: (instance: DmInstanceScope) => Promise<{ latched: boolean }>;
+  latchRelease: (instance: DmInstanceScope) => Promise<{ released: boolean }>;
   readCandidates: () => Promise<DecisionMakerRetentionCandidates>;
   loadKeyRing: () => DmDigestKeyRing;
   rotate: (keyPeriod: number, ring: DmDigestKeyRing) => Promise<{ recorded: boolean }>;
@@ -161,6 +172,10 @@ export const decisionMakerRetentionSweepDeps = (
   validationLatch: (instance) =>
     withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerValidationLatch, (tx) =>
       recordDecisionMakerValidationLatch(tx, { instance }),
+    ),
+  latchRelease: (instance) =>
+    withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerLatchRelease, (tx) =>
+      releaseDecisionMakerLatchBySystem(tx, { instance }),
     ),
   readCandidates: () =>
     withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerRetentionRead, (tx) => readDecisionMakerRetentionCandidates(tx)),
@@ -194,6 +209,7 @@ const SWEEP_ERROR_NAMES: ReadonlySet<string> = new Set([
   "DecisionMakerBodyWriteError",
   "DecisionMakerRequestWriteError",
   "DecisionMakerDigestKeyError",
+  "DecisionMakerSwitchWriteError",
 ]);
 const errorCode = (error: unknown): string | null => {
   if (!(error instanceof Error) || !SWEEP_ERROR_NAMES.has(error.name)) return null;
@@ -219,6 +235,8 @@ export async function runDecisionMakerRetentionSweep(
     cleanupLatchUnsettled: 0,
     validationLatched: 0,
     validationLatchUnsettled: 0,
+    latchesReleased: 0,
+    latchReleaseUnsettled: 0,
     keyRing: "not_configured",
     keysRotated: 0,
     staleClosed: 0,
@@ -262,6 +280,20 @@ export async function runDecisionMakerRetentionSweep(
         JSON.stringify({
           subsystem: "amux",
           event: "decision_maker_validation_latch_check_failed",
+          instance,
+          code: errorCode(error),
+        }),
+      );
+    }
+    try {
+      const written = await deps.latchRelease(instance);
+      if (written.released) result.latchesReleased += 1;
+    } catch (error) {
+      result.latchReleaseUnsettled += 1;
+      console.warn(
+        JSON.stringify({
+          subsystem: "amux",
+          event: "decision_maker_latch_release_check_failed",
           instance,
           code: errorCode(error),
         }),

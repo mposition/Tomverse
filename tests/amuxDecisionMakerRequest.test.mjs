@@ -171,8 +171,9 @@ test("the ledger's vocabularies are the policy's, and no list holds an autonomou
     assert.equal(list.some((value) => /autonom/i.test(value)), false);
   }
   // §2-1, §9, §10 windows, and the commit reserve of lib/amux/dbBoundary.ts.
-  assert.equal(DM_ASSIGNMENT_WINDOW_MS, 2 * 60 * 1000);
-  assert.equal(DM_RESULT_WINDOW_MS, 30 * 60 * 1000);
+  // Owner direction 2026-11-16 (migration 20261116140000_amux_dm_request_windows).
+  assert.equal(DM_ASSIGNMENT_WINDOW_MS, 24 * 60 * 60 * 1000);
+  assert.equal(DM_RESULT_WINDOW_MS, 8 * 60 * 60 * 1000);
   assert.equal(DM_STALE_CLOSE_AFTER_MS, 30 * 24 * 60 * 60 * 1000);
   assert.equal(DM_COMMIT_RESERVE_MS, 200);
   assert.match(read("lib/amux/dbBoundary.ts"), /export const AMUX_DB_COMMIT_RESERVE_MS = 200;/);
@@ -439,6 +440,9 @@ const replaceOnce = (text, from, to, label) => {
 };
 
 const SWITCH_SERIALIZATION_MIGRATION_NAME = "20261008090000_amux_decision_maker_switch_serialization";
+/** Owner direction 2026-11-16: the windows and a late result read back; a system release of a latch. */
+const REQUEST_WINDOWS_MIGRATION_NAME = "20261116140000_amux_dm_request_windows";
+const LATCH_RELEASE_MIGRATION_NAME = "20261116140100_amux_dm_latch_release";
 
 test("stage S2-2a3's migration adds cleanup_unknown to the kinds, once per request, a cleanup latch's named report, and their two guard changes alone", () => {
   const raw = read(CLEANUP_MIGRATION);
@@ -572,8 +576,8 @@ test("stage S2-2a3's migration adds cleanup_unknown to the kinds, once per reque
   // but stage S2-2a4's and stage S2-2b4's for the event guard, whose own tests hold each to its previous
   // body: these are the bodies the database runs, or the one the next replacement is pinned to.
   for (const [name, previous, successors] of [
-    ["amux_decision_maker_request_event_guard", JUDGMENT_MIGRATION_NAME, [BOUNDARY_MIGRATION_NAME, DELIVERY_GAPS_MIGRATION_NAME]],
-    ["amux_decision_maker_switch_event_guard", SWITCH_SERIALIZATION_MIGRATION_NAME, []],
+    ["amux_decision_maker_request_event_guard", JUDGMENT_MIGRATION_NAME, [BOUNDARY_MIGRATION_NAME, DELIVERY_GAPS_MIGRATION_NAME, REQUEST_WINDOWS_MIGRATION_NAME]],
+    ["amux_decision_maker_switch_event_guard", SWITCH_SERIALIZATION_MIGRATION_NAME, [LATCH_RELEASE_MIGRATION_NAME]],
   ]) {
     const redefining = readdirSync(join(root, "prisma/migrations"))
       .filter((migration) => migration > previous && migration !== CLEANUP_MIGRATION_NAME && !successors.includes(migration))
@@ -660,10 +664,11 @@ test("stage S2-2a4's migration records on a result the switch state it was admit
   assert.match(sql, /^BEGIN;$/m);
   assert.match(sql, /^COMMIT;$/m);
 
-  // No later migration but stage S2-2b4's redefines the event guard; that one's own test holds it to this
-  // body, line by line.
+  // No later migration but stage S2-2b4's and the 2026-11-16 windows' redefines the event guard; each
+  // one's own test holds it to the body before it, line by line.
   const redefining = readdirSync(join(root, "prisma/migrations"))
-    .filter((migration) => migration > BOUNDARY_MIGRATION_NAME && migration !== DELIVERY_GAPS_MIGRATION_NAME)
+    .filter((migration) => migration > BOUNDARY_MIGRATION_NAME && migration !== DELIVERY_GAPS_MIGRATION_NAME &&
+      migration !== REQUEST_WINDOWS_MIGRATION_NAME)
     .filter((migration) => {
       try {
         return /FUNCTION "amux_decision_maker_request_event_guard"\(/.test(read(`prisma/migrations/${migration}/migration.sql`));
@@ -874,7 +879,9 @@ const STATES = {
   transmitted: stateRow(TRANSMITTED),
   receipted: stateRow({ ...TRANSMITTED, transmitOutcome: "transmit_receipt" }),
   terminal: stateRow({ ...TRANSMITTED, ...TERMINAL }),
-  resultUnknown: stateRow({ ...TRANSMITTED, resultUnknown: true }),
+  resultUnknown: stateRow({ ...TRANSMITTED, resultUnknown: true, resultUnknownDigest: DIGEST_A }),
+  // Owner direction 2026-11-16: the unknown names the digest the attempts carry -- the output read back.
+  resultUnknownSameDigest: stateRow({ ...TRANSMITTED, resultUnknown: true, resultUnknownDigest: DIGEST_D }),
   discarded: stateRow({ ...ASSIGNED, closingKind: "assign_discarded" }),
   staleClosed: stateRow({ ...TRANSMITTED, closingKind: "stale_close" }),
   assignmentLate: stateRow({ dbNowEpochMs: BigInt(NOW - 10_000 + DM_ASSIGNMENT_WINDOW_MS - DM_COMMIT_RESERVE_MS) }),
@@ -1009,6 +1016,15 @@ const GRAPH = {
     stale_close: "not_stale",
     cleanup_unknown: null,
   },
+  resultUnknownSameDigest: {
+    assign_discarded: "already_transmitted",
+    transmit_intent: "already_transmitted",
+    proposal: null,
+    proposal_without_payload: "payload_mismatch",
+    timeout: null,
+    unavailable_before_intent: "payload_mismatch",
+    result_unknown: "result_unknown_recorded",
+  },
   discarded: {
     assign: "closed",
     assign_discarded: "closed",
@@ -1115,6 +1131,8 @@ test("a rejection is recorded whenever it can be, with a reason the ledger's sta
     ["terminal", "terminal_exists", null],
     ["transmitted", "terminal_exists", "reason_inconsistent"],
     ["resultUnknown", "result_unknown", null],
+    // The digest the unknown names is no "unknown" to reject: it is accepted.
+    ["resultUnknownSameDigest", "result_unknown", "reason_inconsistent"],
     ["transmitted", "result_unknown", "reason_inconsistent"],
     ["fresh", "not_transmitted", null],
     ["assigned", "not_transmitted", null],
@@ -1244,6 +1262,8 @@ test("a submission is idempotent on its pair, and otherwise becomes the one resu
   assert.deepEqual(outcome("discarded"), { outcome: "reject", reason: "request_closed" });
   assert.deepEqual(outcome("operator"), { outcome: "reject", reason: "request_closed" });
   assert.deepEqual(outcome("resultUnknown"), { outcome: "reject", reason: "result_unknown" });
+  // The output the submitter lost and read back by its digest is accepted (owner direction 2026-11-16).
+  assert.deepEqual(outcome("resultUnknownSameDigest"), { outcome: "accept" });
   assert.deepEqual(outcome("assigned"), { outcome: "reject", reason: "not_transmitted" });
   assert.deepEqual(outcome("fresh"), { outcome: "reject", reason: "not_transmitted" });
   assert.deepEqual(outcome("transmittedLate"), { outcome: "reject", reason: "deadline_passed" });
@@ -1619,7 +1639,7 @@ const SWITCH_READ = new RegExp(
     String.raw`r\."releasedAtEpochMs" AS "validationReleasedAtEpochMs"`,
     String.raw`FROM \(\s+SELECT DISTINCT ON \("scope"\) "scope", "value"\s+FROM "AmuxDecisionMakerSwitchEvent"\s+ORDER BY "scope", "sequence" DESC\s+\) n`,
     String.raw`LEFT JOIN LATERAL \(\s+SELECT l\."sequence"\s+FROM "AmuxDecisionMakerSwitchEvent" l\s+WHERE l\."scope" = n\."scope" AND l\."reasonCode" = 'validation_latch'\s+ORDER BY l\."sequence" DESC\s+LIMIT 1\s+\) v ON true`,
-    String.raw`LEFT JOIN LATERAL \(\s+SELECT h\."sequence", floor\(extract\(epoch FROM h\."createdAt"\) \* 1000\)::bigint AS "releasedAtEpochMs"\s+FROM "AmuxDecisionMakerSwitchEvent" h\s+WHERE h\."scope" = n\."scope" AND h\."actorKind" = 'human' AND h\."sequence" > v\."sequence"\s+ORDER BY h\."sequence" ASC\s+LIMIT 1\s+\) r ON true`,
+    String.raw`LEFT JOIN LATERAL \(\s+SELECT h\."sequence", floor\(extract\(epoch FROM h\."createdAt"\) \* 1000\)::bigint AS "releasedAtEpochMs"\s+FROM "AmuxDecisionMakerSwitchEvent" h\s+WHERE h\."scope" = n\."scope" AND \(h\."actorKind" = 'human' OR h\."reasonCode" = 'latch_release'\)\s+AND h\."sequence" > v\."sequence"\s+ORDER BY h\."sequence" ASC\s+LIMIT 1\s+\) r ON true`,
   ].join(String.raw`\s+`),
 );
 
@@ -2979,4 +2999,86 @@ test("§5 review r-20261017-123200-7609b7: a cleanup latch of an earlier report 
   assert.deepEqual(await recordDecisionMakerCleanupLatch(settled.tx, { instance: OPENAI }), { latched: false, reason: "latched" });
   const free = recordingTx(bAfterALatch(REPORT_B));
   assert.equal((await recordDecisionMakerRequest(free.tx, { binding: routingBinding(), card: routedCard(), keyRing: RING })).route, "dm_proposal");
+});
+
+// ---------------------------------------------------------------------------
+// Owner direction 2026-11-16: 20261116140000_amux_dm_request_windows
+// ---------------------------------------------------------------------------
+
+test("the 2026-11-16 windows migration pins both guards and changes only the windows and the late result", () => {
+  const raw = read(`prisma/migrations/${REQUEST_WINDOWS_MIGRATION_NAME}/migration.sql`);
+  const ledger = read(LEDGER_MIGRATION);
+  const gaps = read(`prisma/migrations/${DELIVERY_GAPS_MIGRATION_NAME}/migration.sql`);
+  const before = {
+    amux_decision_maker_request_guard: functionBody(ledger, "amux_decision_maker_request_guard"),
+    amux_decision_maker_request_event_guard: functionBody(gaps, "amux_decision_maker_request_event_guard"),
+  };
+  const after = (name) => functionBody(raw, name);
+  // The header declares the event guard's replacement; the DO block pins both.
+  assert.equal(
+    raw.split("\n")[0],
+    `-- baseline-check: replace-function-if-body-sha256 "amux_decision_maker_request_event_guard" "${sha256(bodyOf(before.amux_decision_maker_request_event_guard))}" "${sha256(bodyOf(after("amux_decision_maker_request_event_guard")))}"`,
+  );
+  const pins = Object.fromEntries([...raw.matchAll(/^ {12}\('([0-9a-f]{64})', '(amux_decision_maker_[a-z_]+)'\),?$/gm)].map((m) => [m[2], m[1]]));
+  assert.deepEqual(pins, Object.fromEntries(Object.entries(before).map(([name, fn]) => [name, sha256(bodyOf(fn))])));
+
+  let request = before.amux_decision_maker_request_guard;
+  request = replaceOnce(
+    request,
+    `    NEW."assignmentDeadlineAt" := NEW."createdAt" + INTERVAL '2 minutes';`,
+    `    -- Owner direction 2026-11-16: a day to take the assignment (it was two\n` +
+      `    -- minutes), so a relay that was down or slow still takes the request.\n` +
+      `    NEW."assignmentDeadlineAt" := NEW."createdAt" + INTERVAL '24 hours';`,
+    "assignment window",
+  );
+  assert.equal(after("amux_decision_maker_request_guard"), request);
+  assert.equal(DM_ASSIGNMENT_WINDOW_MS, 24 * 60 * 60 * 1000);
+
+  let event = before.amux_decision_maker_request_event_guard;
+  event = replaceOnce(event, "    has_result_unknown BOOLEAN;\n", "    has_result_unknown BOOLEAN;\n    unknown_digest TEXT;\n", "declare");
+  event = replaceOnce(
+    event,
+    "                coalesce(bool_or(\"kind\" = ''result_unknown''), false),\n",
+    "                coalesce(bool_or(\"kind\" = ''result_unknown''), false),\n" +
+      "                max(\"resultDigest\") FILTER (WHERE \"kind\" = ''result_unknown''),\n",
+    "select",
+  );
+  event = replaceOnce(event, "has_result_unknown, has_cleanup_unknown, closed\n", "has_result_unknown, unknown_digest, has_cleanup_unknown, closed\n", "into");
+  event = replaceOnce(
+    event,
+    "        WHEN 'result' THEN\n            assigned AND NOT closed AND NOT has_result AND NOT has_result_unknown\n",
+    "        -- Owner direction 2026-11-16: a result whose answer the submitter\n" +
+      "        -- lost, and which it recorded as unknown, is accepted when it comes\n" +
+      "        -- again with the digest the unknown names -- the read-back that\n" +
+      "        -- proves it is the same output -- inside the same deadline.\n" +
+      "        WHEN 'result' THEN\n" +
+      "            assigned AND NOT closed AND NOT has_result\n" +
+      "            AND (NOT has_result_unknown OR NEW.\"resultDigest\" IS NOT DISTINCT FROM unknown_digest)\n",
+    "late result",
+  );
+  event = replaceOnce(
+    event,
+    "                WHEN 'result_unknown' THEN has_result_unknown\n",
+    "                WHEN 'result_unknown' THEN has_result_unknown AND NEW.\"resultDigest\" IS DISTINCT FROM unknown_digest\n",
+    "unknown rejection",
+  );
+  event = replaceOnce(
+    event,
+    `        NEW."resultDeadlineAt" := NEW."createdAt" + INTERVAL '30 minutes';`,
+    `        -- Owner direction 2026-11-16: eight hours (it was 30 minutes), past\n` +
+      `        -- the broker's answer deadline (3 hours 4 minutes).\n` +
+      `        NEW."resultDeadlineAt" := NEW."createdAt" + INTERVAL '8 hours';`,
+    "result window",
+  );
+  assert.equal(after("amux_decision_maker_request_event_guard"), event);
+  assert.equal(DM_RESULT_WINDOW_MS, 8 * 60 * 60 * 1000);
+  // The stale close (§10's retention) is unchanged.
+  assert.match(event, /NOT closed AND now_at >= request_created_at \+ INTERVAL '720 hours'/);
+
+  const statements = raw.split("\n").filter((line) => !line.startsWith("--")).join("\n");
+  assert.deepEqual([...statements.matchAll(/^CREATE OR REPLACE FUNCTION "([a-z_]+)"/gm)].map((m) => m[1]), Object.keys(before));
+  assert.doesNotMatch(statements, /^CREATE TABLE |^ALTER TABLE |^CREATE (UNIQUE )?INDEX |^CREATE TRIGGER |^DROP |^INSERT\b|^UPDATE\b|^DELETE\b/im);
+  assert.ok(statements.indexOf("DO $pin$") < statements.indexOf("CREATE OR REPLACE FUNCTION"));
+  assert.match(statements, /^BEGIN;$/m);
+  assert.match(statements, /^COMMIT;$/m);
 });

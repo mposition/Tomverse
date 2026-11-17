@@ -262,7 +262,6 @@ export function AmuxWorkersOverviewView({
   cm,
   overview,
   isOwner,
-  writesLatch,
   filter,
   query,
   openWorker,
@@ -301,7 +300,6 @@ export function AmuxWorkersOverviewView({
   cm: CapabilityMessages;
   overview: AmuxWorkerOverview | null;
   isOwner: boolean;
-  writesLatch: boolean;
   filter: AmuxWorkerOverviewFilter;
   query: string;
   openWorker: string | null;
@@ -343,7 +341,7 @@ export function AmuxWorkersOverviewView({
   onRegister?: (request: AmuxWorkerRegistrationRequest) => void;
 }) {
   const busy = pending !== null;
-  const canChange = isOwner && writesLatch;
+  const canChange = isOwner;
   const models = cliModels ?? null;
   // The model a worker runs: its one-shot model when it takes Tasks.
   const usedModel = (row: AmuxWorkerOverviewRow) => row.capability?.current?.capability.v22?.model || row.model;
@@ -548,7 +546,6 @@ export function AmuxWorkersOverviewView({
                   cliModel={linkModel}
                   choice={link.choice}
                   busy={link.busy || capabilityBusy || busy}
-                  writesLatch={writesLatch}
                   onChoose={onLinkChoose!}
                   onSave={onLinkSave!}
                 />
@@ -571,7 +568,6 @@ export function AmuxWorkersOverviewView({
                   row={row.capability}
                   form={form}
                   busy={capabilityBusy}
-                  writesLatch={writesLatch}
                   cliModels={models}
                   onChange={onEditChange}
                   onCancel={onEditCancel}
@@ -610,7 +606,7 @@ export function AmuxWorkersOverviewView({
                 <div className="flex flex-wrap gap-2">{changeButtons(row)}</div>
               ) : (
                 <p className="text-sm text-zinc-300" data-testid="amux-worker-drawer-read-only">
-                  {!isOwner ? m.drawer.readOnlyNote : !writesLatch ? m.writesOff : m.drawer.none}
+                  {!isOwner ? m.drawer.readOnlyNote : m.drawer.none}
                 </p>
               )}
               <p className="text-sm text-zinc-400">{m.drawer.switchHelp}</p>
@@ -645,7 +641,7 @@ export function AmuxWorkersOverviewView({
         <h2 className="text-lg font-semibold text-zinc-100">{m.title}</h2>
         <p className="mt-1 text-sm text-zinc-300">{m.description}</p>
       </div>
-      {isOwner ? (writesLatch ? null : <p className="text-sm text-amber-300" data-testid="amux-workers-writes-off">{m.writesOff}</p>) : (
+      {isOwner ? null : (
         <p className="text-sm text-zinc-300" data-testid="amux-workers-read-only">{m.readOnly}</p>
       )}
       {overview.liveReadable ? null : <p role="alert" className="text-sm text-amber-300" data-testid="amux-workers-live-unread">{m.liveUnread}</p>}
@@ -794,7 +790,7 @@ export function AmuxWorkersOverviewView({
             <button
               type="button"
               className={`${buttonClass} w-fit`}
-              disabled={busy || !writesLatch}
+              disabled={busy}
               onClick={() => onSeed(seedEntries)}
               data-testid="amux-workers-seed-register"
             >
@@ -842,7 +838,6 @@ export function AmuxWorkersOverviewPanel({
   readAtMs,
   isOwner,
   health = null,
-  nonClaudeQuotaGate = false,
 }: {
   registry: AmuxWorkerRegistryAdminView | null;
   capabilities: AmuxWorkerCapabilityAdminView | null;
@@ -852,7 +847,6 @@ export function AmuxWorkersOverviewPanel({
   isOwner: boolean;
   /** Each worker's quarantine, usage reading and box signals; null when unread. */
   health?: Readonly<Record<string, AmuxWorkerHealthView>> | null;
-  nonClaudeQuotaGate?: boolean;
 }) {
   const m = useAdminMessages(adminAmuxWorkersMessages) as Messages;
   const cm = useAdminMessages(adminAmuxWorkerCapabilityMessages) as CapabilityMessages;
@@ -884,8 +878,8 @@ export function AmuxWorkersOverviewPanel({
 
   const overview = useMemo(
     () => buildAmuxWorkerOverview({ registry: registryView, capabilities: capabilityView, live,
-      nowMs: readAtMs, health, nonClaudeQuotaGate }),
-    [registryView, capabilityView, live, readAtMs, health, nonClaudeQuotaGate],
+      nowMs: readAtMs, health }),
+    [registryView, capabilityView, live, readAtMs, health],
   );
 
   const applyRegistry = (changes: AmuxWorkerRegistryUpdate) => {
@@ -1001,7 +995,6 @@ export function AmuxWorkersOverviewPanel({
       cm={cm}
       overview={overview}
       isOwner={isOwner}
-      writesLatch={registryView?.writesLatch ?? false}
       filter={filter}
       query={query}
       openWorker={openWorker}

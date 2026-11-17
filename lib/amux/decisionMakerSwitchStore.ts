@@ -9,8 +9,10 @@ import {
   DM_SWITCH_AUDIT_TARGET_TYPE,
   decisionMakerSwitchReadFromRows,
   decisionMakerSwitchStateFromRows,
+  dmLatchSystemReleaseDue,
   dmOperatorSwitchAction,
   dmSwitchAuditMetadata,
+  isDmInstanceScope,
   parseDmOperatorSwitchChange,
   parseDmSwitchLatch,
   unreadableDecisionMakerSwitches,
@@ -18,7 +20,10 @@ import {
   type DecisionMakerSwitchState,
   type DmSwitchActorKind,
 } from "@/lib/amux/decisionMakerSwitchCore";
-import { writeDecisionMakerLatchAudit } from "@/lib/amux/decisionMakerSwitchSystemAudit";
+import {
+  writeDecisionMakerLatchAudit,
+  writeDecisionMakerLatchReleaseAudit,
+} from "@/lib/amux/decisionMakerSwitchSystemAudit";
 
 /**
  * The one module that reads and writes `AmuxDecisionMakerSwitchEvent`
@@ -117,8 +122,9 @@ export async function readDecisionMakerSwitchRowsForAdmin(
  * database millisecond (review r-20261017-123200-7609b7).
  *
  * Since stage S2-2a4 the boundary is the scope's newest `validation_latch`
- * and the first person's event after it -- which the switch guard requires to
- * be `amux.decision.latch_release` -- with that release's own sequence and
+ * and the first release after it -- a person's event, which the switch guard
+ * requires to be `amux.decision.latch_release`, or since 2026-11-16 the
+ * system's own release (`latch_release`) -- with that release's own sequence and
  * database clock (`DmValidationCountBoundary`), in place of the scope's
  * newest event of any kind: a person's ordinary mode change, a cleanup latch
  * and its release are not where §8's count starts. A result is placed against
@@ -167,7 +173,8 @@ export async function readDecisionMakerSwitchesWithBoundariesOrThrow(
     LEFT JOIN LATERAL (
       SELECT h."sequence", floor(extract(epoch FROM h."createdAt") * 1000)::bigint AS "releasedAtEpochMs"
       FROM "AmuxDecisionMakerSwitchEvent" h
-      WHERE h."scope" = n."scope" AND h."actorKind" = 'human' AND h."sequence" > v."sequence"
+      WHERE h."scope" = n."scope" AND (h."actorKind" = 'human' OR h."reasonCode" = 'latch_release')
+        AND h."sequence" > v."sequence"
       ORDER BY h."sequence" ASC
       LIMIT 1
     ) r ON true
@@ -239,8 +246,8 @@ export async function recordDecisionMakerSwitchByOperator(
   }
 
   await takeAuditChainLock(tx);
-  const newest = await tx.$queryRaw<Array<{ actorKind: string; value: string }>>`
-    SELECT "actorKind", "value"
+  const newest = await tx.$queryRaw<Array<{ actorKind: string; value: string; reasonCode: string }>>`
+    SELECT "actorKind", "value", "reasonCode"
     FROM "AmuxDecisionMakerSwitchEvent"
     WHERE "scope" = ${change.scope}
     ORDER BY "sequence" DESC
@@ -248,7 +255,7 @@ export async function recordDecisionMakerSwitchByOperator(
   `;
   const previous = newest[0] ?? null;
   const action = dmOperatorSwitchAction(
-    previous === null ? null : (previous.actorKind as DmSwitchActorKind),
+    previous === null ? null : { actorKind: previous.actorKind as DmSwitchActorKind, reasonCode: previous.reasonCode },
   );
   const eventId = randomUUID();
   const auditLogId = await writeAdminAuditLog({
@@ -330,4 +337,91 @@ export async function latchDecisionMakerInstanceOff(
       floor(extract(epoch FROM "createdAt") * 1000)::bigint AS "createdAtEpochMs"
   `;
   return eventRecord(eventId, auditLogId, inserted);
+}
+
+/**
+ * The system releases an instance's latch an hour after it (owner direction
+ * 2026-11-16: "일정 시간 뒤 자동으로 다시 켭니다"; migration
+ * 20261116140100_amux_dm_latch_release). In the caller's transaction, in this
+ * order: the audit chain lock (every switch change takes it before it
+ * writes, so the read below is still the newest when this commits), the
+ * scope's newest event with the person's newest value and the database clock
+ * in one statement, and -- only when `dmLatchSystemReleaseDue()` -- the
+ * instance's own system audit under `amux.decision.latch_release` and the
+ * event naming it: back to `proposal`, the mode the person last chose. An
+ * instance a person turned off is never turned on; the guard refuses it too.
+ *
+ * §8's count starts again at the release; a cleanup latch's report stays
+ * settled (its newest cleanup latch still names it).
+ *
+ * Statements: 1 lock, 1 read -- 2 when nothing is due; then the system
+ * writer's 3 (4 with an integrity key) and 1 insert -- 6, or 7.
+ */
+export async function releaseDecisionMakerLatchBySystem(
+  tx: Prisma.TransactionClient,
+  input: { instance: unknown },
+): Promise<{ released: false } | ({ released: true } & DecisionMakerSwitchEventRecord)> {
+  if (!isDmInstanceScope(input.instance)) throw new DecisionMakerSwitchWriteError("invalid_latch");
+  const instance = input.instance;
+  await takeAuditChainLock(tx);
+  const rows = await tx.$queryRaw<
+    Array<{
+      actorKind: string | null;
+      reasonCode: string | null;
+      createdAtEpochMs: bigint | number | null;
+      operatorValue: string | null;
+      dbNowEpochMs: bigint | number;
+    }>
+  >`
+    SELECT
+      n."actorKind", n."reasonCode",
+      floor(extract(epoch FROM n."createdAt") * 1000)::bigint AS "createdAtEpochMs",
+      (
+        SELECT h."value" FROM "AmuxDecisionMakerSwitchEvent" h
+        WHERE h."scope" = ${instance} AND h."actorKind" = 'human'
+        ORDER BY h."sequence" DESC LIMIT 1
+      ) AS "operatorValue",
+      floor(extract(epoch FROM clock_timestamp()) * 1000)::bigint AS "dbNowEpochMs"
+    FROM (SELECT 1) one
+    LEFT JOIN LATERAL (
+      SELECT e."actorKind", e."reasonCode", e."createdAt"
+      FROM "AmuxDecisionMakerSwitchEvent" e
+      WHERE e."scope" = ${instance}
+      ORDER BY e."sequence" DESC
+      LIMIT 1
+    ) n ON true
+  `;
+  const row = rows[0];
+  if (!row) return { released: false };
+  const due = dmLatchSystemReleaseDue({
+    newest:
+      row.actorKind === null || row.createdAtEpochMs === null
+        ? null
+        : { actorKind: row.actorKind, reasonCode: row.reasonCode, createdAtMs: Number(row.createdAtEpochMs) },
+    operatorValue: row.operatorValue,
+    dbNowMs: Number(row.dbNowEpochMs),
+  });
+  if (!due) return { released: false };
+  const eventId = randomUUID();
+  const auditLogId = await writeDecisionMakerLatchReleaseAudit(tx, {
+    instance,
+    eventId,
+    metadata: dmSwitchAuditMetadata({
+      event_id: eventId,
+      scope: instance,
+      value: "proposal",
+      reason_code: "latch_release",
+      previous_value: "off",
+    }),
+  });
+  const inserted = await tx.$queryRaw<InsertedRow[]>`
+    INSERT INTO "AmuxDecisionMakerSwitchEvent"
+      ("id", "scope", "value", "reasonCode", "actorKind", "actorUserId", "cleanupEventId", "auditLogId")
+    VALUES
+      (${eventId}, ${instance}, 'proposal', 'latch_release', 'system', NULL, NULL, ${auditLogId})
+    RETURNING
+      "sequence",
+      floor(extract(epoch FROM "createdAt") * 1000)::bigint AS "createdAtEpochMs"
+  `;
+  return { released: true, ...eventRecord(eventId, auditLogId, inserted) };
 }

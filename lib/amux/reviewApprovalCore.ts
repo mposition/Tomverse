@@ -48,8 +48,9 @@ export const amuxV4ReviewReportProjection = (input: {
     input.evidence.workerReport !== null && input.workerReportVerified,
 } : null;
 
+/** `enabled` is the documented value; `true` is what production already holds. */
 export const isAmuxAgentApprovalEnabled = (value: string | undefined) =>
-  value === "true";
+  value === "enabled" || value === "true";
 
 export const amuxReviewApprovalReadiness = (env: {
   TOMVERSE_AMUX_AGENT_APPROVAL_ENABLED?: string;
@@ -209,9 +210,10 @@ export const amuxReviewPublicationMayOpenPr = (items: ReadonlyArray<{
  * must be this exact attempt's stored, readable result (the same evidence
  * that shows the worker report as verified), and no publication work may
  * still open a pull request for it; the attempt budget is checked by the
- * caller. A run whose usage receipt was never reported
- * (`usage_outcome_unknown`) is not retried: the claim would hold every
- * Task on that worker until it is, as the blocked path refuses it too.
+ * caller. A run whose usage receipt was never reported does not hold the
+ * retry (owner decision 2026-11-16): a subscription CLI's unknown usage costs
+ * nothing more and holds no worker (lib/amux/v22WorkerUsageGate.ts), and a
+ * paid route's unknown usage is held by that gate, not here.
  * Approval is unchanged: an implement Task still needs its PR.
  */
 export const amuxV22PrlessReviewRetryAllowed = (input: {
@@ -228,7 +230,6 @@ export const amuxV22PrlessReviewRetryAllowed = (input: {
   input.reviewPrNumber === null && input.attempt !== null &&
   input.attempt.v22AssignmentId !== null &&
   input.attempt.outcome === "succeeded" && input.attempt.toStatus === "review" &&
-  input.attempt.reason !== "usage_outcome_unknown" &&
   input.v4EvidenceVerified && !input.publicationMayOpenPr &&
   !input.displayTruncated && input.displayExact;
 
@@ -261,7 +262,11 @@ export const amuxV22NoChangeCompletionAllowed = (input: {
   displayTruncated: boolean;
   displayExact: boolean;
   patchStored: boolean;
+  // Closing a card as "no change needed" is an approval, not a retry: it still
+  // needs a known run (the database guard of
+  // 20261114120000_amux_review_no_change_unpublished_patch refuses an unknown one).
 }) => input.taskRole === "implement" && !input.patchStored &&
+  input.attempt?.reason !== "usage_outcome_unknown" &&
   amuxV22PrlessReviewRetryAllowed(input);
 
 /**

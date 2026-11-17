@@ -123,7 +123,7 @@ test("invalid identity and uncertain responses fail closed", async () => {
   }
 });
 
-test("a readback after an uncertain write waits longer through a dropped link",
+test("a readback waits through a dropped link exactly as a read does: no budget of its own",
   async () => {
     const attempts = async (readback) => {
       let calls = 0;
@@ -136,7 +136,7 @@ test("a readback after an uncertain write waits longer through a dropped link",
     const readback = await attempts(true);
     assert.equal(read.result.reason, "read_unreachable");
     assert.equal(readback.result.reason, "readback_unreachable");
-    assert.ok(readback.calls > read.calls);
+    assert.equal(readback.calls, read.calls);
     let calls = 0;
     assert.deepEqual(await readAmuxV19SessionBudgetClaimReceipt({
       ...input(async () => {

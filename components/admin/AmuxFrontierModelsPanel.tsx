@@ -64,13 +64,11 @@ export type AmuxBuildPreviewHooks = {
   onRefused: (requestId: string, code: string) => void;
 };
 
-export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAvailable,
-  analysisBudgetAvailable, analysisStopAvailable, ideaId, planReady,
+export function AmuxFrontierModelsPanel({
+  analysisBudgetAvailable, ideaId, planReady,
   declaredExternalSources, operatorId, chunkIndex = 0, build = null, buildRequestId = null,
   ideaText = "", onExecutionApproved, approvalClosed = false }: {
-  available: boolean;
-  previewAvailable: boolean; confirmAvailable: boolean;
-  analysisBudgetAvailable: boolean; analysisStopAvailable: boolean;
+  analysisBudgetAvailable: boolean;
   ideaId: string | null;
   planReady: boolean; declaredExternalSources: boolean; operatorId: string;
   chunkIndex?: number;
@@ -88,7 +86,7 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
   const budgetMessages = useAdminMessages(adminAmuxAnalysisBudgetMessages);
   const { locale } = useAdminLocale();
   const [models, setModels] = useState<AvailableFrontierModel[] | null>(null);
-  const [loading, setLoading] = useState(available);
+  const [loading, setLoading] = useState(true);
   const [failure, setFailure] = useState<AdminApiFailure | null>(null);
   const [selectedApprovalId, setSelectedApprovalId] = useState("");
   const [selectedEffort, setSelectedEffort] = useState("");
@@ -163,20 +161,18 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
         model, effort, chunkIndex);
       if (parsed) {
         setPreview({ kind: "prepared", value: parsed });
-        if (confirmAvailable) {
-          const attempt = readConfirmationAttempt(receiptStore(), operatorId, pendingId,
-            ideaId ?? "", parsed.payloadDigest, parsed.payloadDigestKeyId);
-          if (attempt === "present") {
-            setConfirmation({ kind: "pending" });
-            await readConfirmation(pendingId, ideaId ?? "", parsed.payloadDigest,
-              parsed.payloadDigestKeyId);
-          } else if (attempt === "unavailable") {
-            setConfirmation({ kind: "unknown" });
-          }
+        const attempt = readConfirmationAttempt(receiptStore(), operatorId, pendingId,
+          ideaId ?? "", parsed.payloadDigest, parsed.payloadDigestKeyId);
+        if (attempt === "present") {
+          setConfirmation({ kind: "pending" });
+          await readConfirmation(pendingId, ideaId ?? "", parsed.payloadDigest,
+            parsed.payloadDigestKeyId);
+        } else if (attempt === "unavailable") {
+          setConfirmation({ kind: "unknown" });
         }
         return;
       }
-      if (confirmAvailable && body && typeof body === "object" &&
+      if (body && typeof body === "object" &&
           (body as Record<string, unknown>).state === "unavailable") {
         const attempt = readConfirmationAttemptForPreview(receiptStore(), operatorId,
           pendingId, ideaId ?? "");
@@ -193,11 +189,10 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
       }
       setPreview({ kind: "unknown" });
     } catch { setPreview({ kind: "unknown" }); }
-  }, [chunkIndex, confirmAvailable, ideaId, locale, m.transferPreviewUnknown,
+  }, [chunkIndex, ideaId, locale, m.transferPreviewUnknown,
     operatorId, readConfirmation]);
 
   const load = useCallback(async (signal?: AbortSignal) => {
-    if (!available) return;
     try {
       const response = await adminFetch("/api/admin/amux/ideas/frontier-models?mode=available",
         { cache: "no-store", signal });
@@ -230,7 +225,7 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
           requiresReauthentication: false, approvalId: null });
       }
     } finally { if (!signal?.aborted) setLoading(false); }
-  }, [available, locale, m.frontierModelsUnavailable, m.frontierModelsInvalid]);
+  }, [locale, m.frontierModelsUnavailable, m.frontierModelsInvalid]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -241,7 +236,7 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
   }, [load]);
 
   useEffect(() => {
-    if (!ideaId || !previewAvailable) return;
+    if (!ideaId) return;
     const receipt = readPreviewReceipt(receiptStore(), operatorId, ideaId,
       chunkIndex);
     let active = true;
@@ -255,7 +250,7 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
       }
     });
     return () => { active = false; };
-  }, [chunkIndex, ideaId, operatorId, previewAvailable, readBack]);
+  }, [chunkIndex, ideaId, operatorId, readBack]);
 
   // A build whose answer was lost: once the saved idea's plan reads back as
   // committed, the preview may have been prepared after it, so the receipt
@@ -263,7 +258,7 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
   // exact preview is read back. A plan read back absent is no evidence: the
   // build may still be running, so the receipt is kept until a plan exists.
   useEffect(() => {
-    if (!ideaId || !planReady || !buildRequestId || !previewAvailable || chunkIndex !== 0) return;
+    if (!ideaId || !planReady || !buildRequestId || chunkIndex !== 0) return;
     let active = true;
     queueMicrotask(() => {
       if (!active) return;
@@ -274,7 +269,7 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
       void readBack(receipt.previewId, receipt.model, receipt.effort);
     });
     return () => { active = false; };
-  }, [buildRequestId, chunkIndex, ideaId, operatorId, planReady, previewAvailable, readBack]);
+  }, [buildRequestId, chunkIndex, ideaId, operatorId, planReady, readBack]);
 
   const refresh = () => {
     setLoading(true);
@@ -323,7 +318,7 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
   // unknown answer read back and never retried). A step that does not pass stops here with its own message.
   const [reviewing, setReviewing] = useState(false);
   const startReview = async () => {
-    if (!build?.draft || !selected || !selectedEffort || building || reviewing || ideaId !== null || !previewAvailable) return;
+    if (!build?.draft || !selected || !selectedEffort || building || reviewing || ideaId !== null) return;
     // The draft the operator clicked on is the one that is checked, saved and approved: it is snapshotted here, and the
     // idea cannot be edited until the chain ends (onChain), so the approval screen shows what was saved.
     const draft = build.draft;
@@ -338,7 +333,7 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
 
   // A saved idea whose preview is not prepared yet continues with one button too: eligibility, then the preview.
   const continueReview = async () => {
-    if (!ideaId || !planReady || !previewAvailable || declaredExternalSources || preview.kind !== "idle" || reviewing) return;
+    if (!ideaId || !planReady || declaredExternalSources || preview.kind !== "idle" || reviewing) return;
     setReviewing(true);
     try {
       // The check just answered is passed on: this render's `checked` is still the one before it.
@@ -349,7 +344,7 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
   };
 
   const preparePreview = async (eligibleNow = false) => {
-    if (!ideaId || !previewAvailable || !planReady || declaredExternalSources ||
+    if (!ideaId || !planReady || declaredExternalSources ||
         !selected || !(checked || eligibleNow) ||
         !selected.allowedEfforts.includes(selectedEffort) || preview.kind !== "idle") return;
     const model = selected;
@@ -472,7 +467,7 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
   };
 
   const approveExecution = async () => {
-    if (!confirmAvailable || !ideaId || preview.kind !== "prepared" ||
+    if (!ideaId || preview.kind !== "prepared" ||
         confirmation.kind !== "idle" || !executionPriceId) return;
     const value = preview.value;
     if (!reserveConfirmationAttempt(receiptStore(), operatorId, value.previewId,
@@ -545,7 +540,7 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
   };
 
   const confirmPreview = async () => {
-    if (!confirmAvailable || !ideaId || preview.kind !== "prepared" ||
+    if (!ideaId || preview.kind !== "prepared" ||
         confirmation.kind !== "idle") return;
     const value = preview.value;
     if (!reserveConfirmationAttempt(receiptStore(), operatorId, value.previewId,
@@ -628,10 +623,10 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
         {m.frontierSettingsMoved}{" "}
         <Link href="/admin/amux-settings?tab=analysis" className="font-medium text-blue-300 underline">{m.frontierSettingsLink}</Link>
       </p>
-      {available ? <button type="button" onClick={refresh} disabled={loading || checking}
+      <button type="button" onClick={refresh} disabled={loading || checking}
         className="min-h-11 rounded-lg border px-4 disabled:opacity-50 border-zinc-600">
         {m.frontierModelsRefresh}
-      </button> : null}
+      </button>
       {models && models.length > 0 ? <>
         <label className="flex flex-col gap-1">
           {m.frontierSelectionModel}
@@ -669,7 +664,6 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
   ) : null;
   const modelStatus = (
     <>
-      {!available ? <p>{m.frontierModelsUnavailable}</p> : null}
       {loading ? <p role="status">{m.frontierModelsLoading}</p> : null}
       {failure ? <AdminApiFailureNotice failure={failure} /> : null}
       {models?.length === 0 ? <p role="status">{m.frontierModelsEmpty}</p> : null}
@@ -689,12 +683,11 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
         </details>
         <p className="text-xs text-zinc-400">{m.composeHint}</p>
         <button type="button" onClick={() => void startReview()} data-testid="amux-idea-compose-action"
-          disabled={!build.draft || !selected || !selectedEffort || building || reviewing || !previewAvailable}
+          disabled={!build.draft || !selected || !selectedEffort || building || reviewing}
           aria-busy={building || reviewing}
           className="min-h-11 w-full rounded-lg bg-blue-600 px-4 font-medium text-white hover:bg-blue-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-300 disabled:opacity-50 sm:w-auto">
           {building || reviewing ? m.buildPreviewPending : m.composeAction}
         </button>
-        {!previewAvailable ? <p className="text-xs text-zinc-400">{m.transferPreviewUnavailable}</p> : null}
       </section>
     );
   }
@@ -724,17 +717,16 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
         <div className="mt-2">{modelControls}</div>
       </details>
       {ideaId ? <button type="button" onClick={() => void continueReview()} data-testid="amux-idea-continue-action"
-        disabled={!previewAvailable || !planReady || declaredExternalSources || !selected || !selectedEffort ||
+        disabled={!planReady || declaredExternalSources || !selected || !selectedEffort ||
           reviewing || checking || preview.kind !== "idle"}
         className={`min-h-11 rounded-lg border border-blue-400 px-4 text-blue-200 disabled:opacity-50 ${preview.kind === "idle" ? "" : "hidden"}`}>
         {reviewing ? m.buildPreviewPending : m.continueReviewAction}
       </button> : null}
-      {ideaId && preview.kind === "idle" && !loading && available && (!selected || !selectedEffort) ?
+      {ideaId && preview.kind === "idle" && !loading && (!selected || !selectedEffort) ?
         <p className="text-zinc-400" data-testid="amux-idea-continue-needs-model">{m.continueReviewNeedsModel}</p> : null}
-      {ideaId && !previewAvailable ? <p>{m.transferPreviewUnavailable}</p> : null}
-      {ideaId && previewAvailable && declaredExternalSources ?
+      {ideaId && declaredExternalSources ?
         <p>{m.transferPreviewIdeaOnly}</p> : null}
-      {ideaId && previewAvailable && !declaredExternalSources && !planReady ?
+      {ideaId && !declaredExternalSources && !planReady ?
         <p>{m.transferPreviewPlanRequired}</p> : null}
       {preview.kind === "pending" ? <p role="status">{m.transferPreviewPreparing}</p> : null}
       {preview.kind === "recovery_unavailable" ? <p role="alert">{m.recoveryUnavailable}</p> : null}
@@ -762,11 +754,11 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
           <h4 className="pt-2 font-semibold text-zinc-100">{m.executionStepApprove}</h4>
           <p>{confirmation.kind === "confirmed" ? m.transferConfirmRecordedBoundary :
             m.transferPreviewBoundary}</p>
-          {confirmAvailable && confirmation.kind === "idle" && executionPrice.kind === "loading" ?
+          {confirmation.kind === "idle" && executionPrice.kind === "loading" ?
             <p role="status">{m.executionApprovalPriceLoading}</p> : null}
-          {confirmAvailable && confirmation.kind === "idle" && executionPrice.kind === "error" ?
+          {confirmation.kind === "idle" && executionPrice.kind === "error" ?
             <p role="alert">{m.executionApprovalPriceUnavailable}</p> : null}
-          {confirmAvailable && confirmation.kind === "idle" && executionPriceId ? <>
+          {confirmation.kind === "idle" && executionPriceId ? <>
             <p>{budgetMessages.price}</p>
             <p className="text-xs">{m.executionApprovalBoundary}</p>
             <button type="button" onClick={() => void approveExecution()}
@@ -774,7 +766,7 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
               {m.executionApprovalAction}
             </button>
           </> : null}
-          {confirmAvailable && confirmation.kind === "idle" && executionPrice.kind === "none" ? <button type="button"
+          {confirmation.kind === "idle" && executionPrice.kind === "none" ? <button type="button"
             onClick={() => void confirmPreview()}
             className="min-h-11 rounded-lg border px-4 border-blue-400 text-blue-200">
             {m.transferConfirmAction}
@@ -786,7 +778,7 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
       {confirmation.kind === "confirmed" ? <p role="status">{m.transferConfirmRecorded}</p> : null}
       {confirmation.kind === "confirmed" ? <AmuxAnalysisBudgetPanel
         key={confirmation.value.previewId} confirmed={confirmation.value}
-        available={analysisBudgetAvailable} stopAvailable={analysisStopAvailable} /> : null}
+        available={analysisBudgetAvailable} /> : null}
       {confirmation.kind === "expired" ? <p role="status">{m.transferConfirmExpired}</p> : null}
       {confirmation.kind === "refused" && !failure ?
         <p role="alert">{m.transferConfirmRefused}</p> : null}

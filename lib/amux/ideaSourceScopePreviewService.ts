@@ -10,11 +10,7 @@ import { inspectAmuxIdeaInput } from "./ideaInputCore.ts";
 import { loadCurrentAmuxContentKeys } from "./ideaKeyConfig.ts";
 import { amuxContentKeyRing, loadAmuxContentUnitKeys } from "./ideaKeyStore.ts";
 import { inspectAmuxIdeaSourceScope } from "./ideaSourceScopeCore.ts";
-import {
-  AMUX_V4_SOURCE_SCOPE_PREVIEW_ENV,
-  sourceScopePreviewPermitted,
-  type AmuxSourceScopePreviewRequest,
-} from "./ideaSourceScopePreviewCore.ts";
+import type { AmuxSourceScopePreviewRequest } from "./ideaSourceScopePreviewCore.ts";
 
 export class AmuxSourceScopePreviewError extends Error {
   constructor(readonly code: "preview_disabled" | "not_found" | "idea_unavailable" |
@@ -112,9 +108,6 @@ export async function previewAmuxSourceScope(
   request: AmuxSourceScopePreviewRequest,
 ): Promise<AmuxSourceScopePreview> {
   const actorUserId = ownerId(session);
-  if (!sourceScopePreviewPermitted(process.env[AMUX_V4_SOURCE_SCOPE_PREVIEW_ENV])) {
-    throw new AmuxSourceScopePreviewError("preview_disabled", 503);
-  }
   const owned = await prisma.amuxIdeaSubmission.findFirst({
     where: { id: request.ideaId, actorUserId }, select: { id: true },
   });

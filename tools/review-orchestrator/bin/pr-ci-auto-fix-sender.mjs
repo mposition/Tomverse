@@ -10,10 +10,12 @@
  * the review account. Code the review account can edit must never run here.
  *
  * The outbox is written by the review account, so every request is untrusted:
- * it is rebuilt field by field, each request is sent once, a head sends at
- * most MAX_SENDS_PER_HEAD, and at most MAX_DISPATCHES_PER_HOUR go out an hour. The workflow re-decides everything
- * from GitHub's own records; the worst a forged request can do is what a bad
- * model patch can do, and the workflow's guard judges both.
+ * it is rebuilt field by field, each request is sent until GitHub takes it
+ * (and never again after an outcome nobody saw), and at most
+ * MAX_DISPATCHES_PER_HOUR go out an hour. Nothing is dropped for its age or
+ * for how many requests its head has had (owner 2026-11-16). The workflow
+ * re-decides everything from GitHub's own records; the worst a forged request
+ * can do is what a bad model patch can do, and the workflow's guard judges both.
  *
  * Environment:
  *   PR_CI_AUTO_FIX_DISPATCH_TOKEN   GitHub token: Actions read and write on the repository, nothing else
@@ -29,21 +31,26 @@ import { fileURLToPath } from "node:url";
 
 export const DISPATCH_TOKEN_ENV = "PR_CI_AUTO_FIX_DISPATCH_TOKEN";
 export const SCAN_INTERVAL_SECONDS = 60;
-/**
- * A request older than this is not sent (logged once). The proposing half
- * queues no faster than the hourly cap, so only a long outage expires one;
- * the workflow refuses a head the branch has moved past anyway.
- */
-export const REQUEST_MAX_AGE_MS = 48 * 60 * 60_000;
 export const REQUEST_MAX_BYTES = 128 * 1024;
+/**
+ * The most dispatches an hour, and the only bound on what a forged outbox can
+ * make this account send: it holds the token, and the outbox is the model
+ * account's. It delays, never drops: what is over waits for the next hour.
+ */
 export const MAX_DISPATCHES_PER_HOUR = 60;
 /**
- * Requests one head may send in all: a failed-CI fix and a conflict
- * resolution, each tried once and once more on the operator's request. A
- * request is sent once (its head and creation time), so a new request for a
- * head -- a retry, the other kind -- is sent too, up to this many.
+ * When GitHub refuses a dispatch (a 4xx answer: no run was started) the
+ * request is sent again, after one minute, then two, four ... up to half an
+ * hour, for as long as it stays in the outbox. A 5xx answer is an outcome
+ * nobody saw -- a run may have started -- so it is treated like a timeout:
+ * never sent again, and the proposing half makes a new request once it sees
+ * the head did not move.
  */
-export const MAX_SENDS_PER_HEAD = 20;
+export const SEND_RETRY_BASE_MS = 60_000;
+export const SEND_RETRY_MAX_MS = 30 * 60_000;
+export const sendRetryDelayMs = (failures) => Math.min(SEND_RETRY_BASE_MS * 2 ** Math.max(0, Math.min(failures, 30) - 1), SEND_RETRY_MAX_MS);
+/** A request dated this far ahead of the clock is not sent: its key would not read back as written. */
+const FUTURE_SLACK_MS = 5 * 60_000;
 const SENT_KEY = /^([0-9a-f]{40})(@[0-9]{1,16})?$/;
 /** A request's identity in the sent ledger. */
 export const requestKey = (request) => `${request.headSha}@${request.createdAt}`;
@@ -99,7 +106,8 @@ export const dispatchInputs = (request) => ({
 
 /**
  * One POST to the default branch's workflow. Resolves to the HTTP status as
- * an outcome, or a short reason when no answer came. Redirects are refused:
+ * an outcome (`status` too: GitHub answered, so a refusal is known), or a
+ * short reason when no answer came (no `status`: the outcome is unknown). Redirects are refused:
  * the token goes to api.github.com and nowhere else.
  */
 export async function dispatchWorkflow({ repo, token, request, fetchImpl = fetch, timeoutMs = TIMEOUT_MS }) {
@@ -117,7 +125,7 @@ export async function dispatchWorkflow({ repo, token, request, fetchImpl = fetch
       signal: AbortSignal.timeout(timeoutMs),
     });
     await response.body?.cancel().catch(() => undefined);
-    return { ok: response.status === 204, outcome: `http_${response.status}` };
+    return { ok: response.status === 204, status: response.status, outcome: `http_${response.status}` };
   } catch (error) {
     return { ok: false, outcome: error?.name === "TimeoutError" ? "timeout" : "network_error" };
   }
@@ -182,6 +190,15 @@ export function readSent(path, now) {
   return sent;
 }
 
+/** The POSTs GitHub refused in the last hour, as their times; anything else is dropped. */
+export function readRefusedPosts(path, now) {
+  let value = null;
+  try { value = parseOrNull(readFileSync(path, "utf8")); } catch { /* none yet */ }
+  return Array.isArray(value)
+    ? value.filter((at) => Number.isFinite(at) && at <= now && now - at < 60 * 60_000)
+    : [];
+}
+
 function writeSent(path, sent) {
   const tmp = `${path}.${process.pid}.tmp`;
   writeFileSync(tmp, `${JSON.stringify(sent)}\n`);
@@ -190,9 +207,11 @@ function writeSent(path, sent) {
 
 /**
  * One scan per call, oldest request first. A request is written to the
- * sent ledger before its POST, so an unknown outcome is never sent again; a
- * head sends at most MAX_SENDS_PER_HEAD requests. Logs one line per request
- * it acts on, and the rate cap once while it holds.
+ * sent ledger before its POST, so an outcome nobody saw (a timeout, a broken
+ * connection, a 5xx) is never sent again: the proposing half sees the head did
+ * not move and makes a new request. A POST GitHub refused (4xx) is taken back
+ * out of the ledger and sent again after sendRetryDelayMs. Logs one line
+ * per request it acts on, and the rate cap once while it holds.
  */
 export function createDispatchSender({
   settings, log, fetchImpl = fetch, now = Date.now,
@@ -200,7 +219,15 @@ export function createDispatchSender({
 }) {
   const sentPath = join(settings.stateDir, "sent.json");
   let capped = false;
-  const expired = new Set();
+  const noted = new Set();
+  // Requests GitHub refused: how often, and not before when. In memory; a restart sends them at once.
+  const refused = new Map();
+  // When each POST GitHub refused was made, kept beside the sent ledger so a
+  // restart does not forget them. A refused request leaves the sent ledger so
+  // it is sent again, but its POST still counts toward the hourly cap (reviews
+  // r-20261116-191958-8b665b, r-20261116-193845-9932ef): a burst of 4xx (a bad
+  // token, 429), even across restarts, never sends past MAX_DISPATCHES_PER_HOUR.
+  const refusedPath = join(settings.stateDir, "refused-posts.json");
   return {
     async scanOnce() {
       let names;
@@ -212,6 +239,7 @@ export function createDispatchSender({
       }
       const at = now();
       const sent = readSent(sentPath, at);
+      const refusedPosts = readRefusedPosts(refusedPath, at);
       const requests = [];
       for (const name of names) {
         if (!REQUEST_NAME.test(name)) continue;
@@ -226,25 +254,22 @@ export function createDispatchSender({
           log(`request ${name.slice(0, 9)} is not a valid request; not sending`);
           continue;
         }
-        if (at - request.createdAt > REQUEST_MAX_AGE_MS || request.createdAt - at > 5 * 60_000) {
-          if (!expired.has(request.headSha)) log(`#${request.prNumber} ${request.headSha.slice(0, 9)}: request expired; not sending`);
-          expired.add(request.headSha);
+        if (request.createdAt - at > FUTURE_SLACK_MS) {
+          if (!noted.has(requestKey(request))) log(`#${request.prNumber} ${request.headSha.slice(0, 9)}: request dated in the future; not sending`);
+          noted.add(requestKey(request));
           continue;
         }
         const head = request.headSha;
         if (sent[requestKey(request)] !== undefined) continue;
         // A head an older sender recorded: the request it sent was made before then.
         if (sent[head] !== undefined && sent[head] >= request.createdAt) continue;
-        if (Object.keys(sent).filter((key) => key.startsWith(head)).length >= MAX_SENDS_PER_HEAD) {
-          if (!expired.has(`cap:${head}`)) log(`#${request.prNumber} ${head.slice(0, 9)}: ${MAX_SENDS_PER_HEAD} requests sent for this head; not sending`);
-          expired.add(`cap:${head}`);
-          continue;
-        }
+        if ((refused.get(requestKey(request))?.notBefore ?? 0) > at) continue;
         requests.push(request);
       }
       requests.sort((a, b) => a.createdAt - b.createdAt);
       for (const request of requests) {
-        const lastHour = Object.values(sent).filter((time) => at - time < 60 * 60_000).length;
+        const lastHour = Object.values(sent).filter((time) => at - time < 60 * 60_000).length +
+          refusedPosts.length;
         if (lastHour >= MAX_DISPATCHES_PER_HOUR) {
           if (!capped) log(`rate cap: ${MAX_DISPATCHES_PER_HOUR} dispatches in the last hour; waiting`);
           capped = true;
@@ -255,7 +280,25 @@ export function createDispatchSender({
         mkdirSync(settings.stateDir, { recursive: true });
         writeSent(sentPath, sent);
         const result = await dispatchWorkflow({ repo: settings.repo, token: settings.token, request, fetchImpl });
-        log(`#${request.prNumber} ${request.headSha.slice(0, 9)}: ${result.ok ? "dispatched" : `dispatch failed: ${result.outcome}`}`);
+        const label = `#${request.prNumber} ${request.headSha.slice(0, 9)}`;
+        if (result.ok) {
+          refused.delete(requestKey(request));
+          log(`${label}: dispatched`);
+        } else if (Number.isInteger(result.status) && result.status >= 400 && result.status < 500) {
+          // GitHub refused it: no run was started. Send again, later each time.
+          const failures = (refused.get(requestKey(request))?.failures ?? 0) + 1;
+          const wait = sendRetryDelayMs(failures);
+          refused.set(requestKey(request), { failures, notBefore: now() + wait });
+          // Recorded as refused before it leaves the ledger: a stop in between
+          // counts it twice at most, never not at all.
+          refusedPosts.push(sent[requestKey(request)]);
+          writeSent(refusedPath, refusedPosts);
+          delete sent[requestKey(request)];
+          writeSent(sentPath, sent);
+          log(`${label}: dispatch failed: ${result.outcome}; sending again in ${Math.round(wait / 1000)}s`);
+        } else {
+          log(`${label}: dispatch failed: ${result.outcome}; not sending this request again`);
+        }
       }
     },
   };

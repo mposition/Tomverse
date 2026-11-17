@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 
 import {
+  CI_ADMISSION_MAX_EVENTS,
   CI_ADMISSION_STATE_SETTING_KEY,
   ciAdmissionDraftsToCheck,
   evaluateCiAdmission,
@@ -68,10 +69,6 @@ const STATUS = {
 
 export const ciAdmissionMode = (env: NodeJS.ProcessEnv = process.env): CiAdmissionMode =>
   parseCiAdmissionMode(env.CI_ADMISSION_MODE) ?? "off";
-
-/** Whether a draft behind its base has its branch updated: on unless CI_ADMISSION_UPDATE_BRANCH is "off". */
-export const ciAdmissionUpdatesBranches = (env: NodeJS.ProcessEnv = process.env): boolean =>
-  (env.CI_ADMISSION_UPDATE_BRANCH ?? "").trim().toLowerCase() !== "off";
 
 export const readState = async (db: Pick<Prisma.TransactionClient, "appSetting">) =>
   parseCiAdmissionState(
@@ -198,7 +195,7 @@ async function round(deps: RoundDeps): Promise<CiAdmissionRoundOutcome> {
     async (tx) => {
       await takeLock(tx);
       const state = await readState(tx);
-      const judged = evaluateCiAdmission({ state, openPulls, running, runningBases, deploys, checks, runners, personReady, nowMs: now(), shadow: mode === "shadow", updateBranches: ciAdmissionUpdatesBranches() });
+      const judged = evaluateCiAdmission({ state, openPulls, running, runningBases, deploys, checks, runners, personReady, nowMs: now(), shadow: mode === "shadow" });
       // Shadow keeps what it would have done out of the reservations and statuses.
       await writeState(
         tx,
@@ -302,7 +299,7 @@ async function round(deps: RoundDeps): Promise<CiAdmissionRoundOutcome> {
           pendingStatus: current.pendingStatus.filter((entry) => !cleared.has(`${entry.number}@${entry.headSha}`)),
           // A release that did not happen reserves nothing.
           released: current.released.filter((entry) => !failedReleases.has(entry.number)),
-          events: [...current.events, ...extra].slice(-50),
+          events: [...current.events, ...extra].slice(-CI_ADMISSION_MAX_EVENTS),
         });
       },
       { timeout: TX_TIMEOUT_MS, maxWait: TX_TIMEOUT_MS },

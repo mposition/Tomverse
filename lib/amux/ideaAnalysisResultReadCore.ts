@@ -1,15 +1,8 @@
 import type { AmuxAnalysisChunk } from "./ideaAnalysisChunkCore.ts";
-import { amuxIntakeCap } from "./intakeLimitsCore.ts";
 import { AMUX_V20_REGISTRATION_REFUSAL_ATTEMPT_KINDS,
   isAmuxV20TaskRegistrationRefusal,
   type AmuxV20RegistrationRefusalView } from
   "./ideaRegistrationRefusalCore.ts";
-
-export const AMUX_V4_ANALYSIS_RESULT_READ_ENV = "TOMVERSE_AMUX_V4_ANALYSIS_RESULT_READ";
-export const AMUX_V4_ANALYSIS_RESULT_READ_CODE_ENABLED = true;
-
-export const amuxV4AnalysisResultReadEnabled = (value: string | undefined): boolean =>
-  AMUX_V4_ANALYSIS_RESULT_READ_CODE_ENABLED && value === "enabled";
 
 export type AmuxVisibleAnalysisUnit = {
   id: string;
@@ -44,12 +37,12 @@ const keys = (value: Record<string, unknown>, expected: readonly string[]) =>
   expected.every((key) => Object.hasOwn(value, key));
 const record = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
-// The former field limits hold only under TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS
-// (owner direction 2026-11-15); the parser already admitted every field.
-const text = (value: unknown, max = 2_000): value is string =>
-  typeof value === "string" && value.length > 0 && value.length <= amuxIntakeCap(max);
+// No field length or list count is limited (owner direction 2026-11-15); the
+// parser already admitted every field.
+const text = (value: unknown): value is string =>
+  typeof value === "string" && value.length > 0;
 const textList = (value: unknown): value is string[] =>
-  Array.isArray(value) && value.length <= amuxIntakeCap(12) && value.every((item) => text(item, 500));
+  Array.isArray(value) && value.every((item) => text(item));
 const refusalKinds = new Set<string>(AMUX_V20_REGISTRATION_REFUSAL_ATTEMPT_KINDS);
 const grades = new Set(["routine", "advanced", "frontier"]);
 
@@ -85,7 +78,7 @@ export function matchesAmuxIdeaAnalysisUnitCommitments(
     bodyDigest: string; bodyDigestKeyId: string }[],
 ): boolean {
   return Array.isArray(commitments) && commitments.length === units.length &&
-    units.length <= amuxIntakeCap(40) && units.every((unit, index) => {
+    units.every((unit, index) => {
       const commitment: unknown = commitments[index];
       return record(commitment) && keys(commitment,
         ["id", "localRef", "kind", "digest", "digestKeyId"]) &&
@@ -124,7 +117,7 @@ export function parseAmuxIdeaAnalysisResultView(
         partial ? body.outcome !== "propose" :
         body.outcome !== "propose" && body.outcome !== "reject") ||
       (body.coveredScope !== null && !text(body.coveredScope)) ||
-      !Array.isArray(body.units) || body.units.length > amuxIntakeCap(40) ||
+      !Array.isArray(body.units) ||
       // A session plan's last page may close it with no further unit.
       (body.outcome === "reject" && body.units.length !== 0) ||
       (partial && body.units.length === 0) ||
@@ -158,9 +151,9 @@ export function parseAmuxIdeaAnalysisResultView(
     if (!record(value.proposal) || value.proposal.localId !== value.localRef) return null;
     const proposal = value.proposal;
     if (proposal.kind === "node") {
-      if (!text(proposal.title, 200) || !text(proposal.description)) return null;
+      if (!text(proposal.title) || !text(proposal.description)) return null;
     } else if (proposal.kind === "card") {
-      if (!text(proposal.title, 200) || !text(proposal.problem) ||
+      if (!text(proposal.title) || !text(proposal.problem) ||
           !textList(proposal.scopeIn) || !textList(proposal.scopeOut) ||
           !textList(proposal.completionCriteria)) return null;
     } else if (proposal.kind === "evidence") {

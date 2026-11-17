@@ -418,9 +418,6 @@ export function AdminEngineeringAgentPanel({ initial, more = null }: {
               {button("halt:ack", m.acknowledgeHalt, () =>
                 void post("halt:ack", "/api/admin/engineering-agent/halt", {}),
               )}
-              {button("monitors:confirm", m.confirmMonitors, () =>
-                void post("monitors:confirm", "/api/admin/engineering-agent/monitors", {}),
-              )}
             </div>
           ) : null}
           <p className="text-sm text-zinc-400">{m.haltNote}</p>

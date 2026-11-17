@@ -322,11 +322,11 @@ test("a sign-in the run must not use is refused before any run home is made", as
     await assert.rejects(createAmuxV22ChannelRunHome(provider, config, { now }),
       (error) => error instanceof AmuxV22ChannelAuthRefused, `${provider} ${file}`);
   };
-  // Expiring within six hours: the run could need a refresh it cannot make.
-  await refused("openai", "auth.json", codexLogin(now, { expiresIn: 5 * HOUR }));
-  await refused("cursor", "cursor/auth.json", cursorLogin(now, 5 * HOUR));
-  // A Codex login not refreshed for over seven days, or one on an API key.
-  await refused("openai", "auth.json", codexLogin(now, { refreshedAgo: 8 * 24 * HOUR }));
+  // An expired login (operator, 2026-11-16: an unexpired one is copied however
+  // soon it expires, and a Codex login's refresh age is not a reason).
+  await refused("openai", "auth.json", codexLogin(now, { expiresIn: -HOUR }));
+  await refused("cursor", "cursor/auth.json", cursorLogin(now, -HOUR));
+  // A Codex login on an API key, or one that is not a login at all.
   await refused("openai", "auth.json", codexLogin(now, { OPENAI_API_KEY: "sk-synthetic" }));
   await refused("openai", "auth.json", "not json");
   await refused("github-copilot", "auth-token", "not-a-token");

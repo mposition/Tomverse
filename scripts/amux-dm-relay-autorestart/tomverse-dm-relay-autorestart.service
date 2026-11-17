@@ -1,5 +1,5 @@
 [Unit]
-Description=Tomverse AMUX Decision Maker relay auto-restart (read halts only)
+Description=Tomverse AMUX Decision Maker relay auto-restart (a relay a reboot left stopped)
 Documentation=https://github.com/mposition/Tomverse/blob/develop/docs/ops/amux/bridge-monitoring.md
 Wants=network-online.target
 After=network-online.target

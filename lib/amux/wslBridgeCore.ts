@@ -1,12 +1,9 @@
 /**
  * Development runner that pulls Tomverse work from the operator workstation.
  *
- * The code latch ships false. A true latch is a later policy version and is
- * not implied by this module existing. The local AMUX process is an executor,
- * not a second board: this planner never targets `/api/board`.
+ * The local AMUX process is an executor, not a second board: this planner
+ * never targets `/api/board`.
  */
-
-export const WSL_BRIDGE_CODE_LATCH = true;
 
 export const WSL_BRIDGE_ENV_NAME = "TOMVERSE_AMUX_WSL_BRIDGE";
 
@@ -38,7 +35,6 @@ export type LocalDispatchBody = {
 };
 
 export type BridgeRefusal =
-  | "bridge_latch_off"
   | "bridge_disabled"
   | "assignments_halted"
   | "local_unreachable"
@@ -66,7 +62,6 @@ export const payloadLeaksControlPlane = (text: string) =>
   DATABASE_URL_SCHEME.test(text);
 
 export const planLocalDispatch = (input: {
-  latch: boolean;
   envValue: string | undefined;
   halt: BridgeHalt;
   localReachable: boolean;
@@ -75,8 +70,7 @@ export const planLocalDispatch = (input: {
   prompt: string;
   reservedAttemptIds: readonly string[];
 }): DispatchPlan => {
-  if (!input.latch) return { action: "refuse", reason: "bridge_latch_off" };
-  if (input.envValue !== "1") return { action: "refuse", reason: "bridge_disabled" };
+  if (input.envValue !== "enabled" && input.envValue !== "1") return { action: "refuse", reason: "bridge_disabled" };
   if (input.halt !== "running") return { action: "refuse", reason: "assignments_halted" };
   if (!input.localReachable) return { action: "refuse", reason: "local_unreachable" };
   if (!ATTEMPT_ID.test(input.attemptId)) {
@@ -195,11 +189,10 @@ type SendReply = {
 
 /**
  * One pull of an already-approved delivery. Transports are injected so the
- * tick can be proven without opening a socket. The shipped latch makes the
- * first branch refuse before either transport is called.
+ * tick can be proven without opening a socket. A bridge that is not enabled
+ * refuses in the first branch before either transport is called.
  */
 export const runBridgeTick = async (input: {
-  latch: boolean;
   envValue: string | undefined;
   halt: BridgeHalt;
   localReachable: boolean;
@@ -216,7 +209,6 @@ export const runBridgeTick = async (input: {
   readBack: (attemptId: string) => Promise<true | false | "lookup_failed">;
 }): Promise<BridgeTickResult> => {
   const plan = planLocalDispatch({
-    latch: input.latch,
     envValue: input.envValue,
     halt: input.halt,
     localReachable: input.localReachable,

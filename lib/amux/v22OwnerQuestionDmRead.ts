@@ -2,7 +2,6 @@ import "server-only";
 
 import { prisma } from "@/lib/prisma";
 import { readDecisionMakerCardDetailForAdmin } from "@/lib/amux/decisionMakerAdminRead";
-import { dmInternalRoutesEnabled } from "@/lib/amux/decisionMakerInternalRoute";
 import { readDecisionMakerSwitches } from "@/lib/amux/decisionMakerSwitchStore";
 import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import {
@@ -32,12 +31,10 @@ export async function readAmuxV22QuestionDm(questionId: string): Promise<AmuxV22
     const cardId = row.localCardId;
     if (cardId === null) {
       const provider = row.attempt.v22Assignment?.provider ?? null;
-      const routingEnabled = dmInternalRoutesEnabled();
-      const switches = routingEnabled ? await readDecisionMakerSwitches(prisma) : null;
+      const switches = await readDecisionMakerSwitches(prisma);
       return {
         state: "not_sent",
         reason: amuxV22QuestionDmNotSentReason({
-          routingEnabled,
           killSwitch: switches?.killSwitch ?? null,
           hasProvider: provider !== null && amuxV22Provider(provider) !== null,
         }),

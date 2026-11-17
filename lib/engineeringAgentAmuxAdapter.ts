@@ -32,7 +32,6 @@ import {
   type AmuxExecutionStartedFact,
   type AmuxExecutionToStatus,
 } from "@/lib/amux/execution";
-import { isAmuxExecutionApiEnabled } from "@/lib/amux/executionGate";
 import { recordAmuxReviewPullRequest, type AmuxReviewPullRequestFact } from "@/lib/amux/reviewPullRequest";
 import { amuxWorkerCatalogRefusal } from "@/lib/amux/workerAssignmentCatalog";
 import { listOwnedTodos } from "@/lib/amux/store";
@@ -71,33 +70,18 @@ import type { EngineeringAgentMode, WriteResultOutcome } from "@/lib/engineering
 import { prisma } from "@/lib/prisma";
 import type { Session } from "next-auth";
 
-/**
- * Version 12 of the orchestration policy shipped this false; version 25 turns
- * it on. A call still reaches AMUX only while the execution API gate is open
- * and the engineering operating mode is not off.
- */
-export const ENGINEERING_AGENT_AMUX_ADAPTER_CODE_LATCH = true;
-
 /** The one AMUX worker this adapter speaks for (policy §8). */
 export const ENGINEERING_AGENT_AMUX_WORKER = "engineering-runner";
 
 /**
- * Whether the adapter may call an AMUX writer at all. The orchestration
- * policy's Authority section opens that path only when the code latch and the
- * engineering operating mode are both open, and version 18's execution API
- * gate sits under every AMUX writer. The mode is the effective one, so a kill
- * switch or an unreadable setting reads as off and closes every call --
+ * Whether the adapter may call an AMUX writer at all: only while the
+ * engineering operating mode is not off. The mode is the effective one, so a
+ * kill switch or an unreadable setting reads as off and closes every call --
  * registration, heartbeats, delivery, settlement and the cost ledger alike.
  */
 export const engineeringAgentAmuxAdapterPermitted = (input: {
-  codeLatch: boolean;
-  executionApiEnabled: boolean;
   mode: EngineeringAgentMode;
-}): boolean => input.codeLatch === true && input.executionApiEnabled === true && input.mode !== "off";
-
-/** The half of that gate that needs no database read. */
-export const isEngineeringAgentAmuxAdapterOpen = (): boolean =>
-  ENGINEERING_AGENT_AMUX_ADAPTER_CODE_LATCH && isAmuxExecutionApiEnabled();
+}): boolean => input.mode !== "off";
 
 /**
  * The budget of an adapter route. An AMUX writer's transaction budget grows
@@ -229,16 +213,14 @@ export const engineeringRunEndAttachment = (input: {
   prismaCalls: RUN_END_PRISMA_CALLS,
   work: async (lent, fact) => {
     const tx = engineeringAgentTransactionInAmux(lent);
-    const held = await readEngineeringAgentHaltState(tx);
     await endEngineeringAgentRun(tx, {
       runId: input.runId,
       amuxAttemptId: fact.attemptId,
       outcome: input.outcome,
       halt: combineRunHalt({
         reported: input.halt,
-        circuitLatched: held.circuitLatched,
         // A card-scoped mismatch is not recorded on another run as a halt.
-        openStateMismatches: held.cardScoped ? 0 : held.openStateMismatches,
+        openStateMismatches: 0,
       }),
     });
     await input.markCommitted?.(tx);
@@ -279,18 +261,13 @@ export const engineeringPublishResultAttachment = (input: {
 export type EngineeringAgentWorkerLease = { instanceId: string; generation: number };
 
 /**
- * Whether a call may reach AMUX now: the latch, the execution API and the
- * effective mode. Routes ask this before they record anything, so a closed
- * gate leaves no request row behind; every adapter operation asks it again.
+ * Whether a call may reach AMUX now: the effective mode is not off. Routes ask
+ * this before they record anything, so a closed gate leaves no request row
+ * behind; every adapter operation asks it again.
  */
 export const engineeringAgentAmuxAdapterPermittedNow = async (): Promise<boolean> => {
-  if (!isEngineeringAgentAmuxAdapterOpen()) return false;
   const { mode } = await readEngineeringAgentSwitches(prisma);
-  return engineeringAgentAmuxAdapterPermitted({
-    codeLatch: ENGINEERING_AGENT_AMUX_ADAPTER_CODE_LATCH,
-    executionApiEnabled: isAmuxExecutionApiEnabled(),
-    mode,
-  });
+  return engineeringAgentAmuxAdapterPermitted({ mode });
 };
 
 const requireOpen = async () => {

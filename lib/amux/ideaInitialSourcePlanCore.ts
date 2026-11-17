@@ -1,15 +1,6 @@
 import { isAmuxIdeaRequestId } from "./ideaSubmissionCore.ts";
 
-export const AMUX_V4_INITIAL_PLAN_WRITE_ENV = "TOMVERSE_AMUX_V4_INITIAL_PLAN_WRITE";
-export const AMUX_V4_INITIAL_PLAN_READBACK_ENV = "TOMVERSE_AMUX_V4_INITIAL_PLAN_READBACK";
-export const AMUX_V4_INITIAL_PLAN_WRITE_CODE_ENABLED = true;
-export const AMUX_V4_INITIAL_PLAN_READBACK_CODE_ENABLED = true;
 export const AMUX_V4_INITIAL_PLAN_MAX_BYTES = 256;
-
-export const initialPlanWritePermitted = (value: string | undefined): boolean =>
-  AMUX_V4_INITIAL_PLAN_WRITE_CODE_ENABLED && value === "enabled";
-export const initialPlanReadbackPermitted = (value: string | undefined): boolean =>
-  AMUX_V4_INITIAL_PLAN_READBACK_CODE_ENABLED && value === "enabled";
 
 export function inspectInitialPlanRequest(raw: string):
   { ok: true; ideaId: string } | { ok: false; code: "schema_rejected" | "too_large" } {

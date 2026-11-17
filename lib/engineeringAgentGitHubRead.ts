@@ -28,7 +28,8 @@ const MAX_JSON_BYTES = 1024 * 1024;
 /** GitHub lists at most 100,000 entries for one recursive tree (then says
  * `truncated`); a listing that size is well under GitHub's file limit. */
 const MAX_TREE_JSON_BYTES = AMUX_V22_FILE_MAX_BYTES;
-const MAX_CHECK_RUNS = 100;
+/** GitHub's page size for a listing: the most it returns at once, not a limit on the whole. */
+const PER_PAGE = 100;
 const SHA = /^[0-9a-f]{40}$/;
 
 export const ENGINEERING_AGENT_GITHUB_READ_TOKEN_ENV = "ENGINEERING_AGENT_GITHUB_READ_TOKEN";
@@ -144,21 +145,40 @@ async function githubPage(
 const record = (value: unknown): Record<string, unknown> | null =>
   value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 
+/**
+ * Every page of a listing, page 1, 2, ... until GitHub links no next page
+ * (owner decision 2026-11-16: until then a listing longer than one page of
+ * 100 was refused as `invalid_response`, so a commit with more check runs or a
+ * pull request with more reviews could never be judged). A linked next page
+ * after an empty one is not a listing.
+ */
+async function githubAllPages<T>(
+  path: string,
+  deps: { env: Readonly<Record<string, string | undefined>>; fetchImpl: FetchLike },
+  itemsOf: (body: unknown) => T[],
+): Promise<T[]> {
+  const all: T[] = [];
+  for (let page = 1; ; page += 1) {
+    const read = await githubPage(`${path}${path.includes("?") ? "&" : "?"}per_page=${PER_PAGE}&page=${page}`, deps);
+    const items = itemsOf(read.body);
+    if (items.length > PER_PAGE) throw new EngineeringAgentGitHubReadError("invalid_response");
+    all.push(...items);
+    if (!read.hasNext) return all;
+    if (items.length === 0) throw new EngineeringAgentGitHubReadError("invalid_response");
+  }
+}
+
 type Deps = { env?: Readonly<Record<string, string | undefined>>; fetchImpl?: FetchLike };
 const withDefaults = (deps: Deps) => ({ env: deps.env ?? process.env, fetchImpl: deps.fetchImpl ?? fetch });
 
 export type EngineeringAgentCheckRun = { id: number; name: string; conclusion: string | null };
 
-/**
- * Every check run of a commit, or a refusal: a page that is not the whole
- * list -- GitHub's own count says more, or a next page is linked -- is never
- * read as the whole.
- */
-const checkRunsOf = (page: { body: unknown; hasNext: boolean }): EngineeringAgentCheckRun[] => {
-  const body = record(page.body);
+/** One page of a commit's check runs, with GitHub's count of the whole list. */
+const checkRunsPage = (pageBody: unknown): Array<EngineeringAgentCheckRun & { totalCount: number }> => {
+  const body = record(pageBody);
   const runs = body?.check_runs;
-  if (!Array.isArray(runs) || runs.length > MAX_CHECK_RUNS) throw new EngineeringAgentGitHubReadError("invalid_response");
-  if (page.hasNext || body?.total_count !== runs.length) throw new EngineeringAgentGitHubReadError("invalid_response");
+  const totalCount = body?.total_count;
+  if (!Array.isArray(runs) || typeof totalCount !== "number") throw new EngineeringAgentGitHubReadError("invalid_response");
   return runs.map((run) => {
     const value = record(run);
     if (
@@ -169,12 +189,20 @@ const checkRunsOf = (page: { body: unknown; hasNext: boolean }): EngineeringAgen
     ) {
       throw new EngineeringAgentGitHubReadError("invalid_response");
     }
-    return { id: value.id, name: value.name, conclusion: value.conclusion as string | null };
+    return { id: value.id, name: value.name, conclusion: value.conclusion as string | null, totalCount };
   });
 };
 
-const checkRunsAt = (sha: string, resolved: { env: Readonly<Record<string, string | undefined>>; fetchImpl: FetchLike }) =>
-  githubPage(`/commits/${sha}/check-runs?per_page=${MAX_CHECK_RUNS}`, resolved).then(checkRunsOf);
+/**
+ * Every check run of a commit, over as many pages as GitHub links, or a
+ * refusal: a read whose runs do not add up to GitHub's own count -- a run
+ * added between pages, say -- is never read as the whole.
+ */
+const checkRunsAt = async (sha: string, resolved: { env: Readonly<Record<string, string | undefined>>; fetchImpl: FetchLike }) => {
+  const runs = await githubAllPages(`/commits/${sha}/check-runs`, resolved, checkRunsPage);
+  if (runs.some((run) => run.totalCount !== runs.length)) throw new EngineeringAgentGitHubReadError("invalid_response");
+  return runs.map(({ id, name, conclusion }): EngineeringAgentCheckRun => ({ id, name, conclusion }));
+};
 
 /** develop's head and its check runs (§2.2 S2). */
 export async function readEngineeringAgentDevelopChecks(
@@ -324,7 +352,8 @@ export async function readEngineeringAgentPinnedBaseTree(baseSha: string,
 /* A published pull request, as the approval observer reads it (§9-10)        */
 /* ------------------------------------------------------------------------- */
 
-const MAX_REVIEWS = 100;
+// GitHub's own limits: a pull request lists at most 3,000 files, and its diff
+// is served up to its size limit.
 const MAX_PR_FILES = 3_000;
 const MAX_DIFF_BYTES = PULL_DIFF_DIGEST_MAX_BYTES;
 const PASSING_CONCLUSIONS = new Set(["success", "neutral", "skipped"]);
@@ -599,12 +628,12 @@ export async function readEngineeringAgentPullObservation(
   }
   const mergedByKind = mergedByKindOf(pull, merged);
 
-  const page = await githubPage(`/pulls/${prNumber}/reviews?per_page=${MAX_REVIEWS}`, resolved);
-  if (!Array.isArray(page.body) || page.hasNext || page.body.length > MAX_REVIEWS) {
-    throw new EngineeringAgentGitHubReadError("invalid_response");
-  }
+  const listed = await githubAllPages(`/pulls/${prNumber}/reviews`, resolved, (body) => {
+    if (!Array.isArray(body)) throw new EngineeringAgentGitHubReadError("invalid_response");
+    return body as unknown[];
+  });
   const reviews: EngineeringAgentPullObservation["reviews"] = [];
-  for (const entry of page.body) {
+  for (const entry of listed) {
     const review = record(entry);
     const user = record(review?.user);
     const submittedAt = instant(review?.submitted_at);

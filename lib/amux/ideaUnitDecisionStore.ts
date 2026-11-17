@@ -42,13 +42,6 @@ import { amuxRegistrationAuthorityActor, amuxRegistrationAuthorityKind,
   type AmuxRegistrationAuditAuthority, writeAmuxRegistrationAudit } from
   "./ideaRegistrationAuditAuthority.ts";
 
-/** A09's protected writer still requires the dedicated environment gate and
- * the route's owner approval before its transaction body is reachable. */
-export const AMUX_V4_UNIT_WRITE_CODE_ENABLED = true;
-export const AMUX_V4_UNIT_WRITE_ENV = "TOMVERSE_AMUX_V4_UNIT_WRITE";
-export const amuxV4UnitWriteEnabled = (value: string | undefined) =>
-  AMUX_V4_UNIT_WRITE_CODE_ENABLED && value === "enabled";
-
 export class AmuxV4UnitDecisionError extends Error {
   constructor(readonly code: "forbidden" | "not_found" | "not_ready" |
     "reconfirm" | "integrity_unavailable" | "write_disabled" |

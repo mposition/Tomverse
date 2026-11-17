@@ -5,7 +5,6 @@ import test from "node:test";
 import { boardPromotionExecutionBriefDigest } from "../lib/amux/boardPromotionCore.ts";
 import { buildAmuxDeliveryPrompt } from "../lib/amux/deliveryPrompt.ts";
 import {
-  WSL_BRIDGE_CODE_LATCH,
   acceptLateResult,
   classifyBridgeResult,
   decideAfterReadBack,
@@ -35,8 +34,7 @@ const promptFor = (brief) => {
 };
 
 const ready = (overrides = {}) => ({
-  latch: true,
-  envValue: "1",
+  envValue: "enabled",
   halt: "running",
   localReachable: true,
   session: { name: "claude-impl", running: true },
@@ -46,13 +44,14 @@ const ready = (overrides = {}) => ({
   ...overrides,
 });
 
-test("the code latch is on and a missing env does not send", () => {
-  assert.equal(WSL_BRIDGE_CODE_LATCH, true);
-  const closed = planLocalDispatch(ready({ latch: WSL_BRIDGE_CODE_LATCH, envValue: undefined }));
+test("a missing or other env does not send, and enabled and the earlier 1 do", () => {
+  const closed = planLocalDispatch(ready({ envValue: undefined }));
   assert.equal(closed.action, "refuse");
   assert.equal(closed.reason, "bridge_disabled");
-  const off = planLocalDispatch(ready({ latch: false }));
-  assert.equal(off.reason, "bridge_latch_off");
+  for (const value of ["", "0", "true", "disabled", " enabled", "1 "])
+    assert.equal(planLocalDispatch(ready({ envValue: value })).reason, "bridge_disabled", value);
+  assert.equal(planLocalDispatch(ready({ envValue: "enabled" })).action, "send");
+  assert.equal(planLocalDispatch(ready({ envValue: "1" })).action, "send");
 });
 
 test("an admitted send targets the existing session and does not open a board", () => {
@@ -164,10 +163,10 @@ test("local unreachability and a halt stop new assignments", () => {
   assert.equal(planLocalDispatch(ready({ halt: "halted" })).reason, "assignments_halted");
 });
 
-test("a latched-off tick does not call the local transport", async () => {
+test("a tick of a disabled bridge does not call the local transport", async () => {
   let calls = 0;
   const tick = await runBridgeTick({
-    ...ready({ latch: false }),
+    ...ready({ envValue: undefined }),
     generation: 1,
     liveGeneration: 1,
     leaseExpiresAt: 200,
@@ -231,7 +230,6 @@ test("the rust bridge opens a client only after the exact env gate", () => {
     new URL("../apps/tomverse-orchestrator/src/bin/tomverse-wsl-bridge.rs", import.meta.url),
     "utf8",
   );
-  assert.match(bridge, /pub const WSL_BRIDGE_CODE_LATCH: bool = true;/);
   assert.match(bridge, /wsl bridge does not start workers/);
   const gate = bridge.slice(bridge.indexOf("pub fn activation_gate"), bridge.indexOf("pub fn local_amux_url_allowed"));
   assert.equal(gate.includes("from_env"), false);

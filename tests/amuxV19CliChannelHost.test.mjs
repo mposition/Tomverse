@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { AMUX_V19_AUTH_MIN_REMAINING_MS, AMUX_V19_CODEX_MAX_REFRESH_AGE_MS,
-  AMUX_V19_CURSOR_REFRESH_PLACEHOLDER, amuxV19OutputRevealsSecret,
+import { AMUX_V19_CURSOR_REFRESH_PLACEHOLDER, amuxV19OutputRevealsSecret,
   inspectAmuxV19ChannelAuth } from
   "../lib/amux/ideaV19CliChannelHost.mjs";
 
@@ -35,21 +34,34 @@ test("the Codex sandbox copy keeps the access token and drops the refresh secret
   assert.deepEqual(secrets, [source.tokens.access_token, source.tokens.id_token]);
 });
 
-test("a Codex sign-in that would bill an API key or need a refresh is refused", () => {
+test("a Codex sign-in that would bill an API key or has expired is refused", () => {
   for (const change of [
     { auth_mode: "apikey" },
     { OPENAI_API_KEY: "sk-synthetic" },
-    { tokens: { ...codex().tokens, access_token: token(now +
-      AMUX_V19_AUTH_MIN_REMAINING_MS - 1000) } },
+    { tokens: { ...codex().tokens, access_token: token(now - 1000) } },
+    { tokens: { ...codex().tokens, access_token: token(now) } },
     { tokens: { ...codex().tokens, access_token: "opaque" } },
     { tokens: { ...codex().tokens, account_id: "bad id" } },
-    { last_refresh: new Date(now - AMUX_V19_CODEX_MAX_REFRESH_AGE_MS - 1).toISOString() },
-    { last_refresh: new Date(now + 3_600_000).toISOString() },
     { last_refresh: "yesterday" },
   ]) {
     assert.throws(() => inspectAmuxV19ChannelAuth("openai", bytes(codex(change)), now),
       Error, JSON.stringify(Object.keys(change)));
   }
+});
+
+test("no minimum remaining time and no refresh-age limit: an unexpired Codex login is copied", () => {
+  // Under the former six-hour minimum and seven-day refresh age.
+  const source = codex({ tokens: { ...codex().tokens,
+    access_token: token(now + 60_000, "y") },
+  last_refresh: new Date(now - 30 * 86_400_000).toISOString() });
+  const { copy } = inspectAmuxV19ChannelAuth("openai", bytes(source), now);
+  const parsed = JSON.parse(copy.toString("utf8"));
+  assert.equal(parsed.tokens.access_token, source.tokens.access_token);
+  assert.equal(parsed.tokens.refresh_token, "");
+  // The private copy is stamped as just refreshed, so the CLI does not try a
+  // refresh it has no secret for; the source login is untouched.
+  assert.equal(parsed.last_refresh, new Date(now).toISOString());
+  assert.equal(source.last_refresh, new Date(now - 30 * 86_400_000).toISOString());
 });
 
 const copilotConfig = (change = {}) => [
@@ -96,10 +108,16 @@ test("the Cursor copy carries the session token and never a refresh secret", () 
   assert.equal(amuxV19OutputRevealsSecret(AMUX_V19_CURSOR_REFRESH_PLACEHOLDER,
     distinct.secrets), false);
   for (const value of [{ accessToken: session },
-    { accessToken: token(now + 60_000), refreshToken: session },
+    { accessToken: token(now - 1000), refreshToken: session },
+    { accessToken: token(now), refreshToken: session },
     { accessToken: "opaque", refreshToken: session }, []]) {
     assert.throws(() => inspectAmuxV19ChannelAuth("cursor", bytes(value), now), Error);
   }
+  // No six-hour minimum: a token that is still valid is copied.
+  const soon = token(now + 60_000, "z");
+  assert.deepEqual(JSON.parse(inspectAmuxV19ChannelAuth("cursor",
+    bytes({ accessToken: soon, refreshToken: session }), now).copy.toString("utf8")),
+  { accessToken: soon, refreshToken: AMUX_V19_CURSOR_REFRESH_PLACEHOLDER });
   assert.throws(() => inspectAmuxV19ChannelAuth("anthropic", bytes("{}"), now), TypeError);
 });
 

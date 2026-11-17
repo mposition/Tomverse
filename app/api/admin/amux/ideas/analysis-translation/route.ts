@@ -12,8 +12,6 @@ import { apiSecurityResponse, consumeApiRateLimit,
   readLimitedJson } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
 import { readOwnedAmuxIdeaAnalysisResult } from "@/lib/amux/ideaAnalysisResultOwnerRead";
-import { AMUX_V4_ANALYSIS_RESULT_READ_ENV,
-  amuxV4AnalysisResultReadEnabled } from "@/lib/amux/ideaAnalysisResultReadCore";
 import { AmuxIdeaAnalysisResultReadError } from "@/lib/amux/ideaAnalysisResultReadService";
 import { translateAmuxItemsToKorean } from "@/lib/amux/ideaAnalysisTranslation";
 import { AMUX_ANALYSIS_TRANSLATION_ENV, amuxAnalysisTranslationEnabled,
@@ -60,8 +58,7 @@ export async function POST(request: Request): Promise<Response> {
     if (!hasValidMutationOrigin(request)) {
       return NextResponse.json({ error: "forbidden" }, { status: 403, headers: noStore });
     }
-    if (!amuxAnalysisTranslationEnabled(process.env[AMUX_ANALYSIS_TRANSLATION_ENV]) ||
-        !amuxV4AnalysisResultReadEnabled(process.env[AMUX_V4_ANALYSIS_RESULT_READ_ENV])) {
+    if (!amuxAnalysisTranslationEnabled(process.env[AMUX_ANALYSIS_TRANSLATION_ENV])) {
       return NextResponse.json({ error: "analysis_translation_disabled" },
         { status: 503, headers: noStore });
     }
@@ -95,9 +92,9 @@ export async function POST(request: Request): Promise<Response> {
       return NextResponse.json({ viewKey: amuxAnalysisTranslationViewKey(view),
         translations: outcome.translations, cached: outcome.cached }, { headers: noStore });
     }
-    const status = outcome.state === "too_large" ? 413 : outcome.state === "empty" ? 409 : 503;
+    const status = outcome.state === "empty" ? 409 : 503;
     return NextResponse.json({ error: outcome.state === "empty" ? "nothing_to_translate" :
-      outcome.state === "too_large" ? "too_large" : outcome.state === "disabled" ?
+      outcome.state === "disabled" ?
         "analysis_translation_disabled" : "translation_unavailable" }, { status, headers: noStore });
   } catch (error) {
     if (error instanceof AmuxIdeaAnalysisResultReadError) {

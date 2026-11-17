@@ -308,20 +308,44 @@ test("analysis stream accepts the descriptors the pinned CLI 2.1.288 reports, an
   assert.equal(refused({ ...init, tools: ["Read", "Grep", "Bash"] }), "init_tools");
 });
 
-test("analysis stream names an unexpected system event by the CLI's own vocabulary only", () => {
+test("analysis stream records an unknown system event by name and keeps the answer", () => {
   const rest = [use("read_1", "Read", { file_path: file }), reply("read_1"),
     analysisResult];
-  const code = (subtype) => {
+  const run = (subtype, extra = {}) => {
     const observer = createAmuxTrackedCheckoutAnalysisStreamObserver({
       directory, files: ["src/a.ts"], modelId });
-    observer.observeChunk(Buffer.from([analysisInit, { type: "system", subtype },
-      ...rest].map(JSON.stringify).join("\n")));
-    assert.deepEqual(observer.finish({ exitCode: 0, stdoutComplete: true }),
-      { kind: "outcome_unknown" });
-    return observer.rejectReason().code;
+    observer.observeChunk(Buffer.from([analysisInit,
+      { type: "system", subtype, ...extra }, ...rest]
+      .map(JSON.stringify).join("\n")));
+    return { observer, result: observer.finish({ exitCode: 0,
+      stdoutComplete: true }) };
   };
-  assert.equal(code("hook_started"), "system_event_hook_started");
-  assert.equal(code("private_customer_identifier"), "system_event_other");
+  const known = run("hook_started");
+  assert.equal(known.result.kind, "verified_success");
+  assert.deepEqual(known.result.unrecognizedEvents, { "system:hook_started": 1 });
+  // A name that is not a short token is recorded as such, never echoed.
+  const odd = run("private customer identifier");
+  assert.equal(odd.result.kind, "verified_success");
+  assert.deepEqual(odd.result.unrecognizedEvents, { "system:<invalid>": 1 });
+  // A system event that carries capabilities is still refused.
+  const capability = run("hook_started", { tools: ["Bash"] });
+  assert.deepEqual(capability.result, { kind: "outcome_unknown" });
+  assert.equal(capability.observer.rejectReason().code, "system_event_hook_started");
+  // An ordinary answer keeps its shape.
+  assert.equal("unrecognizedEvents" in analyze([analysisInit, ...rest]), false);
+});
+
+test("an unknown event type is recorded; an event-only manifest cannot be certified through it", () => {
+  const unknown = { type: "tool_use_summary" };
+  const withTrace = analyze([analysisInit, unknown,
+    use("read_1", "Read", { file_path: file }), reply("read_1"), analysisResult],
+  { openTrace: { kind: "complete", files: ["src/a.ts"] } });
+  assert.equal(withTrace.kind, "verified_success");
+  assert.deepEqual(withTrace.unrecognizedEvents, { "event:tool_use_summary": 1 });
+  // Without the independent open trace the events alone are the manifest.
+  assert.deepEqual(analyze([analysisInit, unknown,
+    use("read_1", "Read", { file_path: file }), reply("read_1"), analysisResult]),
+  { kind: "outcome_unknown" });
 });
 
 test("analysis stream names the usage check that refused, with model names only", () => {
@@ -403,8 +427,7 @@ test("a content-free ui_invalidate event is accepted; one paid run names every f
   assert.deepEqual(several.finish({ exitCode: 0, stdoutComplete: true,
     openTrace: { kind: "unverified", reason: "undecoded_open" } }), { kind: "outcome_unknown" });
   const reason = several.rejectReason();
-  assert.equal(reason.code, "system_event_hook_started");
-  assert.ok(reason.also.includes("stream_trace_unverified"));
+  assert.equal(reason.code, "stream_trace_unverified");
   assert.ok(reason.also.includes("usage_model_count") || reason.also.includes("usage_incomplete"));
 });
 
@@ -421,8 +444,10 @@ test("detail mode names the refused system event and its keys, never its body", 
       { kind: "outcome_unknown" });
     return observer;
   };
+  // The capability key (agents) is what makes a later system event refusable.
   const event = { type: "system", subtype: "tengu.private_event-1",
-    message: `prompt text ${secret}`, session_id: "9a2f", payload: { token: secret } };
+    message: `prompt text ${secret}`, session_id: "9a2f", payload: { token: secret },
+    agents: [] };
   const off = run(event, false);
   assert.deepEqual(off.rejectDetail(), []);
   assert.equal(off.rejectReason().code, "system_event_other");
@@ -430,14 +455,14 @@ test("detail mode names the refused system event and its keys, never its body", 
   assert.equal(on.rejectReason().code, "system_event_other",
     "detail mode does not change the verdict or its code");
   assert.deepEqual(on.rejectDetail(), [{ code: "system_event_other",
-    keys: ["type", "subtype", "message", "session_id", "payload"],
+    keys: ["type", "subtype", "message", "session_id", "payload", "agents"],
     subtype: "tengu.private_event-1" }]);
   assert.equal(JSON.stringify(on.rejectDetail()).includes(secret), false);
   assert.equal(JSON.stringify(on.rejectDetail()).includes("prompt text"), false);
   // A subtype that is not a short token is reported as such, not echoed.
-  const odd = run({ type: "system", subtype: "a b/../etc" }, true);
+  const odd = run({ type: "system", subtype: "a b/../etc", agents: [] }, true);
   assert.equal(odd.rejectDetail()[0].subtype, "<invalid>");
-  const long = run({ type: "system", subtype: "x".repeat(300) }, true);
+  const long = run({ type: "system", subtype: "x".repeat(300), agents: [] }, true);
   assert.equal(long.rejectDetail()[0].subtype.length, 64);
 });
 
@@ -487,10 +512,17 @@ test("thinking_tokens progress events pass only in their measured content-free s
   assert.equal(withEvent(thinking).kind, "verified_success");
   const withoutUuid = { ...thinking };
   delete withoutUuid.uuid;
+  // A changed shape is recorded, not a reason to drop the answer; only a
+  // capability-bearing one is still refused.
+  assert.deepEqual(withEvent({ ...thinking, tools: ["Bash"] }),
+    { kind: "outcome_unknown" });
   for (const changed of [
     { ...thinking, text: "a thought" },
-    { ...thinking, tools: ["Bash"] },
     { ...thinking, estimated_tokens: "1200" },
     withoutUuid,
-  ]) assert.deepEqual(withEvent(changed), { kind: "outcome_unknown" });
+  ]) {
+    const kept = withEvent(changed);
+    assert.equal(kept.kind, "verified_success");
+    assert.deepEqual(kept.unrecognizedEvents, { "system:thinking_tokens": 2 });
+  }
 });

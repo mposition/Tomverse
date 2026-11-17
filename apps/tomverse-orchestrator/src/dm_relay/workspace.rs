@@ -49,9 +49,11 @@ pub const DM_WORKSPACE_EVIDENCE_MAX_BYTES: usize = 2 * crate::tomverse_api::V22_
 pub const DM_WORKSPACE_ANSWER_MAX_BYTES: usize = DM_WORKSPACE_EVIDENCE_MAX_BYTES.div_ceil(3) * 4 + 64 * 1024;
 /// The broker's lines: a header and one short line per evidence file.
 const DM_WORKSPACE_LINES_MAX_BYTES: usize = 16 * 1024;
-/// How long the relay waits for the broker's workspace answer at most (a few
-/// public API reads). The result deadline cuts it shorter when it comes first.
-pub const DM_WORKSPACE_WAIT: std::time::Duration = std::time::Duration::from_secs(90);
+/// How long the relay waits for the broker's workspace answer at most: the
+/// workspace's one time limit (`DM_WORKSPACE_TIME_LIMIT_MS` of
+/// lib/amux/decisionMakerWorkspaceCore.ts, an hour). The result deadline cuts
+/// it shorter when it comes first.
+pub const DM_WORKSPACE_WAIT: std::time::Duration = std::time::Duration::from_millis(60 * 60 * 1000);
 
 /// The evidence the app answered, base64 as it came: `{ name, content }`.
 #[derive(Debug, Clone, PartialEq, Eq)]

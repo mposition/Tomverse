@@ -19,15 +19,6 @@ import { patchContextPaths } from "../engineeringAgentT2DmReviewCore.ts";
 import { dmCardEvidenceContext, type DmWorkspaceEvidenceName } from "./decisionMakerWorkspaceCore.ts";
 import { amuxV52ReviewEntriesText, type AmuxV52ReviewEntry } from "./v52ReviewFindingsCore.ts";
 
-/**
- * Filing a settlement card starts a Decision Maker turn. On unless exactly
- * `disabled` (owner decision 2026-11-15: the switches that make the Decision
- * Maker work default on, and are kill switches).
- */
-export const AMUX_DM_OWNER_SETTLEMENT_ENV = "TOMVERSE_AMUX_DM_OWNER_SETTLEMENT";
-export const amuxDmOwnerSettlementEnabled = (env: Record<string, string | undefined> = process.env) =>
-  env[AMUX_DM_OWNER_SETTLEMENT_ENV]?.trim() !== "disabled";
-
 export const AMUX_DM_OWNER_SETTLEMENT_KINDS = ["t2_pr", "stopped"] as const;
 export type AmuxDmOwnerSettlementKind = (typeof AMUX_DM_OWNER_SETTLEMENT_KINDS)[number];
 
@@ -252,8 +243,6 @@ export function amuxDmOwnerSettlementCard(input: {
   siblingTotal: number;
   /** A review pull request: its number and patch. */
   pull: { number: number; patch: string | null } | null;
-  /** Whether the Decision Maker has a workspace; the switch decides by default. */
-  workspace?: boolean;
 }) {
   if (input.criteria.length === 0) return null;
   if (input.kind === "t2_pr" && !input.pull?.patch) return null;
@@ -284,8 +273,7 @@ export function amuxDmOwnerSettlementCard(input: {
     text: findingsText,
   }];
   if (input.kind === "stopped") {
-    const context = dmCardEvidenceContext(evidence, input.workspace);
-    if (context === null) return null;
+    const context = dmCardEvidenceContext(evidence);
     return {
       question_id: input.settlementId,
       worker: AMUX_DM_OWNER_SETTLEMENT_DM_WORKER,
@@ -305,9 +293,7 @@ export function amuxDmOwnerSettlementCard(input: {
   const patch = input.pull!.patch!;
   const files = engineeringAgentPatchFiles(patch);
   if (files.length === 0) return null;
-  const context = dmCardEvidenceContext([{ name: "PATCH.diff", heading: "The pull request's patch", text: patch }, ...evidence],
-    input.workspace);
-  if (context === null) return null;
+  const context = dmCardEvidenceContext([{ name: "PATCH.diff", heading: "The pull request's patch", text: patch }, ...evidence]);
   return {
     question_id: input.settlementId,
     worker: AMUX_DM_OWNER_SETTLEMENT_DM_WORKER,

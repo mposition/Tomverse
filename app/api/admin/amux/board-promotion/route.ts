@@ -13,11 +13,8 @@ import {
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson, readLimitedText } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
 import {
-  BOARD_IMPORT_PREVIEW_LIMIT,
   BoardImportError,
-  admitBoardImportPreview,
   boardImportContentTypeAccepted,
-  pruneBoardImportPreviewHits,
 } from "@/lib/amux/boardImportCore";
 import { BOARD_PROMOTION_RAW_BODY_MAX_BYTES } from "@/lib/amux/boardPromotionCore";
 import {
@@ -45,7 +42,6 @@ const approvalSchema = z
   .strict();
 
 const ACTIONS = new Set(["preview", "prepare", "approve", "reject", "expire", "expire-due", "apply"]);
-const previewHits = new Map<string, number[]>();
 
 const requireOwner = async () => {
   const session = await getServerSession(authOptions);
@@ -90,16 +86,6 @@ export async function POST(request: Request) {
       });
     }
     if (action === "preview") {
-      const now = Date.now();
-      const pruned = pruneBoardImportPreviewHits([...previewHits], now);
-      previewHits.clear();
-      for (const [userId, retained] of pruned) previewHits.set(userId, retained);
-      const decision = admitBoardImportPreview(previewHits.get(auth.session.user.id) ?? [], now);
-      if (decision.retained.length === 0) previewHits.delete(auth.session.user.id);
-      else previewHits.set(auth.session.user.id, decision.retained);
-      if (!decision.allowed || decision.retained.length > BOARD_IMPORT_PREVIEW_LIMIT) {
-        return NextResponse.json({ error: "preview_rate_limited" }, { status: 429, headers: noStoreHeaders });
-      }
       const raw = await readLimitedText(request, BOARD_PROMOTION_RAW_BODY_MAX_BYTES);
       return NextResponse.json(await previewBoardPromotion(raw), { headers: noStoreHeaders });
     }

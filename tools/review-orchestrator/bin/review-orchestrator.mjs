@@ -180,7 +180,7 @@ async function daemon(config) {
   const log = (line) => process.stdout.write(`${new Date().toISOString()} ${line}\n`);
   const orchestrator = new Orchestrator(config, { log });
   const recovered = orchestrator.recoverOrphans();
-  if (recovered > 0) log(`closed ${recovered} orphaned review(s) as unknown`);
+  if (recovered > 0) log(`${recovered} review(s) cut off by the last stop go back to the queue`);
   let stopping = false;
   const stop = () => {
     stopping = true;
@@ -227,8 +227,8 @@ async function daemon(config) {
     await sleep(config.pollMs);
   }
   // Reviewers run in their own process groups, so they would outlive the
-  // daemon. Kill them; the next start closes their slots as unknown.
-  log(`stopping with ${orchestrator.inflight.size} review(s) in flight; they will be closed as unknown`);
+  // daemon. Kill them; their slots go back to the queue (now, or at the next start).
+  log(`stopping with ${orchestrator.inflight.size} review(s) in flight; they will run again from the start`);
   orchestrator.killAll();
   await Promise.race([orchestrator.idle(), sleep(10_000)]);
   releaseLock();

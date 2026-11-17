@@ -6,7 +6,6 @@ import type { Session } from "next-auth";
 
 import { prisma } from "@/lib/prisma";
 import { amuxContentUnitKeyId } from "@/lib/amux/ideaKeyStore";
-import { amuxIdeaTitleFromText } from "@/lib/amux/ideaTitleCore";
 import { commitAmuxDueRawIdeaPurge, readAmuxRawIdeaPurgeOutcome,
   retirePurgedAmuxRawIdeaKey } from "@/lib/amux/ideaRawRetentionService";
 import { commitAmuxDueTransferPayloadPurge, commitAmuxDueFreeformPurge,
@@ -313,7 +312,8 @@ test("owner hold pauses the original purge clock and release makes it due again"
   const renewedId = randomUUID();
   await prisma.$transaction((tx) => commitAmuxIdeaRetentionHold(tx,
     { session: ownerSession, request: ownerRequest, id: renewedId,
-      ideaId: id, reasonCode: "legal_request", days: 2,
+      // Past the former 90-day bound: the owner's hold has none of ours (2026-11-16).
+      ideaId: id, reasonCode: "legal_request", days: 400,
       expectedRemainingBodies: 1, expectedAlreadyPurgedBodies: 0,
       replacesHoldId: holdId }));
   const prior = await prisma.amuxIdeaRetentionHold.findUniqueOrThrow({
@@ -350,8 +350,7 @@ test("the title backfill copies a sent Scout suggestion's title onto a live idea
   const read = (id: string) => prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id } })
     .then((row) => row.title);
   // The 2026-11-04 backfill repeats the rule of its day, the 80-character cut
-  // that the legacy switch keeps (owner direction 2026-11-15 removed it).
-  assert.equal(await read(live), amuxIdeaTitleFromText(sentTitle, true));
+  // (owner direction 2026-11-15 removed it from the code).
   assert.equal(await read(live), `${"가".repeat(79)}…`);
   assert.equal(await read(purgedId), null);
   assert.equal(await read(untouched), null);

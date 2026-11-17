@@ -11,7 +11,7 @@ const b = { ...a, id:"qa-task-105", sourceKey:"AMUX-105", title:"Preserve the se
 const lanes = ["tomverse_backlog","amux_backlog","todo","in_progress","in_review","attention"];
 const detail = (card=a) => ({ ...card, revision:3, body:JSON.stringify({
   problem:"Keep the board context",scopeIn:["Same-page dialog"],scopeOut:[],completionCriteria:["Keyboard focus returns"] }),
-  brief:"Approved fixture brief", feedback:null, outcomeWriteEnabled:false, result:null,
+  brief:"Approved fixture brief", feedback:null, result:null,
   dependencies:[],dependents:[],attempts:[],escalations:[],score:null,usage:[],reviews:[],publications:[] });
 
 /** A console palette colour as the browser resolves it, so the board is checked against the theme, not a literal. */

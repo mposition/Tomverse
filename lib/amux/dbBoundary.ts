@@ -471,6 +471,13 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 10,
     isolation: "mutation",
   },
+  // The system's release of a latch an hour after it (owner direction
+  // 2026-11-16; lock, read, the instance's audit 4, the event: 7).
+  decisionMakerLatchRelease: {
+    operation: "decision_maker_latch_release",
+    prismaCallCeiling: 9,
+    isolation: "mutation",
+  },
   // §5's cleanup report of docs/policy/amux-decision-maker.md, stage S2-2a3
   // (lock, state, the instance's audit 4, the event: 7, pinned by
   // tests/amuxDecisionMakerRequest.test.mjs).
@@ -615,8 +622,8 @@ export const AMUX_DB_BOUNDARIES = {
   // A Decision Maker request's workspace evidence
   // (lib/amux/decisionMakerWorkspaceService.ts): setup + the request's card +
   // the one source row of that card + a pull request's patch + a settlement
-  // Task's rejected reviews + (with the workspace switched off) the card text +
-  // fence.
+  // Task's rejected reviews + fence (the card text read went with the
+  // workspace's kill switch, 2026-11-16).
   decisionMakerWorkspaceRead: {
     operation: "decision_maker_workspace_read",
     prismaCallCeiling: 7,

@@ -169,13 +169,12 @@ test("the unresolved registration receipt is actor-bound and contains no secret 
 
 test("Admin exposes the real write gate and freezes a submitted approval on exact-ID read-back", () => {
   // Registration lives in Operations settings › Analysis settings (approved
-  // backlog redesign, screen C), behind the catalogue read and write switches.
+  // backlog redesign, screen C).
   const panel = readFileSync(new URL(
     "../components/admin/AmuxFrontierModelRegistrationPanel.tsx", import.meta.url), "utf8");
   const page = readFileSync(new URL(
     "../app/(site)/(application)/admin/amux-settings/page.tsx", import.meta.url), "utf8");
-  assert.match(page, /frontierCatalogReadPermitted\(process\.env\[AMUX_V4_FRONTIER_CATALOG_READ_ENV\]\) &&\s+frontierCatalogWritePermitted\(/);
-  assert.match(page, /<AmuxFrontierModelRegistrationPanel writeAvailable=\{modelWriteAvailable\}/);
+  assert.match(page, /<AmuxFrontierModelRegistrationPanel operatorId=/);
   const ideas = readFileSync(new URL(
     "../components/admin/AmuxFrontierModelsPanel.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(ideas, /frontier-models", \{\s*method: "POST"/, "the Ideas flow no longer registers models");

@@ -11,7 +11,6 @@ const world = {
   session: { user: { id: "owner-1" } } as { user: { id: string } } | null,
   role: "owner",
   recent: true,
-  readOn: true,
   listCalls: 0,
   checkCalls: 0,
   checkedInput: null as unknown,
@@ -43,10 +42,6 @@ async function loadRoute(): Promise<{ GET: (request: Request) => Promise<Respons
     mock.module(mod("lib/auth.ts"), { namedExports: { authOptions: {} } });
     mock.module(mod("lib/amux/ideaFrontierCatalogWriteCore.ts"), { namedExports: {
       AMUX_V4_FRONTIER_CATALOG_BODY_MAX_BYTES: 2048,
-      AMUX_V4_FRONTIER_CATALOG_READ_ENV: "FRONTIER_READ_TEST",
-      AMUX_V4_FRONTIER_CATALOG_WRITE_ENV: "FRONTIER_WRITE_TEST",
-      frontierCatalogReadPermitted: () => world.readOn,
-      frontierCatalogWritePermitted: () => false,
       inspectFrontierCatalogWrite: () => ({ ok: false }),
       isFrontierApprovalId: () => false,
     } });
@@ -73,7 +68,6 @@ const reset = () => {
   world.session = { user: { id: "owner-1" } };
   world.role = "owner";
   world.recent = true;
-  world.readOn = true;
   world.listCalls = 0;
   world.checkCalls = 0;
   world.checkedInput = null;
@@ -82,13 +76,12 @@ const reset = () => {
   world.catalog = { decision: "catalog_current", models: approvedModels };
 };
 
-test("available models stay owner-only, recently authenticated, and dark when read is off", async () => {
+test("available models stay owner-only, recently authenticated, and recently authenticated", async () => {
   const { GET } = await loadRoute();
   for (const setup of [
     () => { world.session = null; },
     () => { world.role = "admin"; },
     () => { world.recent = false; },
-    () => { world.readOn = false; },
   ]) {
     reset();
     setup();
@@ -134,7 +127,6 @@ test("exact model check is owner-only and never authorizes transfer", async () =
     () => { world.session = null; },
     () => { world.role = "admin"; },
     () => { world.recent = false; },
-    () => { world.readOn = false; },
   ]) {
     reset(); setup();
     const response = await GET(request(query));

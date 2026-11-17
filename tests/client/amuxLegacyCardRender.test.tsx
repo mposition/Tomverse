@@ -31,8 +31,8 @@ test("the owner sees the idea that will be saved and both actions", () => {
 
 test("a pre-v22 Task says why it has no recovery path", () => {
   const out = html({ ...ready, kind: "pre_v22_task" });
-  assert.match(out, /Task made before v22/);
-  assert.match(out, /has no v22 receipt/);
+  assert.match(out, /Task made before card execution/);
+  assert.match(out, /has no execution receipt/);
   assert.match(out, /data-testid="amux-legacy-card-recreate"/);
 });
 

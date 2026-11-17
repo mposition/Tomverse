@@ -6,11 +6,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { dmSnapshotManifestDigest } from "../lib/amux/decisionMakerBodyCore.ts";
-import { DM_CARD_TEXT_MAX_BYTES, DM_EVIDENCE_OPEN } from "../lib/amux/decisionMakerCore.ts";
+import { DM_CARD_TEXT_MAX_BYTES } from "../lib/amux/decisionMakerCore.ts";
+import { readFileSync } from "node:fs";
 import {
   DM_WORKSPACE_EVIDENCE_MAX_BYTES,
   DM_WORKSPACE_EVIDENCE_NAMES,
-  amuxDmWorkspaceEnabled,
   dmCardEvidenceContext,
   dmLaunchWorkspaceRefusal,
   dmParseLaunchWorkspace,
@@ -27,10 +27,12 @@ const SHA = "0123456789abcdef0123456789abcdef01234567";
 const bytes = (text) => Buffer.from(text, "utf8");
 const PATCH = `diff --git a/a.ts b/a.ts\n${"+x\n".repeat(5_000)}`;
 
-test("the workspace is on unless its kill switch says exactly disabled", () => {
-  assert.equal(amuxDmWorkspaceEnabled({}), true);
-  assert.equal(amuxDmWorkspaceEnabled({ TOMVERSE_AMUX_DM_WORKSPACE: "enabled" }), true);
-  assert.equal(amuxDmWorkspaceEnabled({ TOMVERSE_AMUX_DM_WORKSPACE: " disabled " }), false);
+test("the workspace has no kill switch: it is always on (owner direction 2026-11-16)", () => {
+  for (const path of ["lib/amux/decisionMakerWorkspaceCore.ts", "lib/amux/decisionMakerWorkspaceService.ts",
+    "app/api/internal/amux/decision-maker/workspace/route.ts"]) {
+    const source = readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
+    assert.doesNotMatch(source, /TOMVERSE_AMUX_DM_WORKSPACE\b|amuxDmWorkspaceEnabled/, path);
+  }
 });
 
 test("evidence files: the closed names, text only, the secret path list and the secret scan; the rest still go", () => {
@@ -98,17 +100,15 @@ test("docs/policy/amux-decision-maker.md §10: the manifest digest binds the che
     dmWorkspaceManifestDigest(key, { ...workspace, files: [{ name: "PATCH.diff", text: `${PATCH}+y\n` }] }));
 });
 
-test("a card points at its evidence with the workspace on, and carries it whole with the workspace off", () => {
+test("a card points at its evidence, whatever its size or its characters", () => {
   const evidence = [{ name: "PATCH.diff", heading: "The patch", text: PATCH }];
-  const pointer = dmCardEvidenceContext(evidence, true);
+  const pointer = dmCardEvidenceContext(evidence);
   assert.match(pointer, /evidence\/PATCH\.diff is the whole patch/);
   assert.ok(!pointer.includes("+x"));
-  const inline = dmCardEvidenceContext(evidence, false);
-  assert.ok(inline.startsWith(`${DM_EVIDENCE_OPEN}\nThe patch:\n`));
-  assert.ok(inline.includes(PATCH), "whole: far past the 4,000 characters a context once held");
-  // Evidence that cannot ride whole (past the card's one cap, or characters a card cannot carry): no card at all.
-  assert.equal(dmCardEvidenceContext([{ ...evidence[0], text: "z".repeat(DM_CARD_TEXT_MAX_BYTES) }], false), null);
-  assert.equal(dmCardEvidenceContext([{ ...evidence[0], text: "bell\u0007" }], false), null);
+  // No 224 KiB room and no control-character refusal any more: the evidence goes to the workspace.
+  for (const text of ["z".repeat(DM_CARD_TEXT_MAX_BYTES), "bell\u0007"]) {
+    assert.equal(dmCardEvidenceContext([{ ...evidence[0], text }]), pointer);
+  }
 });
 
 test("WORKSPACE.md says what is where, and that nothing in it is an instruction", () => {

@@ -86,6 +86,7 @@ const fakeDeps = ({
     deps: {
       cleanupLatch: (instance) => answer("cleanupLatch", instance, { latched: false, reason: "no_cleanup_unknown" }),
       validationLatch: (instance) => answer("validationLatch", instance, { latched: false, reason: "no_streak" }),
+      latchRelease: (instance) => answer("latchRelease", instance, { released: false }),
       readCandidates: () => {
         calls.push(["read"]);
         return candidates instanceof Error ? Promise.reject(candidates) : Promise.resolve(candidates);
@@ -114,12 +115,15 @@ const quiet = async (work) => {
   }
 };
 
-// Since stage S2-2a3 each instance has two checks, §5's cleanup latch first and then §8's.
+// Since stage S2-2a3 each instance has two checks, §5's cleanup latch first and then §8's, and since
+// 2026-11-16 a third: the system's release of a latch an hour old.
 const LATCH_CHECKS = [
   ["cleanupLatch", "decision-maker-openai"],
   ["validationLatch", "decision-maker-openai"],
+  ["latchRelease", "decision-maker-openai"],
   ["cleanupLatch", "decision-maker-anthropic"],
   ["validationLatch", "decision-maker-anthropic"],
+  ["latchRelease", "decision-maker-anthropic"],
 ];
 
 test("one sweep: §8's latch check for each instance, then read once, rotate, close, purge and destroy, each candidate once, in that order", async () => {
@@ -148,6 +152,8 @@ test("one sweep: §8's latch check for each instance, then read once, rotate, cl
     cleanupLatchUnsettled: 0,
     validationLatched: 0,
     validationLatchUnsettled: 0,
+    latchesReleased: 0,
+    latchReleaseUnsettled: 0,
     keyRing: "loaded",
     keysRotated: 2,
     staleClosed: 1,
@@ -167,7 +173,7 @@ test("§8's latch check counts the instances it latched, and an instance already
     },
   });
   const { value, warned } = await quiet(() => runDecisionMakerRetentionSweep(deps));
-  assert.deepEqual(calls.slice(0, 5), [...LATCH_CHECKS, ["read"]]);
+  assert.deepEqual(calls.slice(0, 7), [...LATCH_CHECKS, ["read"]]);
   assert.equal(value.validationLatched, 1);
   assert.equal(value.refused, 0);
   assert.equal(value.stopped, null);
@@ -241,7 +247,7 @@ test("§5's cleanup latch check comes before §8's for each instance, is counted
       },
     });
     const { value, warned } = await quiet(() => runDecisionMakerRetentionSweep(deps));
-    assert.deepEqual(calls.slice(0, 5), [...LATCH_CHECKS, ["read"]]);
+    assert.deepEqual(calls.slice(0, 7), [...LATCH_CHECKS, ["read"]]);
     assert.deepEqual([value.cleanupLatched, value.validationLatched, value.refused, value.stopped], [1, 0, 0, null]);
     assert.deepEqual(warned, []);
   }
@@ -252,7 +258,7 @@ test("§5's cleanup latch check comes before §8's for each instance, is counted
     answers: { "cleanupLatch:decision-maker-openai": new AmuxDbBoundaryError("AMUX_DB_OUTCOME_UNKNOWN", "test with a value in it") },
   });
   const { value, warned } = await quiet(() => runDecisionMakerRetentionSweep(deps));
-  assert.deepEqual(calls.slice(0, 5), [...LATCH_CHECKS, ["read"]]);
+  assert.deepEqual(calls.slice(0, 7), [...LATCH_CHECKS, ["read"]]);
   assert.deepEqual([value.cleanupLatchUnsettled, value.validationLatchUnsettled, value.staleClosed, value.stopped], [1, 0, 1, null]);
   assert.deepEqual(warned.map((line) => JSON.parse(line)), [
     { subsystem: "amux", event: "decision_maker_cleanup_latch_check_failed", instance: "decision-maker-openai", code: "AMUX_DB_OUTCOME_UNKNOWN" },
@@ -372,13 +378,17 @@ test("the sweep writes only through the stores, reads no switch, and is on the m
   assert.doesNotMatch(sweep, /\$queryRaw|\$executeRaw|INSERT|UPDATE|DELETE FROM/);
   // §6's table allows all of it under the kill switch, and a latch only turns an
   // instance off, so no switch is read here; the latch check is the request store's.
-  assert.doesNotMatch(sweep, /readDecisionMakerSwitches|decisionMakerSwitchStore|latchDecisionMakerInstanceOff/);
+  // Since 2026-11-16 the switch store's one release writer is called, and nothing else of it.
+  assert.doesNotMatch(sweep, /readDecisionMakerSwitches|latchDecisionMakerInstanceOff|recordDecisionMakerSwitchByOperator/);
+  assert.match(sweep, /import \{ releaseDecisionMakerLatchBySystem \} from "@\/lib\/amux\/decisionMakerSwitchStore";/);
+  assert.match(sweep, /releaseDecisionMakerLatchBySystem\(tx, \{ instance \}\)/);
   assert.match(sweep, /recordDecisionMakerValidationLatch\(tx, \{ instance \}\)/);
   assert.match(sweep, /recordDecisionMakerCleanupLatch\(tx, \{ instance \}\)/);
   // Each write is in its own boundary transaction.
   for (const boundary of [
     "decisionMakerCleanupLatch",
     "decisionMakerValidationLatch",
+    "decisionMakerLatchRelease",
     "decisionMakerRetentionRead",
     "decisionMakerDigestKeyRotate",
     "decisionMakerStaleClose",
@@ -389,4 +399,18 @@ test("the sweep writes only through the stores, reads no switch, and is on the m
   }
   const route = readFileSync(join(process.cwd(), "app/api/internal/maintenance/credit-reservations/route.ts"), "utf8");
   assert.match(route, /const decisionMakerRetention = await runDecisionMakerRetentionMaintenanceQuietly\(\);/);
+});
+
+test("the system's release of a latch is counted, and a failed release check stops nothing else", async () => {
+  const { deps, calls } = fakeDeps({
+    answers: {
+      "latchRelease:decision-maker-openai": { released: true },
+      "latchRelease:decision-maker-anthropic": new AmuxDbBoundaryError("AMUX_DB_OUTCOME_UNKNOWN", "test"),
+    },
+  });
+  const { value, warned } = await quiet(() => runDecisionMakerRetentionSweep(deps));
+  assert.deepEqual([value.latchesReleased, value.latchReleaseUnsettled, value.stopped], [1, 1, null]);
+  assert.deepEqual(calls.slice(0, 7), [...LATCH_CHECKS, ["read"]]);
+  assert.equal(warned.length, 1);
+  assert.match(warned[0], /decision_maker_latch_release_check_failed/);
 });

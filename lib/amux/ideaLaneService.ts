@@ -9,12 +9,11 @@ import { prisma } from "@/lib/prisma";
 import { openAmuxContent, verifyAmuxContentDigest } from "./ideaCrypto.ts";
 import { inspectAmuxIdeaInput } from "./ideaInputCore.ts";
 import { loadAmuxContentKeyRing } from "./ideaKeyStore.ts";
-import { amuxIntakeLegacyLimits } from "./intakeLimitsCore.ts";
 import {
   AMUX_IDEA_LANE_LEASE_MS,
-  AMUX_IDEA_LANE_MAX_ATTEMPTS,
   AMUX_IDEA_LANE_PUBLISH_FENCE_MS,
-  AMUX_IDEA_LANE_REPEATED_FAILURE_STOP,
+  AMUX_IDEA_LANE_BACKOFF_BASE_MS,
+  AMUX_IDEA_LANE_BACKOFF_MAX_MS,
   AMUX_IDEA_LANE_SECRET_ENV,
   amuxIdeaLaneBranch,
   amuxIdeaLaneClaimable,
@@ -65,7 +64,6 @@ export async function claimAmuxIdeaLane(scope: { actorUserId?: string } = {}): P
     await tx.$executeRaw`SELECT set_config('statement_timeout', '5000', true)`;
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('amux_idea_lane_claim'))`;
     const now = await databaseNow(tx);
-    const legacy = amuxIntakeLegacyLimits();
     const since = new Date(now.getTime() - 86_400_000);
     const today = await tx.amuxIdeaLaneAttempt.count({ where: { claimedAt: { gt: since } } });
     if (today >= amuxIdeaLaneDailyAttempts()) return null;
@@ -75,6 +73,7 @@ export async function claimAmuxIdeaLane(scope: { actorUserId?: string } = {}): P
             'claimedAtMs', (extract(epoch FROM a."claimedAt") * 1000)::double precision,
             'leaseUntilMs', (extract(epoch FROM a."leaseUntil") * 1000)::double precision,
             'outcome', a."outcome", 'prNumber', a."prNumber", 'continues', a."continues",
+            'finishedAtMs', (extract(epoch FROM a."finishedAt") * 1000)::double precision,
             'mergedAtMs', (extract(epoch FROM a."mergedAt") * 1000)::double precision,
             'prClosedAtMs', (extract(epoch FROM a."prClosedAt") * 1000)::double precision))
           FROM "AmuxIdeaLaneAttempt" a WHERE a."ideaId" = i."id") AS "attempts"
@@ -99,19 +98,18 @@ export async function claimAmuxIdeaLane(scope: { actorUserId?: string } = {}): P
           AND ((a."outcome" = 'pr_open' AND a."claimedAt" > p."partStart")
             OR (a."outcome" IS NULL
               AND a."leaseUntil" > (${now.toISOString()}::timestamptz AT TIME ZONE 'UTC'))))
-        -- A part the lane gave up on (amuxIdeaLaneGivesUp): its newest runs
-        -- ended in the same failure AMUX_IDEA_LANE_REPEATED_FAILURE_STOP times
-        -- in a row (a run that never reported is lease_expired); with the
-        -- legacy switch, AMUX_IDEA_LANE_MAX_ATTEMPTS runs of any outcome. The
-        -- live and PR-opening runs were left out above, so the rest are failures.
-        AND CASE WHEN ${legacy}::boolean THEN
-          (SELECT count(*) FROM "AmuxIdeaLaneAttempt" a WHERE a."ideaId" = i."id"
-            AND a."claimedAt" > p."partStart") < ${AMUX_IDEA_LANE_MAX_ATTEMPTS}
-        ELSE NOT EXISTS (SELECT 1 FROM (SELECT COALESCE(a."outcome", 'lease_expired') AS "outcome"
-            FROM "AmuxIdeaLaneAttempt" a WHERE a."ideaId" = i."id" AND a."claimedAt" > p."partStart"
-            ORDER BY a."claimedAt" DESC LIMIT ${AMUX_IDEA_LANE_REPEATED_FAILURE_STOP}) newest
-          HAVING count(*) = ${AMUX_IDEA_LANE_REPEATED_FAILURE_STOP} AND count(DISTINCT newest."outcome") = 1)
-        END
+        -- A part waiting out its backoff (amuxIdeaLaneState): every run left
+        -- here is a failure, the next claim waits until the newest one's end
+        -- (a run that never reported ends at its lease) plus 5 minutes
+        -- doubling per failure up to 24 hours; a part is never given up on.
+        AND NOT EXISTS (SELECT 1 FROM (SELECT count(*) AS "failures",
+              max(COALESCE(a."finishedAt", a."leaseUntil")) AS "lastEnd"
+            FROM "AmuxIdeaLaneAttempt" a WHERE a."ideaId" = i."id" AND a."claimedAt" > p."partStart") f
+          WHERE f."failures" > 0 AND f."lastEnd" + LEAST(
+              ${AMUX_IDEA_LANE_BACKOFF_MAX_MS}::double precision * interval '1 millisecond',
+              ${AMUX_IDEA_LANE_BACKOFF_BASE_MS}::double precision * interval '1 millisecond'
+                * power(2, LEAST(f."failures", 30) - 1))
+            > (${now.toISOString()}::timestamptz AT TIME ZONE 'UTC'))
       -- SEV1 first: an idea the develop CI repair pass handed over (its system
       -- audit entry is the mark; only that pass writes the action), then age.
       ORDER BY EXISTS (SELECT 1 FROM "AdminAuditLog" l
@@ -124,7 +122,7 @@ export async function claimAmuxIdeaLane(scope: { actorUserId?: string } = {}): P
     let pick: Candidate | null = null;
     let pickState: AmuxIdeaLaneState | null = null;
     for (const idea of candidates) {
-      const state = amuxIdeaLaneState(idea.attempts ?? [], nowMs, legacy);
+      const state = amuxIdeaLaneState(idea.attempts ?? [], nowMs);
       if (!amuxIdeaLaneClaimable(state)) continue;
       // The owner's close (ideaOwnerCloseService.ts) and the analysis path's
       // first source plan lock this row too, so

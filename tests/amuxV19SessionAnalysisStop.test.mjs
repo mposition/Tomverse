@@ -110,12 +110,9 @@ test("session stop route admits exact IDs and denies unauthorised or malformed p
     "../app/api/internal/amux/v19/session-analysis-stop/route.ts");
   const GET = imported.GET ?? imported.default.GET;
   const secretKey = "TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET";
-  const readKey = "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_STOP_POLL_READ";
   const syncKey = "TOMVERSE_AMUX_SYNC_SECRET";
   const maxSecretKey = "TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET";
-  const maxReadKey = "TOMVERSE_AMUX_V19_MAX_STOP_POLL_READ";
-  const previous = [secretKey, readKey, syncKey,
-    maxSecretKey, maxReadKey].map((key) =>
+  const previous = [secretKey, syncKey, maxSecretKey].map((key) =>
     [key, process.env[key]]);
   const endpoint = "https://tomverse.example/api/internal/amux/v19/session-analysis-stop";
   const headers = { authorization: `Bearer ${agentSecret}`,
@@ -124,14 +121,9 @@ test("session stop route admits exact IDs and denies unauthorised or malformed p
     new Request(`${endpoint}${query}`, { headers: selectedHeaders });
   try {
     process.env[secretKey] = agentSecret;
-    delete process.env[readKey];
     delete process.env[syncKey];
     const query = `?claimId=${claimId}&reservationId=${reservationId}&ideaId=${ideaId}`;
     assert.equal((await GET(request(query, {}))).status, 401);
-    const dark = await GET(request(query));
-    assert.equal(dark.status, 409);
-    assert.match(dark.headers.get("cache-control") ?? "", /no-store/);
-    process.env[readKey] = "enabled";
     for (const bad of ["", `?claimId=${claimId}`,
       `?claimId=${claimId}&reservationId=${reservationId}`,
       `?claimId=${claimId}&reservationId=bad/id`,
@@ -157,8 +149,6 @@ test("session stop route admits exact IDs and denies unauthorised or malformed p
       process.env[maxSecretKey] = "syntheticMaxLauncherSecret_0123456789abcdefgh";
       const maxHeaders = { authorization: `Bearer ${process.env[maxSecretKey]}`,
         "x-amux-agent-id": "amux-intake-max" };
-      assert.equal((await GET(request(query, maxHeaders))).status, 409);
-      process.env[maxReadKey] = "enabled";
       assert.equal((await GET(request(query, maxHeaders))).status, 200);
       assert.equal(dbCalls, 2);
     } finally {

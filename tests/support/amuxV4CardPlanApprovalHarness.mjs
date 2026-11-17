@@ -93,9 +93,7 @@ mock.module(mod("lib/amux/ideaStoryRegistrationService.ts"), {
 });
 mock.module(mod("lib/amux/ideaUnitDecisionStore.ts"), {
   namedExports: {
-    AMUX_V4_UNIT_WRITE_ENV: "TOMVERSE_AMUX_V4_UNIT_WRITE",
     AmuxV4UnitDecisionError: DecisionError,
-    amuxV4UnitWriteEnabled: (value) => value === "enabled",
     commitAmuxV4CardRegistration: async (tx, input) => {
       calls.push(["consume", tx, input.context.draftUnitId, input.cardId, input.keys]);
       return { decisionId: input.context.decisionId, cardId: input.cardId, auditId: "a" };
@@ -109,7 +107,6 @@ const request = new Request("https://t.test");
 const reset = () => {
   calls = []; failOn = null; commitFails = false; refusalFails = false;
   proposedUnits = [{ id: "unit-task-02" }, { id: "unit-task-01" }, { id: "unit-story-1" }];
-  process.env.TOMVERSE_AMUX_V4_UNIT_WRITE = "enabled";
 };
 const run = (extra = {}) => approveAmuxV4CardPlan(session, request,
   { ideaId: "idea-0001", planRequestId: "11111111-2222-4333-8444-555555555555",
@@ -182,8 +179,6 @@ await assert.rejects(run(), (error) => error.code === "outcome_unknown");
 // Gates.
 reset(); proposedUnits = [];
 await assert.rejects(run(), (error) => error.code === "nothing_to_approve");
-reset(); process.env.TOMVERSE_AMUX_V4_UNIT_WRITE = "disabled";
-await assert.rejects(run(), (error) => error.code === "write_disabled");
 reset();
 await assert.rejects(approveAmuxV4CardPlan({ ...session, role: "ops" }, request,
   { ideaId: "idea-0001", planRequestId: "11111111-2222-4333-8444-555555555555",

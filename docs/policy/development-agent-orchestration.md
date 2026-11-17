@@ -145,6 +145,7 @@ approvedBy: mposition · approvedAt: 2026-10-18 · 정책 버전: 55
 | 53 | 2026-10-17 mposition | R1 관측(2026-10-13 08:52~10-16 08:52 AEST)과 R2b 동등 관측(2026-10-14 18:21~10-17 18:21 AEST)의 종료를 운영자 확인으로 기록하고, R2c 코드 래치 `AMUX_WORKER_DERIVED_CATALOG_ASSIGNMENT_LATCH`를 켜 버전 35의 일곱 사용처가 등록부에서 유도한 카탈로그로 배정한다. 카탈로그 환경 변수는 R2e까지 남고, 래치를 끄면 배정은 환경 변수로 돌아간다. R2d와 FIRST Task 재시도 경로는 바꾸지 않는다. |
 | 54 | 2026-10-18 mposition | R2d 코드 래치 `AMUX_WORKER_SESSION_LIST_LATCH`를 켜 bridge가 유도 카탈로그의 세션 목록과 `TOMVERSE_AMUX_WSL_SESSIONS`의 교집합만 등록·배정하게 한다. 운영자가 두 경로의 bridge 바이너리를 main `d6c99aa1f` 빌드로 교체하며, 관측은 래치 배포와 교체가 모두 끝난 뒤 3일이다. 2026-10-18 기준으로 바뀌는 배정은 없다. |
 | 55 | 2026-10-18 mposition | worker 목록을 Admin 등록부 하나에서 관리한다. `TOMVERSE_AMUX_WSL_SESSIONS`를 옮기지 않고 없애며, bridge는 통합하지 않고 worker마다 하나(새 템플릿 `tomverse-amux-bridge@`, `--worker %i`)로 둔다. 담당과 종류(`session`·`v22`)는 새 읽기 전용 route `bridge-scope`가 등록부·능력에서 정한다. 장애 복구는 2026-10-14의 자동 재시작이 맡는다. 단계는 S1~S4이고 승인 자체로 아무것도 켜지 않는다. |
+| 55 (버전 유지) | 2026-11-16 mposition | 운영자 결정(대화, 버전 증가 없음): 카드 실행·코드 검토 등급·공용 AMUX의 환경 변수 스위치와 코드 래치를 정리한다. 카드 실행의 켜짐 스위치(`TOMVERSE_AMUX_V22_TASK_EXECUTION`, `WORKER_CLAIM`, `AUTO_PROMOTE`, `PROMOTION_FLOW`, `MULTI_PROVIDER`, `NON_CLAUDE_QUOTA_GATE`, `DELIVERY_BASE_SHA`, `TASK_RESULT_WRITE`, `LOCAL_CLI_FLOW`, `READ_BACK_PROCEED`, `TOMVERSE_AMUX_BRIDGE_READ_BACK_PROCEED`, `GRADUATION_EXCEPTION`, `TOMVERSE_AMUX_EXECUTION_GRADE`, `TOMVERSE_AMUX_V52_REJECT_RETRY_IN_BUDGET`, `V52_REVIEW_AVOID_VENDORS`, `TOMVERSE_AMUX_EXECUTION_API_ENABLED`, `INFRA_FAILURE_ROUTING`, `STALLED_CARD_SWEEP`, `CLI_USAGE_WRITE`)와 그 코드 래치, 결과를 쓰지 않던 `OUTCOME_WRITE` 경로를 없애고 코드는 늘 켜진 동작으로 동작한다. 남기는 것은 실제 돈이 나가는 경로(읽기 전용 API executor), 외부 게시(`V22_ENGINEERING_PUBLICATION`), 데이터 삭제(`CLI_USAGE_RETENTION`, `TASK_RESULT_RETENTION`), box 서비스를 켜는 스위치(orchestrator `ENABLED`·`EXECUTE`·`CLAIM`, `WSL_BRIDGE`, `CLI_MONITOR`, 복구 controller·checker), 에이전트 권한(`AGENT_APPROVAL_ENABLED`), 자격증명이다. 남는 스위치의 값은 `enabled`/`disabled`로 적고, 파서는 production의 기존 값(`1`, `true`)도 같은 뜻으로 읽는다. 새 스위치를 만들지 않고 migration을 만들지 않는다. |
 
 v1 행은 역사적 승인 기록으로 남는다. v2는 이 표의 행과 상태 줄이 공개 저장소 파일에 함께 기록되어야 저장소상 효력을 가진다. 개별 Agent의 승인 정책을 이 문서의 승인으로 간주하지 않는다.
 
@@ -276,9 +277,9 @@ Phase A에서 검증 가능한 AMUX 능력은 queue read와 routing snapshot의 
 실행, 외부 시스템 변경을 뜻하지 않는다.
 
 `claim`과 그 뒤의 worker 등록·heartbeat, owned queue, execution, delivery,
-settlement(이하 실행 API)는 코드 래치 `AMUX_EXECUTION_API_CODE_LATCH`가 true이고,
-환경 변수 `TOMVERSE_AMUX_EXECUTION_API_ENABLED`가 trim 후 정확히 `1`일 때만 열린다(버전 18).
-판정은 `NODE_ENV`와 무관하다. 둘 중 하나라도 아니면 실행 API는 `execution_api_disabled`로 거절한다. local process executor는
+settlement(이하 실행 API)는 늘 열려 있다. 버전 18의 코드 래치 `AMUX_EXECUTION_API_CODE_LATCH`와 환경 변수
+`TOMVERSE_AMUX_EXECUTION_API_ENABLED`는 2026-11-16 운영자 결정으로 없앴다(그 전에는 둘 다 참일 때만 열렸고,
+아니면 `execution_api_disabled`로 거절했다). local process executor는
 production에서 실행할 수 없으며 환경변수만으로 그 금지를 해제하지 못한다.
 이후 실행 허용은 Agent별 승인 정책, 격리된 실행 서비스, 비용·보존·감사 계약과
 별도 검증·활성화 결정을 요구한다. 선택 전용 route의 production 활성화도 별도
@@ -395,9 +396,8 @@ Preview, prepare, approval, apply는 서로 다른 동작이다.
 - 무쓰기는 앱 DB에 상태 행이 없다는 뜻이다. reverse proxy, APM, access log,
   PostgreSQL error log, browser memory, backup에 본문 흔적이 없다는 뜻이 아니다.
   payload와 거절 원문이 그 경로에 남지 않는다는 증거 없이는 활성화하지 않는다.
-- Preview는 계정당 분당 10회를 넘지 않는다. 이 제한은 replay oracle을 줄이기
-  위한 제품 제한이며 DoS 방어의 완전한 증명은 아니다. 초과와 scan 거절은 서로
-  구별되는 오류 코드만 반환한다.
+- Preview의 계정당 분당 10회 제한은 2026-11-16 운영자 지시(AMUX intake 맨 위 절)로 없앴다.
+  Preview는 owner·step-up 세션만 부를 수 있다. scan 거절은 자기 오류 코드만 반환한다.
 - Prepare는 명시적 쓰기다. 같은 `owner`, authorized session, 최근 step-up을
   요구한다. prepared row와 canonical human audit는 같은 트랜잭션에 생성한다.
   전용 `amux:import:approve` permission이 role map에 추가되기 전에는 그 이름만
@@ -610,7 +610,7 @@ Brief와 요청 전체는 catalog scanner(`amux-board-content-scan-v1`)를 통�
 
 대상 카드는 `backlog`이고 owner와 `claimedAt`과 `archivedAt`이 null이며, attempt, delivery, route decision이 0이고, 의존성이 있으면 그 의존성은 `done`이며 archive되지 않았다. source identity가 없거나 digest가 다르면 거절한다. 하나라도 거절이면 배치 전체를 쓰지 않는다.
 
-Apply는 환경 변수 `TOMVERSE_AMUX_BOARD_PROMOTE`가 정확히 `enabled`이고 코드 래치가 true일 때만 열린다. 버전 3이 출고한 코드 래치는 false였다. 버전 6이 출고하는 코드 래치는 true다. 요청 스키마의 `policyVersion`은 3으로 남는다. HTTP route는 래치를 인자로 받지 않는다. 승인 계약은 catalog import와 같다. 준비한 운영자가 최근 step-up 후 같은 행을 승인하고, 창은 15분이며, 소비는 한 번이다. 감사 metadata에는 brief 원문, 제목, source key를 넣지 않는다. 환경 값이 `enabled`가 아니면 코드 래치가 켜져 있어도 트랜잭션을 열지 않는다.
+Apply는 승인된 행에 대해서만 열린다. 2026-11-16 대화 결정으로 환경 변수 `TOMVERSE_AMUX_BOARD_PROMOTE`와 코드 래치를 없앴다(버전 6이 래치를 켜고 production 값이 enabled였으므로 동작은 같다). 요청 스키마의 `policyVersion`은 3으로 남는다. 승인 계약은 catalog import와 같다. 준비한 운영자가 최근 step-up 후 같은 행을 승인하고, 창은 15분이며, 소비는 한 번이다. 감사 metadata에는 brief 원문, 제목, source key를 넣지 않는다.
 
 성공한 apply는 그 카드의 status를 `todo`로 바꾸고, 요청의 kind, priority, classification, brief, brief digest를 기록하고, revision을 1 올린다. owner를 세팅하지 않고 attempt, delivery, route decision을 만들지 않는다. `TOMVERSE_AMUX_EXECUTE`를 바꾸지 않는다. queue는 계속 literal `todo`와 owner null만 읽는다. 승격된 카드는 그 조건에 들어가 선택 대상이 될 수 있으나, 선택은 실행이 아니다.
 
@@ -624,7 +624,7 @@ Apply는 환경 변수 `TOMVERSE_AMUX_BOARD_PROMOTE`가 정확히 `enabled`이�
 
 item drift인 source key마다 `accept_new_source_revision` 또는 `reject`가 정확히 하나 필요하다. 두 카드를 한 결정으로 묶지 않는다. no-op, missing, extra에는 revision을 만들지 않는다. 결정이 빠지거나 drift가 아닌 키를 결정하면 preview는 거절하고 writes는 0이다.
 
-Preview는 아무것도 쓰지 않는다. `applyPermitted`는 환경 변수 `TOMVERSE_AMUX_RECONCILIATION_APPLY`가 정확히 `enabled`이고 코드 래치가 true일 때만 true다. 버전 5가 출고하는 코드 래치는 true다. HTTP route는 래치를 인자로 받지 않는다. Apply는 그 판정이 false이면 트랜잭션을 열기 전에 `apply_disabled`로 거절한다. 환경 값이 `enabled`가 아니면 코드 래치가 켜져 있어도 트랜잭션을 열지 않는다.
+Preview는 아무것도 쓰지 않는다. `applyPermitted`는 계획이 유효할 때 true다. 2026-11-16 대화 결정으로 환경 변수 `TOMVERSE_AMUX_RECONCILIATION_APPLY`와 코드 래치를 없앴다(production 값은 enabled였다). Apply는 owner step-up과 감사 체인만으로 트랜잭션을 연다.
 
 래치가 열린 뒤의 한 트랜잭션은 consumed run, 사람 감사, revision insert, accept인 카드의 pointer 갱신만 한다. revision은 append-only다. accept는 새 accepted revision을 넣은 뒤에 pointer만 옮긴다. reject는 rejected revision만 추가하고 pointer를 유지한다. 어느 쪽도 `sourceVersion`, `sourceDigest`, `sourceSnapshot`, status, kind, priority, owner, `claimedAt`을 바꾸지 않는다. attempt, delivery, route decision, provider cost, 사용자 크레딧을 만들지 않는다. 감사 metadata에는 제목과 source key를 넣지 않고 digest와 개수만 남긴다.
 
@@ -672,7 +672,7 @@ score는 `scoreAmuxScheduler`와 `amux-global-priority-v2`다. capacity weight�
 
 preview는 아무것도 쓰지 않는다. 계산된 포함, 제외, `applyPermitted`만 반환한다.
 
-prepare와 승인, 보류, 거절은 환경 변수 `TOMVERSE_AMUX_BOARD_RECOMMEND`가 정확히 `enabled`이고 코드 래치가 true일 때만 쓴다. 버전 7이 출고하는 코드 래치는 false다. 래치가 꺼져 있거나 환경 값이 `enabled`가 아니면 그 네 쓰기 모두 트랜잭션을 열기 전에 `apply_disabled`로 거절한다. 이미 쓴 snapshot의 읽기는 남는다. 이 버전은 그 환경 변수를 설정하지 않는다. HTTP route는 래치를 인자로 받지 않는다. 용량 행의 insert와 update writer도 이 버전에 없다.
+prepare와 승인, 보류, 거절은 2026-11-16 대화 결정으로 환경 변수 `TOMVERSE_AMUX_BOARD_RECOMMEND`와 코드 래치 없이 owner step-up만으로 쓴다(버전 10이 래치를 켰고 production 값은 enabled였다). 이미 쓴 snapshot의 읽기는 남는다. 용량 행의 insert와 update writer도 이 버전에 없다.
 
 preview는 위 조건과 무관하게 아무것도 쓰지 않는다.
 
@@ -708,7 +708,7 @@ kill switch는 환경 값이 정확히 `enabled`가 아니거나 코드 래치�
 6. 새 자격증명은 없다. 로그와 감사에 brief, 제목, source key를 넣지 않는다.
 7. 테이블은 `AmuxRecommendationCapacity`, snapshot, snapshot 항목, decision이다. 용량 행의 insert와 update writer는 이 버전에 없다. 추천 서비스는 snapshot과 decision만 쓴다. 카드 status enum에 값을 추가하지 않는다. 보존 기간은 미정이고 삭제 job은 없다.
 8. 추천 비용 namespace는 열지 않는다. provider 호출이 없으므로 상한은 0건이다. 사용자 크레딧과 섞지 않는다.
-9. 스위치는 `TOMVERSE_AMUX_BOARD_RECOMMEND`가 정확히 `enabled`인 것과 코드 래치다. 출고 래치는 false다. 자동 정지는 환경 값이 더 이상 `enabled`가 아니거나 래치가 false일 때다. 환경 값의 해제는 사람의 조작이고, 래치를 다시 켜는 것은 별도 버전이다.
+9. 스위치. 2026-11-16 대화 결정으로 `TOMVERSE_AMUX_BOARD_RECOMMEND`와 코드 래치를 없앴다. 추천 풀은 owner step-up과 승인 기록만으로 쓰며, 환경 값으로 자동 정지하는 경로는 없다.
 10. 멱등 키는 decision id다. `outcome_unknown` 뒤에는 read-back만 한다.
 11. 외부 worker와 모델이 없으므로 S0 실측과 DPA 행은 없다.
 12. 위 감사 action은 전부 사람이다.
@@ -763,7 +763,7 @@ grant를 남기는 요청의 step-up 창은 15분이다. 그 15분은 grant의 7
 
 출고 스위치는 둘이다. 환경 변수 `TOMVERSE_AMUX_BOARD_AUTO_PROMOTE`가 정확히 `enabled`인 것과 코드 래치가 true인 것이다. 버전 8이 출고하는 코드 래치는 false다. 이 버전은 그 환경 변수를 설정하지 않는다. 래치가 꺼져 있거나 환경 값이 `enabled`가 아니면 grant 쓰기와 자동 소비 모두 트랜잭션을 열기 전에 `apply_disabled`로 거절한다. HTTP route는 래치를 인자로 받지 않는다.
 
-추가 정지는 저장된 halt다. `clearedAt`이 null인 halt가 있으면 카드를 쓰기 전에 `auto_halted`로 거절한다. halt를 여는 조건은 둘 중 하나다. 저장된 중대 위반이 1건 이상이거나, 자동 경로의 `outcome_unknown`이 DB 시계로부터 뒤로 15분 안에 2건 이상인 것이다. 15분은 `15 * 60`초이고 경계는 포함한다. 결과 불명 1건은 halt를 열지 않는다. 간격이 15분을 넘는 2건은 halt를 열지 않는다.
+추가 정지는 저장된 halt다. `clearedAt`이 null인 halt가 있으면 카드를 쓰기 전에 `auto_halted`로 거절한다. halt를 여는 조건은 저장된 중대 위반이 1건 이상인 것 하나다. 결과 불명은 halt를 열지 않는다(운영자 결정 2026-11-16: 15분 안 2건이 열었다). 결과 불명은 기록되고 그 카드만 멈추며, 이미 열려 있던 `outcome_unknown_burst` halt는 다음 승격 tick이 시스템 감사 하나와 함께 닫는다. 졸업 조건(사람 결정 20건/14일)과 자동 경로의 전역·worker당 동시 수 상한(3·1)도 없앴다. 측정값은 계속 보이고, 비용 원장(1회·24시간·30일)은 그대로다.
 
 중대 위반 코드는 `cost_exceeded`, `worker_cap_exceeded`, `global_wip_exceeded`, `unapproved_todo`, `lifecycle_write`뿐이다. `unapproved_todo`는 grant 소비 없이 `todo`가 된 자동 경로 카드다. `lifecycle_write`는 이 경로가 attempt, delivery, route decision을 만든 것이다. 졸업 미달, 용량 미설정, 용량 가득 참, grant 없음, 사전 비용 거절은 중대 위반이 아니다. 사람의 재개 writer는 이 버전에 없다.
 
@@ -781,7 +781,7 @@ grant를 남기는 요청의 step-up 창은 15분이다. 그 15분은 grant의 7
 6. 새 자격증명은 없다. 로그와 감사에 brief, 제목, source key를 넣지 않는다.
 7. 위 네 테이블만 추가한다. 용량 행의 insert와 update writer는 없다. 추천 분자는 바꾸지 않는다.
 8. 비용 namespace는 자동 경로의 USD cent다. 상한은 500, 1,500, 10,000이다. 사용자 크레딧과 섞지 않는다. 이 버전은 비용 행을 쓰지 않는다.
-9. 스위치는 `TOMVERSE_AMUX_BOARD_AUTO_PROMOTE`가 정확히 `enabled`인 것과 코드 래치다. 출고 래치는 false다. 중대 위반 1건 또는 15분 안 결과 불명 2건은 halt다. 환경 값의 해제는 사람의 조작이고, 래치를 다시 켜는 것과 halt를 닫는 것은 별도 버전이다.
+9. 스위치는 `TOMVERSE_AMUX_BOARD_AUTO_PROMOTE`가 정확히 `enabled`인 것과 코드 래치다. 출고 래치는 false다. 중대 위반 1건은 halt다(결과 불명은 halt가 아니다: 2026-11-16). 환경 값의 해제는 사람의 조작이고, 래치를 다시 켜는 것과 halt를 닫는 것은 별도 버전이다.
 10. 멱등 키는 consumption id다. `outcome_unknown` 뒤에는 read-back만 한다.
 11. 외부 worker와 모델이 없으므로 S0 실측과 DPA 행은 없다.
 12. 위 감사 action의 actor는 사람이다.
@@ -808,7 +808,7 @@ grant를 남기는 요청의 step-up 창은 15분이다. 그 15분은 grant의 7
 
 요청 스키마의 `policyVersion`은 7로 남는다. 버전 7의 포함 조건, 용량 판정, 승인, 보류, 거절은 바꾸지 않는다. 버전 9의 자동 승격 코드 래치는 true로 남는다.
 
-버전 10이 출고하는 `RECOMMENDATION_CODE_LATCH`는 true다. 환경 변수 `TOMVERSE_AMUX_BOARD_RECOMMEND`가 정확히 `enabled`일 때만 prepare와 승인, 보류, 거절이 트랜잭션을 연다. 이 버전은 그 환경 변수를 설정하지 않는다. HTTP route는 래치를 인자로 받지 않는다. 상수가 false이면 route는 서비스 전에 `apply_disabled`를 반환한다.
+버전 10이 켠 추천 풀 코드 래치와 환경 변수 `TOMVERSE_AMUX_BOARD_RECOMMEND`는 2026-11-16 대화 결정으로 없앴다. prepare와 승인, 보류, 거절은 owner step-up만으로 트랜잭션을 연다.
 
 이 버전은 사람 결정 20건을 만들지 않는다. 용량 행을 넣지 않는다. 그 행이 없는 동안 포함 행은 `capacity_unconfigured`다. `TOMVERSE_AMUX_EXECUTE`와 `TOMVERSE_AMUX_EXECUTION_API_ENABLED`를 읽거나 쓰지 않는다. worker를 시작하지 않는다.
 
@@ -820,7 +820,7 @@ grant를 남기는 요청의 step-up 창은 15분이다. 그 15분은 grant의 7
 
 용량 요청은 `canonicalizationVersion`, `policyVersion`, `active`, `wipLimit`만 가진다. `wipLimit`는 1 이상 10000 이하의 정수다. 카드 id, 기본 한도, 자동 경로의 전역 3은 이 요청에 없다. owner와 최근 step-up이 있어야 하고, 쓰기는 사람 감사 `amux.recommendation_capacity.updated` 뒤에 `id`가 `queue`인 행 하나를 upsert한다. 감사 metadata는 `active`와 `wipLimit`만 담는다. 같은 요청을 다시 보내면 감사를 다시 남긴다. 저장한 행을 읽어 요청과 다르면 거절한다.
 
-이 writer는 추천 풀 코드 래치와 `TOMVERSE_AMUX_BOARD_RECOMMEND`보다 앞에서 동작한다. 래치를 나중에 꺼도 용량 행을 비활성화하는 경로는 남는다. 카드 status를 바꾸지 않는다. 환경 변수를 읽거나 쓰지 않는다. `TOMVERSE_AMUX_EXECUTE`와 `TOMVERSE_AMUX_EXECUTION_API_ENABLED`를 읽거나 쓰지 않는다. worker를 시작하지 않는다. 사람 결정 20건을 만들지 않는다.
+이 writer는 추천 풀의 prepare·결정 writer와 독립으로 동작한다. 용량 행을 비활성화하는 경로는 항상 남는다. 카드 status를 바꾸지 않는다. 환경 변수를 읽거나 쓰지 않는다. `TOMVERSE_AMUX_EXECUTE`와 `TOMVERSE_AMUX_EXECUTION_API_ENABLED`를 읽거나 쓰지 않는다. worker를 시작하지 않는다. 사람 결정 20건을 만들지 않는다.
 
 행이 없거나 `active`가 아니거나 `wipLimit`이 비어 있으면 소비는 계속 `capacity_unconfigured`다.
 
@@ -846,7 +846,7 @@ Tomverse의 카드, 추천, 승격, 승인, 실행 원장, 감사는 정본이�
 
 ## 버전 14 — WSL runner 코드 래치
 
-버전 13의 예외와 경계는 유지한다. 이 버전은 `WSL_BRIDGE_CODE_LATCH`를 true로 바꾼다. runner는 그 래치와 환경 변수 `TOMVERSE_AMUX_WSL_BRIDGE`의 값이 정확히 `1`인 것이 함께 있을 때만 `bridge_tick`에 들어간다. 로컬 AMUX 주소는 loopback만 허용한다. 세션이 이미 실행 중이 아니면 프로세스를 만들지 않는다.
+버전 13의 예외와 경계는 유지한다. 이 버전은 `WSL_BRIDGE_CODE_LATCH`를 true로 바꾼다(2026-11-16에 래치를 없앴다). runner는 환경 변수 `TOMVERSE_AMUX_WSL_BRIDGE`의 값이 정확히 `enabled`(이전 값 `1`도 같은 뜻)일 때만 `bridge_tick`에 들어간다. 로컬 AMUX 주소는 loopback만 허용한다. 세션이 이미 실행 중이 아니면 프로세스를 만들지 않는다.
 
 이 버전은 `TOMVERSE_AMUX_WSL_BRIDGE`와 `TOMVERSE_AMUX_WSL_LOCAL_URL`을 설정하지 않는다. `TOMVERSE_AMUX_EXECUTE`를 켜지 않는다. worker 프로세스를 시작하지 않는다. 환경변수를 비운 것을 자격증명 격리의 실측으로 세지 않는다. 연결 계약은 `docs/ops/amux/wsl-execution-bridge.md`다.
 
@@ -878,11 +878,11 @@ Tomverse의 카드, 추천, 승격, 승인, 실행 원장, 감사는 정본이�
 
 ### claim 전용 모드
 
-코드 래치 `CLAIM_ONLY_CODE_LATCH`는 true로 출고하고, 환경 변수 `TOMVERSE_AMUX_CLAIM`이 정확히 `1`일 때만 연다. 이 모드는 claim만 하고 RuntimeService와 명령 실행기를 시작하지 않는다. claim은 서버가 execution_ready로 판정한 runtime에만 간다. `TOMVERSE_AMUX_EXECUTE`와 `TOMVERSE_AMUX_CLAIM`이 함께 설정되면 orchestrator는 시작하지 않는다.
+환경 변수 `TOMVERSE_AMUX_CLAIM`이 정확히 `enabled`(이전 값 `1`도 같은 뜻)일 때만 연다. 코드 래치 `CLAIM_ONLY_CODE_LATCH`는 2026-11-16에 없앴다. 이 모드는 claim만 하고 RuntimeService와 명령 실행기를 시작하지 않는다. claim은 서버가 execution_ready로 판정한 runtime에만 간다. `TOMVERSE_AMUX_EXECUTE`와 `TOMVERSE_AMUX_CLAIM`이 함께 설정되면 orchestrator는 시작하지 않는다.
 
 ### backlog 카드 메타데이터 writer
 
-owner와 최근 step-up이 backlog 카드 하나의 `kind`, `priority`, `estimatedCostMicrousd`만 고친다. 대상은 `backlog`, owner null, brief 없음, 보관되지 않은 카드다. revision + 1과 사람 감사를 같은 트랜잭션에 쓴다. status는 바꾸지 않는다. `estimatedCostMicrousd`는 0 이상 5,000,000 이하다. 코드 래치 true, 환경 변수 `TOMVERSE_AMUX_BACKLOG_METADATA`가 정확히 `enabled`일 때만 연다.
+owner와 최근 step-up이 backlog 카드 하나의 `kind`, `priority`, `estimatedCostMicrousd`만 고친다. 대상은 `backlog`, owner null, brief 없음, 보관되지 않은 카드다. revision + 1과 사람 감사를 같은 트랜잭션에 쓴다. status는 바꾸지 않는다. `estimatedCostMicrousd`는 0 이상 5,000,000 이하다. 2026-11-16 대화 결정으로 코드 래치와 환경 변수 `TOMVERSE_AMUX_BACKLOG_METADATA`를 없앴고(production 값은 enabled였다), owner step-up만으로 연다.
 
 ### 자동 승격 개정
 
@@ -1033,15 +1033,15 @@ PR 병합, `review` → `done`, 배포, worker catalog 변경, WSL 세션 추가
 
 ### 무엇이 달랐나
 
-- `develop`의 `lib/amux/executionGate.ts`는 `NODE_ENV`가 `test`일 때만 실행 API를 연다. 배포된 빌드는 환경 변수로 열 수 없다.
-- `main`의 같은 파일은 `TOMVERSE_AMUX_EXECUTION_API_ENABLED`가 trim 후 정확히 `1`이면 연다. 버전 13~15의 WSL 실행 루프는 이 경로로 운영 중이다.
+- `develop`의 실행 게이트 모듈(2026-11-16에 삭제)은 `NODE_ENV`가 `test`일 때만 실행 API를 연다. 배포된 빌드는 환경 변수로 열 수 없다.
+- `main`의 같은 파일은 실행 API를 연다(2026-11-16에 `TOMVERSE_AMUX_EXECUTION_API_ENABLED` 스위치를 없앴다). 버전 13~15의 WSL 실행 루프는 이 경로로 운영 중이다.
 - 「Phase A selection-only boundary」 절은 "claim과 그 뒤의 worker 등록·heartbeat, owned queue, execution, delivery, settlement은 Phase A production에서 비활성이다"라고 적는다. 버전 15는 claim 전용 모드와 실행 루프를 승인했지만, 이 문장을 명시적으로 개정하지 않았다.
 
 ### 개정
 
 「Phase A selection-only boundary」 절의 두 번째 문단 첫 문장을 다음으로 바꾼다.
 
-> `claim`과 그 뒤의 worker 등록·heartbeat, owned queue, execution, delivery, settlement(이하 **실행 API**)는 코드 래치 `AMUX_EXECUTION_API_CODE_LATCH`가 true이고, 환경 변수 `TOMVERSE_AMUX_EXECUTION_API_ENABLED`가 trim 후 정확히 `1`일 때만 열린다. 판정은 `NODE_ENV`와 무관하다. 둘 중 하나라도 아니면 실행 API는 `execution_api_disabled`로 거절한다.
+> `claim`과 그 뒤의 worker 등록·heartbeat, owned queue, execution, delivery, settlement(이하 **실행 API**)는 늘 열려 있다. 코드 래치 `AMUX_EXECUTION_API_CODE_LATCH`와 환경 변수 `TOMVERSE_AMUX_EXECUTION_API_ENABLED`는 2026-11-16에 없앴다(그 전에는 둘 다 참일 때만 열렸고 아니면 `execution_api_disabled`로 거절했다).
 
 같은 문단의 나머지는 유지한다. 특히 다음은 바뀌지 않는다.
 
@@ -1051,7 +1051,7 @@ PR 병합, `review` → `done`, 배포, worker catalog 변경, WSL 세션 추가
 
 ### 코드 래치
 
-- `AMUX_EXECUTION_API_CODE_LATCH`는 `lib/amux/executionGate.ts`의 코드 상수이고, 이 버전은 **true로 출고**한다. 버전 15가 이미 운영 중인 실행 루프를 승인했기 때문이다.
+- (2026-11-16에 래치와 게이트 모듈을 없앴다. 아래는 그 전의 기록이다.) `AMUX_EXECUTION_API_CODE_LATCH`는 실행 게이트 모듈의 코드 상수였고, 이 버전은 **true로 출고**했다. 버전 15가 이미 운영 중인 실행 루프를 승인했기 때문이다.
 - 게이트는 래치와 환경 변수를 인자로 받는 순수 함수 하나로 판정하고, 공개 함수는 그 함수에 출고 상수와 환경 값을 넘긴다.
 - 테스트가 고정하는 것: 출고 상수가 true다. 래치가 false이면 환경 값이 `1`이어도 닫힌다. 래치가 true이고 환경 값이 `1`이면 `NODE_ENV`가 `production`이어도 열린다. 환경 값이 비었거나 `1`이 아니면 닫힌다.
 - 기존 단위 테스트 `tests/amuxClaimContractParity.test.mjs`의 "a production build cannot activate future execution with an environment flag"는 위 동작으로 바꾼다. 환경 변수를 비우면 `execution_api_disabled`인 기존 DB 통합 테스트는 유지한다.
@@ -1428,10 +1428,10 @@ orchestrator 코드, 버전 20의 정지·재시작 동작(1~8항, 11항), claim
 
 승인 기록: `approvedBy: mposition`, `approvedAt: 2026-10-10`. 운영자는 자동 편입에 worker claim과 실제 Task 실행을 포함하고, 기존 Backlog 점수 정비보다 활성화를 먼저 진행하도록 요청했다. 기존 v22 계약과 wire `policyVersion: 22`는 바꾸지 않는다.
 
-- `AMUX_V22_AUTO_PROMOTION_CODE_LATCH`, `AMUX_V22_WORKER_CLAIM_CODE_LATCH`, `AMUX_V22_TASK_EXECUTION_CODE_LATCH`, `AMUX_V22_SIDECAR_CODE_LATCH`만 true로 출고한다. 앱의 `TOMVERSE_AMUX_V22_AUTO_PROMOTE`, `TOMVERSE_AMUX_V22_WORKER_CLAIM`, `TOMVERSE_AMUX_V22_TASK_EXECUTION`은 각각 정확히 `enabled`, Ubuntu의 `TOMVERSE_AMUX_V22_SIDECAR`는 정확히 `1`일 때만 해당 경로가 열린다. 빠진 값·다른 값은 닫힌다.
+- 자동 편입·worker claim·Task 실행의 코드 래치와 환경 스위치(`TOMVERSE_AMUX_V22_AUTO_PROMOTE`, `TOMVERSE_AMUX_V22_WORKER_CLAIM`, `TOMVERSE_AMUX_V22_TASK_EXECUTION`)는 2026-11-16에 없앴다. 세 경로는 늘 열려 있고, 자동 편입의 켜고 끔은 운영자의 활성화 행(Admin)이 정한다. Ubuntu의 `TOMVERSE_AMUX_V22_SIDECAR`는 정확히 `enabled`(이전 값 `1`도 같은 뜻)일 때만 열린다.
 - 실제 환경 값을 켜기 전 코드·독립 검토·CI·해당 배포 SHA, 졸업 20건/14일, owner 활성화 행, 현재 source·hierarchy·brief 승인, 점수·ready·의존성·worker 검증·용량·비용·감사·kill switch·결과 불명 부재를 확인한다. 어느 검사도 이 활성화 요청으로 면제하지 않는다. Ubuntu sidecar 설치와 실제 호출 결과는 앱 코드 래치와 별도로 관측한다.
 - 기존 카드의 R0·이력·상태·점수는 이 변경으로 변환하거나 덮어쓰지 않는다. 명시적 opt-in 없는 legacy 카드와 실행 자격이 없는 카드는 계속 보류한다. 사용자 credit과 Agent 비용의 분리, 호출별 사용량 검증, 결과 불명 정지·read-back·사람 해제를 유지한다.
-- `AMUX_V22_ENGINEERING_PUBLICATION_CODE_LATCH`와 `AMUX_V22_OUTCOME_WRITE_CODE_LATCH`는 false로 유지한다. 자동 PR 게시·병합, 운영자 완료 판정의 자동화는 포함하지 않는다. main 병합은 운영자 전용이며 추가 배포는 기존 별도 승인 경계를 따른다.
+- `AMUX_V22_ENGINEERING_PUBLICATION_CODE_LATCH`는 2026-11-16에 없앴고(공개 PR 게시는 `TOMVERSE_AMUX_V22_ENGINEERING_PUBLICATION`만 정한다), `AMUX_V22_OUTCOME_WRITE_CODE_LATCH`와 그 쓰기 경로(운영자 관측 기록)는 2026-11-16에 코드째 없앴다. 자동 PR 게시·병합, 운영자 완료 판정의 자동화는 포함하지 않는다. main 병합은 운영자 전용이며 추가 배포는 기존 별도 승인 경계를 따른다.
 - 되돌리기는 해당 환경 값을 끄는 것이다. 새 편입·claim·실행 접수를 막되 이미 시작한 attempt와 결과·감사 기록을 지우지 않고 기존 정산·복구 계약으로 처리한다. 코드 구현, 검토, 병합, 배포, 런타임 활성화와 첫 Task 실행을 각각 구분해 보고한다.
 
 ## 버전 30 — 초기 v22 활성화의 졸업 근거 예외
@@ -1439,7 +1439,7 @@ orchestrator 코드, 버전 20의 정지·재시작 동작(1~8항, 11항), claim
 승인 기록: `approvedBy: mposition`, `approvedAt: 2026-10-11`. 운영자는 초기 자동 승격을 막는 졸업 기준에 대한 이번 예외와 자동 편입·worker claim·실제 Task 실행 스위치 활성화를 승인했다. wire `policyVersion: 22`는 유지한다.
 
 - v29의 20건/14일 졸업 조건에만 초기 활성화 예외 `owner-bootstrap-2026-10-11`을 둔다. 실제 승인 건수·기간과 졸업 판정은 고치거나 통과로 위장하지 않는다.
-- 앱의 `TOMVERSE_AMUX_V22_GRADUATION_EXCEPTION`이 정확히 이 예외 ID이고, 최근 재인증한 owner가 이 ID를 명시하여 기존 v22 활성화 writer로 승인한 경우에만 적용한다. 동일 transaction의 canonical 활성화 감사에 예외 ID와 정책 버전 30을 기록한다. 환경 변수만 켜거나 기존 활성화 감사만 재사용해서는 예외를 얻지 않는다.
+- (2026-11-16: 졸업 조건이 없어져 `TOMVERSE_AMUX_V22_GRADUATION_EXCEPTION`과 이 예외 경로를 코드에서 없앴다. 아래 서술은 당시 승인 기록이다.) 앱의 `TOMVERSE_AMUX_V22_GRADUATION_EXCEPTION`이 정확히 이 예외 ID이고, 최근 재인증한 owner가 이 ID를 명시하여 기존 v22 활성화 writer로 승인한 경우에만 적용한다. 동일 transaction의 canonical 활성화 감사에 예외 ID와 정책 버전 30을 기록한다. 환경 변수만 켜거나 기존 활성화 감사만 재사용해서는 예외를 얻지 않는다.
 - 매 자동 편입에서 현재 활성화 행과 결속된 owner 감사 및 현재 예외 환경 값을 다시 확인한다. 예외 값을 끄거나 owner가 비활성화하면 새 편입을 중단한다. 새 승인 전까지는 다른 졸업 예외를 받지 않는다.
 - 비용·권한·source/hierarchy/brief 승인·점수·ready·의존성·worker 검증·용량·예약 슬롯·감사·kill switch·미해결 결과 불명/정지 검사는 그대로다. legacy 자동 승격 writer와 v22 writer는 동시에 켜지 않는다. legacy 카드는 자동 변환하거나 실행하지 않는다.
 - 활성화 범위는 자동 편입 → 담당 없는 Todo → worker claim → Ubuntu의 실제 Task 실행이다. 공개 PR·자동 병합·배포 및 운영자 완료 판정 자동화는 포함하지 않는다. main 병합은 운영자 전용이고 배포는 기존 승인 경계를 따른다. 코드·독립 검토·CI·배포와 실제 런타임 활성화는 구분해 기록한다.
@@ -2041,7 +2041,7 @@ CLI-C는 CLI-B의 "기간 granularity·분류 차원·합치기 순서는 구현
   환경 값, 병합·배포·production 활성화는 열지 않는다. 작성자와 다른 provider의
   독립 검토와 합성 DB·checker·UI 검증을 배포 전 차단 조건으로 둔다.
 - 작성된 복구 mutation 능력은 별도 false 하드코드 latch 없이
-  `TOMVERSE_AMUX_V22_TASK_RECOVERY_ENABLED`가 정확히 `true`일 때만 owner POST와
+  `TOMVERSE_AMUX_V22_TASK_RECOVERY_ENABLED`가 정확히 `enabled`(이전 값 `true`도 같은 뜻)일 때만 owner POST와
   internal pending/report를 연다. 누락·그 밖의 값은 기본 off이고, owner GET은
   disabled metadata와 기존 Phase 1 read만 제공하며, 일반 claim·start 경로에는
   영향을 주지 않는다. 이 환경 값을 실제로 설정하는 일은 별도 활성화 승인이다.
@@ -2093,7 +2093,7 @@ ledger는 그대로다. 기존 결과와 사용량은 추정하지 않고 `unkno
 
 ### 2. root controller와 단회 stop proof
 
-- `TOMVERSE_AMUX_V22_LEGACY_SAFE_STOP_ENABLED`가 정확히 `true`일 때만 owner POST와
+- `TOMVERSE_AMUX_V22_LEGACY_SAFE_STOP_ENABLED`가 정확히 `enabled`(이전 값 `true`도 같은 뜻)일 때만 owner POST와
   root pending/report가 열린다. 누락·그 밖의 값은 기본 off다. root route는 전용
   `TOMVERSE_AMUX_V22_RECOVERY_CONTROLLER_SECRET`만 받고 기존 sync secret을 재사용하지
   않는다. v36 unprivileged checker actor는 `inspect`만 읽고
@@ -2860,7 +2860,7 @@ v16 역할 판정이 생기면 2항의 유도를 그 값으로 바꾸는 것은 
    등급을 `frontier`로 올리고 그 결과를 frontier의 검토(독립 검토 서버, 그다음 사람)로 보낸다. 시도를
    새로 쓰지 않는다(운영자 결정 2026-11-15, 아래 "v22 worker 실행: 로컬 CLI 흐름"). 검토 기록이 없으면
    (그 검토를 하지 않는 이전 bridge) 이전 방식대로 `frontier`로 다시 실행하되 저장된 patch는 남긴다.
-   `TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW=disabled`이면 이전 방식(변경을 버리고 처음부터 다시 실행)이다.
+   이전 방식(변경을 버리고 처음부터 다시 실행)과 그 스위치(`TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW`)는 2026-11-16에 없앴다.
 
 ### 1. 적용 범위
 
@@ -3042,7 +3042,7 @@ Task의 `taskRole`, 예상 경로(`expectedPaths`), intake의 등급 제안뿐�
     패치와 판정 기록이 있는 끝난 실행이므로 운영자 검토에서 재시도할 수 있다(시도 예산 안에서, 그 시도의
     reject 기록이 있을 때만).
   - **운영자 결정 2026-11-15, 고정 횟수로 막지 않는다.** reject는 횟수와 무관하게 같은 등급으로 `todo`에
-    돌아가고(`TOMVERSE_AMUX_V52_REJECT_RETRY_IN_BUDGET`은 기본 켜짐, `disabled`로 옛 규칙), 다음 시도의
+    돌아가고(`TOMVERSE_AMUX_V52_REJECT_RETRY_IN_BUDGET` 스위치와 옛 규칙은 2026-11-16에 없앴다), 다음 시도의
     prompt는 직전 시도들의 지적(최근 세 번의 reject, 새것부터, 들어가는 만큼 통째로, 잘렸으면 잘렸다고
     표시)을 데이터로 받는다. 저장된 지적을 열 수 없을 때만 box가 검토 서버에서 job id로 읽는다. **reviewer
     자신이 "이 blocker·major 지적은 앞선 검토의 지적이 그대로 남은 것"이라고 표시했을 때만**(다음 검토의 scope note에
@@ -3050,7 +3050,7 @@ Task의 `taskRole`, 예상 경로(`expectedPaths`), intake의 등급 제안뿐�
     점수를 쓰지 않고, 앱은 그 표시가 거절한 reviewer의 blocker·major 지적에 있는지만 확인한다) Task가
     `blocked`(`review_server_rejected_twice`)가 되어 이유와 함께 사람·Decision Maker로 간다. 그 판단은 기록할 때
     한 번 하고(`AmuxV52ReviewFindings.repeatsPrior`), 소유자가 재시도한 뒤에는 그 이후 reject만 센다. 같은 공급사가 두 번 연달아 거절하면 다음 검토는 다른 공급사를 우선한다(`--avoid-vendor`,
-    기본 꺼진 스위치 `TOMVERSE_AMUX_V52_REVIEW_AVOID_VENDORS`, 배정 규칙은 `tools/review-orchestrator/README.md`).
+    늘 보낸다(`TOMVERSE_AMUX_V52_REVIEW_AVOID_VENDORS` 스위치는 2026-11-16에 없앴다. box의 bridge와 helper가 이 필드를 읽는 버전이어야 한다), 배정 규칙은 `tools/review-orchestrator/README.md`).
   - `unknown`(판정을 읽을 수 없음, 요청·서버 오류 포함): Task는 같은 등급으로 `todo`에 돌아가 다시 실행되며 그
     실행이 검토 서버에 새로 제출된다. 같은 diff를 같은 attempt에서 두 번 제출하지는 않는다. 시도 예산이 끝나면
     `blocked`가 되어 사람에게 간다. 검토 서버는 reviewer가 시간을 넘기면 다른 공급사로 다시 시도하므로
@@ -3068,17 +3068,12 @@ switch, v22 용량 한도, 결과 불명은 멈추고 사람에게 넘긴다는 
 
 ### 9. 스위치와 출고
 
-- 5항의 배정, 6항의 검사, 7항의 검토 서버 연결은 두 스위치가 모두 켜졌을 때만 작동한다. 하나라도
-  꺼져 있으면 지금의 v22 경로 그대로다. 4항의 판정 함수는 intake v20 등록 Guard가 부르며, 그
+- 5항의 배정, 6항의 검사, 7항의 검토 서버 연결은 (스위치를 없앤 2026-11-16부터) 늘 작동한다. 4항의 판정 함수는 intake v20 등록 Guard가 부르며, 그
   스위치는 intake 정책이 정한다.
-  - **코드 래치** `AMUX_EXECUTION_GRADE_CODE_LATCH`(`lib/amux/executionGradeCore.ts`)는 false로
-    출고한다. S1~S4가 develop에 들어오고 테스트가 통과하면, 래치를 true로 바꾸는 PR을 이 버전이 미리
-    승인한다. 래치만으로는 아무것도 작동하지 않는다. 그 PR의 병합은 운영자가 한다.
-  - **운영 스위치** 환경 변수 `TOMVERSE_AMUX_EXECUTION_GRADE`는 값이 정확히 `enabled`일 때만 켜진다.
-    서버가 읽으며 어떤 route도 요청 본문으로 받지 않는다. 운영자가 staging에서 먼저 켜고, v4 Task
-    한 건이 등록 → 같은 등급 배정 → 검토 서버 → `develop` PR까지 간 기록을 확인한 뒤에 production에서
-    켠다.
-- 운영 스위치를 끄면 새로 claim되는 Task부터 지금의 경로로 돌아간다. 이미 검토 서버에 제출된 Task는
+  - **2026-11-16: 코드 래치 `AMUX_EXECUTION_GRADE_CODE_LATCH`와 운영 스위치
+    `TOMVERSE_AMUX_EXECUTION_GRADE`를 없앴다.** 등급 배정·contract 경로 검사·검토 서버 호출은 늘 켜져
+    있고, 새 형식(v52 확인 snapshot과 등급 영수증)을 가진 Task에만 적용된다.
+- (운영 스위치를 없앴으므로 지금의 경로로 돌아가는 끄기는 없다.) 이미 검토 서버에 제출된 Task는
   그 판정을 7항대로 처리한다.
 
 ### 10. 구현 단계
@@ -3401,7 +3396,7 @@ v22 실행은 CLI 한 번이라 실행 중에 답을 기다릴 수 없다. 그�
 
 운영자 지시: "내부 개발용 Flow입니다. 제한을 줄 이유가 없습니다. 로컬 CLI에 명령했을 때 제가 받는 답처럼 편리한 Flow였으면 합니다." 이 흐름이 기본이다. `TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW=disabled`이면 앱·sidecar·bridge가 각각 이전 동작으로 돌아간다(코드: `lib/amux/v22LocalCliFlowCore.ts`). 스위치는 Railway와 box의 sidecar·bridge unit에 같은 값으로 둔다.
 
-- **시간 상한 없음.** sidecar는 10분 마감(`AMUX_V22_SIDECAR_DEADLINE_MS`)도 다른 고정 상한도 두지 않는다. 실행은 CLI가 끝나거나, 운영자가 멈추거나(sidecar `stop` op, unit의 SIGTERM: `operator_stop`), 살아 있다는 신호가 30분 동안 하나도 없을 때(`stalled`)만 끝난다. 살아 있다는 신호는 새 출력, checkout 변화, CLI 프로세스 트리(자식·같은 프로세스 그룹 포함)의 CPU 시간 증가(리눅스 `/proc/<pid>/stat`) 셋이다. 출력 없이 CPU를 쓰며 오래 도는 테스트나 빌드는 멈추지 않는다. `/proc`을 읽을 수 없으면 앞의 두 신호로 판정한다. 어떤 이유로 끝나든 checkout 변경은 버리지 않는다. 그 자리에 두고, 임시 index로 작업 트리 전체(크기·새 파일·바이너리 상관없이, ignore된 파일 제외)를 commit 객체로 떠서 worker clone의 `refs/amux-v22-preserved/<attempt>`에 묶는다(`reset --hard`·`clean`으로 지워지지 않는다). 그 diff는 sidecar state 디렉터리의 `<attempt>.preserved.patch`(0600)에 쓴다. 다음 attempt는 base 동기화로 남은 변경을 정리하기 전에 같은 방식으로 `leftover-<attempt>`에 보존하고, 보존하지 못하면 checkout을 건드리지 않고 시작하지 않는다(`leftover_preserve_unavailable`). 결과 분류(`outcome_unknown`과 그 정산)는 바꾸지 않는다. execution lease는 생존 표시라 heartbeat마다 갱신되고, 이 흐름에서는 180초다.
+- **시간 상한 없음.** sidecar는 10분 마감(`AMUX_V22_SIDECAR_DEADLINE_MS`)도 다른 고정 상한도 두지 않는다. 실행은 CLI가 끝나거나, 운영자가 멈추거나(sidecar `stop` op, unit의 SIGTERM: `operator_stop`), 살아 있다는 신호가 3시간 동안 하나도 없을 때(`stalled`)만 끝난다(30분이던 창을 넓혔다: 운영자 결정 2026-11-16). checkout을 다루는 git 한 단계의 대기도 하나의 값(2시간)이고, 멈춘 lock이나 죽은 파일 시스템을 위한 장치일 뿐 작업 상한이 아니다. 살아 있다는 신호는 새 출력, checkout 변화, CLI 프로세스 트리(자식·같은 프로세스 그룹 포함)의 CPU 시간 증가(리눅스 `/proc/<pid>/stat`) 셋이다. 출력 없이 CPU를 쓰며 오래 도는 테스트나 빌드는 멈추지 않는다. `/proc`을 읽을 수 없으면 앞의 두 신호로 판정한다. 어떤 이유로 끝나든 checkout 변경은 버리지 않는다. 그 자리에 두고, 임시 index로 작업 트리 전체(크기·새 파일·바이너리 상관없이, ignore된 파일 제외)를 commit 객체로 떠서 worker clone의 `refs/amux-v22-preserved/<attempt>`에 묶는다(`reset --hard`·`clean`으로 지워지지 않는다). 그 diff는 sidecar state 디렉터리의 `<attempt>.preserved.patch`(0600)에 쓴다. 다음 attempt는 base 동기화로 남은 변경을 정리하기 전에 같은 방식으로 `leftover-<attempt>`에 보존하고, 보존하지 못하면 checkout을 건드리지 않고 시작하지 않는다(`leftover_preserve_unavailable`). 결과 분류(`outcome_unknown`과 그 정산)는 바꾸지 않는다. execution lease는 생존 표시라 heartbeat마다 갱신되고, 이 흐름에서는 180초다.
 - **크기 상한 없음.** 프롬프트 32 KiB, Claude stdout 256 KiB, 보고 64 KiB, 결론 형식 한도(findings 4,000자, handoff 12개 등), 이전 결론 8 KiB·의존 8개를 두지 않는다. 남는 것은 bridge를 건너는 메시지 하나의 메모리 backstop(32 MiB)뿐이고, 그보다 긴 보고는 처음과 끝(결론과 질문이 있는 마지막 줄)을 남기고 가운데를 줄인다. 결론은 관대하게 읽는다(모르는 키 무시, 여러 줄 JSON, 잘못된 항목만 버림, verdict만 필수).
 - **context 파일.** brief, 운영자·DM 답, 이전 patch, 이전 결론, 검토 지적(`review-findings.md`)은 worker checkout의 `.amux/context/`로 간다. delivery는 이 파일들을 프롬프트 끝의 경계 토큰 블록에 싣고(bridge는 프롬프트를 그대로 넘긴다), sidecar가 블록을 꺼내 파일로 쓴 뒤 프롬프트는 그 파일을 가리킨다. 디렉터리는 checkout의 `.git/info/exclude`에 들어가 patch와 변경 경로 목록에 들어가지 않는다. implement의 이전 patch는 CLI 시작 전에 `git apply --3way`로 적용해 둔다.
 - **transcript.** Claude는 `--output-format stream-json --verbose`로 돌고, 모든 CLI의 stdout 전체가 sidecar state 디렉터리의 `<attempt>.transcript.jsonl`(0600, 30일 뒤 정리)에 남는다. journal에는 들어가지 않는다. 앱 저장과 Admin 보기는 아직 없다.
@@ -3422,13 +3417,31 @@ sidecar는 실행 종료 기록을 메모리에도 들고 있었고, 점검은 �
 운영자 지시: "이 시나리오만 맞게 고치지 말고 이런 류의 시나리오를 다 커버하는 포괄적인 솔루션으로 개발하세요. … AMUX 프로세스가 로컬 CLI를 돌리는 것과 같이 자연스럽게 돌아갔으면 합니다." 이어서 "내부 개발용 Flow입니다. 제한을 줄 이유가 없습니다. 이런 제한을 다 찾아 없애 주세요." 이 절과 다른 절의 서술이 다르면 이 절이 맞다. 전체를 `TOMVERSE_AMUX_INFRA_FAILURE_ROUTING=disabled` 하나로 이전 동작으로 되돌린다(기본은 켜짐).
 
 - **카드 시도를 쓰는 실패와 쓰지 않는 실패.** 카드의 시도로 세는 것은 워커가 실제로 일을 하고 낸 결과의 실패뿐이다(CLI가 보고한 실패, 검토 거절, 범위 위반, 마감 시간을 넘긴 실행, 출력 한도 초과). 결과 없음, 시작 직후 종료, 로그인 거부, 사용량 소진, 네트워크, lease 만료, sidecar 오류, 사용량 미보고는 플랫폼 실패다. attempt 사유 `infra_<종류>`로 남고, 카드는 `todo`로 돌아가 다른 워커·다른 공급자에게 먼저 간다(`lib/amux/infraFailureCore.ts`). 유료(위험 수락) 경로는 분류하지 않는다. bridge는 미검증 정산에 sidecar의 실패 코드를 싣는다(`failure`). 그 코드가 없는 이전 bridge의 정산은 사용량 기록 유무로 `no_result`와 `usage_unreported`를 가른다.
-- **고정 횟수 없음.** 카드는 다섯 번에서 멈추지 않는다. 워커의 결과가 같은 방식으로 세 번 연속 실패하면(`outcome:reason`이 같음) `repeated_failure`로 사람·DM에게 넘어간다. 30회는 실패가 계속 달라지는 카드를 위한 폭주 방지선이고, 넘으면 같은 방식으로 넘어간다. 플랫폼 실패는 카드당 12번이 한도이고(`infra_attempts_exhausted`), 역시 사람·DM에게 넘어간다. 한도에 닿은 실행도 자기 `infra_<종류>` 사유를 그대로 가지므로 계속 세어진다(한도 이름은 escalation에만 적는다). 사람이 `retry`로 돌려보내면(owner 검토 결정, DM 정산 — 둘 다 escalation을 `retry`로 닫는다) 그 뒤의 플랫폼 실패만 한도에 센다. 사람의 결정(검토 승인, 원클릭 복구)은 이 한도로 막지 않는다. 유료 재시도는 자기 한도를 그대로 쓴다. 등급별 비용 영수증의 `maxAttempts`(2/2/3)는 승인 상한 계산에만 쓰이고, 넘으면 기록할 뿐 막지 않는다(2026-11-14 결정 그대로). DB도 같은 규칙으로 센다. 검토 제안 guard는 플랫폼 실패를 빼고 30에서 막고, v22 attempt guard·복구 attempt guard·복구 승인 CHECK의 attempt 번호 상한은 5에서 64로 넓혔다(30 + 12보다 크다).
+- **고정 횟수 없음.** 카드는 다섯 번에서 멈추지 않는다. 워커의 결과가 같은 방식으로 세 번 연속 실패하면(`outcome:reason`이 같음) `repeated_failure`로 사람·DM에게 넘어간다. 30회는 실패가 계속 달라지는 카드를 위한 폭주 방지선이고, 넘으면 같은 방식으로 넘어간다. 플랫폼 실패는 카드당 12번이 한도이던 것을 2026-11-16에 없앴다: 카드는 사람에게 넘어가지 않고 기다렸다가(아래 "카드 실행: 남은 정지와 상한 정리") 다시 배정된다. 사람이 `retry`로 돌려보내면(owner 검토 결정, DM 정산 — 둘 다 escalation을 `retry`로 닫는다) 그 뒤의 플랫폼 실패부터 기다리는 시간을 센다. 유료 재시도는 자기 한도를 그대로 쓴다. 등급별 비용 영수증의 `maxAttempts`(2/2/3)는 승인 상한 계산에만 쓰이고, 넘으면 기록할 뿐 막지 않는다(2026-11-14 결정 그대로). DB도 같은 규칙으로 센다. 검토 제안 guard는 플랫폼 실패를 빼고 30에서 막고, v22 attempt guard·복구 attempt guard·복구 승인 CHECK의 attempt 번호는 상한 없이 양수이기만 하면 된다(5에서 64로 넓혔던 것을 2026-11-16에 없앴다).
 - **사용량은 0이 아니다.** 플랫폼 실패의 사용량은 원장에 "알 수 없음"으로 남는다. 워커 사용량 게이트는 이 실행을 세지 않으므로 사람의 "받아들이기" 없이 워커가 풀린다. 비용 상한·예약·정산 행은 바뀌지 않는다.
 - **워커 격리.** 같은 워커에서 플랫폼 실패가 세 번 연속 나면 그 워커는 5분 동안 배정에서 빠진다. 실패가 더 이어질 때마다 대기는 두 배가 되고 최대 1시간이다. 대기가 끝나거나, 마지막 실패 뒤 그 워커의 사용량이 다시 관측되면(앞쪽 두 번까지) 카드 한 장으로 다시 시험하고, 성공하면 닫힌다. 상태는 저장하지 않고 워커의 최근 attempt에서 매번 계산한다(`lib/amux/workerCircuitCore.ts`). 워커 registry의 "시험 3장·3회 연속 실패 latch"는 이것으로 합쳤다. 이미 기록된 latch만 사람이 풀 때까지 남는다.
 - **Admin의 "배정 가능".** 워커 목록은 claim과 같은 규칙으로만 판정한다. 격리 중이면 "반복 실패로 잠시 빠짐", Anthropic 워커의 사용량 관측이 15분보다 오래되면 "사용량 관측 안 됨 · 로그인 확인 필요"로 보인다. box가 보낸 로그인 신호(`login_required`, `auth_stage_failed` 등)는 배정을 막지 않는 경고로 함께 보인다. 사본이 몇 시간 더 유효할 수 있고, 실제로 실패하면 격리가 잡는다.
 - **멈춘 이유.** 자동 승격과 claim이 건너뛴 카드마다 이유 코드와 구조화된 내용(준비 미충족 사유, 경로별 워커와 제외 이유)을 `AmuxCardWaitReason`에 남긴다. 워커의 글은 남기지 않는다. Admin 보드 카드와 상세에 "왜 안 돌고 있나"로 보인다. 같은 이유로 한 시간 넘게 기다린 claim 단계 카드는 operational incident `AMUX_CARD_WAITING`으로 올린다. 격리된 워커는 `AMUX_WORKER_QUARANTINED`로 올린다.
 - **box 건강 신호.** 로그인 복사(`auth_stage`)와 Claude 로그인 keepalive(`login_keepalive`)는 결과를 워커 로그인 사본 옆 `amux-health-<source>.json`에 쓴다. sidecar의 `health` 동작이 이를 읽고, bridge가 5분마다 `/api/internal/amux/v22/worker-health`로 보낸다(`AmuxWorkerHealthSignal`). `login_required`·`refresh_failed`·`auth_stage_failed`·`relogin_soon`은 처음 들어올 때 incident로 올린다. 코드와 시각만 오가고 토큰은 오가지 않는다.
-- **스스로 진행.** `TOMVERSE_AMUX_V22_READ_BACK_PROCEED`와 bridge의 `TOMVERSE_AMUX_BRIDGE_READ_BACK_PROCEED`는 이제 기본으로 켜져 있다(`disabled`로 끈다). bridge halt는 유료 API 호출의 결과 불명일 때만 종료 코드 3으로 사람을 기다리고, 그 밖의 halt(`dispatch_outcome_unknown`, `settle_outcome_unknown`, `pending_session_missing` 등)는 종료 코드 75로 끝나 systemd가 다시 시작한다. 새 프로세스는 다시 등록하고, 남은 attempt는 lease가 끝나면 플랫폼 실패로 다른 워커에게 간다. 정체 카드 정리(`TOMVERSE_AMUX_STALLED_CARD_SWEEP`)도 기본으로 켜져 있다.
+- **스스로 진행.** 앱의 `TOMVERSE_AMUX_V22_READ_BACK_PROCEED`와 bridge의 `TOMVERSE_AMUX_BRIDGE_READ_BACK_PROCEED`는 이제 늘 켜져 있다(2026-11-16에 스위치를 없앴다). bridge halt는 유료 API 호출의 결과 불명일 때만 종료 코드 3으로 사람을 기다리고, 그 밖의 halt(`dispatch_outcome_unknown`, `settle_outcome_unknown`, `pending_session_missing` 등)는 종료 코드 75로 끝나 systemd가 다시 시작한다. 새 프로세스는 다시 등록하고, 남은 attempt는 lease가 끝나면 플랫폼 실패로 다른 워커에게 간다. 정체 카드 정리(`TOMVERSE_AMUX_STALLED_CARD_SWEEP`)도 기본으로 켜져 있다.
 - **자동 승격.** 결과를 잃은 승격은 queue lock 아래에서 다시 읽는다. 영수증이 아예 없으면 커밋되지 않은 것이므로 결과 불명으로 남기지 않고 다음 tick이 다시 시도한다. 그런 결과 불명만으로 열린 승격 정지는 스스로 풀린다(감사 `amux.auto_promotion.resumed_by_readback`). 영수증이 있는데 맞지 않는 결과 불명과 치명적 위반 정지는 그대로 사람에게 남는다.
 - **분석 Agent.** 세 번 연속 실패 정지는 유료 API 경로에만 적용하고, 그 경로의 정산만 센다. 구독 세션 경로는 실패 연속으로 멈추지 않는다.
 - **처리량.** 동시 실행 상한은 검증된 워커 수뿐이다(전역 6 삭제). claim과 자동 승격은 tick마다 후보를 100개까지 읽고, route 예산이 다음 transaction을 담지 못하면 그 자리에서 멈춘다.
+
+## 카드 실행: 남은 정지와 상한 정리 (운영자 결정 2026-11-16)
+
+운영자 지시: AMUX 전수 점검에서 나온 "사람 없이는 풀리지 않는 정지"와 "결과를 버리는 경로", 우리가 정한 크기·개수·시간 상한을 카드 실행과 검토 재시도 영역에서 없앤다. 실제 돈이 나가는 경로(읽기 전용 API 재시도의 3.4/6.8 USD, 재시도 task 고정, 모델 접근 비용 상한), 외부 한계(GitHub 파일 100 MiB, Next proxy 10 MB와 patch envelope 9 MiB, 메모리 backstop 32 MiB), 감사 체인은 그대로다.
+
+- **결과 patch의 상한은 하나다.** 결과 저장소가 따로 갖던 64 KiB는 없앴고 `lib/amux/v22PatchLimit.ts`의 4 MiB 하나를 쓴다. 이전에는 64 KiB를 넘는 변경이 있는 결과가 통째로 거부됐다. 결과 본문은 이미 bridge의 전송 backstop(32 MiB)까지 받는다.
+- **결과는 가져갈 때까지 box에 남는다.** sidecar는 끝난 실행의 결과 본문과 patch를 메모리에 15분만 들고 있었다. 이제 state 디렉터리의 `<attempt>.result.pending`·`<attempt>.patch.pending`(0600)에 쓰고, 앱이 받았다고 확인한 뒤(`confirm_result`, `confirm_patch`)에만 지운다. sidecar가 재시작돼도 결과는 남는다. journal(`<attempt>.result`)에는 여전히 본문이 없다. 복구 점검이 쓰는 종료 기록(terminal)의 개수 상한(256)도 없앴다.
+- **바뀐 경로 목록과 정산 body.** 바뀐 경로의 개수 상한(4,096)과 JSON 24 KiB, git 출력 32 KiB를 없앴다. 목록은 patch와 같은 4 MiB 안에서만 막힌다(settlement body가 같은 proxy buffer를 지난다). 정산·검토 기록 route의 body는 patch envelope(9 MiB)이고, invocation 128개, 경로 4,096개, 실패 보고 24시간 상한은 없다.
+- **보관된 결과를 찾는 범위.** 카드의 검토 대상 attempt를 최신 20개에서 찾던 것을 attempt 전체에서 찾는다. 한 번에 게시하는 보관 결과는 3개에서 10개로, 연기한 카드를 기억하는 개수 상한(500)은 없앴다. 선행 결론은 의존 카드 500개까지만 읽던 것을 전부 읽는다.
+- **인프라 실패는 사람에게 넘기지 않는다.** 카드당 12번이 한도이던 플랫폼 실패는 개수 상한이 없다. 카드는 `todo`로 돌아가고, 두 번까지는 바로, 그 뒤로는 1분에서 시작해 두 배씩(최대 1시간) 기다린 다음 다시 배정된다(`amuxInfraRetryDelayMs`, claim의 `infra_retry_backoff`, 사람이 `retry`로 돌려보낸 뒤의 실패부터 센다). 그래서 카드의 attempt 번호도 상한이 없고, 세 DB 가드(실행 attempt, 복구 attempt, 복구 승인)의 64는 양수 조건으로 바꿨다. 이미 `infra_attempts_exhausted`로 넘어간 카드의 기록은 남는다.
+- **사용량을 모르는 실행은 워커를 묶지 않는다.** 워커 사용량 게이트는 이제 예산에 묶인(위험 수락·읽기 전용 API) 실행만 센다(전에는 `TOMVERSE_AMUX_V22_READ_BACK_PROCEED=disabled`이면 구독 경로도 셌다). PR이 없는 review 카드의 재시도도 사용량 불명(`usage_outcome_unknown`)으로 막지 않는다. "변경 없음으로 완료" 승인은 DB guard가 아는 실행만 받으므로 그대로다.
+- **검토 요청은 다시 보낸다.** 검토 서버가 job id를 돌려주지 않으면 box의 launcher는 attempt를 unknown으로 닫지 않고 15초에서 시작해 두 배씩(최대 5분) 기다려 같은 요청을 다시 보낸다. 같은 commit의 job이 둘 생겨도 attempt가 저장한 job id만 읽으므로 판정은 틀리지 않는다. 알려진 job은 읽기만 다시 하고 제출하지 않는다. bridge는 이 대기(`waiting`)를 진행 중으로 본다. 검토 지적 요약(legacy 평문)의 2,000자·12줄도 없앴고 DB CHECK는 비어 있지 않을 것만 요구한다.
+- **worker 등록의 latch는 아무것도 묶지 않는다.** 기록된 latch 이벤트(`opened`)는 기록으로 남고, 배정은 더 이상 그것을 보지 않는다. 사람이 풀어야 하던 worker가 이미 있었다면 따로 지울 행이 없다(테이블은 append-only).
+- **사용량 관측의 신선도.** 관측이 "신선"한 시간을 15분에서 1시간으로 넓혔고(`AMUX_QUOTA_FRESH_SECONDS`), 기록 route는 오래된 관측도 받는다(미래 5분 넘게 앞선 관측만 시계 오류로 거절한다).
+- **자동 승격.** 위 "자동 승격" 정지 설명대로 졸업·동시 수 상한·결과 불명 halt가 없다. 한 tick이 시도하는 grant는 10개에서 1,000개로 늘렸고(한 tick이 옮기는 카드는 여전히 하나). orchestrator halt 한 번의 상태 읽기가 묻는 halt key는 16개에서 64개다.
+- **복구 정지.** 이전 요청이 결과를 모른 채 남긴 정지 의도는, 읽어 보니 같은 실행(invocation과 control group)이 아직 돌고 있으면 한 번 더 `systemctl stop`한다(정지는 멱등이다). 프로필 설정 파일의 개수 상한은 128/16에서 4,096/256으로 넓혔다.
+- **DB 크기 CHECK.** 복구 보고(4 KiB, 8 KiB), 읽기 전용 launch scope(2 KiB), 대기 이유 detail(8 KiB), worker 건강 신호 detail(2 KiB)을 모두 1 MiB로 맞췄다.
+- **옛 흐름에 남은 값.** 위험 수락 읽기 전용 재시도의 고정 launch(10분 마감, stdout 256 KiB, 보고 64 KiB)만 그대로다. `TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW=disabled`와 그 옛 분기는 2026-11-16에 없앴다.

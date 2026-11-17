@@ -13,8 +13,6 @@ import { AmuxSessionBudgetSettlementError,
   "@/lib/amux/ideaSessionAnalysisBudgetSettlementService";
 import { prisma } from "@/lib/prisma";
 
-const WRITE_ENV = "TOMVERSE_AMUX_V19_SESSION_BUDGET_UNKNOWN_WRITE";
-const READ_ENV = "TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_READ";
 const uuid = z.string().uuid();
 const bodySchema = z.object({
   claimId: uuid, requestId: uuid, reservationId: uuid, ideaId: uuid,
@@ -23,9 +21,11 @@ const bodySchema = z.object({
   inputTokens: z.null(), outputTokens: z.null(),
 }).strict();
 
-/** A stopped or uncertain local invocation preserves its full monthly
- * reservation. This endpoint cannot record success, charge zero or retry a
- * claim. The exact claim receipt GET remains the response-loss readback. */
+/** A stopped or uncertain local invocation. A paid (bounded) claim keeps its
+ * full monthly reservation for the owner; a subscription (max_shadow) claim is
+ * closed by the system at zero in the same transaction (operator, 2026-11-16).
+ * This endpoint cannot record success or retry a claim. The exact claim
+ * receipt GET remains the response-loss readback. */
 export async function POST(request: Request): Promise<Response> {
   const v4Authorized = isAmuxV4AnalysisAgentAuthorized(request,
     process.env[AMUX_V4_ANALYSIS_AGENT_SECRET_ENV],
@@ -36,11 +36,6 @@ export async function POST(request: Request): Promise<Response> {
     process.env.TOMVERSE_AMUX_SYNC_SECRET);
   if (!v4Authorized && !maxAuthorized) {
     return amuxJsonNoStore({ error: "Unauthorized" }, 401);
-  }
-  if (process.env[WRITE_ENV] !== "enabled" ||
-      process.env[READ_ENV] !== "enabled") {
-    return amuxJsonNoStore({ available: false,
-      reason: "session_budget_unknown_write_disabled" }, 409);
   }
   if (request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !==
       "application/json") {

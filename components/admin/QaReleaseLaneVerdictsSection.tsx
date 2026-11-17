@@ -70,6 +70,7 @@ const TONE: Record<string, Tone> = {
   waiting: "wait",
   attempt_in_flight: "wait",
   latched: "wait",
+  released: "idle",
   state_unknown: "error",
   candidates_unknown: "error",
   report_not_recorded: "error",

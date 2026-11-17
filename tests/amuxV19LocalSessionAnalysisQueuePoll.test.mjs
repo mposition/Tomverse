@@ -148,9 +148,18 @@ test("local v19 poll rejects redirects, unbounded or content-bearing responses",
       { ...page, candidates: [{ ...candidate(0), nextInvocationOrdinal: 2_147_483_648 },
         ...page.candidates.slice(1)] },
       { ...page, huge: "x".repeat(65_536) },
+      { ...page, candidates: [...page.candidates, candidate(32)] },
+      { ...page, nextCursor: null },
     ]) {
       assert.deepEqual(await poll({ fetchImpl: async () => Response.json(body) }),
         invalid);
+    }
+    // More may follow a page the app thinned after reading it (a retry still
+    // waiting, an owner stop): fewer than 32, or none, with a cursor.
+    for (const candidates of [page.candidates.slice(0, 31), []]) {
+      const thinned = { candidates, hasMore: true, nextCursor: "next_page_1" };
+      assert.deepEqual(await poll({ fetchImpl: async () => Response.json(thinned) }),
+        { kind: "candidates", ...thinned });
     }
   } finally {
     if (prior === undefined) delete process.env[AMUX_V19_SESSION_ANALYSIS_APP_ORIGIN_ENV];

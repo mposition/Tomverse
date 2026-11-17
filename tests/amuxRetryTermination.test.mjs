@@ -19,7 +19,6 @@ import {
   decideAmuxAttemptBudget,
   settlementDestinationForBudget,
 } from "../lib/amux/executionBudgetCore.ts";
-import { AMUX_MAX_INFRA_FAILURES_PER_TASK } from "../lib/amux/infraFailureCore.ts";
 import { decideAmuxV52ReviewDisposition } from "../lib/amux/v52ReviewCore.ts";
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
@@ -34,7 +33,7 @@ const runReviewed = (verdicts, { repeatsPrior = () => false } = {}) => {
   const signatures = [];
   let rejections = 0;
   for (const [index, verdict] of verdicts.entries()) {
-    const disposition = decideAmuxV52ReviewDisposition(verdict, rejections, true, repeatsPrior(index));
+    const disposition = decideAmuxV52ReviewDisposition(verdict, rejections, repeatsPrior(index));
     if (disposition.status !== "todo") return { run: index + 1, status: disposition.status, why: disposition.reason };
     const signature = amuxResultFailureSignature("succeeded", disposition.reason);
     const repeated = amuxRepeatedResultFailure([signature, ...signatures.slice(0, AMUX_REPEATED_FAILURE_RUNS - 1)]);
@@ -67,27 +66,19 @@ test("(d) results that keep changing stop at the runaway guard, never later", ()
   assert.deepEqual(runReviewed(verdicts), { run: AMUX_MAX_EXECUTION_ATTEMPTS, status: "blocked", why: "attempts" });
 });
 
-test("(c) platform failures stop at their bound since a person's retry, and the Decision Maker cannot reset it", () => {
-  // Twelve platform failures since the person's last retry: the twelfth stops the card.
-  let window = 0;
-  let stopped = null;
-  for (let run = 1; run <= 40 && !stopped; run += 1) {
+test("(c) platform failures never stop a card: they only wait, counted from a person's last retry", () => {
+  // Any number of platform failures goes back to todo (2026-11-16: twelve handed the card over).
+  for (const run of [1, 12, 13, 40, 400]) {
     const budget = settlementDestinationForBudget({ requested_status: "todo", attempt_number: run,
-      infra_attempts_before: run - 1, infra_window_before: window, infra_failure: true });
-    if (budget.to_status !== "todo") stopped = { run, why: budget.exhausted_limit };
-    window += 1;
+      infra_attempts_before: run - 1, infra_failure: true });
+    assert.equal(budget.to_status, "todo", String(run));
   }
-  assert.deepEqual(stopped, { run: AMUX_MAX_INFRA_FAILURES_PER_TASK, why: "infra_attempts" });
-  // The settlement's retry is checked against the claim's own rule, and the
-  // window it reads counts from a person's retry only: it refuses, and a person decides.
-  assert.equal(decideAmuxAttemptBudget({ historical_rows: 12, greatest_attempt_number: 12, infra_rows: 12,
-    infra_window_rows: AMUX_MAX_INFRA_FAILURES_PER_TASK }).allowed, false);
-  assert.equal(decideAmuxAttemptBudget({ historical_rows: 12, greatest_attempt_number: 12, infra_rows: 12,
-    infra_window_rows: 0 }).allowed, true, "after a person's retry the platform may be tried again");
+  assert.equal(decideAmuxAttemptBudget({ historical_rows: 200, greatest_attempt_number: 200,
+    infra_rows: 200 }).allowed, true);
   const store = read("lib/amux/infraFailureStore.ts");
   assert.match(store, /e\."resolvedById" IS NOT NULL AND e\."resolvedById" NOT LIKE 'system:%'/);
-  assert.match(read("lib/amux/stalledCardSweep.ts"), /AND \$\{AMUX_INFRA_WINDOW_RETRY_SQL\}\) r/,
-    "the stalled sweep reads the same window");
+  // The wait grows with the failures since the last person's retry; the claim holds it.
+  assert.match(read("lib/amux/v22WorkerClaimService.ts"), /amuxInfraRetryDelayMs\(prior\.infraWindowRows\)/);
   assert.match(read("lib/amux/legacyCardSystemService.ts"),
     /AMUX_DM_OWNER_SETTLEMENT_RESOLVER = "system:amux-dm-owner-settlement"/,
     "the settlement resolves as a system resolver");

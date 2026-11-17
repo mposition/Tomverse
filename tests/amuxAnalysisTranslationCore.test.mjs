@@ -8,7 +8,6 @@ import {
   amuxAnalysisTranslationItems,
   amuxAnalysisTranslationViewKey,
   amuxAnalysisViewReadable,
-  checkAmuxTranslationSource,
   mergeAmuxTranslation,
   parseAmuxTranslationOutput,
   planAmuxTranslation,
@@ -79,26 +78,17 @@ test("only a readable result has a view key, and a changed unit body is another 
   assert.notEqual(amuxAnalysisTranslationViewKey(view), amuxAnalysisTranslationViewKey(purged));
 });
 
-test("one call's source check (the legacy page check) refuses an empty or over-long call", () => {
-  assert.deepEqual(checkAmuxTranslationSource([]), { ok: false, code: "empty" });
-  const long = [{ id: "a", text: "x".repeat(AMUX_ANALYSIS_TRANSLATION_MAX_SOURCE_CHARS + 1) }];
-  assert.deepEqual(checkAmuxTranslationSource(long), { ok: false, code: "too_large" });
-  const many = Array.from({ length: 401 }, (_, index) => ({ id: `i${index}`, text: "x" }));
-  assert.deepEqual(checkAmuxTranslationSource(many), { ok: false, code: "too_large" });
-  assert.equal(checkAmuxTranslationSource([{ id: "a", text: "x" }]).ok, true);
-});
-
 test("a larger page is planned as more calls of one call's size, never refused (owner direction 2026-11-15)", () => {
   const max = AMUX_ANALYSIS_TRANSLATION_MAX_SOURCE_CHARS;
   const sizeOf = (batch) => batch.reduce((total, item) => total + item.text.length, 0);
-  assert.deepEqual(planAmuxTranslation([], false), { ok: false, code: "empty" });
+  assert.deepEqual(planAmuxTranslation([]), { ok: false, code: "empty" });
   // A page that fits is the same single call as before, under the same ids.
   const small = [{ id: "a", text: "One" }, { id: "b", text: "Two" }];
-  const one = planAmuxTranslation(small, false);
+  const one = planAmuxTranslation(small);
   assert.deepEqual(one.plan.batches, [small]);
   // Many items: calls of at most 400 items and 24,000 characters, in screen order.
   const many = Array.from({ length: 1_000 }, (_, index) => ({ id: `i${index}`, text: `item ${index} `.repeat(10) }));
-  const planned = planAmuxTranslation(many, false);
+  const planned = planAmuxTranslation(many);
   assert.equal(planned.ok, true);
   assert.ok(planned.plan.batches.length > 1);
   for (const batch of planned.plan.batches) {
@@ -111,7 +101,7 @@ test("a larger page is planned as more calls of one call's size, never refused (
   // One item larger than a call: pieces cut at line breaks, joined back in order.
   const lines = Array.from({ length: 3_000 }, (_, index) => `Line ${index} of a long execution brief.`);
   const long = { id: "u:c1:brief", text: [...lines.slice(0, 1_500), "", "   ", ...lines.slice(1_500)].join("\n") };
-  const pieces = planAmuxTranslation([{ id: "covered", text: "Short." }, long], false);
+  const pieces = planAmuxTranslation([{ id: "covered", text: "Short." }, long]);
   const sent = pieces.plan.batches.flat();
   assert.ok(sent.length > 2 && sent.every((item) => item.text.length <= max && item.text.trim()));
   assert.ok(sent.slice(1).every((item) => item.id.startsWith("u:c1:brief#")));
@@ -120,30 +110,12 @@ test("a larger page is planned as more calls of one call's size, never refused (
     "the joiners rebuild the exact text");
   // A single line longer than a call is sliced without splitting a surrogate pair.
   const emoji = { id: "e", text: "😀".repeat(max) };
-  const sliced = planAmuxTranslation([emoji], false).plan;
+  const sliced = planAmuxTranslation([emoji]).plan;
   const slices = sliced.batches.flat();
   assert.ok(slices.length >= 2 && slices.every((item) => item.text.length <= max && !/^[\uDC00-\uDFFF]/.test(item.text)));
   assert.equal(mergeAmuxTranslation(sliced, Object.fromEntries(slices.map((item) => [item.id, item.text]))).e, emoji.text);
   // A missing piece is no translation.
   assert.equal(mergeAmuxTranslation(pieces.plan, { covered: "짧음" }), null);
-});
-
-test("with the legacy switch a page larger than one call is refused, as before", () => {
-  const long = [{ id: "a", text: "x".repeat(AMUX_ANALYSIS_TRANSLATION_MAX_SOURCE_CHARS + 1) }];
-  assert.deepEqual(planAmuxTranslation(long, true), { ok: false, code: "too_large" });
-  const many = Array.from({ length: 401 }, (_, index) => ({ id: `i${index}`, text: "x" }));
-  assert.deepEqual(planAmuxTranslation(many, true), { ok: false, code: "too_large" });
-  assert.deepEqual(planAmuxTranslation([{ id: "a", text: "x" }], true).plan.batches, [[{ id: "a", text: "x" }]]);
-  const previous = process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS;
-  try {
-    process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS = "enabled";
-    assert.deepEqual(planAmuxTranslation(long), { ok: false, code: "too_large" }, "the switch is read from the environment");
-    delete process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS;
-    assert.equal(planAmuxTranslation(long).ok, true, "the new behaviour is the default");
-  } finally {
-    if (previous === undefined) delete process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS;
-    else process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS = previous;
-  }
 });
 
 test("the prompt keeps code, paths and numbers, and treats the text as data", () => {

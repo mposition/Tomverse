@@ -84,13 +84,12 @@ const REGISTRATIONS = [
   reg("copilot-impl", "paused"),
   reg("copilot-chore", "retired", "chore"),
 ];
-const REGISTRY = buildAmuxWorkerRegistryAdminView({ registrations: REGISTRATIONS, latches: new Map(), observations: new Map(), writesLatch: true });
+const REGISTRY = buildAmuxWorkerRegistryAdminView({ registrations: REGISTRATIONS, latches: new Map(), observations: new Map() });
 const CAPABILITIES = buildAmuxWorkerCapabilityAdminView({
   registrations: REGISTRATIONS,
   current: new Map([
     ["codex-impl", { revision: 1, changedAt: "2026-10-14T00:00:00.000Z", capability: { model: "gpt-5-3-codex", routingTags: ["implementation", "tests"], toolCapabilities: [], v22: null } }],
   ]),
-  writesLatch: true,
 });
 const LIVE = {
   kind: "observed" as const,
@@ -105,7 +104,6 @@ const OVERVIEW = buildAmuxWorkerOverview({ registry: REGISTRY, capabilities: CAP
 type Overrides = Partial<{
   overview: AmuxWorkerOverview | null;
   isOwner: boolean;
-  writesLatch: boolean;
   filter: AmuxWorkerOverviewFilter;
   query: string;
   openWorker: string | null;
@@ -132,7 +130,6 @@ const render = (overrides: Overrides = {}) => {
     cm,
     overview: "overview" in overrides ? overrides.overview! : OVERVIEW,
     isOwner: overrides.isOwner ?? true,
-    writesLatch: overrides.writesLatch ?? true,
     filter: overrides.filter ?? "all",
     query: overrides.query ?? "",
     openWorker: overrides.openWorker ?? null,
@@ -200,8 +197,8 @@ test("workers are grouped by channel, and the kept workers are omitted by defaul
 
 test("every class a worker can be registered with has a channel section, so an Antigravity worker is listed", () => {
   const registrations = [...REGISTRATIONS, reg("antigravity-impl", "requested")];
-  const registry = buildAmuxWorkerRegistryAdminView({ registrations, latches: new Map(), observations: new Map(), writesLatch: true });
-  const capabilities = buildAmuxWorkerCapabilityAdminView({ registrations, current: new Map(), writesLatch: true });
+  const registry = buildAmuxWorkerRegistryAdminView({ registrations, latches: new Map(), observations: new Map() });
+  const capabilities = buildAmuxWorkerCapabilityAdminView({ registrations, current: new Map() });
   const overview = buildAmuxWorkerOverview({ registry, capabilities, live: LIVE, nowMs: NOW })!;
   for (const filter of ["all", "waiting"] as const) {
     const tree = render({ overview, filter });
@@ -269,15 +266,14 @@ test("the owner is offered the change that fits each state, plus details; nothin
   assert.equal(propsOf(retiredTree).filter((props) => /^amux-worker-(activate|pause|resume)-/.test(String(props["data-testid"] ?? ""))).length, 0);
 });
 
-test("a non-owner, or a build with the code latch off, is offered details only", () => {
-  for (const overrides of [{ isOwner: false }, { writesLatch: false }] as const) {
+test("a non-owner is offered details only", () => {
+  for (const overrides of [{ isOwner: false }] as const) {
     const tree = render(overrides);
     const changes = propsOf(tree).filter((props) => /^amux-worker-(activate|pause|resume)-/.test(String(props["data-testid"] ?? "")));
     assert.equal(changes.length, 0, JSON.stringify(overrides));
     assert.equal(byTestId(tree, "amux-worker-details-codex-impl").length, 1);
   }
   assert.equal(byTestId(render({ isOwner: false }), "amux-workers-read-only").length, 1);
-  assert.equal(byTestId(render({ writesLatch: false }), "amux-workers-writes-off").length, 1);
 });
 
 test("while one change is in flight every change control is held, and the worker's own says so", () => {
@@ -296,8 +292,8 @@ test("filters and the search say how many each shows, and an empty result says s
   assert.equal(byTestId(render({ query: "nobody" }), "amux-workers-no-match").length, 1);
   assert.equal(byTestId(render({ query: "cursor" }), "amux-worker-row-codex-impl").length, 0);
   const empty = buildAmuxWorkerOverview({
-    registry: buildAmuxWorkerRegistryAdminView({ registrations: [], latches: new Map(), observations: new Map(), writesLatch: true }),
-    capabilities: buildAmuxWorkerCapabilityAdminView({ registrations: [], current: new Map(), writesLatch: true }),
+    registry: buildAmuxWorkerRegistryAdminView({ registrations: [], latches: new Map(), observations: new Map() }),
+    capabilities: buildAmuxWorkerCapabilityAdminView({ registrations: [], current: new Map() }),
     live: LIVE,
     nowMs: NOW,
   })!;
@@ -386,7 +382,6 @@ test("the first-registration control is folded away, offered to the owner only w
   assert.deepEqual(calls.seed, [[entries]]);
   assert.equal(byTestId(render({ seedEntries: [] }), "amux-workers-seed").length, 0);
   assert.equal(byTestId(render({ seedEntries: null }), "amux-workers-seed").length, 0);
-  assert.equal(byTestId(render({ seedEntries: entries, writesLatch: false }), "amux-workers-seed-register")[0]!.disabled, true);
   const running = render({ seedEntries: entries, pending: { done: 2, total: 3 }, lastRun: "seed" });
   assert.equal(textOf(byTestId(running, "amux-workers-seed-register")[0]!.children as ReactNode), m.seed.registering(2, 3));
 });
@@ -414,7 +409,6 @@ const CURSOR_CAPABILITIES = buildAmuxWorkerCapabilityAdminView({
   current: new Map([
     ["cursor-impl", { revision: 1, changedAt: "2026-11-10T00:00:00.000Z", capability: { model: "grok-4.7-high", routingTags: ["implementation"], toolCapabilities: [], v22: null } }],
   ]),
-  writesLatch: true,
 });
 const CURSOR_OVERVIEW = buildAmuxWorkerOverview({ registry: REGISTRY, capabilities: CURSOR_CAPABILITIES, live: LIVE, nowMs: NOW })!;
 const cursorModels = (pricedModelId?: string) => buildAmuxCliModelCatalogAdminView({
@@ -439,8 +433,8 @@ test("the drawer of a worker whose model has no price offers the owner the price
   (form.onSave as (change: unknown) => void)({ cli: "cursor", cliModel: "grok-4.7-high", pricedModelId: "grok-4-7" });
   assert.deepEqual(calls.linkChoose, [["grok-4-7"]]);
   assert.deepEqual(calls.linkSave, [[{ cli: "cursor", cliModel: "grok-4.7-high", pricedModelId: "grok-4-7" }]]);
-  // Not for a read-only viewer, with writes off, or without the catalog.
-  for (const overrides of [{ isOwner: false }, { writesLatch: false }, { cliModels: null }]) {
+  // Not for a read-only viewer, or without the catalog.
+  for (const overrides of [{ isOwner: false }, { cliModels: null }]) {
     const held = render({ overview: CURSOR_OVERVIEW, openWorker: "cursor-impl", cliModels: cursorModels(), ...overrides });
     assert.equal(propsOf(held).some((props) => "choice" in props && props.cliModel === "grok-4.7-high"), false);
   }

@@ -4,6 +4,7 @@ import type { Prisma } from "@prisma/client";
 
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/amux/auditContract";
+import { AMUX_DM_PENDING_SCAN, AMUX_DM_TICK_LIMIT } from "@/lib/amux/decisionMakerCore";
 import { BoardImportError } from "@/lib/amux/boardImportCore";
 import { openAmuxContent, verifyAmuxContentDigest } from "@/lib/amux/ideaCrypto";
 import { loadAmuxContentKeyRing } from "@/lib/amux/ideaKeyStore";
@@ -27,8 +28,8 @@ import { openAmuxV22TaskResultRow, type AmuxV22SealedRow } from
 
 const CARD_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const REVIEW_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-export const AMUX_V22_RESULT_REVIEW_SYNC_LIMIT = 3;
-export const AMUX_V22_RESULT_REVIEW_PENDING_SCAN = 24;
+export const AMUX_V22_RESULT_REVIEW_SYNC_LIMIT = AMUX_DM_TICK_LIMIT;
+export const AMUX_V22_RESULT_REVIEW_PENDING_SCAN = AMUX_DM_PENDING_SCAN;
 export const AMUX_V22_RESULT_REVIEW_APPLIED_ACTION = "amux.v22.result_review.applied";
 /** Who resolves the person's escalation when the Decision Maker decided, as
  * the card close and the merge observer name themselves: never a person's id. */

@@ -10,7 +10,6 @@ import {
   withAmuxRouteBudget,
 } from "@/lib/amux/dbBoundary";
 import {
-  dmInternalRoutesEnabled,
   dmRouteErrorResponse,
   dmRouteRefusal,
 } from "@/lib/amux/decisionMakerInternalRoute";
@@ -22,7 +21,7 @@ import { recordDmQuestionLocalCard } from
 /**
  * Names the typed-ask card the relay filed for a v22 question or an idea card
  * close question, once. The same card again is a read; another card for the
- * same question is refused. Closed until `TOMVERSE_AMUX_DM_ROUTING=enabled`.
+ * same question is refused.
  */
 const OPERATION = "decision_maker_v22_question_card";
 const refused = dmRouteRefusal("recorded");
@@ -35,7 +34,6 @@ export async function POST(request: Request) {
   if (!isAmuxSyncAuthorized(request)) {
     return amuxJsonNoStore({ error: "Unauthorized" }, 401);
   }
-  if (!dmInternalRoutesEnabled()) return refused(409, "dm_routing_disabled");
 
   return withAmuxRouteBudget(async () => {
     try {

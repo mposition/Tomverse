@@ -77,7 +77,7 @@ async function reviewDraft(tx: LifecycleTx, patch: string): Promise<Card> {
   await recordDecisionMakerSwitchByOperator(tx, { session: operator(), scope: "kill_switch", value: "off" });
   await fixtureCommitted(tx);
   await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerOwnerSettlementSync,
-    (inner) => readAmuxDmOwnerSettlementSyncRows(inner, { enabled: true }));
+    (inner) => readAmuxDmOwnerSettlementSyncRows(inner));
   return { taskId: seed.taskId, settlementId: amuxDmOwnerSettlementId(escalationId), bindingId, prNumber, ref };
 }
 

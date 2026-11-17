@@ -11,7 +11,7 @@ import {
 import { parseDmDeliveryCursor } from "@/lib/amux/decisionMakerDeliveryCore";
 import { readDecisionMakerDeliveryCandidate } from "@/lib/amux/decisionMakerDeliveryRead";
 import { dmDeliveryRouteErrorResponse } from "@/lib/amux/decisionMakerDeliveryRoute";
-import { dmInternalRoutesEnabled, dmRouteRefusal } from "@/lib/amux/decisionMakerInternalRoute";
+import { dmRouteRefusal } from "@/lib/amux/decisionMakerInternalRoute";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 import { amuxJsonNoStore } from "@/lib/amux/internalRoute";
 
@@ -32,7 +32,7 @@ import { amuxJsonNoStore } from "@/lib/amux/internalRoute";
  * nothing: the bridge sends only after the delivery decision
  * (deliveries/route.ts) is recorded.
  *
- * Closed until the operator sets `TOMVERSE_AMUX_DM_ROUTING=enabled`. The answer
+ * The answer
  * carries the message; no log line here does.
  */
 
@@ -52,7 +52,6 @@ export async function POST(request: Request) {
   if (!isAmuxSyncAuthorized(request)) {
     return amuxJsonNoStore({ error: "Unauthorized" }, 401);
   }
-  if (!dmInternalRoutesEnabled()) return refused(409, "dm_routing_disabled");
 
   return withAmuxRouteBudget(async () => {
     try {

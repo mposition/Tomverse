@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { DM_CARD_TEXT_MAX_BYTES, DM_OUTPUT_TEXT_MAX_BYTES, repositoryPathRefusal } from "./decisionMakerCore.ts";
-import { amuxDmWorkspaceEnabled, dmWorkspaceCardPointer } from "./decisionMakerWorkspaceCore.ts";
+import { dmWorkspaceCardPointer } from "./decisionMakerWorkspaceCore.ts";
 
 /**
  * A v22 worker's question to the owner (operator decision 2026-10-30).
@@ -28,7 +28,6 @@ export const AMUX_V22_OWNER_QUESTION_MARKER = "AMUX_OWNER_QUESTION:";
  * its runs are bounded by its attempt budget, not by a question count.
  */
 export const AMUX_V22_OWNER_TEXT_MAX_CHARS = DM_CARD_TEXT_MAX_BYTES;
-export const AMUX_V22_OWNER_OPTIONS_MAX = 6;
 
 /** The earlier flow's sidecar refuses a prompt over 32 KiB; the resume
  * section keeps the whole prompt under this so a long previous patch is left
@@ -98,8 +97,7 @@ export function parseAmuxV22OwnerQuestion(resultText: string):
   const unblocks = boundedText(record.unblocks, AMUX_V22_OWNER_TEXT_MAX_CHARS);
   if (!question || !unblocks) return null;
   const rawOptions = record.options ?? [];
-  if (!Array.isArray(rawOptions) ||
-      rawOptions.length > AMUX_V22_OWNER_OPTIONS_MAX) return null;
+  if (!Array.isArray(rawOptions)) return null;
   const options: AmuxV22OwnerQuestion["options"] = [];
   for (const item of rawOptions) {
     if (!item || typeof item !== "object" || Array.isArray(item)) return null;
@@ -128,21 +126,20 @@ export function parseAmuxV22OwnerQuestion(resultText: string):
  * title names the card; the context starts with the card line; the paths are
  * the worker's, hints into the Decision Maker's workspace (a checkout of the
  * repository). Nothing is cut or dropped to fit a card (owner decision
- * 2026-11-15): with the workspace on, what the worker found goes whole as
- * evidence/CONTEXT.md (lib/amux/decisionMakerWorkspaceService.ts re-reads it)
- * and the card points at it; with the workspace off it rides in the context,
- * and a card over the one cap goes to the operator by the routing.
+ * 2026-11-15): what the worker found goes whole as evidence/CONTEXT.md
+ * (lib/amux/decisionMakerWorkspaceService.ts re-reads it) and the card points
+ * at it; the workspace is always on (2026-11-16).
  */
 export function amuxV22QuestionDmCard(input: { questionId: string; worker: string;
   providerClass: string; taskId: string; sequence: number; displayKey: string | null;
-  cardTitle: string | null; question: AmuxV22OwnerQuestion; workspace?: boolean }) {
+  cardTitle: string | null; question: AmuxV22OwnerQuestion }) {
   const name = input.displayKey ?? `v22 Task ${input.taskId}`;
   const title = input.cardTitle?.trim() ? `${name} ${input.cardTitle.trim()}` :
     `${name} question ${input.sequence}`;
   const cardLine = `Card: ${name}${input.cardTitle?.trim() ? ` "${input.cardTitle.trim()}"` : ""}` +
     `, question ${input.sequence} from worker ${input.worker}.`;
   const found = input.question.context ?? null;
-  const context = found !== null && (input.workspace ?? amuxDmWorkspaceEnabled()) ?
+  const context = found !== null ?
     `${cardLine}\n\n${dmWorkspaceCardPointer(["CONTEXT.md"])}` :
     [cardLine, found].filter(Boolean).join("\n\n");
   return { question_id: input.questionId, worker: input.worker, provider: input.providerClass,

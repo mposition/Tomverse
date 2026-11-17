@@ -14,9 +14,7 @@ import {
   BOARD_IMPORT_SCANNER_VERSION,
 } from "../lib/amux/boardImportCore.ts";
 import {
-  AMUX_RECONCILIATION_APPLY_CODE_LATCH,
   AMUX_RECONCILIATION_PRESERVED_CARD,
-  amuxReconciliationApplyPermitted,
   classifySourceReconciliation,
   planAmuxReconciliation,
   previewAmuxReconciliation,
@@ -86,11 +84,8 @@ test("a missing key and an extra key stay out of the no-op list", () => {
   assert.equal(classified.itemNoOp.length, 64);
 });
 
-test("an accepted revision preserves the backlog card and the latch still needs the environment", () => {
-  assert.equal(AMUX_RECONCILIATION_APPLY_CODE_LATCH, true);
-  assert.equal(amuxReconciliationApplyPermitted("enabled"), true);
-  assert.equal(amuxReconciliationApplyPermitted("true"), false);
-  assert.equal(amuxReconciliationApplyPermitted(undefined), false);
+test("an accepted revision preserves the backlog card and apply has no switch", () => {
+  assert.equal(read("lib/amux/boardReconciliationCore.ts").includes("TOMVERSE_AMUX_RECONCILIATION_APPLY"), false);
   assert.deepEqual(AMUX_RECONCILIATION_PRESERVED_CARD, {
     status: "backlog",
     kind: "unknown",
@@ -158,16 +153,12 @@ test("each drifted key needs its own decision and preview writes nothing", () =>
     planned.revisions.map((entry) => entry.decision),
     ["accept_new_source_revision", "reject"],
   );
-  const preview = previewAmuxReconciliation(body, "enabled");
+  const preview = previewAmuxReconciliation(body);
   assert.equal(preview.outcome, "preview");
   assert.equal(preview.writes, 0);
   assert.equal(preview.applyPermitted, true);
-  assert.equal(preview.inactive, false);
   assert.deepEqual(preview.acceptKeys, ["AMUX-BOARD-01"]);
   assert.deepEqual(preview.rejectKeys, ["AMUX-INTAKE-01"]);
-  assert.equal(previewAmuxReconciliation(body, undefined).applyPermitted, false);
-  assert.equal(previewAmuxReconciliation(body, undefined).inactive, true);
-  assert.equal(previewAmuxReconciliation(body, "true").applyPermitted, false);
 });
 
 test("a missing decision and a decision on a no-op both refuse without a write", () => {
@@ -214,16 +205,16 @@ test("global digest drift with no item drift is a run with zero revisions", () =
   assert.equal(planned.noOpCount, 1);
 });
 
-test("the public apply path checks the shipped latch before the commit", () => {
+test("the public apply path opens one transaction and has no latch", () => {
   const core = read("lib/amux/boardReconciliationCore.ts");
   const service = read("lib/amux/boardReconciliation.ts");
   const route = read("app/api/admin/amux/reconciliation/route.ts");
   const panel = read("components/admin/AmuxReconciliationPanel.tsx");
   const apply = service.slice(service.indexOf("export async function applyAmuxReconciliation"));
-  const permit = apply.indexOf("amuxReconciliationApplyPermitted");
   const opened = apply.indexOf("prisma.$transaction");
-  assert.equal(permit >= 0 && opened > permit, true);
-  assert.equal(core.includes("AMUX_RECONCILIATION_APPLY_CODE_LATCH = true"), true);
+  assert.equal(opened >= 0, true);
+  assert.equal(apply.includes("amuxReconciliationApplyPermitted"), false);
+  assert.equal(core.includes("AMUX_RECONCILIATION_APPLY_CODE_LATCH"), false);
   assert.equal(core.includes("codeLatch: true"), false);
   assert.equal(service.includes("codeLatch: true"), false);
   assert.equal(service.includes("TOMVERSE_AMUX_EXECUTE"), false);

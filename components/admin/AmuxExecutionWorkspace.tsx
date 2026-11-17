@@ -36,7 +36,6 @@ import { adminAmuxBoardViewsMessages } from "@/lib/adminMessages/amuxBoardViews"
 import type { AmuxExecutionListRow } from "@/lib/amux/adminExecutionCardList";
 import { adminAmuxDecisionMakerAttentionMessages } from "@/lib/adminMessages/amuxDecisionMaker";
 import type { DmAttention, DmAttentionItem } from "@/lib/amux/decisionMakerAttention";
-import { AmuxOutcomeObservationForm } from "./AmuxOutcomeObservationForm";
 import { requestArchiveAllActiveCards } from "./amuxExecutionArchiveRequest";
 import { AmuxAttemptUsageAcceptance } from "./AmuxAttemptUsageAcceptance";
 import { AmuxCardWaitReasonLine, AmuxCardWaitReasonPanel,
@@ -76,10 +75,6 @@ type Card = {
 type BoardSnapshot = { pageSize: number;
   counts: Record<AmuxExecutionLane, number>;
   lanes: Array<{ lane: AmuxExecutionLane; cards: Card[] }> };
-type ActivationSnapshot = { asOf: string; activationAuthorized: false;
-  stages: Array<{ id: string; status: "closed" | "unverified" |
-    "owner_evidence_required"; gates: Array<{ id: string;
-      codeLatch: boolean | null; environmentEnabled: boolean | null }> }> };
 type HierarchyItem = ({ type: "node"; id: string; title: string | null;
   level: string; parentId: string | null; state: string;
   assessment: unknown; progress: { done: number; total: number } } |
@@ -97,7 +92,6 @@ type FeedbackRollup = { complete: boolean; reason: string | null;
 type Detail = Omit<Card, "score"> & { revision: number; body: string | null;
   brief: string | null;
   feedback: AmuxTaskFeedbackProjection | null;
-  outcomeWriteEnabled: boolean;
   /** A legacy WORKBOARD card's recreate and close; null or absent for any other card. */
   legacyCard?: AmuxLegacyCardView | null;
   /** The owner's re-approval of a waiting Task's cost ceiling; null or absent when none is read. */
@@ -290,7 +284,6 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, initialView = "bo
   // A lane the board pages on its own (the attention lane's rest, the past-work list) stops after a failed read instead of retrying in a loop.
   const [autoStopped, setAutoStopped] = useState<Partial<Record<AmuxExecutionLane, true>>>({});
   const [board, setBoard] = useState<BoardSnapshot | null>(null);
-  const [activation, setActivation] = useState<ActivationSnapshot | null>(null);
   const [boardPages, setBoardPages] = useState<Partial<Record<AmuxExecutionLane, number>>>({});
   const [boardBusy, setBoardBusy] = useState<AmuxExecutionLane | null>(null);
   const [archive, setArchive] = useState<Card[]>([]);
@@ -352,14 +345,6 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, initialView = "bo
     } catch (reason) { showError(reason); setBoardLoading(false); return; }
     await refreshBoard();
   };
-  useEffect(() => {
-    let cancelled = false;
-    void getJson<ActivationSnapshot>("/api/admin/amux/execution-view?view=activation")
-      .then((result) => { if (!cancelled) setActivation(result); })
-      .catch((reason) => { if (!cancelled) showError(reason); });
-    return () => { cancelled = true; };
-  }, [showError]);
-
   const loadHierarchy = useCallback(async (parent: Parent, page = 0) => {
     const key = keyOf(parent);
     setTreeBusy(key); setError(null);
@@ -839,19 +824,6 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, initialView = "bo
       </div>
     </div>}
     <p className={styles.hint}>{m.searchScope}</p>
-    {activation && <details data-testid="amux-v22-activation-diagnostic"
-      className="rounded border p-3 text-sm border-zinc-700">
-      <summary className="cursor-pointer font-semibold">{m.activationReadout}</summary>
-      <p className="text-xs text-zinc-500">{m.activationCaveat}</p>
-      <ul className="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-        {activation.stages.map((stage) => <li key={stage.id} className="rounded border p-2">
-          <strong>{stage.id}</strong> · {m.activationStatus[stage.status]}
-          <ul className="text-xs text-zinc-500">{stage.gates.map((gate) =>
-            <li key={gate.id}>{gate.id}: {gate.codeLatch === false ? m.codeClosed :
-              gate.environmentEnabled === false ? m.environmentClosed : m.unknown}</li>)}</ul>
-        </li>)}
-      </ul>
-    </details>}
     {laneIdeas === null && <p role="status" className={styles.hint}>{m.ideaLane.unavailable}</p>}
     {error && <p role="alert" className="rounded border border-red-500 p-2 text-sm">
       {error === "reauth" ? <Link className="underline"
@@ -1196,10 +1168,6 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, initialView = "bo
         <p className="text-sm">{m.userOutcome}: {selected.feedback.observed.userOutcome?.outcome ?? m.unknown}</p>
         <p className="text-sm">{m.checkFindings}: {selected.feedback.observed.checks?.findingCount ?? m.unknown}</p>
         <p className="text-sm">{m.reviewFindings}: {selected.feedback.observed.independentReview?.findingCount ?? m.unknown}</p>
-        {selected.outcomeWriteEnabled && <AmuxOutcomeObservationForm
-          key={selected.id} taskId={selected.id} revision={selected.revision}
-          writeEnabled={selected.outcomeWriteEnabled}
-          onSaved={() => void openCard(selected.id)} />}
       </section>}
       {selected.escalations.length > 0 && <section><h4 className="font-semibold">{m.attention}</h4>
         <ul className="text-sm">{selected.escalations.map((item) => <li key={item.id}>

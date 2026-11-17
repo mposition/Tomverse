@@ -1,6 +1,6 @@
 import { amuxCanonicalJson } from "./boardImportCore.ts";
 import { isAmuxFeatureDisplayPrefix } from "./cardDisplayKeyCore.ts";
-import { AMUX_INTAKE_SAFETY_MAX_BYTES, amuxIntakeLegacyLimits } from "./intakeLimitsCore.ts";
+import { AMUX_INTAKE_SAFETY_MAX_BYTES } from "./intakeLimitsCore.ts";
 import { scanAmuxV4Input } from "./localIntakeCore.ts";
 
 /**
@@ -19,28 +19,16 @@ export const AMUX_ANALYSIS_CHUNK_SCHEMA_VERSION = 5 as const;
  * Owner direction 2026-11-15 (intakeLimitsCore.ts): an answer is no longer
  * refused for a field's length or a list's count, and a slightly malformed
  * field (untrimmed text, a line break in a title, a repeated ref) is
- * normalised instead of refusing the page. The constants below are the former
- * limits, applied only to new model output while
- * TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS is enabled; a stored unit is re-read
- * under the rule it was admitted with, so the switch never hides one. The
- * one ceiling left is AMUX_INTAKE_SAFETY_MAX_BYTES on the whole answer. */
-export const AMUX_TASK_EXPECTED_PATHS_MAX = 40;
-export const AMUX_TASK_EXPECTED_PATH_MAX_BYTES = 512;
-export const AMUX_ANALYSIS_CHUNK_MAX_BYTES = 65_536;
-export const AMUX_ANALYSIS_CHUNK_CARD_CAP = 8;
-export const AMUX_ANALYSIS_CHUNK_NODE_CAP = 16;
-export const AMUX_ANALYSIS_CHUNK_EVIDENCE_CAP = 16;
+ * normalised instead of refusing the page. The one ceiling left is
+ * AMUX_INTAKE_SAFETY_MAX_BYTES on the whole answer. */
 
-/** The byte ceiling of one whole answer under the current switch. */
-export const amuxAnalysisChunkMaxBytes = (legacy: boolean = amuxIntakeLegacyLimits()): number =>
-  legacy ? AMUX_ANALYSIS_CHUNK_MAX_BYTES : AMUX_INTAKE_SAFETY_MAX_BYTES;
+/** The byte ceiling of one whole answer. */
+export const amuxAnalysisChunkMaxBytes = (): number => AMUX_INTAKE_SAFETY_MAX_BYTES;
 
 /** The request body that carries one answer: JSON escaping at most doubles
- * admitted text (the parser refuses control characters), plus the envelope.
- * `formerBytes` is the route's own body limit before owner direction 2026-11-15. */
-export const amuxAnalysisAnswerRequestMaxBytes = (formerBytes: number,
-  legacy: boolean = amuxIntakeLegacyLimits()): number =>
-  legacy ? formerBytes : 2 * AMUX_INTAKE_SAFETY_MAX_BYTES + 64 * 1024;
+ * admitted text (the parser refuses control characters), plus the envelope. */
+export const amuxAnalysisAnswerRequestMaxBytes = (): number =>
+  2 * AMUX_INTAKE_SAFETY_MAX_BYTES + 64 * 1024;
 
 const REF = /^[A-Za-z0-9:_-]{1,128}$/;
 // The chunk prefix prevents ambiguous IDs when one project spans many chunks.
@@ -341,65 +329,51 @@ export const amuxAnalysisInputTextSafe = (value: string): boolean =>
   wellFormedUnicode(value) && !SPOOFING_CHAR.test(value.replaceAll("\r\n", "\n")) &&
   scanAmuxV4Input(value).ok;
 
-/** How one answer is read. `legacy` applies the limits and refusals in force
- * before owner direction 2026-11-15; otherwise no field length or list count
- * refuses an answer, and a slightly malformed field is normalised. */
-type Limits = { readonly legacy: boolean };
-const OPEN: Limits = Object.freeze({ legacy: false });
-const within = (limits: Limits, max: number): number =>
-  limits.legacy ? max : Number.POSITIVE_INFINITY;
-
-const text = (value: unknown, maxBytes: number, field: AmuxAnalysisSchemaField,
-  limits: Limits): string => {
+/** No field length or list count refuses an answer, and a slightly malformed
+ * field is normalised. */
+const text = (value: unknown, field: AmuxAnalysisSchemaField): string => {
   if (typeof value !== "string") return refuse("value_not_allowed", field);
   // A paired CRLF and surrounding whitespace are normalised, not refused.
-  const normalised = limits.legacy ? value : value.replaceAll("\r\n", "\n").trim();
+  const normalised = value.replaceAll("\r\n", "\n").trim();
   if (normalised.length === 0 || normalised.trim() !== normalised || !/\S/u.test(normalised)) {
     return reject("metadata_incomplete");
   }
-  if (byteLength(normalised) > within(limits, maxBytes)) reject("too_large");
   if (!amuxAnalysisTextSafe(normalised)) {
     reject("content_refused");
   }
   return normalised;
 };
 
-const nullableText = (value: unknown, maxBytes: number, field: AmuxAnalysisSchemaField,
-  limits: Limits): string | null =>
-  value === null ? null : text(value, maxBytes, field, limits);
+const nullableText = (value: unknown, field: AmuxAnalysisSchemaField): string | null =>
+  value === null ? null : text(value, field);
 
 /** A title's line breaks and tabs become one space; a path still refuses them. */
-const singleLineText = (value: unknown, maxBytes: number, field: AmuxAnalysisSchemaField,
-  limits: Limits, collapse = false): string => {
-  const joined = !limits.legacy && collapse && typeof value === "string"
+const singleLineText = (value: unknown, field: AmuxAnalysisSchemaField,
+  collapse = false): string => {
+  const joined = collapse && typeof value === "string"
     ? value.replace(/[ \t]*[\t\r\n]+[ \t]*/gu, " ") : value;
-  const result = text(joined, maxBytes, field, limits);
+  const result = text(joined, field);
   if (/[\t\n]/u.test(result)) reject("content_refused");
   return result;
 };
 
-const list = <T>(value: unknown, max: number, min: number, parse: (item: unknown, index: number) => T,
-  field: AmuxAnalysisSchemaField, limits: Limits): T[] => {
+const list = <T>(value: unknown, min: number, parse: (item: unknown, index: number) => T,
+  field: AmuxAnalysisSchemaField): T[] => {
   if (!Array.isArray(value)) return refuse("value_not_allowed", field);
-  if (value.length > within(limits, max)) reject("too_large");
   if (value.length < min) reject("metadata_incomplete");
   return value.map((item, index) => parse(item, index));
 };
 
-/** A repeated value is refused under the former rule, otherwise kept once. */
-const distinct = <T>(values: T[], field: AmuxAnalysisSchemaField, limits: Limits): T[] => {
-  if (new Set(values).size === values.length) return values;
-  if (limits.legacy) refuse("duplicate_value", field);
-  return [...new Set(values)];
-};
+/** A repeated value is kept once. */
+const distinct = <T>(values: T[]): T[] =>
+  new Set(values).size === values.length ? values : [...new Set(values)];
 
-const uniqueRefs = (value: unknown, max: number, field: AmuxAnalysisSchemaField,
-  limits: Limits, min = 0): string[] =>
-  distinct(list(value, max, min, (item) => ref(item, field), field, limits), field, limits);
+const uniqueRefs = (value: unknown, field: AmuxAnalysisSchemaField, min = 0): string[] =>
+  distinct(list(value, min, (item) => ref(item, field), field));
 
-const sourceRefs = (value: unknown, permitted: ReadonlySet<string>, field: AmuxAnalysisSchemaField,
-  limits: Limits): string[] => {
-  const refs = uniqueRefs(value, 16, field, limits, 1);
+const sourceRefs = (value: unknown, permitted: ReadonlySet<string>,
+  field: AmuxAnalysisSchemaField): string[] => {
+  const refs = uniqueRefs(value, field, 1);
   if (refs.some((candidate) => !permitted.has(candidate))) reject("source_ref_unapproved");
   return refs;
 };
@@ -414,7 +388,7 @@ const localId = (value: unknown, kind: "node" | "card" | "evidence", chunkIndex:
 };
 
 const modelSignal = (value: unknown, metricNames: readonly string[],
-  permittedUnitRefs: readonly string[], limits: Limits): AmuxPortfolioModelSignal => {
+  permittedUnitRefs: readonly string[]): AmuxPortfolioModelSignal => {
   const signal = object(value, ["metrics", "uncertainty", "rationale", "evidenceRefIds"], "portfolioSignal");
   const metricValues = object(signal.metrics, metricNames, "metrics");
   const metrics: Record<string, number> = {};
@@ -426,14 +400,14 @@ const modelSignal = (value: unknown, metricNames: readonly string[],
   }
   return { metrics,
     uncertainty: oneOf(signal.uncertainty, ["low", "medium", "high"] as const, "uncertainty"),
-    rationale: text(signal.rationale, 500, "rationale", limits),
+    rationale: text(signal.rationale, "rationale"),
     evidenceRefIds: sourceRefs(signal.evidenceRefIds,
-      new Set(permittedUnitRefs), "evidenceRefIds", limits),
+      new Set(permittedUnitRefs), "evidenceRefIds"),
   };
 };
 
 const parseNode = (value: unknown, permitted: ReadonlySet<string>, chunkIndex: number,
-  limits: Limits): AmuxAnalysisNode => {
+): AmuxAnalysisNode => {
   const hasSignal = value !== null && typeof value === "object" &&
     Object.hasOwn(value, "portfolioSignal");
   const hasPrefix = value !== null && typeof value === "object" &&
@@ -448,23 +422,23 @@ const parseNode = (value: unknown, permitted: ReadonlySet<string>, chunkIndex: n
   }
   const parentRef = nullableRef(data.parentRef, "parentRef");
   if ((level === "initiative") !== (parentRef === null)) refuse("initiative_parent", "parentRef");
-  const unitSources = sourceRefs(data.sourceRefIds, permitted, "sourceRefIds", limits);
+  const unitSources = sourceRefs(data.sourceRefIds, permitted, "sourceRefIds");
   return {
     kind: "node",
     localId: localId(data.localId, "node", chunkIndex),
     level,
     parentRef,
-    title: singleLineText(data.title, 200, "title", limits, true),
-    description: text(data.description, 2_000, "description", limits),
+    title: singleLineText(data.title, "title", true),
+    description: text(data.description, "description"),
     sourceRefIds: unitSources,
     ...(hasSignal ? { portfolioSignal: modelSignal(data.portfolioSignal,
-      ["value"], unitSources, limits) } : {}),
+      ["value"], unitSources) } : {}),
     ...(hasPrefix ? { displayPrefix: data.displayPrefix as string } : {}),
   };
 };
 
 const parseCard = (value: unknown, permitted: ReadonlySet<string>, chunkIndex: number,
-  limits: Limits): AmuxAnalysisCard => {
+): AmuxAnalysisCard => {
   const hasSignal = value !== null && typeof value === "object" &&
     Object.hasOwn(value, "portfolioSignal");
   const hasPaths = value !== null && typeof value === "object" &&
@@ -480,7 +454,7 @@ const parseCard = (value: unknown, permitted: ReadonlySet<string>, chunkIndex: n
   const taskRole = data.taskRole === null ? null : oneOf(data.taskRole, AMUX_TASK_ROLE_PROPOSALS, "taskRole");
   const executionGrade = data.executionGrade === null ? null :
     oneOf(data.executionGrade, AMUX_EXECUTION_GRADE_PROPOSALS, "executionGrade");
-  const executionBrief = nullableText(data.executionBrief, 2_000, "executionBrief", limits);
+  const executionBrief = nullableText(data.executionBrief, "executionBrief");
   const parentStoryRef = nullableRef(data.parentStoryRef, "parentStoryRef");
   if (cardType === "story") {
     if (storyKind === null) refuse("story_fields", "storyKind");
@@ -496,26 +470,25 @@ const parseCard = (value: unknown, permitted: ReadonlySet<string>, chunkIndex: n
   }
   // amux-intake v20 item 3: a Story has no expected paths.
   if (hasPaths && cardType !== "task") refuse("story_expected_paths", "expectedPaths");
-  const expectedPaths = hasPaths ? distinct(list(data.expectedPaths, AMUX_TASK_EXPECTED_PATHS_MAX, 1,
-    (item) => singleLineText(item, AMUX_TASK_EXPECTED_PATH_MAX_BYTES, "expectedPaths", limits),
-    "expectedPaths", limits), "expectedPaths", limits) : null;
-  const unitSources = sourceRefs(data.sourceRefIds, permitted, "sourceRefIds", limits);
+  const expectedPaths = hasPaths ? distinct(list(data.expectedPaths, 1,
+    (item) => singleLineText(item, "expectedPaths"), "expectedPaths")) : null;
+  const unitSources = sourceRefs(data.sourceRefIds, permitted, "sourceRefIds");
   const items = (field: "scopeIn" | "scopeOut" | "completionCriteria", min: number) =>
-    list(data[field], 12, min, (item) => text(item, 500, field, limits), field, limits);
+    list(data[field], min, (item) => text(item, field), field);
   return {
     kind: "card",
     localId: localId(data.localId, "card", chunkIndex),
     cardType,
     storyKind,
-    title: singleLineText(data.title, 200, "title", limits, true),
-    problem: text(data.problem, 2_000, "problem", limits),
+    title: singleLineText(data.title, "title", true),
+    problem: text(data.problem, "problem"),
     scopeIn: items("scopeIn", 1),
     scopeOut: items("scopeOut", 0),
     completionCriteria: items("completionCriteria", 1),
     featureRef: ref(data.featureRef, "featureRef"),
     parentStoryRef,
-    dependencyRefs: uniqueRefs(data.dependencyRefs, 16, "dependencyRefs", limits),
-    duplicateCandidateRefs: uniqueRefs(data.duplicateCandidateRefs, 8, "duplicateCandidateRefs", limits),
+    dependencyRefs: uniqueRefs(data.dependencyRefs, "dependencyRefs"),
+    duplicateCandidateRefs: uniqueRefs(data.duplicateCandidateRefs, "duplicateCandidateRefs"),
     taskRole,
     executionGrade,
     executionBrief,
@@ -523,31 +496,31 @@ const parseCard = (value: unknown, permitted: ReadonlySet<string>, chunkIndex: n
     ...(hasSignal ? { portfolioSignal: modelSignal(data.portfolioSignal,
       cardType === "story" ? ["impact"] : ["contribution", "urgency",
         "dependencyUnlock", "workerCoverage", "effort", "deliveryRisk"],
-      unitSources, limits) } : {}),
+      unitSources) } : {}),
     ...(expectedPaths ? { expectedPaths } : {}),
   };
 };
 
 const parseEvidence = (value: unknown, permitted: ReadonlySet<string>, chunkIndex: number,
-  limits: Limits): AmuxAnalysisEvidence => {
+): AmuxAnalysisEvidence => {
   const data = object(value, ["kind", "localId", "evidenceType", "summary", "cardRef", "sourceRefIds"], "evidence");
   return {
     kind: "evidence",
     localId: localId(data.localId, "evidence", chunkIndex),
     evidenceType: oneOf(data.evidenceType, ["observed_error", "source_finding"] as const, "evidenceType"),
-    summary: text(data.summary, 1_000, "summary", limits),
+    summary: text(data.summary, "summary"),
     cardRef: ref(data.cardRef, "cardRef"),
-    sourceRefIds: sourceRefs(data.sourceRefIds, permitted, "sourceRefIds", limits),
+    sourceRefIds: sourceRefs(data.sourceRefIds, permitted, "sourceRefIds"),
   };
 };
 
 const parseUnit = (value: unknown, permitted: ReadonlySet<string>, chunkIndex: number,
-  limits: Limits): AmuxAnalysisChunk["units"][number] => {
+): AmuxAnalysisChunk["units"][number] => {
   if (value === null || typeof value !== "object" || Array.isArray(value)) refuse("not_object", "unit");
   const kind = (value as Record<string, unknown>).kind;
-  if (kind === "node") return parseNode(value, permitted, chunkIndex, limits);
-  if (kind === "card") return parseCard(value, permitted, chunkIndex, limits);
-  if (kind === "evidence") return parseEvidence(value, permitted, chunkIndex, limits);
+  if (kind === "node") return parseNode(value, permitted, chunkIndex);
+  if (kind === "card") return parseCard(value, permitted, chunkIndex);
+  if (kind === "evidence") return parseEvidence(value, permitted, chunkIndex);
   return refuse("unit_kind", "kind");
 };
 
@@ -558,8 +531,6 @@ export function inspectAmuxStoredAnalysisUnit(input: {
   raw: string; chunkIndex: number; permittedSourceRefIds: readonly string[];
 }): { ok: true; unit: AmuxAnalysisChunk["units"][number] } |
   { ok: false } {
-  // A stored unit is re-read under the rule it was admitted with, never the
-  // former limits: the switch must not hide a unit already admitted.
   if (typeof input?.raw !== "string" || byteLength(input.raw) > AMUX_INTAKE_SAFETY_MAX_BYTES ||
       !Number.isSafeInteger(input.chunkIndex) || input.chunkIndex < 0 ||
       !Array.isArray(input.permittedSourceRefIds) ||
@@ -568,7 +539,7 @@ export function inspectAmuxStoredAnalysisUnit(input: {
   }
   try {
     return { ok: true, unit: parseUnit(JSON.parse(input.raw),
-      new Set(input.permittedSourceRefIds), input.chunkIndex, OPEN) };
+      new Set(input.permittedSourceRefIds), input.chunkIndex) };
   } catch { return { ok: false }; }
 }
 
@@ -689,13 +660,12 @@ const snapshotInspectionInput = (input: AmuxAnalysisChunkInspectionInput): {
           previousContinuationKind !== "input" && previousContinuationKind !== "output") ||
         !Array.isArray(permittedSourceRefIds) || !Array.isArray(permittedTargetRefs) ||
         !(requiredSchemaVersion === null || SCHEMA_VERSIONS.includes(requiredSchemaVersion))) return null;
-    // A large idea inherits every earlier page's proposals as targets; only
-    // the former rule bounds how many (owner direction 2026-11-15).
-    const open = requiredSchemaVersion === null || !amuxIntakeLegacyLimits();
+    // A large idea inherits every earlier page's proposals as targets; none is
+    // counted against a limit (owner direction 2026-11-15).
     const sourceRefs = copyBoundedAmuxArray<string>(permittedSourceRefIds,
-      open ? Number.MAX_SAFE_INTEGER : 256);
+      Number.MAX_SAFE_INTEGER);
     const rawTargets = copyBoundedAmuxArray<AmuxPermittedTargetRef>(permittedTargetRefs,
-      open ? Number.MAX_SAFE_INTEGER : 512);
+      Number.MAX_SAFE_INTEGER);
     if (sourceRefs === null || rawTargets === null || sourceRefs.length === 0 ||
         sourceRefs.some((candidate) => !amuxAnalysisRefSafe(candidate))) return null;
     const targetRefs = rawTargets.map((target) => snapshotAmuxPermittedTarget(target));
@@ -718,12 +688,7 @@ export function inspectAmuxAnalysisChunk(
   if (snapshot === null) return { ok: false, code: "metadata_incomplete" };
   const { raw, expectedPreviewId, expectedChunkIndex, previousContinuationKind,
     sourceRefs, targetRefs, requiredSchemaVersion, allowEmptyClosingPage } = snapshot;
-  // New model output follows the switch; a stored chunk (no required schema)
-  // is re-read under the rule it was admitted with.
-  const limits: Limits = requiredSchemaVersion === null ? OPEN :
-    { legacy: amuxIntakeLegacyLimits() };
-  const maxBytes = amuxAnalysisChunkMaxBytes(limits.legacy);
-  if (byteLength(raw) > maxBytes) return { ok: false, code: "too_large" };
+  if (byteLength(raw) > amuxAnalysisChunkMaxBytes()) return { ok: false, code: "too_large" };
   let parsed: unknown;
   try {
     parsed = amuxAnalysisAnswerJson(raw);
@@ -744,10 +709,9 @@ export function inspectAmuxAnalysisChunk(
     if (data.previewId !== expectedPreviewId) refuse("header_mismatch", "previewId");
     if (data.chunkIndex !== expectedChunkIndex) refuse("header_mismatch", "chunkIndex");
     const permitted = new Set(sourceRefs);
-    const units = list(data.units, AMUX_ANALYSIS_CHUNK_CARD_CAP + AMUX_ANALYSIS_CHUNK_NODE_CAP +
-      AMUX_ANALYSIS_CHUNK_EVIDENCE_CAP, 0,
-      (unit, index) => atUnit(index, unit, () => parseUnit(unit, permitted, expectedChunkIndex, limits)),
-      "units", limits);
+    const units = list(data.units, 0,
+      (unit, index) => atUnit(index, unit, () => parseUnit(unit, permitted, expectedChunkIndex)),
+      "units");
     const firstUnit = (broken: (unit: AmuxAnalysisChunk["units"][number]) => boolean,
       rule: AmuxAnalysisSchemaRule, field: AmuxAnalysisSchemaField): void => {
       const index = units.findIndex(broken);
@@ -782,9 +746,6 @@ export function inspectAmuxAnalysisChunk(
       cards: units.filter((unit) => unit.kind === "card").length,
       evidence: units.filter((unit) => unit.kind === "evidence").length,
     };
-    if (limits.legacy && (counts.nodes > AMUX_ANALYSIS_CHUNK_NODE_CAP ||
-        counts.cards > AMUX_ANALYSIS_CHUNK_CARD_CAP ||
-        counts.evidence > AMUX_ANALYSIS_CHUNK_EVIDENCE_CAP)) reject("too_large");
     firstUnit((unit) => units.findIndex((other) => other.localId === unit.localId) !== units.indexOf(unit),
       "local_id_duplicate", "localId");
     validateUnitRefs(units, targetRefs);
@@ -793,8 +754,8 @@ export function inspectAmuxAnalysisChunk(
       "coverageStatus");
     const continuationKind = data.continuationKind === null ? null :
       oneOf(data.continuationKind, ["input", "output"] as const, "continuationKind");
-    const ownerQuestion = nullableText(data.ownerQuestion, 2_000, "ownerQuestion", limits);
-    const remainingScope = nullableText(data.remainingScope, 2_000, "remainingScope", limits);
+    const ownerQuestion = nullableText(data.ownerQuestion, "ownerQuestion");
+    const remainingScope = nullableText(data.remainingScope, "remainingScope");
     const emptyClose = allowEmptyClosingPage && previousContinuationKind === "output" &&
       outcome === "propose" && coverageStatus === "complete";
     if ((remainingScope === null) !== (continuationKind === null) ||
@@ -831,12 +792,12 @@ export function inspectAmuxAnalysisChunk(
       coverageStatus,
       continuationKind,
       ownerQuestion,
-      coveredScope: text(data.coveredScope, 2_000, "coveredScope", limits),
+      coveredScope: text(data.coveredScope, "coveredScope"),
       remainingScope,
       units,
     };
     const canonical = amuxCanonicalJson(chunk);
-    if (byteLength(canonical) > maxBytes) reject("too_large");
+    if (byteLength(canonical) > amuxAnalysisChunkMaxBytes()) reject("too_large");
     // A long-lived digest of model-derived content must be keyed. The future
     // app writer computes it with its own key after this structural check;
     // this no-credential parser intentionally returns no plain SHA-256.

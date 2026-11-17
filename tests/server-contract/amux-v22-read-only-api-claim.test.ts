@@ -203,7 +203,6 @@ test("API gate and current frame fence claim before assignment mutation", async 
     routeId: "read-only-route", routePolicyDigest: "d".repeat(64),
     briefDigest: "b".repeat(64) };
   const env = {
-    TOMVERSE_AMUX_V22_WORKER_CLAIM: process.env.TOMVERSE_AMUX_V22_WORKER_CLAIM,
     TOMVERSE_AMUX_V22_READ_ONLY_API_EXECUTOR_ENABLED:
       process.env.TOMVERSE_AMUX_V22_READ_ONLY_API_EXECUTOR_ENABLED,
     TOMVERSE_AMUX_V22_READ_ONLY_API_CREDENTIAL_PROFILE_ID:
@@ -215,7 +214,6 @@ test("API gate and current frame fence claim before assignment mutation", async 
     TOMVERSE_AMUX_V22_READ_ONLY_API_REPOSITORY_SCOPE_DIGEST:
       process.env.TOMVERSE_AMUX_V22_READ_ONLY_API_REPOSITORY_SCOPE_DIGEST,
   };
-  process.env.TOMVERSE_AMUX_V22_WORKER_CLAIM = "enabled";
   process.env.TOMVERSE_AMUX_V22_READ_ONLY_API_CREDENTIAL_PROFILE_ID =
     frame.credentialProfileId;
   process.env.TOMVERSE_AMUX_V22_READ_ONLY_API_CREDENTIAL_METADATA_DIGEST =

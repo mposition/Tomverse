@@ -56,11 +56,6 @@ test("orchestrator drives the canonical AMUX recovery endpoint on a bounded cade
   assert.match(scheduler, /more = outcome\.more\.unwrap_or\(false\)/);
   assert.match(recoverRoute, /withAmuxRouteBudget/);
   assert.match(recoverRoute, /await sweepExpiredAmuxQuotaObservations\(\)/);
-  assert.match(recoverRoute, /if \(!isAmuxExecutionApiEnabled\(\)\)/);
-  assert.ok(
-    recoverRoute.indexOf("await sweepExpiredAmuxQuotaObservations()") <
-      recoverRoute.indexOf("if (!isAmuxExecutionApiEnabled())"),
-  );
   assert.match(recoverRoute, /\}, AMUX_LIFECYCLE_ROUTE_BUDGET_MS\);/);
   assert.match(telemetry, /AMUX_QUOTA_SWEEP_BATCH_SIZE = 200/);
   assert.match(

@@ -8,6 +8,7 @@
 // PostgreSQL in tests/integration/amux-decision-maker-switch.db.test.ts.
 
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import test from "node:test";
@@ -28,6 +29,7 @@ import {
   DM_SWITCH_AUDIT_ACTIONS,
   DM_SWITCH_AUDIT_METADATA_KEYS,
   DM_SWITCH_AUDIT_TARGET_TYPE,
+  DM_LATCH_SYSTEM_RELEASE_AFTER_MS,
   DM_SWITCH_LATCH_ACTOR_FOR_INSTANCE,
   DM_SWITCH_LATCH_REASONS,
   DM_SWITCH_REASON_CODES,
@@ -36,6 +38,7 @@ import {
   decisionMakerSwitchReadFromRows,
   decisionMakerSwitchStateFromRows,
   defaultDecisionMakerSwitches,
+  dmLatchSystemReleaseDue,
   dmOperatorSwitchAction,
   dmSwitchAuditMetadata,
   dmSwitchRoutingInput,
@@ -51,12 +54,14 @@ import {
   readDecisionMakerSwitchesOrThrow,
   readDecisionMakerSwitchesWithBoundariesOrThrow,
   recordDecisionMakerSwitchByOperator,
+  releaseDecisionMakerLatchBySystem,
 } from "../lib/amux/decisionMakerSwitchStore.ts";
 
 const root = process.cwd();
 const read = (path) => readFileSync(join(root, path), "utf8");
 const STORE = "lib/amux/decisionMakerSwitchStore.ts";
 const MIGRATION = "prisma/migrations/20261008030000_amux_decision_maker_switch/migration.sql";
+const LATCH_RELEASE_MIGRATION = "prisma/migrations/20261116140100_amux_dm_latch_release/migration.sql";
 
 const withoutSqlComments = (sql) =>
   sql
@@ -79,7 +84,8 @@ test("the switch vocabularies are the policy's, and no list holds an autonomous 
   assert.deepEqual([...DM_INSTANCE_MODES], ["off", "proposal"]);
   assert.deepEqual([...DM_KILL_SWITCH_VALUES], ["on", "off"]);
   assert.deepEqual([...DM_SWITCH_VALUES], ["on", "off", "proposal"]);
-  assert.deepEqual([...DM_SWITCH_REASON_CODES], ["operator", "validation_latch", "cleanup_latch"]);
+  // Owner direction 2026-11-16: the system's release of a latch (migration 20261116140100).
+  assert.deepEqual([...DM_SWITCH_REASON_CODES], ["operator", "validation_latch", "cleanup_latch", "latch_release"]);
   assert.deepEqual([...DM_SWITCH_LATCH_REASONS], ["validation_latch", "cleanup_latch"]);
   assert.deepEqual([...DM_SWITCH_ACTOR_KINDS], ["human", "system"]);
   for (const list of [DM_SWITCH_SCOPES, DM_INSTANCE_MODES, DM_KILL_SWITCH_VALUES, DM_SWITCH_VALUES]) {
@@ -103,7 +109,14 @@ test("the migration's CHECKs hold exactly the lists, and pair scope, value, acto
   const sql = withoutSqlComments(read(MIGRATION));
   assert.deepEqual(checkList(sql, "AmuxDecisionMakerSwitchEvent_scope_check"), [...DM_SWITCH_SCOPES]);
   assert.deepEqual(checkList(sql, "AmuxDecisionMakerSwitchEvent_value_check"), [...DM_SWITCH_VALUES]);
-  assert.deepEqual(checkList(sql, "AmuxDecisionMakerSwitchEvent_reason_code_check"), [...DM_SWITCH_REASON_CODES]);
+  // The first migration held three reasons; the 2026-11-16 one adds the system's release.
+  assert.deepEqual(checkList(sql, "AmuxDecisionMakerSwitchEvent_reason_code_check"), DM_SWITCH_REASON_CODES.filter((code) => code !== "latch_release"));
+  const release = withoutSqlComments(read(LATCH_RELEASE_MIGRATION));
+  assert.deepEqual(checkList(release, "AmuxDecisionMakerSwitchEvent_reason_code_check"), [...DM_SWITCH_REASON_CODES]);
+  assert.match(
+    release,
+    /OR \(\s*"actorKind" = 'system'\s*AND "reasonCode" = 'latch_release'\s*AND "scope" <> 'kill_switch'\s*AND "value" = 'proposal'\s*\)/,
+  );
   assert.deepEqual(checkList(sql, "AmuxDecisionMakerSwitchEvent_actor_kind_check"), [...DM_SWITCH_ACTOR_KINDS]);
   assert.match(
     sql,
@@ -323,8 +336,11 @@ test("the system only latches an instance, for a latch reason; a cleanup latch n
 
 test("a person's first change after a system latch is recorded as its release", () => {
   assert.equal(dmOperatorSwitchAction(null), "amux.decision.mode");
-  assert.equal(dmOperatorSwitchAction("human"), "amux.decision.mode");
-  assert.equal(dmOperatorSwitchAction("system"), "amux.decision.latch_release");
+  assert.equal(dmOperatorSwitchAction({ actorKind: "human", reasonCode: "operator" }), "amux.decision.mode");
+  assert.equal(dmOperatorSwitchAction({ actorKind: "system", reasonCode: "validation_latch" }), "amux.decision.latch_release");
+  assert.equal(dmOperatorSwitchAction({ actorKind: "system", reasonCode: "cleanup_latch" }), "amux.decision.latch_release");
+  // The system's own release (2026-11-16) is no latch: a person's change after it is a mode change.
+  assert.equal(dmOperatorSwitchAction({ actorKind: "system", reasonCode: "latch_release" }), "amux.decision.mode");
 });
 
 test("switch audit metadata carries closed keys and short identifiers only", () => {
@@ -417,7 +433,7 @@ test("one store module reads and writes the table; nothing else in the applicati
 // Statements per operation (§9: 12 at most, pinned exactly)
 // ---------------------------------------------------------------------------
 
-const recordingTx = ({ newest = [], boundaryRows = [], failRead = false } = {}) => {
+const recordingTx = ({ newest = [], boundaryRows = [], releaseRows = [], failRead = false } = {}) => {
   const sent = [];
   const tx = {
     $executeRaw: (strings, ...values) => {
@@ -433,6 +449,8 @@ const recordingTx = ({ newest = [], boundaryRows = [], failRead = false } = {}) 
         return Promise.resolve([{ sequence: 41n, createdAtEpochMs: 1_790_000_000_000n }]);
       }
       if (sql.includes('SELECT "actorKind", "value"')) return Promise.resolve(newest);
+      // The system's release read (2026-11-16): the scope's newest event and the person's newest value.
+      if (sql.includes('AS "operatorValue"')) return Promise.resolve(releaseRows);
       // The request ledger's switch read, with each instance's §8 count boundary (stage S2-2a4).
       if (sql.includes("DISTINCT ON") && sql.includes('"newestValidationLatchSequence"')) return Promise.resolve(boundaryRows);
       if (sql.includes("DISTINCT ON")) return Promise.resolve([{ scope: "decision-maker-openai", value: "proposal" }]);
@@ -504,7 +522,7 @@ for (const [label, key, auditStatements] of [
       );
       // Chain lock first, then the scope's newest event, then the audit, then the event.
       assert.match(sent[0].sql, /pg_advisory_xact_lock\(hashtext\('tomverse-admin-audit-chain'\)\)/);
-      assert.match(sent[1].sql, /SELECT "actorKind", "value"\s+FROM "AmuxDecisionMakerSwitchEvent"\s+WHERE "scope" = \$/);
+      assert.match(sent[1].sql, /SELECT "actorKind", "value", "reasonCode"\s+FROM "AmuxDecisionMakerSwitchEvent"\s+WHERE "scope" = \$/);
       assert.deepEqual(sent[1].values, ["decision-maker-openai"]);
       const audit = sent.find((statement) => statement.kind === "create").data;
       assert.equal(audit.action, "amux.decision.mode");
@@ -589,7 +607,7 @@ test("the Admin route's DB boundaries are the store's statements at their larges
 
 test("a person's change after a system latch is written as the latch release", async () => {
   await withIntegrityKey(null, async () => {
-    const { tx, sent } = recordingTx({ newest: [{ actorKind: "system", value: "off" }] });
+    const { tx, sent } = recordingTx({ newest: [{ actorKind: "system", value: "off", reasonCode: "validation_latch" }] });
     const result = await recordDecisionMakerSwitchByOperator(tx, {
       session,
       scope: "decision-maker-openai",
@@ -678,9 +696,10 @@ test("the ledger's switch read is the state and each instance's §8 count bounda
     cleanupLatchedEventId: { "decision-maker-openai": REPORT, "decision-maker-anthropic": null },
   });
   assert.equal(sent.length, 1);
-  // The boundary is the scope's newest validation latch and the first person's event after it -- which
-  // the guard requires to be its release -- not the scope's newest event of any kind: a person's ordinary
-  // mode change and a cleanup latch are not where §8's count starts.
+  // The boundary is the scope's newest validation latch and the first release after it -- a person's
+  // event, which the guard requires to be its release, or (2026-11-16) the system's own -- not the scope's
+  // newest event of any kind: a person's ordinary mode change and a cleanup latch are not where §8's
+  // count starts.
   assert.match(
     sent[0].sql,
     new RegExp(
@@ -692,7 +711,7 @@ test("the ledger's switch read is the state and each instance's §8 count bounda
         String.raw`r\."releasedAtEpochMs" AS "validationReleasedAtEpochMs"`,
         String.raw`FROM \(\s+SELECT DISTINCT ON \("scope"\) "scope", "value"\s+FROM "AmuxDecisionMakerSwitchEvent"\s+ORDER BY "scope", "sequence" DESC\s+\) n`,
         String.raw`LEFT JOIN LATERAL \(\s+SELECT l\."sequence"\s+FROM "AmuxDecisionMakerSwitchEvent" l\s+WHERE l\."scope" = n\."scope" AND l\."reasonCode" = 'validation_latch'\s+ORDER BY l\."sequence" DESC\s+LIMIT 1\s+\) v ON true`,
-        String.raw`LEFT JOIN LATERAL \(\s+SELECT h\."sequence", floor\(extract\(epoch FROM h\."createdAt"\) \* 1000\)::bigint AS "releasedAtEpochMs"\s+FROM "AmuxDecisionMakerSwitchEvent" h\s+WHERE h\."scope" = n\."scope" AND h\."actorKind" = 'human' AND h\."sequence" > v\."sequence"\s+ORDER BY h\."sequence" ASC\s+LIMIT 1\s+\) r ON true`,
+        String.raw`LEFT JOIN LATERAL \(\s+SELECT h\."sequence", floor\(extract\(epoch FROM h\."createdAt"\) \* 1000\)::bigint AS "releasedAtEpochMs"\s+FROM "AmuxDecisionMakerSwitchEvent" h\s+WHERE h\."scope" = n\."scope" AND \(h\."actorKind" = 'human' OR h\."reasonCode" = 'latch_release'\)\s+AND h\."sequence" > v\."sequence"\s+ORDER BY h\."sequence" ASC\s+LIMIT 1\s+\) r ON true`,
       ].join(String.raw`\s+`),
     ),
   );
@@ -753,4 +772,128 @@ test("an instance with no validation latch counts every result; a row the table 
   ]) {
     assert.deepEqual(decisionMakerSwitchReadFromRows(rows), unreadable, JSON.stringify(rows, (_, v) => (typeof v === "bigint" ? String(v) : v)));
   }
+});
+
+// ---------------------------------------------------------------------------
+// Owner direction 2026-11-16: the system releases a latch an hour after it
+// (migration 20261116140100_amux_dm_latch_release)
+// ---------------------------------------------------------------------------
+
+const CLEANUP_MIGRATION = "prisma/migrations/20261017160000_amux_decision_maker_cleanup_unknown/migration.sql";
+const functionOf = (sql, name) => {
+  const start = sql.indexOf(`CREATE OR REPLACE FUNCTION "${name}"()`);
+  assert.ok(start >= 0, name);
+  return sql.slice(start, sql.indexOf("$$;", sql.indexOf("AS $$", start) + 5) + 3);
+};
+const bodyOf = (fn) => {
+  const open = fn.indexOf("AS $$") + 5;
+  return fn.slice(open, fn.indexOf("$$", open));
+};
+const sha256 = (text) => createHash("sha256").update(text, "utf8").digest("hex");
+const replaceOnce = (text, from, to, label) => {
+  const parts = text.split(from);
+  assert.equal(parts.length, 2, `${label}: exactly one occurrence`);
+  return parts.join(to);
+};
+
+test("the system releases a latch it wrote, an hour after it, only back to a person's proposal mode", () => {
+  assert.equal(DM_LATCH_SYSTEM_RELEASE_AFTER_MS, 60 * 60 * 1000);
+  const latch = (reasonCode, createdAtMs = 0) => ({ actorKind: "system", reasonCode, createdAtMs });
+  const due = (newest, operatorValue, dbNowMs) => dmLatchSystemReleaseDue({ newest, operatorValue, dbNowMs });
+  for (const reason of DM_SWITCH_LATCH_REASONS) {
+    assert.equal(due(latch(reason), "proposal", DM_LATCH_SYSTEM_RELEASE_AFTER_MS), true, reason);
+    assert.equal(due(latch(reason), "proposal", DM_LATCH_SYSTEM_RELEASE_AFTER_MS - 1), false, `${reason} too soon`);
+    // A person turned the instance off, or never on: it stays off.
+    assert.equal(due(latch(reason), "off", DM_LATCH_SYSTEM_RELEASE_AFTER_MS), false, `${reason} off`);
+    assert.equal(due(latch(reason), null, DM_LATCH_SYSTEM_RELEASE_AFTER_MS), false, `${reason} never on`);
+  }
+  // Nothing to release: no event, a person's newest event, or the system's own release.
+  assert.equal(due(null, "proposal", DM_LATCH_SYSTEM_RELEASE_AFTER_MS), false);
+  assert.equal(due({ actorKind: "human", reasonCode: "operator", createdAtMs: 0 }, "proposal", DM_LATCH_SYSTEM_RELEASE_AFTER_MS), false);
+  assert.equal(due(latch("latch_release"), "proposal", DM_LATCH_SYSTEM_RELEASE_AFTER_MS), false);
+});
+
+test("the latch release migration pins the switch guard and changes only the release lines", () => {
+  const raw = read(LATCH_RELEASE_MIGRATION);
+  const before = functionOf(read(CLEANUP_MIGRATION), "amux_decision_maker_switch_event_guard");
+  const after = functionOf(raw, "amux_decision_maker_switch_event_guard");
+  assert.equal(
+    raw.split("\n")[0],
+    `-- baseline-check: replace-function-if-body-sha256 "amux_decision_maker_switch_event_guard" "${sha256(bodyOf(before))}" "${sha256(bodyOf(after))}"`,
+  );
+  assert.ok(raw.includes(`IF actual IS DISTINCT FROM '${sha256(bodyOf(before))}' THEN`));
+  let guard = before;
+  guard = replaceOnce(guard, "    newest_actor_kind TEXT;\n", "    newest_actor_kind TEXT;\n    newest_reason TEXT;\n    newest_created_at TIMESTAMPTZ;\n    operator_value TEXT;\n", "declare");
+  guard = replaceOnce(
+    guard,
+    `'SELECT "sequence", "actorKind" FROM %I.%I WHERE "scope" = $1 ORDER BY "sequence" DESC LIMIT 1',`,
+    `'SELECT "sequence", "actorKind", "reasonCode", "createdAt" FROM %I.%I WHERE "scope" = $1 ORDER BY "sequence" DESC LIMIT 1',`,
+    "newest",
+  );
+  guard = replaceOnce(guard, ") INTO newest_sequence, newest_actor_kind USING", ") INTO newest_sequence, newest_actor_kind, newest_reason, newest_created_at USING", "into");
+  guard = replaceOnce(
+    guard,
+    "            WHEN newest_actor_kind = 'system' THEN 'amux.decision.latch_release'\n",
+    "            WHEN newest_actor_kind = 'system' AND newest_reason IN ('validation_latch', 'cleanup_latch') THEN 'amux.decision.latch_release'\n",
+    "human release",
+  );
+  const release = after.slice(after.indexOf("        -- Owner direction 2026-11-16"), after.indexOf('        expected_actor := CASE NEW."scope"'));
+  guard = replaceOnce(guard, '    ELSE\n        expected_actor := CASE NEW."scope"', `    ELSE\n${release}        expected_actor := CASE NEW."scope"`, "system release");
+  guard = replaceOnce(
+    guard,
+    "'amux.decision.latch', 'AmuxDecisionMakerSwitchEvent', NEW.\"id\", expected_actor;",
+    "CASE NEW.\"reasonCode\" WHEN 'latch_release' THEN 'amux.decision.latch_release' ELSE 'amux.decision.latch' END, 'AmuxDecisionMakerSwitchEvent', NEW.\"id\", expected_actor;",
+    "system audit",
+  );
+  assert.equal(after, guard);
+  // The inserted release check: a system latch at least an hour old, a person's proposal mode, or a refusal.
+  assert.ok(release.includes(`IF NEW."reasonCode" = 'latch_release' THEN`));
+  assert.ok(release.includes("OR newest_reason NOT IN ('validation_latch', 'cleanup_latch')"));
+  assert.ok(release.includes("OR pg_catalog.clock_timestamp() < newest_created_at + INTERVAL '1 hour'"));
+  assert.ok(release.includes("OR operator_value IS DISTINCT FROM 'proposal' THEN"));
+  assert.ok(release.includes("RAISE EXCEPTION 'AMUX_DM_SWITCH_RELEASE';"));
+  assert.ok(release.includes(`WHERE "scope" = $1 AND "actorKind" = ''human'' ORDER BY "sequence" DESC LIMIT 1`));
+  const statements = withoutSqlComments(raw);
+  assert.equal((statements.match(/^ALTER TABLE /gm) ?? []).length, 2);
+  assert.equal((statements.match(/^CREATE OR REPLACE FUNCTION /gm) ?? []).length, 1);
+  assert.doesNotMatch(statements, /^CREATE TABLE |^CREATE (UNIQUE )?INDEX |^CREATE TRIGGER |^INSERT\b|^UPDATE\b|^DELETE\b/im);
+  assert.ok(statements.indexOf("DO $pin$") < statements.indexOf("ALTER TABLE"));
+});
+
+test("the system's release sends 2 statements when nothing is due and 6 when it releases, in order", async () => {
+  await withIntegrityKey(null, async () => {
+    const HOUR = 60 * 60 * 1000;
+    const row = (overrides) => ({
+      actorKind: "system",
+      reasonCode: "validation_latch",
+      createdAtEpochMs: 1_790_000_000_000n,
+      operatorValue: "proposal",
+      dbNowEpochMs: BigInt(1_790_000_000_000 + HOUR),
+      ...overrides,
+    });
+    for (const releaseRows of [
+      [row({ dbNowEpochMs: BigInt(1_790_000_000_000 + HOUR - 1) })],
+      [row({ operatorValue: "off" })],
+      [row({ actorKind: "human", reasonCode: "operator" })],
+      [row({ actorKind: null, reasonCode: null, createdAtEpochMs: null })],
+    ]) {
+      const { tx, sent } = recordingTx({ releaseRows });
+      assert.deepEqual(await releaseDecisionMakerLatchBySystem(tx, { instance: "decision-maker-openai" }), { released: false });
+      assert.deepEqual(sent.map((statement) => statement.kind), ["execute", "query"], JSON.stringify(releaseRows, (_, v) => typeof v === "bigint" ? String(v) : v));
+    }
+    const { tx, sent } = recordingTx({ releaseRows: [row({})] });
+    const released = await releaseDecisionMakerLatchBySystem(tx, { instance: "decision-maker-openai" });
+    assert.equal(released.released, true);
+    assert.deepEqual(sent.map((statement) => statement.kind), ["execute", "query", "execute", "query", "create", "query"]);
+    assert.match(sent[0].sql, /pg_advisory_xact_lock\(hashtext\('tomverse-admin-audit-chain'\)\)/);
+    const audit = sent.find((statement) => statement.kind === "create").data;
+    assert.equal(audit.action, "amux.decision.latch_release");
+    assert.equal(audit.actorUserId ?? null, null);
+    assert.equal(audit.metadata.systemActor, DM_SWITCH_LATCH_ACTOR_FOR_INSTANCE["decision-maker-openai"]);
+    const insert = sent.at(-1);
+    assert.match(insert.sql, /INSERT INTO "AmuxDecisionMakerSwitchEvent"/);
+    assert.ok(insert.sql.includes("'proposal', 'latch_release', 'system', NULL, NULL"));
+    assert.ok(sent.length <= AMUX_DB_BOUNDARIES.decisionMakerLatchRelease.prismaCallCeiling - 2);
+    await assert.rejects(releaseDecisionMakerLatchBySystem(recordingTx().tx, { instance: "kill_switch" }), DecisionMakerSwitchWriteError);
+  });
 });
