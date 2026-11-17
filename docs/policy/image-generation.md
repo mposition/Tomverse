@@ -944,9 +944,19 @@ Klein **20크레딧**(low, 700µUSD). Grok Imagine(733)·Nano Banana 2(725)와 �
   않는다.
 - **생성만이다.** 편집은 승인된 할증이 없어 adapter가 거절한다.
 
-**미확인 — 켠 채로 남은 질문.** ① BFL 문서에 프롬프트·결과의 보관 기간과 처리 리전을
-적은 문장이 없다(전달 host는 리전별 `delivery.*.bfl.ai`). `lib/providerDataDestinations.ts`에
-BFL 행이 아직 없다. ② `1k`·`1:1`이 정확히 1024×1024를 내는지, FLUX 3 Image가 어떤 MIME으로
+**개인정보 고지.** 켜는 diff에서 `lib/providerDataDestinations.ts`에 BFL 행을 넣었다
+(같은 이유로 그동안 빠져 있던 fal 행도). 행의 provider 타입이 채팅 공급자만 받던 것을
+이미지 공급자까지 넓혔고, 활성 이미지 공급자가 행 없이 남지 않게 테스트가 막는다. BFL 행은
+`unproven`이라 개인정보 처리방침 표에 "확인되지 않음"으로 보인다. 수신 법인만 적었다
+(Black Forest Labs Inc., 개인정보 처리방침 기준).
+
+**미확인 — 켠 채로 남은 질문.** ⓪ **학습 사용.** BFL 개인정보 처리방침은 입력과 출력을
+"train and improve our AI models"에 쓸 수 있고 이메일(privacy@blackforestlabs.ai, 제목
+"Training Opt Out")로 거부할 수 있다고 쓴다. 같은 문서는 계약에 따라 처리하는 business
+고객의 콘텐츠에는 적용되지 않는다고도 쓴다. Tomverse API 계정에 어느 쪽이 적용되는지
+확인되지 않았다. 확인 전까지는 학습에 쓰일 수 있다고 보고, 거부 요청을 보내는 것이
+운영자 결정으로 남아 있다. ① BFL 문서에 프롬프트·결과의 보관 기간과 처리 리전을 적은
+문장이 없다(전달 host는 리전별 `delivery.*.bfl.ai`). ② `1k`·`1:1`이 정확히 1024×1024를 내는지, FLUX 3 Image가 어떤 MIME으로
 주는지는 실제 생성으로만 안다 — 다르면 adapter가 저장하지 않고 실패하며 그 요청은
 환급된다. 첫 실제 생성 결과로 확인한다. ③ `version`이 `latest`뿐이라 같은 id가 다른
 release를 가리킬 수 있다. 날짜 태그가 생기면 고정한다.

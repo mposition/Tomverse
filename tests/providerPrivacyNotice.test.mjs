@@ -79,7 +79,8 @@ test("the privacy page preserves known disclosures and explicitly names unverifi
     assert.match(source, /const destinations = PROVIDER_DATA_DESTINATIONS/);
     assert.match(source, /const showProviderTable = destinations\.length > 0/);
     const undisclosed = PROVIDER_DATA_DESTINATIONS.filter((entry) => entry.status !== "proven");
-    assert.deepEqual(undisclosed.map((entry) => entry.provider), ["cohere"]);
+    // fal and bfl are image-only providers whose terms are not yet reviewed.
+    assert.deepEqual(undisclosed.map((entry) => entry.provider), ["cohere", "fal", "bfl"]);
     assert.ok(disclosableDataDestinations().length < PROVIDER_DATA_DESTINATIONS.length);
     assert.ok(PROVIDER_DATA_DESTINATIONS.length > 0);
     const labels = [
