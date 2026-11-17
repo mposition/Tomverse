@@ -694,6 +694,14 @@ export function ChatMessageList({
     setScrollModeState(mode);
   }, []);
 
+  // A response that streamed (or finished) while the reader was scrolled up
+  // keeps the jump button saying "new response" until they come back down.
+  // Adjusted during render rather than in an effect, so the label never
+  // flashes "Jump to latest" for a frame when generation ends.
+  const [unseenResponse, setUnseenResponse] = useState(false);
+  if (scrollMode !== "paused" && unseenResponse) setUnseenResponse(false);
+  if (scrollMode === "paused" && isSending && !unseenResponse) setUnseenResponse(true);
+
   // Scrolls the container and marks the scroll that results as "ours" for
   // exactly as long as it actually takes -- via the `scrollend` event where
   // supported, with a couple of animation frames as a fallback/backstop --
@@ -2087,6 +2095,7 @@ export function ChatMessageList({
         <button
           type="button"
           data-testid="scroll-to-latest-button"
+          data-state={isSending ? "generating" : unseenResponse ? "new-response" : "idle"}
           onClick={() => {
             const prefersReducedMotion =
               typeof window !== "undefined" &&
@@ -2094,13 +2103,37 @@ export function ChatMessageList({
             setMode("following");
             scrollToBottomNow(prefersReducedMotion ? "auto" : "smooth");
           }}
-          aria-label={isSending ? t("chat.newResponseAvailable") : t("chat.scrollToLatest")}
-          className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm text-zinc-100 shadow-lg hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+          aria-label={
+            isSending
+              ? t("chat.generatingScrollToLatest")
+              : unseenResponse
+                ? t("chat.newResponseAvailable")
+                : t("chat.scrollToLatest")
+          }
+          className={`absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm text-zinc-100 shadow-lg hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+            isSending ? "animate-generating-glow motion-reduce:animate-none" : ""
+          }`}
         >
-          <span className="flex items-center gap-2">
-            <ArrowDown className="h-4 w-4" />
-            {isSending ? t("chat.newResponseAvailable") : t("chat.scrollToLatest")}
-          </span>
+          {isSending ? (
+            <span className="flex items-center gap-2">
+              <span
+                aria-hidden="true"
+                data-testid="scroll-to-latest-generating-dots"
+                className="flex items-center gap-1"
+              >
+                <span className="h-1.5 w-1.5 animate-typing-wave rounded-full bg-blue-400 motion-reduce:animate-none" />
+                <span className="h-1.5 w-1.5 animate-typing-wave rounded-full bg-blue-400 motion-reduce:animate-none [animation-delay:150ms]" />
+                <span className="h-1.5 w-1.5 animate-typing-wave rounded-full bg-blue-400 motion-reduce:animate-none [animation-delay:300ms]" />
+              </span>
+              <span className="font-medium">{t("chat.generatingPill")}</span>
+              <ArrowDown aria-hidden="true" className="h-4 w-4 text-zinc-400" />
+            </span>
+          ) : (
+            <span className="flex items-center gap-2">
+              <ArrowDown aria-hidden="true" className="h-4 w-4" />
+              {unseenResponse ? t("chat.newResponseAvailable") : t("chat.scrollToLatest")}
+            </span>
+          )}
         </button>
       )}
     </div>

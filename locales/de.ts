@@ -916,6 +916,8 @@ export const de = {
         guestSaveReviewCta: "Kostenloses Konto erstellen",
         guestSaveReviewTitle: "Diese KI-Prüfung behalten",
         newResponseAvailable: "Neue Antwort verfügbar",
+        generatingPill: "Antwort wird erstellt",
+        generatingScrollToLatest: "Antwort wird erstellt – zum neuesten springen",
         panelModelSelectLabel: "Modell für Vergleichsfeld {position}",
         quickDifferenceSummaryApproximateCost: "Etwa {credits} Credit für einen typischen kurzen Vergleich. Lange Antworten können mehr verbrauchen; reservierte Credits werden erstattet, wenn die Analyse fehlschlägt.",
         quickDifferenceSummaryLoadingStage2: "Die Unterschiede werden zusammengefasst …",

@@ -1416,6 +1416,20 @@ export const holdChatUsageBucket = async (
 
 const incrementUsage = holdChatUsageBucket;
 
+/**
+ * Ceiling for a signed-in account's daily plan-credit bucket.
+ *
+ * That bucket is both the daily guardrail and the only "plan credits used
+ * today" counter: the Admin Console user list and detail, the CSV export and
+ * /api/user/usage all read it. A plan without a daily guardrail
+ * (`dailyMessageLimit` 0) used to skip the bucket entirely, so those screens
+ * showed only what the account spent while it was still on a plan that had
+ * one. Every plan-credit charge now records the day, uncapped when the plan
+ * has no daily limit, and the refund paths return it under the same flags.
+ */
+export const dailyPlanCreditBucketLimit = (dailyLimit: number) =>
+    dailyLimit > 0 ? dailyLimit : Number.MAX_SAFE_INTEGER;
+
 /** Counts into a bucket that has no ceiling. */
 const recordUsage = async (
     tx: Prisma.TransactionClient,
@@ -3185,32 +3199,30 @@ export const acquireChatAccess = async (
             addOnReservedCredits = creditAllocation.addOnCreditsRequired;
             decisionState.availableCredits = creditAllocation.planCreditsAvailableNow;
             if (planReservedCredits > 0) {
-                if (dailyRule) {
-                    const dailyAllowed = await incrementUsage(
-                        tx,
-                        access.subjectKey,
-                        "day",
-                        accessDayWindow.start,
-                        dailyRule.limit,
-                        planReservedCredits
+                const dailyAllowed = await incrementUsage(
+                    tx,
+                    access.subjectKey,
+                    "day",
+                    accessDayWindow.start,
+                    dailyPlanCreditBucketLimit(dailyRule?.limit ?? 0),
+                    planReservedCredits
+                );
+                if (!dailyAllowed) {
+                    throw new ChatAccessError(
+                        409,
+                        CONCURRENT_RESERVATION_CONFLICT,
+                        "Daily plan credit balance changed. Please retry.",
+                        undefined,
+                        { conflictScope: "daily_plan_credits" }
                     );
-                    if (!dailyAllowed) {
-                        throw new ChatAccessError(
-                            409,
-                            CONCURRENT_RESERVATION_CONFLICT,
-                            "Daily plan credit balance changed. Please retry.",
-                            undefined,
-                            { conflictScope: "daily_plan_credits" }
-                        );
-                    }
-                    reservationEntries.push({
-                        key: access.subjectKey,
-                        period: "day",
-                        periodStart: accessDayWindow.start,
-                        amount: planReservedCredits,
-                        metric: "plan-credits",
-                    });
                 }
+                reservationEntries.push({
+                    key: access.subjectKey,
+                    period: "day",
+                    periodStart: accessDayWindow.start,
+                    amount: planReservedCredits,
+                    metric: "plan-credits",
+                });
                 const allowed = await incrementUsage(
                     tx,
                     access.subjectKey,

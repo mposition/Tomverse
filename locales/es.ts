@@ -916,6 +916,8 @@ export const es = {
         guestSaveReviewCta: "Crear una cuenta gratuita",
         guestSaveReviewTitle: "Conserva esta Revisión IA",
         newResponseAvailable: "Nueva respuesta disponible",
+        generatingPill: "Generando respuesta",
+        generatingScrollToLatest: "Generando respuesta: ir al último",
         panelModelSelectLabel: "Modelo para el panel de comparación {position}",
         quickDifferenceSummaryApproximateCost: "Alrededor de {credits} crédito para una comparación corta típica. Las respuestas largas pueden consumir más, y los créditos reservados se devuelven si el análisis falla.",
         quickDifferenceSummaryLoadingStage2: "Resumiendo las diferencias...",
