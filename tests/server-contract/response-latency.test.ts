@@ -142,3 +142,17 @@ test("the store attributes only server samples and reads legacy and deployment c
     if (old === undefined) delete process.env.RAILWAY_GIT_COMMIT_SHA; else process.env.RAILWAY_GIT_COMMIT_SHA = old;
   }
 });
+
+test("the evidence reader pairs signed browser reports with server build/model without changing browser durations", async () => {
+  const store = await import(url("lib/responseLatencyStore.ts"));
+  const { POST, createToken } = await load();
+  const id = randomUUID();
+  await store.recordResponseLatency(`${id}:server`, { product: "chat", mode: "auto", source: "server", modelId: "paired-model", provider: "openai", outcome: "completed", timings: { firstContentMs: 100 } });
+  assert.equal((await POST(request({ token: createToken(id, "chat", "auto"), outcome: "completed", prepareMs: 5, firstContentMs: 110, completionMs: 200 }))).status, 204);
+  const evidence = await store.readResponseLatencyEvidence();
+  const client = evidence.groups.find((group: { source: string; modelId: string }) => group.source === "client" && group.modelId === "paired-model");
+  assert.ok(client.context);
+  assert.equal(client.timings.firstContentMs.p50Ms, 110);
+  assert.equal(client.timings.completionMs.p50Ms, 200);
+  assert.equal((samples.get(`${id}:client`) as { timings: { _context?: unknown } }).timings._context, undefined);
+});

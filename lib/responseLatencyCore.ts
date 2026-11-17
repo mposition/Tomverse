@@ -80,6 +80,19 @@ export type ResponseLatencySample = ResponseLatencyDimensions & {
   timings: ResponseLatencyTimings;
   context?: ResponseLatencyContext;
 };
+
+/** Attribute browser timing to the request's server sample, never ingestion time. */
+export function attributePairedClientLatency(rows: (ResponseLatencySample & { id: string })[]): ResponseLatencySample[] {
+  const servers = new Map(rows.filter(row => row.source === "server" && typeof row.id === "string" && row.id.endsWith(":server"))
+    .map(row => [row.id.slice(0, -7), row]));
+  return rows.map(({ id, ...sample }) => {
+    if (sample.source !== "client" || typeof id !== "string" || !id.endsWith(":client")) return sample;
+    const server = servers.get(id.slice(0, -7));
+    const context = responseLatencyContextSchema.safeParse(server?.context);
+    if (!server || !context.success || server.product !== sample.product || server.mode !== sample.mode) return { ...sample, context: undefined };
+    return { ...sample, modelId: server.modelId, provider: server.provider, context: context.data };
+  });
+}
 export const clientLatencyBodySchema = z.object({
   token: z.string().min(1).max(2_048),
   outcome: z.enum(["completed", "cancelled", "failed"]),

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createHmac, randomUUID } from "node:crypto";
-import { clientLatencyBodySchema, latencyDistribution, summarizeResponseLatency, responseLatencyContext, storedResponseLatencyTimings, type ResponseLatencySample } from "../lib/responseLatencyCore";
+import { clientLatencyBodySchema, latencyDistribution, summarizeResponseLatency, responseLatencyContext, storedResponseLatencyTimings, attributePairedClientLatency, type ResponseLatencySample } from "../lib/responseLatencyCore";
 import { createResponseLatencyToken, verifyResponseLatencyToken } from "../lib/responseLatencyToken";
 import { createClientLatency } from "../lib/responseLatencyClient";
 import { createLatencyStages } from "../lib/responseLatencyStages";
@@ -137,6 +137,21 @@ test("server cohorts separate deployments, configured flags and unknown history 
   assert.equal(storedResponseLatencyTimings({ prompt: "private", _context: context }), null);
   assert.equal(storedResponseLatencyTimings({ firstContentMs: 0, _context: { ...context, secret: "private" } })?.context, undefined);
   assert.equal(clientLatencyBodySchema.safeParse({ token: "proof", outcome: "completed", prepareMs: 0, firstContentMs: 0, completionMs: 1, context }).success, false);
+});
+
+test("exact request pairs give browser timings their server deployment/model while missing or mismatched pairs stay unknown", () => {
+  const context = responseLatencyContext({ RAILWAY_GIT_COMMIT_SHA: "a".repeat(40) });
+  const base: ResponseLatencySample = { product: "chat", mode: "auto", source: "server", modelId: "actual-model", provider: "openai", outcome: "completed", context, timings: { firstContentMs: 100 } };
+  const rows = attributePairedClientLatency([{ ...base, id: "request:server" },
+    { ...base, id: "request:client", source: "client", modelId: null, context: undefined, timings: { firstContentMs: 150, completionMs: 900 } },
+    { ...base, id: "missing:client", source: "client", context: undefined },
+    { ...base, id: "request:client", source: "client", mode: "manual", context: undefined }]);
+  assert.equal(rows[1].context?.build, context.build);
+  assert.equal(rows[1].modelId, "actual-model");
+  assert.equal(rows[1].timings.completionMs, 900);
+  assert.equal(rows[2].context, undefined);
+  assert.equal(rows[3].context, undefined);
+  assert.ok(rows.every(row => !("id" in row)));
 });
 
 test("timing proof binds dimensions and purpose, expires and rejects tampering", () => {
