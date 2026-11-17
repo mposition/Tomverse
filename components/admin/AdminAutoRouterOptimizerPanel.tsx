@@ -4,6 +4,7 @@ import { OptimizerEvidenceView, type OptimizerEvidenceSummary } from "@/componen
 import { formatAestDateTime } from "@/lib/adminUiCore";
 import { ResponseLatencyEvidenceView } from "@/components/admin/ResponseLatencyEvidenceView";
 import type { ResponseLatencyEvidence } from "@/lib/responseLatencyCore";
+import type { DailyTaskImplementation } from "@/lib/dailyProductImplementationCore";
 import { useCallback, useEffect, useState } from "react";
 import { Loader2, Sparkles } from "lucide-react";
 import { AdminConfirmDialog } from "@/components/admin/ui/AdminConfirmDialog";
@@ -58,6 +59,8 @@ type Summary = OptimizerEvidenceSummary & {
 };
 
 type Cycle = {
+  implementations?: Record<number, DailyTaskImplementation>;
+  implementationLookupUnavailable?: boolean;
   id: string;
   createdAt: string;
   status: string;
