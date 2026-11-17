@@ -158,6 +158,17 @@ test("the presentation tool spreads finance and schedule instead of packing one 
   assert.doesNotMatch(description, /compact finance and execution slide/);
 });
 
+test("the presentation tool derives break-even from fixed costs and the variable cost ratio", () => {
+  // A deck once reported break-even revenue as the total costs at the stated
+  // revenue instead of fixed costs over the contribution margin ratio.
+  const description = buildGeneratedArtifactToolConfig(collector()).tools[
+    ARTIFACT_TOOL_NAMES.presentation
+  ].description;
+  assert.match(description, /variable costs .* and fixed costs/);
+  assert.match(description, /fixed costs \/ \(1 - variable cost ratio\) rather than reusing total costs/);
+  assert.match(description, /show the cost assumptions and that formula on the break-even slide/);
+});
+
 test("document headings describe the full schedule and respect the requested time span", () => {
   const description = buildGeneratedArtifactToolConfig(collector()).tools[ARTIFACT_TOOL_NAMES.document].description;
   assert.match(description, /Match every heading and table caption to the full time span/);

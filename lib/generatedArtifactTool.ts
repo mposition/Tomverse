@@ -344,6 +344,10 @@ const HANDLERS: Record<AuthoredArtifactKind, KindHandler> = {
       "per line ending in the total or key figure, and the schedule as a short " +
       "timeline ('Week 1-2: milestone'), each on its own slide when the deck has " +
       "room; never pack them into one long sentence. " +
+      "Split costs into variable costs (a share of revenue, such as materials) " +
+      "and fixed costs, compute break-even revenue as fixed costs / (1 - " +
+      "variable cost ratio) rather than reusing total costs, and show the cost " +
+      "assumptions and that formula on the break-even slide. " +
       "Label hypothetical figures as illustrative assumptions, keep their " +
       "arithmetic consistent and never present them as the user's actual figures. " +
       "Never write file bytes, base64 or a download link yourself.",
