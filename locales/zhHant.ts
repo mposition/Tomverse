@@ -740,6 +740,8 @@ export const zhHant = {
         noModelsFound: "沒有符合篩選條件的模型。",
         scrollToLatest: "跳至最新訊息",
         newResponseAvailable: "有新回覆",
+        generatingPill: "正在產生回覆",
+        generatingScrollToLatest: "正在產生回覆 — 跳至最新訊息",
         panelPaused: "已暫停",
         availableModel: "可用",
         unavailableModel: "無法使用",

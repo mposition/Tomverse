@@ -737,6 +737,8 @@ export const ko = {
         noModelsFound: "조건에 맞는 모델이 없습니다.",
         scrollToLatest: "최신 메시지로 이동",
         newResponseAvailable: "새 답변이 있습니다",
+        generatingPill: "답변 생성 중",
+        generatingScrollToLatest: "답변 생성 중 — 최신 메시지로 이동",
         panelPaused: "일시정지됨",
         availableModel: "사용 가능",
         unavailableModel: "사용 불가",
