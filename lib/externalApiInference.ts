@@ -4,6 +4,7 @@ import { APICallError, jsonSchema, stepCountIs, streamText, tool, type ModelMess
 import { getActiveAiModel } from "@/lib/activeAiModel";
 import { getUserBillingPlan } from "@/lib/billingEntitlements";
 import { estimateImageInputTokens, readImageDimensions } from "@/lib/chatImageInputTokens";
+import { estimateNativeAttachmentTokens } from "@/lib/chatAttachmentTokens";
 import {
     acquireChatAccess,
     ChatAccessError,
@@ -254,9 +255,20 @@ export async function handleChatCompletions(request: Request): Promise<Response>
         const estimate = createTokenEstimateAccumulator();
         for (const segment of converted.textSegments) estimate.addText(segment);
         estimate.addTokens(4 * converted.messages.length);
+        let measuredImageTokens = 0;
         for (const image of converted.images) {
-            estimate.addTokens(estimateImageInputTokens(model.provider, readImageDimensions(image.bytes)));
+            const tokens = estimateImageInputTokens(model.provider, readImageDimensions(image.bytes));
+            measuredImageTokens += tokens;
+            estimate.addTokens(tokens);
         }
+        // As in Chat (app/api/chat/route.ts): the measured image size counts
+        // against the input limit, and the rest of the flat per-image
+        // allowance is added to the reservation only, so an image costs the
+        // same credits and provider hold here as it does in Chat.
+        const reservationOnlyInputTokens = Math.max(
+            0,
+            estimateNativeAttachmentTokens(converted.images.length) - measuredImageTokens
+        );
         const access = identifyChatCaller(request, key.userId, plan.tier, {
             dailyMessageLimit: plan.dailyMessageLimit,
             monthlyMessageLimit: plan.monthlyMessageLimit,
@@ -267,6 +279,7 @@ export async function handleChatCompletions(request: Request): Promise<Response>
         // smaller typical reservation with a larger provider limit.
         const budget = createChatBudget("user", model, atLeastOneToken(estimate.breakdown()), {
             totalOutputTokenCap: options.requestedOutputTokens ?? capabilities.maxOutputTokens,
+            reservationOnlyInputTokens,
         });
 
         const clientName = request.headers.get("user-agent")?.slice(0, 80) ?? null;

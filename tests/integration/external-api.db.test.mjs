@@ -400,6 +400,10 @@ test("external inference API over the real shared credit ledger", { skip: !datab
         const [textOnly, withImage] = await reservationsFor(userId);
         const payload = (row) => row.reservationPayload.inputTokens;
         assert.ok(payload(withImage) > payload(textOnly), "the image is in the input estimate");
+        // A 1x1 image measures to a handful of tokens, but the hold is Chat's
+        // flat per-image allowance, so the API is never the cheaper way in.
+        assert.ok(payload(withImage) - payload(textOnly) >= 16_000, `image hold ${payload(withImage) - payload(textOnly)}`);
+        assert.ok(withImage.reservedCostMicroUsd > textOnly.reservedCostMicroUsd);
         const before = dispatches;
         const remote = await call(key, body({ messages: [{ role: "user", content: [{ type: "image_url", image_url: { url: "http://169.254.169.254/" } }] }] }));
         assert.equal(remote.status, 400);

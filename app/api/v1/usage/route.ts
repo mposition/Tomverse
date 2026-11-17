@@ -7,9 +7,11 @@ import { NO_STORE_HEADERS, withBearerKey } from "@/lib/externalApiRoutes";
 // credits and recent request receipts. Never another key's, never the account.
 export async function GET(request: Request) {
     return withBearerKey(request, async (key) => {
-        const limit = Number(new URL(request.url).searchParams.get("limit") ?? 50);
+        // An integer 1..100; anything else (1.5, "abc", -3) is the default.
+        const requested = Number(new URL(request.url).searchParams.get("limit") ?? 50);
+        const limit = Number.isSafeInteger(requested) && requested > 0 ? Math.min(requested, 100) : 50;
         const summary = (await listExternalApiKeys(key.userId)).find((entry) => entry.id === key.keyId);
-        const requests = await externalApiKeyUsage(key.keyId, Number.isFinite(limit) ? limit : 50);
+        const requests = await externalApiKeyUsage(key.keyId, limit);
         return Response.json(
             {
                 object: "tomverse.usage",
