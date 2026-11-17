@@ -4,6 +4,7 @@ import type { Prisma } from "@prisma/client";
 import { ApiSecurityError } from "@/lib/apiSecurity";
 import { getChatCreditAllocation } from "@/lib/chatCreditAllocation";
 import {
+    dailyPlanCreditBucketLimit,
     getUserChatUsageKey,
     incrementUsageBucket,
     readUsageBucketCount,
@@ -131,22 +132,22 @@ export async function reserveExtractionRunCredits(
     }
 
     if (allocation.planReservedCredits > 0) {
-        if (dayLimit > 0) {
-            const charged = await incrementUsageBucket(
-                tx,
-                subjectKey,
-                "day",
-                dayWindow.start,
-                dayLimit,
-                allocation.planReservedCredits
+        // Recorded even without a daily limit: the bucket is also the
+        // "used today" counter, and refundPlanCredits returns it either way.
+        const dayCharged = await incrementUsageBucket(
+            tx,
+            subjectKey,
+            "day",
+            dayWindow.start,
+            dailyPlanCreditBucketLimit(dayLimit),
+            allocation.planReservedCredits
+        );
+        if (!dayCharged) {
+            throw new ApiSecurityError(
+                409,
+                "CONCURRENT_RESERVATION_CONFLICT",
+                "Another request is reserving credits. Try again."
             );
-            if (!charged) {
-                throw new ApiSecurityError(
-                    409,
-                    "CONCURRENT_RESERVATION_CONFLICT",
-                    "Another request is reserving credits. Try again."
-                );
-            }
         }
         const charged = await incrementUsageBucket(
             tx,
