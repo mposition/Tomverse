@@ -332,13 +332,27 @@ test("BFL is never reached without its key, for an edit, or for an unpinned endp
   assert.equal(calls.length, 0);
 });
 
-test("only the FLUX 3 image family carries the per-image bound, and none is seeded", () => {
+test("only the FLUX 3 image family carries the per-image bound, and both are seeded on", () => {
   assert.equal(imageThinkingBilling("bfl", "flux-3-image"), "not_billed");
   assert.equal(imageThinkingCapMinimumMicroUsd("bfl", "flux-3-image"), 0);
   assert.equal(imageThinkingCapMinimumMicroUsd("bfl", "flux-3-image-klein"), 0);
   // FLUX.2 is billed per megapixel and its body is not pinned.
   assert.equal(imageThinkingCapMinimumMicroUsd("bfl", "flux-2-pro"), null);
-  assert.equal(IMAGE_MODEL_REGISTRY.some((model) => model.provider === "bfl"), false);
+  // Enabled by default (owner 2026-11-16) at the approved 75 and 20 credits.
+  const seeded = IMAGE_MODEL_REGISTRY.filter((model) => model.provider === "bfl");
+  assert.deepEqual(
+    seeded.map((model) => [model.id, model.disabledReason, model.prices.map((price) => price.credits)]),
+    [
+      ["flux-3-image", null, [75]],
+      ["flux-3-image-klein", null, [20]],
+    ]
+  );
+  // Every seeded body is one the request builder can send.
+  for (const model of seeded) {
+    for (const size of model.sizes) {
+      assert.ok(buildBflImageRequest({ apiModelId: model.apiModelId, prompt: "p", size }), model.id);
+    }
+  }
 });
 
 test("discovery's Black Forest Labs slug reaches the bfl catalogue draft", () => {

@@ -18,6 +18,8 @@ const PROVIDER_LABELS: Record<string, string> = {
     together: "Together",
     openrouter: "OpenRouter",
     sail: "Sail",
+    fal: "fal",
+    bfl: "Black Forest Labs",
 };
 
 function placeName(code: string, t: (key: string) => string): string {

@@ -707,6 +707,81 @@ export const imageDeliveryMimeType = (model: ImageModelProfile): string =>
 export const imageModelChipLabel = (model: ImageModelProfile): string =>
   model.shortName ?? model.name;
 
+// FLUX 3 on the Black Forest Labs API, called directly (lib/bflImageRequest.ts).
+// Enabled by default: owner decision in chat 2026-11-16, with sale credits
+// approved the same day at 75 (FLUX 3 Image) and 20 (Klein).
+//
+// Price read from bfl.ai/pricing on 2026-11-16: per image by resolution tier,
+// 1K $0.048 (Image) and $0.009 (Klein); "Reference images ... and prompts are
+// included at no extra charge", and "Rejected requests, failed generations and
+// outputs withheld by moderation are not charged". So the thinking cap is 0
+// and the worst case is the image price plus the prompt budget:
+//   Image  48,000 + 5,000 = 53,000 microUSD, floor 59; 75 is 707 per credit.
+//   Klein   9,000 + 5,000 = 14,000 microUSD, floor 16; 20 is 700 per credit.
+// The same headroom as Grok Imagine (733) and Nano Banana 2 (725).
+//
+// Env first, code second: an enabled model makes its provider active, and
+// /api/ready refuses a flag-on production whose active provider has no
+// budget. IMAGE_PROVIDER_BFL_COST_MICROUSD_PER_DAY / _PER_MONTH and
+// BFL_API_KEY must be deployed before this reaches an environment.
+//
+// 1K square only: the request maps no other size. No provenance is claimed,
+// because BFL documents none for FLUX 3.
+const BFL_FLUX_3_IMAGE: ImageModelProfile = {
+  id: "flux-3-image",
+  provider: "bfl",
+  apiModelId: "flux-3-image",
+  name: "FLUX 3 Image",
+  shortName: "FLUX 3",
+  lifecycle: "stable",
+  disabledReason: null,
+  sizes: ["1024x1024"],
+  // The request has no quality setting; the shelf it sits on beside Grok
+  // Imagine and Nano Banana 2.
+  qualities: ["medium"],
+  prices: [{ quality: "medium", size: "1024x1024", credits: 75, outputCostMicroUsd: 48_000 }],
+  latencyClass: "balanced",
+  routingNote:
+    "Best for: photorealistic images and fine detail; non-English text inside the image is not yet verified.",
+  useCase: "detail",
+  provenance: [],
+  outputMimeTypes: ["image/jpeg", "image/png"],
+  pricingVersion: "bfl-flux-3-image-2026-11-16-v1",
+  priceVerification: {
+    verifiedAt: "2026-11-16",
+    sources: ["https://bfl.ai/pricing", "https://docs.bfl.ai/api_integration/integration_guidelines"],
+    // Billed per image; prompts included; no reasoning charge.
+    thinkingCapMicroUsd: 0,
+  },
+};
+
+const BFL_FLUX_3_IMAGE_KLEIN: ImageModelProfile = {
+  id: "flux-3-image-klein",
+  provider: "bfl",
+  apiModelId: "flux-3-image-klein",
+  name: "FLUX 3 Image Klein",
+  shortName: "FLUX 3 Klein",
+  lifecycle: "stable",
+  disabledReason: null,
+  sizes: ["1024x1024"],
+  // The draft shelf: the cheapest model in the comparison.
+  qualities: ["low"],
+  prices: [{ quality: "low", size: "1024x1024", credits: 20, outputCostMicroUsd: 9_000 }],
+  latencyClass: "fast",
+  routingNote: "Best for: fast, low-cost drafts and quick variations; weaker at: fine detail.",
+  useCase: "value",
+  provenance: [],
+  outputMimeTypes: ["image/png", "image/jpeg"],
+  // The request asks for PNG (`output_format: "png"`).
+  deliveryMimeType: "image/png",
+  pricingVersion: "bfl-flux-3-image-klein-2026-11-16-v1",
+  priceVerification: {
+    verifiedAt: "2026-11-16",
+    sources: ["https://bfl.ai/pricing", "https://docs.bfl.ai/api_integration/integration_guidelines"],
+    thinkingCapMicroUsd: 0,
+  },
+};
+
 export const IMAGE_MODEL_REGISTRY: readonly ImageModelProfile[] = [
   OPENAI_GPT_IMAGE_2,
   GOOGLE_GEMINI_31_FLASH_IMAGE,
@@ -714,6 +789,8 @@ export const IMAGE_MODEL_REGISTRY: readonly ImageModelProfile[] = [
   GOOGLE_GEMINI_31_FLASH_LITE_IMAGE,
   GOOGLE_GEMINI_3_PRO_IMAGE,
   FAL_NANO_BANANA_2,
+  BFL_FLUX_3_IMAGE,
+  BFL_FLUX_3_IMAGE_KLEIN,
 ];
 
 /** The default single selection and the v1 compatibility model. */
