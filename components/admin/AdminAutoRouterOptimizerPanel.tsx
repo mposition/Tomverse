@@ -20,6 +20,7 @@ import {
 import { AdminApiFailureNotice } from "@/components/admin/AdminApiFailureNotice";
 import { AutoRouterTunables, type TunableAction, type TunableSettingsState } from "@/components/admin/AdminAutoRouterTunables";
 import { adminAutoRouterOptimizerMessages } from "@/lib/adminMessages/autoRouterOptimizer";
+import { OptimizerAnswerComparisons, type OptimizerAnswerComparison } from "@/components/admin/OptimizerAnswerComparisons";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminFetch } from "@/lib/adminFetch";
 import {
@@ -53,7 +54,7 @@ type Summary = OptimizerEvidenceSummary & {
     findings: string[];
     recommendations: { kind: string; text: string }[];
   } | null;
-  comparisons?: { kind: string | null; a: string | null; b: string | null; verdict: string }[];
+  comparisons?: OptimizerAnswerComparison[];
   gate?: { basis: "judged" | "direct"; towardWinner: number; towardLoser: number } | null;
 };
 
@@ -253,8 +254,6 @@ export function AdminAutoRouterOptimizerPanel({
 
   const status = (value: string) => (m.statuses as Record<string, string>)[value] ?? value;
   const verdict = (value: string) => (m.verdicts as Record<string, string>)[value] ?? value;
-  const comparisonVerdict = (value: string) =>
-    (m.comparisonVerdicts as Record<string, string>)[value] ?? value;
   const recommendationKind = (value: string) =>
     (m.recommendationKinds as Record<string, string>)[value] ?? value;
 
@@ -520,21 +519,7 @@ export function AdminAutoRouterOptimizerPanel({
                 ) : null}
               </div>
             ) : null}
-            {cycle.summary?.comparisons && cycle.summary.comparisons.length > 0 ? (
-              <details className="mt-2" data-testid="admin-auto-router-optimizer-comparisons">
-                <summary className="cursor-pointer text-xs font-bold text-zinc-400">
-                  {m.comparisonsTitle} ({cycle.summary.comparisons.length})
-                </summary>
-                <ul className="mt-2 space-y-1 text-xs text-zinc-300">
-                  {cycle.summary.comparisons.map((item, index) => (
-                    <li key={index}>
-                      {item.kind ? `${(m.kinds as Record<string, string>)[item.kind] ?? item.kind} · ` : ""}
-                      {item.a ?? "-"} vs {item.b ?? "-"} · {comparisonVerdict(item.verdict)}
-                    </li>
-                  ))}
-                </ul>
-              </details>
-            ) : null}
+            <OptimizerAnswerComparisons comparisons={cycle.summary?.comparisons ?? []} />
             {cycle.syntheticCases && cycle.syntheticCases.length > 0 ? (
               <details className="mt-2" data-testid="admin-auto-router-optimizer-synthetic">
                 <summary className="cursor-pointer text-xs font-bold text-zinc-400">

@@ -121,6 +121,9 @@ export const adminAutoRouterOptimizerMessages = defineAdminMessages({
       closing: "Implement this as a small, tested change and open it as a develop PR.",
     },
     comparisonsTitle: "Direct comparisons (current pick vs same-credit model)",
+    comparisonAnswerLatency: (a: string, b: string) => `Answer completion: current ${a}; other ${b}`,
+    comparisonLatencyMissing: "not measured",
+    comparisonLatencyNote: "Times cover answer generation to completion, not the browser's first content. Both sides use the same stored question and context; matching official sources and answer quality still need verification. Missing times are not zero.",
     comparisonVerdicts: {
       a: "current pick better",
       b: "other model better",
@@ -315,6 +318,9 @@ export const adminAutoRouterOptimizerMessages = defineAdminMessages({
       closing: "작고 테스트된 변경으로 구현하고 develop PR로 올리세요.",
     },
     comparisonsTitle: "직접 비교 (현재 선택 대 같은 크레딧 모델)",
+    comparisonAnswerLatency: (a: string, b: string) => `답변 완료: 현재 ${a} · 비교 ${b}`,
+    comparisonLatencyMissing: "미측정",
+    comparisonLatencyNote: "답변 생성부터 완료까지의 시간이며 브라우저 첫 표시 시간이 아닙니다. 같은 질문과 대화 맥락을 사용하지만, 공식 근거의 일치와 답변 품질은 별도로 검증해야 합니다. 미측정은 0이 아닙니다.",
     comparisonVerdicts: {
       a: "현재 선택이 나음",
       b: "다른 모델이 나음",
