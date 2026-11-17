@@ -78,9 +78,12 @@ export async function POST(request: Request) {
             if (expiresAt === undefined) {
                 return managementJson(400, { error: "Choose one of the offered expiry periods.", code: "INVALID_EXPIRY" });
             }
-            const created = await createExternalApiKey({ userId, name, creditCap, expiresAt }, { session, request });
+            // Everything the response needs is read before the key exists: the
+            // secret is shown only in this response, so a failure after the key
+            // is created would leave an active key nobody can use.
             const baseUrl = externalApiBaseUrl(request);
             const models = (await externalApiRunnableModels(plan.tier)).map((entry) => entry.capabilities);
+            const created = await createExternalApiKey({ userId, name, creditCap, expiresAt }, { session, request });
             return managementJson(201, {
                 // Shown once. The server keeps only a digest and cannot show it again.
                 key: created.key,

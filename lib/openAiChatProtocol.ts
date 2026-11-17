@@ -70,18 +70,19 @@ const toolCall = z.strictObject({
 });
 
 const message = z.discriminatedUnion("role", [
-    z.strictObject({ role: z.literal("system"), content: textContent, name: z.string().optional() }),
-    z.strictObject({ role: z.literal("developer"), content: textContent, name: z.string().optional() }),
+    // No `name` on any message: the providers behind this API have no
+    // participant names, so a request that relies on one is refused rather
+    // than answered as if every turn came from the same speaker.
+    z.strictObject({ role: z.literal("system"), content: textContent }),
+    z.strictObject({ role: z.literal("developer"), content: textContent }),
     z.strictObject({
         role: z.literal("user"),
         content: z.union([z.string(), z.array(z.union([textPart, imagePart]))]),
-        name: z.string().optional(),
     }),
     z.strictObject({
         role: z.literal("assistant"),
         content: z.union([textContent, z.null()]).optional(),
         tool_calls: z.array(toolCall).optional(),
-        name: z.string().optional(),
         // Some clients echo a previous turn's reasoning back. It is the
         // client's copy of what this API sent; it is not sent to the provider.
         reasoning_content: z.string().nullable().optional(),

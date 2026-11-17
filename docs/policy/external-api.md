@@ -134,7 +134,7 @@ model accepts a temperature, including models registered with reasoning `none`),
 The request body may be up to 12 MB.
 
 **Refused with a typed 400:** any other field (`unsupported_parameter`, naming
-it), `n` other than 1, `store: true`, `parallel_tool_calls: false`, both token
+it), a `name` on any message (no provider here has participant names), `n` other than 1, `store: true`, `parallel_tool_calls: false`, both token
 limits with different values, a token limit above the model's maximum, images
 for a model without image input, remote image URLs (never fetched), a tool
 result answering no earlier tool call, and sampling parameters a model does not

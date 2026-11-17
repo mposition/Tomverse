@@ -100,6 +100,10 @@ test("nested unknown fields are refused too", () => {
     const withMessage = (extra) => ({ ...vscodeRequest, messages: [...vscodeRequest.messages, extra] });
     rejects(() => parseChatCompletionRequest(withMessage({ role: "assistant", content: "x", audio: { id: "a" } })), "unsupported_parameter");
     rejects(() => parseChatCompletionRequest(withMessage({ role: "tool", tool_call_id: "c", content: "x", name: "read" })), "unsupported_parameter");
+    // Participant names would be dropped by every provider here, so they are refused on every role.
+    for (const role of ["system", "developer", "user", "assistant"]) {
+        rejects(() => parseChatCompletionRequest(withMessage({ role, content: "x", name: "alice" })), "unsupported_parameter");
+    }
     rejects(
         () => parseChatCompletionRequest(withMessage({ role: "assistant", tool_calls: [{ id: "c", type: "function", function: { name: "read", arguments: "{}", extra: 1 } }] })),
         "unsupported_parameter"
