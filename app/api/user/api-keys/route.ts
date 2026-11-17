@@ -50,7 +50,12 @@ export async function GET(request: Request) {
                 },
             });
         },
-        { whenDisabled: () => managementJson(200, { enabled: false }) }
+        {
+            // Keys issued before the API was switched off stay listed so they can
+            // still be revoked; nothing else is offered.
+            whenDisabled: async ({ userId }) =>
+                managementJson(200, { enabled: false, keys: await listExternalApiKeys(userId) }),
+        }
     );
 }
 

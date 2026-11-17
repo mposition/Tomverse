@@ -452,6 +452,11 @@ export const toOpenAiFinishReason = (
     sdkReason: string | undefined,
     sawToolCalls: boolean
 ): FinishReason => {
+    // A provider that stopped for length or a content filter is reported as
+    // such even when tool calls were started: an argument cut off by the
+    // output limit must not reach the client as a finished call.
+    if (sdkReason === "length") return "length";
+    if (sdkReason === "content-filter") return "content_filter";
     if (sawToolCalls) return "tool_calls";
     switch (sdkReason) {
         case "length":
@@ -577,6 +582,7 @@ export const createChunkTranslator = (base: { id: string; created: number; model
     const toolIndexById = new Map<string, number>();
     const argumentsById = new Map<string, string>();
     const namesById = new Map<string, string>();
+    const completedIds = new Set<string>();
     let text = "";
     let reasoning = "";
 
@@ -635,6 +641,7 @@ export const createChunkTranslator = (base: { id: string; created: number; model
                     // concatenated fragments always equal the final input.
                     const id = String(part.toolCallId);
                     const name = String(part.toolName);
+                    completedIds.add(id);
                     const complete =
                         typeof part.input === "string" ? part.input : JSON.stringify(part.input ?? {});
                     const chunks: unknown[] = [];
@@ -673,6 +680,8 @@ export const createChunkTranslator = (base: { id: string; created: number; model
                         id,
                         name: namesById.get(id) ?? "",
                         arguments: argumentsById.get(id) ?? "",
+                        /** False when the provider started the call and never finished it. */
+                        complete: completedIds.has(id),
                     })),
             };
         },

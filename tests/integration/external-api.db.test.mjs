@@ -25,6 +25,12 @@ test("external inference API over the real shared credit ledger", { skip: !datab
         EXTERNAL_API_ENABLED: "true",
         EXTERNAL_API_MODEL_IDS: MODEL_ID,
         EXTERNAL_API_ALLOWED_USER_IDS: "",
+        // Every request here comes from one loopback address. The per-minute
+        // request guards are their own layer; widen them so scenarios do not
+        // throttle each other and the credit layer is what each one tests.
+        CHAT_USER_PER_MINUTE: "1000",
+        CHAT_IP_PER_MINUTE: "1000",
+        EXTERNAL_API_REQUESTS_PER_MINUTE: "1000",
     });
     const floor = getSingleAccountCostCeiling();
     for (const provider of ["openai", "anthropic"]) {
@@ -284,6 +290,53 @@ test("external inference API over the real shared credit ledger", { skip: !datab
         script = textScript("Hello from the fixture.");
     });
 
+    await t.test("OpenAI calls never ask the provider to store the request", async () => {
+        const userId = await newUser();
+        allow(userId);
+        const { key } = await issueKey(userId);
+        assert.equal((await call(key, body({ store: false }))).status, 200);
+        assert.equal(lastCalls.at(-1).providerOptions?.openai?.store, false);
+        assert.equal((await call(key, body())).status, 200);
+        assert.equal(lastCalls.at(-1).providerOptions?.openai?.store, false, "even when the client says nothing");
+    });
+
+    await t.test("a client that left before dispatch is refunded and never reaches the provider", async () => {
+        const userId = await newUser();
+        allow(userId);
+        const { key } = await issueKey(userId);
+        const controller = new AbortController();
+        controller.abort();
+        const before = dispatches;
+        const response = await call(key, body(), { signal: controller.signal });
+        assert.equal(response.status, 499);
+        assert.equal(dispatches, before);
+        const [reservation] = await reservationsFor(userId);
+        assert.equal(reservation.status, "refunded");
+        assert.equal(reservation.settledCostMicroUsd, 0n);
+    });
+
+    await t.test("a tool call cut off by the output limit is reported as length, not as a finished call", async () => {
+        const userId = await newUser();
+        allow(userId);
+        const { key } = await issueKey(userId);
+        const tools = [{ type: "function", function: { name: "write", parameters: { type: "object", properties: { text: { type: "string" } } } } }];
+        script = () =>
+            streamOf([
+                { type: "stream-start", warnings: [] },
+                { type: "tool-input-start", id: "call_cut", toolName: "write" },
+                { type: "tool-input-delta", id: "call_cut", delta: '{"text":"unfinish' },
+                finish("length", usage(100, 4096)),
+            ]);
+        const response = await call(key, body({ tools }));
+        const json = await response.json();
+        assert.equal(json.choices[0].finish_reason, "length");
+        assert.equal(json.choices[0].message.tool_calls, undefined, "the partial call is not offered for execution");
+        const streamed = await readSse(await call(key, body({ tools, stream: true })));
+        const finishChunk = streamed.chunks.find((c) => c.choices?.[0]?.finish_reason);
+        assert.equal(finishChunk.choices[0].finish_reason, "length");
+        script = textScript("Hello from the fixture.");
+    });
+
     await t.test("an inline image reaches the provider as a file part and widens the reservation", async () => {
         const userId = await newUser();
         allow(userId);
@@ -390,6 +443,69 @@ test("external inference API over the real shared credit ledger", { skip: !datab
         const subjects = new Set((await reservationsFor(userId)).map((r) => r.subjectKey));
         assert.equal(subjects.size, 1);
         script = textScript("Hello from the fixture.");
+    });
+
+    await t.test("web and API requests draw on one balance and never over-reserve it", async () => {
+        const userId = await newUser("Free");
+        allow(userId);
+        const { key } = await issueKey(userId);
+        const security = await import(mod("lib/chatSecurity.ts"));
+        const { getRuntimeModel } = await import(mod("lib/modelRegistry.ts"));
+        const { getUserBillingPlan } = await import(mod("lib/billingEntitlements.ts"));
+        const plan = await getUserBillingPlan(userId);
+        const model = await getRuntimeModel(MODEL_ID);
+        const limit = Math.min(plan.dailyMessageLimit, plan.monthlyMessageLimit);
+        // The per-minute request guard is a separate layer; widen it so the
+        // credit allowance is what runs out.
+        const savedMinute = [process.env.CHAT_USER_PER_MINUTE, process.env.CHAT_IP_PER_MINUTE];
+        process.env.CHAT_USER_PER_MINUTE = "1000";
+        process.env.CHAT_IP_PER_MINUTE = "1000";
+        assert.ok(limit > 0 && limit < 200, "a small, finite Free allowance to exhaust");
+        // The web side: Chat's own admission, held and never settled, so every
+        // credit it takes stays committed while the API competes for the rest.
+        const web = async () => {
+            const access = security.identifyChatCaller(new Request("http://localhost/api/chat"), userId, plan.tier, {
+                dailyMessageLimit: plan.dailyMessageLimit,
+                monthlyMessageLimit: plan.monthlyMessageLimit,
+            });
+            try {
+                const grant = await security.acquireChatAccess(access, security.createChatBudget("user", model, 10), { source: "chat" });
+                await security.releaseChatAccess(grant.leaseId);
+                return "ok";
+            } catch (error) {
+                return error.code;
+            }
+        };
+        const api = async () => {
+            const response = await call(key, body());
+            return response.status === 200 ? "ok" : (await response.json()).error.code;
+        };
+        const committed = async () =>
+            (await reservationsFor(userId)).reduce((total, row) => total + (row.status === "reserved" ? row.reservedCredits : row.settledCredits), 0);
+        await Promise.all(Array.from({ length: 24 }, (_, i) => (i % 2 ? web() : api())));
+        assert.ok((await committed()) <= limit);
+        let refusalsInARow = 0;
+        let lastRefusal = null;
+        for (let i = 0; i < limit * 3 && refusalsInARow < 4; i += 1) {
+            const result = await (i % 2 ? web() : api());
+            if (result === "ok") refusalsInARow = 0;
+            else {
+                refusalsInARow += 1;
+                lastRefusal = result;
+            }
+        }
+        const total = await committed();
+        const perRequest = (await reservationsFor(userId))[0].reservedCredits;
+        const diagnosis = JSON.stringify({ total, limit, perRequest, lastRefusal, rows: (await reservationsFor(userId)).length });
+        assert.ok(total <= limit, diagnosis);
+        assert.ok(limit - total < perRequest, `the allowance was used up, not stranded: ${diagnosis}`);
+        assert.ok(lastRefusal && !/CONCURRENCY/.test(lastRefusal), `exhaustion is refused as a credit limit: ${diagnosis}`);
+        const sources = new Set((await reservationsFor(userId)).map((row) => row.source));
+        assert.deepEqual([...sources].sort(), ["chat", "external_api"]);
+        for (const [name, value] of [["CHAT_USER_PER_MINUTE", savedMinute[0]], ["CHAT_IP_PER_MINUTE", savedMinute[1]]]) {
+            if (value === undefined) delete process.env[name];
+            else process.env[name] = value;
+        }
     });
 
     await t.test("idempotency: a retry is a receipt, a reuse is a conflict, neither dispatches", async () => {

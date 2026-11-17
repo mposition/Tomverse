@@ -60,7 +60,8 @@ export const withKeyManagementSession = async (
     request: Request,
     handler: (context: ManagementContext) => Promise<Response>,
     options?: {
-        whenDisabled?: () => Response;
+        /** Answers a signed-in account the API is not offered to. */
+        whenDisabled?: (context: { userId: string }) => Promise<Response> | Response;
         /** Revocation must work even after the feature is switched off. */
         allowWhenDisabled?: boolean;
     }
@@ -77,7 +78,7 @@ export const withKeyManagementSession = async (
         !options?.allowWhenDisabled &&
         (!externalApiEnabled(process.env) || !externalApiUserAllowed(process.env, userId))
     ) {
-        if (options?.whenDisabled) return options.whenDisabled();
+        if (options?.whenDisabled) return options.whenDisabled({ userId });
         return json(403, { error: "The Tomverse API is not enabled for this account.", code: "EXTERNAL_API_NOT_ENABLED" });
     }
     const plan = await getUserBillingPlan(userId);

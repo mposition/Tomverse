@@ -20,6 +20,8 @@ Tomverse agent, not a tool runner and not a separate billing product.
 - Nothing is added to the request: no memory, Refiner, Review, web search,
   conversation history or system prompt of Tomverse's own. No `Conversation`
   or `Message` row is written, and `Conversation.productKey` is untouched.
+- Nothing is stored at the provider on Tomverse's side either: OpenAI calls
+  always send `store: false` (the Responses API stores by default).
 
 ## 2. Switches
 
@@ -60,7 +62,8 @@ are settled normally in both cases. Revoking a key stops that key immediately.
 - Each key has a name, optional expiry (7/30/90/365 days or none), and an
   optional lifetime credit cap. At most 10 active keys per account. Rotation is
   create-new then revoke-old. Revocation is always possible, even after the
-  feature is switched off for the account.
+  feature is switched off for the account: the settings page still lists
+  existing keys, with revoke as the only action.
 - Create, rename, cap change and revoke are written to the hash-chained audit
   log in the same transaction, with the prefix and never the secret or digest.
 - Unknown, revoked and expired keys, and keys of a suspended or
@@ -134,7 +137,11 @@ result answering no earlier tool call, and sampling parameters a model does not
 accept. Nothing is silently dropped.
 
 **Responses.** One choice. A tool-only reply has `content: null`,
-`tool_calls`, and `finish_reason: "tool_calls"`. `usage` is `null` when the
+`tool_calls`, and `finish_reason: "tool_calls"`. A provider stop for length or
+a content filter is reported as `length` / `content_filter` even when a tool
+call had started, and a call the provider never finished is left out of a
+non-streaming `tool_calls`, so a truncated argument is never offered as a
+finished call. `usage` is `null` when the
 provider reported none — never zeros. Streaming sends `chat.completion.chunk`
 events with one completion id, the assistant role once, text deltas, tool-call
 fragments (id and name on the first fragment of each call, indexed by first
@@ -159,7 +166,7 @@ with Tomverse limit details under `tomverse` where they exist.
 | 429 | `key_credit_cap_reached`, the shared credit, concurrency and guardrail codes (unchanged from Chat), `rate_limited` |
 | 502 | `upstream_error`, `empty_response` |
 | 503 | `feature_unavailable`, `AI_CHAT_DISABLED_BY_ADMIN`, provider unavailability |
-| 504 / 499 | `upstream_timeout`, `request_cancelled` (stream error events) |
+| 504 / 499 | `upstream_timeout`, `request_cancelled` (stream error events; 499 also when the client left before dispatch — nothing is sent and the hold is refunded) |
 
 **Idempotency.** An optional `Idempotency-Key` header (up to 255 characters)
 is scoped to the key and bound to a digest of the body. The same key and body

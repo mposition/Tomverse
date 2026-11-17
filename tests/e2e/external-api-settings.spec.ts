@@ -33,15 +33,15 @@ const vscodeConfig = [
 ];
 const SECRET = ["tvk", "ab12cd34", "S".repeat(43)].join("_");
 
-const mockKeys = async (page: Page, options: { enabled: boolean }) => {
-    const keys: Array<Record<string, unknown>> = [];
+const mockKeys = async (page: Page, options: { enabled: boolean; keys?: Array<Record<string, unknown>> }) => {
+    const keys: Array<Record<string, unknown>> = options.keys ?? [];
     const calls: string[] = [];
     await page.route(
         (url) => url.pathname === "/api/user/api-keys",
         async (route) => {
             const request = route.request();
             calls.push(`${request.method()} /api/user/api-keys`);
-            if (!options.enabled) return route.fulfill({ json: { enabled: false } });
+            if (!options.enabled) return route.fulfill({ json: { enabled: false, keys } });
             if (request.method() === "POST") {
                 const body = request.postDataJSON();
                 const summary = {
@@ -106,6 +106,23 @@ test("API keys: the page says so when the API is not offered to the account", as
     await page.goto("/settings/api");
     await expect(page.getByTestId("external-api-unavailable")).toBeVisible();
     await expect(page.getByTestId("external-api-create")).toHaveCount(0);
+});
+
+test("API keys: an account the API was switched off for can still revoke its keys", async ({ page }) => {
+    await prepareGuestPage(page, "en");
+    const calls = await mockKeys(page, {
+        enabled: false,
+        keys: [{ id: "key_old", name: "Old laptop", keyPrefix: ["tvk", "zz99yy88"].join("_"), creditCap: null, committedCredits: 3, heldCredits: 0, requestCount: 3, state: "active", expiresAt: null, revokedAt: null, lastUsedAt: null, createdAt: "2026-11-01T00:00:00.000Z" }],
+    });
+    await page.goto("/settings/api");
+    await expect(page.getByTestId("external-api-unavailable")).toBeVisible();
+    const row = page.getByTestId("external-api-key");
+    await expect(row).toContainText("Old laptop");
+    await expect(row.getByRole("button", { name: "Rename" })).toHaveCount(0);
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.getByTestId("external-api-key-revoke").click();
+    await expect(row).toHaveAttribute("data-key-state", "revoked");
+    expect(calls).toContain("DELETE /api/user/api-keys/key_old");
 });
 
 test("API keys: create shows the secret once with a ready config, then revoke @ui-risk", async ({ page, isMobile }) => {

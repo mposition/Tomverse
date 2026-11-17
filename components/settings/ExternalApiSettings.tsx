@@ -41,7 +41,7 @@ type ModelSummary = {
 };
 
 type Overview =
-    | { enabled: false }
+    | { enabled: false; keys?: KeySummary[] }
     | {
           enabled: true;
           baseUrl: string;
@@ -159,13 +159,13 @@ function KeyUsage({ keyId }: { keyId: string }) {
     );
 }
 
-function KeyRow({ entry, onChanged }: { entry: KeySummary; onChanged: () => void }) {
+function KeyRow({ entry, onChanged, revokeOnly = false }: { entry: KeySummary; onChanged: () => void; revokeOnly?: boolean }) {
     const { t } = useLanguage();
     const [editing, setEditing] = useState<"name" | "cap" | null>(null);
     const [draft, setDraft] = useState("");
     const [error, setError] = useState<string | null>(null);
     const [showUsage, setShowUsage] = useState(false);
-    const active = entry.state === "active";
+    const active = entry.state === "active" && !revokeOnly;
 
     const patch = async (payload: Record<string, unknown>) => {
         setError(null);
@@ -266,9 +266,9 @@ function KeyRow({ entry, onChanged }: { entry: KeySummary; onChanged: () => void
                             </button>
                         </>
                     ) : null}
-                    <button type="button" onClick={() => setShowUsage((value) => !value)} className="rounded-lg px-2 py-1 text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800">
+                    {revokeOnly ? null : <button type="button" onClick={() => setShowUsage((value) => !value)} className="rounded-lg px-2 py-1 text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800">
                         {showUsage ? t("externalApi.usageHide") : t("externalApi.usageShow")}
-                    </button>
+                    </button>}
                     {entry.state !== "revoked" ? (
                         <button type="button" data-testid="external-api-key-revoke" onClick={() => void revoke()} className="rounded-lg px-2 py-1 text-red-600 hover:bg-zinc-100 dark:hover:bg-zinc-800">
                             {t("externalApi.revoke")}
@@ -357,9 +357,22 @@ export function ExternalApiSettings() {
             {failed && !overview ? <p className="mt-8 text-sm text-zinc-600 dark:text-zinc-300">{t("externalApi.loadFailed")}</p> : null}
             {!failed && !overview ? <p className="mt-8 text-sm text-zinc-500">{t("externalApi.loading")}</p> : null}
             {overview && !overview.enabled ? (
-                <p className="mt-8 rounded-2xl border border-zinc-200 bg-white p-4 text-sm dark:border-zinc-800 dark:bg-zinc-950/60" data-testid="external-api-unavailable">
-                    {t("externalApi.unavailable")}
-                </p>
+                <>
+                    <p className="mt-8 rounded-2xl border border-zinc-200 bg-white p-4 text-sm dark:border-zinc-800 dark:bg-zinc-950/60" data-testid="external-api-unavailable">
+                        {t("externalApi.unavailable")}
+                    </p>
+                    {overview.keys?.length ? (
+                        // Still listed so a key issued earlier can be revoked.
+                        <section className="mt-6 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950/60">
+                            <h2 className="text-base font-bold">{t("externalApi.keysTitle")}</h2>
+                            <ul className="divide-y divide-zinc-200 dark:divide-zinc-800" data-testid="external-api-keys">
+                                {overview.keys.map((entry) => (
+                                    <KeyRow key={entry.id} entry={entry} onChanged={() => void load()} revokeOnly />
+                                ))}
+                            </ul>
+                        </section>
+                    ) : null}
+                </>
             ) : null}
 
             {overview && overview.enabled ? (

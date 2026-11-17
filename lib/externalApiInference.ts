@@ -209,13 +209,18 @@ export async function handleChatCompletions(request: Request): Promise<Response>
                 throw new ProtocolError(400, "unsupported_parameter", `${param} is not supported for this model.`, param);
             }
         }
+        // The API is stateless, and OpenAI's Responses API stores requests by
+        // default -- so every OpenAI call says store: false explicitly,
+        // whatever the client sent.
+        const baseOptions = (settings.providerOptions ?? {}) as Record<string, Record<string, unknown>>;
         const providerOptions =
-            parsed.reasoning_effort != null
+            model.provider === "openai"
                 ? {
-                      ...(settings.providerOptions ?? {}),
+                      ...baseOptions,
                       openai: {
-                          ...((settings.providerOptions as Record<string, Record<string, unknown>> | undefined)?.openai ?? {}),
-                          reasoningEffort: parsed.reasoning_effort,
+                          ...(baseOptions.openai ?? {}),
+                          store: false,
+                          ...(parsed.reasoning_effort != null ? { reasoningEffort: parsed.reasoning_effort } : {}),
                       },
                   }
                 : settings.providerOptions;
@@ -286,6 +291,13 @@ export async function handleChatCompletions(request: Request): Promise<Response>
             ])
         );
 
+        // A client that left while the request was being authenticated, read
+        // and reserved has already fired its abort event; a listener added now
+        // would never hear it. Checked here, before anything is dispatched, so
+        // the hold is refunded and the provider is never called.
+        if (request.signal?.aborted) {
+            throw new ProtocolError(499, "request_cancelled", "The request was cancelled before it was sent.");
+        }
         const controller = new AbortController();
         const onClientAbort = () => controller.abort("client_disconnected");
         request.signal?.addEventListener("abort", onClientAbort, { once: true });
@@ -388,7 +400,9 @@ export async function handleChatCompletions(request: Request): Promise<Response>
                 model: model.id,
                 text: final.text,
                 reasoning: final.reasoning,
-                toolCalls: final.toolCalls,
+                // Only calls the provider finished; a call cut off by the output
+                // limit is reported through finish_reason "length" instead.
+                toolCalls: final.toolCalls.filter((call) => call.complete),
                 finishReason: final.finishReason,
                 usage: final.usage,
                 tomverse: { request_id: requestId },
@@ -460,7 +474,7 @@ const idempotentReplay = async (keyId: string, idempotencyKeyDigest: string, req
 type RunFinal = {
     text: string;
     reasoning: string;
-    toolCalls: { id: string; name: string; arguments: string }[];
+    toolCalls: { id: string; name: string; arguments: string; complete: boolean }[];
     finishReason: ReturnType<typeof toOpenAiFinishReason>;
     usage: UsageView | null;
     error: { status: number; code: string; message: string } | null;

@@ -184,6 +184,10 @@ test("stream translation: role once, tool fragments indexed, final arguments com
     const collected = t.collected();
     assert.equal(collected.text, "Let me look.");
     assert.deepEqual(collected.toolCalls.map((c) => c.id), ["call_a", "call_b"]);
+    assert.deepEqual(collected.toolCalls.map((c) => c.complete), [true, true]);
+    const cut = createChunkTranslator({ id: "x", created: 1, model: "m" });
+    cut.translate({ type: "tool-input-start", id: "c", toolName: "write" });
+    assert.equal(cut.collected().toolCalls[0].complete, false);
 });
 
 test("tool-only completion has null content and tool_calls finish reason", () => {
@@ -210,4 +214,6 @@ test("missing provider usage is null, never zero", () => {
     assert.equal(toOpenAiFinishReason("length", false), "length");
     assert.equal(toOpenAiFinishReason("other", false), "stop");
     assert.equal(toOpenAiFinishReason("stop", true), "tool_calls");
+    assert.equal(toOpenAiFinishReason("length", true), "length", "truncation wins over started tool calls");
+    assert.equal(toOpenAiFinishReason("content-filter", true), "content_filter");
 });
