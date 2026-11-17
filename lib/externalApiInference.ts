@@ -261,10 +261,12 @@ export async function handleChatCompletions(request: Request): Promise<Response>
             dailyMessageLimit: plan.dailyMessageLimit,
             monthlyMessageLimit: plan.monthlyMessageLimit,
         });
+        // The output limit sent to the provider and the output the
+        // reservation prices are always the same number. With no limit from
+        // the client that is the model's maximum, reserved in full -- never a
+        // smaller typical reservation with a larger provider limit.
         const budget = createChatBudget("user", model, atLeastOneToken(estimate.breakdown()), {
-            ...(options.requestedOutputTokens !== null
-                ? { totalOutputTokenCap: options.requestedOutputTokens }
-                : {}),
+            totalOutputTokenCap: options.requestedOutputTokens ?? capabilities.maxOutputTokens,
         });
 
         const clientName = request.headers.get("user-agent")?.slice(0, 80) ?? null;

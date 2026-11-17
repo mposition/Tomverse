@@ -119,6 +119,9 @@ test("strict tools are forwarded where the provider honours them and refused els
     const parsed = parseChatCompletionRequest(strictTools);
     assert.equal(convertChatCompletionRequest(parsed, model).tools[0].strict, true);
     rejects(() => convertChatCompletionRequest(parsed, { ...model, provider: "anthropic" }), "unsupported_parameter");
+    // Provider ids as the model registry spells them (lib/models.ts).
+    assert.equal(convertChatCompletionRequest(parsed, { ...model, provider: "moonshot" }).tools[0].strict, true);
+    assert.equal(convertChatCompletionRequest(parsed, { ...model, provider: "mistral" }).tools[0].strict, true);
     rejects(() => convertChatCompletionRequest(parsed, { vision: true }), "unsupported_parameter");
     const relaxed = parseChatCompletionRequest({ ...strictTools, tools: [{ ...strictTools.tools[0], function: { ...strictTools.tools[0].function, strict: false } }] });
     assert.equal(convertChatCompletionRequest(relaxed, { ...model, provider: "anthropic" }).tools[0].strict, false);
@@ -149,6 +152,15 @@ test("images: data URLs only, supported types, size bound, model capability", ()
         () => convertChatCompletionRequest(parseChatCompletionRequest(asideToolRound), { vision: false }),
         "model_does_not_support_images"
     );
+});
+
+test("image detail is forwarded to OpenAI and refused where it would be dropped", () => {
+    const withDetail = (detail) =>
+        parseChatCompletionRequest({ ...vscodeRequest, messages: [{ role: "user", content: [{ type: "image_url", image_url: { url: PNG_1x1, detail } }] }] });
+    const low = convertChatCompletionRequest(withDetail("low"), model).messages[0].content[0];
+    assert.deepEqual(low.providerOptions, { openai: { imageDetail: "low" } });
+    rejects(() => convertChatCompletionRequest(withDetail("high"), { ...model, provider: "anthropic" }), "unsupported_parameter");
+    assert.equal(convertChatCompletionRequest(withDetail("auto"), { ...model, provider: "anthropic" }).messages[0].content[0].providerOptions, undefined);
 });
 
 test("tool definitions, choices and results are validated", () => {

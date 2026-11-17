@@ -57,7 +57,10 @@ const imagePart = z
  * For any other provider the flag would be dropped, so `strict: true` is
  * refused there instead of promising schema-exact arguments it cannot give.
  */
-const STRICT_TOOL_PROVIDERS = new Set(["openai", "mistral", "moonshotai"]);
+const STRICT_TOOL_PROVIDERS = new Set(["openai", "mistral", "moonshot"]);
+
+/** Providers whose adapter takes OpenAI's image `detail`; elsewhere only "auto". */
+const IMAGE_DETAIL_PROVIDERS = new Set(["openai"]);
 
 const textContent = z.union([z.string(), z.array(textPart)]);
 const toolCall = z.strictObject({
@@ -280,7 +283,12 @@ export const decodeImageDataUrl = (url: string, param: string): DecodedImage => 
 
 type SdkContentPart =
     | { type: "text"; text: string }
-    | { type: "file"; mediaType: string; data: Uint8Array }
+    | {
+          type: "file";
+          mediaType: string;
+          data: Uint8Array;
+          providerOptions?: { openai: { imageDetail: "low" | "high" } };
+      }
     | { type: "tool-call"; toolCallId: string; toolName: string; input: unknown }
     | {
           type: "tool-result";
@@ -401,6 +409,23 @@ export const convertChatCompletionRequest = (
                     images.push(image);
                     if (images.length > PROTOCOL_LIMITS.maxImages) {
                         throw new ProtocolError(413, "too_many_images", `At most ${PROTOCOL_LIMITS.maxImages} images per request.`, param);
+                    }
+                    const detail = part.image_url.detail;
+                    if (detail === "low" || detail === "high") {
+                        if (!IMAGE_DETAIL_PROVIDERS.has(model.provider ?? "")) {
+                            throw new ProtocolError(
+                                400,
+                                "unsupported_parameter",
+                                "image_url.detail other than auto is not supported for this model.",
+                                `${at}.content.${partIndex}.image_url.detail`
+                            );
+                        }
+                        return {
+                            type: "file",
+                            mediaType: image.mediaType,
+                            data: image.bytes,
+                            providerOptions: { openai: { imageDetail: detail } },
+                        };
                     }
                     return { type: "file", mediaType: image.mediaType, data: image.bytes };
                 });

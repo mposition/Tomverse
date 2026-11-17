@@ -92,7 +92,8 @@ no API wallet, no new price and no per-token billing for the user.
   tool schemas, earlier tool calls and tool results, and each image (provider
   image-token rules). The output reservation is the request's
   `max_completion_tokens`/`max_tokens` when given, otherwise the model's
-  default, never above the model's maximum.
+  maximum, and the provider is sent exactly that limit: output is never
+  allowed beyond what was reserved.
 - Settlement is the existing contract (`getSettledUsageCredits`):
 
 | Outcome | User credits | Provider cost recorded |
@@ -122,7 +123,8 @@ Base URL `https://<host>/api/v1`. Bearer authentication only.
 
 **Supported request fields:** `model`, `messages` (roles `system`,
 `developer`, `user`, `assistant`, `tool`; text parts; `image_url` parts with
-base64 `data:` URLs of PNG, JPEG, WebP or GIF up to 8 MB each, 16 per request),
+base64 `data:` URLs of PNG, JPEG, WebP or GIF up to 8 MB each, 16 per request;
+`detail` `low`/`high` is forwarded to OpenAI and refused for other providers),
 `stream`, `stream_options.include_usage`, `tools` (function tools, up to 128,
 64 KB per schema; `strict: true` only for providers whose adapter forwards it: OpenAI, Mistral, Moonshot), `tool_choice` (`none`, `auto`, `required`, or a named
 function), `parallel_tool_calls: true`, `max_tokens`, `max_completion_tokens`,

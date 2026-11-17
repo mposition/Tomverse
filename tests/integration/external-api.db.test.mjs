@@ -331,6 +331,21 @@ test("external inference API over the real shared credit ledger", { skip: !datab
         script = textScript("Hello from the fixture.");
     });
 
+    await t.test("with no output limit the provider gets exactly the limit the reservation priced", async () => {
+        const userId = await newUser();
+        allow(userId);
+        const { key } = await issueKey(userId);
+        assert.equal((await call(key, body())).status, 200);
+        const unlimited = lastCalls.at(-1).maxOutputTokens;
+        assert.equal((await call(key, body({ max_tokens: unlimited }))).status, 200);
+        assert.equal(lastCalls.at(-1).maxOutputTokens, unlimited);
+        const [implicit, explicit] = await reservationsFor(userId);
+        assert.equal(implicit.reservedCostMicroUsd, explicit.reservedCostMicroUsd, "no limit is priced as the model maximum");
+        assert.equal((await call(key, body({ max_tokens: 64 }))).status, 200);
+        assert.equal(lastCalls.at(-1).maxOutputTokens, 64);
+        assert.ok((await reservationsFor(userId)).at(-1).reservedCostMicroUsd < implicit.reservedCostMicroUsd);
+    });
+
     await t.test("a client that left before dispatch is refunded and never reaches the provider", async () => {
         const userId = await newUser();
         allow(userId);
