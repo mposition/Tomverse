@@ -3,6 +3,8 @@ import { prisma } from "@/lib/prisma";
 import {
   responseLatencyDimensionsSchema, responseLatencyOutcomeSchema, responseLatencyTimingsSchema,
   summarizeResponseLatency, type ResponseLatencySample,
+  responseLatencyContext, storedResponseLatencyTimings,
+  attributePairedClientLatency,
 } from "@/lib/responseLatencyCore";
 
 const RETENTION_MS = 7 * 86_400_000;
@@ -18,7 +20,10 @@ export async function recordResponseLatency(id: string, sample: ResponseLatencyS
     await prisma.responseLatencySample.createMany({
       data: [{ id, ...dimensions, source: sample.source,
         outcome: responseLatencyOutcomeSchema.parse(sample.outcome),
-        timings: responseLatencyTimingsSchema.parse(sample.timings) }],
+        timings: { ...responseLatencyTimingsSchema.parse(sample.timings),
+          // Browser reports may arrive after a deployment. Never attribute the
+          // ingestion server's build to an earlier browser turn.
+          ...(sample.source === "server" ? { _context: responseLatencyContext(process.env) } : {}) } }],
       skipDuplicates: true,
     });
   } catch {
@@ -32,18 +37,19 @@ export async function readResponseLatencyEvidence(now = new Date()) {
     const [rows, reviews] = await Promise.all([
       prisma.responseLatencySample.findMany({ where: { createdAt: { gte: since } },
         orderBy: { createdAt: "desc" }, take: MAX_ROWS + 1,
-        select: { product: true, mode: true, source: true, modelId: true, provider: true, outcome: true, timings: true } }),
+        select: { id: true, product: true, mode: true, source: true, modelId: true, provider: true, outcome: true, timings: true } }),
       prisma.comparisonReviewRun.findMany({ where: { startedAt: { gte: since } },
         orderBy: { startedAt: "desc" }, take: 501,
         select: { outcome: true, durationMs: true, primaryDurationMs: true, primaryStatus: true, primaryModelId: true, primaryProvider: true } }),
     ]);
-    const samples: ResponseLatencySample[] = rows.slice(0, MAX_ROWS).flatMap(row => {
+    const samples: ResponseLatencySample[] = attributePairedClientLatency(rows.slice(0, MAX_ROWS).flatMap(row => {
       const dimensions = responseLatencyDimensionsSchema.safeParse({ product: row.product, mode: row.mode, modelId: row.modelId, provider: row.provider });
-      const timings = responseLatencyTimingsSchema.safeParse(row.timings);
+      const stored = storedResponseLatencyTimings(row.timings);
       const outcome = responseLatencyOutcomeSchema.safeParse(row.outcome);
-      return dimensions.success && timings.success && outcome.success && ["server", "client"].includes(row.source)
-        ? [{ ...dimensions.data, source: row.source as "server" | "client", outcome: outcome.data, timings: timings.data }] : [];
-    });
+      return dimensions.success && stored && outcome.success && ["server", "client"].includes(row.source)
+        ? [{ id: row.id, ...dimensions.data, source: row.source as "server" | "client", outcome: outcome.data,
+          timings: stored.timings, context: row.source === "server" ? stored.context : undefined }] : [];
+    }));
     for (const row of reviews.slice(0, 500)) samples.push({
       product: "review", mode: "cross_review", source: "review", modelId: row.primaryModelId, provider: row.primaryProvider,
       outcome: row.outcome === "completed_dual" ? "completed" : row.outcome === "completed_primary_only" ? "primary_only" : row.outcome === "cached" ? "cached" : "failed",

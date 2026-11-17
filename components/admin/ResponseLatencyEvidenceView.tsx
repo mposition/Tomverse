@@ -25,6 +25,9 @@ export function ResponseLatencyEvidenceView({ evidence, current = false, refresh
       </p>
       {evidence.groups.map((group, index) => <div key={index} className="mt-3">
         <p className="text-xs font-bold text-zinc-300">{group.product} · {group.mode} · {group.source} · {group.modelId ?? m.unattributed} · {group.outcome} · n={group.count}</p>
+        <p className="mt-1 break-words text-xs text-zinc-400" data-testid="response-latency-context">{group.context
+          ? m.context(group.context.build?.slice(0, 12) ?? m.unknownBuild, group.context.routerPresearch, group.context.parallelContextPrecheck, group.context.compactSearchMenu)
+          : m.unknownContext}</p>
         <table className="mt-1 w-full text-left text-xs text-zinc-400">
           <caption className="sr-only">{m.caption(group.product, group.source, group.outcome)}</caption>
           <thead><tr><th scope="col">{m.stage}</th><th scope="col">n</th><th scope="col">p50</th><th scope="col">p95</th></tr></thead>
