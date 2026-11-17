@@ -27,6 +27,7 @@ mock.module(mod("lib/billingEntitlements.ts"), { namedExports: { getUserBillingP
 mock.module(mod("lib/chatSecurity.ts"), { namedExports: {
   getUserChatUsageKey: id => `user:${id}`, usagePeriodStart: (period, now = new Date()) => new Date(period === 'month' ? Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),1) : Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate())),
   readUsageBucketCount: async (_tx, _key, period) => w.buckets[period],
+  dailyPlanCreditBucketLimit: dailyLimit => dailyLimit > 0 ? dailyLimit : Number.MAX_SAFE_INTEGER,
   incrementUsageBucket: async (_tx, _key, period, _start, limit, amount) => { if (period.startsWith("provider-cost") && w.providerBudgetBlocked || w.buckets[period] + amount > limit) return false; w.buckets[period] += amount; return true; },
 } });
 mock.module(mod("lib/userDailyUsage.ts"), { namedExports: { getUserDayWindow: async (_tx, _userId, now = new Date()) => ({ start: new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate())), end: new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate()+1)) }) } });
@@ -74,9 +75,19 @@ test("plan credits are consumed first and unused purchased credits are returned"
   assert.equal(w.buckets.month, 296); assert.equal(w.addOnSettlements[0].settledCredits, 0);
 });
 
-test("an unlimited daily plan never refunds a daily bucket it did not reserve", async () => {
+test("an unlimited daily plan still counts the day and refunds only its own hold", async () => {
+  // The day bucket is also the "plan credits used today" counter (Admin Console, CSV).
   w.dailyLimit = 0; w.buckets.day = 50;
   const row = await reserveVoiceConversationCredits(input());
+  assert.equal(w.buckets.day, 86);
+  await settleVoiceConversationCredits(row.id, 10);
+  assert.equal(w.buckets.day, 56); assert.equal(w.buckets.month, 6);
+});
+
+test("a reservation made before every plan held the day refunds no day bucket", async () => {
+  w.dailyLimit = 0; w.buckets.day = 50;
+  const row = await reserveVoiceConversationCredits(input());
+  w.row.reservationPayload = { ...w.row.reservationPayload, dayReserved: false }; w.buckets.day = 50;
   await settleVoiceConversationCredits(row.id, 10);
   assert.equal(w.buckets.day, 50); assert.equal(w.buckets.month, 6);
 });
