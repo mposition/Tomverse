@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import {
   responseLatencyDimensionsSchema, responseLatencyOutcomeSchema, responseLatencyTimingsSchema,
   summarizeResponseLatency, type ResponseLatencySample,
+  responseLatencyContext, storedResponseLatencyTimings,
 } from "@/lib/responseLatencyCore";
 
 const RETENTION_MS = 7 * 86_400_000;
@@ -18,7 +19,10 @@ export async function recordResponseLatency(id: string, sample: ResponseLatencyS
     await prisma.responseLatencySample.createMany({
       data: [{ id, ...dimensions, source: sample.source,
         outcome: responseLatencyOutcomeSchema.parse(sample.outcome),
-        timings: responseLatencyTimingsSchema.parse(sample.timings) }],
+        timings: { ...responseLatencyTimingsSchema.parse(sample.timings),
+          // Browser reports may arrive after a deployment. Never attribute the
+          // ingestion server's build to an earlier browser turn.
+          ...(sample.source === "server" ? { _context: responseLatencyContext(process.env) } : {}) } }],
       skipDuplicates: true,
     });
   } catch {
@@ -39,10 +43,11 @@ export async function readResponseLatencyEvidence(now = new Date()) {
     ]);
     const samples: ResponseLatencySample[] = rows.slice(0, MAX_ROWS).flatMap(row => {
       const dimensions = responseLatencyDimensionsSchema.safeParse({ product: row.product, mode: row.mode, modelId: row.modelId, provider: row.provider });
-      const timings = responseLatencyTimingsSchema.safeParse(row.timings);
+      const stored = storedResponseLatencyTimings(row.timings);
       const outcome = responseLatencyOutcomeSchema.safeParse(row.outcome);
-      return dimensions.success && timings.success && outcome.success && ["server", "client"].includes(row.source)
-        ? [{ ...dimensions.data, source: row.source as "server" | "client", outcome: outcome.data, timings: timings.data }] : [];
+      return dimensions.success && stored && outcome.success && ["server", "client"].includes(row.source)
+        ? [{ ...dimensions.data, source: row.source as "server" | "client", outcome: outcome.data,
+          timings: stored.timings, context: row.source === "server" ? stored.context : undefined }] : [];
     });
     for (const row of reviews.slice(0, 500)) samples.push({
       product: "review", mode: "cross_review", source: "review", modelId: row.primaryModelId, provider: row.primaryProvider,

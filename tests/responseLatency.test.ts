@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createHmac, randomUUID } from "node:crypto";
-import { clientLatencyBodySchema, latencyDistribution, summarizeResponseLatency, type ResponseLatencySample } from "../lib/responseLatencyCore";
+import { clientLatencyBodySchema, latencyDistribution, summarizeResponseLatency, responseLatencyContext, storedResponseLatencyTimings, type ResponseLatencySample } from "../lib/responseLatencyCore";
 import { createResponseLatencyToken, verifyResponseLatencyToken } from "../lib/responseLatencyToken";
 import { createClientLatency } from "../lib/responseLatencyClient";
 import { createLatencyStages } from "../lib/responseLatencyStages";
@@ -116,6 +116,27 @@ test("client reports reject text, dimensions, negative, excessive and out-of-ord
   for (const extra of [{ prompt: "secret" }, { modelId: "forged" }, { prepareMs: -1 }, { completionMs: 3_600_001 }, { firstContentMs: 9 }, { firstContentMs: 31 }]) {
     assert.equal(clientLatencyBodySchema.safeParse({ ...valid, ...extra }).success, false);
   }
+});
+
+test("server cohorts separate deployments, configured flags and unknown history without recording environment values", () => {
+  const context = responseLatencyContext({ RAILWAY_GIT_COMMIT_SHA: "a".repeat(40), CHAT_ROUTER_PRESEARCH_ENABLED: "true", DATABASE_URL: "private", CHAT_ROUTER_COMPACT_SEARCH_MENU_ENABLED: "private" });
+  assert.deepEqual(context, { build: "a".repeat(40), routerPresearch: "true", parallelContextPrecheck: "unset", compactSearchMenu: "other" });
+  assert.doesNotMatch(JSON.stringify(context), /private|DATABASE_URL/);
+  assert.equal(responseLatencyContext({ RAILWAY_GIT_COMMIT_SHA: "invalid" }).build, null);
+  const sample: ResponseLatencySample = { product: "chat", mode: "auto", source: "server", modelId: "a", provider: "openai", outcome: "completed", timings: { firstContentMs: 100, settlementMs: 200 } };
+  const summary = summarizeResponseLatency([sample, { ...sample, context }, { ...sample, context },
+    { ...sample, context: { ...context, build: "b".repeat(40) } },
+    { ...sample, context: { ...context, parallelContextPrecheck: "true" } }]);
+  assert.deepEqual(summary.groups.map(group => group.count), [2, 1, 1, 1]);
+  assert.equal(summary.groups[0].context?.build, context.build);
+  assert.equal(summary.groups[1].context, undefined);
+  assert.equal(summary.groups[0].timings.firstContentMs.p50Ms, 100);
+  assert.ok(!("_context" in summary.groups[0].timings));
+  assert.deepEqual(storedResponseLatencyTimings({ firstContentMs: 0, _context: context }), { timings: { firstContentMs: 0 }, context });
+  assert.deepEqual(storedResponseLatencyTimings({ firstContentMs: 0 }), { timings: { firstContentMs: 0 }, context: undefined });
+  assert.equal(storedResponseLatencyTimings({ prompt: "private", _context: context }), null);
+  assert.equal(storedResponseLatencyTimings({ firstContentMs: 0, _context: { ...context, secret: "private" } })?.context, undefined);
+  assert.equal(clientLatencyBodySchema.safeParse({ token: "proof", outcome: "completed", prepareMs: 0, firstContentMs: 0, completionMs: 1, context }).success, false);
 });
 
 test("timing proof binds dimensions and purpose, expires and rejects tampering", () => {
