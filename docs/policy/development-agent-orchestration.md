@@ -1033,7 +1033,7 @@ PR 병합, `review` → `done`, 배포, worker catalog 변경, WSL 세션 추가
 
 ### 무엇이 달랐나
 
-- `develop`의 `lib/amux/executionGate.ts`는 `NODE_ENV`가 `test`일 때만 실행 API를 연다. 배포된 빌드는 환경 변수로 열 수 없다.
+- `develop`의 실행 게이트 모듈(2026-11-16에 삭제)은 `NODE_ENV`가 `test`일 때만 실행 API를 연다. 배포된 빌드는 환경 변수로 열 수 없다.
 - `main`의 같은 파일은 실행 API를 연다(2026-11-16에 `TOMVERSE_AMUX_EXECUTION_API_ENABLED` 스위치를 없앴다). 버전 13~15의 WSL 실행 루프는 이 경로로 운영 중이다.
 - 「Phase A selection-only boundary」 절은 "claim과 그 뒤의 worker 등록·heartbeat, owned queue, execution, delivery, settlement은 Phase A production에서 비활성이다"라고 적는다. 버전 15는 claim 전용 모드와 실행 루프를 승인했지만, 이 문장을 명시적으로 개정하지 않았다.
 
@@ -1051,7 +1051,7 @@ PR 병합, `review` → `done`, 배포, worker catalog 변경, WSL 세션 추가
 
 ### 코드 래치
 
-- `AMUX_EXECUTION_API_CODE_LATCH`는 `lib/amux/executionGate.ts`의 코드 상수이고, 이 버전은 **true로 출고**한다. 버전 15가 이미 운영 중인 실행 루프를 승인했기 때문이다.
+- (2026-11-16에 래치와 게이트 모듈을 없앴다. 아래는 그 전의 기록이다.) `AMUX_EXECUTION_API_CODE_LATCH`는 실행 게이트 모듈의 코드 상수였고, 이 버전은 **true로 출고**했다. 버전 15가 이미 운영 중인 실행 루프를 승인했기 때문이다.
 - 게이트는 래치와 환경 변수를 인자로 받는 순수 함수 하나로 판정하고, 공개 함수는 그 함수에 출고 상수와 환경 값을 넘긴다.
 - 테스트가 고정하는 것: 출고 상수가 true다. 래치가 false이면 환경 값이 `1`이어도 닫힌다. 래치가 true이고 환경 값이 `1`이면 `NODE_ENV`가 `production`이어도 열린다. 환경 값이 비었거나 `1`이 아니면 닫힌다.
 - 기존 단위 테스트 `tests/amuxClaimContractParity.test.mjs`의 "a production build cannot activate future execution with an environment flag"는 위 동작으로 바꾼다. 환경 변수를 비우면 `execution_api_disabled`인 기존 DB 통합 테스트는 유지한다.

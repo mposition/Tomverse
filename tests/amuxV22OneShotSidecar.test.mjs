@@ -756,6 +756,10 @@ test("Ubuntu runs one synthetic CLI process and replays its durable result",
           // The temp worktree is not a git checkout; base sync, the baseline,
           // the changed-path inventory, the package install and the shell jail
           // have their own tests. Every role has a shell, so the run needs them.
+          // The leftover preservation and the context files are git steps of
+          // the local CLI flow, covered in amuxV22LocalCliFlow.test.mjs.
+          preserveWorkingTree: async () => ({ ok: true, changed: false }),
+          writeContextFiles: async () => ({ ok: true }),
           syncBase: async () => ({ ok: true, baseSha: "d".repeat(40) }),
           captureBaseline: async () => ({ ok: true, baseSha: "d".repeat(40) }),
           captureChangedPaths: async () => ({ ok: true, files: [], contractPaths: [] }),
@@ -766,7 +770,7 @@ test("Ubuntu runs one synthetic CLI process and replays its durable result",
       const execute = { op: "execute", ...request, role: "review" };
       assert.equal((await handler(execute)).kind, "in_progress");
       const finished = await readFinished(handler);
-      assert.equal(finished.kind, "succeeded");
+      assert.equal(finished.kind, "succeeded", JSON.stringify(finished));
       assert.match(finished.outputDigest, /^[0-9a-f]{64}$/);
       const restarted = createAmuxV22SidecarHandler({ worker: "worker-a",
         stateDir, run: () => { throw new Error("duplicate CLI invocation"); } });
@@ -1025,7 +1029,7 @@ test("a Codex sidecar runs its own CLI under the role's sandbox and returns a Co
 });
 
 // The sidecar takes absolute POSIX paths only.
-test("a Codex or Copilot run never holds the operator's refresh token, and an expiring login never starts",
+test("a Codex or Copilot run never holds the operator's refresh token, and an expired login never starts",
   { skip: process.platform === "win32" }, async () => {
   const root = await mkdtemp(join(tmpdir(), "amux-v22-sidecar-auth-"));
   try {
@@ -1064,12 +1068,19 @@ test("a Codex or Copilot run never holds the operator's refresh token, and an ex
     // The operator's own file is untouched.
     assert.match(await readFile(join(cli, "auth.json"), "utf8"), /synthetic-operator-refresh-secret/);
 
-    await writeFile(join(cli, "auth.json"), login(5 * 60 * 60 * 1000));
-    const expiring = await runAmuxV22OneShot(investigate, codex,
+    // A login that expires soon still runs: there is no margin of ours
+    // (owner direction 2026-11-16); only an expired one is refused.
+    await writeFile(join(cli, "auth.json"), login(5 * 60 * 1000));
+    const soon = await runAmuxV22OneShot(investigate, codex,
       { syntheticPlatform: true, spawnChild, channelPreflight: () => null });
-    assert.deepEqual([expiring.kind, expiring.cliStarted, expiring.failure],
+    assert.equal(soon.kind, "succeeded");
+    assert.equal(fake.calls.length, 2);
+    await writeFile(join(cli, "auth.json"), login(-60_000));
+    const expired = await runAmuxV22OneShot(investigate, codex,
+      { syntheticPlatform: true, spawnChild, channelPreflight: () => null });
+    assert.deepEqual([expired.kind, expired.cliStarted, expired.failure],
       ["failed", false, "channel_auth_refused"]);
-    assert.equal(fake.calls.length, 1);
+    assert.equal(fake.calls.length, 2);
 
     // Copilot: the checked token is the only sign-in, carried in its env.
     const copilot = { ...codex, provider: "github-copilot",
@@ -1079,14 +1090,14 @@ test("a Codex or Copilot run never holds the operator's refresh token, and an ex
     await writeFile(join(cli, "auth-token"), `${token}\n`);
     await runAmuxV22OneShot(copilotRequest, copilot,
       { syntheticPlatform: true, spawnChild: fake.spawnChild, channelPreflight: () => null });
-    assert.equal(fake.calls.length, 2);
-    assert.equal(fake.calls[1].spawnOptions.env.COPILOT_GITHUB_TOKEN, token);
+    assert.equal(fake.calls.length, 3);
+    assert.equal(fake.calls[2].spawnOptions.env.COPILOT_GITHUB_TOKEN, token);
     await writeFile(join(cli, "auth-token"), "not-a-token");
     const badToken = await runAmuxV22OneShot(copilotRequest, copilot,
       { syntheticPlatform: true, spawnChild: fake.spawnChild, channelPreflight: () => null });
     assert.deepEqual([badToken.kind, badToken.cliStarted, badToken.failure],
       ["failed", false, "channel_auth_refused"]);
-    assert.equal(fake.calls.length, 2);
+    assert.equal(fake.calls.length, 3);
     // Every run home was removed.
     assert.deepEqual((await readdir(home)).filter((name) => name.startsWith("run-")), []);
   } finally { await rm(root, { recursive: true, force: true }); }

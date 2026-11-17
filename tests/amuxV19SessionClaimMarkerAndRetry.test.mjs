@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, readFile, rmdir, stat, utimes, writeFile } from
+import { chmod, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from
   "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -45,7 +45,7 @@ test("Linux marker records the claim, is read back by a new instance and removed
       await first.release();
       assert.equal(await first.read(), null);
       await assert.rejects(first.release(), /local_state_unavailable/);
-    } finally { await rmdir(directory); }
+    } finally { await rm(directory, { recursive: true, force: true }); }
   });
 
 test("Linux marker from before 2026-11-16 and the legacy marker name no claim, say when they were written, and are removed",
@@ -63,7 +63,9 @@ test("Linux marker from before 2026-11-16 and the legacy marker name no claim, s
         assert.equal(pending.identity, null, name);
         // The time the cycle asks the app about: the file's own mtime, also
         // for the legacy one-file marker.
-        assert.equal(pending.writtenAtMs, hourAgo.getTime(), name);
+        // utimes stores seconds as a float, so the read-back can be off by a
+        // fraction of a millisecond.
+        assert.ok(Math.abs(pending.writtenAtMs - hourAgo.getTime()) < 1, name);
         await marker.release();
         assert.equal(await marker.read(), null, name);
       }
@@ -76,10 +78,11 @@ test("Linux marker from before 2026-11-16 and the legacy marker name no claim, s
         await writeFile(file, "analysis_outcome_unverified\n", { mode: 0o600 });
         await utimes(file, when, when);
       }
-      assert.equal((await marker.read()).writtenAtMs, newer.getTime());
+      assert.ok(Math.abs((await marker.read()).writtenAtMs - newer.getTime()) < 1);
       await marker.release();
       assert.equal(await marker.read(), null);
-    } finally { await rmdir(directory); }
+      assert.deepEqual(await readdir(directory), []);
+    } finally { await rm(directory, { recursive: true, force: true }); }
   });
 
 test("the marker refuses a relative or missing state directory", () => {
