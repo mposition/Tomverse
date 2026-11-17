@@ -6751,9 +6751,13 @@ export function ChatPageClient({
         migrateDraft(originDraftScopeId, activeChatId);
       } else {
       try {
-        const newConversationTitle = (
-          trimmed || sendInputAttachments[0]?.name || t("sidebar.newChat")
-        ).slice(0, 30);
+        // Trimmed after the cut: the server stores the title trimmed, and the
+        // generated-title swap only applies while the row still equals this
+        // exact string, so a cut that ends on a space would never be replaced.
+        const newConversationTitle =
+          (trimmed || sendInputAttachments[0]?.name || t("sidebar.newChat"))
+            .slice(0, 30)
+            .trim() || t("sidebar.newChat");
         const res = await fetch(mountedSurface === "chat" ? "/api/products/chat/conversations" : "/api/conversations", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
