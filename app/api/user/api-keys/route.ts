@@ -14,7 +14,7 @@ import {
     normalizeExternalApiKeyName,
 } from "@/lib/externalApiKeyCore";
 import { createExternalApiKey, ExternalApiKeyError, listExternalApiKeys } from "@/lib/externalApiKeys";
-import { externalApiBaseUrl, managementJson, withKeyManagementSession } from "@/lib/externalApiRoutes";
+import { externalApiBaseUrl, managementJson, withKeyManagementSession, withManagementReadLimit } from "@/lib/externalApiRoutes";
 
 // Cookie-authenticated key management. Mutations keep the ordinary
 // same-origin check (lib/requestOrigin.ts); an Authorization header is refused
@@ -31,7 +31,7 @@ const createSchema = z
 export async function GET(request: Request) {
     return withKeyManagementSession(
         request,
-        async ({ userId, plan }) => {
+        async ({ userId, plan }) => withManagementReadLimit(request, userId, async () => {
             const baseUrl = externalApiBaseUrl(request);
             const models = (await externalApiRunnableModels(plan.tier)).map((entry) => entry.capabilities);
             return managementJson(200, {
@@ -49,12 +49,14 @@ export async function GET(request: Request) {
                     vscode: vscodeCustomEndpointConfig(baseUrl, models),
                 },
             });
-        },
+        }),
         {
             // Keys issued before the API was switched off stay listed so they can
             // still be revoked; nothing else is offered.
             whenDisabled: async ({ userId }) =>
-                managementJson(200, { enabled: false, keys: await listExternalApiKeys(userId) }),
+                withManagementReadLimit(request, userId, async () =>
+                    managementJson(200, { enabled: false, keys: await listExternalApiKeys(userId) })
+                ),
         }
     );
 }

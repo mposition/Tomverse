@@ -612,16 +612,28 @@ test("external inference API over the real shared credit ledger", { skip: !datab
         assert.equal(reservation.settledCredits, 0);
         assert.equal(reservation.settledCostMicroUsd, 0n);
 
+        // A provider 5xx may come after it processed the request: not proof
+        // of zero spend, so the estimate stays on the provider side.
+        script = () =>
+            streamOf([
+                new APICallError({ message: "server error", url: "https://provider.invalid", requestBodyValues: {}, statusCode: 500, isRetryable: true }),
+            ]);
+        assert.equal((await call(key, body())).status, 502);
+        const serverError = (await reservationsFor(userId)).at(-1);
+        assert.equal(serverError.outcome, "failed");
+        assert.equal(serverError.settledCredits, 0, "the user is not charged for a failure");
+        assert.ok(serverError.settledCostMicroUsd > 0n, "a 5xx keeps its estimated provider cost");
+
         script = () => streamOf([{ type: "stream-start", warnings: [] }, new Error("socket hang up")]);
         const lost = await call(key, body({ stream: true }));
         const { events, chunks } = await readSse(lost);
         assert.notEqual(events.at(-1), "[DONE]", "a failed stream never ends like a finished one");
         assert.equal(chunks.at(-1).error.code, "upstream_error");
-        reservation = (await reservationsFor(userId))[1];
+        reservation = (await reservationsFor(userId)).at(-1);
         assert.equal(reservation.outcome, "failed");
         assert.equal(reservation.settledCredits, 0, "failed requests are not charged credits");
         assert.ok(reservation.settledCostMicroUsd > 0n, "an unknown provider outcome keeps its estimated cost");
-        assert.equal(dispatches - before, 2);
+        assert.equal(dispatches - before, 3);
         script = textScript("Hello from the fixture.");
     });
 

@@ -60,21 +60,21 @@ const imagePart = z
 const STRICT_TOOL_PROVIDERS = new Set(["openai", "mistral", "moonshotai"]);
 
 const textContent = z.union([z.string(), z.array(textPart)]);
-const toolCall = z.object({
+const toolCall = z.strictObject({
     id: z.string().min(1).max(200),
     type: z.literal("function"),
-    function: z.object({ name: z.string().min(1), arguments: z.string() }),
+    function: z.strictObject({ name: z.string().min(1), arguments: z.string() }),
 });
 
 const message = z.discriminatedUnion("role", [
-    z.object({ role: z.literal("system"), content: textContent, name: z.string().optional() }),
-    z.object({ role: z.literal("developer"), content: textContent, name: z.string().optional() }),
-    z.object({
+    z.strictObject({ role: z.literal("system"), content: textContent, name: z.string().optional() }),
+    z.strictObject({ role: z.literal("developer"), content: textContent, name: z.string().optional() }),
+    z.strictObject({
         role: z.literal("user"),
         content: z.union([z.string(), z.array(z.union([textPart, imagePart]))]),
         name: z.string().optional(),
     }),
-    z.object({
+    z.strictObject({
         role: z.literal("assistant"),
         content: z.union([textContent, z.null()]).optional(),
         tool_calls: z.array(toolCall).optional(),
@@ -84,16 +84,16 @@ const message = z.discriminatedUnion("role", [
         reasoning_content: z.string().nullable().optional(),
         refusal: z.string().nullable().optional(),
     }),
-    z.object({
+    z.strictObject({
         role: z.literal("tool"),
         tool_call_id: z.string().min(1).max(200),
         content: textContent,
     }),
 ]);
 
-const toolDefinition = z.object({
+const toolDefinition = z.strictObject({
     type: z.literal("function"),
-    function: z.object({
+    function: z.strictObject({
         name: z.string(),
         description: z.string().max(8_000).optional(),
         parameters: z.record(z.string(), z.unknown()).optional(),
@@ -101,7 +101,10 @@ const toolDefinition = z.object({
     }),
 });
 
-/** Every top-level field the API understands. Anything else is refused. */
+/**
+ * Every field the API understands, at every level -- messages, tool calls,
+ * tool definitions and tool_choice included. Anything else is refused.
+ */
 const requestSchema = z
     .object({
         model: z.string().min(1).max(160),
@@ -116,7 +119,7 @@ const requestSchema = z
         tool_choice: z
             .union([
                 z.enum(["none", "auto", "required"]),
-                z.object({ type: z.literal("function"), function: z.object({ name: z.string() }) }),
+                z.strictObject({ type: z.literal("function"), function: z.strictObject({ name: z.string() }) }),
             ])
             .optional(),
         parallel_tool_calls: z.boolean().optional(),

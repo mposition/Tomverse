@@ -130,9 +130,18 @@ export const externalApiRefusal = (error: unknown, requestId?: string): Response
 
 type Outcome = "completed" | "empty" | "cancelled" | "failed";
 
-/** Whether the provider answered with an HTTP status -- evidence it billed nothing. */
+/**
+ * Whether the provider refused the request before doing any work -- a 4xx
+ * other than a timeout, which is evidence it billed nothing. A 5xx or 408
+ * may come after the provider processed the request, so its cost is
+ * unknown and stays at the reservation's estimate.
+ */
 const providerRefused = (error: unknown) =>
-    APICallError.isInstance(error) && typeof error.statusCode === "number";
+    APICallError.isInstance(error) &&
+    typeof error.statusCode === "number" &&
+    error.statusCode >= 400 &&
+    error.statusCode < 500 &&
+    error.statusCode !== 408;
 
 const recordReceipt = (requestId: string, data: { finishReason?: string | null; errorCode?: string | null }) =>
     prisma.externalApiRequest

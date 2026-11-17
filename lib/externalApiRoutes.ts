@@ -5,7 +5,7 @@ import { authOptions } from "@/lib/auth";
 import { getUserBillingPlan } from "@/lib/billingEntitlements";
 import { externalApiEnabled, externalApiUserAllowed } from "@/lib/externalApiCatalogCore";
 import { authenticateExternalApiKey, type AuthenticatedExternalApiKey } from "@/lib/externalApiKeys";
-import { consumeApiRateLimit } from "@/lib/apiSecurity";
+import { apiSecurityResponse, consumeApiRateLimit } from "@/lib/apiSecurity";
 import { externalApiErrorResponse, externalApiRefusal, positiveInteger } from "@/lib/externalApiInference";
 
 /**
@@ -93,3 +93,22 @@ export const withKeyManagementSession = async (
 };
 
 export { json as managementJson };
+
+/**
+ * Per-account budget for the settings page's read routes (key list, a key's
+ * receipts). Revocation is deliberately not behind it: it must always work.
+ */
+export const withManagementReadLimit = async (
+    request: Request,
+    userId: string,
+    render: () => Promise<Response>
+) => {
+    try {
+        await consumeApiRateLimit(request, userId, "external-api-key-read", { minute: 60, day: 5_000 });
+    } catch (error) {
+        const security = apiSecurityResponse(error);
+        if (security) return security;
+        throw error;
+    }
+    return render();
+};

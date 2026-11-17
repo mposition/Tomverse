@@ -97,6 +97,21 @@ test("nested unknown fields are refused too", () => {
     rejects(() => parseChatCompletionRequest(withPart({ type: "image_url", image_url: { url: PNG_1x1, fetch: true } })), "unsupported_parameter");
     rejects(() => parseChatCompletionRequest({ ...vscodeRequest, stream_options: { include_usage: true, include_obfuscation: true } }), "unsupported_parameter");
     assert.ok(parseChatCompletionRequest(withPart({ type: "image_url", image_url: { url: PNG_1x1, detail: "low" } })));
+    const withMessage = (extra) => ({ ...vscodeRequest, messages: [...vscodeRequest.messages, extra] });
+    rejects(() => parseChatCompletionRequest(withMessage({ role: "assistant", content: "x", audio: { id: "a" } })), "unsupported_parameter");
+    rejects(() => parseChatCompletionRequest(withMessage({ role: "tool", tool_call_id: "c", content: "x", name: "read" })), "unsupported_parameter");
+    rejects(
+        () => parseChatCompletionRequest(withMessage({ role: "assistant", tool_calls: [{ id: "c", type: "function", function: { name: "read", arguments: "{}", extra: 1 } }] })),
+        "unsupported_parameter"
+    );
+    rejects(
+        () => parseChatCompletionRequest({ ...vscodeRequest, tools: [{ type: "function", function: { name: "read", parameters: {}, examples: [] } }] }),
+        "unsupported_parameter"
+    );
+    rejects(
+        () => parseChatCompletionRequest({ ...vscodeRequest, tool_choice: { type: "function", function: { name: "run_in_terminal", args: {} } } }),
+        "unsupported_parameter"
+    );
 });
 
 test("strict tools are forwarded where the provider honours them and refused elsewhere", () => {

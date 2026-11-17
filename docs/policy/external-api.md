@@ -35,7 +35,7 @@ All default off. Server-side; hiding UI is never the gate.
 | `EXTERNAL_API_PUBLIC_BASE_URL` | Optional canonical base URL shown to users (e.g. `https://tomverse.app/api/v1`). Otherwise derived from the request host. |
 | `NEXT_PUBLIC_EXTERNAL_API_SETTINGS_VISIBLE` | Build-time. Shows the API keys row in the settings panel. `/settings/api` itself checks availability through the server. |
 | `EXTERNAL_API_REQUESTS_PER_MINUTE` / `_PER_DAY` | Per-account request-rate abuse guard, defaults 120 / 20 000. Credits, the key cap and concurrency are what bound usage; this only stops runaway clients. |
-| `EXTERNAL_API_READS_PER_MINUTE` / `_PER_DAY` | Separate per-account budget for `GET /models` and `GET /usage`, defaults 60 / 5 000. |
+| `EXTERNAL_API_READS_PER_MINUTE` / `_PER_DAY` | Separate per-account budget for `GET /models` and `GET /usage`, defaults 60 / 5 000. The settings read routes (key list, receipts) have a fixed 60 / 5 000; revocation has none, so it always works. |
 | `EXTERNAL_API_TIMEOUT_MS` | Server timeout for one generation, default 600 000. |
 
 **Kill switch.** The Admin operational pause for AI chat
@@ -100,7 +100,8 @@ no API wallet, no new price and no per-token billing for the user.
 | completed — text, or tool calls only | the reserved credits | reported usage; if usage is missing, the reservation's own estimate |
 | empty — no text and no tool call | 0 | reported usage, or the estimate |
 | cancelled — client disconnect or timeout | pro rata if more than 16 output tokens were produced | reported usage, or the streamed output estimate |
-| failed — provider answered an HTTP error before any output | 0 | 0 (the provider refused) |
+| failed — provider refused with a 4xx (not 408) before any output | 0 | 0 (the provider refused) |
+| failed — provider answered a 5xx or 408 before any output | 0 | reservation estimate (the provider may have processed it) |
 | failed — any other failure (network, mid-stream) | 0 | the reservation's estimate, never 0 by assumption |
 | refused before dispatch | nothing held | nothing |
 
@@ -136,8 +137,8 @@ limits with different values, a token limit above the model's maximum, images
 for a model without image input, remote image URLs (never fetched), a tool
 result answering no earlier tool call, and sampling parameters a model does not
 accept, and `strict: true` on a tool for a provider that would drop it.
-Unknown fields are refused inside text and image parts and `stream_options`
-too. Nothing is silently dropped.
+Unknown fields are refused at every level -- messages, content parts, tool
+calls, tool definitions, `tool_choice` and `stream_options`. Nothing is silently dropped.
 
 **Responses.** One choice. A tool-only reply has `content: null`,
 `tool_calls`, and `finish_reason: "tool_calls"`. A provider stop for length or
