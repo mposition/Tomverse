@@ -45,7 +45,7 @@ import {
     type UsageView,
 } from "@/lib/openAiChatProtocol";
 import { prisma } from "@/lib/prisma";
-import { safeErrorMetadata } from "@/lib/providerErrorClassification";
+import { logStreamErrorWithoutContent, safeErrorMetadata } from "@/lib/providerErrorClassification";
 import {
     recordModelFailure,
     recordModelSuccess,
@@ -153,6 +153,7 @@ export async function handleChatCompletions(request: Request): Promise<Response>
     let leaseId: string | null = null;
     let reservation: ChatUsageReservation | null = null;
     let handedToStream = false;
+    let disposeDispatch: (() => void) | null = null;
     try {
         const key = await authenticateExternalApiKey(request.headers.get("authorization"));
         if (!externalApiUserAllowed(process.env, key.userId)) {
@@ -292,7 +293,13 @@ export async function handleChatCompletions(request: Request): Promise<Response>
             () => controller.abort("timeout"),
             positiveInteger(process.env.EXTERNAL_API_TIMEOUT_MS, 600_000)
         );
+        disposeDispatch = () => {
+            clearTimeout(timeout);
+            request.signal?.removeEventListener("abort", onClientAbort);
+        };
 
+        // No side effects until consume() starts: if streamText throws below,
+        // the catch still owns the reservation and refunds it.
         const run = createRun({
             requestId,
             model,
@@ -302,12 +309,12 @@ export async function handleChatCompletions(request: Request): Promise<Response>
             created: Math.floor(Date.now() / 1000),
             completionId: `chatcmpl-${requestId.slice(4)}`,
             includeUsage: options.includeUsage,
-            dispose: () => {
-                clearTimeout(timeout);
-                request.signal?.removeEventListener("abort", onClientAbort);
-            },
+            dispose: disposeDispatch,
         });
         const result = streamText({
+            // The SDK's default onError logs the raw error object, and provider
+            // errors can carry request and response bodies. Content-free only.
+            onError: logStreamErrorWithoutContent({ traceId: requestId, modelId: model.id }),
             model: getActiveAiModel(model),
             messages: converted.messages as ModelMessage[],
             ...(converted.tools.length ? { tools } : {}),
@@ -398,6 +405,7 @@ export async function handleChatCompletions(request: Request): Promise<Response>
             );
             await recordReceipt(requestId, { errorCode: "predispatch_failure" });
         }
+        if (!handedToStream) disposeDispatch?.();
         if (leaseId && !handedToStream) await releaseChatAccess(leaseId).catch(() => undefined);
         const refusal = externalApiRefusal(error, requestId);
         if (refusal) return refusal;
@@ -485,15 +493,18 @@ const createRun = (input: {
     let streamError: unknown = null;
     let aborted = false;
     let final: RunFinal | null = null;
-    const heartbeat = setInterval(() => {
-        void heartbeatChatAccess(input.leaseId).catch(() => undefined);
-        void extendChatReservationExpiry(input.reservation.reservationId, 300).catch(() => undefined);
-    }, 60_000);
 
     const consume = async (
         parts: AsyncIterable<{ type: string; [key: string]: unknown }>,
         emit: (chunk: unknown) => void
     ) => {
+        // Started here, not when the run is created, so a dispatch that never
+        // began cannot leave an interval extending a reservation nobody owns.
+        // Cleared on every path out of this function, below.
+        const heartbeat = setInterval(() => {
+            void heartbeatChatAccess(input.leaseId).catch(() => undefined);
+            void extendChatReservationExpiry(input.reservation.reservationId, 300).catch(() => undefined);
+        }, 60_000);
         try {
             for await (const part of parts) {
                 if (part.type === "error") {
@@ -540,6 +551,7 @@ const createRun = (input: {
             if (input.controller.signal.aborted) aborted = true;
             else streamError = error;
         }
+        clearInterval(heartbeat);
         if (input.controller.signal.aborted) aborted = true;
 
         const collected = translator.collected();
@@ -579,6 +591,9 @@ const createRun = (input: {
         // provider refused with an HTTP status before producing anything.
         const outputBytes =
             Buffer.byteLength(collected.text, "utf8") +
+            // Reasoning is billed as output too; a stream cut off mid-thought
+            // has produced it even when no answer text arrived.
+            Buffer.byteLength(collected.reasoning, "utf8") +
             collected.toolCalls.reduce((total, call) => total + Buffer.byteLength(call.arguments, "utf8"), 0);
         const observedUsage = usage as UsageView | null;
         const turnUsage = usageFromProvider && observedUsage
@@ -609,7 +624,6 @@ const createRun = (input: {
                 })
             );
         }
-        clearInterval(heartbeat);
         input.dispose();
         await releaseChatAccess(input.leaseId).catch(() => undefined);
         await recordReceipt(input.requestId, {

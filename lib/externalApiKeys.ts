@@ -110,7 +110,29 @@ export const listExternalApiKeys = async (
 
 type AuditContext = { session: Session; request: Request };
 
+const isUniqueViolation = (error: unknown) =>
+    typeof error === "object" && error !== null && (error as { code?: unknown }).code === "P2002";
+
+/**
+ * The public prefix is ~41 random bits and unique, so two accounts can, very
+ * rarely, draw the same one. That is a reason to draw again, not to fail: the
+ * whole transaction rolls back and nothing about the losing draw is kept.
+ */
 export const createExternalApiKey = async (
+    input: { userId: string; name: string; creditCap: number | null; expiresAt: Date | null },
+    audit: AuditContext
+) => {
+    for (let attempt = 0; ; attempt += 1) {
+        try {
+            return await createExternalApiKeyOnce(input, audit);
+        } catch (error) {
+            if (attempt < 3 && isUniqueViolation(error)) continue;
+            throw error;
+        }
+    }
+};
+
+const createExternalApiKeyOnce = async (
     input: { userId: string; name: string; creditCap: number | null; expiresAt: Date | null },
     audit: AuditContext
 ) => {

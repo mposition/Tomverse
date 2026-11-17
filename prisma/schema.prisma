@@ -2071,7 +2071,8 @@ model ExternalApiRequest {
   reservation          ChatCreditReservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
   /// SHA-256 of the client's Idempotency-Key header, when it sent one.
   idempotencyKeyDigest String?
-  /// SHA-256 of the canonical request body, to tell a retry from a reuse.
+  /// SHA-256 of the raw request body bytes, to tell a retry from a reuse; a
+  /// re-serialised body with reordered keys counts as a different request.
   requestDigest        String
   clientName           String?
   modelId              String

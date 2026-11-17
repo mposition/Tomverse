@@ -59,18 +59,23 @@ test("external inference API over the real shared credit ledger", { skip: !datab
 
     // The fake provider. `script` decides what one dispatch streams.
     let dispatches = 0;
+    let modelSetupFails = false;
     let script = (...args) => textScript("Hello from the fixture.")(...args);
     const lastCalls = [];
     mock.module(mod("lib/activeAiModel.ts"), {
         namedExports: {
-            getActiveAiModel: () =>
+            getActiveAiModel: () => {
+                if (modelSetupFails) throw new Error("synthetic provider setup failure");
+                return (
                 new MockLanguageModelV4({
                     doStream: async (options) => {
                         dispatches += 1;
                         lastCalls.push(options);
                         return script(options);
                     },
-                }),
+                })
+                );
+            },
             QWEN_GROUNDED_THINKING_BUDGET: 128,
             qwenLookupStep: () => undefined,
             createCohereResearchFetch: (f) => f,
@@ -470,6 +475,102 @@ test("external inference API over the real shared credit ledger", { skip: !datab
         assert.equal(reservation.settledCredits, 0, "failed requests are not charged credits");
         assert.ok(reservation.settledCostMicroUsd > 0n, "an unknown provider outcome keeps its estimated cost");
         assert.equal(dispatches - before, 2);
+        script = textScript("Hello from the fixture.");
+    });
+
+    await t.test("an expired in-flight request is reconciled at its estimate and never settled twice", async () => {
+        const userId = await newUser();
+        allow(userId);
+        const { key } = await issueKey(userId);
+        let open;
+        const gate = new Promise((r) => (open = r));
+        script = () => ({
+            stream: new ReadableStream({
+                async start(controller) {
+                    controller.enqueue({ type: "stream-start", warnings: [] });
+                    await gate;
+                    controller.enqueue({ type: "text-start", id: "t" });
+                    controller.enqueue({ type: "text-delta", id: "t", delta: "late answer" });
+                    controller.enqueue({ type: "text-end", id: "t" });
+                    controller.enqueue(finish("stop"));
+                    controller.close();
+                },
+            }),
+        });
+        const pending = call(key, body());
+        let reservation;
+        for (let i = 0; i < 200 && !reservation; i += 1) {
+            [reservation] = await reservationsFor(userId);
+            if (!reservation) await new Promise((r) => setTimeout(r, 10));
+        }
+        // As if the process had died: the reservation outlives its expiry.
+        await db.chatCreditReservation.update({ where: { id: reservation.id }, data: { expiresAt: new Date(Date.now() - 1000) } });
+        const { reconcileExpiredChatCreditReservations } = await import(mod("lib/chatSecurity.ts"));
+        await reconcileExpiredChatCreditReservations(new Date());
+        let reconciled = await db.chatCreditReservation.findUnique({ where: { id: reservation.id } });
+        assert.equal(reconciled.status, "refunded");
+        assert.equal(reconciled.settledCredits, 0);
+        assert.ok(reconciled.settledCostMicroUsd > 0n, "an unknown provider outcome is not priced at zero");
+        assert.ok(reconciled.reconciledAt);
+        // The original process finishes later; its settlement must not apply again.
+        open();
+        const response = await pending;
+        assert.equal(response.status, 200);
+        const after = await db.chatCreditReservation.findUnique({ where: { id: reservation.id } });
+        assert.equal(after.status, "refunded");
+        assert.equal(after.settledCredits, 0);
+        assert.equal(after.settledCostMicroUsd, reconciled.settledCostMicroUsd);
+        script = textScript("Hello from the fixture.");
+    });
+
+    await t.test("a failure before the stream starts refunds the hold and frees the slot", async () => {
+        const userId = await newUser();
+        allow(userId);
+        const { key } = await issueKey(userId);
+        modelSetupFails = true;
+        let response;
+        try {
+            response = await call(key, body());
+        } finally {
+            modelSetupFails = false;
+        }
+        assert.equal(response.status, 500);
+        const [reservation] = await reservationsFor(userId);
+        assert.equal(reservation.status, "refunded");
+        assert.equal(reservation.settledCredits, 0);
+        assert.equal(await db.chatRequestLease.count({ where: { subjectKey: reservation.subjectKey } }), 0, "the concurrency slot is released");
+        assert.equal((await call(key, body())).status, 200, "the account can carry on");
+    });
+
+    await t.test("a stream cancelled during reasoning still settles the reasoning it produced", async () => {
+        const userId = await newUser();
+        allow(userId);
+        const { key } = await issueKey(userId);
+        const controller = new AbortController();
+        script = (options) =>
+            streamOf(
+                [
+                    { type: "stream-start", warnings: [] },
+                    { type: "reasoning-start", id: "r" },
+                    ...Array.from({ length: 60 }, () => ({ type: "reasoning-delta", id: "r", delta: "thinking about the problem " })),
+                    finish("stop"),
+                ],
+                { delayMs: 15, signal: options.abortSignal }
+            );
+        const response = await call(key, body({ stream: true }), { signal: controller.signal });
+        const reader = response.body.getReader();
+        for (let i = 0; i < 8; i += 1) await reader.read();
+        controller.abort();
+        await reader.cancel().catch(() => undefined);
+        let reservation;
+        for (let i = 0; i < 200; i += 1) {
+            [reservation] = await reservationsFor(userId);
+            if (reservation?.status !== "reserved") break;
+            await new Promise((r) => setTimeout(r, 25));
+        }
+        assert.equal(reservation.outcome, "cancelled");
+        assert.ok(reservation.settledOutputTokens > 16, "reasoning output is not counted as nothing");
+        assert.ok(reservation.settledCredits > 0, "more than 16 output tokens earns the pro-rata charge");
         script = textScript("Hello from the fixture.");
     });
 

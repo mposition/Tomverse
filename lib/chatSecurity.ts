@@ -5785,6 +5785,15 @@ export const reconcileExpiredChatCreditReservations = async (
                     reconciled: true,
                     reason: "reservation_expired",
                     resolveTurnUsage: async (tx) => {
+                              // An expired external API reservation was admitted
+                              // and then lost its process: the provider may have
+                              // run. The user is refunded as for any failure, but
+                              // the provider side keeps the reservation's own
+                              // estimate rather than a cost of zero
+                              // (docs/policy/external-api.md section 4).
+                              if (reservation.source === "external_api") {
+                                  return { turnUsage: { outcome: "failed", usageFromProvider: false } };
+                              }
                               const researchUsage = await researchPreviewSettlementForExpiry(tx, reservation.reservationId, now);
                               if (researchUsage) { researchHandoff = true; return { turnUsage: researchUsage }; }
                               if (!isDeepResearchReservation(row.modelId)) return null;
