@@ -19,8 +19,6 @@ import type { DmShownProposal } from "./decisionMakerJudgmentCore.ts";
 
 /** Why an open question has no local card for the Decision Maker yet. */
 export const AMUX_V22_QUESTION_DM_NOT_SENT_REASONS = [
-  // TOMVERSE_AMUX_DM_ROUTING is not enabled: the relay's routes answer 409.
-  "routing_off",
   // The kill switch holds every Decision Maker path.
   "kill_switch",
   // The switches cannot be read, which holds the path the same way.
@@ -70,11 +68,9 @@ export type AmuxV22QuestionDm =
 
 /** Why an open question with no local card is not with the Decision Maker. */
 export const amuxV22QuestionDmNotSentReason = (input: {
-  routingEnabled: boolean;
   killSwitch: boolean | null;
   hasProvider: boolean;
 }): AmuxV22QuestionDmNotSentReason => {
-  if (!input.routingEnabled) return "routing_off";
   if (input.killSwitch === null) return "switches_unreadable";
   if (input.killSwitch) return "kill_switch";
   if (!input.hasProvider) return "no_provider";

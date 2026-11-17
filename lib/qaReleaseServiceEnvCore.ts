@@ -201,6 +201,21 @@ export type QaReleaseStartDecision =
  * item 6). The Monitor has no enable flag of its own: it is off when its
  * cron is not declared.
  */
+/**
+ * A release service's boolean switch: `enabled` is the documented value, and
+ * the `true` the Railway variables already hold reads the same way.
+ */
+export const qaReleaseSwitchOn = (raw: string | undefined): boolean => {
+  const value = (raw ?? "").trim();
+  return value === "enabled" || value === "true";
+};
+
+/** A paid step that is on unless switched off: `disabled`, or the earlier `false`, turns it off. */
+export const qaReleaseSwitchOff = (raw: string | undefined): boolean => {
+  const value = (raw ?? "").trim();
+  return value === "disabled" || value === "false";
+};
+
 export function decideQaReleaseServiceStart(
   service: QaReleaseService,
   env: Readonly<Record<string, string | undefined>>,
@@ -209,8 +224,8 @@ export function decideQaReleaseServiceStart(
   if (!checkQaReleaseServiceEnv(service, names).ok) return "refuse";
 
   const value = (name: string) => (env[name] ?? "").trim();
-  if (service === "digest" && value("QA_RELEASE_DIGEST_ENABLED") !== "true") return "disabled";
-  if (service === "train" && value("QA_RELEASE_TRAIN_ENABLED") !== "true") return "disabled";
+  if (service === "digest" && !qaReleaseSwitchOn(env.QA_RELEASE_DIGEST_ENABLED)) return "disabled";
+  if (service === "train" && !qaReleaseSwitchOn(env.QA_RELEASE_TRAIN_ENABLED)) return "disabled";
   if (service === "mergeLane") {
     // Policy section 8 item 6: the lane runs only while the kill switch is
     // empty, stops on any value, and stops when the switch cannot be read.
@@ -220,7 +235,7 @@ export function decideQaReleaseServiceStart(
     const killSwitch = env.QA_RELEASE_MERGE_LANE_KILL_SWITCH;
     // Any character stops it, whitespace included: only a declared, empty value runs.
     if (killSwitch !== "") return "disabled";
-    if (value("QA_RELEASE_MERGE_LANE_ENABLED") !== "true") return "disabled";
+    if (!qaReleaseSwitchOn(env.QA_RELEASE_MERGE_LANE_ENABLED)) return "disabled";
   }
   if (REQUIRED[service].some((name) => value(name) === "")) return "refuse";
   if (!/^[1-9][0-9]{0,8}$/.test(value("QA_RELEASE_CONTROL_REVISION"))) return "refuse";

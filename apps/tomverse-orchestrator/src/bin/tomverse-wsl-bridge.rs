@@ -10,14 +10,7 @@ fn main() -> std::process::ExitCode {
         return std::process::ExitCode::from(1);
     };
     let env_value = std::env::var(tomverse_orchestrator::wsl_bridge::WSL_BRIDGE_ENV_NAME).ok();
-    match tomverse_orchestrator::wsl_bridge::activation_gate(
-        tomverse_orchestrator::wsl_bridge::WSL_BRIDGE_CODE_LATCH,
-        env_value.as_deref(),
-    ) {
-        tomverse_orchestrator::wsl_bridge::ActivationGate::LatchOff => {
-            println!("amux wsl bridge latch is off");
-            std::process::ExitCode::SUCCESS
-        }
+    match tomverse_orchestrator::wsl_bridge::activation_gate(env_value.as_deref()) {
         tomverse_orchestrator::wsl_bridge::ActivationGate::EnvOff => {
             println!("amux wsl bridge env is off");
             std::process::ExitCode::SUCCESS

@@ -10,7 +10,7 @@ import {
   commitAutoGrant,
   commitAutoHaltFromReadback,
   commitAutoPromotion,
-  commitAutoResume,
+  expireDueAutoGrants,
   grantAutoPromotion,
   recordAutoOutcomeUnknown,
   runAutoPromotionTick,
@@ -323,8 +323,9 @@ test("an unset switch refuses before a transaction, and a grant binds its item w
   }
 });
 
-test("a due grant is expired on a consume attempt and by the tick, and the tick refuses below graduation", async () => {
-  assert.equal((await graduationNow()).ok, false, "precondition: fewer than 20 decisions spanning 14 days");
+test("a due grant is expired on a consume attempt and by the tick's expiry step", async () => {
+  // No count of human decisions gates the path any more (2026-11-16).
+  assert.equal((await graduationNow()).ok, true);
   const before = await ledger();
 
   // The owner's consume attempt expires a due grant, commits that, and refuses.
@@ -360,9 +361,8 @@ test("a due grant is expired on a consume attempt and by the tick, and the tick 
     grantedAt: new Date(Date.now() - 8 * DAY_MS),
     expiresAt: new Date(Date.now() - DAY_MS),
   });
-  const result = await runAutoPromotionTick();
-  assert.equal(result.promoted, false);
-  assert.equal(result.reason, "graduation_unmet");
+  // The tick's expiry step alone: a whole tick would also promote from a bound grant.
+  const result = await expireDueAutoGrants(AUTO_SYSTEM_ACTOR);
   assert.ok(result.expired >= 1);
   assert.equal((await prisma.amuxRecommendationAutoGrant.findUnique({ where: { id: dueForTick } }))?.status, "expired");
   const tickExpiry = await prisma.adminAuditLog.findFirst({
@@ -393,8 +393,7 @@ test("each due grant expires in its own transaction, so the audit chain lock is 
     );
   }
   const before = await ledger();
-  const result = await runAutoPromotionTick();
-  assert.equal(result.promoted, false);
+  const result = await expireDueAutoGrants(AUTO_SYSTEM_ACTOR);
   assert.ok(result.expired >= dueIds.length);
   const writers = new Set<string>();
   for (const id of dueIds) {
@@ -428,15 +427,6 @@ test("the owner consume uses the bound item and amount and writes exactly one co
     item: itemH,
     ...overrides,
   });
-  const early = parseAutoConsumeRequest(JSON.stringify(v8()));
-  assert.equal(early.ok, true);
-  if (!early.ok) return;
-  await assert.rejects(
-    () => commitAutoPromotion(session, request, early.request, early.requestDigest),
-    refusedWith("graduation_unmet"),
-  );
-  assert.equal((await prisma.amuxWorkItem.findUnique({ where: { id: cardH.id }, select: { status: true } }))?.status, "backlog");
-
   // Twenty consumed human decisions spanning fourteen days.
   const start = new Date(Date.now() - 14 * DAY_MS);
   let promoteSnapshot = "";
@@ -699,7 +689,7 @@ test("a grant refused for its own card does not hold the next grant, and later e
   }
 });
 
-test("two lost outcomes within 15 minutes open a halt, and a halted tick refuses", async () => {
+test("two lost outcomes within 15 minutes are recorded and open no halt (2026-11-16)", async () => {
   // First: the consume had committed, so the read-back finds the row.
   const first = await recordAutoOutcomeUnknown({
     actor: AUTO_SYSTEM_ACTOR,
@@ -733,51 +723,16 @@ test("two lost outcomes within 15 minutes open a halt, and a halted tick refuses
   });
   assert.equal(second.recorded, true);
   assert.equal(second.consumptionFound, false);
-  assert.equal(second.halted, true);
-  assert.equal(second.haltId, openHaltId);
-  const halt = await prisma.amuxRecommendationAutoHalt.findUnique({
-    where: { id: openHaltId },
-    select: { reason: true, violationCode: true, actorUserId: true, clearedAt: true },
-  });
-  assert.deepEqual(halt, {
-    reason: "outcome_unknown_burst",
-    violationCode: null,
-    actorUserId: AUTO_SYSTEM_ACTOR_ROW_ID,
-    clearedAt: null,
-  });
+  assert.equal(second.halted, false);
+  assert.equal(await prisma.amuxRecommendationAutoHalt.count({ where: { id: openHaltId } }), 0);
 
   // The same lost outcome again is one event, not a third.
   const again = await recordAutoOutcomeUnknown({ actor: AUTO_SYSTEM_ACTOR, consumptionId: lostId, grantId: null });
   assert.equal(again.recorded, false);
   assert.equal(await prisma.amuxRecommendationAutoUnknown.count({ where: { id: lostId } }), 1);
   const replay = await commitAutoHaltFromReadback({ actor: autoHumanActor(session, request), haltId: randomUUID() });
-  assert.deepEqual(replay, { haltId: openHaltId, halted: true, replayed: true });
+  assert.deepEqual(replay, { haltId: null, halted: false, replayed: false });
 
-  const halted = await runAutoPromotionTick();
-  assert.equal(halted.promoted, false);
-  assert.equal(halted.reason, "auto_halted");
-});
-
-test("the owner resumes the halt, and the next tick is no longer halted", async () => {
-  await assert.rejects(() => commitAutoResume(session, request, randomUUID()), refusedWith("not_found"));
-  const resumed = await commitAutoResume(session, request, openHaltId);
-  assert.deepEqual(resumed, { haltId: openHaltId, cleared: true, replayed: false });
-  const halt = await prisma.amuxRecommendationAutoHalt.findUnique({
-    where: { id: openHaltId },
-    select: { clearedAt: true },
-  });
-  assert.ok(halt?.clearedAt instanceof Date);
-  const audit = await prisma.adminAuditLog.findFirst({
-    where: { action: "amux.auto_promotion.resumed", targetId: openHaltId },
-    select: { actorUserId: true },
-  });
-  assert.equal(audit?.actorUserId, actorUserId);
-  assert.deepEqual(await commitAutoResume(session, request, openHaltId), {
-    haltId: openHaltId,
-    cleared: true,
-    replayed: true,
-  });
   const next = await runAutoPromotionTick();
-  assert.equal(next.promoted, false);
-  assert.equal(next.reason, "no_grant");
+  assert.notEqual(next.reason, "auto_halted");
 });

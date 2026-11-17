@@ -33,12 +33,31 @@ export type DmInstanceMode = (typeof DM_INSTANCE_MODES)[number];
 /** Every value the store accepts in some scope; the pairing is a second CHECK. */
 export const DM_SWITCH_VALUES = ["on", "off", "proposal"] as const;
 
-/** Section 8: a person's change, the validation-failure latch, section 5's cleanup latch. */
-export const DM_SWITCH_REASON_CODES = ["operator", "validation_latch", "cleanup_latch"] as const;
+/**
+ * Section 8: a person's change, the validation-failure latch, section 5's
+ * cleanup latch, and since 2026-11-16 (migration
+ * 20261116140100_amux_dm_latch_release) the system's release of a latch.
+ */
+export const DM_SWITCH_REASON_CODES = ["operator", "validation_latch", "cleanup_latch", "latch_release"] as const;
 export type DmSwitchReasonCode = (typeof DM_SWITCH_REASON_CODES)[number];
 
 export const DM_SWITCH_LATCH_REASONS = ["validation_latch", "cleanup_latch"] as const;
 export type DmSwitchLatchReason = (typeof DM_SWITCH_LATCH_REASONS)[number];
+
+/** The system's release of a latch (owner direction 2026-11-16). */
+export const DM_SWITCH_SYSTEM_RELEASE_REASON = "latch_release" as const;
+
+/**
+ * How long after a latch the system releases it (owner direction 2026-11-16:
+ * "일정 시간 뒤 자동으로 다시 켭니다"): an hour, which the switch guard holds
+ * (`INTERVAL '1 hour'`). The maintenance sweep checks every fifteen minutes,
+ * so a latch stands for an hour to an hour and a quarter. Only back to the
+ * proposal mode a person last chose: an instance a person turned off stays off.
+ */
+export const DM_LATCH_SYSTEM_RELEASE_AFTER_MS = 60 * 60 * 1000;
+
+export const isDmSwitchLatchReason = (value: unknown): value is DmSwitchLatchReason =>
+  typeof value === "string" && (DM_SWITCH_LATCH_REASONS as readonly string[]).includes(value);
 
 export const DM_SWITCH_ACTOR_KINDS = ["human", "system"] as const;
 export type DmSwitchActorKind = (typeof DM_SWITCH_ACTOR_KINDS)[number];
@@ -121,8 +140,9 @@ export const decisionMakerSwitchStateFromRows = (rows: unknown): DecisionMakerSw
  * - `none`: the instance has no validation latch; every result counts.
  * - `latched`: its newest validation latch has no person's event after it --
  *   the run it latched stands, and nothing is owed until it is released.
- * - `released`: the first person's event after that latch, which the switch
- *   guard requires to be `amux.decision.latch_release`. The count starts at
+ * - `released`: the first release after that latch -- a person's event, which
+ *   the switch guard requires to be `amux.decision.latch_release`, or since
+ *   2026-11-16 the system's own release an hour after it. The count starts at
  *   it: the results admitted under that release or a later switch event of
  *   the instance -- each result records the sequence of its instance's newest
  *   switch event, read by the ledger's guard under the shared switch gate
@@ -317,13 +337,34 @@ export const parseDmSwitchLatch = (instance: unknown, reason: unknown, cleanupEv
 
 /**
  * Which audit action a person's change is recorded under: the release of a
- * latch when the scope's newest event is the system's, otherwise a mode
- * change. The trigger refuses the event under any other action.
+ * latch when the scope's newest event is a system latch, otherwise a mode
+ * change -- a system release (2026-11-16) is no latch. The trigger refuses
+ * the event under any other action.
  */
 export const dmOperatorSwitchAction = (
-  newestActorKind: DmSwitchActorKind | null,
+  newest: { actorKind: DmSwitchActorKind; reasonCode: string } | null,
 ): (typeof DM_SWITCH_AUDIT_ACTIONS)["mode" | "latchRelease"] =>
-  newestActorKind === "system" ? DM_SWITCH_AUDIT_ACTIONS.latchRelease : DM_SWITCH_AUDIT_ACTIONS.mode;
+  newest !== null && newest.actorKind === "system" && isDmSwitchLatchReason(newest.reasonCode)
+    ? DM_SWITCH_AUDIT_ACTIONS.latchRelease
+    : DM_SWITCH_AUDIT_ACTIONS.mode;
+
+/**
+ * Whether the system releases an instance's latch now (owner direction
+ * 2026-11-16), from the scope's newest event and its newest person's event,
+ * by the database clock: the newest is a system latch at least
+ * `DM_LATCH_SYSTEM_RELEASE_AFTER_MS` old, and the person's newest choice is
+ * proposal mode. The switch guard holds the same rule.
+ */
+export const dmLatchSystemReleaseDue = (input: {
+  newest: { actorKind: unknown; reasonCode: unknown; createdAtMs: number } | null;
+  operatorValue: unknown;
+  dbNowMs: number;
+}): boolean =>
+  input.newest !== null &&
+  input.newest.actorKind === "system" &&
+  isDmSwitchLatchReason(input.newest.reasonCode) &&
+  input.dbNowMs >= input.newest.createdAtMs + DM_LATCH_SYSTEM_RELEASE_AFTER_MS &&
+  input.operatorValue === "proposal";
 
 /** The only keys a switch audit entry carries. No free text. */
 export const DM_SWITCH_AUDIT_METADATA_KEYS = [

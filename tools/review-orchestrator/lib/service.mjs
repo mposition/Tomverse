@@ -36,7 +36,7 @@ const mirrorLock = (config) => join(config.stateDir, "mirror.lock");
 /**
  * Drain mode is a flag file in the state directory, so it survives a restart:
  * an update drains, waits for the running reviews, restarts, then lifts the
- * drain, and no review is cut off and closed as unknown.
+ * drain, and no review is cut off and run again from the start.
  */
 const drainFlag = (config) => join(config.stateDir, "drain");
 export const isDraining = (config) => existsSync(drainFlag(config));
@@ -137,13 +137,8 @@ export async function submitJob(config, request, bundlePath, { now = new Date() 
 
   const store = new Store(config.stateDir);
   const id = newJobId(now);
-  // Counting pending jobs and publishing this one happen under one lock, so
-  // concurrent submits cannot all read the same count and all pass the cap.
+  // The queue has no length cap: a submit always waits its turn.
   return withLock(mirrorLock(config), () => {
-    const pending = store.listJobs().filter(({ slots }) => slots.some((slot) => slot.status !== "done")).length;
-    if (pending >= config.maxPendingJobs) {
-      throw new UsageError("queue_full", `${pending} jobs are still pending; wait for one to finish`);
-    }
     let imported = false;
     try {
       ensureMirror(repo);
@@ -232,10 +227,24 @@ export const promptForProvider = (provider, prompt) =>
   provider.promptNote ? `${provider.promptNote}\n\n${prompt}` : prompt;
 
 /**
+ * A failed run is retried, never ended as unknown (owner decision 2026-11-16).
+ * The first group says nothing about the change under review, only that this
+ * vendor could not answer; the second is a local fault of this host. Both go
+ * back to the queue.
+ */
+const VENDOR_FAILURES = /^(timeout|output_too_large|reviewer_spawn_failed|reviewer_exit_.+)$/;
+const LOCAL_FAILURES = new Set(["worktree_failed", "prompt_file_failed"]);
+
+const RETRY_BASE_MS = 60_000;
+const RETRY_MAX_MS = 30 * 60_000;
+
+/** Wait before a slot is tried again once every vendor has failed it: 1, 2, 4 ... up to 30 minutes. */
+export const retryDelayMs = (attempts) => Math.min(RETRY_BASE_MS * 2 ** Math.max(0, attempts - 1), RETRY_MAX_MS);
+
+/**
  * The scheduling loop. One instance per state directory (enforced by the
  * caller with a daemon lock). Children are tracked in memory only, so a slot
- * left `running` from a previous process is an unknown outcome: it is closed
- * as `unknown`, never re-run.
+ * left `running` from a previous process goes back to the queue.
  */
 export class Orchestrator {
   constructor(config, { now = () => Date.now(), log = () => {} } = {}) {
@@ -245,6 +254,8 @@ export class Orchestrator {
     this.log = log;
     this.inflight = new Set();
     this.killers = new Set();
+    this.stopping = false;
+    this.waitingLogged = new Set();
     this.workRoot = join(config.stateDir, "worktrees");
     mkdirSync(this.workRoot, { recursive: true });
   }
@@ -292,16 +303,33 @@ export class Orchestrator {
     return closed;
   }
 
+  /**
+   * A slot left `running` by a previous process was cut off by the restart, not
+   * answered: it goes back to the queue as it was (no vendor is blamed, no
+   * delay), and runs again from the start.
+   */
   recoverOrphans() {
     let recovered = 0;
     for (const { job, slots } of this.store.listJobs()) {
       for (const slot of slots) {
         if (slot.status !== "running") continue;
-        this.store.writeSlot(job.id, { ...slot, status: "done", verdict: "unknown", reason: "orchestrator_restarted", findings: [], endedAt: this.now() });
+        this.requeueSlot(job.id, slot, { retriedAfter: "orchestrator_restarted" });
         recovered += 1;
       }
     }
     return recovered;
+  }
+
+  /** The slot as a fresh queued one, keeping only what steers its next assignment. */
+  requeueSlot(jobId, slot, { retriedAfter, excludeVendors = slot.excludeVendors ?? [], attempts = slot.attempts ?? 0, delayMs = 0 }) {
+    this.store.writeSlot(jobId, {
+      index: slot.index,
+      status: "queued",
+      excludeVendors,
+      retriedAfter,
+      attempts,
+      ...(delayMs > 0 ? { notBefore: this.now() + delayMs } : {}),
+    });
   }
 
   tick(quotas) {
@@ -327,7 +355,24 @@ export class Orchestrator {
       const { job, slots } = byId.get(decision.jobId);
       const slot = slots.find((s) => s.index === decision.slot);
       if (decision.kind === "impossible") {
-        this.store.writeSlot(job.id, { ...slot, status: "done", verdict: "unknown", reason: "no_eligible_reviewer", findings: [], endedAt: now });
+        // A retried slot whose exclusions left it no vendor -- the one it was
+        // waiting for went to another slot of the job -- would wait for good.
+        // Its exclusions are dropped and it waits its backoff, then goes round
+        // the vendors again (review r-20261116-223613-55be3b).
+        if ((slot.excludeVendors ?? []).length > 0 && slot.status === "queued") {
+          const attempts = slot.attempts ?? 1;
+          this.requeueSlot(job.id, slot, { retriedAfter: slot.retriedAfter ?? "no_alternative",
+            excludeVendors: [], attempts, delayMs: retryDelayMs(attempts) });
+          this.log(`no vendor left for ${job.id}#${slot.index}; exclusions dropped, retried in ${Math.round(retryDelayMs(attempts) / 1000)}s`);
+          continue;
+        }
+        // Nobody can take this slot right now (a provider was disabled, a
+        // vendor's quota is spent): it waits in the queue for a later pass.
+        const key = `${job.id}#${slot.index}`;
+        if (!this.waitingLogged.has(key)) {
+          this.waitingLogged.add(key);
+          this.log(`no eligible reviewer for ${key}; waiting in the queue`);
+        }
         continue;
       }
       if (this.store.readSlot(job.id, slot.index).status !== "queued") continue;
@@ -342,8 +387,9 @@ export class Orchestrator {
     return decisions;
   }
 
-  /** Stop every running reviewer; their slots close as unknown on the next start. */
+  /** Stop every running reviewer; their slots go back to the queue. */
   killAll() {
+    this.stopping = true;
     for (const kill of this.killers) kill();
   }
 
@@ -361,32 +407,57 @@ export class Orchestrator {
       this.log(`ignored a late result for ${job.id}#${slot.index}`);
       return;
     }
-    // A reviewer that ran out of time is not the answer (owner decision
-    // 2026-11-15): the slot goes back to the queue for another vendor, and ends
-    // unknown only when no other vendor is left to try.
-    if (outcome.reason === "timeout" && this.requeueTimedOut(job, slot)) return;
+    // A reviewer cut off by this daemon's own shutdown did not answer.
+    if (this.stopping && outcome.verdict === "unknown") {
+      this.requeueSlot(job.id, slot, { retriedAfter: "orchestrator_restarted" });
+      this.log(`stopped ${job.id}#${slot.index}; back in the queue`);
+      return;
+    }
+    // A reviewer that failed to answer is not the answer (owner decisions
+    // 2026-11-15 and 2026-11-16): the slot goes back to the queue.
+    if (outcome.verdict === "unknown" && this.requeueFailed(job, slot, outcome.reason)) return;
     this.store.writeSlot(job.id, { ...slot, status: "done", ...outcome, endedAt: this.now() });
     this.log(`finished ${job.id}#${slot.index} ${outcome.verdict}${outcome.reason ? ` (${outcome.reason})` : ""}`);
   }
 
   /**
-   * Queue a timed-out slot again, excluding every vendor that already timed
-   * out on it and every vendor another slot of the job uses. An operator-pinned
-   * slot is left as it ended: the operator named that reviewer.
+   * Queue a failed slot again. A vendor failure excludes every vendor that
+   * already failed on the slot and every vendor another slot of the job uses,
+   * so the next try goes to a vendor that has not failed it yet. When none is
+   * left the exclusions are dropped and the slot waits, longer each time
+   * (`retryDelayMs`), then goes round the vendors again. A local fault blames
+   * no vendor and only waits. An operator-pinned slot names its reviewer and
+   * waits for that one. Returns false for a reason that is an answer.
    */
-  requeueTimedOut(job, slot) {
-    if (job.reviewerProviders?.[slot.index] !== undefined) return false;
+  requeueFailed(job, slot, reason) {
+    const local = LOCAL_FAILURES.has(reason);
+    if (!local && !VENDOR_FAILURES.test(reason ?? "")) return false;
     const entry = this.store.readJob(job.id);
     if (!entry) return false;
-    const tried = [...new Set([...(slot.excludeVendors ?? []), slot.vendor].filter(Boolean))];
-    const usedElsewhere = entry.slots.filter((other) => other.index !== slot.index && other.vendor)
-      .map((other) => other.vendor);
-    const alternatives = eligibleProviders(this.config.providers, job.authorVendor)
-      .filter((provider) => !tried.includes(provider.vendor) && !usedElsewhere.includes(provider.vendor));
-    if (alternatives.length === 0) return false;
-    this.store.writeSlot(job.id, { index: slot.index, status: "queued", excludeVendors: tried,
-      retriedAfter: "timeout" });
-    this.log(`timed out ${job.id}#${slot.index} on ${slot.vendor}; queued for another vendor (not ${tried.join(", ")})`);
+    const attempts = (slot.attempts ?? 0) + 1;
+    let excludeVendors = slot.excludeVendors ?? [];
+    let delayMs = retryDelayMs(attempts);
+    if (!local && job.reviewerProviders?.[slot.index] === undefined) {
+      const tried = [...new Set([...excludeVendors, slot.vendor].filter(Boolean))];
+      // Another slot's vendor, and the vendor an operator-pinned slot holds
+      // even before it runs (planAssignments reserves it): neither is an
+      // alternative for this slot (review r-20261116-215201-35d854).
+      const pinned = (job.reviewerProviders ?? []).flatMap((id, index) => index === slot.index ||
+        id === undefined ? [] : [this.config.providers.find((provider) => provider.id === id)?.vendor])
+        .filter(Boolean);
+      const usedElsewhere = [...entry.slots.filter((other) => other.index !== slot.index && other.vendor)
+        .map((other) => other.vendor), ...pinned];
+      const untried = eligibleProviders(this.config.providers, job.authorVendor)
+        .some((provider) => !tried.includes(provider.vendor) && !usedElsewhere.includes(provider.vendor));
+      if (untried) {
+        excludeVendors = tried;
+        delayMs = 0;
+      } else {
+        excludeVendors = [];
+      }
+    }
+    this.requeueSlot(job.id, slot, { retriedAfter: reason, excludeVendors, attempts, delayMs });
+    this.log(`failed ${job.id}#${slot.index} on ${slot.vendor} (${reason}); queued again${excludeVendors.length > 0 ? ` (not ${excludeVendors.join(", ")})` : ""}${delayMs > 0 ? ` in ${Math.round(delayMs / 1000)}s` : ""}`);
     return true;
   }
 
@@ -397,6 +468,9 @@ export class Orchestrator {
       let prepared;
       try {
         prepared = await withLock(mirrorLock(this.config), () => {
+          // A run a restart cut off may have left its checkout behind.
+          removeWorktree(repo.mirror, workdir);
+          rmSync(workdir, { recursive: true, force: true });
           addWorktree(repo.mirror, workdir, job.head);
           isolateInstructionFiles(workdir, job.base, job.head);
           // Instruction-file edits are shown over the whole base..head range

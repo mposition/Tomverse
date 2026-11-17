@@ -7,8 +7,6 @@ import { AMUX_MAX_EXECUTION_ATTEMPTS } from "@/lib/amux/executionBudgetCore";
 import { POST as queuePost } from "@/app/api/internal/amux/queue/route";
 import { POST as routingSnapshotPost } from "@/app/api/internal/amux/routing-snapshot/route";
 import { POST as ownedQueuePost } from "@/app/api/internal/amux/owned-queue/route";
-import { POST as workerRegisterPost } from "@/app/api/internal/amux/workers/register/route";
-import { POST as workerHeartbeatPost } from "@/app/api/internal/amux/workers/heartbeat/route";
 import { POST as executionStartPost } from "@/app/api/internal/amux/execution/start/route";
 import { POST as executionHeartbeatPost } from "@/app/api/internal/amux/execution/heartbeat/route";
 import { POST as executionSettlePost } from "@/app/api/internal/amux/execution/settle/route";
@@ -522,10 +520,7 @@ test("AMUX backlog is excluded by authenticated queue and routing APIs", async (
   const backlogId = `amux-backlog-api-${randomUUID()}`;
   const secret = makeAmuxSyncSecret();
   const previousSecret = process.env.TOMVERSE_AMUX_SYNC_SECRET;
-  const previousExecutionApi = process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
   process.env.TOMVERSE_AMUX_SYNC_SECRET = secret;
-  process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = "1";
-
   try {
     await prisma.amuxWorkItem.create({
       data: { id: backlogId, title: "Catalog card for API isolation" },
@@ -588,9 +583,6 @@ test("AMUX backlog is excluded by authenticated queue and routing APIs", async (
     if (previousSecret === undefined)
       delete process.env.TOMVERSE_AMUX_SYNC_SECRET;
     else process.env.TOMVERSE_AMUX_SYNC_SECRET = previousSecret;
-    if (previousExecutionApi === undefined)
-      delete process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
-    else process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = previousExecutionApi;
     await prisma.amuxWorkItem.deleteMany({ where: { id: backlogId } });
   }
 });
@@ -1927,86 +1919,6 @@ test("claim persists scheduler and worker-router evidence in one append-only dec
   });
 });
 
-test("one authenticated claim kill-switch refusal appends one audit without mutating ownership", async () => {
-  const taskId = await createTodo("amux-api-kill-switch");
-  const secret = makeAmuxSyncSecret();
-  const previousSecret = process.env.TOMVERSE_AMUX_SYNC_SECRET;
-  const previousExecutionApi = process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
-
-  process.env.TOMVERSE_AMUX_SYNC_SECRET = secret;
-  delete process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
-
-  try {
-    const auditCountBefore = await prisma.adminAuditLog.count({
-      where: { action: "amux.claim.refused" },
-    });
-
-    const response = await claimPost(
-      new Request("http://localhost/api/internal/amux/claim", {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${secret}`,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({}),
-      }),
-    );
-
-    assert.equal(response.status, 409);
-    assert.deepEqual(await response.json(), {
-      claimed: false,
-      reason: "execution_api_disabled",
-    });
-
-    const task = await prisma.amuxWorkItem.findUniqueOrThrow({
-      where: { id: taskId },
-    });
-
-    assert.equal(task.owner, null);
-    assert.equal(task.revision, 0);
-    assert.equal(task.claimedAt, null);
-    assert.equal(
-      await prisma.amuxRouteDecision.count({ where: { taskId } }),
-      0,
-    );
-
-    const refusalAudits = await prisma.adminAuditLog.findMany({
-      where: { action: "amux.claim.refused" },
-      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-    });
-
-    assert.equal(refusalAudits.length, auditCountBefore + 1);
-
-    const refusalAudit = refusalAudits.at(-1);
-
-    assert.ok(refusalAudit);
-    assert.equal(refusalAudit.actorUserId, null);
-    assert.equal(refusalAudit.actorEmail, null);
-    assert.equal(refusalAudit.targetType, "AmuxClaimRequest");
-    assert.equal(refusalAudit.targetId, null);
-    assert.deepEqual(refusalAudit.metadata, {
-      reason: "execution_api_disabled",
-      measured: true,
-      verdict: "refused",
-      systemActor: "tomverse-amux-orchestrator",
-    });
-  } finally {
-    if (previousSecret === undefined) {
-      delete process.env.TOMVERSE_AMUX_SYNC_SECRET;
-    } else {
-      process.env.TOMVERSE_AMUX_SYNC_SECRET = previousSecret;
-    }
-
-    if (previousExecutionApi === undefined) {
-      delete process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
-    } else {
-      process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = previousExecutionApi;
-    }
-
-    await prisma.amuxWorkItem.deleteMany({ where: { id: taskId } });
-  }
-});
-
 test("an unauthenticated claim refusal does not append an audit oracle", async () => {
   const previousSecret = process.env.TOMVERSE_AMUX_SYNC_SECRET;
   process.env.TOMVERSE_AMUX_SYNC_SECRET = makeAmuxSyncSecret();
@@ -2048,11 +1960,8 @@ test("an authenticated not-eligible claim appends one bounded refusal audit", as
   const worker = "codex-missing-task";
   const secret = makeAmuxSyncSecret();
   const previousSecret = process.env.TOMVERSE_AMUX_SYNC_SECRET;
-  const previousExecutionApi = process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
 
   process.env.TOMVERSE_AMUX_SYNC_SECRET = secret;
-  process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = "1";
-
   try {
     const response = await claimPost(
       new Request("http://localhost/api/internal/amux/claim", {
@@ -2114,11 +2023,6 @@ test("an authenticated not-eligible claim appends one bounded refusal audit", as
       process.env.TOMVERSE_AMUX_SYNC_SECRET = previousSecret;
     }
 
-    if (previousExecutionApi === undefined) {
-      delete process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
-    } else {
-      process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = previousExecutionApi;
-    }
   }
 });
 
@@ -2145,10 +2049,8 @@ test("an authenticated authoritative-worker mismatch appends one bounded refusal
   });
 
   const previousSecret = process.env.TOMVERSE_AMUX_SYNC_SECRET;
-  const previousExecutionApi = process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
 
   process.env.TOMVERSE_AMUX_SYNC_SECRET = secret;
-  process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = "1";
   // Version 35 (R2c): workers come from the registry the catalog is derived
   // from, so they are seed workers.
   await seedAmuxWorkerCatalog([{ worker_name: authoritativeWorker, routing_roles: ["implementation"] }]);
@@ -2226,12 +2128,6 @@ test("an authenticated authoritative-worker mismatch appends one bounded refusal
       process.env.TOMVERSE_AMUX_SYNC_SECRET = previousSecret;
     }
 
-    if (previousExecutionApi === undefined) {
-      delete process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
-    } else {
-      process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = previousExecutionApi;
-    }
-
     await prisma.amuxWorkerRuntime.deleteMany({ where: { workerName: authoritativeWorker } });
     await prisma.amuxWorkItem.deleteMany({ where: { id: taskId } });
   }
@@ -2258,10 +2154,8 @@ test("claim API refuses ownership when no worker is execution-ready", async () =
   });
 
   const previousSecret = process.env.TOMVERSE_AMUX_SYNC_SECRET;
-  const previousExecutionApi = process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
 
   process.env.TOMVERSE_AMUX_SYNC_SECRET = secret;
-  process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = "1";
   // Version 35 (R2c): workers come from the registry the catalog is derived
   // from, so they are seed workers.
   await seedAmuxWorkerCatalog([{ worker_name: worker, routing_roles: ["implementation"] }]);
@@ -2363,12 +2257,6 @@ test("claim API refuses ownership when no worker is execution-ready", async () =
       delete process.env.TOMVERSE_AMUX_SYNC_SECRET;
     } else {
       process.env.TOMVERSE_AMUX_SYNC_SECRET = previousSecret;
-    }
-
-    if (previousExecutionApi === undefined) {
-      delete process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
-    } else {
-      process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = previousExecutionApi;
     }
 
     await prisma.amuxHumanEscalation.deleteMany({ where: { taskId } });
@@ -3319,7 +3207,7 @@ test("replacement worker generation cannot heartbeat or settle the old execution
   }
 });
 
-test("execution API is fail-closed by default and preserves the execution fences when enabled", async () => {
+test("the execution API preserves the execution fences", async () => {
   const taskId = await createTodo("amux-execution-api");
   const worker = `amux-api-${randomUUID()}`;
   const instanceId = randomUUID();
@@ -3327,10 +3215,8 @@ test("execution API is fail-closed by default and preserves the execution fences
   const base = new Date();
 
   const previousSecret = process.env.TOMVERSE_AMUX_SYNC_SECRET;
-  const previousExecutionApi = process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
 
   process.env.TOMVERSE_AMUX_SYNC_SECRET = secret;
-  delete process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
 
   try {
     await prisma.amuxWorkItem.update({
@@ -3354,39 +3240,6 @@ test("execution API is fail-closed by default and preserves the execution fences
     });
 
     assert.equal(ready.accepted, true);
-
-    const disabledResponse = await executionStartPost(
-      new Request("http://localhost/api/internal/amux/execution/start", {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${secret}`,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          task_id: taskId,
-          worker,
-          instance_id: instanceId,
-          generation: runtime.generation,
-          expected_revision: 1,
-        }),
-      }),
-    );
-
-    assert.equal(disabledResponse.status, 409);
-
-    assert.deepEqual(await disabledResponse.json(), {
-      started: false,
-      reason: "execution_api_disabled",
-    });
-
-    const untouched = await prisma.amuxWorkItem.findUniqueOrThrow({
-      where: { id: taskId },
-    });
-
-    assert.equal(untouched.status, "todo");
-    assert.equal(untouched.revision, 1);
-
-    process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = "1";
 
     const startResponse = await executionStartPost(
       new Request("http://localhost/api/internal/amux/execution/start", {
@@ -3516,12 +3369,6 @@ test("execution API is fail-closed by default and preserves the execution fences
       delete process.env.TOMVERSE_AMUX_SYNC_SECRET;
     } else {
       process.env.TOMVERSE_AMUX_SYNC_SECRET = previousSecret;
-    }
-
-    if (previousExecutionApi === undefined) {
-      delete process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
-    } else {
-      process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = previousExecutionApi;
     }
 
     await prisma.amuxWorkDelivery.deleteMany({
@@ -3667,58 +3514,6 @@ test("expired execution recovery returns only the still-current attempt to Todo 
   }
 });
 
-test("execution-off worker and owned routes cannot touch control state", async () => {
-  const worker = `amux-gated-${randomUUID()}`;
-  const secret = makeAmuxSyncSecret();
-  const previousSecret = process.env.TOMVERSE_AMUX_SYNC_SECRET;
-  const previousExecutionApi = process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
-  process.env.TOMVERSE_AMUX_SYNC_SECRET = secret;
-  delete process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
-  try {
-    const auditBefore = await prisma.adminAuditLog.count({
-      where: { targetType: "AmuxWorkerRuntime", targetId: worker },
-    });
-    const routes = [
-      ["workers/register", workerRegisterPost],
-      ["workers/heartbeat", workerHeartbeatPost],
-      ["owned-queue", ownedQueuePost],
-    ] as const;
-    for (const [path, POST] of routes) {
-      const response = await POST(
-        new Request(`http://localhost/api/internal/amux/${path}`, {
-          method: "POST",
-          headers: { authorization: `Bearer ${secret}` },
-          body: "{malformed body must not be parsed}",
-        }),
-      );
-      assert.equal(response.status, 409, path);
-      assert.equal((await response.json()).reason, "execution_api_disabled");
-    }
-    assert.equal(
-      await prisma.amuxWorkerRuntime.count({ where: { workerName: worker } }),
-      0,
-    );
-    assert.equal(
-      await prisma.adminAuditLog.count({
-        where: { targetType: "AmuxWorkerRuntime", targetId: worker },
-      }),
-      auditBefore,
-    );
-  } finally {
-    if (previousSecret === undefined)
-      delete process.env.TOMVERSE_AMUX_SYNC_SECRET;
-    else process.env.TOMVERSE_AMUX_SYNC_SECRET = previousSecret;
-    if (previousExecutionApi === undefined)
-      delete process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
-    else process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = previousExecutionApi;
-  }
-});
-
-// The owned queue keeps the seven keys a WSL bridge built from main before the
-// develop AMUX port requires, during the compatibility window; that bridge
-// halts on a body without them (docs/ops/amux/wsl-execution-bridge.md, "Wire
-// compatibility"). description and claimed_at are Options there and are not
-// sent. The key list is the shared fixture the Rust client parses.
 test("owned queue exposes only runnable owner-assigned Todo work in the compatibility shape", async () => {
   const ownedId = await createTodo("amux-owned-queue");
   const unownedId = await createTodo("amux-unowned-queue");
@@ -3727,11 +3522,8 @@ test("owned queue exposes only runnable owner-assigned Todo work in the compatib
   const claimedAt = new Date();
 
   const previousSecret = process.env.TOMVERSE_AMUX_SYNC_SECRET;
-  const previousExecutionApi = process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
 
   process.env.TOMVERSE_AMUX_SYNC_SECRET = secret;
-  process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = "1";
-
   try {
     await prisma.amuxWorkItem.update({
       where: {
@@ -3797,12 +3589,6 @@ test("owned queue exposes only runnable owner-assigned Todo work in the compatib
     } else {
       process.env.TOMVERSE_AMUX_SYNC_SECRET = previousSecret;
     }
-    if (previousExecutionApi === undefined) {
-      delete process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
-    } else {
-      process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = previousExecutionApi;
-    }
-
     await prisma.amuxWorkItem.deleteMany({
       where: {
         id: {
@@ -3824,11 +3610,8 @@ test("execution start atomically creates durable delivery and pull ack remain id
   );
 
   const previousSecret = process.env.TOMVERSE_AMUX_SYNC_SECRET;
-  const previousExecutionApi = process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
 
   process.env.TOMVERSE_AMUX_SYNC_SECRET = secret;
-  process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = "1";
-
   try {
     await prisma.amuxWorkItem.update({
       where: { id: taskId },
@@ -4036,12 +3819,6 @@ test("execution start atomically creates durable delivery and pull ack remain id
       delete process.env.TOMVERSE_AMUX_SYNC_SECRET;
     } else {
       process.env.TOMVERSE_AMUX_SYNC_SECRET = previousSecret;
-    }
-
-    if (previousExecutionApi === undefined) {
-      delete process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
-    } else {
-      process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = previousExecutionApi;
     }
 
     await prisma.amuxWorkDelivery.deleteMany({
@@ -4541,13 +4318,10 @@ test("claim API persists authoritative routing when consistent client evidence d
 
   const previousSecret = process.env.TOMVERSE_AMUX_SYNC_SECRET;
 
-  const previousExecutionApi = process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
 
   const worker = "codex-impl";
 
   process.env.TOMVERSE_AMUX_SYNC_SECRET = secret;
-
-  process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = "1";
 
   // Version 35 (R2c): workers come from the registry the catalog is derived
   // from, so they are seed workers.
@@ -4676,11 +4450,6 @@ test("claim API persists authoritative routing when consistent client evidence d
       process.env.TOMVERSE_AMUX_SYNC_SECRET = previousSecret;
     }
 
-    if (previousExecutionApi === undefined) {
-      delete process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
-    } else {
-      process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = previousExecutionApi;
-    }
     // The successful claim created an append-only route decision. Keep its
     // task in this disposable test database rather than deleting evidence.
   }

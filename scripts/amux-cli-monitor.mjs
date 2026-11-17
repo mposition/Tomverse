@@ -1,11 +1,11 @@
 import { collectAgentOfficeCliSnapshot, configuredAgentOfficeCliWorkers,
   sendAgentOfficeCliSnapshot } from "../lib/agentOfficeCliMonitorCollector.mjs";
-import { AGENT_OFFICE_CLI_POLL_MS } from "../lib/agentOfficeCliMonitorCore.ts";
+import { AGENT_OFFICE_CLI_POLL_MS, agentOfficeCliMonitorSwitchOn } from "../lib/agentOfficeCliMonitorCore.ts";
 
 const flags = process.argv.slice(2);
 if (flags.some(flag => !["--once", "--check-source"].includes(flag))) throw new Error("invalid arguments");
 const check = flags.includes("--check-source");
-if (!check && (process.env.TOMVERSE_AMUX_CLI_MONITOR !== "1" ||
+if (!check && (!agentOfficeCliMonitorSwitchOn(process.env.TOMVERSE_AMUX_CLI_MONITOR) ||
     (process.env.TOMVERSE_AMUX_CLI_MONITOR_SECRET ?? "").length < 32)) {
   process.stdout.write("CLI monitor disabled\n");
   process.exit(0);

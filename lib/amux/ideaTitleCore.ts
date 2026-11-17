@@ -12,25 +12,14 @@
  * The backfill in prisma/migrations/20261104130000_amux_idea_title repeated the
  * former 80-character rule in SQL for Scout suggestions already sent.
  */
-import { amuxIntakeLegacyLimits } from "./intakeLimitsCore.ts";
-
-/** With TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS only: the former cut, with an ellipsis. */
-export const AMUX_IDEA_TITLE_MAX = 80;
-
 /** suggestionIdeaText (lib/productResearchScoutCore.ts) opens a Scout idea with it. */
 const SCOUT_PREFIX = "[Scout 제안]";
 
-export function amuxIdeaTitleFromText(text: string,
-  legacy: boolean = amuxIntakeLegacyLimits()): string | null {
+export function amuxIdeaTitleFromText(text: string): string | null {
   const line = text.split(/\r\n|\r|\n/).find((candidate) => candidate.trim() !== "");
   if (line === undefined) return null;
   let title = line.replace(/\p{Cc}/gu, " ").replace(/\s+/g, " ").trim();
   if (title.startsWith(SCOUT_PREFIX)) title = title.slice(SCOUT_PREFIX.length).trim();
-  // Code points, so a cut never splits a surrogate pair and matches SQL char_length.
-  const points = Array.from(title);
-  if (legacy && points.length > AMUX_IDEA_TITLE_MAX) {
-    title = `${points.slice(0, AMUX_IDEA_TITLE_MAX - 1).join("").trimEnd()}…`;
-  }
   return title === "" ? null : title;
 }
 

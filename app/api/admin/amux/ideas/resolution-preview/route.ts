@@ -11,8 +11,6 @@ import { assertRecentAdminAuthentication, isAdminReauthenticationError } from
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedText } from
   "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
-import { AMUX_V4_RESOLUTION_PREVIEW_ENV, amuxV4ResolutionPreviewEnabled } from
-  "@/lib/amux/ideaResolutionChoiceCore";
 import { AmuxIdeaResolutionPreviewError, readAmuxIdeaResolutionCatalog,
   previewAmuxIdeaResolution } from "@/lib/amux/ideaResolutionPreviewService";
 import { AmuxIdeaAnalysisResultReadError } from
@@ -73,10 +71,6 @@ export async function GET(request: Request): Promise<Response> {
   try {
     const session = await owner();
     if (session instanceof NextResponse) return session;
-    if (!amuxV4ResolutionPreviewEnabled(process.env[AMUX_V4_RESOLUTION_PREVIEW_ENV])) {
-      return NextResponse.json({ error: "resolution_preview_disabled" },
-        { status: 503, headers: noStore });
-    }
     await consumeApiRateLimit(request, session.user!.id!, "admin-amux-v4-resolution-preview", {
       minute: 10, day: 100,
     });
@@ -96,10 +90,6 @@ export async function POST(request: Request): Promise<Response> {
   try {
     const session = await owner();
     if (session instanceof NextResponse) return session;
-    if (!amuxV4ResolutionPreviewEnabled(process.env[AMUX_V4_RESOLUTION_PREVIEW_ENV])) {
-      return NextResponse.json({ error: "resolution_preview_disabled" },
-        { status: 503, headers: noStore });
-    }
     if (request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !==
         "application/json") return NextResponse.json({ error: "content_type_refused" },
           { status: 415, headers: noStore });

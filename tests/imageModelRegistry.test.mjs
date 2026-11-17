@@ -140,14 +140,16 @@ test("a disabled model is invisible to every selection path", () => {
     "gpt-image-2",
     "grok-imagine-image-quality-20260403",
     "fal-ai/nano-banana-2",
+    "flux-3-image",
+    "flux-3-image-klein",
   ]);
-  // Three providers now. The list is spelled out rather than counted because
+  // Four providers now (bfl added 2026-11-16). The list is spelled out rather than counted because
   // adding a provider is the change that turns budgets, concurrency buckets
   // and readiness on for it, and that should never happen as a side effect of
   // an edit somewhere else. The three Google models are registered and still
   // contribute no provider here: `google` is the model *owner* of the fal row,
   // and owner is not provider.
-  assert.deepEqual(listActiveImageProviders(), ["openai", "xai", "fal"]);
+  assert.deepEqual(listActiveImageProviders(), ["openai", "xai", "fal", "bfl"]);
   // Fail-closed price lookup: the model exists, but pricing it is refused.
   assert.equal(
     getImageModelPrice("gemini-3.1-flash-image", "medium", "1024x1024"),
@@ -750,7 +752,7 @@ test("every registered model resolves to an owner that can be labelled", () => {
   // The label table lives in the component and is typed exhaustively, so this
   // asserts the other half: that no registry entry produces an owner outside
   // the union the table is keyed by.
-  const known = new Set(["openai", "google", "xai", "fal", "qwen"]);
+  const known = new Set(["openai", "google", "xai", "fal", "qwen", "bfl"]);
   for (const model of IMAGE_MODEL_REGISTRY) {
     const { owner, gateway } = imageModelBrandParts(model);
     assert.ok(known.has(owner), `${model.id} owner ${owner} has no brand label`);

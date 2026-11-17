@@ -33,18 +33,10 @@ mock.module(mod("lib/amux/ideaSendPath.ts"), { namedExports: { ideaSendPath: asy
   isAlreadySeen: () => false,
 }) } });
 const { POST } = await import(mod("app/api/admin/qa-release/ci-advice/[suggestionId]/route.ts"));
-const { AMUX_V4_IDEA_SUBMISSION_ENV: writeKey, AMUX_V4_IDEA_READBACK_ENV: readKey } = await import(mod("lib/amux/ideaSubmissionCore.ts"));
-const oldWrite = process.env[writeKey], oldRead = process.env[readKey];
 test.beforeEach(() => {
   role = "owner"; recent = true; calls = []; rates = []; reserved = true; ambiguous = false; submissions.clear();
   item = { id, title: "Reuse CI fixtures", why: "Measured six-minute check", change: "Reuse the existing fixtures", savesMinutes: 2,
     status: "open", createdAt: "2026-11-13T00:00:00.000Z", at: null, amuxIdeaId: null };
-  process.env[writeKey] = "enabled"; process.env[readKey] = "enabled";
-});
-test.after(() => {
-  for (const [key, value] of [[writeKey, oldWrite], [readKey, oldRead]]) {
-    if (value === undefined) delete process.env[key]; else process.env[key] = value;
-  }
 });
 const act = (action, extra = {}, suggestionId = id) => POST(new Request("https://app.example.test/api/admin/qa-release/ci-advice/item", {
   method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action, ...extra }),
@@ -73,9 +65,8 @@ test("caller-supplied request IDs, unsupported actions and unknown suggestions c
   assert.deepEqual(calls, []);
 });
 
-test("AMUX switches and the item reservation stop submissions", async () => {
-  delete process.env[writeKey]; assert.equal((await act("send")).status, 503);
-  process.env[writeKey] = "enabled"; reserved = false; assert.equal((await act("send")).status, 409);
+test("the item reservation stops submissions", async () => {
+  reserved = false; assert.equal((await act("send")).status, 409);
   assert.deepEqual(calls, []);
 });
 

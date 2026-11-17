@@ -119,7 +119,7 @@ test("base evidence admits exact image bytes and the base build's exclusions", a
   assert.equal(result.baseFiles.find((file) =>
     file.path === "tests/support/helper.mjs").text, source.get("helper.mjs"));
   assert.match(result.exclusionDigest, /^[0-9a-f]{64}$/);
-  assert.equal(result.installedVersions.next, "16.3.8");
+  assert.equal("installedVersions" in result, false);
   assert.ok(result.policyDocuments.some((text) =>
     text.includes("tests/e2e/support/canonical-visual.ts")));
 });

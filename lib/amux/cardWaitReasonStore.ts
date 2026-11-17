@@ -10,7 +10,6 @@ import {
   amuxCardWaitDetail,
   amuxCardWaitIncident,
 } from "./cardWaitReasonCore.ts";
-import { amuxInfraFailureRoutingEnabled } from "./infraFailureCore.ts";
 
 /**
  * Stores why a card was passed over (lib/amux/cardWaitReasonCore.ts, owner
@@ -36,7 +35,7 @@ const logFailure = (event: string, error: unknown) => console.warn(JSON.stringif
 export async function recordAmuxCardWaitReasons(entries: readonly AmuxCardWaitEntry[],
   now = new Date(), db: typeof prisma = prisma) {
   const valid = entries.filter((entry) => amuxCardWaitCodeValid(entry.code));
-  if (valid.length === 0 || !amuxInfraFailureRoutingEnabled()) return;
+  if (valid.length === 0) return;
   try {
     const existing = await db.amuxCardWaitReason.findMany({
       where: { taskId: { in: valid.map((entry) => entry.taskId) } },
@@ -70,7 +69,7 @@ export async function recordAmuxCardWaitReasons(entries: readonly AmuxCardWaitEn
 /** A claimed card no longer waits. */
 export async function clearAmuxCardWaitReasons(taskIds: readonly string[],
   db: typeof prisma = prisma) {
-  if (taskIds.length === 0 || !amuxInfraFailureRoutingEnabled()) return;
+  if (taskIds.length === 0) return;
   try { await db.amuxCardWaitReason.deleteMany({ where: { taskId: { in: [...taskIds] } } }); }
   catch (error) { logFailure("amux_card_wait_clear_failed", error); }
 }
@@ -81,7 +80,7 @@ export async function readAmuxCardWaitReasons(taskIds: readonly string[],
   type Row = { taskId: string; stage: string; code: string;
     detail: ReturnType<typeof amuxCardWaitDetail>; firstSeenAt: Date; lastSeenAt: Date;
     seenCount: number };
-  if (taskIds.length === 0 || !amuxInfraFailureRoutingEnabled()) return new Map<string, Row>();
+  if (taskIds.length === 0) return new Map<string, Row>();
   const rows = await db.amuxCardWaitReason.findMany({
     where: { taskId: { in: [...taskIds] } },
     select: { taskId: true, stage: true, code: true, detail: true, firstSeenAt: true,
@@ -95,7 +94,6 @@ export async function readAmuxCardWaitReasons(taskIds: readonly string[],
  * no pass has refreshed for a day. Best effort.
  */
 export async function reportLongAmuxCardWaits(now = new Date(), db: typeof prisma = prisma) {
-  if (!amuxInfraFailureRoutingEnabled()) return;
   try {
     await db.amuxCardWaitReason.deleteMany({ where: {
       lastSeenAt: { lt: new Date(now.getTime() - 24 * 60 * 60_000) } } });

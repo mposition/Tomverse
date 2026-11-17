@@ -9,10 +9,6 @@ import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { assertRecentAdminAuthentication, isAdminReauthenticationError } from "@/lib/adminReauthentication";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedText } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
-import {
-  AMUX_V4_FRONTIER_CATALOG_READ_ENV,
-  frontierCatalogReadPermitted,
-} from "@/lib/amux/ideaFrontierCatalogWriteCore";
 import { isAmuxIdeaRequestId } from "@/lib/amux/ideaSubmissionCore";
 import {
   ideaTransferBrowserCookieName,
@@ -20,11 +16,7 @@ import {
 } from "@/lib/amux/ideaTransferBrowserCore";
 import {
   AMUX_V4_TRANSFER_PREVIEW_MAX_BYTES,
-  AMUX_V4_TRANSFER_PREVIEW_READ_ENV,
-  AMUX_V4_TRANSFER_PREVIEW_WRITE_ENV,
   inspectIdeaOnlyTransferPreviewRequest,
-  transferPreviewReadPermitted,
-  transferPreviewWritePermitted,
 } from "@/lib/amux/ideaTransferPreviewInputCore";
 import {
   IdeaTransferPreviewError,
@@ -73,12 +65,6 @@ export async function POST(request: Request) {
   try {
     const session = await owner();
     if (session instanceof NextResponse) return session;
-    if (!transferPreviewWritePermitted(process.env[AMUX_V4_TRANSFER_PREVIEW_WRITE_ENV]) ||
-        !transferPreviewReadPermitted(process.env[AMUX_V4_TRANSFER_PREVIEW_READ_ENV]) ||
-        !frontierCatalogReadPermitted(process.env[AMUX_V4_FRONTIER_CATALOG_READ_ENV])) {
-      return NextResponse.json({ error: "preview_disabled", transferAuthorized: false },
-        { status: 503, headers: noStore });
-    }
     if (request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !== "application/json") {
       return NextResponse.json({ error: "content_type_refused", transferAuthorized: false },
         { status: 415, headers: noStore });
@@ -121,10 +107,6 @@ export async function GET(request: Request) {
   try {
     const session = await owner();
     if (session instanceof NextResponse) return session;
-    if (!transferPreviewReadPermitted(process.env[AMUX_V4_TRANSFER_PREVIEW_READ_ENV])) {
-      return NextResponse.json({ error: "preview_disabled", transferAuthorized: false },
-        { status: 503, headers: noStore });
-    }
     await consumeApiRateLimit(request, session.user!.id!, "admin-amux-v4-transfer-preview-read", {
       minute: 10, day: 100,
     });

@@ -10,14 +10,11 @@ import {
   resolveAdminPageMeta,
 } from "../lib/adminNavigation.ts";
 import {
-  BACKLOG_METADATA_APPLY_ENV,
   BACKLOG_METADATA_AUDIT_ACTION,
   BACKLOG_METADATA_AUDIT_KEYS,
-  BACKLOG_METADATA_CODE_LATCH,
   BACKLOG_METADATA_COST_MAX_MICROUSD,
   BACKLOG_METADATA_RAW_BODY_MAX_BYTES,
   BacklogMetadataConflict,
-  backlogMetadataApplyPermitted,
   backlogMetadataAuditMetadata,
   backlogMetadataCardWrite,
   backlogMetadataRefusal,
@@ -55,19 +52,13 @@ const fact = (overrides = {}) => ({
   ...overrides,
 });
 
-test("the latch is on and apply still needs the environment value exactly enabled", () => {
-  assert.equal(BACKLOG_METADATA_CODE_LATCH, true);
-  assert.equal(BACKLOG_METADATA_APPLY_ENV, "TOMVERSE_AMUX_BACKLOG_METADATA");
-  assert.equal(backlogMetadataApplyPermitted({ envValue: "enabled", codeLatch: true }), true);
-  assert.equal(
-    backlogMetadataApplyPermitted({ envValue: "enabled", codeLatch: BACKLOG_METADATA_CODE_LATCH }),
-    true,
-  );
-  assert.equal(backlogMetadataApplyPermitted({ envValue: "enabled", codeLatch: false }), false);
-  assert.equal(backlogMetadataApplyPermitted({ envValue: undefined, codeLatch: true }), false);
-  assert.equal(backlogMetadataApplyPermitted({ envValue: undefined, codeLatch: false }), false);
-  for (const envValue of ["", "1", "true", "ENABLED", "Enabled", " enabled", "enabled ", "on"]) {
-    assert.equal(backlogMetadataApplyPermitted({ envValue, codeLatch: true }), false, envValue);
+test("owner direction 2026-11-16: backlog metadata apply has no environment switch or code latch", () => {
+  for (const path of ["lib/amux/backlogMetadataCore.ts", "lib/amux/backlogMetadataService.ts",
+    "app/api/admin/amux/backlog-metadata/route.ts"]) {
+    const source = read(path);
+    assert.equal(source.includes("TOMVERSE_AMUX_BACKLOG_METADATA"), false);
+    assert.equal(source.includes("BACKLOG_METADATA_CODE_LATCH"), false);
+    assert.equal(source.includes("backlogMetadataApply"), false);
   }
 });
 
@@ -254,7 +245,7 @@ test("the audit metadata carries only ids, closed-list values, a cost flag and r
 const withoutComments = (source) =>
   source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
 
-test("the route refuses apply before any transaction and cannot supply the latch", () => {
+test("the route applies without a transaction of its own and has no latch", () => {
   const route = withoutComments(read("app/api/admin/amux/backlog-metadata/route.ts"));
   assert.equal(route.includes("CODE_LATCH"), false);
   assert.equal(route.includes("codeLatch"), false);
@@ -267,24 +258,21 @@ test("the route refuses apply before any transaction and cannot supply the latch
   assert.match(route, /status: 428/);
   assert.match(route, /boardImportContentTypeAccepted/);
   assert.match(route, /consumeApiRateLimit\(request, auth\.session\.user\.id, "admin-amux-backlog-metadata-apply", \{\s*minute: 10,\s*day: 100,/);
-  const gate = route.indexOf("if (!backlogMetadataApplyOpen())");
-  const disabled = route.indexOf('{ error: "apply_disabled" }, { status: 409');
   const apply = route.indexOf("applyBacklogMetadata({");
-  const read_ = route.indexOf("readLimitedText(request, BACKLOG_METADATA_RAW_BODY_MAX_BYTES)", gate);
-  assert.ok(gate > 0 && disabled > gate && apply > disabled && read_ > disabled && apply > read_);
+  const read_ = route.indexOf("readLimitedText(request, BACKLOG_METADATA_RAW_BODY_MAX_BYTES)", route.indexOf("admin-amux-backlog-metadata-apply"));
+  assert.ok(apply > 0 && read_ > 0 && apply > read_);
+  assert.equal(route.includes("apply_disabled"), false);
   assert.equal(route.lastIndexOf("applyBacklogMetadata({"), apply);
 
   const service = withoutComments(read("lib/amux/backlogMetadataService.ts"));
   assert.match(service, /^import "server-only";/);
-  assert.match(service, /codeLatch: BACKLOG_METADATA_CODE_LATCH/);
   assert.equal(service.includes("codeLatch: true"), false);
   const start = service.indexOf("export async function applyBacklogMetadata");
   const applyBody = service.slice(start);
-  const refused = applyBody.indexOf('throw new BoardImportError("apply_disabled", 409)');
   const transaction = applyBody.indexOf("withBacklogMetadataTransaction(");
-  assert.ok(start > 0 && refused > 0 && transaction > refused);
+  assert.ok(start > 0 && transaction > 0);
+  assert.equal(applyBody.includes("apply_disabled"), false);
   const core = withoutComments(read("lib/amux/backlogMetadataCore.ts"));
-  assert.match(core, /export const BACKLOG_METADATA_CODE_LATCH = true;/);
   assert.equal(core.includes("process.env"), false);
 });
 
@@ -323,10 +311,10 @@ test("the page is owner-only, listed to the owner alone, and offers the step-up 
   assert.match(panel, /\/api\/admin\/amux\/backlog-metadata\?action=/);
   assert.match(panel, /ADMIN_REAUTHENTICATION_REQUIRED/);
   assert.match(panel, /adminRecentAuthenticationHref\("\/admin\/amux-recovery\?tab=legacy"\)/);
-  // Apply needs a preview of the exact text on screen that reported valid and permitted.
+  // Apply needs a preview of the exact text on screen that reported valid.
   assert.match(
     panel,
-    /previewed !== null &&\s*previewed\.valid === true &&\s*previewed\.applyPermitted === true &&\s*previewed\.text === requestText/,
+    /previewed !== null &&\s*previewed\.valid === true &&\s*previewed\.text === requestText/,
   );
   assert.match(panel, /disabled=\{pending \|\| !applyReady\}/);
   // The screen moved into the Legacy tools tab of Safety & recovery

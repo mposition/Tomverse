@@ -65,10 +65,10 @@ async function stoppedTask(tx: LifecycleTx, input: {
     settlementId: amuxDmOwnerSettlementId(escalationId) };
 }
 
-async function sync(enabled = true) {
+async function sync() {
   const { withAmuxDbBoundary, AMUX_DB_BOUNDARIES, readAmuxDmOwnerSettlementSyncRows } = await services();
   return withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerOwnerSettlementSync,
-    (tx) => readAmuxDmOwnerSettlementSyncRows(tx, { enabled }));
+    (tx) => readAmuxDmOwnerSettlementSyncRows(tx));
 }
 
 async function apply(settlementId: string, answer: Parameters<
@@ -232,14 +232,12 @@ const remakeSiblings = (ids: { waiting: string; chained: string; started: string
 
 after(async () => { await closeLifecycleHarness(); });
 
-test("a stopped Task is filed once per escalation, only while the switch is on, and its unreadable evidence goes to the person", async () => {
+test("a stopped Task is filed once per escalation, and its unreadable evidence goes to the person", async () => {
   await lifecycle(async (tx) => {
     const card = await stoppedTask(tx);
-    const off = await sync(false);
-    assert.deepEqual(off.pending, [], "off files nothing");
     assert.equal(await settlementRow(tx, card.settlementId), undefined);
 
-    const on = await sync(true);
+    const on = await sync();
     const mine = on.pending.filter((row) => row.settlementId === card.settlementId);
     assert.equal(mine.length, 1);
     assert.equal(mine[0]!.kind, "stopped");
@@ -248,7 +246,7 @@ test("a stopped Task is filed once per escalation, only while the switch is on, 
     assert.equal(row?.escalationId, card.escalationId);
     assert.equal(row?.attemptId, card.attemptId);
     assert.equal(row?.taskStatus, "blocked");
-    await sync(true);
+    await sync();
     const count = await tx.$queryRaw<Array<{ n: number }>>`
       SELECT count(*)::int AS "n" FROM "AmuxDmOwnerSettlement" WHERE "taskId" = ${card.taskId}`;
     assert.equal(count[0]!.n, 1, "one settlement per escalation");
@@ -262,7 +260,7 @@ test("a stopped Task is filed once per escalation, only while the switch is on, 
       (inner, context) => recordAmuxDmOwnerSettlementsUnfilable(inner,
         { settlementIds: opened.unfilable, now: context.dbNow })), { recorded: 1 });
     assert.equal((await settlementRow(tx, card.settlementId))?.handoffReason, "evidence_unavailable");
-    assert.ok(!(await sync(true)).pending.some((entry) => entry.settlementId === card.settlementId));
+    assert.ok(!(await sync()).pending.some((entry) => entry.settlementId === card.settlementId));
     assert.deepEqual(await apply(card.settlementId, { decision: "retry" }), { applied: false, outcome: "handed_off" },
       "handed to the person, no later DM answer decides it");
   });
@@ -271,7 +269,7 @@ test("a stopped Task is filed once per escalation, only while the switch is on, 
 test("retry runs the Task again as the system, its escalation resolved and one chained audit; the card is never a session's", async () => {
   await lifecycle(async (tx) => {
     const card = await stoppedTask(tx);
-    await sync(true);
+    await sync();
     const { withAmuxDbBoundary, AMUX_DB_BOUNDARIES, recordDmQuestionLocalCard, recordDmQuestionLocalCardClosed,
       isAmuxV22QuestionCard } = await services();
     const localCard = `OS-${randomUUID().slice(0, 8)}`;
@@ -298,7 +296,7 @@ test("retry runs the Task again as the system, its escalation resolved and one c
     assert.deepEqual(await apply(card.settlementId, { decision: "retry" }), { applied: false, outcome: null },
       "a second answer finds it applied");
 
-    const rows = await sync(true);
+    const rows = await sync();
     assert.ok(rows.closing.some((entry) => entry.questionId === card.settlementId), "its card is closed by the relay");
     assert.deepEqual(await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerV22QuestionWrite,
       (inner, context) => recordDmQuestionLocalCardClosed(inner, { questionId: card.settlementId,
@@ -309,7 +307,7 @@ test("retry runs the Task again as the system, its escalation resolved and one c
 test("complete finishes the Task terminal on the database clock; close archives it with its status kept", async () => {
   await lifecycle(async (tx) => {
     const card = await stoppedTask(tx);
-    await sync(true);
+    await sync();
     assert.deepEqual(await apply(card.settlementId, { decision: "complete" }), { applied: true, outcome: "done" });
     const task = await taskRow(tx, card.taskId);
     assert.equal(task.status, "done");
@@ -318,7 +316,7 @@ test("complete finishes the Task terminal on the database clock; close archives 
   });
   await lifecycle(async (tx) => {
     const card = await stoppedTask(tx, { status: "review", reason: "human_review_required" });
-    await sync(true);
+    await sync();
     assert.deepEqual(await apply(card.settlementId, { decision: "close" }), { applied: true, outcome: "closed" });
     const task = await taskRow(tx, card.taskId);
     assert.equal(task.status, "review", "a close keeps the status");
@@ -334,7 +332,7 @@ test("a confirmed remake is claimed first; its idea and reservation are written 
     const ids = { waiting: randomUUID(), chained: randomUUID(), started: randomUUID(), unrelated: randomUUID() };
     const card = await stoppedTask(tx, { afterSettlement: remakeSiblings(ids) });
     await operatingScope(tx);
-    const rows = await sync(true);
+    const rows = await sync();
     const siblings = rows.siblings.filter((row) => row.forTaskId === card.taskId);
     assert.equal(siblings.length, 4, "the cards under the same parent come with its card");
     assert.deepEqual(siblings.filter((row) => row.waitsOnThis).map((row) => row.id).sort(),
@@ -395,7 +393,7 @@ test("whatever changes between the intake's preparation and its commit, the guar
     await lifecycle(async (tx) => {
       const card = await stoppedTask(tx);
       await operatingScope(tx);
-      await sync(true);
+      await sync();
       const intake = committingIntake(tx, () => race(tx, card));
       const result = await settle(card.settlementId, REMAKE, intake.deps);
       assert.equal(intake.seen.filed, 1, `${label}: the intake prepared once`);
@@ -427,7 +425,7 @@ test("a person who answered first, or the kill switch at the answer, means nothi
   // The person resolved the card's escalation before the answer was applied.
   await lifecycle(async (tx) => {
     const card = await stoppedTask(tx);
-    await sync(true);
+    await sync();
     await tx.$executeRaw`UPDATE "AmuxHumanEscalation" SET "status" = 'resolved', "resolvedById" = 'person',
       "resolution" = 'Handled it myself.', "resolutionOutcome" = 'block',
       "resolvedAt" = CURRENT_TIMESTAMP, "updatedAt" = CURRENT_TIMESTAMP WHERE "id" = ${card.escalationId}`;
@@ -439,7 +437,7 @@ test("a person who answered first, or the kill switch at the answer, means nothi
   // or it is not there): nothing is applied and nothing is filed.
   await lifecycle(async (tx) => {
     const card = await stoppedTask(tx);
-    await sync(true);
+    await sync();
     const intake = fakeIntake(tx, card.settlementId, { ideaId: randomUUID() });
     const { applyAmuxDmAutoApplyCandidate } = await import("@/lib/amux/dmAutoApplyService");
     assert.deepEqual(await applyAmuxDmAutoApplyCandidate({ kind: "owner_settlement",
@@ -452,7 +450,7 @@ test("a person who answered first, or the kill switch at the answer, means nothi
   // The kill switch is on when the answer comes: nothing is claimed.
   await lifecycle(async (tx) => {
     const card = await stoppedTask(tx);
-    await sync(true);
+    await sync();
     const { recordDecisionMakerSwitchByOperator } = await services();
     await recordDecisionMakerSwitchByOperator(tx, { session: operator(), scope: "kill_switch", value: "on" });
     const intake = fakeIntake(tx, card.settlementId, { ideaId: randomUUID() });
@@ -468,7 +466,7 @@ test("an idea the intake refuses, or whose outcome nobody knows and cannot be re
   for (const [filing, readBack, reason] of cases) {
     await lifecycle(async (tx) => {
       const card = await stoppedTask(tx);
-      await sync(true);
+      await sync();
       const intake = fakeIntake(tx, card.settlementId, filing, readBack);
       assert.deepEqual(await settle(card.settlementId, REMAKE, intake.deps), { applied: false, outcome: "handed_off" });
       assert.equal(intake.seen.filed.length, 1, "filed once");
@@ -484,7 +482,7 @@ test("an idea the intake refuses, or whose outcome nobody knows and cannot be re
   // An unknown outcome that reads back committed is the idea: the cards close.
   await lifecycle(async (tx) => {
     const card = await stoppedTask(tx);
-    await sync(true);
+    await sync();
     const ideaId = randomUUID();
     const intake = fakeIntake(tx, card.settlementId, { unknown: true }, { ideaId });
     assert.deepEqual(await settle(card.settlementId, REMAKE, intake.deps), { applied: true, outcome: "remade" });
@@ -501,7 +499,7 @@ test("a claim an earlier tick left unfinished is finished from what it names, ca
   // The intake's commit named its idea, then the close was lost: the close runs.
   await lifecycle(async (tx) => {
     const card = await stoppedTask(tx);
-    await sync(true);
+    await sync();
     assert.equal((await apply(card.settlementId, REMAKE)).outcome, "remake_claimed");
     const ideaId = randomUUID();
     await tx.$executeRaw`UPDATE "AmuxDmOwnerSettlement" SET "remakeIdeaId" = ${ideaId} WHERE "id" = ${card.settlementId}`;
@@ -516,7 +514,7 @@ test("a claim an earlier tick left unfinished is finished from what it names, ca
   // No idea named and the Task moved (a queued delivery): cancelled, nothing read back.
   await lifecycle(async (tx) => {
     const card = await stoppedTask(tx);
-    await sync(true);
+    await sync();
     assert.equal((await apply(card.settlementId, REMAKE)).outcome, "remake_claimed");
     await withoutTriggers(tx, () => tx.$executeRaw`
       UPDATE "AmuxWorkDelivery" SET "status" = 'queued', "receiptId" = NULL, "leasedAt" = NULL,
@@ -531,7 +529,7 @@ test("a claim an earlier tick left unfinished is finished from what it names, ca
   // No idea named, the Task unmoved, and none reads back: the person decides.
   await lifecycle(async (tx) => {
     const card = await stoppedTask(tx);
-    await sync(true);
+    await sync();
     assert.equal((await apply(card.settlementId, REMAKE)).outcome, "remake_claimed");
     await stale(tx, card);
     const intake = fakeIntake(tx, card.settlementId, { ideaId: randomUUID() }, null);
@@ -542,12 +540,12 @@ test("a claim an earlier tick left unfinished is finished from what it names, ca
   // The sync's sweep judges the same way: a claim with a queued delivery is cancelled there too.
   await lifecycle(async (tx) => {
     const card = await stoppedTask(tx);
-    await sync(true);
+    await sync();
     assert.equal((await apply(card.settlementId, REMAKE)).outcome, "remake_claimed");
     await withoutTriggers(tx, () => tx.$executeRaw`
       UPDATE "AmuxWorkDelivery" SET "status" = 'queued', "receiptId" = NULL, "leasedAt" = NULL,
         "leaseExpiresAt" = NULL, "acknowledgedAt" = NULL WHERE "attemptId" = ${card.attemptId}`);
-    await sync(true);
+    await sync();
     assert.equal((await settlementRow(tx, card.settlementId))?.cancelReason, "task_moved");
   });
 });
@@ -581,7 +579,7 @@ test("a review pull request's approval is recorded with its verified head and di
                 invalidatedReviewIds: [] })}::jsonb, ${prNumber}, CURRENT_TIMESTAMP)`;
         });
       } });
-    const rows = await sync(true);
+    const rows = await sync();
     const mine = rows.pending.find((row) => row.settlementId === card.settlementId);
     assert.equal(mine?.kind, "t2_pr");
     assert.equal(mine?.bindingId, bindingId);
@@ -617,7 +615,7 @@ test("a review pull request's approval is recorded with its verified head and di
                 invalidatedReviewIds: [] })}::jsonb, 920001, CURRENT_TIMESTAMP)`;
         });
       } });
-    await sync(true);
+    await sync();
     assert.deepEqual(await apply(card.settlementId, { decision: "approve" }), { applied: true, outcome: "approved" });
     const row = await settlementRow(tx, card.settlementId);
     assert.equal(row?.state, "applied");
@@ -631,7 +629,7 @@ test("a review pull request's approval is recorded with its verified head and di
     assert.equal((await escalationRow(tx, card.escalationId)).status, "open");
     const audit = await appliedAudit(tx, card.taskId);
     assert.equal((audit?.metadata as Record<string, unknown>).approvedHeadSha, HEAD);
-    const again = await sync(true);
+    const again = await sync();
     assert.ok(!again.pending.some((entry) => entry.taskId === card.taskId), "the escalation is not filed again");
   });
 });
@@ -639,7 +637,7 @@ test("a review pull request's approval is recorded with its verified head and di
 test("a Task that moved, a resolved escalation or a spent budget never takes the Decision Maker's answer", async () => {
   await lifecycle(async (tx) => {
     const card = await stoppedTask(tx);
-    await sync(true);
+    await sync();
     await withoutTriggers(tx, () => tx.$executeRaw`UPDATE "AmuxWorkItem" SET "status" = 'todo' WHERE "id" = ${card.taskId}`);
     assert.deepEqual(await apply(card.settlementId, { decision: "close" }), { applied: true, outcome: "cancelled" });
     const row = await settlementRow(tx, card.settlementId);
@@ -649,11 +647,11 @@ test("a Task that moved, a resolved escalation or a spent budget never takes the
   });
   await lifecycle(async (tx) => {
     const card = await stoppedTask(tx);
-    await sync(true);
+    await sync();
     await tx.$executeRaw`UPDATE "AmuxHumanEscalation" SET "status" = 'resolved', "resolvedById" = 'person',
       "resolution" = 'Handled it myself.', "resolutionOutcome" = 'block',
       "resolvedAt" = CURRENT_TIMESTAMP, "updatedAt" = CURRENT_TIMESTAMP WHERE "id" = ${card.escalationId}`;
-    await sync(true);
+    await sync();
     const row = await settlementRow(tx, card.settlementId);
     assert.equal(row?.state, "cancelled", "the sync cancels it: the person answered first");
     assert.equal(row?.cancelReason, "escalation_resolved");
@@ -665,14 +663,14 @@ test("a Task that moved, a resolved escalation or a spent budget never takes the
     const card = await stoppedTask(tx, { afterSettlement: (inner, taskId) => withoutTriggers(inner,
       () => inner.$executeRaw`UPDATE "AmuxExecutionAttempt" SET "attemptNumber" = ${AMUX_MAX_EXECUTION_ATTEMPTS}
         WHERE "taskId" = ${taskId}`) });
-    await sync(true);
+    await sync();
     assert.deepEqual(await apply(card.settlementId, { decision: "retry" }), { applied: false, outcome: "handed_off" });
     assert.equal((await settlementRow(tx, card.settlementId))?.handoffReason, "attempt_budget_spent");
     assert.equal((await taskRow(tx, card.taskId)).status, "blocked");
   });
   await lifecycle(async (tx) => {
     const card = await stoppedTask(tx);
-    await sync(true);
+    await sync();
     const { recordDecisionMakerSwitchByOperator } = await services();
     await recordDecisionMakerSwitchByOperator(tx, { session: operator(), scope: "kill_switch", value: "on" });
     assert.deepEqual(await apply(card.settlementId, { decision: "close" }), { applied: false, outcome: null },
@@ -684,7 +682,7 @@ test("a Task that moved, a resolved escalation or a spent budget never takes the
 test("the table refuses what the lifecycle does not allow", async () => {
   await lifecycle(async (tx) => {
     const card = await stoppedTask(tx);
-    await sync(true);
+    await sync();
     const refusedBy = async (constraint: string, sql: () => Promise<unknown>) => {
       await tx.$executeRawUnsafe("SAVEPOINT refused_check");
       try { await sql(); await tx.$executeRawUnsafe("RELEASE SAVEPOINT refused_check"); return false; }
@@ -727,18 +725,16 @@ test("the table refuses what the lifecycle does not allow", async () => {
   });
 });
 
-test("the owner asks for one card from the owner queue while the switch is off; the tick files only that one; an unreadable one is sent again", async () => {
+test("the owner may still ask for one card from the owner queue; an unreadable one is sent again", async () => {
   await lifecycle(async (tx) => {
     const card = await stoppedTask(tx);
     const { requestAmuxOwnerQueueDm } = await import("@/lib/amux/ownerQueueDmRequestService");
     const { AMUX_OWNER_QUEUE_DM_REQUESTED_ACTION } = await import("@/lib/amux/ownerQueueDmRequestCore");
-    const { readAmuxDmOwnerSettlementRequestedAmong, readAmuxOwnerQueueDmAskedAmong } =
+    const { readAmuxOwnerQueueDmAskedAmong } =
       await import("@/lib/amux/dmOwnerSettlementRead");
     const press = (over: Partial<Parameters<typeof requestAmuxOwnerQueueDm>[0]> = {}) => requestAmuxOwnerQueueDm({
       session: operator(), request: new Request("https://tomverse.app/api/admin/amux/owner-queue/dm-request"),
       taskId: card.taskId, source: "settlement", action: "request", sourceId: card.escalationId, ...over });
-    assert.deepEqual((await sync(false)).pending, [], "off files nothing on its own");
-
     // A Task that is not the escalation's, and a review resend with nothing to resend, change nothing.
     assert.deepEqual(await press({ taskId: "not-the-escalations-task" }), { outcome: "refused", reason: "not_eligible" });
     assert.deepEqual(await press({ source: "result_review", action: "resend", sourceId: "no-such-review" }),
@@ -753,13 +749,12 @@ test("the owner asks for one card from the owner queue while the switch is off; 
     assert.equal(audits[0]!.actorEmail, "operator@example.test");
     assert.ok(audits[0]!.entryHash, "the person's press is on the hash chain");
     assert.deepEqual(await press(), { outcome: "refused", reason: "not_eligible" }, "one settlement per escalation");
-    assert.deepEqual([...await readAmuxDmOwnerSettlementRequestedAmong(tx, [card.settlementId])], [card.settlementId]);
     // The DM approver reads the same entry and leaves the answer to the owner.
     assert.deepEqual([...await readAmuxOwnerQueueDmAskedAmong(tx,
       { settlementIds: [card.settlementId, "other"], reviewIds: [card.settlementId] })], [card.settlementId]);
 
-    const off = await sync(false);
-    assert.deepEqual(off.pending.map((row) => row.settlementId), [card.settlementId], "only the one asked for");
+    const off = await sync();
+    assert.deepEqual(off.pending.map((row) => row.settlementId), [card.settlementId], "the one asked for");
 
     // Its evidence cannot be read (synthetic bytes): handed to the person, then sent again by the owner.
     const { openAmuxDmOwnerSettlementCards, recordAmuxDmOwnerSettlementsUnfilable, withAmuxDbBoundary,
@@ -769,13 +764,13 @@ test("the owner asks for one card from the owner queue while the switch is off; 
     await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerOwnerSettlementHandoff,
       (inner, context) => recordAmuxDmOwnerSettlementsUnfilable(inner,
         { settlementIds: opened.unfilable, now: context.dbNow }));
-    assert.deepEqual((await sync(false)).pending, []);
+    assert.deepEqual((await sync()).pending, []);
     assert.deepEqual(await press({ action: "resend", sourceId: card.settlementId }),
       { outcome: "done", settlementId: card.settlementId });
     const resent = await settlementRow(tx, card.settlementId);
     assert.equal(resent?.handoffReason, null);
     assert.equal(resent?.handoffAt, null);
-    assert.deepEqual((await sync(false)).pending.map((row) => row.settlementId), [card.settlementId]);
+    assert.deepEqual((await sync()).pending.map((row) => row.settlementId), [card.settlementId]);
     assert.deepEqual(await press({ action: "resend", sourceId: card.settlementId }),
       { outcome: "refused", reason: "not_resendable" }, "nothing left to send again");
   });
@@ -784,17 +779,13 @@ test("the owner asks for one card from the owner queue while the switch is off; 
 test("the owner queue names, per card, where the Decision Maker stands and what the owner may press", async () => {
   await lifecycle(async (tx) => {
     const card = await stoppedTask(tx);
-    const saved = { routing: process.env.TOMVERSE_AMUX_DM_ROUTING, settlement: process.env.TOMVERSE_AMUX_DM_OWNER_SETTLEMENT };
-    process.env.TOMVERSE_AMUX_DM_ROUTING = "enabled";
-    // On unless exactly `disabled` (owner decision 2026-11-15).
-    process.env.TOMVERSE_AMUX_DM_OWNER_SETTLEMENT = "disabled";
-    try {
+    {
       const { readAmuxOwnerQueueDmStatus } = await import("@/lib/amux/ownerQueueDmStatusRead");
       const { recordAmuxDmRelaySync } = await import("@/lib/amux/dmRelayHeartbeat");
       const { AMUX_DM_RELAY_LAST_SYNC_KEY } = await import("@/lib/amux/dmRelayHeartbeatCore");
       const before = await readAmuxOwnerQueueDmStatus([{ taskId: card.taskId, escalationId: card.escalationId }]);
-      assert.deepEqual(before.byTask.get(card.taskId), { source: "settlement", state: "switch_off", reason: "settlement",
-        requestId: null, action: "request", sourceId: card.escalationId });
+      assert.deepEqual(before.byTask.get(card.taskId), { source: "settlement", state: "waiting_relay", reason: null,
+        requestId: null, action: null, sourceId: card.escalationId });
       await recordAmuxDmRelaySync();
       await recordAmuxDmRelaySync();
       const rows = await tx.$queryRaw<Array<{ n: number }>>`
@@ -814,11 +805,6 @@ test("the owner queue names, per card, where the Decision Maker stands and what 
       const filed = await readAmuxOwnerQueueDmStatus([{ taskId: card.taskId, escalationId: card.escalationId }]);
       assert.deepEqual([filed.byTask.get(card.taskId)?.state, filed.byTask.get(card.taskId)?.requestId],
         ["card_filed", null]);
-    } finally {
-      for (const [name, value] of [["TOMVERSE_AMUX_DM_ROUTING", saved.routing],
-        ["TOMVERSE_AMUX_DM_OWNER_SETTLEMENT", saved.settlement]] as const) {
-        if (value === undefined) delete process.env[name]; else process.env[name] = value;
-      }
     }
   });
 });

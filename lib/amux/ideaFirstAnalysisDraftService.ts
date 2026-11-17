@@ -16,6 +16,7 @@ import { readPreviousOutputPage } from "./ideaTransferPreviewService.ts";
 import { openAmuxContent, verifyAmuxContentDigest } from "./ideaCrypto.ts";
 import type { AmuxContentKeys } from "./ideaCrypto.ts";
 import type { AmuxAnalysisOutputPage } from "./ideaOutputCursorCore.ts";
+import { undecidedDraftExpiresAt } from "./ideaRetentionCore.ts";
 
 const ID = /^[A-Za-z0-9:_-]{1,128}$/;
 const DAY_MS = 24 * 60 * 60_000;
@@ -236,7 +237,8 @@ export async function persistAmuxAnalysisPageDraftInTx(
     outputPending: false,
   };
   const nextCursor = prepared.decision === "ready" ? prepared.nextCursor : null;
-  const nextMonth = new Date(now.getTime() + 30 * DAY_MS);
+  // The database sets the stored clock from the first completed chunk.
+  const draftExpiresAt = undecidedDraftExpiresAt(now);
   const finishesAnalysis = nextCursor === null && !needsOwnerInput;
   const activeAnalysisPurgeAfter = new Date(idea.analysisDeadlineAt.getTime() + DAY_MS);
   // The next page needs both the preceding freeform and transfer text.
@@ -298,7 +300,7 @@ export async function persistAmuxAnalysisPageDraftInTx(
         id: unit.id, ideaId: idea.id, actorUserId: idea.actorUserId,
         chunkIndex, unitIndex: unit.unitIndex,
         localRef: unit.localRef, unitKind: unit.unitKind,
-        state: "proposed", expiresAt: nextMonth,
+        state: "proposed", expiresAt: draftExpiresAt,
         bodyCiphertext: Uint8Array.from(unit.body.ciphertext), bodyKeyId: unit.body.keyId,
         bodyKeyVersion: unit.body.keyVersion,
         bodyDigest: unit.body.digest, bodyDigestKeyId: unit.body.digestKeyId,

@@ -72,8 +72,10 @@ operator's login. The operator's own CLI use keeps the source fresh.
 Antigravity is the one exception (below).
 
 Claude (`anthropic:<worker>`, from `~/.claude/.credentials.json` to
-`<worker>/cli/.credentials.json`) is staged only with at least 2 h left on the
-access token. Until 2026-11-06 the timer staged Codex and Copilot only; the
+`<worker>/cli/.credentials.json`) is staged whenever its access token has not
+expired; the login keepalive refreshes it 10 minutes before expiry and
+restages the copies (the former 2 h minimum only left the same token in place
+and failed the unit for two hours of every token, 2026-11-16). Until 2026-11-06 the timer staged Codex and Copilot only; the
 Claude copies made on 2026-10-12 expired that night, the quota reading
 stopped, and the claim admitted no Anthropic route from then on. The timer
 therefore runs hourly, and its `ExecStart` lists the Claude workers too, with
@@ -177,10 +179,11 @@ are outside this repair.
 
 ## Local CLI flow (owner decision 2026-11-15)
 
-A v22 one-shot run behaves like a local CLI session; this is the default.
-`TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW=disabled` restores the earlier behaviour in
-the app, the sidecar and the bridge, so set it the same way on Railway and in
-the box's sidecar and bridge unit drop-ins. Source:
+A v22 one-shot run behaves like a local CLI session, always. The switch that
+restored the earlier behaviour (`TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW=disabled`)
+was removed on 2026-11-16 together with that behaviour; delete the variable
+from Railway and from the box's sidecar and bridge unit drop-ins. Only the
+risk-accepted read-only retry keeps its exact earlier launch. Source:
 `lib/amux/v22LocalCliFlowCore.ts`; policy: `docs/policy/development-agent-orchestration.md`
 "v22 worker 실행: 로컬 CLI 흐름".
 
@@ -201,7 +204,7 @@ What a worker gets:
   implement), prior conclusions and review findings are files under
   `.amux/context/` in the checkout, kept out of Git by `.git/info/exclude`.
 - No time limit: a run stops only at the operator's stop, or when it shows no
-  sign of life for 30 minutes: no new output, no checkout change and no CPU
+  sign of life for 3 hours: no new output, no checkout change and no CPU
   time used by the CLI's process tree (children and its process group
   included, read from `/proc/<pid>/stat`). A quiet test or build that uses CPU
   is never stopped; where `/proc` cannot be read, the first two signals
@@ -282,5 +285,6 @@ until it is):
    after the next stage or keepalive round, and the worker's row on Admin ›
    AMUX settings › Workers.
 
-`TOMVERSE_AMUX_INFRA_FAILURE_ROUTING=disabled` on the app turns the whole
-change off (the route answers 409 and the bridge only logs it).
+The change is always on: the `TOMVERSE_AMUX_INFRA_FAILURE_ROUTING` switch that
+turned it off was removed on 2026-11-16, and the worker-health route no longer
+answers 409 `disabled`.

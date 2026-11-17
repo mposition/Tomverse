@@ -1,17 +1,8 @@
 /**
  * Orchestration policy v52: one execution grade for each newly registered v4 Task.
  * This module is pure so intake, the runner and the app's PR observer can apply
- * the same path judgement without reading a switch or calling a model.
+ * the same path judgement without calling a model.
  */
-
-export const AMUX_EXECUTION_GRADE_CODE_LATCH = true;
-export const AMUX_EXECUTION_GRADE_ENV = "TOMVERSE_AMUX_EXECUTION_GRADE";
-
-export const amuxExecutionGradeRoutingOpen = (codeLatch: boolean,
-  value: string | undefined) => codeLatch && value === "enabled";
-
-export const amuxExecutionGradeRoutingEnabled = (value: string | undefined) =>
-  amuxExecutionGradeRoutingOpen(AMUX_EXECUTION_GRADE_CODE_LATCH, value);
 
 /** The sole contract-path list. Change it only with the approved policy. */
 export const AMUX_CONTRACT_PATHS = [

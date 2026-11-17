@@ -78,10 +78,8 @@ mock.module(mod("lib/amux/v4TaskCostCatalogApprovalService.ts"), { namedExports:
   calculateCurrentApprovedAmuxV4TaskCost: async () => ({ receipt: {} }),
 } });
 mock.module(mod("lib/amux/ideaUnitDecisionStore.ts"), { namedExports: {
-  AMUX_V4_UNIT_WRITE_ENV: "UNIT_WRITE_TEST",
   AmuxV4DuplicateReasonRequired: class extends DecisionError {},
   AmuxV4UnitDecisionError: DecisionError,
-  amuxV4UnitWriteEnabled: () => true,
   commitAmuxV4CardRegistration: async () => ({}),
   commitAmuxV4UnitPrepare: async () => ({}),
   markAmuxV4UnitConsumeOutcomeUnknown: async () => undefined,
@@ -115,8 +113,6 @@ const identity = { ideaId: "idea-0001", draftUnitId: "draft-0001",
   analysisPreviewId: "preview-0001" };
 const makeRefusal = () => new AmuxV20RegistrationRefusalDetected(
   "task_expected_paths_mixed", identity, proposal);
-
-process.env.UNIT_WRITE_TEST = "enabled";
 
 refusal = makeRefusal();
 await assert.rejects(prepareAmuxV4StoryRegistration({ session, request,

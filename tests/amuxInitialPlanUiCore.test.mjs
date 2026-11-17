@@ -82,14 +82,11 @@ test("a clean load shows an existing plan without another POST", () => {
 test("Admin UI calls plan only for a saved idea with no external sources", () => {
   const panel = readFileSync(new URL("../components/admin/AmuxIdeaInputPanel.tsx", import.meta.url), "utf8");
   const plan = readFileSync(new URL("../components/admin/AmuxInitialPlanPanel.tsx", import.meta.url), "utf8");
-  const page = readFileSync(new URL("../app/(site)/(application)/admin/amux-backlog/page.tsx", import.meta.url), "utf8");
   assert.match(panel, /ideaId=\{submission\.kind === "submitted" \? submission\.ideaId : null\}/);
   assert.match(panel, /declaredExternalSources=\{submission\.kind === "submitted" && submission\.hasExternalSources\}/);
-  assert.match(plan, /!ideaId \|\| !available \|\| declaredExternalSources/);
+  assert.match(plan, /!ideaId \|\| declaredExternalSources/);
   assert.match(plan, /reservePendingInitialPlan\(receiptStore\(\), operatorId, ideaId\)/);
   assert.match(plan, /classifyExistingInitialPlan/);
   assert.match(plan, /checkedIdeaId !== ideaId/);
   assert.match(plan, /await readBack\(ideaId\)/);
-  assert.match(page, /initialPlanWritePermitted\(process\.env\[AMUX_V4_INITIAL_PLAN_WRITE_ENV\]\)/);
-  assert.match(page, /initialPlanReadbackPermitted\(process\.env\[AMUX_V4_INITIAL_PLAN_READBACK_ENV\]\)/);
 });

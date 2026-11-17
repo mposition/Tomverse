@@ -12,7 +12,6 @@ import {
 import { parseDmDeliveryCursor } from "@/lib/amux/decisionMakerDeliveryCore";
 import { recordAmuxDmRelaySync } from "@/lib/amux/dmRelayHeartbeat";
 import {
-  dmInternalRoutesEnabled,
   dmRouteErrorResponse,
   dmRouteRefusal,
 } from "@/lib/amux/decisionMakerInternalRoute";
@@ -29,20 +28,17 @@ import {
   runAmuxV22ResolveStep,
 } from "@/lib/amux/v22OwnerQuestionDmService";
 import { runAmuxDmAutoApplyStep } from "@/lib/amux/dmAutoApplyService";
-import { amuxV22ResultReviewDmEnabled } from "@/lib/amux/v22ResultReviewCore";
 import {
   openAmuxV22ResultReviewCards,
   readAmuxV22ResultReviewSyncRows,
   recordAmuxV22ResultReviewsUnfilable,
 } from "@/lib/amux/v22ResultReviewService";
-import { amuxDmOwnerSettlementEnabled } from "@/lib/amux/dmOwnerSettlementCore";
 import {
   openAmuxDmOwnerSettlementCards,
   readAmuxDmOwnerSettlementSyncRows,
   recordAmuxDmOwnerSettlementsUnfilable,
 } from "@/lib/amux/dmOwnerSettlementService";
 import { resumeAmuxDmOwnerSettlementRemake } from "@/lib/amux/dmOwnerSettlementRemake";
-import { engineeringAgentT2DmReviewEnabled } from "@/lib/engineeringAgentT2DmReviewCore";
 import {
   engineeringAgentT2DmCards,
   readEngineeringAgentT2DmSyncRows,
@@ -58,8 +54,7 @@ import {
  * the cancel, each its own transaction within docs/policy/amux-decision-maker.md §9's 12 statements; then the open questions that still need a typed-ask card on the
  * AMUX host and the cards of questions no longer open that it should close.
  * `cursor` says where the walk goes next. The question text is opened from
- * the run's encrypted result outside the read transaction. Closed until
- * `TOMVERSE_AMUX_DM_ROUTING=enabled`.
+ * the run's encrypted result outside the read transaction.
  *
  * An idea card close question (lib/amux/ideaCardCloseService.ts) rides the same
  * tick in the same shape, so the bridge needs no change: the walk applies its
@@ -68,21 +63,16 @@ import {
  * the v22 questions to go on.
  *
  * Owner decision 2026-11-07: a v22 result waiting for review rides the tick the
- * same way (lib/amux/v22ResultReviewService.ts; new cards only while
- * TOMVERSE_AMUX_V22_RESULT_REVIEW_DM=enabled), and while
- * TOMVERSE_AMUX_DM_APPROVER=enabled one Decision Maker proposal per tick is
- * applied without the operator (lib/amux/dmAutoApplyService.ts).
+ * same way (lib/amux/v22ResultReviewService.ts), and while
+ * TOMVERSE_AMUX_DM_APPROVER is not `disabled` one Decision Maker proposal per
+ * tick is applied without the operator (lib/amux/dmAutoApplyService.ts).
  *
  * Owner decision 2026-11-13: a stopped v22 Task in the owner queue that no
  * other path holds rides the tick as an owner queue settlement
- * (lib/amux/dmOwnerSettlementService.ts; new settlements and cards only while
- * TOMVERSE_AMUX_DM_OWNER_SETTLEMENT=enabled), before the T2 drafts. With the
- * switch off, the settlements the owner asked for from the owner queue are
- * still filed (owner decision 2026-11-14).
+ * (lib/amux/dmOwnerSettlementService.ts), before the T2 drafts.
  *
  * Operator decision 2026-11-11: an engineering agent T2 draft rides the tick
- * last, for advice only (lib/engineeringAgentT2DmReviewService.ts; new cards
- * only while TOMVERSE_ENGINEERING_AGENT_T2_DM_REVIEW=enabled). Its answer is
+ * last, for advice only (lib/engineeringAgentT2DmReviewService.ts). Its answer is
  * shown beside the draft in Admin and applies nothing.
  */
 const OPERATION = "decision_maker_v22_question_sync";
@@ -94,11 +84,10 @@ export async function POST(request: Request) {
     return amuxJsonNoStore({ error: "Unauthorized" }, 401);
   }
   return withAmuxRouteBudget(async () => {
-    // The relay's last call, before the switch: the monitor's silence alert
+    // The relay's last call, first: the monitor's silence alert
     // (lib/amux/dmRelayHeartbeatCore.ts) reads it. Inside the route budget and
     // bounded to about two seconds of it; never throws.
     await recordAmuxDmRelaySync();
-    if (!dmInternalRoutesEnabled()) return refused(409, "dm_routing_disabled");
     try {
       const body = await readLimitedJson(request, 1_024, requestSchema);
       const after = parseDmDeliveryCursor(body.after);
@@ -119,7 +108,6 @@ export async function POST(request: Request) {
       const review = await withAmuxDbBoundary(
         AMUX_DB_BOUNDARIES.decisionMakerV22ResultReviewRead,
         (tx) => readAmuxV22ResultReviewSyncRows(tx)).then(async (rows) => {
-        if (!amuxV22ResultReviewDmEnabled()) return { pending: [], closing: rows.closing };
         const opened = await openAmuxV22ResultReviewCards(rows.pending);
         if (opened.unfilable.length > 0)
           await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerV22ResultReviewHandoff,
@@ -135,11 +123,9 @@ export async function POST(request: Request) {
       await resumeAmuxDmOwnerSettlementRemake().catch(() => {
         console.warn(JSON.stringify({ subsystem: "amux", event: "dm_owner_settlement_resume_failed" }));
       });
-      const settlementOn = amuxDmOwnerSettlementEnabled();
       const settlement = await withAmuxDbBoundary(
         AMUX_DB_BOUNDARIES.decisionMakerOwnerSettlementSync,
-        (tx) => readAmuxDmOwnerSettlementSyncRows(tx, { enabled: settlementOn })).then(async (rows) => {
-        // With the switch off, `pending` holds only what the owner asked for.
+        (tx) => readAmuxDmOwnerSettlementSyncRows(tx)).then(async (rows) => {
         const opened = await openAmuxDmOwnerSettlementCards(rows);
         if (opened.unfilable.length > 0)
           await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerOwnerSettlementHandoff,
@@ -153,7 +139,6 @@ export async function POST(request: Request) {
       const t2 = await withAmuxDbBoundary(
         AMUX_DB_BOUNDARIES.engineeringAgentT2DmReviewRead,
         (tx) => readEngineeringAgentT2DmSyncRows(tx)).then(async (rows) => {
-        if (!engineeringAgentT2DmReviewEnabled()) return { pending: [], closing: rows.closing };
         const opened = engineeringAgentT2DmCards(rows.pending);
         if (opened.unfilable.length > 0)
           await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.engineeringAgentT2DmReviewUnfilable,

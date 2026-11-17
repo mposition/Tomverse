@@ -8,7 +8,6 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
-  AMUX_WORKER_CAPABILITY_WRITES_LATCH,
   AMUX_WORKER_ROUTING_TAGS,
   AMUX_WORKER_ROUTING_TAG_REQUIREMENTS,
   AMUX_WORKER_V22_ROLES,
@@ -16,7 +15,6 @@ import {
   amuxWorkerCapabilitiesEqual,
   amuxWorkerCapabilityRefusal,
   amuxWorkerCapabilityWithinCeiling,
-  amuxWorkerCapabilityWritesOpen,
   buildAmuxWorkerCapabilityAdminView,
   parseAmuxWorkerCapabilityAdminView,
 } from "../lib/amux/workerCapabilityCore.ts";
@@ -67,20 +65,6 @@ test("the closed lists are version 35's table", () => {
   assert.deepEqual([...AMUX_WORKER_ROUTING_TAGS], [...AMUX_WORKER_ROUTING_TAGS].sort());
   assert.deepEqual([...AMUX_WORKER_V22_ROLES], ["design", "implement", "investigate", "review"]);
   assert.ok(Object.isFrozen(AMUX_WORKER_ROUTING_TAG_REQUIREMENTS));
-});
-
-test("version 36 turns R2a's capability writes on, and the policy records it", () => {
-  // Version 35 section 5: R2a shipped latched off; version 36 is the
-  // operator's activation record. The latch and its record move together.
-  assert.equal(AMUX_WORKER_CAPABILITY_WRITES_LATCH, true);
-  assert.equal(amuxWorkerCapabilityWritesOpen(), true);
-  const policy = readFileSync(new URL("../docs/policy/development-agent-orchestration.md", import.meta.url), "utf8");
-  const normalized = policy.split(String.fromCharCode(13)).join("");
-  const heading = "## 버전 36 — worker 능력 R2a 코드 래치";
-  const record = "승인 기록: `approvedBy: mposition`, `approvedAt: 2026-10-13`";
-  assert.ok(normalized.includes([heading, "", record].join(String.fromCharCode(10))));
-  assert.ok(normalized.includes("`AMUX_WORKER_CAPABILITY_WRITES_LATCH`(`lib/amux/workerCapabilityCore.ts`)를 false로 둔 채 출고됐고, 이 버전이 그 래치를 true로 바꾼다"));
-  assert.ok(normalized.includes("approvedBy: mposition · approvedAt: 2026-10-13 · 정책 버전: 36"));
 });
 
 test("a tag is an authority: it never exceeds the worker's ceiling or its class", () => {
@@ -172,10 +156,8 @@ test("the Admin view lists every registered, non-retired worker with what is rec
   ]]);
   const registrations = [...PRODUCTION_REGISTRY, registration("codex-old", "chore", "retired")];
   const view = buildAmuxWorkerCapabilityAdminView({ registrations, current: recorded });
-  // Defaults to the code latch (true since version 36).
-  assert.equal(view.writesLatch, AMUX_WORKER_CAPABILITY_WRITES_LATCH);
   // The CLI model catalog is read apart; null when it was not given.
-  assert.deepEqual(Object.keys(view).sort(), ["cliModels", "rows", "writesLatch"]);
+  assert.deepEqual(Object.keys(view).sort(), ["cliModels", "rows"]);
   assert.equal(view.cliModels, null);
   assert.equal(view.rows.length, 13);
   assert.deepEqual(view.rows.map((row) => row.workerName), [...PRODUCTION_REGISTRY.map((row) => row.workerName)].sort());
@@ -202,7 +184,6 @@ test("the GET body is accepted only in its exact shape", () => {
   const withRow = (row) => ({ ...body, rows: body.rows.map((entry, at) => (at === index ? row : entry)) });
   for (const broken of [
     null,
-    { ...body, writesLatch: "no" },
     { ...body, rows: "none" },
     withRow({ ...body.rows[index], workerName: "Devin_worker" }),
     withRow({ ...body.rows[index], providerClass: "devin" }),

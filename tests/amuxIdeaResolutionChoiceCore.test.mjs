@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { amuxV4ResolutionPreviewEnabled, inspectAmuxResolutionChoices } from
+import { inspectAmuxResolutionChoices } from
   "../lib/amux/ideaResolutionChoiceCore.ts";
 
 const digest = (letter) => letter.repeat(64);
@@ -40,11 +40,6 @@ const base = (overrides = {}) => ({
     existingNode("f1", "feature", "e1", 4, "c")],
   existingCards: [existingCard("s1", "f1")],
   ...overrides,
-});
-
-test("A08 preview requires its dedicated environment value", () => {
-  assert.equal(amuxV4ResolutionPreviewEnabled("enabled"), true);
-  assert.equal(amuxV4ResolutionPreviewEnabled(undefined), false);
 });
 
 test("owner may preview a new Story under an exact selected Feature", () => {

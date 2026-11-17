@@ -22,10 +22,8 @@ const ready: ScopeRepositoryRead = { kind: "ready", repositories: ["mposition/am
 const picker = (read: ScopeRepositoryRead, deselected: string[] = []) => renderToStaticMarkup(
   <AmuxIdeaScopeRepositoryPicker read={read} deselected={deselected} disabled={false}
     onToggle={() => undefined} stepUpHref="/admin/step-up" />);
-const panel = (sessionIntake: boolean) => renderToStaticMarkup(
-  <AmuxIdeaInputPanel submissionAvailable sourceScopePreviewAvailable initialPlanAvailable frontierModelsAvailable
-    transferPreviewAvailable transferConfirmAvailable analysisResultAvailable analysisBudgetAvailable
-    analysisStopAvailable operatorId="owner-1" sessionIntake={sessionIntake} />);
+const panel = () => renderToStaticMarkup(
+  <AmuxIdeaInputPanel analysisBudgetAvailable operatorId="owner-1" />);
 
 test("a read scope selects every allowed repository by default", () => {
   assert.deepEqual(classifyScopeRepositoryRead(200, scopeBody),
@@ -76,19 +74,13 @@ test("an unread, absent or failed scope blocks saving and says why", () => {
   assert.match(picker({ kind: "error", reauth: true }), /href="\/admin\/step-up"/, "a 428 offers the sign-in renewal");
 });
 
-test("with session intake on the free-text repository box is replaced and the save button waits for the scope", () => {
-  const session = panel(true);
+test("the free-text repository box is replaced and the save button waits for the scope", () => {
+  const session = panel();
   assert.match(session, /data-testid="amux-idea-scope-repositories"/);
   assert.doesNotMatch(session, /id="amux-v4-repositories"/);
   assert.match(session, /id="amux-v4-pull-requests"/, "the pull request box stays");
   assert.match(session, /disabled=""[^>]*>Queue for automatic analysis/, "blocked while the scope is unread");
   assert.match(session, /Reading the operating scope/);
-});
-
-test("with session intake off the screen is unchanged", () => {
-  const v4 = panel(false);
-  assert.match(v4, /id="amux-v4-repositories"/);
-  assert.doesNotMatch(v4, /amux-idea-scope-repositories/);
 });
 
 test("the submitted and checked repositories are the selected ones", () => {
@@ -125,24 +117,18 @@ test("the session model picker defaults to the scope model and lists approved mo
 });
 
 test("the session panel shows the model picker and sends the choice only when one is made", () => {
-  assert.match(panel(true), /data-testid="amux-idea-session-model"/);
-  assert.doesNotMatch(panel(false), /amux-idea-session-model/);
+  assert.match(panel(), /data-testid="amux-idea-session-model"/);
   const source = readFileSync("components/admin/AmuxIdeaInputPanel.tsx", "utf8");
   // A lane entry is an owner idea, so it never carries the session model.
-  assert.match(source, /\.\.\.\(!toLane && sessionModelBody && sessionModelBody !== "incomplete" \? \{ model: sessionModelBody \} : \{\}\)/);
+  assert.match(source, /\.\.\.\(!toLane && sessionModelBody \? \{ model: sessionModelBody \} : \{\}\)/);
   assert.match(source, /sessionModelBody === "incomplete"/, "an incomplete choice blocks the save");
 });
 
-test("the idea lane's test button shows only while the lane is on, beside either intake", () => {
-  const withLane = (sessionIntake: boolean) => renderToStaticMarkup(
-    <AmuxIdeaInputPanel submissionAvailable sourceScopePreviewAvailable initialPlanAvailable frontierModelsAvailable
-      transferPreviewAvailable transferConfirmAvailable analysisResultAvailable analysisBudgetAvailable
-      analysisStopAvailable operatorId="owner-1" sessionIntake={sessionIntake} laneAvailable />);
-  for (const sessionIntake of [true, false]) {
-    const html = withLane(sessionIntake);
-    assert.match(html, /data-testid="amux-idea-lane-submit"/);
-    assert.match(html, /Send to the idea lane \(test\)/);
-    assert.match(html, /opens a draft PR into develop/, "it says what saving does");
-    assert.doesNotMatch(panel(sessionIntake), /amux-idea-lane-submit/, "absent while the lane is off");
-  }
+test("the idea lane's test button shows only while the lane is on", () => {
+  const html = renderToStaticMarkup(
+    <AmuxIdeaInputPanel analysisBudgetAvailable operatorId="owner-1" laneAvailable />);
+  assert.match(html, /data-testid="amux-idea-lane-submit"/);
+  assert.match(html, /Send to the idea lane \(test\)/);
+  assert.match(html, /opens a draft PR into develop/, "it says what saving does");
+  assert.doesNotMatch(panel(), /amux-idea-lane-submit/, "absent while the lane is off");
 });

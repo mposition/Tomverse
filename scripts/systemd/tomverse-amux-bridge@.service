@@ -34,8 +34,7 @@ RestartSec=60
 # person (version 20, section 11), or for the auto-restart's approved causes
 # (docs/ops/amux/bridge-monitoring.md, section 5). Since 2026-11-15 every
 # other halt exits 75 and is restarted here: the new process reads back
-# what it left open (TOMVERSE_AMUX_BRIDGE_READ_BACK_PROCEED=disabled
-# restores exit 3 for every halt).
+# what it left open.
 RestartPreventExitStatus=3
 TimeoutStopSec=10
 KillMode=control-group

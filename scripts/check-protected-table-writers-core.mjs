@@ -818,9 +818,9 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/amux/ideaSessionAnalysisBudgetSettlementService.ts",
     table: "AmuxIdeaSessionAnalysisBudgetClaim",
-    tableMentions: 1,
-    writeVerbs: 2,
-    reason: "The settlement writer uses this SQL only to lock an exact claim; the guarded mutation uses its authorized Prisma delegate.",
+    tableMentions: 2,
+    writeVerbs: 4,
+    reason: "The settlement writer uses this SQL only to lock an exact claim (settlement, and the system close of a subscription claim's unknown outcome at zero, owner direction 2026-11-16); the guarded mutation uses its authorized Prisma delegate.",
   },
   {
     path: "lib/amux/ideaSessionAnalysisBudgetResolutionService.ts",
@@ -2218,23 +2218,23 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/qaReleaseMergeLaneStore.ts",
     table: "QaReleaseOperatorControl",
-    tableMentions: 3,
-    writeVerbs: 14,
-    reason: "The merge lane's single writer (docs/policy/qa-release-agent.md version 4, section 10). Its raw SQL is the issue, consume and result-report transactions counted statement by statement: in issue and consume, one constant SELECT that reads the newest operator control revision and switch and the newest latch event in one snapshot (issue adds whether an attempt is open; consume adds the attempt row itself, locked FOR UPDATE); issue's one constant INSERT ... RETURNING of the attempt row, so the trigger-set expiry comes back in the same statement; consume's one conditional UPDATE of that row from issued to consumed; and the report's one constant WITH statement that reads the newest revision, locks the attempt and makes the conditional move, then one constant INSERT ... SELECT of the next latch event; and the round-start state read, one constant SELECT of the newest latch event and the open attempt with no write. A person's latch release is the other writer, lib/qaReleaseMergeLaneRelease.ts. No table name is interpolated; every value is a bound parameter. It reads QaReleaseOperatorControl and never writes it.",
+    tableMentions: 4,
+    writeVerbs: 17,
+    reason: "The merge lane's single writer (docs/policy/qa-release-agent.md version 4, section 10). Its raw SQL is the issue, consume and result-report transactions counted statement by statement: in issue and consume, one constant SELECT that reads the newest operator control revision and switch and the newest latch event in one snapshot (issue adds whether an attempt is open; consume adds the attempt row itself, locked FOR UPDATE); issue's one constant INSERT ... RETURNING of the attempt row, so the trigger-set expiry comes back in the same statement; consume's one conditional UPDATE of that row from issued to consumed; and the report's one constant WITH statement that reads the newest revision, locks the attempt and makes the conditional move, then one constant INSERT ... SELECT of the next latch event; and the round-start state read, one constant SELECT of the newest latch event and the open attempt with no write; and the lane's own latch release (owner decision 2026-11-16), one constant WITH statement that reads the newest revision, the newest latch event, whether an attempt is open and every set event since the last release with its attempt, then one constant INSERT of the release event. A person's latch release is the other writer, lib/qaReleaseMergeLaneRelease.ts. No table name is interpolated; every value is a bound parameter. It reads QaReleaseOperatorControl and never writes it.",
   },
   {
     path: "lib/qaReleaseMergeLaneStore.ts",
     table: "QaReleaseMergeAttempt",
-    tableMentions: 10,
-    writeVerbs: 14,
-    reason: "The merge lane's single writer (docs/policy/qa-release-agent.md version 4, section 10). Its raw SQL is the issue, consume and result-report transactions counted statement by statement: in issue and consume, one constant SELECT that reads the newest operator control revision and switch and the newest latch event in one snapshot (issue adds whether an attempt is open; consume adds the attempt row itself, locked FOR UPDATE); issue's one constant INSERT ... RETURNING of the attempt row, so the trigger-set expiry comes back in the same statement; consume's one conditional UPDATE of that row from issued to consumed; and the report's one constant WITH statement that reads the newest revision, locks the attempt and makes the conditional move, then one constant INSERT ... SELECT of the next latch event; and the round-start state read, one constant SELECT of the newest latch event and the open attempt with no write. A person's latch release is the other writer, lib/qaReleaseMergeLaneRelease.ts. No table name is interpolated; every value is a bound parameter.",
+    tableMentions: 12,
+    writeVerbs: 17,
+    reason: "The merge lane's single writer (docs/policy/qa-release-agent.md version 4, section 10). Its raw SQL is the issue, consume and result-report transactions counted statement by statement: in issue and consume, one constant SELECT that reads the newest operator control revision and switch and the newest latch event in one snapshot (issue adds whether an attempt is open; consume adds the attempt row itself, locked FOR UPDATE); issue's one constant INSERT ... RETURNING of the attempt row, so the trigger-set expiry comes back in the same statement; consume's one conditional UPDATE of that row from issued to consumed; and the report's one constant WITH statement that reads the newest revision, locks the attempt and makes the conditional move, then one constant INSERT ... SELECT of the next latch event; and the round-start state read, one constant SELECT of the newest latch event and the open attempt with no write; and the lane's own latch release (owner decision 2026-11-16), one constant WITH statement that reads the newest revision, the newest latch event, whether an attempt is open and every set event since the last release with its attempt, then one constant INSERT of the release event. A person's latch release is the other writer, lib/qaReleaseMergeLaneRelease.ts. No table name is interpolated; every value is a bound parameter.",
   },
   {
     path: "lib/qaReleaseMergeLaneStore.ts",
     table: "QaReleaseMergeLaneLatch",
-    tableMentions: 5,
-    writeVerbs: 14,
-    reason: "The merge lane's single writer (docs/policy/qa-release-agent.md version 4, section 10). Its raw SQL is the issue, consume and result-report transactions counted statement by statement: in issue and consume, one constant SELECT that reads the newest operator control revision and switch and the newest latch event in one snapshot (issue adds whether an attempt is open; consume adds the attempt row itself, locked FOR UPDATE); issue's one constant INSERT ... RETURNING of the attempt row, so the trigger-set expiry comes back in the same statement; consume's one conditional UPDATE of that row from issued to consumed; and the report's one constant WITH statement that reads the newest revision, locks the attempt and makes the conditional move, then one constant INSERT ... SELECT of the next latch event; and the round-start state read, one constant SELECT of the newest latch event and the open attempt with no write. A person's latch release is the other writer, lib/qaReleaseMergeLaneRelease.ts. No table name is interpolated; every value is a bound parameter. It reads the newest latch event in issue and consume, and appends one in the report through the INSERT ... SELECT above.",
+    tableMentions: 10,
+    writeVerbs: 17,
+    reason: "The merge lane's single writer (docs/policy/qa-release-agent.md version 4, section 10). Its raw SQL is the issue, consume and result-report transactions counted statement by statement: in issue and consume, one constant SELECT that reads the newest operator control revision and switch and the newest latch event in one snapshot (issue adds whether an attempt is open; consume adds the attempt row itself, locked FOR UPDATE); issue's one constant INSERT ... RETURNING of the attempt row, so the trigger-set expiry comes back in the same statement; consume's one conditional UPDATE of that row from issued to consumed; and the report's one constant WITH statement that reads the newest revision, locks the attempt and makes the conditional move, then one constant INSERT ... SELECT of the next latch event; and the round-start state read, one constant SELECT of the newest latch event and the open attempt with no write; and the lane's own latch release (owner decision 2026-11-16), one constant WITH statement that reads the newest revision, the newest latch event, whether an attempt is open and every set event since the last release with its attempt, then one constant INSERT of the release event. A person's latch release is the other writer, lib/qaReleaseMergeLaneRelease.ts. No table name is interpolated; every value is a bound parameter. It reads the newest latch event in issue and consume, and appends one in the report through the INSERT ... SELECT above.",
   },
   {
     path: "prisma/migrations/20261004010000_qa_release_merge_attempt/migration.sql",
@@ -2259,6 +2259,38 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 9,
     reason:
       "Creates the latch table and the triggers that constrain its insert and refuse update, delete and truncate. It names those verbs to refuse or constrain them and writes no row.",
+  },
+  {
+    path: "prisma/migrations/20261116150100_qa_release_merge_lane_latch_system_release/migration.sql",
+    table: "QaReleaseMergeAttempt",
+    tableMentions: 3,
+    writeVerbs: 4,
+    reason:
+      "Replaces the latch insert trigger's body (owner decision 2026-11-16): a release audited by the merge lane is accepted only when no attempt is open and every attempt the set events since the last release name closed on an outcome the lane read. It reads the attempt table and writes no attempt row.",
+  },
+  {
+    path: "prisma/migrations/20261116150100_qa_release_merge_lane_latch_system_release/migration.sql",
+    table: "QaReleaseMergeLaneLatch",
+    tableMentions: 11,
+    writeVerbs: 4,
+    reason:
+      "Replaces the latch insert trigger's body so the merge lane may release a latch whose every cause it read again and closed (owner decision 2026-11-16); the consecutive numbering, releasing only a latched lane and the same-transaction audit row are unchanged. It reads the latch events and writes no row.",
+  },
+  {
+    path: "prisma/migrations/20261116150100_qa_release_merge_lane_latch_system_release/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 4,
+    reason:
+      "The replaced latch insert trigger reads the audit row this transaction wrote (id, target, action, actor, xmin), now telling a person's release from the lane's own. It never writes AdminAuditLog.",
+  },
+  {
+    path: "prisma/migrations/20261116150000_engineering_agent_binding_record_size/migration.sql",
+    table: "EngineeringAgentBinding",
+    tableMentions: 1,
+    writeVerbs: 4,
+    reason:
+      "This migration only replaces the binding's three record CHECKs (snapshot, approval and merge observation) with one 1 MiB size bound and no review id count (owner decision 2026-11-16). It writes no row and changes no trigger.",
   },
   {
     path: "prisma/migrations/20261004020000_qa_release_merge_lane_latch/migration.sql",
@@ -2884,10 +2916,10 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/amux/decisionMakerSwitchStore.ts",
     table: "AmuxDecisionMakerSwitchEvent",
-    tableMentions: 9,
-    writeVerbs: 3,
+    tableMentions: 12,
+    writeVerbs: 4,
     reason:
-      "The switch event table's single writer (docs/policy/amux-decision-maker.md §10). Its raw SQL is four constant SELECTs (the newest event of every scope; since stage S2-4c the same with each event's actor and reason, for Admin's switch panel; of one scope for a person's change; and since 2026-10-17 the newest value of every scope, which the request ledger's writers read with -- since stage S2-2a3, in a subquery of the same statement -- the cleanup_unknown report each scope's newest cleanup_latch names, the one report that latch settles, and -- since stage S2-2a4, in two LATERAL subqueries of the same statement over the same table -- the scope's newest validation_latch and the first person's event after it with that release's sequence and clock, where section 8's validation count starts) and two constant INSERT ... RETURNING statements, a person's event and a latch, which since S2-2a3 names a cleanup latch's report; every value is a bound parameter. The third verb is the word in the error raised when an insert returns no row. It never updates or deletes an event, and it writes the audit log only through writeAdminAuditLog and, for a latch, lib/amux/decisionMakerSwitchSystemAudit.ts.",
+      "The switch event table's single writer (docs/policy/amux-decision-maker.md §10). Its raw SQL is four constant SELECTs (the newest event of every scope; since stage S2-4c the same with each event's actor and reason, for Admin's switch panel; of one scope for a person's change; and since 2026-10-17 the newest value of every scope, which the request ledger's writers read with -- since stage S2-2a3, in a subquery of the same statement -- the cleanup_unknown report each scope's newest cleanup_latch names, the one report that latch settles, and -- since stage S2-2a4, in two LATERAL subqueries of the same statement over the same table -- the scope's newest validation_latch and the first person's event after it with that release's sequence and clock, where section 8's validation count starts) and two constant INSERT ... RETURNING statements, a person's event and a latch, which since S2-2a3 names a cleanup latch's report; every value is a bound parameter. Since 2026-11-16 (owner direction, migration 20261116140100_amux_dm_latch_release) a fifth constant SELECT -- one scope's newest event with the person's newest value and the database clock, two mentions -- and a third constant INSERT ... RETURNING, the system's release of a latch back to proposal mode, one more mention and verb. The release of the first person's event after a latch also counts the system's release, in the same statement. The third verb is the word in the error raised when an insert returns no row. It never updates or deletes an event, and it writes the audit log only through writeAdminAuditLog and, for a latch and its system release, lib/amux/decisionMakerSwitchSystemAudit.ts.",
   },
   {
     path: "prisma/migrations/20261008090000_amux_decision_maker_switch_serialization/migration.sql",
@@ -3328,6 +3360,230 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 23,
     reason:
       "Adds the delivery event's notSentReason with its two CHECKs, replaces the kind CHECK and the one-outcome partial unique index with the third outcome delivery_not_sent (sections 2-7 and 9), and replaces the delivery guard, which allows it once after the decision. Nothing here inserts, updates or deletes a delivery event.",
+  },
+  {
+    path: "prisma/migrations/20261116120000_amux_session_claim_record_only_checks/migration.sql",
+    table: "AmuxIdeaSessionAnalysisBudgetClaim",
+    tableMentions: 1,
+    writeVerbs: 6,
+    reason:
+      "The 2026-11-16 sweep migration (owner direction; docs/policy/amux-intake.md, a subscription claim reserves nothing and a zero-token result settles at zero): CHECK-only DDL, each constraint dropped and added again with its new bound; its write verbs are DROP/ADD words of ALTER TABLE and comments. It has no INSERT, UPDATE or DELETE.",
+  },
+  {
+    path: "prisma/migrations/20261116120100_amux_v19_session_claim_mode_record_only/migration.sql",
+    table: "AmuxIdeaSessionAnalysisBudgetClaim",
+    tableMentions: 2,
+    writeVerbs: 3,
+    reason:
+      "The 2026-11-16 sweep migration (owner direction; docs/policy/amux-intake.md, subscription analysis closes an unknown outcome at zero and accepts a late result): it only replaces a guard function body under its replace-function-if-body-sha256 header. Its write verbs are the guard's TG_OP comparisons and words of comments inside the function body; the table mentions are the guard's reads. It has no INSERT, UPDATE or DELETE.",
+  },
+  {
+    path: "prisma/migrations/20261116120100_amux_v19_session_claim_mode_record_only/migration.sql",
+    table: "AmuxIdeaSessionAnalysisReservation",
+    tableMentions: 1,
+    writeVerbs: 3,
+    reason:
+      "The 2026-11-16 sweep migration (owner direction; docs/policy/amux-intake.md, subscription analysis closes an unknown outcome at zero and accepts a late result): it only replaces a guard function body under its replace-function-if-body-sha256 header. Its write verbs are the guard's TG_OP comparisons and words of comments inside the function body; the table mentions are the guard's reads. It has no INSERT, UPDATE or DELETE.",
+  },
+  {
+    path: "prisma/migrations/20261116120100_amux_v19_session_claim_mode_record_only/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 3,
+    writeVerbs: 3,
+    reason:
+      "The 2026-11-16 sweep migration (owner direction; docs/policy/amux-intake.md, subscription analysis closes an unknown outcome at zero and accepts a late result): it only replaces a guard function body under its replace-function-if-body-sha256 header. Its write verbs are the guard's TG_OP comparisons and words of comments inside the function body; the table mentions are the guard's reads. It has no INSERT, UPDATE or DELETE.",
+  },
+  {
+    path: "prisma/migrations/20261116120200_amux_v19_session_claim_system_close/migration.sql",
+    table: "AmuxIdeaSessionAnalysisBudgetClaim",
+    tableMentions: 9,
+    writeVerbs: 2,
+    reason:
+      "The 2026-11-16 sweep migration (owner direction; docs/policy/amux-intake.md, subscription analysis closes an unknown outcome at zero and accepts a late result): it only replaces a guard function body under its replace-function-if-body-sha256 header. Its write verbs are the guard's TG_OP comparisons and words of comments inside the function body; the table mentions are the guard's reads. It has no INSERT, UPDATE or DELETE.",
+  },
+  {
+    path: "prisma/migrations/20261116120200_amux_v19_session_claim_system_close/migration.sql",
+    table: "AmuxIdeaSessionAnalysisReservation",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "The 2026-11-16 sweep migration (owner direction; docs/policy/amux-intake.md, subscription analysis closes an unknown outcome at zero and accepts a late result): it only replaces a guard function body under its replace-function-if-body-sha256 header. Its write verbs are the guard's TG_OP comparisons and words of comments inside the function body; the table mentions are the guard's reads. It has no INSERT, UPDATE or DELETE.",
+  },
+  {
+    path: "prisma/migrations/20261116120200_amux_v19_session_claim_system_close/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 5,
+    writeVerbs: 2,
+    reason:
+      "The 2026-11-16 sweep migration (owner direction; docs/policy/amux-intake.md, subscription analysis closes an unknown outcome at zero and accepts a late result): it only replaces a guard function body under its replace-function-if-body-sha256 header. Its write verbs are the guard's TG_OP comparisons and words of comments inside the function body; the table mentions are the guard's reads. It has no INSERT, UPDATE or DELETE.",
+  },
+  {
+    path: "prisma/migrations/20261116120300_amux_v19_shadow_usage_late_result/migration.sql",
+    table: "AmuxIdeaSessionAnalysisBudgetClaim",
+    tableMentions: 2,
+    writeVerbs: 1,
+    reason:
+      "The 2026-11-16 sweep migration (owner direction; docs/policy/amux-intake.md, subscription analysis closes an unknown outcome at zero and accepts a late result): it only replaces a guard function body under its replace-function-if-body-sha256 header. Its write verbs are the guard's TG_OP comparisons and words of comments inside the function body; the table mentions are the guard's reads. It has no INSERT, UPDATE or DELETE.",
+  },
+  {
+    path: "prisma/migrations/20261116120300_amux_v19_shadow_usage_late_result/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 1,
+    reason:
+      "The 2026-11-16 sweep migration (owner direction; docs/policy/amux-intake.md, subscription analysis closes an unknown outcome at zero and accepts a late result): it only replaces a guard function body under its replace-function-if-body-sha256 header. Its write verbs are the guard's TG_OP comparisons and words of comments inside the function body; the table mentions are the guard's reads. It has no INSERT, UPDATE or DELETE.",
+  },
+  {
+    path: "prisma/migrations/20261116120400_amux_v19_session_result_late_guard/migration.sql",
+    table: "AmuxIdeaSessionAnalysisBudgetClaim",
+    tableMentions: 3,
+    writeVerbs: 2,
+    reason:
+      "The 2026-11-16 sweep migration (owner direction; docs/policy/amux-intake.md, subscription analysis closes an unknown outcome at zero and accepts a late result): it only replaces a guard function body under its replace-function-if-body-sha256 header. Its write verbs are the guard's TG_OP comparisons and words of comments inside the function body; the table mentions are the guard's reads. It has no INSERT, UPDATE or DELETE.",
+  },
+  {
+    path: "prisma/migrations/20261116120400_amux_v19_session_result_late_guard/migration.sql",
+    table: "AmuxIdeaSessionAnalysisReservation",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "The 2026-11-16 sweep migration (owner direction; docs/policy/amux-intake.md, subscription analysis closes an unknown outcome at zero and accepts a late result): it only replaces a guard function body under its replace-function-if-body-sha256 header. Its write verbs are the guard's TG_OP comparisons and words of comments inside the function body; the table mentions are the guard's reads. It has no INSERT, UPDATE or DELETE.",
+  },
+  {
+    path: "prisma/migrations/20261116120400_amux_v19_session_result_late_guard/migration.sql",
+    table: "AmuxIdeaTrackedCheckoutEvidence",
+    tableMentions: 2,
+    writeVerbs: 2,
+    reason:
+      "The 2026-11-16 sweep migration (owner direction; docs/policy/amux-intake.md, subscription analysis closes an unknown outcome at zero and accepts a late result): it only replaces a guard function body under its replace-function-if-body-sha256 header. Its write verbs are the guard's TG_OP comparisons and words of comments inside the function body; the table mentions are the guard's reads. It has no INSERT, UPDATE or DELETE.",
+  },
+  {
+    path: "prisma/migrations/20261116120400_amux_v19_session_result_late_guard/migration.sql",
+    table: "AmuxIdeaTrackedCheckoutReadManifest",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "The 2026-11-16 sweep migration (owner direction; docs/policy/amux-intake.md, subscription analysis closes an unknown outcome at zero and accepts a late result): it only replaces a guard function body under its replace-function-if-body-sha256 header. Its write verbs are the guard's TG_OP comparisons and words of comments inside the function body; the table mentions are the guard's reads. It has no INSERT, UPDATE or DELETE.",
+  },
+  {
+    path: "prisma/migrations/20261116120400_amux_v19_session_result_late_guard/migration.sql",
+    table: "AmuxIdeaReadManifestKeyIntent",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "The 2026-11-16 sweep migration (owner direction; docs/policy/amux-intake.md, subscription analysis closes an unknown outcome at zero and accepts a late result): it only replaces a guard function body under its replace-function-if-body-sha256 header. Its write verbs are the guard's TG_OP comparisons and words of comments inside the function body; the table mentions are the guard's reads. It has no INSERT, UPDATE or DELETE.",
+  },
+  {
+    path: "prisma/migrations/20261116120400_amux_v19_session_result_late_guard/migration.sql",
+    table: "AmuxIdeaOperatingScopeSetting",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "The 2026-11-16 sweep migration (owner direction; docs/policy/amux-intake.md, subscription analysis closes an unknown outcome at zero and accepts a late result): it only replaces a guard function body under its replace-function-if-body-sha256 header. Its write verbs are the guard's TG_OP comparisons and words of comments inside the function body; the table mentions are the guard's reads. It has no INSERT, UPDATE or DELETE.",
+  },
+  {
+    path: "prisma/migrations/20261116120400_amux_v19_session_result_late_guard/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 5,
+    writeVerbs: 2,
+    reason:
+      "The 2026-11-16 sweep migration (owner direction; docs/policy/amux-intake.md, subscription analysis closes an unknown outcome at zero and accepts a late result): it only replaces a guard function body under its replace-function-if-body-sha256 header. Its write verbs are the guard's TG_OP comparisons and words of comments inside the function body; the table mentions are the guard's reads. It has no INSERT, UPDATE or DELETE.",
+  },
+  {
+    path: "prisma/migrations/20261116130000_amux_card_exec_report_sizes/migration.sql",
+    table: "AmuxV22TaskRecoveryEvidence",
+    tableMentions: 1,
+    writeVerbs: 10,
+    reason:
+      "The 2026-11-16 sweep migration (owner direction; docs/policy/development-agent-orchestration.md, card execution report and detail bounds become one 1 MiB bound): CHECK-only DDL, each constraint dropped and added again with its new bound; its write verbs are DROP/ADD words of ALTER TABLE and comments. It has no INSERT, UPDATE or DELETE.",
+  },
+  {
+    path: "prisma/migrations/20261116130000_amux_card_exec_report_sizes/migration.sql",
+    table: "AmuxV22ReadOnlyLaunchCheck",
+    tableMentions: 1,
+    writeVerbs: 10,
+    reason:
+      "The 2026-11-16 sweep migration (owner direction; docs/policy/development-agent-orchestration.md, card execution report and detail bounds become one 1 MiB bound): CHECK-only DDL, each constraint dropped and added again with its new bound; its write verbs are DROP/ADD words of ALTER TABLE and comments. It has no INSERT, UPDATE or DELETE.",
+  },
+  {
+    path: "prisma/migrations/20261116130000_amux_card_exec_report_sizes/migration.sql",
+    table: "AmuxV22ReadOnlyLaunchProof",
+    tableMentions: 1,
+    writeVerbs: 10,
+    reason:
+      "The 2026-11-16 sweep migration (owner direction; docs/policy/development-agent-orchestration.md, card execution report and detail bounds become one 1 MiB bound): CHECK-only DDL, each constraint dropped and added again with its new bound; its write verbs are DROP/ADD words of ALTER TABLE and comments. It has no INSERT, UPDATE or DELETE.",
+  },
+  {
+    path: "prisma/migrations/20261116130400_amux_v22_recovery_approval_attempt_unbounded/migration.sql",
+    table: "AmuxV22TaskRecoveryApproval",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "The 2026-11-16 sweep migration (owner direction; docs/policy/development-agent-orchestration.md, a recovery approval's attempt number has no bound of ours): CHECK-only DDL, each constraint dropped and added again with its new bound; its write verbs are DROP/ADD words of ALTER TABLE and comments. It has no INSERT, UPDATE or DELETE.",
+  },
+  {
+    path: "prisma/migrations/20261116140000_amux_dm_request_windows/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 3,
+    writeVerbs: 2,
+    reason:
+      "The 2026-11-16 windows migration (owner direction; docs/policy/amux-decision-maker.md §2, §9, §10): it replaces the request guard (20261008090100_amux_decision_maker_request_ledger) and the request event guard (20261018120000_amux_decision_maker_delivery_gaps) with their previous bodies but for the assignment and result windows and a late result accepted for the digest its result_unknown names. Its write verbs are the guards' TG_OP comparisons and words of comments inside the function bodies. Its AdminAuditLog mentions are the unchanged guard bodies' reads of the audit row an event or a request is bound to. It never writes AdminAuditLog.",
+  },
+  {
+    path: "prisma/migrations/20261116140000_amux_dm_request_windows/migration.sql",
+    table: "AmuxDecisionMakerSwitchEvent",
+    tableMentions: 3,
+    writeVerbs: 2,
+    reason:
+      "The 2026-11-16 windows migration (owner direction; docs/policy/amux-decision-maker.md §2, §9, §10): it replaces the request guard (20261008090100_amux_decision_maker_request_ledger) and the request event guard (20261018120000_amux_decision_maker_delivery_gaps) with their previous bodies but for the assignment and result windows and a late result accepted for the digest its result_unknown names. Its write verbs are the guards' TG_OP comparisons and words of comments inside the function bodies. The unchanged guard bodies read the newest kill switch and instance events under the shared switch gate, and the event guard the highest sequence a result records. Nothing here writes a switch event.",
+  },
+  {
+    path: "prisma/migrations/20261116140000_amux_dm_request_windows/migration.sql",
+    table: "AmuxDecisionMakerRequest",
+    tableMentions: 3,
+    writeVerbs: 2,
+    reason:
+      "The 2026-11-16 windows migration (owner direction; docs/policy/amux-decision-maker.md §2, §9, §10): it replaces the request guard (20261008090100_amux_decision_maker_request_ledger) and the request event guard (20261018120000_amux_decision_maker_delivery_gaps) with their previous bodies but for the assignment and result windows and a late result accepted for the digest its result_unknown names. Its write verbs are the guards' TG_OP comparisons and words of comments inside the function bodies. The request guard's own table, and the event guard's read of the request row and its audit target type. Nothing here inserts, updates or deletes a request; rows written before keep their deadlines.",
+  },
+  {
+    path: "prisma/migrations/20261116140000_amux_dm_request_windows/migration.sql",
+    table: "AmuxDecisionMakerRequestEvent",
+    tableMentions: 2,
+    writeVerbs: 2,
+    reason:
+      "The 2026-11-16 windows migration (owner direction; docs/policy/amux-decision-maker.md §2, §9, §10): it replaces the request guard (20261008090100_amux_decision_maker_request_ledger) and the request event guard (20261018120000_amux_decision_maker_delivery_gaps) with their previous bodies but for the assignment and result windows and a late result accepted for the digest its result_unknown names. Its write verbs are the guards' TG_OP comparisons and words of comments inside the function bodies. The event guard reads the request's events after the per-request lock and names an event as an audit's target type. Nothing here inserts, updates or deletes an event.",
+  },
+  {
+    path: "prisma/migrations/20261116140000_amux_dm_request_windows/migration.sql",
+    table: "AmuxDecisionMakerJudgment",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "The 2026-11-16 windows migration (owner direction; docs/policy/amux-decision-maker.md §2, §9, §10): it replaces the request guard (20261008090100_amux_decision_maker_request_ledger) and the request event guard (20261018120000_amux_decision_maker_delivery_gaps) with their previous bodies but for the assignment and result windows and a late result accepted for the digest its result_unknown names. Its write verbs are the guards' TG_OP comparisons and words of comments inside the function bodies. The unchanged event guard reads a person's judgment of this transaction for a judgment's closing event. Nothing here writes a judgment.",
+  },
+  {
+    path: "prisma/migrations/20261116140100_amux_dm_latch_release/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 6,
+    reason:
+      "The 2026-11-16 latch release migration (owner direction; docs/policy/amux-decision-maker.md §8, §10): it replaces the switch event table's reason and actor/reason CHECKs, adding the system's latch_release back to proposal mode, and the switch guard with its previous body (20261017160000_amux_decision_maker_cleanup_unknown) but for the newest event's reason and clock, a person's release only after a latch, and the system release's rule. Its write verbs are the DDL (the two replaced CHECKs), the guard's TG_OP comparison and words of comments. Its AdminAuditLog mentions are the guard's reads of the audit row a person's or the system's event is bound to. It never writes AdminAuditLog.",
+  },
+  {
+    path: "prisma/migrations/20261116140100_amux_dm_latch_release/migration.sql",
+    table: "AmuxDecisionMakerSwitchEvent",
+    tableMentions: 6,
+    writeVerbs: 6,
+    reason:
+      "The 2026-11-16 latch release migration (owner direction; docs/policy/amux-decision-maker.md §8, §10): it replaces the switch event table's reason and actor/reason CHECKs, adding the system's latch_release back to proposal mode, and the switch guard with its previous body (20261017160000_amux_decision_maker_cleanup_unknown) but for the newest event's reason and clock, a person's release only after a latch, and the system release's rule. Its write verbs are the DDL (the two replaced CHECKs), the guard's TG_OP comparison and words of comments. The replaced CHECKs, the guard's own table, its read of the scope's newest event and of the person's newest value, and an event as an audit's target type. Nothing here inserts, updates or deletes a switch event; only lists grow, so every stored row passes the new CHECKs.",
+  },
+  {
+    path: "prisma/migrations/20261116140100_amux_dm_latch_release/migration.sql",
+    table: "AmuxDecisionMakerRequestEvent",
+    tableMentions: 1,
+    writeVerbs: 6,
+    reason:
+      "The 2026-11-16 latch release migration (owner direction; docs/policy/amux-decision-maker.md §8, §10): it replaces the switch event table's reason and actor/reason CHECKs, adding the system's latch_release back to proposal mode, and the switch guard with its previous body (20261017160000_amux_decision_maker_cleanup_unknown) but for the newest event's reason and clock, a person's release only after a latch, and the system release's rule. Its write verbs are the DDL (the two replaced CHECKs), the guard's TG_OP comparison and words of comments. The unchanged guard reads the cleanup_unknown report a cleanup latch names. Nothing here writes a request event.",
   },
   {
     path: "prisma/migrations/20261115140000_amux_dm_card_text_cap/migration.sql",
@@ -4138,6 +4394,18 @@ export const RUNTIME_SQL_ALLOWLIST = [
       "Thirty-six statements in the six replaced guards (stage S2-2b4), all EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, because every function pins search_path to pg_catalog, pg_temp, and each the same as in the body it replaces: the event guard's six (20261017200000), the body guard's ten, the retention guard's four, the key guard's five, the judgment guard's six and the delivery guard's five (20261008130100). Only the closing kinds, a direct answer's close's audit action and the delivery guard's third outcome change in them. The schema is the trigger's own, quoted with %I; every value is bound with USING. They read and never write.",
   },
   {
+    path: "prisma/migrations/20261116140000_amux_dm_request_windows/migration.sql",
+    count: 8,
+    reason:
+      "The 2026-11-16 windows migration's two guards (owner direction): the request guard's two (the newest kill switch and instance events under the shared switch gate, and its SELECT EXISTS on AdminAuditLog) and the event guard's six, each the same statement as in the body it replaces (20261008090100, 20261018120000) but for the event aggregate, which also reads the digest a result_unknown names. All EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, because the functions pin search_path to pg_catalog, pg_temp. The schema is the trigger's own, quoted with %I; every value is bound with USING. They read and never write.",
+  },
+  {
+    path: "prisma/migrations/20261116140100_amux_dm_latch_release/migration.sql",
+    count: 5,
+    reason:
+      "The 2026-11-16 latch release migration's switch guard (owner direction): the newest event of the scope (now with its reason and clock), the cleanup latch's named report, the person's newest value for a system release, and the SELECT EXISTS on AdminAuditLog for a person's and for the system's event. All EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, because the function pins search_path to pg_catalog, pg_temp. The schema is the trigger's own, quoted with %I; every value is bound with USING. They read and never write.",
+  },
+  {
     path: "prisma/migrations/20261115140000_amux_dm_card_text_cap/migration.sql",
     count: 10,
     reason:
@@ -4148,6 +4416,12 @@ export const RUNTIME_SQL_ALLOWLIST = [
     count: 8,
     reason:
       "Eight reads in the Decision Maker request ledger's functions, all with EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, because every function pins search_path to pg_catalog, pg_temp: the request guard's newest kill switch and instance events (under the shared switch gate, for a dm_proposal row) and its SELECT EXISTS on AdminAuditLog; the event guard's read of the request row, its aggregate of the request's events after the per-request advisory lock, its newest kill switch and instance events (under the shared switch gate), and its SELECT EXISTS on AdminAuditLog; and the commit check's read of the assignment deadline or the result deadline. The schema is the trigger's own, never input, quoted with %I; every value is bound with USING. They read and never write.",
+  },
+  {
+    path: "prisma/migrations/20261116150100_qa_release_merge_lane_latch_system_release/migration.sql",
+    count: 3,
+    reason:
+      "Three reads in the replaced latch insert trigger, all EXECUTE over a name built from TG_TABLE_SCHEMA and constant table names, because the function pins search_path to pg_catalog, pg_temp: the newest QaReleaseMergeLaneLatch event, the AdminAuditLog row (a set by the lane, a person's release, or the lane's own), and for the lane's own release whether any attempt is open and every set event since the last release closed on an outcome the lane read. The schema is the trigger's own, quoted with %I, and every value is bound with USING. They read and never write.",
   },
   {
     path: "prisma/migrations/20261004020000_qa_release_merge_lane_latch/migration.sql",

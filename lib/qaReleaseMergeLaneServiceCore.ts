@@ -10,6 +10,10 @@
  *   an attempt whose result never arrived. It ends there, except that a
  *   deploy it closed as succeeded, on a lane the app then reads as free and
  *   unlatched, goes on to the next step in the same round;
+ * - with none open and the lane latched, it reads dev's deployments and, when
+ *   dev deploys nothing broken, asks the app to release the latch: the app
+ *   releases it only when every cause was read again and closed (owner
+ *   decision 2026-11-16; a person releases the rest);
  * - with none open and the lane free, it picks the oldest candidate, asks the
  *   app for an instruction, re-reads the pull request and its own switches,
  *   consumes the instruction, merges with the head pinned, checks where the
@@ -120,6 +124,8 @@ export type QaReleaseMergeLanePorts = {
     /** `diffDigest`: for a Decision Maker approved pull request, its diff's digest read right before (lib/pullDiffDigestCore.ts). */
     consume: (request: { attemptId: string; pullRequestNumber: number; headSha: string; base: string; diffDigest?: string }) => Promise<{ consumed: boolean; reason?: string }>;
     report: (attemptId: string, report: QaReleaseMergeReport) => Promise<{ recorded: boolean; reason?: string }>;
+    /** The lane's own latch release; the app decides whether every cause was read again and closed. */
+    release: () => Promise<{ released: boolean; reason?: string }>;
   };
   github: {
     listOpenDevelopPulls: () => Promise<QaReleaseLanePullRequest[]>;
@@ -158,7 +164,7 @@ export type QaReleaseMergeLanePorts = {
 export type QaReleaseMergeLaneRoundOutcome = QaReleaseMergeLaneStepOutcome & { afterDeploy?: "succeeded" | "ci_passed" };
 
 type QaReleaseMergeLaneStepOutcome =
-  | { exitCode: 0; outcome: "disabled" | "latched" | "hold" | "idle" | "waiting" | "attempt_in_flight" | "abandoned" }
+  | { exitCode: 0; outcome: "disabled" | "latched" | "released" | "hold" | "idle" | "waiting" | "attempt_in_flight" | "abandoned" }
   /** The pick the app declined: in S-M1 (lane switch off) this is the shadow judgement, compared with what people merged. */
   | { exitCode: 0; outcome: "instruction_refused"; pullRequestNumber: number; headSha: string; reason: string }
   | { exitCode: 0; outcome: "reported"; report: QaReleaseMergeReport["kind"]; detail: string }
@@ -454,8 +460,25 @@ async function laneRound(
     if (state.dbNowMs - attempt.issuedAtMs <= QA_RELEASE_RESULT_SILENCE_MS) return { exitCode: 0, outcome: "attempt_in_flight" };
     return sendReport(ports, attempt.id, { kind: "unreported" }, "unreported");
   }
-  if (state.latched) return { exitCode: 0, outcome: "latched" };
+  if (state.latched) return releaseIfReadAgain(ports);
   return startNextAttempt(env, ports, state, observer);
+}
+
+/**
+ * A latched lane with no attempt open (owner decision 2026-11-16): the round
+ * reads dev's deployments, as it does before every merge, and asks the app to
+ * release the latch only when dev deploys nothing broken and nothing is
+ * deploying. Unread, broken, busy or refused, the lane stays latched and the
+ * next round asks again. The release itself merges nothing; the next round
+ * picks as usual.
+ */
+async function releaseIfReadAgain(ports: QaReleaseMergeLanePorts): Promise<QaReleaseMergeLaneRoundOutcome> {
+  const deployments = await ports.railway.developDeployments().catch(() => null);
+  if (deployments === null || developBroken(deployments) || qaReleaseHoldingDeployments(deployments).length > 0) {
+    return { exitCode: 0, outcome: "latched" };
+  }
+  const answer = await ports.app.release().catch(() => null);
+  return answer?.released === true ? { exitCode: 0, outcome: "released" } : { exitCode: 0, outcome: "latched" };
 }
 
 /** The deploy reports that close an attempt as deployed, by their round detail. */

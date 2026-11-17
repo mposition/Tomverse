@@ -28,7 +28,7 @@ where
 fn scheduler_enabled() -> bool {
     std::env::var("TOMVERSE_AMUX_ENABLED")
         .ok()
-        .is_some_and(|value| value.trim() == "1")
+        .is_some_and(|value| matches!(value.trim(), "enabled" | "1"))
 }
 
 /// The process's exits (orchestration policy version 20, section 3): `Ok`
@@ -50,7 +50,7 @@ pub async fn run() -> Result<()> {
         info!(
             service = "tomverse-orchestrator",
             enabled = false,
-            "Tomverse AMUX orchestrator disabled; set TOMVERSE_AMUX_ENABLED=1 to enable"
+            "Tomverse AMUX orchestrator disabled; set TOMVERSE_AMUX_ENABLED=enabled to enable"
         );
 
         return Ok(());

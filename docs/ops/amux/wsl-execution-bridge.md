@@ -1,6 +1,6 @@
 # WSL execution bridge
 
-상태: 코드 래치 `WSL_BRIDGE_CODE_LATCH`는 true다. 환경 변수 `TOMVERSE_AMUX_WSL_BRIDGE`가 정확히 `1`이 아니면 runner는 소켓을 열지 않는다. 이 문서는 그 변수를 설정하지 않는다.
+상태: 환경 변수 `TOMVERSE_AMUX_WSL_BRIDGE`가 정확히 `enabled`(production에 이미 있는 `1`도 같은 뜻)가 아니면 runner는 소켓을 열지 않는다. 코드 래치 `WSL_BRIDGE_CODE_LATCH`는 2026-11-16에 없앴다. 이 문서는 그 변수를 설정하지 않는다.
 
 정책: `docs/policy/development-agent-orchestration.md` 버전 14, 결과 정산과 claim은 버전 15.
 
@@ -8,7 +8,7 @@
 
 Tomverse가 카드, 추천, 승격, 승인, 실행 원장, 감사의 정본이다. 운영자 워크스테이션의 WSL이 그 정본에서 승인된 작업을 가져온다. Tomverse 서버는 워크스테이션으로 접속하지 않고, 워크스테이션은 새 외부 수신 포트를 열지 않는다.
 
-Rust runtime과 BoardDriver는 같은 WSL 프로세스에 둔다. Railway의 `tomverse-orchestrator`는 선택 루프이고, 버전 15의 claim 전용 모드(`TOMVERSE_AMUX_CLAIM`이 정확히 `1`)에서는 owner 없는 Todo를 서버가 execution_ready로 판정한 WSL runtime에 claim한다. claim 전용 모드는 Railway에서 runtime이나 명령 실행기를 시작하지 않는다. `TOMVERSE_AMUX_EXECUTE`는 이 계약의 활성화가 아니며, 두 변수가 함께 설정되면 orchestrator는 시작하지 않는다. 같은 orchestrator가 5분마다 자동 승격 tick(`POST /api/internal/amux/auto-promotion/tick`)을 부른다. 판정은 전부 서버가 한다.
+Rust runtime과 BoardDriver는 같은 WSL 프로세스에 둔다. Railway의 `tomverse-orchestrator`는 선택 루프이고, 버전 15의 claim 전용 모드(`TOMVERSE_AMUX_CLAIM`이 정확히 `enabled`, 이전 값 `1`도 같은 뜻)에서는 owner 없는 Todo를 서버가 execution_ready로 판정한 WSL runtime에 claim한다. claim 전용 모드는 Railway에서 runtime이나 명령 실행기를 시작하지 않는다. `TOMVERSE_AMUX_EXECUTE`는 이 계약의 활성화가 아니며, 두 변수가 함께 설정되면 orchestrator는 시작하지 않는다. 같은 orchestrator가 5분마다 자동 승격 tick(`POST /api/internal/amux/auto-promotion/tick`)을 부른다. 판정은 전부 서버가 한다.
 
 ## 로컬 실행
 
@@ -173,7 +173,7 @@ S3 전환은 2026-10-20에 끝났다(codex 셋 12:06, claude 셋 14:47 AEST 등�
 
 ## 활성화
 
-버전 14가 코드 래치를 켰다. `tomverse-wsl-bridge`는 `TOMVERSE_AMUX_WSL_BRIDGE`가 정확히 `1`이고 `TOMVERSE_AMUX_WSL_LOCAL_URL`이 loopback일 때만 실행 루프로 들어간다(정책 버전 55 S4부터 `--worker <이름>`으로 시작한 `run_worker_from_env`). 그 루프는 `bridge_tick_sourced`를 호출하고, 실행 attempt의 전달 본문은 Tomverse의 delivery pull로 받는다. `bridge_tick`은 고정 본문을 받는 테스트용 진입점이다. 세션이 없으면 `start_for_dispatch`가 실패하고 프로세스를 만들지 않는다. 환경 변수가 없으면 바이너리와 `scripts/amux-wsl-bridge.mjs`는 소켓을 열지 않고 끝난다.
+버전 14가 코드 래치를 켰다. `tomverse-wsl-bridge`는 `TOMVERSE_AMUX_WSL_BRIDGE`가 정확히 `enabled`(이전 값 `1`도 같은 뜻)이고 `TOMVERSE_AMUX_WSL_LOCAL_URL`이 loopback일 때만 실행 루프로 들어간다(정책 버전 55 S4부터 `--worker <이름>`으로 시작한 `run_worker_from_env`). 그 루프는 `bridge_tick_sourced`를 호출하고, 실행 attempt의 전달 본문은 Tomverse의 delivery pull로 받는다. `bridge_tick`은 고정 본문을 받는 테스트용 진입점이다. 세션이 없으면 `start_for_dispatch`가 실패하고 프로세스를 만들지 않는다. 환경 변수가 없으면 바이너리와 `scripts/amux-wsl-bridge.mjs`는 소켓을 열지 않고 끝난다.
 
 이 버전은 두 환경 변수를 설정하지 않는다. `TOMVERSE_AMUX_EXECUTE`를 켜지 않는다.
 
@@ -188,7 +188,7 @@ S3 전환은 2026-10-20에 끝났다(codex 셋 12:06, claude 셋 14:47 AEST 등�
 1. 새 서버의 worker 계정에서 AMUX 서버와 8개 worker를 Linux native worktree로 운행한다. `amux-worker-start.service`가 재부팅 후 8개를 시작했는지 각 세션의 실제 프로세스와 작업 디렉터리로 확인한다. 새 서버의 옛 `tomverse-wsl-bridge.service` **사용자** unit은 disabled/inactive로 둔다. AMUX invariant 관측은 승인된 v24 정정 계약으로 판정한다.
 2. 기존 WSL AMUX 서버·bridge의 systemd뿐 아니라 Windows Task Scheduler·시작 프로그램·`wsl.conf` boot 명령 등 자동 시작 경로를 읽어 끈다. 새 등록 전에 제품 DB에서 이전 worker **각각**의 열린 attempt 0건, 소유된 Todo 0건, 미해결 `AmuxOrchestratorWrite` 영수증 0건, lease·generation을 read-back한다. 종료되지 않은 로컬 카드 중 `Execution attempt:`를 담은 카드는 원래 Tomverse attempt에 모두 대응시킨다. 해소된 attempt의 로컬 작업은 claim을 열기 전에 멈춘다. 남은 건은 기존 app route의 lease expiry/recover 또는 사람 Review·escalation으로 해소하고 다시 읽는다. 직접 SQL로 고치거나 로컬 카드 상태를 제품 상태로 추정하지 않는다.
 3. 유출 가능성이 있는 기존 `TOMVERSE_AMUX_SYNC_SECRET`을 교체하고 옛 값이 거부됨을 확인한다. 새 서버 worker 홈·AMUX DB·백업·shell 기록에 비밀 사본이 남았는지 값 출력 없이 검사한다. 기존 WSL 인증 파일은 원본 기록으로만 보존한다. bridge 값은 worker 계정에 다시 복사하지 않는다.
-4. 운영자 권한으로 worker와 별도의 무권한 Linux 계정과 **system** unit을 준비한다. 운영자 계정은 worker와 분리한다. 이전된 `tommy`는 현재 `sudo`·`docker`·`lxd` 그룹에 있으므로 worker로 계속 쓰려면 이 세 권한을 제거하고 `NOPASSWD`·공유 sudo 캐시도 없앤다. 별도 운영자 로그인 경로를 먼저 확보한다. 그룹 제거 뒤 worker의 user systemd manager·tmux·AMUX 서버·8개 세션을 재시작하고 각 프로세스의 `/proc/<pid>/status` `Groups`를 확인한다. 이전 root 동등 권한으로 만들어졌을 수 있는 sudoers·system unit/timer·root cron·setuid 파일·docker/lxd 컨테이너와 이미지를 점검한 뒤 bridge를 설치한다. 승인된 commit에서 빌드한 bridge 바이너리와 unit은 root 소유로 설치해 worker 쓰기를 막는다. 인증 파일은 bridge 계정만 읽는다. 필요한 변수는 `TOMVERSE_INTERNAL_URL`, 새 `TOMVERSE_AMUX_SYNC_SECRET`, loopback `TOMVERSE_AMUX_WSL_LOCAL_URL`이며, AMUX API가 토큰을 요구하면 별도 bridge 토큰도 이 파일에 둔다. `TOMVERSE_AMUX_WSL_BRIDGE=1`은 활성화 결정 때에만 넣는다. `TOMVERSE_AMUX_EXECUTE`는 켜지 않는다. system unit에는 `User=`와 `NoNewPrivileges`, 적절한 `ProtectHome`·`ProtectSystem`, `Restart=on-failure`, `RestartSec=60`, `RestartPreventExitStatus=3`을 둔다. AMUX 서버는 **사용자** unit이므로 `After=amux-server.service`로 두 unit을 순서화할 수 없다. bridge 시작 전에 loopback AMUX readiness를 별도로 기다리며 실패 시 재시도한다.
+4. 운영자 권한으로 worker와 별도의 무권한 Linux 계정과 **system** unit을 준비한다. 운영자 계정은 worker와 분리한다. 이전된 `tommy`는 현재 `sudo`·`docker`·`lxd` 그룹에 있으므로 worker로 계속 쓰려면 이 세 권한을 제거하고 `NOPASSWD`·공유 sudo 캐시도 없앤다. 별도 운영자 로그인 경로를 먼저 확보한다. 그룹 제거 뒤 worker의 user systemd manager·tmux·AMUX 서버·8개 세션을 재시작하고 각 프로세스의 `/proc/<pid>/status` `Groups`를 확인한다. 이전 root 동등 권한으로 만들어졌을 수 있는 sudoers·system unit/timer·root cron·setuid 파일·docker/lxd 컨테이너와 이미지를 점검한 뒤 bridge를 설치한다. 승인된 commit에서 빌드한 bridge 바이너리와 unit은 root 소유로 설치해 worker 쓰기를 막는다. 인증 파일은 bridge 계정만 읽는다. 필요한 변수는 `TOMVERSE_INTERNAL_URL`, 새 `TOMVERSE_AMUX_SYNC_SECRET`, loopback `TOMVERSE_AMUX_WSL_LOCAL_URL`이며, AMUX API가 토큰을 요구하면 별도 bridge 토큰도 이 파일에 둔다. `TOMVERSE_AMUX_WSL_BRIDGE=enabled`(이전 값 `1`도 같은 뜻)는 활성화 결정 때에만 넣는다. `TOMVERSE_AMUX_EXECUTE`는 켜지 않는다. system unit에는 `User=`와 `NoNewPrivileges`, 적절한 `ProtectHome`·`ProtectSystem`, `Restart=on-failure`, `RestartSec=60`, `RestartPreventExitStatus=3`을 둔다. AMUX 서버는 **사용자** unit이므로 `After=amux-server.service`로 두 unit을 순서화할 수 없다. bridge 시작 전에 loopback AMUX readiness를 별도로 기다리며 실패 시 재시도한다.
 5. AMUX 수신 주소를 loopback으로 제한하거나 방화벽에서 운영자 SSH 외 접근을 막고 외부 호스트에서 포트가 닫혔는지 확인한다. 전용 계정의 AMUX loopback API 접근과 Tomverse 내부 route 호출, `record_history` owner 전송 시 로컬 카드 생성 가능성을 실측한다. worker가 bridge 인증 파일·프로세스 환경에 접근하거나 root 소유 바이너리·unit을 바꾸지 못하고, bridge가 worker 자격증명을 읽지 못하는지 확인한다. 제품 DB·GitHub 쓰기·배포 인증은 bridge 계정에 없다. 비밀값과 내부 URL은 로그에 출력하지 않는다.
 6. 승인된 정책 SHA, bridge 바이너리 SHA, 서버·CLI 버전, 제품 실행 API 게이트, 시간 동기화, AMUX DB `quick_check`와 복사 digest, 8개 worktree SHA, Git origin, 이전·새 서비스 상태를 기록한다. **Railway claim 루프가 꺼지거나 orchestrator가 halt한 상태**, 소유된 Todo 0건, `TOMVERSE_AMUX_WSL_SESSIONS`를 worker 하나로 제한한 상태에서 등록·heartbeat를 관측한다. bridge에는 register-only 모드가 없으므로 이 창에서는 실행이 없었다는 증거를 확인한다. 그 다음 운영자가 claim을 열어 제한 실행을 관측한다.
 7. 오류·결과 불명·lease 충돌·감사 누락·비밀 접근이 보이면 새 **system** unit을 중지한다. bridge의 exit 3 halt는 자동 재시작하지 않는다. 제품 DB에서 attempt와 영수증을 대조하고 운영자가 재개 또는 fallback을 결정한다. 새 unit의 재개는 `systemctl`의 system scope를 사용한다. WSL 원본 파일은 보존하되 old bridge를 무조건 재시작하지 않는다. 제품 DB를 로컬 백업으로 덮어쓰지 않는다.

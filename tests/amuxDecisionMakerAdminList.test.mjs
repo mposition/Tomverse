@@ -266,7 +266,7 @@ test("an operator route has no DM path, and its refusals are kept for Admin", ()
   assert.equal(dmAdminDeliveryStatus(row), "not_applicable");
 });
 
-test("the status follows the events in one order: closing, unknown result, result, then the DM path", () => {
+test("the status follows the events in one order: closing, result, unknown result, then the DM path", () => {
   const cases = [
     [{ assigned: false }, "awaiting_assignment"],
     [{ assigned: false, assignmentDeadlineAtEpochMs: BigInt(NOW) }, "assignment_expired"],
@@ -282,7 +282,8 @@ test("the status follows the events in one order: closing, unknown result, resul
     [{ resultKind: "unavailable" }, "unavailable"],
     // A result outranks an unknown transmission; a closing outranks everything.
     [{ snapshotState: "none", transmitOutcome: "transmit_unknown", resultKind: "timeout" }, "timeout"],
-    [{ snapshotState: "none", resultUnknown: true, resultKind: "proposal", outputKind: "select", irreversible: true }, "result_unknown"],
+    // A result accepted after its unknown -- the same digest read back (owner direction 2026-11-16) -- is the result.
+    [{ snapshotState: "none", resultUnknown: true, resultKind: "proposal", outputKind: "select", irreversible: true }, "proposal"],
     [{ snapshotState: "none", resultKind: "proposal", outputKind: "select", irreversible: true, closingKind: "confirm", declarationAccuracy: "not_judged" }, "confirm"],
     [{ snapshotState: "none", resultKind: "proposal", outputKind: "free_text", irreversible: false, closingKind: "edit_confirm", declarationAccuracy: "matched" }, "edit_confirm"],
     [{ snapshotState: "none", resultKind: "proposal", outputKind: "free_text", irreversible: false, closingKind: "reject", declarationAccuracy: "not_judged" }, "reject"],

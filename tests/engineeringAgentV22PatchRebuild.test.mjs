@@ -6,7 +6,6 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 
-import { CONVENTION_VERSIONS } from "../lib/agentAuthorityFiles.ts";
 import { decideTier } from "../lib/agentPushPolicy.ts";
 import { loadEngineeringAgentV22Candidate } from
   "../lib/engineeringAgentV22CandidateLoad.ts";
@@ -167,7 +166,7 @@ const newFilePatch = (path, text) => {
 };
 
 const neutralTierInput = (changes, over = {}) => ({ changes,
-  policyNamedTests: new Set(), installedVersions: { ...CONVENTION_VERSIONS },
+  policyNamedTests: new Set(),
   credential: { status: "analysed", forbidsAll: false,
     forbiddenPaths: new Set() },
   slice: { status: "analysed", slicePaths: new Set() }, ...over });
@@ -306,15 +305,16 @@ test("mode changes, executables and symlinks rebuild git's tree", async () => {
       ["lib/link", "modified", "120000", "120000"],
       ["lib/newlink", "added", null, "120000"],
       ["lib/swap.ts", "modified", "100644", "120000"]]);
-    // A person reads these: the tier gate sends each to T2 by its mode.
-    const reasons = decideTier(neutralTierInput(result.changes)).findings
-      .map((finding) => finding.reason);
-    assert.ok(reasons.includes("executable_bit"));
-    assert.ok(reasons.includes("symlink"));
+    // A symlink is T2 by its mode (its target is read where it is built or
+    // served); an executable bit is not (owner decision 2026-11-16).
+    const findings = decideTier(neutralTierInput(result.changes)).findings;
+    assert.deepEqual([...new Set(findings.filter((finding) => finding.reason === "symlink")
+      .map((finding) => finding.path))].sort(), ["lib/dead", "lib/link", "lib/newlink", "lib/swap.ts"]);
+    assert.ok(!findings.some((finding) => finding.path?.endsWith(".sh") && finding.reason !== "control_plane_path"));
   } finally { fixture.cleanup(); }
 });
 
-test("binary files, as literals and deltas, rebuild git's tree and are T2", async () => {
+test("binary files, as literals and deltas, rebuild git's tree", async () => {
   const image = binary("image", 64 * 1024);
   const tweaked = Buffer.from(image);
   tweaked[1000] ^= 0xff;
@@ -331,8 +331,8 @@ test("binary files, as literals and deltas, rebuild git's tree and are T2", asyn
     assert.deepEqual(result.changes.map((entry) => [entry.path, entry.status,
       entry.isText]), [["public/image.bin", "modified", false],
       ["public/new.bin", "added", false], ["public/old.bin", "deleted", false]]);
-    assert.ok(decideTier(neutralTierInput(result.changes)).findings
-      .some((finding) => finding.reason === "not_text"));
+    // Binary content alone no longer makes a change T2 (owner decision 2026-11-16).
+    assert.deepEqual(decideTier(neutralTierInput(result.changes)), { tier: "T1", findings: [] });
   } finally { fixture.cleanup(); }
 });
 
@@ -400,15 +400,18 @@ test("a new file on a contract path is a candidate the existing tier gate sends 
   try {
     const contract = ["prisma/migrations/20261115000000_new/migration.sql",
       "docs/release-gates/new.md", ".github/workflows/new.yml",
-      "scripts/new.mjs", "tests/newPolicy.test.mjs", "lib/modelPricingNew.ts"];
+      "scripts/new.mjs", "lib/modelPricingNew.ts"];
+    // A test that only sounds like a policy test is judged by its path (owner decision 2026-11-16).
+    const policySounding = "tests/newPolicy.test.mjs";
     const change = fixture.changeFiles(Object.fromEntries(
-      contract.map((path) => [path, "-- new\n"])), [".github/workflows/ci.yml"]);
+      [...contract, policySounding].map((path) => [path, "-- new\n"])), [".github/workflows/ci.yml"]);
     const result = await sameTree(fixture, change);
     const verdict = decideTier(neutralTierInput(result.changes));
     assert.equal(verdict.tier, "T2");
-    for (const path of [...contract.slice(0, 5), ".github/workflows/ci.yml"])
+    for (const path of [...contract.slice(0, 4), ".github/workflows/ci.yml"])
       assert.ok(verdict.findings.some((finding) => finding.path === path),
         `${path} has a finding`);
+    assert.ok(!verdict.findings.some((finding) => finding.path === policySounding));
   } finally { fixture.cleanup(); }
 });
 

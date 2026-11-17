@@ -71,7 +71,6 @@ const post = (submittedPatch) => POST(new Request(endpoint, { method: "POST",
     sourceSha256: sha256(resultText), patch: submittedPatch }),
 }));
 
-process.env.TOMVERSE_AMUX_V22_TASK_RESULT_WRITE = "enabled";
 const validResponse = await post(patch);
 assert.equal(validResponse.status, 200);
 const validBody = await validResponse.json();

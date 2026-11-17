@@ -160,7 +160,7 @@ test("without a proposal the card says in one line why, offers no confirm, and k
   const ko = adminAmuxCardsMessages.ko;
   const cases = [
     [{ state: "not_sent", reason: "waiting_relay" }, "DM에 아직 전달되지 않았어요"],
-    [{ state: "not_sent", reason: "routing_off" }, "TOMVERSE_AMUX_DM_ROUTING"],
+    [{ state: "not_sent", reason: "kill_switch" }, "kill switch"],
     [{ state: "cannot_answer", requestId: REQUEST_ID, reason: "제품 방향 결정이 필요합니다." }, "DM이 답할 수 없다고 했어요: 제품 방향 결정이 필요합니다."],
     [{ state: "with_operator", requestId: REQUEST_ID, reasons: ["irreversible_term"] }, ko.dmReasons.irreversible_term],
   ] as const;

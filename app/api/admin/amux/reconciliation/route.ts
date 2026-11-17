@@ -12,15 +12,11 @@ import {
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedText } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
 import {
-  BOARD_IMPORT_PREVIEW_LIMIT,
   BoardImportError,
-  admitBoardImportPreview,
   boardImportContentTypeAccepted,
-  pruneBoardImportPreviewHits,
 } from "@/lib/amux/boardImportCore";
 import { applyAmuxReconciliation } from "@/lib/amux/boardReconciliation";
 import {
-  AMUX_RECONCILIATION_APPLY_ENV,
   AMUX_RECONCILIATION_RAW_BODY_MAX_BYTES,
   planAmuxReconciliation,
   previewAmuxReconciliation,
@@ -28,7 +24,6 @@ import {
 
 const noStoreHeaders = { "Cache-Control": "private, no-store, max-age=0" };
 const ACTIONS = new Set(["preview", "apply"]);
-const previewHits = new Map<string, number[]>();
 
 const withNoStore = (response: Response) => {
   response.headers.set("Cache-Control", noStoreHeaders["Cache-Control"]);
@@ -79,17 +74,7 @@ export async function POST(request: Request) {
     }
     const raw = await readLimitedText(request, AMUX_RECONCILIATION_RAW_BODY_MAX_BYTES);
     if (action === "preview") {
-      const now = Date.now();
-      const pruned = pruneBoardImportPreviewHits([...previewHits], now);
-      previewHits.clear();
-      for (const [accountId, retained] of pruned) previewHits.set(accountId, retained);
-      const decision = admitBoardImportPreview(previewHits.get(userId) ?? [], now);
-      if (decision.retained.length === 0) previewHits.delete(userId);
-      else previewHits.set(userId, decision.retained);
-      if (!decision.allowed || decision.retained.length > BOARD_IMPORT_PREVIEW_LIMIT) {
-        return NextResponse.json({ error: "preview_rate_limited" }, { status: 429, headers: noStoreHeaders });
-      }
-      return NextResponse.json(previewAmuxReconciliation(raw, process.env[AMUX_RECONCILIATION_APPLY_ENV]), {
+      return NextResponse.json(previewAmuxReconciliation(raw), {
         headers: noStoreHeaders,
       });
     }

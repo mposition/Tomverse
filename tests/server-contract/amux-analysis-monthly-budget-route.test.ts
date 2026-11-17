@@ -28,7 +28,6 @@ mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {
   $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn({ $queryRaw: async () => [] }),
   amuxIdeaAnalysisBudgetSetting: { findUnique: async () => { reads++; return savedRow; } },
 } } });
-mock.module(mod("lib/amux/ideaAnalysisBudgetReservationService.ts"), { namedExports: { AMUX_V4_ANALYSIS_BUDGET_RESERVE_CODE_LATCH: true } });
 mock.module(mod("lib/amux/ideaAnalysisBudgetSettingStore.ts"), { namedExports: {
   AnalysisBudgetSettingError: SettingError,
   readAnalysisBudgetSnapshot: async () => { reads++; return { version: 0, limitMicroUsd: "50000000",
@@ -46,7 +45,6 @@ let POST: (request: Request) => Promise<Response>;
 before(async () => { ({ GET, POST } = await import(mod("app/api/admin/amux/ideas/analysis-budget-settings/route.ts"))); });
 function reset() {
   current = session; role = "owner"; recent = true; writes = 0; reads = 0; storeError = null; savedRow = null;
-  process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_READ = "enabled";
   process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_RESERVE = "enabled";
 }
 const request = (body: unknown = { id, expectedPreviousVersion: 0, monthlyUsd: "1000", ownerConfirmed: true }) =>
@@ -70,11 +68,9 @@ test("snapshot uses private no-store and exact-ID readback exposes only numeric 
   savedRow = null;
   assert.deepEqual(await (await GET(get(`?id=${id}`))).json(), { state: "not_visible", retryWrite: false });
 });
-test("existing budget switches fail closed before the writer", async () => {
-  reset(); delete process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_READ;
-  assert.equal((await GET(get())).status, 409);
-  assert.equal((await POST(request())).status, 409);
+test("the budget write switch fails closed before the writer; the read has no switch", async () => {
   reset(); delete process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_RESERVE;
+  assert.equal((await GET(get())).status, 200);
   assert.equal((await POST(request())).status, 409); assert.equal(writes, 0);
 });
 test("strict input rejects omitted confirmation, unbounded body, extra fields and malformed IDs", async () => {

@@ -104,6 +104,62 @@ test.describe("streaming auto-scroll", () => {
     expect(distanceOnceFinished).toBeGreaterThanOrEqual(distanceRightAfterScroll - 5);
   });
 
+  test("jump button animates while the response is still generating, then says a new response is ready", async ({
+    page,
+  }, testInfo) => {
+    await prepareGuestPage(page, "en");
+    await seedGuestModels(page, ["gpt-5-4-mini"]);
+    // route.fulfill() always delivers the whole body, so hold the stream open
+    // from inside the page instead: the first chunk arrives at once, the
+    // stream only closes when the test calls window.__finishChatStream().
+    await page.addInitScript((body) => {
+      const originalFetch = window.fetch.bind(window);
+      window.fetch = async (input, init) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
+        if (method !== "POST" || !new URL(url, location.href).pathname.endsWith("/api/chat")) {
+          return originalFetch(input, init);
+        }
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(encoder.encode(body));
+            (window as unknown as { __finishChatStream: () => void }).__finishChatStream = () =>
+              controller.close();
+          },
+        });
+        return new Response(stream, {
+          status: 200,
+          headers: { "Content-Type": "text/plain; charset=utf-8", "X-Request-ID": "qa-trace-generating" },
+        });
+      };
+    }, LONG_RESPONSE);
+    await page.goto("/review");
+
+    await sendChatMessage(page, testInfo, "Tell me something long");
+    await waitForContentGrowth(page);
+    await wheelUp(page);
+    await expect.poll(() => distanceFromBottom(page)).toBeGreaterThan(150);
+
+    const button = page.getByTestId("scroll-to-latest-button");
+    await expect(button).toHaveAttribute("data-state", "generating");
+    await expect(button).toHaveAccessibleName("Response generating — jump to latest");
+    await expect(button).toContainText("Generating response");
+    await expect(page.getByTestId("scroll-to-latest-generating-dots")).toBeVisible();
+
+    await page.evaluate(() =>
+      (window as unknown as { __finishChatStream: () => void }).__finishChatStream()
+    );
+
+    await expect(button).toHaveAttribute("data-state", "new-response");
+    await expect(button).toHaveText("New response available");
+    await expect(page.getByTestId("scroll-to-latest-generating-dots")).toHaveCount(0);
+
+    await button.click();
+    await expect.poll(() => distanceFromBottom(page)).toBeLessThan(80);
+    await expect(button).toHaveCount(0);
+  });
+
   test("jump-to-latest button scrolls to bottom and resumes following", async ({
     page,
   }, testInfo) => {

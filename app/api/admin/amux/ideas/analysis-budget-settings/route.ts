@@ -7,8 +7,7 @@ import { assertRecentAdminAuthentication, isAdminReauthenticationError } from "@
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { AMUX_V4_ANALYSIS_BUDGET_RESERVE_CODE_LATCH } from "@/lib/amux/ideaAnalysisBudgetReservationService";
-import { AMUX_ANALYSIS_BUDGET_READ_ENV, AMUX_ANALYSIS_BUDGET_WRITE_ENV } from "@/lib/amux/ideaAnalysisBudgetSettingCore";
+import { AMUX_ANALYSIS_BUDGET_WRITE_ENV } from "@/lib/amux/ideaAnalysisBudgetSettingCore";
 import { AnalysisBudgetSettingError, commitAnalysisBudgetSetting, readAnalysisBudgetSnapshot } from "@/lib/amux/ideaAnalysisBudgetSettingStore";
 
 const noStore = { "Cache-Control": "private, no-store, max-age=0" };
@@ -30,13 +29,9 @@ function failure(error: unknown) {
   if (security) { security.headers.set("Cache-Control", noStore["Cache-Control"]); return security; }
   return NextResponse.json({ error: "outcome_unknown", retryWrite: false }, { status: 503, headers: noStore });
 }
-function enabled() {
-  return AMUX_V4_ANALYSIS_BUDGET_RESERVE_CODE_LATCH && process.env[AMUX_ANALYSIS_BUDGET_READ_ENV] === "enabled";
-}
 export async function GET(request: Request): Promise<Response> {
   try {
     if (!await owner()) return NextResponse.json({ error: "Not found." }, { status: 404, headers: noStore });
-    if (!enabled()) return NextResponse.json({ error: "budget_disabled" }, { status: 409, headers: noStore });
     const params = new URL(request.url).searchParams;
     if ([...params.keys()].some((k) => k !== "id") || params.getAll("id").length > 1) {
       throw new AnalysisBudgetSettingError("invalid_budget");
@@ -64,7 +59,7 @@ export async function POST(request: Request): Promise<Response> {
   try {
     const session = await owner();
     if (!session) return NextResponse.json({ error: "Not found." }, { status: 404, headers: noStore });
-    if (!enabled() || process.env[AMUX_ANALYSIS_BUDGET_WRITE_ENV] !== "enabled") return NextResponse.json({ error: "budget_disabled" }, { status: 409, headers: noStore });
+    if (process.env[AMUX_ANALYSIS_BUDGET_WRITE_ENV] !== "enabled") return NextResponse.json({ error: "budget_disabled" }, { status: 409, headers: noStore });
     if (request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !== "application/json") return NextResponse.json({ error: "Invalid content type." }, { status: 415, headers: noStore });
     await consumeApiRateLimit(request, session.user!.id!, "admin-amux-v4-budget-setting", { minute: 3, day: 20 });
     const body = await readLimitedJson(request, 2_048, schema);

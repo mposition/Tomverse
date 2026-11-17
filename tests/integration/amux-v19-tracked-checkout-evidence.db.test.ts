@@ -62,7 +62,8 @@ import { analysisDeadlineAt as deadlineFor,
  * its content is due. */
 const RETENTION_DAYS = amuxSessionContentRetentionDays();
 const pastRetention = () => new Date(Date.now() - (RETENTION_DAYS + 1) * 24 * 60 * 60_000);
-const sevenDayDeadline = (submittedAt: Date) => deadlineFor(submittedAt, true);
+/** The deadline a row submitted before 2026-11-15 carries. */
+const sevenDayDeadline = (submittedAt: Date) => new Date(submittedAt.getTime() + 7 * 86_400_000);
 
 const commitAmuxIdeaSessionSubmission = (
   tx: Parameters<typeof commitPinnedSessionSubmission>[0],
@@ -815,13 +816,13 @@ test("an analysis still running past day seven records new pages and keeps every
   const stored = await prisma.amuxIdeaSubmission.findUniqueOrThrow({
     where: { id: runningIdeaId } });
   assert.equal(stored.analysisDeadlineAt.getTime(),
-    deadlineFor(stored.submittedAt, false).getTime());
+    deadlineFor(stored.submittedAt).getTime());
   for (const ordinal of [0, 1]) {
     await prisma.$transaction((tx) =>
       recordAmuxTrackedCheckoutEvidence(tx, evidenceInput(runningIdeaId, ordinal)));
   }
   const submittedAt = pastRetention();
-  const openDeadline = deadlineFor(submittedAt, false);
+  const openDeadline = deadlineFor(submittedAt);
   await prisma.$transaction(async (tx) => {
     await tx.$executeRawUnsafe('ALTER TABLE "AmuxIdeaSubmission" DISABLE TRIGGER "AmuxIdeaSubmission_identity_guard"');
     await tx.amuxIdeaSubmission.update({ where: { id: runningIdeaId }, data: {

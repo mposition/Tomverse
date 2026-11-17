@@ -7,8 +7,6 @@ import {
   type AmuxClaimAuditRefusalReason,
 } from "@/lib/amux/auditContract";
 import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
-import { AMUX_V22_TASK_EXECUTION_ENV,
-  amuxV22TaskExecutionEnabled } from "@/lib/amux/v22TaskExecutionCore";
 import { prisma } from "@/lib/prisma";
 import {
   scoreAmuxScheduler,
@@ -812,9 +810,6 @@ export async function listOwnedTodos(): Promise<AmuxOwnedTodo[]> {
           owner: {
             not: null,
           },
-          ...(!amuxV22TaskExecutionEnabled(
-            process.env[AMUX_V22_TASK_EXECUTION_ENV])
-            ? legacyDispatchSourceFilter() : {}),
           archivedAt: null,
           dependencies: runnableDependencyFilter(),
         },

@@ -24,7 +24,7 @@ export type AmuxTranslationOutcome =
       /** Provider requests this translation sent; a cached call sends none. */
       calls: number }
   | { state: "unavailable"; calls: number }
-  | { state: "disabled" | "empty" | "too_large" };
+  | { state: "disabled" | "empty" };
 
 // The same text translated by the same model is answered from memory: a
 // reload, a second tab or the owner toggling the view makes no second call.

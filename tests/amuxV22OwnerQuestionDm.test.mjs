@@ -44,12 +44,11 @@ const detail = (overrides = {}, extra = {}) => ({
 });
 
 test("a question with no local card says the first thing that holds it", () => {
-  const all = { routingEnabled: true, killSwitch: false, hasProvider: true };
+  const all = { killSwitch: false, hasProvider: true };
   assert.equal(amuxV22QuestionDmNotSentReason(all), "waiting_relay");
   assert.equal(amuxV22QuestionDmNotSentReason({ ...all, hasProvider: false }), "no_provider");
   assert.equal(amuxV22QuestionDmNotSentReason({ ...all, killSwitch: true, hasProvider: false }), "kill_switch");
   assert.equal(amuxV22QuestionDmNotSentReason({ ...all, killSwitch: null }), "switches_unreadable");
-  assert.equal(amuxV22QuestionDmNotSentReason({ ...all, routingEnabled: false, killSwitch: true }), "routing_off");
 });
 
 test("a filed question's state follows its card's newest request", () => {
@@ -99,7 +98,7 @@ test("a proposal is confirmable only with its rationale and the values a confirm
 test("only a state still on the Decision Maker's path counts as pending", () => {
   assert.equal(amuxV22QuestionDmPending({ state: "proposal" }), true);
   assert.equal(amuxV22QuestionDmPending({ state: "not_sent", reason: "waiting_relay" }), true);
-  assert.equal(amuxV22QuestionDmPending({ state: "not_sent", reason: "routing_off" }), false);
+  assert.equal(amuxV22QuestionDmPending({ state: "not_sent", reason: "kill_switch" }), false);
   assert.equal(amuxV22QuestionDmPending({ state: "cannot_answer", reason: null }), false);
   assert.equal(amuxV22QuestionDmPending({ state: "rejected" }), false);
 });

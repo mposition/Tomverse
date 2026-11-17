@@ -69,12 +69,6 @@ const amuxProposalWriter = amuxReviewWriter.match(
 const amuxSourceScopePreviewService = withoutComments(readFileSync(
   join(LIB_DIR, "amux/ideaSourceScopePreviewService.ts"), "utf8"
 ));
-const amuxSourceScopePreviewCore = withoutComments(readFileSync(
-  join(LIB_DIR, "amux/ideaSourceScopePreviewCore.ts"), "utf8"
-));
-const amuxResolutionPreviewCore = withoutComments(readFileSync(
-  join(LIB_DIR, "amux/ideaResolutionChoiceCore.ts"), "utf8"
-));
 const amuxResolutionPreviewService = withoutComments(readFileSync(
   join(LIB_DIR, "amux/ideaResolutionPreviewService.ts"), "utf8"
 ));
@@ -363,21 +357,17 @@ const reachesCanonicalOneShotStageAudit = (route) =>
 const isDarkReadOnlyAmuxSourceScopePreview = (
   route,
   service = amuxSourceScopePreviewService,
-  core = amuxSourceScopePreviewCore,
 ) => {
   const routeBusinessImports = [...route.source.matchAll(/from "@\/lib\/([^"]+)"/g)]
     .map((match) => match[1]).sort();
   const serviceBusinessImports = [...service.matchAll(/from "@\/lib\/([^"]+)"/g)]
     .map((match) => match[1]).sort();
   const ownerAt = route.source.indexOf("const session = await owner();");
-  const gateAt = route.source.indexOf("if (!sourceScopePreviewPermitted(process.env[AMUX_V4_SOURCE_SCOPE_PREVIEW_ENV]))");
   const rateAt = route.source.indexOf("await consumeApiRateLimit(request, session.user!.id!");
   const previewAt = route.source.indexOf("await previewAmuxSourceScope(session, inspected.request)");
   if (route.name !== "amux/ideas/source-scope-preview/route.ts" ||
       JSON.stringify(amuxBusinessClosure()) !== JSON.stringify(SOURCE_SCOPE_REVIEWED_FILES) ||
-      ownerAt < 0 || gateAt <= ownerAt || rateAt <= gateAt || previewAt <= rateAt ||
-      !/AMUX_V4_SOURCE_SCOPE_PREVIEW_CODE_ENABLED\s*=\s*(?:true|false)\b/.test(core) ||
-      !/AMUX_V4_SOURCE_SCOPE_PREVIEW_CODE_ENABLED\s*&&\s*value\s*===\s*"enabled"/.test(core) ||
+      ownerAt < 0 || rateAt <= ownerAt || previewAt <= rateAt ||
       (service.match(/\$transaction\s*\(/g) ?? []).length !== 1 ||
       !/return await prisma\.\$transaction\(async \(tx\) => \{\s*await configureAmuxSourceScopeReadOnlyTransaction\(tx\);\s*return previewAmuxSourceScopeInTransaction\(tx, actorUserId, request, keys\);\s*\},/.test(service) ||
       (service.match(/from "\.\/ideaKeyStore\.ts"/g) ?? []).length !== 1 ||
@@ -410,8 +400,6 @@ const isReadOnlyAmuxResolutionPreview = (route,
   if (route.name !== "amux/ideas/resolution-preview/route.ts" ||
       JSON.stringify(amuxBusinessClosure(new Map(), RESOLUTION_PREVIEW_ROUTE)) !==
         JSON.stringify(RESOLUTION_PREVIEW_REVIEWED_FILES) ||
-      !/AMUX_V4_RESOLUTION_PREVIEW_CODE_ENABLED\s*=\s*(?:true|false)\b/.test(amuxResolutionPreviewCore) ||
-      !/AMUX_V4_RESOLUTION_PREVIEW_CODE_ENABLED\s*&&\s*value\s*===\s*"enabled"/.test(amuxResolutionPreviewCore) ||
       !route.source.includes("const session = await owner();") ||
       !route.source.includes("await consumeApiRateLimit(request, session.user!.id!") ||
       !route.source.includes("await previewAmuxIdeaResolution({ session, ...parsed.data })") ||
@@ -430,12 +418,9 @@ const isReadOnlyAmuxResolutionPreview = (route,
   }
   const post = route.source.slice(route.source.indexOf("export async function POST"));
   const ownerAt = post.indexOf("const session = await owner();");
-  const gateAt = post.indexOf("amuxV4ResolutionPreviewEnabled(process.env[AMUX_V4_RESOLUTION_PREVIEW_ENV])");
-  const gateReturnsDisabled = /if\s*\(\s*!amuxV4ResolutionPreviewEnabled\(process\.env\[AMUX_V4_RESOLUTION_PREVIEW_ENV\]\)\s*\)\s*\{\s*return\s+NextResponse\.json\(\{\s*error:\s*"resolution_preview_disabled"/.test(post);
   const rateAt = post.indexOf("await consumeApiRateLimit(request, session.user!.id!");
   const previewAt = post.indexOf("await previewAmuxIdeaResolution({ session, ...parsed.data })");
-  return ownerAt >= 0 && gateAt > ownerAt && gateReturnsDisabled && rateAt > gateAt &&
-    previewAt > rateAt;
+  return ownerAt >= 0 && rateAt > ownerAt && previewAt > rateAt;
 };
 
 test("the read-only POST audit exception closes when its source boundary changes", () => {
@@ -509,8 +494,7 @@ test("the resolution dry-run audit exception closes when its source boundary cha
     [keyStorePath, `${rawKeyStore}\nvoid globalThis.fetch("https://example.invalid");`],
   ])), resolutionBaseline);
   assert.equal(isReadOnlyAmuxResolutionPreview({ ...route,
-    source: route.source.replaceAll("if (!amuxV4ResolutionPreviewEnabled(",
-      "if (amuxV4ResolutionPreviewEnabled("),
+    source: route.source.replaceAll("const session = await owner();", "const session = null;"),
   }), false);
 });
 

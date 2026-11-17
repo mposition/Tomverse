@@ -1,14 +1,16 @@
 /**
  * Operator command: compare the Railway web service `Tomverse` in one
- * environment with the AMUX v19 session-flow switch list, and with --apply set
- * the missing ones to `enabled` in one write (one redeploy).
+ * environment with the subscription analysis switch list (the retention and
+ * spending switches that remain after the 2026-11-16 route-switch removal),
+ * and with --apply set the missing ones to `enabled` in one write (one
+ * redeploy).
  *
  *   npm run amux:v19-switches -- --environment staging
  *   npm run amux:v19-switches -- --environment staging --apply
  *   npm run amux:v19-switches -- --environment production --apply --confirm-production
  *
  * Read-only without --apply. It never sets, prints or reads back a secret
- * value: the three operator values are reported as set or missing by name.
+ * value: the operator values are reported as set or missing by name.
  * Switches that are present with another value are reported and left alone.
  * Needs a logged-in Railway CLI (`railway login`) with access to the project.
  */

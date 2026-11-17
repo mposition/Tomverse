@@ -54,6 +54,7 @@ const ports = (overrides = {}) => {
       issue: record("issue", overrides.issue ?? { issued: true, attemptId: "att-1" }),
       consume: record("consume", overrides.consume ?? { consumed: true }),
       report: record("report", overrides.report ?? { recorded: true }),
+      release: record("release", overrides.release ?? { released: false, reason: "not_releasable" }),
     },
     github: {
       listOpenDevelopPulls: record("list", overrides.pulls ?? [pull(7)]),
@@ -101,6 +102,38 @@ test("a latch, a dev deployment in flight or no candidate merges nothing", async
   const none = ports({ pulls: [pull(7, { isDraft: true })] });
   assert.equal((await runQaReleaseMergeLaneRound(ENV, none.ports)).outcome, "idle");
   for (const run of [latched, busy, none]) assert.equal(names(run.calls).includes("merge"), false);
+});
+
+// Owner decision 2026-11-16: the lane asks the app to release its own latch
+// once dev deploys nothing broken; the app decides whether every cause was read
+// again and closed.
+test("a latched lane with no attempt open asks for its release only when dev deploys cleanly", async () => {
+  const latchedState = { dbNowMs: NOW, latched: true, openAttempt: null };
+  const released = ports({ state: latchedState, release: { released: true } });
+  assert.deepEqual(await runQaReleaseMergeLaneRound(ENV, released.ports), { exitCode: 0, outcome: "released" });
+  assert.deepEqual(names(released.calls), ["readState", "deployments", "release"]);
+  // The release merges nothing in the same round.
+  assert.equal(names(released.calls).includes("merge"), false);
+
+  const refused = ports({ state: latchedState });
+  assert.deepEqual(await runQaReleaseMergeLaneRound(ENV, refused.ports), { exitCode: 0, outcome: "latched" });
+  assert.ok(names(refused.calls).includes("release"));
+
+  const failedDeploy = [{ serviceId: "web", serviceName: "web", status: "FAILED", createdAt: "2026-10-04T23:00:00Z", meta: { branch: "develop", commitHash: MERGE } }];
+  const deploying = [{ serviceId: "web", serviceName: "web", status: "WAITING", createdAt: "2026-10-04T23:00:00Z" }];
+  for (const [label, deployments] of [["unread", null], ["broken", failedDeploy], ["deploying", deploying]]) {
+    const run = ports({ state: latchedState, release: { released: true }, deployments });
+    assert.deepEqual(await runQaReleaseMergeLaneRound(ENV, run.ports), { exitCode: 0, outcome: "latched" }, label);
+    assert.equal(names(run.calls).includes("release"), false, label);
+  }
+  // An app that cannot be reached leaves the lane latched; it asks again next round.
+  const unreachable = ports({ state: latchedState, release: () => { throw new Error("app_503"); } });
+  assert.deepEqual(await runQaReleaseMergeLaneRound(ENV, unreachable.ports), { exitCode: 0, outcome: "latched" });
+  // With an attempt open the round judges the attempt, never the release.
+  const open = ports({ state: { dbNowMs: NOW, latched: true, openAttempt: { id: "att-9", state: "consumed", pullRequestNumber: 7,
+    headSha: HEAD, mergeCommitSha: null, issuedAtMs: NOW - 60_000, mergeNotBeforeMs: NOW - 60_000 } }, release: { released: true } });
+  await runQaReleaseMergeLaneRound(ENV, open.ports);
+  assert.equal(names(open.calls).includes("release"), false);
 });
 
 test("an excluded candidate is skipped for the next, and its exclusion is judged only once readiness passes", async () => {

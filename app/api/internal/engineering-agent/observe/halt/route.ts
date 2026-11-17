@@ -24,8 +24,7 @@ import { prisma } from "@/lib/prisma";
 // branch; it halts claims, runs and pushes until a person acknowledges it or
 // -- owner decision 2026-11-15 -- the runner's later reading finds nothing
 // unbound (`none`, naming when the halt it saw was observed), which clears that
-// halt and no later one (a no-op when nothing holds, and with
-// ENGINEERING_AGENT_LEGACY_HALTS). Only these values: a circuit or a mismatch
+// halt and no later one (a no-op when nothing holds). Only these values: a circuit or a mismatch
 // is the app's to read, never a service's to assert.
 
 const subjectSchema = z.union([

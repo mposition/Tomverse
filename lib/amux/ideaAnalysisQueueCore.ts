@@ -1,17 +1,11 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 
-/** An independent v4 intake bridge. The existing AMUX sync credential cannot
- * discover operator ideas, and the dedicated environment switch remains
- * required after the v15 code activation. */
-export const AMUX_V4_ANALYSIS_QUEUE_CODE_LATCH = true;
-export const AMUX_V4_ANALYSIS_QUEUE_READ_ENV = "TOMVERSE_AMUX_V4_ANALYSIS_QUEUE_READ";
+/** The idea analysis intake bridge. The existing AMUX sync credential cannot
+ * discover operator ideas; only the dedicated agent secret can read the queue. */
 export const AMUX_V4_ANALYSIS_AGENT_SECRET_ENV = "TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET";
 export const AMUX_V4_ANALYSIS_AGENT_ID = "amux-intake";
 
 const SECRET = /^[A-Za-z0-9_-]{32,256}$/;
-
-export const amuxV4AnalysisQueueReadEnabled = (value: string | undefined): boolean =>
-  AMUX_V4_ANALYSIS_QUEUE_CODE_LATCH && value === "enabled";
 
 /** Only the dedicated local Agent identity may read candidate IDs. This
  * helper never grants payload access or permission to claim a receipt. */

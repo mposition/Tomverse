@@ -1,19 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { amuxV22DeliveryBaseShaEnabled, amuxV22DeliveryBudgetMicrousd,
+import { amuxV22DeliveryBudgetMicrousd,
   amuxV22EngineeringPublicationEnabled,
-  amuxV22TaskExecutionEnabled,
   v22ExecutionReceiptVerified,
   v22KnownCliFailureReason,
   v22ReadOnlyApiReceiptMatchesUsage,
   v22SettlementPatchMatches } from
   "../lib/amux/v22TaskExecutionCore.ts";
 
-test("v22 execution and publication each need their own exact switch", () => {
-  assert.equal(amuxV22TaskExecutionEnabled("enabled"), true);
+test("v22 publication needs its own exact switch", () => {
   for (const flag of [undefined, "", "disabled", "true", "1", " enabled", "ENABLED"]) {
-    assert.equal(amuxV22TaskExecutionEnabled(flag), false);
     assert.equal(amuxV22EngineeringPublicationEnabled(flag), false);
   }
   assert.equal(amuxV22EngineeringPublicationEnabled("enabled"), true);
@@ -148,12 +145,6 @@ test("an ordinary delivery's budget field stays within the bridge's 5 USD wire r
     "a dear ordinary run is still delivered, not refused by the bridge");
   assert.equal(amuxV22DeliveryBudgetMicrousd(3_400_000, true), 3_400_000,
     "the read-only retry carries its exact signed amount");
-});
-
-test("the publication base reaches the box only behind its default-off switch", () => {
-  assert.equal(amuxV22DeliveryBaseShaEnabled(undefined), false);
-  assert.equal(amuxV22DeliveryBaseShaEnabled("true"), false);
-  assert.equal(amuxV22DeliveryBaseShaEnabled("enabled"), true);
 });
 
 test("only a failed Claude receipt naming its CLI cause is a known failure", () => {

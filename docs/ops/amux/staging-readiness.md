@@ -14,7 +14,7 @@ dirty source identity는 deploy SHA가 아니며 staging 배포 증거를 대신
 
 - `TOMVERSE_AMUX_ENABLED`: 코드 기본값 off, 실제 runtime 값 미관측
 - `TOMVERSE_AMUX_EXECUTE`: 코드 기본값 off, 실제 runtime 값 미관측
-- `TOMVERSE_AMUX_EXECUTION_API_ENABLED`: 코드 기본값 off, 실제 runtime 값 미관측
+- `TOMVERSE_AMUX_EXECUTION_API_ENABLED`: 2026-11-16에 없앴다(실행 API는 늘 열려 있다)
 - worker 배정 카탈로그: 등록부에서 유도(정책 버전 35 3항). `TOMVERSE_AMUX_WORKER_CATALOG_JSON`은
   R2e부터 앱이 읽지 않으므로 runtime 값이 배정에 영향을 주지 않음
 - local executor: production hard-disabled (`cfg(test)` process fixture only)
@@ -150,8 +150,7 @@ PR 확인·병합 전에는 `Credit Finance DB Integration`의 `routing` matrix 
 
 현재 가장 강한 rollback은 feature-OFF다.
 
-- `TOMVERSE_AMUX_EXECUTE` 제거 또는 `1` 이외 값
-- `TOMVERSE_AMUX_EXECUTION_API_ENABLED` 제거 또는 `1` 이외 값
+- `TOMVERSE_AMUX_EXECUTE` 제거 또는 `enabled`(이전 값 `1`) 이외 값
 - 필요 시 `TOMVERSE_AMUX_ENABLED` 제거
 
 `execution_ready=false`가 유지되는 동안 server-side claim lifecycle은 fail-closed 상태다.

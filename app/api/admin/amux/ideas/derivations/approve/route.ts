@@ -15,8 +15,6 @@ import { amuxDerivationApprovalSchema } from
   "@/lib/amux/ideaDerivationRouteSchema";
 import { createAmuxContentKeyRing,
   loadAmuxContentKeyRing } from "@/lib/amux/ideaKeyStore";
-import { AMUX_V4_UNIT_WRITE_ENV, amuxV4UnitWriteEnabled } from
-  "@/lib/amux/ideaUnitDecisionStore";
 import { hasValidMutationOrigin } from "@/lib/requestOrigin";
 
 const noStore = { "Cache-Control": "private, no-store, max-age=0" };
@@ -34,10 +32,6 @@ export async function POST(request: Request) {
         { status: 403, headers: noStore });
     }
     await assertRecentAdminAuthentication(session);
-    if (!amuxV4UnitWriteEnabled(process.env[AMUX_V4_UNIT_WRITE_ENV])) {
-      return NextResponse.json({ error: "unit_write_disabled" },
-        { status: 503, headers: noStore });
-    }
     if (request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !==
         "application/json") {
       return NextResponse.json({ error: "content_type_refused" },

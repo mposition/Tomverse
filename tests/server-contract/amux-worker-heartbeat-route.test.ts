@@ -10,9 +10,6 @@ let recordedCapabilities: string[] | null = null;
 mock.module(mod("lib/amux/guard.ts"), { namedExports: {
   isAmuxSyncAuthorized: () => true,
 } });
-mock.module(mod("lib/amux/executionGate.ts"), { namedExports: {
-  isAmuxExecutionApiEnabled: () => true,
-} });
 // The derived catalog check runs inside the heartbeat's own transaction
 // (orchestration policy version 35, section 3), through `listed`.
 mock.module(mod("lib/amux/workerAssignmentCatalog.ts"), { namedExports: {

@@ -2,20 +2,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import {
-  AMUX_V4_SOURCE_SCOPE_PREVIEW_CODE_ENABLED,
-  sourceScopePreviewPermitted,
-} from "../lib/amux/ideaSourceScopePreviewCore.ts";
-
 const source = readFileSync(new URL("../app/api/admin/amux/ideas/source-scope-preview/route.ts", import.meta.url), "utf8");
 const service = readFileSync(new URL("../lib/amux/ideaSourceScopePreviewService.ts", import.meta.url), "utf8");
 
-test("source scope route requires its dedicated environment gate", () => {
-  assert.equal(AMUX_V4_SOURCE_SCOPE_PREVIEW_CODE_ENABLED, true);
-  assert.equal(sourceScopePreviewPermitted(undefined), false);
-  assert.equal(sourceScopePreviewPermitted("enabled"), true);
-  assert.match(source, /sourceScopePreviewPermitted\(process\.env\[AMUX_V4_SOURCE_SCOPE_PREVIEW_ENV\]\)/);
-  assert.match(source, /error: "preview_disabled", transferAuthorized: false/);
+test("source scope route is a POST-only preview", () => {
   assert.doesNotMatch(source, /export async function GET\(/);
 });
 
@@ -30,7 +20,6 @@ test("scope preview requires owner and recent authentication before the bounded 
   assert.match(source, /"Cache-Control": "private, no-store, max-age=0"/);
   const gateOrder = [
     "await owner()",
-    "sourceScopePreviewPermitted(process.env",
     'request.headers.get("content-type")',
     "await consumeApiRateLimit(",
     "await readLimitedText(",

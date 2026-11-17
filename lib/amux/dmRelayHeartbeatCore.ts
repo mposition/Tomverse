@@ -34,25 +34,23 @@ export const AMUX_DM_RELAY_SILENT_MS = 5 * 60_000;
 
 /**
  * How long after a Decision Maker request was created the relay may still be
- * inside that question's tick: the 2-minute assignment window, the broker's
- * 39-minute response deadline (34 until 2026-11-15, when the Decision Maker's
- * workspace build, at most 5 minutes, came before the launcher), and 4 minutes
- * for the result's writes.
+ * inside that question's tick: the broker's response deadline
+ * (DM_BROKER_RESPONSE_DEADLINE_MS, 3 hours 4 minutes since 2026-11-16: a
+ * two-hour run and an hour's workspace before it; it was 39 minutes), the
+ * relay's own wait of up to an hour for the workspace before it launches, its
+ * other steps, and the result's writes after it: 250 minutes (review
+ * r-20261116-215147-09f5b1; it was 190).
  */
-export const AMUX_DM_RELAY_QUESTION_MS = 45 * 60_000;
+export const AMUX_DM_RELAY_QUESTION_MS = 250 * 60_000;
 
 /** How often a relay that stays silent pages again. */
 export const AMUX_DM_RELAY_REMINDER_MS = 3 * 60 * 60_000;
 
 /**
- * The Ubuntu relay serves production, and is only expected to call while
- * that deployment's routes are open
- * (`TOMVERSE_AMUX_DM_ROUTING=enabled`, lib/amux/decisionMakerInternalRoute.ts
- * `AMUX_DM_ROUTING_ENV`). Read here by name, not imported, so the monitor does
- * not load the Decision Maker route module.
+ * The Ubuntu relay serves production, so it is expected to call only for the
+ * production deployment.
  */
 export const amuxDmRelayExpected = (env: NodeJS.ProcessEnv = process.env): boolean =>
-  env.TOMVERSE_AMUX_DM_ROUTING === "enabled" &&
   resolveDeploymentEnvironment(env) === "production";
 
 /** A stored value, or null when it is missing or not a time. */

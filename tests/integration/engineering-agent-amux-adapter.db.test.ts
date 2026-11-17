@@ -924,21 +924,10 @@ test("an active run whose attempt ended halts runs before anyone reports it", as
   // Owner decision 2026-11-15: the orphaned run holds its own card only, so
   // the agent as a whole reports no halt for it.
   assert.equal(currentEngineeringAgentHalt(await readEngineeringAgentHaltState(prisma)), "none");
-  // ENGINEERING_AGENT_LEGACY_HALTS: it halts every run, as before.
-  process.env.ENGINEERING_AGENT_LEGACY_HALTS = "enabled";
-  let mismatch!: { id: string };
-  try {
-    const other = await readyWorkerWithCard();
-    await assert.rejects(
-      startWithRun(other, nextRunId()),
-      (error: unknown) => error instanceof EngineeringAgentStoreRefusedError && error.code === "halted",
-    );
-    assert.equal(await runEngineeringAgentTransaction(prisma, (tx) => openEngineeringAgentRunMismatches(tx)), 1);
-    mismatch = await prisma.engineeringAgentWorkItem.findUniqueOrThrow({ where: { causeKey: `run_attempt:${runId}` } });
-    assert.equal(currentEngineeringAgentHalt(await readEngineeringAgentHaltState(prisma)), "state_mismatch");
-  } finally {
-    delete process.env.ENGINEERING_AGENT_LEGACY_HALTS;
-  }
+  // The mismatch it opens is the card's, so another card still starts.
+  assert.equal(await runEngineeringAgentTransaction(prisma, (tx) => openEngineeringAgentRunMismatches(tx)), 1);
+  const mismatch = await prisma.engineeringAgentWorkItem.findUniqueOrThrow({ where: { causeKey: `run_attempt:${runId}` } });
+  assert.equal(currentEngineeringAgentHalt(await readEngineeringAgentHaltState(prisma)), "none");
 
   // A person's action: AMUX's rows locked first, both sides read again.
   const person = {
@@ -1061,18 +1050,8 @@ test("a settlement records the agent's own spend under the agent scope, apart fr
   );
 });
 
-// The whole gate (orchestration policy version 25): with the code latch and
-// the execution API both open, the engineering mode alone decides.
-const withExecutionApi = async <T>(work: () => Promise<T>): Promise<T> => {
-  const previous = process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
-  process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = "1";
-  try {
-    return await work();
-  } finally {
-    if (previous === undefined) delete process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
-    else process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = previous;
-  }
-};
+// The whole gate: the engineering mode alone decides.
+const withExecutionApi = async <T>(work: () => Promise<T>): Promise<T> => work();
 
 test("mode off closes a public adapter call before it writes anything to AMUX", async () => {
   await withExecutionApi(async () => {

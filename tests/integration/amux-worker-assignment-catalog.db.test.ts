@@ -149,10 +149,9 @@ test("registration and heartbeat ask the derived catalog inside their own transa
   assert.equal((await prisma.amuxWorkerRuntime.findUniqueOrThrow({ where: { workerName: "claude-impl" } })).dispatchReady, false);
 });
 
-test("the bridge scope is the derived catalog without the engineering runner, with each worker's kind, or off", async () => {
+test("the bridge scope is the derived catalog without the engineering runner, with each worker's kind", async () => {
   // Orchestration policy version 55, section 1 (S1).
-  assert.deepEqual(await readAmuxWorkerBridgeScope(false), { listed: false, reason: "bridge_scope_off" });
-  assert.deepEqual(await readAmuxWorkerBridgeScope(true), { listed: true, workers: [] });
+  assert.deepEqual(await readAmuxWorkerBridgeScope(), { listed: true, workers: [] });
   const session = owner();
   await register(session, "claude-impl", "implementation", "active");
   await register(session, "codex-chore", "chore", "active");
@@ -163,7 +162,7 @@ test("the bridge scope is the derived catalog without the engineering runner, wi
   });
   await record(session, "codex-chore", { model: null, routingTags: ["chore"], toolCapabilities: [], v22: null });
   await record(session, "cursor-impl", { model: null, routingTags: ["implementation"], toolCapabilities: [], v22: null });
-  assert.deepEqual(await readAmuxWorkerBridgeScope(true), {
+  assert.deepEqual(await readAmuxWorkerBridgeScope(), {
     listed: true,
     workers: [{ name: "claude-impl", kind: "v22" }, { name: "codex-chore", kind: "session" }],
   });

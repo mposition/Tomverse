@@ -25,7 +25,6 @@ type AuditCall = {
 
 type World = {
   authorized: boolean;
-  executionApiEnabled: boolean;
   auditCalls: AuditCall[];
   auditError: Error | null;
   snapshot: Record<string, unknown>;
@@ -78,7 +77,6 @@ const validBody = () => ({
 
 const freshWorld = (): World => ({
   authorized: true,
-  executionApiEnabled: true,
   auditCalls: [],
   auditError: null,
   snapshot: {
@@ -151,11 +149,6 @@ async function loadRoute(): Promise<{
     mock.module(mod("lib/amux/guard.ts"), {
       namedExports: {
         isAmuxSyncAuthorized: () => world.authorized,
-      },
-    });
-    mock.module(mod("lib/amux/executionGate.ts"), {
-      namedExports: {
-        isAmuxExecutionApiEnabled: () => world.executionApiEnabled,
       },
     });
     mock.module(mod("lib/amux/claimDeadline.ts"), {
@@ -449,9 +442,10 @@ test("audit, database, and claim writer failures are generic no-store 500s", asy
   const { POST } = await loadRoute();
   const failures = [
     () => {
-      world.executionApiEnabled = false;
       world.auditError = new Error("audit chain internals");
-      return request(validBody());
+      const body = validBody();
+      body.decision.scheduler_score = 33;
+      return request(body);
     },
     () => {
       world.snapshotError = new Error("database internals");

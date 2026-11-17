@@ -9,7 +9,6 @@ import { amuxInternalErrorResponse, amuxJsonNoStore } from "@/lib/amux/internalR
 import { readAmuxAssignmentCatalogs } from "@/lib/amux/workerAssignmentCatalog";
 import { AMUX_WORKER_HEALTH_SOURCES } from "@/lib/amux/workerHealthCore";
 import { recordAmuxWorkerHealthSignals } from "@/lib/amux/workerHealthStore";
-import { amuxInfraFailureRoutingEnabled } from "@/lib/amux/infraFailureCore";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -32,8 +31,6 @@ const schema = z.object({
 export async function POST(request: Request) {
   if (!isAmuxSyncAuthorized(request))
     return amuxJsonNoStore({ error: "Unauthorized" }, 401);
-  if (!amuxInfraFailureRoutingEnabled())
-    return amuxJsonNoStore({ recorded: 0, reason: "disabled" }, 409);
   return withAmuxRouteBudget(async () => {
     try {
       const body = await readLimitedJson(request, 4 * 1_024, schema);

@@ -456,6 +456,43 @@ input[type="reset"]:disabled,
   animation: tomverse-fade-in 120ms ease-out;
 }
 
+/* Jump-to-latest pill while a response is still generating: three dots rise
+   in turn (stagger them with animation-delay) and the pill border breathes
+   blue, so a reader who scrolled up can see the answer is still being
+   written. Both stop under the reduced-motion block below. */
+@keyframes tomverse-typing-wave {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.55;
+  }
+  30% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+
+@utility animate-typing-wave {
+  animation: tomverse-typing-wave 1.2s ease-in-out infinite;
+}
+
+@keyframes tomverse-generating-glow {
+  0%,
+  100% {
+    border-color: rgb(63 63 70);
+    box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.3), 0 0 0 0 rgb(59 130 246 / 0);
+  }
+  50% {
+    border-color: rgb(59 130 246);
+    box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.3), 0 0 14px 1px rgb(59 130 246 / 0.45);
+  }
+}
+
+@utility animate-generating-glow {
+  animation: tomverse-generating-glow 2s ease-in-out infinite;
+}
+
 /* Respect the OS reduced-motion preference. The typing indicator and status
    dots animate indefinitely while a response streams, which is exactly the
    sustained motion this setting exists to suppress. */

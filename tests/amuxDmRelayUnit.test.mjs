@@ -89,10 +89,30 @@ test("the unit waits for the local AMUX and keeps the bridge template's hardenin
   ]) {
     assert.deepEqual(values(name), valuesOf(template, name), name);
   }
-  for (const name of ["ReadWritePaths", "BindPaths", "BindReadOnlyPaths", "ReadOnlyPaths",
-    "DynamicUser"]) {
+  for (const name of ["BindReadOnlyPaths", "ReadOnlyPaths", "DynamicUser"]) {
     assert.deepEqual(values(name), [], name);
   }
+});
+
+test("the owed records have a state directory of their own, the only path of /var/lib the relay sees", () => {
+  // dm_relay/owed.rs reads STATE_DIRECTORY, which StateDirectory= sets. The
+  // template's TemporaryFileSystem=/var/lib:ro hides the directory, so it is
+  // bound back in and made writable under ProtectSystem=strict.
+  assert.deepEqual(values("StateDirectory"), ["tomverse-amux-dm-relay"]);
+  assert.deepEqual(values("StateDirectoryMode"), ["0700"]);
+  assert.deepEqual(values("BindPaths"), ["/var/lib/tomverse-amux-dm-relay"]);
+  assert.deepEqual(values("ReadWritePaths"), ["/var/lib/tomverse-amux-dm-relay"]);
+  assert.deepEqual(values("TemporaryFileSystem"), ["/var/lib:ro"]);
+  assert.deepEqual(values("ProtectSystem"), ["strict"]);
+  // The template's workers have no such path.
+  for (const name of ["StateDirectory", "BindPaths", "ReadWritePaths"]) {
+    assert.deepEqual(valuesOf(template, name), [], name);
+  }
+  const owed = readFileSync(
+    new URL("../apps/tomverse-orchestrator/src/dm_relay/owed.rs", import.meta.url),
+    "utf8"
+  );
+  assert.match(owed, /const SYSTEMD_STATE_DIR_ENV: &str = "STATE_DIRECTORY";/);
 });
 
 test("every directive in the unit is one this test names", () => {
@@ -104,7 +124,8 @@ test("every directive in the unit is one this test names", () => {
     "CapabilityBoundingSet", "AmbientCapabilities", "ProtectHome", "ProtectSystem",
     "PrivateTmp", "PrivateDevices", "ProtectKernelTunables", "ProtectKernelModules",
     "ProtectControlGroups", "RestrictSUIDSGID", "LockPersonality",
-    "RestrictAddressFamilies", "TemporaryFileSystem", "UMask", "WantedBy",
+    "RestrictAddressFamilies", "TemporaryFileSystem", "StateDirectory", "StateDirectoryMode",
+    "BindPaths", "ReadWritePaths", "UMask", "WantedBy",
   ]);
   assert.deepEqual(directives.filter((name) => !known.has(name)), []);
   // EnvironmentFile is the one directive given twice.

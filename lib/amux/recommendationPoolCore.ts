@@ -5,7 +5,6 @@ import {
   BOARD_IMPORT_EXPIRY_MS,
   amuxCanonicalJson,
   amuxCatalogTextRefused,
-  boardImportApplyPermitted,
 } from "./boardImportCore.ts";
 import {
   type BoardPromotionItem,
@@ -22,17 +21,15 @@ import { scoreAmuxScheduler } from "./schedulerScoreCore.ts";
  * Decision requests stay at policy version 7. Capacity requests use version 11.
  *
  * Parsing and selection are pure. This module does not open a transaction,
- * write a card, or choose a capacity limit. Version 10 ships the code latch
- * true. Apply still needs the env value exactly `enabled`. Nothing here starts
- * a worker or spends credits.
+ * write a card, or choose a capacity limit. Apply is gated by the approval
+ * flow, not by a switch (owner direction 2026-11-16). Nothing here starts a
+ * worker or spends credits.
  */
 
 export const RECOMMENDATION_POLICY_VERSION = 7;
 export const RECOMMENDATION_CAPACITY_POLICY_VERSION = 11;
 export const RECOMMENDATION_CANONICALIZATION_VERSION = AMUX_MANIFEST_CANONICALIZATION_VERSION;
 export const RECOMMENDATION_SCORING_VERSION = AMUX_GLOBAL_PRIORITY_VERSION;
-export const RECOMMENDATION_APPLY_ENV = "TOMVERSE_AMUX_BOARD_RECOMMEND";
-export const RECOMMENDATION_CODE_LATCH = true;
 export const RECOMMENDATION_LOCK_NAME = "tomverse-amux-recommendation:queue";
 export const RECOMMENDATION_SNAPSHOT_BACKSTOP = 10_000;
 export const RECOMMENDATION_REVIEW_AFTER_MAX_MS = 366 * 24 * 60 * 60 * 1000;
@@ -204,11 +201,6 @@ const sameKeys = (value: object, expected: readonly string[]): boolean => {
 
 const member = <T extends string>(value: string, allowed: readonly T[]): value is T =>
   (allowed as readonly string[]).includes(value);
-
-export const recommendationApplyPermitted = (input: {
-  envValue: string | undefined;
-  codeLatch: boolean;
-}): boolean => boardImportApplyPermitted(input);
 
 export const recommendationRemaining = (
   capacity: RecommendationCapacityFact,

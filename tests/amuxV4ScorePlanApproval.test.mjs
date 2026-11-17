@@ -27,7 +27,6 @@ test("the single portfolio writers and the plan use the same in-transaction writ
   const route = readFileSync("app/api/admin/amux/portfolio/plan/route.ts", "utf8");
   assert.match(route, /getAdminRole\(session\) !== "owner" \|\| !hasValidMutationOrigin\(request\)/);
   assert.match(route, /assertRecentAdminAuthentication\(session\)/);
-  assert.match(route, /amuxV4PortfolioWriteEnabled\(process\.env\[AMUX_V4_PORTFOLIO_WRITE_ENV\]\)/);
   assert.match(route, /consumeApiRateLimit\(/);
   assert.match(route, /\.strict\(\)/);
 });

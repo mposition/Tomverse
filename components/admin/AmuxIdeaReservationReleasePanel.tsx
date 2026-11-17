@@ -59,9 +59,6 @@ export function AmuxIdeaReservationReleasePanel({ ideaId, requestId, available, 
       if (response.status === 428) { setReauthenticate(true); setPhase(pending ? "unknown" : "unavailable"); return; }
       const body: unknown = await response.json().catch(() => null);
       const row = body && typeof body === "object" && !Array.isArray(body) ? body as Record<string, unknown> : null;
-      if (response.status === 409 && row?.error === "analysis_reservation_read_disabled") {
-        setPhase("disabled"); return;
-      }
       const releasable = Array.isArray(row?.releasable) ? row.releasable as Array<Record<string, unknown>> : null;
       if (!response.ok || row?.state !== "idea" || row.ideaId !== ideaId || !releasable ||
           !releasable.every((hold) => typeof hold.id === "string" && ID.test(hold.id) &&

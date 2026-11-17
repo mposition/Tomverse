@@ -506,7 +506,7 @@ test("a legacy card with no decision is remade or closed right under the why box
       allowed_outcomes: [], proposed_transitions: {},
     }) }), true, preV22Legacy);
   assert.match(html, /data-testid="amux-legacy-card"/);
-  assert.match(html, /Task made before v22/);
+  assert.match(html, /Task made before card execution/);
   assert.match(html, /data-testid="amux-legacy-card-recreate"/);
   assert.match(html, /data-testid="amux-legacy-card-close"/);
   // The panel sits right below the why box, before the review parts.
@@ -521,7 +521,7 @@ test("a legacy card with no decision is remade or closed right under the why box
   assert.doesNotMatch(html, /No choice is open for this card yet/);
   assert.doesNotMatch(html, /amux-owner-queue-recovery-steps/);
   // Its Ubuntu inspection is not offered; the note points at the panel.
-  assert.match(html, /data-testid="admin-amux-host-recovery-not-applicable">This Task is archived, or has no v22 receipt/);
+  assert.match(html, /data-testid="admin-amux-host-recovery-not-applicable">This Task is archived, or has no execution receipt/);
   assert.match(html, /in the legacy card panel on this screen/);
   assert.doesNotMatch(html, /Request Ubuntu inspection/);
   assert.doesNotMatch(html, /admin-amux-one-click-recovery/);

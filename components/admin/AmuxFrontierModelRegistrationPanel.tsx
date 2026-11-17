@@ -40,8 +40,7 @@ const receiptStore = (): Storage | null => {
  * The receipt is kept before the write and an unknown answer is read back by
  * its exact approval id, never resent.
  */
-export function AmuxFrontierModelRegistrationPanel({ writeAvailable, operatorId }: {
-  writeAvailable: boolean;
+export function AmuxFrontierModelRegistrationPanel({ operatorId }: {
   operatorId: string;
 }) {
   const m = useAdminMessages(adminAmuxIdeaInputMessages);
@@ -62,7 +61,7 @@ export function AmuxFrontierModelRegistrationPanel({ writeAvailable, operatorId 
   const registrationInputValid = FRONTIER_MODEL_ID.test(registrationModelId.trim()) &&
     registrationEfforts.length > 0 && registrationVersionValue !== null &&
     registrationVersionValue <= 999_999_999;
-  const registrationLocked = !writeAvailable || !registrationRecoveryChecked ||
+  const registrationLocked = !registrationRecoveryChecked ||
     registrationState !== "idle";
 
   const toggleRegistrationEffort = (effort: string, checked: boolean) => {
@@ -98,7 +97,7 @@ export function AmuxFrontierModelRegistrationPanel({ writeAvailable, operatorId 
   };
 
   const registerModel = async () => {
-    if (!writeAvailable || !registrationRecoveryChecked || registrationState !== "idle" ||
+    if (!registrationRecoveryChecked || registrationState !== "idle" ||
         !registrationConfirmed || !registrationInputValid ||
         registrationVersionValue === null) return;
     const registration: PendingFrontierCatalogApproval = {
@@ -236,7 +235,6 @@ export function AmuxFrontierModelRegistrationPanel({ writeAvailable, operatorId 
           {m.frontierRegistrationTitle}
         </h4>
         <p className="text-zinc-300">{m.frontierRegistrationHint}</p>
-        {!writeAvailable ? <p role="status">{m.frontierRegistrationDisabled}</p> : null}
         <div className="grid gap-3 md:grid-cols-2">
           <label className="flex flex-col gap-1" htmlFor="amux-v4-frontier-registration-provider">
             {m.frontierRegistrationProvider}

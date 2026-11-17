@@ -9,7 +9,6 @@ import {
   withAmuxRouteBudget,
 } from "@/lib/amux/dbBoundary";
 import {
-  dmInternalRoutesEnabled,
   dmReturnedRefusalStatus,
   dmRouteErrorResponse,
   dmRouteRefusal,
@@ -41,8 +40,6 @@ import { amuxJsonNoStore } from "@/lib/amux/internalRoute";
  * r-20261017-115136-888d76). The answer is the report's whatever that check does;
  * a latch that could not be written stays owed, and a routing or a
  * transmission intent of the instance is refused meanwhile.
- *
- * Closed until the operator sets `TOMVERSE_AMUX_DM_ROUTING=enabled`.
  */
 
 const MAX_BODY_BYTES = 1_024;
@@ -62,7 +59,6 @@ export async function POST(request: Request) {
   if (!isAmuxSyncAuthorized(request)) {
     return amuxJsonNoStore({ error: "Unauthorized" }, 401);
   }
-  if (!dmInternalRoutesEnabled()) return refused(409, "dm_routing_disabled");
 
   return withAmuxRouteBudget(async () => {
     try {

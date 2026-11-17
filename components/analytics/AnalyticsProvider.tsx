@@ -170,7 +170,7 @@ export function MarketingConsentSlot({
 // stays on the button as its aria-label: the accessible name never shrinks
 // (WCAG 2.5.3 Label in Name holds, and every existing role/name query keeps
 // matching), while the layout gets labels that fit next to 44x44 targets.
-const consentCopy: Record<
+export const consentCopy: Record<
   Language,
   {
     title: string;
@@ -214,7 +214,7 @@ const consentCopy: Record<
   ko: {
     title: "개인정보를 보호하는 제품 분석",
     body: "동의하면 기능 사용·유입 경로 통계를 수집해 Tomverse를 개선합니다. 프롬프트, 응답, 파일명 및 파일 내용은 포함하지 않습니다.",
-    mobileBody: "기능 사용·유입 경로 통계를 수집해 제품을 개선합니다. 질문·파일 내용은 제외합니다.",
+    mobileBody: "기능 사용·유입 경로 통계를 수집해 제품을 개선합니다. 프롬프트·응답·파일명·파일 내용은 제외합니다.",
     accept: "사용 통계 허용",
     acceptShort: "통계 허용",
     decline: "거부",
@@ -223,7 +223,7 @@ const consentCopy: Record<
     settings: "분석 설정",
     noticeTitle: "개인정보 보호 분석이 활성화되어 있습니다",
     noticeBody: "이 지역에서는 명확한 거부 기능과 함께 개인정보를 최소화한 제품 분석을 시작합니다. 프롬프트, 응답, 파일명 및 파일 내용은 포함하지 않으며 광고 저장 기능은 계속 꺼져 있습니다.",
-    noticeMobileBody: "분석이 켜져 있습니다. 질문과 파일은 수집하지 않습니다.",
+    noticeMobileBody: "분석이 켜져 있습니다. 프롬프트·응답·파일명·파일 내용은 수집하지 않습니다.",
     keepOn: "분석 유지",
     keepOnShort: "유지",
     turnOff: "분석 끄기",

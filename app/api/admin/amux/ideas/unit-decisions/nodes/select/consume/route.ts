@@ -12,8 +12,7 @@ import { apiSecurityResponse, consumeApiRateLimit,
 import { authOptions } from "@/lib/auth";
 import { readAmuxV4UnitBrowserNonce } from
   "@/lib/amux/ideaUnitBrowserCore";
-import { AMUX_V4_UNIT_WRITE_ENV, AmuxV4UnitDecisionError,
-  amuxV4UnitWriteEnabled } from "@/lib/amux/ideaUnitDecisionStore";
+import { AmuxV4UnitDecisionError } from "@/lib/amux/ideaUnitDecisionStore";
 import { consumeAmuxV4NodeSelection } from
   "@/lib/amux/ideaNodeSelectionService";
 import { hasValidMutationOrigin } from "@/lib/requestOrigin";
@@ -36,10 +35,6 @@ export async function POST(request: Request) {
         { status: 403, headers: noStore });
     }
     await assertRecentAdminAuthentication(session);
-    if (!amuxV4UnitWriteEnabled(process.env[AMUX_V4_UNIT_WRITE_ENV])) {
-      return NextResponse.json({ error: "unit_write_disabled", retryWrite: false },
-        { status: 503, headers: noStore });
-    }
     if (request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !==
         "application/json") {
       return NextResponse.json({ error: "content_type_refused", retryWrite: false },

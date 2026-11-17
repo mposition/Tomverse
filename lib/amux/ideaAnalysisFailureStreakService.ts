@@ -7,7 +7,7 @@ import { auditRowActorKind,
   AMUX_V4_ANALYSIS_BUDGET_SETTLE_ACTION,
   AMUX_V4_ANALYSIS_BUDGET_SETTLE_TARGET } from "@/lib/adminAuditSystemActors";
 import { AMUX_V4_ANALYSIS_NAMESPACE } from "./ideaAnalysisBudgetCore.ts";
-import { amuxInfraFailureRoutingEnabled } from "./infraFailureCore.ts";
+import { AMUX_SESSION_SYSTEM_CLOSURE } from "./ideaSessionLateResult.ts";
 
 /** One Agent-wide breaker across preview and direct-read CLI invocations.
  * Unknown and owner resolution are separate stops, not execution outcomes.
@@ -16,14 +16,12 @@ import { amuxInfraFailureRoutingEnabled } from "./infraFailureCore.ts";
  * 없습니다."): three failures in a row stop only the paid API path, counted on
  * that path's own settlements. A subscription session is never stopped by a
  * failure streak; its next claim simply runs. A malformed recent audit row
- * still stops both (integrity, not a limit). With
- * TOMVERSE_AMUX_INFRA_FAILURE_ROUTING=disabled both paths share the old
- * breaker. */
+ * still stops both (integrity, not a limit). */
 export async function readAmuxIdeaAnalysisFailureStreak(
   tx: Prisma.TransactionClient,
   path: "paid" | "session" = "paid",
 ): Promise<"ready" | "stopped" | "integrity_unavailable"> {
-  const pathOnly = amuxInfraFailureRoutingEnabled();
+  const pathOnly = true;
   // Preserve the v4 fail-closed check: filtering terminal outcomes below must
   // not hide a malformed recent v4 settlement behind older audit entries.
   const recentV4 = await tx.adminAuditLog.findMany({
@@ -49,11 +47,17 @@ export async function readAmuxIdeaAnalysisFailureStreak(
   });
   if (recentSession.some((entry) => {
     const details = entry.metadata;
-    const status = details && typeof details === "object" && !Array.isArray(details)
-      ? (details as Record<string, unknown>).status : null;
+    const fields = details && typeof details === "object" && !Array.isArray(details)
+      ? details as Record<string, unknown> : null;
+    const status = fields?.status ?? null;
+    // The system closes an unknown subscription claim at zero (operator,
+    // 2026-11-16); that owner_consumed row is the system's, not an owner's.
+    const systemClosure = status === "owner_consumed" &&
+      fields?.closedBy === AMUX_SESSION_SYSTEM_CLOSURE &&
+      fields.budgetMode === "max_shadow" && fields.verification === "not_proven";
     const expectedActor = ["failed", "succeeded", "outcome_unknown"].includes(
-      String(status)) ? "system" : ["owner_consumed", "released"].includes(
-      String(status)) ? "human" : null;
+      String(status)) || systemClosure ? "system" : ["owner_consumed", "released"]
+      .includes(String(status)) ? "human" : null;
     return !entry.entryHash || !expectedActor ||
       auditRowActorKind(entry) !== expectedActor ||
       (details as Record<string, unknown> | null)?.namespace !==

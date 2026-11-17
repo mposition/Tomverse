@@ -124,7 +124,7 @@ async function priorBudget(tx: Prisma.TransactionClient, taskId: string) {
   const numbered = Math.max(prior.historicalRows, prior.greatestAttemptNumber ?? 0);
   if (!decideAmuxAttemptBudget({ historical_rows: prior.historicalRows,
     greatest_attempt_number: prior.greatestAttemptNumber, infra_rows: prior.infraRows,
-    infra_window_rows: 0 }).allowed)
+  }).allowed)
     throw new BoardImportError("attempt_budget_exhausted", 409);
   return { historicalAttempts: prior.historicalRows, nextAttemptNumber: numbered + 1,
     reserved: prior.reservedMicrousd };

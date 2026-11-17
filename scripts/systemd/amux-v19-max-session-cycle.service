@@ -13,8 +13,8 @@ EnvironmentFile=%h/.config/tomverse-amux-v19/max-session.env
 ExecStartPre=/bin/bash %h/.local/lib/tomverse-amux-v19/refresh-tracked-mirrors.sh
 ExecStart=/usr/bin/node %h/.local/lib/tomverse-amux-v19/max-session-cycle.mjs
 WorkingDirectory=%h
-# v19 has no analysis deadline; the operator's stop button and the seven-day
-# retention end a long call. This only bounds a wedged unit.
+# The subscription analysis has no deadline: only the operator's stop ends a
+# long call, and an unreachable app is waited for, not a reason to stop.
 TimeoutStartSec=infinity
 KillMode=control-group
 UMask=0077
@@ -23,5 +23,8 @@ StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=amux-v19-max-session-cycle
 
-# The timer may start again, but an unknown outcome keeps the durable halt
-# marker, which refuses every later claim until the operator reconciles it.
+# An attempt that ends without a result reports its claim's outcome unknown;
+# the app closes a subscription claim at zero and queues the idea again after
+# a wait. A local marker left by an unconfirmed report names its claim, and
+# the next tick reconciles that claim before any new one. Nothing waits for
+# the operator.

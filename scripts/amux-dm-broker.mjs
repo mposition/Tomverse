@@ -23,7 +23,5 @@ const broker = createDecisionMakerBroker();
 const server = createServer({ allowHalfOpen: true, pauseOnConnect: true }, (socket) => {
   void broker.handleConnection(socket);
 });
-// The bridge is one client; a few connections at once is already abnormal.
-server.maxConnections = 8;
 server.on("error", () => fail("listen_failed"));
 server.listen({ fd });

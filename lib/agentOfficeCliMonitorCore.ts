@@ -2,6 +2,13 @@ import { z } from "zod";
 import { detectSecrets } from "./engineeringAgentSecretPatterns";
 import { AGENT_OFFICE_AMUX_ROSTER } from "./agentOffice/amuxRoster";
 
+/**
+ * The monitor's start switch: `enabled`, or the `1` production already holds.
+ * Anything else (including `0` and `disabled`) leaves the monitor off.
+ */
+export const agentOfficeCliMonitorSwitchOn = (value: string | undefined) =>
+  value === "enabled" || value === "1";
+
 /** Owner-approved resident monitoring scope; never an execution allowlist. */
 export const AGENT_OFFICE_CLI_WORKER = "codex-impl";
 export type AgentOfficeCliWorker = (typeof AGENT_OFFICE_AMUX_ROSTER)[number]["name"];

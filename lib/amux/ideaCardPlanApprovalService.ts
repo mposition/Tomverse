@@ -10,17 +10,15 @@ import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import { prisma } from "@/lib/prisma";
 import { AmuxCardDuplicateScanError, loadAmuxCardDuplicateScanner } from
   "./ideaCardDuplicateScanService.ts";
-import { AMUX_V4_CARD_PLAN_MAX_PROPOSED, AmuxV4CardPlanError, amuxV4CardPlanRound,
+import { AmuxV4CardPlanError, amuxV4CardPlanRound,
   amuxV4PlanPublicPrConsent, orderAmuxV4CardPlan } from "./ideaCardPlanCore.ts";
 import { loadCurrentAmuxContentKeys } from "./ideaKeyConfig.ts";
-import { amuxIntakeLegacyLimits } from "./intakeLimitsCore.ts";
 import { createAmuxContentKeyRing } from "./ideaKeyStore.ts";
 import { prepareAmuxV4CardRegistrationInTx } from "./ideaStoryRegistrationService.ts";
 import { amuxV4UnitBrowserDigest } from "./ideaUnitBrowserCore.ts";
 import { deriveAmuxIdeaUnitConfirmation, sameAmuxIdeaUnitConfirmation } from
   "./ideaUnitConfirmationCore.ts";
-import { AMUX_V4_UNIT_WRITE_ENV, AmuxV4UnitDecisionError, amuxV4UnitWriteEnabled,
-  commitAmuxV4CardRegistration } from "./ideaUnitDecisionStore.ts";
+import { AmuxV4UnitDecisionError, commitAmuxV4CardRegistration } from "./ideaUnitDecisionStore.ts";
 import { readVerifiedAmuxCardProposal } from "./ideaUnitProposalReadService.ts";
 import { inspectAmuxV20TaskRegistration } from
   "./ideaUnitRegistrationCore.ts";
@@ -102,9 +100,6 @@ export async function prepareAmuxV4CardPlan(session: Session, request: Request, 
     throw new AmuxV4UnitDecisionError("forbidden");
   }
   await assertRecentAdminAuthentication(session);
-  if (!amuxV4UnitWriteEnabled(process.env[AMUX_V4_UNIT_WRITE_ENV])) {
-    throw new AmuxV4UnitDecisionError("write_disabled");
-  }
   if (!ID.test(input.ideaId) || input.publicPrConsentOff.some((id) => !ID.test(id))) {
     throw new AmuxV4UnitDecisionError("not_ready");
   }
@@ -113,20 +108,14 @@ export async function prepareAmuxV4CardPlan(session: Session, request: Request, 
       throw new AmuxV4CardPlanError("reason_invalid", [unitId]);
     }
   }
-  // Owner direction 2026-11-15: any number of proposed cards is approved over
-  // rounds; only the legacy switch keeps the former 200-card refusal.
-  const legacy = amuxIntakeLegacyLimits();
+  // Owner direction 2026-11-15: any number of proposed cards is approved over rounds.
   const proposed = await prisma.amuxIdeaDraftUnit.findMany({
     // The analysis's own units only; a derived unit keeps its own flow.
     where: { ideaId: input.ideaId, actorUserId, unitKind: "card", state: "proposed",
       derivationGroupId: null },
     select: { id: true }, orderBy: { id: "asc" },
-    ...(legacy ? { take: AMUX_V4_CARD_PLAN_MAX_PROPOSED + 1 } : {}),
   });
   if (proposed.length === 0 && !options.allowEmpty) throw new AmuxV4CardPlanError("nothing_to_approve");
-  if (legacy && proposed.length > AMUX_V4_CARD_PLAN_MAX_PROPOSED) {
-    throw new AmuxV4CardPlanError("too_many_units");
-  }
   // A deferred round reads no proposal: every card waits for the node rounds.
   const verified: Awaited<ReturnType<typeof readVerifiedAmuxCardProposal>>[] =
     options.deferAll ? [] : await Promise.all(proposed.map((unit) =>

@@ -9,7 +9,7 @@ import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import { prisma } from "@/lib/prisma";
 
 import { BoardImportError } from "./boardImportCore.ts";
-import { AMUX_INFRA_FAILURE_REASONS, amuxInfraFailureRoutingEnabled } from "./infraFailureCore.ts";
+import { AMUX_INFRA_FAILURE_REASONS } from "./infraFailureCore.ts";
 
 /**
  * Owner decision 2026-11-10: the owner may accept that one ended v22 attempt's
@@ -33,7 +33,7 @@ export type AmuxV22UsageAcceptanceSource = "owner_accept" | "recovery_approval" 
  * decision 2026-11-15): it holds no worker, so there is nothing to accept. */
 export async function amuxV22TaskUnknownUsageAttemptIds(tx: Prisma.TransactionClient,
   taskId: string): Promise<string[]> {
-  const infraReasons = amuxInfraFailureRoutingEnabled() ? [...AMUX_INFRA_FAILURE_REASONS] : [];
+  const infraReasons = [...AMUX_INFRA_FAILURE_REASONS];
   const rows = await tx.$queryRaw<Array<{ id: string }>>`
     SELECT a."id" FROM "AmuxExecutionAttempt" a
     JOIN "AmuxWorkItem" w ON w."id" = a."taskId"

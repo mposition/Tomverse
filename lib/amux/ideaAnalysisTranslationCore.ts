@@ -1,5 +1,4 @@
 import type { AmuxIdeaAnalysisResultView } from "./ideaAnalysisResultReadCore.ts";
-import { amuxIntakeLegacyLimits } from "./intakeLimitsCore.ts";
 
 /**
  * A Korean reading aid for the owner's analysis result (owner request
@@ -18,8 +17,7 @@ export const amuxAnalysisTranslationEnabled = (value: string | undefined): boole
 
 /** Total source characters and items ONE call translates. A larger page is
  * translated in more calls of this size (planAmuxTranslation, owner direction
- * 2026-11-15); with TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS it is refused instead.
- * The per-call request below is unchanged either way. */
+ * 2026-11-15). */
 export const AMUX_ANALYSIS_TRANSLATION_MAX_SOURCE_CHARS = 24_000;
 export const AMUX_ANALYSIS_TRANSLATION_MAX_ITEMS = 400;
 /** Korean output of 24,000 English characters, with room for low-effort reasoning. */
@@ -87,18 +85,6 @@ export function amuxAnalysisTranslationItems(view: ReadableView): AmuxTranslatio
   return items;
 }
 
-export type AmuxTranslationSourceCheck =
-  | { ok: true; items: AmuxTranslationItem[] }
-  | { ok: false; code: "empty" | "too_large" };
-
-export function checkAmuxTranslationSource(items: AmuxTranslationItem[]): AmuxTranslationSourceCheck {
-  if (items.length === 0) return { ok: false, code: "empty" };
-  const chars = items.reduce((total, item) => total + item.text.length, 0);
-  if (items.length > AMUX_ANALYSIS_TRANSLATION_MAX_ITEMS ||
-      chars > AMUX_ANALYSIS_TRANSLATION_MAX_SOURCE_CHARS) return { ok: false, code: "too_large" };
-  return { ok: true, items };
-}
-
 /** One piece of an asked item: translated under `id`, or kept as written
  * (white space only). `joiner` is the text between it and the piece before. */
 type AmuxTranslationPiece = { joiner: string; id: string | null; text: string };
@@ -152,19 +138,10 @@ function piecesOf(item: AmuxTranslationItem, max: number): AmuxTranslationPiece[
 /**
  * The page's items in calls that each stay within one call's source size and
  * item count, in screen order. An item that alone is larger is translated in
- * pieces cut at line breaks and joined again (mergeAmuxTranslation). With the
- * legacy switch a page larger than one call is refused, as before.
+ * pieces cut at line breaks and joined again (mergeAmuxTranslation).
  */
-export function planAmuxTranslation(items: AmuxTranslationItem[],
-  legacy: boolean = amuxIntakeLegacyLimits()):
-  { ok: true; plan: AmuxTranslationPlan } | { ok: false; code: "empty" | "too_large" } {
-  if (legacy) {
-    const checked = checkAmuxTranslationSource(items);
-    if (!checked.ok) return checked;
-    return { ok: true, plan: { batches: [checked.items],
-      items: checked.items.map((item) => ({ id: item.id,
-        pieces: [{ joiner: "", id: item.id, text: item.text }] })) } };
-  }
+export function planAmuxTranslation(items: AmuxTranslationItem[]):
+  { ok: true; plan: AmuxTranslationPlan } | { ok: false; code: "empty" } {
   if (items.length === 0) return { ok: false, code: "empty" };
   const planned = items.map((item) => ({ id: item.id,
     pieces: piecesOf(item, AMUX_ANALYSIS_TRANSLATION_MAX_SOURCE_CHARS) }));

@@ -235,36 +235,27 @@ const MAX_ROUTING_RESPONSE_BYTES: usize = 512 * 1024;
 const MAX_LIFECYCLE_RESPONSE_BYTES: usize = 128 * 1024;
 const MAX_QUEUE_ITEMS: usize = 512;
 
-/// The v22 local CLI flow (owner decision 2026-11-15,
-/// lib/amux/v22LocalCliFlowCore.ts): on unless
-/// TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW is exactly `disabled`.
-pub fn v22_local_cli_flow() -> bool {
-    std::env::var("TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW")
-        .map(|value| value.trim() != "disabled").unwrap_or(true)
-}
-
 /// A memory backstop for one prompt, context set or report crossing the
 /// bridge (AMUX_V22_TRANSPORT_MAX_BYTES), not a work limit.
 pub const V22_TRANSPORT_MAX_BYTES: usize = 32 * 1024 * 1024;
 
-/// A report's bound: the earlier flow's 64 KiB, or the transport backstop.
+/// A report's bound: the transport backstop (the v22 local CLI flow, owner
+/// decision 2026-11-15, lib/amux/v22LocalCliFlowCore.ts).
 pub fn v22_result_max_bytes() -> usize {
-    if v22_local_cli_flow() { V22_TRANSPORT_MAX_BYTES } else { 65_536 }
+    V22_TRANSPORT_MAX_BYTES
 }
 
-/// A delivered prompt: the earlier 96 KiB, or (local CLI flow) the prompt with
-/// its context-file block, which may hold the brief, the previous patch and
-/// prior conclusions whole.
+/// A delivered prompt with its context-file block, which may hold the brief,
+/// the previous patch and prior conclusions whole.
 pub fn v22_delivery_prompt_max_bytes() -> usize {
-    if v22_local_cli_flow() { 2 * V22_TRANSPORT_MAX_BYTES } else { 96 * 1024 }
+    2 * V22_TRANSPORT_MAX_BYTES
 }
 
-/// A delivery pull answer carries the prompt and, in the local CLI flow, its
-/// context files (the brief, the previous patch, prior conclusions).
+/// A delivery pull answer carries the prompt and its context files (the
+/// brief, the previous patch, prior conclusions).
 fn v22_delivery_response_max_bytes() -> usize {
     // JSON escaping can at most double the prompt.
-    if v22_local_cli_flow() { 2 * v22_delivery_prompt_max_bytes() + MAX_LIFECYCLE_RESPONSE_BYTES }
-    else { MAX_LIFECYCLE_RESPONSE_BYTES }
+    2 * v22_delivery_prompt_max_bytes() + MAX_LIFECYCLE_RESPONSE_BYTES
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]

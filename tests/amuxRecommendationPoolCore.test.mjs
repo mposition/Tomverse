@@ -5,10 +5,8 @@ import { test } from "node:test";
 import {
   RECOMMENDATION_AUDIT_KEYS,
   RECOMMENDATION_CAPACITY_AUDIT_KEYS,
-  RECOMMENDATION_CODE_LATCH,
   parseRecommendationCapacityRequest,
   parseRecommendationDecisionRequest,
-  recommendationApplyPermitted,
   recommendationApproveStillIncluded,
   recommendationAuditMetadata,
   recommendationRemaining,
@@ -43,12 +41,14 @@ const card = (id, overrides = {}) => ({
 
 const id = (suffix) => `c${suffix.padEnd(24, "0").slice(0, 24)}`;
 
-test("version 10 ships the recommendation latch open", () => {
-  assert.equal(RECOMMENDATION_CODE_LATCH, true);
-  assert.equal(recommendationApplyPermitted({ envValue: "enabled", codeLatch: false }), false);
-  assert.equal(recommendationApplyPermitted({ envValue: "enabled", codeLatch: true }), true);
-  assert.equal(recommendationApplyPermitted({ envValue: "true", codeLatch: true }), false);
-  assert.equal(recommendationApplyPermitted({ envValue: undefined, codeLatch: true }), false);
+test("owner direction 2026-11-16: recommendation apply has no environment switch or code latch", () => {
+  for (const path of ["lib/amux/recommendationPoolCore.ts", "lib/amux/recommendationPoolService.ts",
+    "app/api/admin/amux/board-recommendation/route.ts"]) {
+    const source = readFileSync(path, "utf8");
+    assert.equal(source.includes("TOMVERSE_AMUX_BOARD_RECOMMEND"), false);
+    assert.equal(source.includes("RECOMMENDATION_CODE_LATCH"), false);
+    assert.equal(source.includes("recommendationApplyPermitted"), false);
+  }
 });
 
 test("unconfigured capacity includes nothing", () => {
@@ -297,10 +297,8 @@ test("version 11 records capacity only from the request and does not choose a li
   ]) {
     assert.equal(parseRecommendationCapacityRequest(JSON.stringify(raw)).ok, false);
   }
-  const route = readFileSync("app/api/admin/amux/board-recommendation/route.ts", "utf8");
   const service = readFileSync("lib/amux/recommendationPoolService.ts", "utf8");
   const core = readFileSync("lib/amux/recommendationPoolCore.ts", "utf8");
-  assert.ok(route.indexOf('action === "capacity"') < route.indexOf("if (!RECOMMENDATION_CODE_LATCH)"));
   const capacity = service.slice(
     service.indexOf("export async function configureRecommendationCapacity"),
     service.indexOf("const loadCards"),
@@ -318,15 +316,12 @@ test("version 11 records capacity only from the request and does not choose a li
   assert.equal(core.includes("AUTO_GLOBAL_ACTIVE_CAP"), false);
 });
 
-test("the route passes the shipped latch and does not mention execution", () => {
+test("the route does not mention execution", () => {
   const route = readFileSync("app/api/admin/amux/board-recommendation/route.ts", "utf8");
   const service = readFileSync("lib/amux/recommendationPoolService.ts", "utf8");
-  const core = readFileSync("lib/amux/recommendationPoolCore.ts", "utf8");
-  assert.match(route, /RECOMMENDATION_CODE_LATCH/);
   assert.equal(route.includes("codeLatch: true"), false);
   assert.equal(route.includes("TOMVERSE_AMUX_EXECUTE"), false);
   assert.equal(service.includes("TOMVERSE_AMUX_EXECUTE"), false);
   assert.equal(service.includes("amuxRecommendationCapacity.create"), false);
   assert.equal(service.includes("amuxRecommendationCapacity.update"), false);
-  assert.match(core, /RECOMMENDATION_CODE_LATCH = true/);
 });

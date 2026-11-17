@@ -71,7 +71,6 @@ export const adminAmuxWorkerCapabilityMessages = defineAdminMessages({
       refused: {
         model_not_found: "Refused: that Admin › Models entry no longer exists or is retired. Nothing was written.",
         no_change: "Refused: it is already linked that way. Nothing was written.",
-        capability_writes_off: "Refused: changes are off in this build. Nothing was written.",
       },
       failed: "The link change failed.",
     },
@@ -139,7 +138,6 @@ export const adminAmuxWorkerCapabilityMessages = defineAdminMessages({
       refused: {
         model_not_found: "거부되었습니다: 그 Admin › Models 항목이 없거나 은퇴했습니다. 아무것도 쓰지 않았습니다.",
         no_change: "거부되었습니다: 이미 그렇게 연결되어 있습니다. 아무것도 쓰지 않았습니다.",
-        capability_writes_off: "거부되었습니다: 이 빌드에서는 변경이 꺼져 있습니다. 아무것도 쓰지 않았습니다.",
       },
       failed: "연결 변경에 실패했습니다.",
     },

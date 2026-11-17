@@ -2,11 +2,11 @@ import "server-only";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { readLimitedJson } from "@/lib/apiSecurity";
 import { agentOfficeCliBuffer } from "@/lib/agentOfficeCliMonitorBuffer";
-import { AGENT_OFFICE_CLI_MAX_BYTES, agentOfficeCliSnapshotSchema } from "@/lib/agentOfficeCliMonitorCore";
+import { AGENT_OFFICE_CLI_MAX_BYTES, agentOfficeCliMonitorSwitchOn, agentOfficeCliSnapshotSchema } from "@/lib/agentOfficeCliMonitorCore";
 
 export function agentOfficeCliMonitorCredential(env = process.env): string | null {
   const secret = env.TOMVERSE_AMUX_CLI_MONITOR_SECRET ?? "";
-  return env.TOMVERSE_AMUX_CLI_MONITOR === "1" && secret.length >= 32
+  return agentOfficeCliMonitorSwitchOn(env.TOMVERSE_AMUX_CLI_MONITOR) && secret.length >= 32
     ? createHash("sha256").update(secret).digest("hex") : null;
 }
 

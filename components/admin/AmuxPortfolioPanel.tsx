@@ -44,9 +44,7 @@ const previewScoreResponse = z.object({ confirmationDigest: digest,
 type Pending = { kind: "assessment" | "score"; requestId: string;
   payload: object; confirmationDigest: string };
 
-export function AmuxPortfolioPanel({ writeAvailable }: {
-  writeAvailable: boolean;
-}) {
+export function AmuxPortfolioPanel() {
   const m = useAdminMessages(adminAmuxPortfolioMessages);
   const common = useAdminMessages(adminCommonMessages);
   const [kind, setKind] = useState<Kind>("initiative");
@@ -165,7 +163,7 @@ export function AmuxPortfolioPanel({ writeAvailable }: {
     finally { setBusy(false); }
   };
   const approve = async () => {
-    if (!pending || !confirmed || !writeAvailable || busy || unknown) return;
+    if (!pending || !confirmed || busy || unknown) return;
     setBusy(true); setError(null);
     try {
       const response = await post({ action: pending.kind === "assessment" ?
@@ -214,7 +212,6 @@ export function AmuxPortfolioPanel({ writeAvailable }: {
   const score = previewScoreResponse.safeParse(preview);
   return <AdminTile className="space-y-4 text-sm" title={m.title} description={m.hint}>
     <p className="text-xs text-zinc-400">{m.noPromotion}</p>
-    {!writeAvailable ? <p role="status">{m.disabled}</p> : null}
     <div className="grid gap-3 md:grid-cols-2">
       <label>{m.subjectKind}
         <select value={kind} disabled={busy || unknown} onChange={(event) => { setKind(event.target.value as Kind);
@@ -314,7 +311,7 @@ export function AmuxPortfolioPanel({ writeAvailable }: {
       {score.success ? <p role="status">{score.data.score.activeFresh ? m.fresh : m.stale}</p> : null}
       <label className="flex gap-2"><input type="checkbox" checked={confirmed}
         onChange={(event) => setConfirmed(event.target.checked)} />{m.confirmEvidence}</label>
-      <button type="button" disabled={!writeAvailable || !confirmed || busy || unknown}
+      <button type="button" disabled={!confirmed || busy || unknown}
         onClick={() => void approve()}
         className="min-h-11 rounded border border-zinc-400 px-3 disabled:opacity-50">
         {pending?.kind === "assessment" ? m.approve : m.confirm}

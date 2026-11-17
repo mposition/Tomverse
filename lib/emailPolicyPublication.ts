@@ -120,9 +120,12 @@ export const AMENDED_DOCUMENT_EVIDENCE: Readonly<
   // content on 2026-11-15. This records that content, not publication approval.
   // The Memory semantic-search copy correction also changes the source digest
   // while its notice remains hidden. Record the observation without approving it.
+  // 2026-11-17: the provider table gains unverified rows for the image-only
+  // providers fal and Black Forest Labs (enabled FLUX 3 models). Observation
+  // only; not added to APPROVED_AMENDED_DIGESTS and authorizes no email.
   "/privacy": {
     date: "2026-11-16",
-    contentSha256: "bc4dd8939516d84004a355ad6591edf9a6da60d62c291a7ffbd2562cd2fae3aa",
+    contentSha256: "dbae6fa41ce1756146d28eea5202ffc566519dfc7f1a2fdbb47449bd46dbb3cc",
   },
   "/terms": {
     date: "2026-11-16",

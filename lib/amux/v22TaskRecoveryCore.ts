@@ -64,8 +64,12 @@ export const AMUX_V22_READ_ONLY_API_EXECUTOR_ARTIFACT_DIGEST_ENV =
   "TOMVERSE_AMUX_V22_READ_ONLY_API_EXECUTOR_ARTIFACT_DIGEST";
 export const AMUX_V22_READ_ONLY_API_REPOSITORY_SCOPE_DIGEST_ENV =
   "TOMVERSE_AMUX_V22_READ_ONLY_API_REPOSITORY_SCOPE_DIGEST";
-export const amuxV22TaskRecoveryEnabled = (value: string | undefined) => value === "true";
-export const amuxV22LegacySafeStopEnabled = (value: string | undefined) => value === "true";
+// The recovery switches read `enabled`, or the earlier exact `true` that
+// production already sets (owner decision 2026-11-16).
+export const amuxV22TaskRecoveryEnabled = (value: string | undefined) =>
+  value === "enabled" || value === "true";
+export const amuxV22LegacySafeStopEnabled = (value: string | undefined) =>
+  value === "enabled" || value === "true";
 export const amuxV22ReadOnlyApiExecutorEnabled = (value: string | undefined) =>
   value === "true";
 export const AMUX_V22_RECOVERY_ID_PATTERN = /^[A-Za-z0-9:_-]{1,128}$/;
@@ -188,10 +192,23 @@ export const amuxV22RecoveryEvidenceSchema = z.object({
 export const amuxV22RecoveryJournalProven = (input: { reason: string }) =>
   input.reason === "terminal_journal_proven";
 const profileAlias = z.string().min(1).max(64).regex(/^[a-z0-9][a-z0-9-]{0,63}$/);
+// The same bounds the box's recovery controller reads the profile file with
+// (v22RecoveryController.mjs PROFILE_LIMIT, MEMBER_LIMIT): a file the
+// controller takes is never one the app turns away (review
+// r-20261116-223616-da3a14).
+const RECOVERY_PROFILE_LIMIT = 4_096;
+const RECOVERY_PROFILE_MEMBER_LIMIT = 256;
+/**
+ * One controller request or report carries one profile: up to 256 member
+ * names of 64 characters plus fixed fields. The route body bound and the box
+ * controller's response bound are both this value (tests/amuxV22RecoveryProfileLimits).
+ */
+export const AMUX_V22_RECOVERY_CONTROLLER_BODY_MAX_BYTES = 65_536;
 const recoveryProfileConfigSchema = z.object({
   version: z.literal(1),
   profiles: z.array(z.object({ alias: profileAlias,
-    workerNames: z.array(profileAlias).min(1).max(16) }).strict()).min(1).max(128),
+    workerNames: z.array(profileAlias).min(1).max(RECOVERY_PROFILE_MEMBER_LIMIT) }).strict())
+    .min(1).max(RECOVERY_PROFILE_LIMIT),
 }).strict().superRefine((value, context) => {
   const aliases = new Set<string>();
   const workers = new Set<string>();
@@ -264,7 +281,7 @@ export const amuxV22SafeStopEvidenceSchema = z.object({
   targetHost: z.literal(AMUX_V22_RECOVERY_HOST_SCOPE),
   sourceEvidenceId: z.string().uuid(), sourceEvidenceDigest: digest,
   workerProfileAlias: profileAlias,
-  profileWorkerNames: z.array(profileAlias).min(1).max(16),
+  profileWorkerNames: z.array(profileAlias).min(1).max(RECOVERY_PROFILE_MEMBER_LIMIT),
   targetUnit: z.string().min(1).max(128), profileConfigDigest: digest,
   hostInvocationId: z.null(), modelOutcome: z.literal("unknown"),
   stopProof: stopProofSchema,

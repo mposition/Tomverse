@@ -67,7 +67,6 @@ export const adminAmuxCardsMessages = defineAdminMessages({
     dmState: (dm: AmuxV22QuestionDm, reason: (code: string) => string) => {
       switch (dm.state) {
         case "not_sent": return {
-          routing_off: "Not sent to the Decision Maker: DM routing is off (TOMVERSE_AMUX_DM_ROUTING).",
           kill_switch: "Not sent to the Decision Maker: the kill switch is on.",
           switches_unreadable: "Not sent to the Decision Maker: its switches could not be read.",
           no_provider: "Not sent to the Decision Maker: the asking run has no provider, so the relay passes this question over.",
@@ -159,7 +158,6 @@ export const adminAmuxCardsMessages = defineAdminMessages({
     dmState: (dm: AmuxV22QuestionDm, reason: (code: string) => string) => {
       switch (dm.state) {
         case "not_sent": return {
-          routing_off: "DM에 전달되지 않았어요: DM 라우팅이 꺼져 있어요(TOMVERSE_AMUX_DM_ROUTING).",
           kill_switch: "DM에 전달되지 않았어요: Decision Maker kill switch가 켜져 있어요.",
           switches_unreadable: "DM에 전달되지 않았어요: Decision Maker 스위치를 읽지 못했어요.",
           no_provider: "DM에 전달되지 않았어요: 질문한 실행에 provider 기록이 없어 릴레이가 이 질문을 건너뜁니다.",

@@ -542,7 +542,7 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
 | `gemini-3.1-flash-lite-image` | 등록-보류 (`operational_hold`, 2026-11-13) | 1K $0.0336 (1K 전용) | thinking cap 6,144µUSD. 남은 것: 판매 크레딧 승인(최소 50)·Google 예산 env. Draft 후보이며 두 번째 비교 자리를 Google로 채우지 않는다 |
 | `gemini-3-pro-image` | 등록-비활성 (`worst_case_cost_unbounded`) | 1K·2K $0.134 / 4K $0.24 | **thinking 상한**(재실측 대상 아님) + 제품 판단 보류(`gpt-image-2` Final과 중복) |
 | Qwen Image (`qwen-image-2.0`·`-2.0-pro`·`-3.0`·`-3.0-pro`) | 미등록 · **직접 어댑터 구현(기본 꺼짐, 2026-11-07)** | 장당 2.0 $0.035 / 2.0-pro $0.075 / 3.0 1K $0.03 / 3.0-pro 1K $0.04 (운영자 조사, `verified` 아님) | 아래 "Qwen 직접 어댑터" — 결과 저장 리전, 예산 env, 판매 크레딧, 약관, 한국어 글자 정확도 |
-| FLUX 3 Image (`flux-3-image`·`flux-3-image-klein`, BFL 직접) | 미등록 · **직접 어댑터 구현(기본 꺼짐, 2026-11-16)** | 1K 장당 Image $0.048 / Klein $0.009 (bfl.ai/pricing 2026-11-16 읽음, `verified` 아님) | 아래 "BFL 직접 어댑터" — 데이터 보관·리전, 1K 1:1 출력 크기, 예산 env, 판매 크레딧, 한국어 글자 정확도 |
+| FLUX 3 Image (`flux-3-image`·`flux-3-image-klein`, BFL 직접) | **활성 (기본 켜짐, 2026-11-17)** | 1K 장당 Image $0.048 · 판매가 75크레딧 / Klein $0.009 · 20크레딧 (bfl.ai/pricing 2026-11-16) | 아래 "BFL 직접 어댑터" — 데이터 보관·리전, 첫 실제 생성의 크기·MIME, 한국어 글자 정확도 |
 | `google/nano-banana-2.1` (fal) | 미등록 — endpoint 표 행만 (`per_token_uncapped`) | 토큰 과금: 1M당 입력 $1.764 · 출력 텍스트·thinking $8.823 · 출력 이미지 $35.294 (2026-11-07 읽음, `verified` 아님) | **thinking 상한** — §16.9 |
 | `alibaba/qwen-image-3/text-to-image` (fal) | 미등록 — endpoint 표 행만 (`not_billed`) | 1K $0.04 / 2K $0.075 (조사 전언, 원문 미확인) | 가격 원문 확인·smoke·판매 크레딧 승인 — §16.9 |
 | Ideogram 4.0 | 미등록 | Turbo $0.03 / Default $0.06 / Quality $0.10 (미검증) | 신규 공급자 전체 온보딩 |
@@ -904,15 +904,21 @@ Alibaba Cloud Model Studio International(싱가포르) 동기 endpoint
 ⑦ production 예산 env 선배포 후 같은 카탈로그 행 추가. smoke는 adapter를 거치므로 카탈로그
 행이 먼저 있어야 한다(fal처럼 별도 smoke 스크립트는 없다).
 
-#### BFL 직접 어댑터 (2026-11-16, 기본 꺼짐)
+#### BFL 직접 어댑터 (2026-11-16, 2026-11-17부터 기본 켜짐)
 
 Black Forest Labs API(`api.bfl.ai`, `x-key: $BFL_API_KEY`)의 FLUX 3 이미지 endpoint를
 부르는 `lib/bflImageRequest.ts`와 `generateWithBfl`이 있다. fal 경유가 아니라 직접
 호출이다(운영자 결정 2026-11-16: fal에 비교 모델 둘이 몰리지 않게, 외부 처리자를 늘리지
-않게). Qwen과 같이 **adapter 구현은 활성화가 아니다** — 코드 seed에 BFL 모델이 없고,
-런타임 카탈로그 행을 추가해도 production에서 `IMAGE_PROVIDER_BFL_COST_MICROUSD_PER_DAY`·
-`_PER_MONTH`가 없으면 판정이 거절한다. 신규 공급자 조사가 `black-forest-labs`로 올린
-discovery 항목은 `runtimeImageProviderFor`가 `bfl`로 이어 카탈로그 초안 링크를 준다.
+않게). 신규 공급자 조사가 `black-forest-labs`로 올린 discovery 항목은
+`runtimeImageProviderFor`가 `bfl`로 이어 카탈로그 초안 링크를 준다.
+
+**기본 켜짐 (운영자 결정 2026-11-16).** 두 모델이 코드 seed에 활성으로 들어 있다.
+판매 크레딧은 같은 날 승인했다: FLUX 3 Image **75크레딧**(medium, 크레딧당 최악 707µUSD),
+Klein **20크레딧**(low, 700µUSD). Grok Imagine(733)·Nano Banana 2(725)와 같은 여유다.
+활성 모델이 생기면 `bfl`이 활성 provider가 되므로 `BFL_API_KEY`와
+`IMAGE_PROVIDER_BFL_COST_MICROUSD_PER_DAY`·`_PER_MONTH`가 코드보다 먼저 배포돼 있어야 한다
+(운영자가 2026-11-17 배포 완료를 알림). 활성 이미지 모델이 다섯이 되어 composer는 선택한
+모델만 줄에 두고 나머지를 "모델 더 보기" 뒤에 둔다(`IMAGE_INLINE_MODEL_DISCOVERY_LIMIT` 3).
 
 - 대상은 요청 스키마와 가격을 읽은 `flux-3-image`·`flux-3-image-klein`뿐이다
   (`https://api.bfl.ai/openapi.json`, 2026-11-16). FLUX.2는 메가픽셀 과금이고 스키마가 달라
@@ -925,7 +931,7 @@ discovery 항목은 `runtimeImageProviderFor`가 `bfl`로 이어 카탈로그 �
   실패·moderation으로 보류된 출력은 과금하지 않는다. 그래서
   `IMAGE_PROVIDER_THINKING_BILLING.bfl = "not_billed"`이고 최악 원가는 출력가 + 프롬프트
   예산 5,000µUSD다. 바닥은 Image 53,000µUSD → **59크레딧**, Klein 14,000µUSD →
-  **16크레딧**이다. 바닥은 판매가가 아니다(§12 조건 5).
+  **16크레딧**이고, 판매가는 위의 75·20이다.
 - 비동기 흐름: submit 한 번(재시도 없음 — 응답을 잃은 submit도 과금 작업일 수 있다) →
   응답의 `polling_url`을 1초마다 조회(조회는 무료라 실패·429·5xx는 다시 묻는다) →
   `Ready`의 서명 URL(10분 유효)을 키 없이 받는다. 키를 보내는 polling URL과 이미지 URL은
@@ -938,17 +944,25 @@ discovery 항목은 `runtimeImageProviderFor`가 `bfl`로 이어 카탈로그 �
   않는다.
 - **생성만이다.** 편집은 승인된 할증이 없어 adapter가 거절한다.
 
-**미확인 — 활성화 전에 확인한다.** ① BFL 문서에 프롬프트·결과의 보관 기간과 처리 리전을
-적은 문장이 없다(전달 host는 리전별 `delivery.*.bfl.ai`). `lib/providerDataDestinations.ts`에
-BFL 행이 없으므로 활성화 전에 약관을 읽고 행을 추가한다. ② `1k`·`1:1`이 정확히 1024×1024를
-내는지, FLUX 3 Image가 어떤 MIME으로 주는지는 실제 생성으로만 안다 — 다르면 adapter가
-저장하지 않고 실패한다. ③ `version`이 `latest`뿐이라 같은 id가 다른 release를 가리킬 수
-있다. 날짜 태그가 생기면 고정한다.
+**개인정보 고지.** 켜는 diff에서 `lib/providerDataDestinations.ts`에 BFL 행을 넣었다
+(같은 이유로 그동안 빠져 있던 fal 행도). 행의 provider 타입이 채팅 공급자만 받던 것을
+이미지 공급자까지 넓혔고, 활성 이미지 공급자가 행 없이 남지 않게 테스트가 막는다. BFL 행은
+`unproven`이라 개인정보 처리방침 표에 "확인되지 않음"으로 보인다. 수신 법인만 적었다
+(Black Forest Labs Inc., 개인정보 처리방침 기준).
 
-활성화 순서: ① 판매 크레딧 승인 ② 약관·데이터 보관 확인과 data destination 행 ③ BFL 계정·
-`BFL_API_KEY`(운영자) ④ staging에 예산 env 선배포 ⑤ staging 런타임 카탈로그에 프로필 +
-공식 출처(`bfl.ai/pricing`) 가격 revision 추가 후 켜기 ⑥ staging 유료 생성 1회로 크기·MIME·
-`cost` 확인 ⑦ production 예산 env 선배포 후 같은 행 추가.
+**미확인 — 켠 채로 남은 질문.** ⓪ **학습 사용.** BFL 개인정보 처리방침은 입력과 출력을
+"train and improve our AI models"에 쓸 수 있고 이메일(privacy@blackforestlabs.ai, 제목
+"Training Opt Out")로 거부할 수 있다고 쓴다. 같은 문서는 계약에 따라 처리하는 business
+고객의 콘텐츠에는 적용되지 않는다고도 쓴다. Tomverse API 계정에 어느 쪽이 적용되는지
+확인되지 않았다. 확인 전까지는 학습에 쓰일 수 있다고 보고, 거부 요청을 보내는 것이
+운영자 결정으로 남아 있다. ① BFL 문서에 프롬프트·결과의 보관 기간과 처리 리전을 적은
+문장이 없다(전달 host는 리전별 `delivery.*.bfl.ai`). ② `1k`·`1:1`이 정확히 1024×1024를 내는지, FLUX 3 Image가 어떤 MIME으로
+주는지는 실제 생성으로만 안다 — 다르면 adapter가 저장하지 않고 실패하며 그 요청은
+환급된다. 첫 실제 생성 결과로 확인한다. ③ `version`이 `latest`뿐이라 같은 id가 다른
+release를 가리킬 수 있다. 날짜 태그가 생기면 고정한다.
+
+끄는 방법: Admin › Models 카탈로그에서 해당 행을 hold로 두면 새 요청을 받지 않는다(코드
+배포 없이 되돌릴 수 있다).
 
 #### 등록-비활성은 사용자에게 보이지 않는다 (2026-11-13 운영자 결정)
 

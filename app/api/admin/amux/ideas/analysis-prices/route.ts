@@ -22,9 +22,6 @@ import { AmuxIdeaAnalysisPriceApprovalError,
 import { prisma } from "@/lib/prisma";
 
 const WRITE_ENV = "TOMVERSE_AMUX_V4_ANALYSIS_PRICE_WRITE";
-const READ_ENV = "TOMVERSE_AMUX_V4_ANALYSIS_PRICE_READ";
-const WRITE_CODE_LATCH = true;
-const READ_CODE_LATCH = true;
 const noStore = { "Cache-Control": "private, no-store, max-age=0" };
 const uuid = z.string().uuid();
 const bodySchema = z.object({
@@ -74,8 +71,7 @@ export async function POST(request: Request): Promise<Response> {
       { status: 404, headers: noStore });
     if (session === "forbidden") return NextResponse.json({ error: "Forbidden." },
       { status: 403, headers: noStore });
-    if (!WRITE_CODE_LATCH || process.env[WRITE_ENV] !== "enabled" ||
-        !READ_CODE_LATCH || process.env[READ_ENV] !== "enabled") {
+    if (process.env[WRITE_ENV] !== "enabled") {
       return NextResponse.json({ error: "price_approval_disabled" },
         { status: 409, headers: noStore });
     }
@@ -115,8 +111,7 @@ export async function DELETE(request: Request): Promise<Response> {
       { status: 404, headers: noStore });
     if (session === "forbidden") return NextResponse.json({ error: "Forbidden." },
       { status: 403, headers: noStore });
-    if (!WRITE_CODE_LATCH || process.env[WRITE_ENV] !== "enabled" ||
-        !READ_CODE_LATCH || process.env[READ_ENV] !== "enabled") {
+    if (process.env[WRITE_ENV] !== "enabled") {
       return NextResponse.json({ error: "price_approval_disabled" },
         { status: 409, headers: noStore });
     }
@@ -159,10 +154,6 @@ export async function GET(request: Request): Promise<Response> {
       { status: 404, headers: noStore });
     if (session === "forbidden") return NextResponse.json({ error: "Forbidden." },
       { status: 403, headers: noStore });
-    if (!READ_CODE_LATCH || process.env[READ_ENV] !== "enabled") {
-      return NextResponse.json({ error: "price_read_disabled" },
-        { status: 409, headers: noStore });
-    }
     await consumeApiRateLimit(request, session.user!.id!,
       "admin-amux-v4-analysis-price-read", { minute: 30, day: 300 });
     const params = new URL(request.url).searchParams;

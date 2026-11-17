@@ -264,20 +264,34 @@ test("malformed model output and a non-frontier model do not retry", async () =>
   );
 });
 
-test("stale snapshot, extra keys, cap, split, evidence, priority and duplicates refuse the package", () => {
-  const stale = inspectLocalIntakePackage(
+test("no card count, length or snapshot age limit; extra keys, split, evidence, priority and duplicates still refuse the package", () => {
+  // A snapshot older than the former 24 hours is tied to the board by its
+  // digest alone.
+  const old = inspectLocalIntakePackage(
     body(pkg({ snapshotGeneratedAt: "2026-09-27T09:00:00.000Z" })),
     { now, liveSnapshotDigest: digest },
   );
-  assert.equal(stale.ok, false);
-  assert.equal(stale.code, "snapshot_stale");
+  assert.equal(old.ok, true);
+  const wrongBoard = inspectLocalIntakePackage(
+    body(pkg({ snapshotGeneratedAt: "2026-09-27T09:00:00.000Z" })),
+    { now, liveSnapshotDigest: "cd".repeat(32) },
+  );
+  assert.equal(wrongBoard.code, "snapshot_digest_mismatch");
   const extra = parseLocalIntakePackage(body({ ...pkg(), note: "extra" }));
   assert.equal(extra.ok, false);
   assert.equal(extra.code, "schema_rejected");
-  const nine = parseLocalIntakePackage(
-    body(pkg({ cards: Array.from({ length: 9 }, (_, index) => card({ localId: `card-0${index + 1}` })) })),
-  );
-  assert.equal(nine.code, "card_cap_exceeded");
+  // Past the former caps: nine cards, a long title and long lists parse.
+  const big = parseLocalIntakePackage(body(pkg({ cards: Array.from({ length: 20 }, (_, index) => card({
+    localId: `card-${String(index + 1).padStart(2, "0")}`,
+    title: `Title ${"t".repeat(900)}`, problem: "p".repeat(9_000),
+    scopeIn: Array.from({ length: 40 }, (_unused, item) => `Scope item ${item} ${"s".repeat(800)}`),
+  })) })));
+  assert.equal(big.ok, true);
+  assert.equal(big.pkg.cards.length, 20);
+  // An empty card list and an empty text are still malformed.
+  assert.equal(parseLocalIntakePackage(body(pkg({ cards: [] }))).code, "schema_rejected");
+  assert.equal(parseLocalIntakePackage(body(pkg({ cards: [card({ title: "" })] }))).code,
+    "schema_rejected");
   const split = inspectLocalIntakePackage(body(pkg({ classification: "bug", cards: [card(), card({ localId: "card-02" })] })), {
     now,
     liveSnapshotDigest: digest,

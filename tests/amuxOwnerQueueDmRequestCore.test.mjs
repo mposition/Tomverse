@@ -14,8 +14,7 @@ import { amuxOwnerQueueWithDmStatus } from "../lib/amux/ownerQueueCore.ts";
 import { AMUX_DM_RELAY_SILENT_MS, judgeAmuxDmRelayLiveness } from "../lib/amux/dmRelayHeartbeatCore.ts";
 
 const read = (path) => readFileSync(path, "utf8");
-const on = { routing: true, killSwitch: false, resultReview: true, t2: true, settlement: true };
-const off = { ...on, settlement: false };
+const on = { killSwitch: false };
 const facts = (over = {}) => ({
   question: null, review: null, t2: null, settlement: null, escalationId: null, settlementEligible: false, ...over,
 });
@@ -55,9 +54,8 @@ test("a worker question says how far it got and why it has no card", () => {
   assert.equal(amuxOwnerQueueDmView(facts({ question: question() }), on).action, null);
 });
 
-test("routing off, the kill switch, or unreadable switches hold every path", () => {
-  for (const [switches, reason] of [[{ ...on, routing: false }, "dm_routing"], [{ ...on, killSwitch: true }, "kill_switch"],
-    [{ ...on, killSwitch: null }, "switches_unreadable"]]) {
+test("the kill switch, or unreadable switches hold every path", () => {
+  for (const [switches, reason] of [[{ killSwitch: true }, "kill_switch"], [{ killSwitch: null }, "switches_unreadable"]]) {
     for (const f of [facts({ question: question() }),
       facts({ review: { id: "v1", localCardId: null, request: null, handoffReason: null } }),
       facts({ escalationId: "e1", settlementEligible: true })]) {
@@ -73,38 +71,33 @@ test("a result review sent back only when its evidence could not be read and it 
   assert.deepEqual([unreadable.state, unreadable.action, unreadable.sourceId], ["unfilable", "resend", "v1"]);
   assert.equal(amuxOwnerQueueDmView(review({ handoffReason: "dm_undecided" }), on).action, null);
   // Not offered where the tick would not file it.
-  assert.equal(amuxOwnerQueueDmView(review({ handoffReason: "evidence_unavailable" }), { ...on, resultReview: false }).action, null);
   assert.equal(amuxOwnerQueueDmView(review({ handoffReason: "evidence_unavailable" }), { ...on, killSwitch: true }).action, null);
-  assert.equal(amuxOwnerQueueDmView(review({}), { ...on, resultReview: false }).reason, "result_review");
   assert.equal(amuxOwnerQueueDmView(review({ localCardId: "c" }), on).state, "card_filed");
 });
 
 test("a T2 draft whose patch does not fit is never offered again", () => {
   const dm = amuxOwnerQueueDmView(facts({ t2: { workItemId: "w1", localCardId: null, request: null, unfilable: true } }), on);
   assert.deepEqual([dm.state, dm.reason, dm.action], ["unfilable", "patch_does_not_fit", null]);
-  assert.equal(amuxOwnerQueueDmView(facts({ t2: { workItemId: "w1", localCardId: null, request: null, unfilable: false } }),
-    { ...on, t2: false }).reason, "t2_draft");
+  assert.equal(amuxOwnerQueueDmView(facts({ t2: { workItemId: "w1", localCardId: null, request: null, unfilable: false } }), on).state,
+    "waiting_relay");
 });
 
-test("an escalation with no settlement is asked for while the switch is off, and waits while it is on", () => {
+test("an escalation with no settlement waits for the relay", () => {
   const eligible = facts({ escalationId: "e1", settlementEligible: true });
-  const ask = amuxOwnerQueueDmView(eligible, off);
-  assert.deepEqual([ask.source, ask.state, ask.action, ask.sourceId], ["settlement", "switch_off", "request", "e1"]);
   assert.deepEqual([amuxOwnerQueueDmView(eligible, on).state, amuxOwnerQueueDmView(eligible, on).action],
     ["waiting_relay", null]);
-  const held = amuxOwnerQueueDmView(facts({ escalationId: "e1", settlementEligible: false }), off);
+  const held = amuxOwnerQueueDmView(facts({ escalationId: "e1", settlementEligible: false }), on);
   assert.deepEqual([held.state, held.reason, held.action], ["not_eligible", "settlement_not_eligible", null]);
   assert.equal(amuxOwnerQueueDmView(facts(), on).state, "none");
 });
 
-test("a settlement row: requested waits, unreadable is sent again, cancelled and applied are settled", () => {
+test("a settlement row: an open one waits, unreadable is sent again, cancelled and applied are settled", () => {
   const row = (over) => facts({ escalationId: "e1", settlement: { id: "s1", state: "open", localCardId: null,
-    request: null, handoffReason: null, cancelReason: null, requested: false, ...over } });
-  assert.deepEqual([amuxOwnerQueueDmView(row({}), off).action, amuxOwnerQueueDmView(row({}), off).sourceId], ["request", "s1"]);
-  assert.equal(amuxOwnerQueueDmView(row({ requested: true }), off).state, "waiting_relay");
-  assert.equal(amuxOwnerQueueDmView(row({ handoffReason: "evidence_unavailable" }), off).action, "resend");
-  assert.equal(amuxOwnerQueueDmView(row({ handoffReason: "evidence_unavailable" }), { ...off, routing: false }).action, null);
-  assert.equal(amuxOwnerQueueDmView(row({ handoffReason: "dm_undecided" }), off).action, null);
+    request: null, handoffReason: null, cancelReason: null, ...over } });
+  assert.deepEqual([amuxOwnerQueueDmView(row({}), on).state, amuxOwnerQueueDmView(row({}), on).action], ["waiting_relay", null]);
+  assert.equal(amuxOwnerQueueDmView(row({ handoffReason: "evidence_unavailable" }), on).action, "resend");
+  assert.equal(amuxOwnerQueueDmView(row({ handoffReason: "evidence_unavailable" }), { killSwitch: true }).action, null);
+  assert.equal(amuxOwnerQueueDmView(row({ handoffReason: "dm_undecided" }), on).action, null);
   assert.deepEqual([amuxOwnerQueueDmView(row({ state: "cancelled", cancelReason: "task_moved" }), on).state,
     amuxOwnerQueueDmView(row({ state: "cancelled", cancelReason: "task_moved" }), on).reason], ["settled", "task_moved"]);
   assert.equal(amuxOwnerQueueDmView(row({ state: "applied" }), on).reason, "applied");
@@ -121,11 +114,12 @@ test("a question goes before a review, a draft and a settlement", () => {
 });
 
 test("while the relay is not calling, the button gives way to the relay check", () => {
-  const ask = amuxOwnerQueueDmView(facts({ escalationId: "e1", settlementEligible: true }), off);
-  assert.equal(amuxOwnerQueueDmButton(ask, live), "request");
+  const ask = amuxOwnerQueueDmView(facts({ review: { id: "v1", localCardId: null, request: null,
+    handoffReason: "evidence_unavailable" } }), on);
+  assert.equal(amuxOwnerQueueDmButton(ask, live), "resend");
   assert.equal(amuxOwnerQueueDmButton(ask, stale), "relay_check");
   assert.equal(amuxOwnerQueueDmButton(ask, { state: "never", lastSeenAt: null }), "relay_check");
-  assert.equal(amuxOwnerQueueDmButton(ask, { state: "asking", lastSeenAt: null }), "request");
+  assert.equal(amuxOwnerQueueDmButton(ask, { state: "asking", lastSeenAt: null }), "resend");
   const waiting = amuxOwnerQueueDmView(facts({ question: question() }), on);
   assert.equal(amuxOwnerQueueDmButton(waiting, live), null);
   assert.equal(amuxOwnerQueueDmButton(waiting, stale), "relay_check");
@@ -151,7 +145,7 @@ test("every state and reason the core names has words in both languages", () => 
   }
   const core = read("lib/amux/ownerQueueDmRequestCore.ts");
   const reasons = new Set([...core.matchAll(/reason: "([a-z_]+)"/g)].map((match) => match[1]));
-  for (const code of ["dm_routing", "kill_switch", "switches_unreadable", "evidence_unavailable", "task_moved",
+  for (const code of ["kill_switch", "switches_unreadable", "evidence_unavailable", "task_moved",
     "question_not_parked", "task_not_blocked", "result_body_gone", "provider_unknown", "escalation_resolved",
     "applied", "claimed"]) reasons.add(code);
   for (const code of reasons) {
@@ -160,17 +154,13 @@ test("every state and reason the core names has words in both languages", () => 
   }
 });
 
-test("the screen reads the relay record the alert writes, and the sync opens what the owner asked for", () => {
+test("the screen reads the relay record the alert writes", () => {
   const route = read("app/api/internal/amux/decision-maker/v22-questions/sync/route.ts");
   assert.equal((route.match(/recordAmuxDmRelaySync\(/g) ?? []).length, 1, "one writer: the heartbeat's");
   const status = read("lib/amux/ownerQueueDmStatusRead.ts");
   assert.match(status, /readAmuxDmRelayLastSyncAt\(\), readAmuxDmRelayLastQuestionAt\(now\)/);
   assert.match(status, /judgeAmuxDmRelayLiveness\(sync, question, now\)/);
-  // With the switch off the settlement still opens what the owner asked for.
-  assert.doesNotMatch(route, /if \(!settlementOn\) return \{ pending: \[\]/);
-  const service = read("lib/amux/dmOwnerSettlementService.ts");
-  assert.match(service, /readAmuxDmOwnerSettlementRequestedIds\(tx, AMUX_DM_OWNER_SETTLEMENT_PENDING_SCAN\)/);
-  assert.match(service, /\$\{requested === null\} OR s\."id" = ANY/);
+  assert.doesNotMatch(route, /settlementOn|amuxDmOwnerSettlementEnabled/);
 });
 
 test("the owner's press is one transaction under the audit chain lock, with the person's audit entry", () => {
@@ -197,8 +187,9 @@ test("only an unjudged proposal is one to confirm; any other ending is closed", 
 });
 
 test("a relay read that failed is unknown: it neither hides the button nor claims the relay is down", () => {
-  const ask = amuxOwnerQueueDmView(facts({ escalationId: "e1", settlementEligible: true }), off);
-  assert.equal(amuxOwnerQueueDmButton(ask, null), "request");
+  const ask = amuxOwnerQueueDmView(facts({ review: { id: "v1", localCardId: null, request: null,
+    handoffReason: "evidence_unavailable" } }), on);
+  assert.equal(amuxOwnerQueueDmButton(ask, null), "resend");
   const read = readFileSync("lib/amux/ownerQueueDmStatusRead.ts", "utf8");
   assert.match(read, /\.then\(\(\[sync, question\]\) => amuxDmRelayView\(judgeAmuxDmRelayLiveness\(sync, question, now\)\), \(\) => null\)/);
 });

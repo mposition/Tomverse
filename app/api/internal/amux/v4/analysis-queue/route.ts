@@ -6,8 +6,6 @@ import { readLimitedJson } from "@/lib/apiSecurity";
 import { amuxJsonNoStore } from "@/lib/amux/internalRoute";
 import {
   AMUX_V4_ANALYSIS_AGENT_SECRET_ENV,
-  AMUX_V4_ANALYSIS_QUEUE_READ_ENV,
-  amuxV4AnalysisQueueReadEnabled,
   isAmuxV4AnalysisAgentAuthorized,
 } from "@/lib/amux/ideaAnalysisQueueCore";
 import { parseAmuxV4AnalysisQueueCursor } from "@/lib/amux/ideaAnalysisQueueCursorCore";
@@ -21,9 +19,6 @@ export async function POST(request: Request): Promise<Response> {
     process.env[AMUX_V4_ANALYSIS_AGENT_SECRET_ENV],
     process.env.TOMVERSE_AMUX_SYNC_SECRET)) {
     return amuxJsonNoStore({ error: "Unauthorized" }, 401);
-  }
-  if (!amuxV4AnalysisQueueReadEnabled(process.env[AMUX_V4_ANALYSIS_QUEUE_READ_ENV])) {
-    return amuxJsonNoStore({ available: false, reason: "analysis_queue_disabled" }, 409);
   }
   if (request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !==
       "application/json") {

@@ -18,8 +18,8 @@ import { sameAmuxIdeaUnitConfirmation,
   "./ideaUnitConfirmationCore.ts";
 import { readVerifiedAmuxCardProposal } from
   "./ideaUnitProposalReadService.ts";
-import { AMUX_V4_UNIT_WRITE_ENV, AmuxV4UnitDecisionError,
-  amuxV4UnitWriteEnabled, commitAmuxV4CardLink,
+import { AmuxV4UnitDecisionError,
+  commitAmuxV4CardLink,
   commitAmuxV4UnitPrepare,
   markAmuxV4UnitConsumeOutcomeUnknown } from "./ideaUnitDecisionStore.ts";
 
@@ -42,9 +42,6 @@ export async function prepareAmuxV4CardLink(input: {
 }) {
   const actorUserId = owner(input.session);
   await assertRecentAdminAuthentication(input.session);
-  if (!amuxV4UnitWriteEnabled(process.env[AMUX_V4_UNIT_WRITE_ENV])) {
-    throw new AmuxV4UnitDecisionError("write_disabled");
-  }
   const choice = input.choice;
   if (!ID.test(choice.ideaId) || !ID.test(choice.draftUnitId) ||
       !ID.test(choice.featureNodeId) || !ID.test(choice.targetCardId) ||
@@ -198,9 +195,6 @@ export async function consumeAmuxV4CardLink(input: {
 }) {
   const actorUserId = owner(input.session);
   await assertRecentAdminAuthentication(input.session);
-  if (!amuxV4UnitWriteEnabled(process.env[AMUX_V4_UNIT_WRITE_ENV])) {
-    throw new AmuxV4UnitDecisionError("write_disabled");
-  }
   if (!ID.test(input.decisionId) || !UUID.test(input.consumeRequestId) ||
       !DIGEST.test(input.confirmationDigest)) {
     throw new AmuxV4UnitDecisionError("not_ready");

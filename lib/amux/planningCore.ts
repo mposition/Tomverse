@@ -395,10 +395,16 @@ const QUOTA_SOURCE_RELIABILITY: Record<AmuxQuotaTelemetry["source"], number> = {
   wrapper: 0.85,
 };
 
+/** A usage reading describes the worker for this long. The sources are rate
+ * limited (the Claude usage endpoint answers 429 under frequent polling), so
+ * the window is an hour, not the quarter of one a single missed round would
+ * outlast. A longer-lived reading is never read as fresh. */
+export const AMUX_QUOTA_FRESH_SECONDS = 3_600;
+
 export const evaluateAmuxQuotaTelemetry = (
   telemetry: AmuxQuotaTelemetry | null,
   now: Date,
-  maxAgeSeconds = 900,
+  maxAgeSeconds = AMUX_QUOTA_FRESH_SECONDS,
 ): {
   metric: AmuxObservedMetric | null;
   provider_exhausted: boolean;

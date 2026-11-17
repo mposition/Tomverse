@@ -69,13 +69,6 @@ test("no router model, a refused budget or an over-long page makes no provider c
   await reset();
   assert.deepEqual(await translateAmuxItemsToKorean([]), { state: "empty" });
   assert.equal(calls, 0); assert.equal(holds, 0);
-  // With the legacy switch an over-long page is refused before any call, as before.
-  process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS = "enabled";
-  try {
-    assert.deepEqual(await translateAmuxItemsToKorean([{ id: "a", text: "x".repeat(24_001) }]),
-      { state: "too_large" });
-  } finally { delete process.env.TOMVERSE_AMUX_INTAKE_LEGACY_LIMITS; }
-  assert.equal(calls, 0); assert.equal(holds, 0);
 });
 
 test("a page larger than one call is translated in calls of one call's size, each held and settled", async () => {

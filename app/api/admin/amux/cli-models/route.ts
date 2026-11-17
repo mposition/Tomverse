@@ -17,7 +17,6 @@ import {
   withAmuxDbBoundary,
   withAmuxRouteBudget,
 } from "@/lib/amux/dbBoundary";
-import { amuxWorkerCapabilityWritesOpen } from "@/lib/amux/workerCapabilityCore";
 
 /**
  * The owner links one CLI model name to the Admin › Models entry that prices
@@ -57,9 +56,6 @@ export async function POST(request: Request) {
       if (!session?.user?.id || !isAdminSession(session)) return notFound();
       if (getAdminRole(session) !== "owner") {
         return NextResponse.json({ error: "Forbidden." }, { status: 403, headers: noStoreHeaders });
-      }
-      if (!amuxWorkerCapabilityWritesOpen()) {
-        return NextResponse.json({ error: "capability_writes_off" }, { status: 409, headers: noStoreHeaders });
       }
       await assertRecentAdminAuthentication(session);
       await consumeApiRateLimit(request, session.user.id, "admin-amux-cli-model-link", {

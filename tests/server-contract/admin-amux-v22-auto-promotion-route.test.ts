@@ -8,7 +8,6 @@ const mod = (path: string) => pathToFileURL(resolve(root, path)).href;
 const world = { session: { user: { id: "owner-1" } } as
   { user: { id: string } } | null, role: "owner", recent: true,
   writes: 0, reads: 0 };
-let lastException: string | undefined;
 let installed = false;
 async function loadRoute(): Promise<{
   GET: () => Promise<Response>; POST: (request: Request) => Promise<Response>;
@@ -53,11 +52,10 @@ async function loadRoute(): Promise<{
     mock.module(mod("lib/amux/v22AutoPromotionService.ts"), { namedExports: {
       readV22AutoPromotionControl: async () => {
         world.reads += 1;
-        return { active: false, codeLatch: false };
+        return { active: false };
       },
-      configureV22AutoPromotion: async (input: { active: boolean; graduationExceptionId?: string }) => {
+      configureV22AutoPromotion: async (input: { active: boolean }) => {
         world.writes += 1;
-        lastException = input.graduationExceptionId;
         return { active: input.active, changed: true };
       },
     } });
@@ -100,13 +98,13 @@ test("only the exact v22 control shape reaches the writer", async () => {
   reset();
   const status = await GET();
   assert.equal(status.status, 200);
-  assert.deepEqual(await status.json(), { active: false, codeLatch: false });
+  assert.deepEqual(await status.json(), { active: false });
   for (const invalid of [
     { ...valid, policyVersion: 21 },
     { ...valid, active: "true" },
     { ...valid, extra: true },
     { policyVersion: 22, active: true },
-    { ...valid, graduationExceptionId: "enabled" },
+    { ...valid, graduationExceptionId: "owner-bootstrap-2026-10-11" },
   ]) {
     assert.equal((await POST(post(invalid))).status, 400);
     assert.equal(world.writes, 0);
@@ -121,11 +119,10 @@ test("only the exact v22 control shape reaches the writer", async () => {
   assert.equal(world.writes, 1);
 });
 
-test("exact exception reaches only the recently authenticated owner writer", async () => {
+test("activation reaches only the recently authenticated owner writer", async () => {
   const { POST } = await loadRoute();
   reset();
-  const body = { ...valid, active: true,
-    graduationExceptionId: "owner-bootstrap-2026-10-11" };
+  const body = { ...valid, active: true };
   world.role = "admin";
   assert.equal((await POST(post(body))).status, 403);
   world.role = "owner"; world.recent = false;
@@ -133,6 +130,5 @@ test("exact exception reaches only the recently authenticated owner writer", asy
   assert.equal(world.writes, 0);
   world.recent = true;
   assert.equal((await POST(post(body))).status, 200);
-  assert.equal(lastException, body.graduationExceptionId);
   assert.equal(world.writes, 1);
 });

@@ -12,30 +12,23 @@ import { commitAmuxIdeaOnlyAnalysisClaim,
 import { loadAmuxContentKeyRing } from "@/lib/amux/ideaKeyStore";
 import { prisma } from "@/lib/prisma";
 
-const CLAIM_CODE_LATCH = true;
+// The claim write is the one switch on the paid-analysis path: it starts the
+// spend. Read-back is always open so an operator can reconcile a lost claim
+// response; it never returns a prompt.
 const CLAIM_WRITE_ENV = "TOMVERSE_AMUX_V4_ANALYSIS_CLAIM_WRITE";
-const STOP_POLL_READ_ENV = "TOMVERSE_AMUX_V19_ANALYSIS_STOP_POLL_READ";
-// Read-back is independently gated so turning off writes cannot prevent an
-// operator from reconciling a lost claim response. It never returns a prompt.
-const CLAIM_RECEIPT_READ_CODE_LATCH = true;
-const CLAIM_RECEIPT_READ_ENV = "TOMVERSE_AMUX_V4_ANALYSIS_CLAIM_READ";
 const id = z.string().regex(/^[A-Za-z0-9:_-]{1,128}$/);
 const bodySchema = z.object({ requestId: id, previewId: id }).strict();
 
-/** The v15 code latch still requires verified local isolation, exact owner
- * transfer, live model eligibility, bounded costs, the failure latch, both
- * environment switches, v19 stop polling and outcome-unknown read-back
- * before a model call. */
+/** A claim still requires verified local isolation, exact owner transfer,
+ * live model eligibility, bounded costs, the failure latch, the claim switch
+ * and outcome-unknown read-back before a model call. */
 export async function POST(request: Request): Promise<Response> {
   if (!isAmuxV4AnalysisAgentAuthorized(request,
     process.env[AMUX_V4_ANALYSIS_AGENT_SECRET_ENV],
     process.env.TOMVERSE_AMUX_SYNC_SECRET)) {
     return amuxJsonNoStore({ error: "Unauthorized" }, 401);
   }
-  if (!CLAIM_CODE_LATCH || process.env[CLAIM_WRITE_ENV] !== "enabled" ||
-      !CLAIM_RECEIPT_READ_CODE_LATCH ||
-      process.env[CLAIM_RECEIPT_READ_ENV] !== "enabled" ||
-      process.env[STOP_POLL_READ_ENV] !== "enabled") {
+  if (process.env[CLAIM_WRITE_ENV] !== "enabled") {
     return amuxJsonNoStore({ available: false, reason: "analysis_claim_disabled" }, 409);
   }
   if (request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !==
@@ -82,11 +75,6 @@ export async function GET(request: Request): Promise<Response> {
     process.env[AMUX_V4_ANALYSIS_AGENT_SECRET_ENV],
     process.env.TOMVERSE_AMUX_SYNC_SECRET)) {
     return amuxJsonNoStore({ error: "Unauthorized" }, 401);
-  }
-  if (!CLAIM_RECEIPT_READ_CODE_LATCH ||
-      process.env[CLAIM_RECEIPT_READ_ENV] !== "enabled") {
-    return amuxJsonNoStore({ available: false,
-      reason: "analysis_claim_read_disabled" }, 409);
   }
   const url = new URL(request.url);
   if (url.searchParams.getAll("requestId").length !== 1 ||

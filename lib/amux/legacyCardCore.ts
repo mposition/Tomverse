@@ -242,8 +242,7 @@ export function amuxLegacyCardIdeaText(card: {
   const head = [title, "", ...nature, ...(nature.length ? [""] : []), ...body,
     ...(brief ? [...(body.length ? [""] : []), "승인된 실행 브리프:", brief] : [])].join("\n").trim();
   // Owner direction 2026-11-15: the remade idea keeps the card's whole text;
-  // it is cut to the idea input ceiling only under the legacy switch, and
-  // otherwise only past the 4 MiB safety ceiling no real card reaches.
+  // it is cut only past the 4 MiB safety ceiling no real card reaches.
   const room = amuxIdeaInputMaxBytes() - Buffer.byteLength(`\n\n…\n\n${footer}`, "utf8");
   const cut = cutToBytes(head, room);
   const truncated = cut !== head;

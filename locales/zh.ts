@@ -745,6 +745,8 @@ export const zh = {
         noModelsFound: "没有符合筛选条件的模型。",
         scrollToLatest: "跳转到最新消息",
         newResponseAvailable: "有新回复",
+        generatingPill: "正在生成回复",
+        generatingScrollToLatest: "正在生成回复 — 跳转到最新消息",
         panelPaused: "已暂停",
         availableModel: "可用",
         unavailableModel: "不可用",

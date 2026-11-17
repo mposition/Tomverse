@@ -115,8 +115,8 @@ const resetWorld = () => {
   world.relayLastQuestionAt = null;
   world.relayQuestionReads = 0;
   world.relayReadError = null;
-  delete process.env.TOMVERSE_AMUX_DM_ROUTING;
-  process.env.APP_ENV = "production";
+  // The relay is expected only in production: the relay tests below say so themselves.
+  process.env.APP_ENV = "dev";
   world.dependencyReports = [];
   world.incidents = [];
   world.completedResults = [];
@@ -867,15 +867,14 @@ test("names that cannot be printed are replaced in the alert, not in the compari
 // The AMUX Decision Maker relay watch (docs/ops/amux/bridge-monitoring.md §6).
 // The relay calls the v22 question sync route every 30 seconds while it is not
 // halted; the route records the call, and the monitor pages when the record is
-// older than five minutes -- only while TOMVERSE_AMUX_DM_ROUTING is enabled.
+// older than five minutes -- only for the production deployment.
 
-test("dev and staging do not page for the production relay even with DM routing enabled", async () => {
+test("dev and staging do not page for the production relay even with the relay silent", async () => {
   const { monitorInfrastructureThresholdsIfDue } = await loadMonitor();
   for (const environment of ["dev", "staging"]) {
     resetWorld();
     world.dashboard = dashboard();
     process.env.APP_ENV = environment;
-    process.env.TOMVERSE_AMUX_DM_ROUTING = "enabled";
 
     const result = await monitorInfrastructureThresholdsIfDue();
 
@@ -885,11 +884,11 @@ test("dev and staging do not page for the production relay even with DM routing 
   }
 });
 
-test("a relay silent past five minutes pages while DM routing is enabled", async () => {
+test("a relay silent past five minutes pages in production", async () => {
   resetWorld();
+  process.env.APP_ENV = "production";
   const { monitorInfrastructureThresholdsIfDue } = await loadMonitor();
   world.dashboard = dashboard();
-  process.env.TOMVERSE_AMUX_DM_ROUTING = "enabled";
   const lastSyncAt = minutesAgo(12);
   world.relayLastSyncAt = lastSyncAt;
 
@@ -911,9 +910,10 @@ test("a relay silent past five minutes pages while DM routing is enabled", async
 
 test("a relay that never called pages too", async () => {
   resetWorld();
+  process.env.APP_ENV = "production";
   const { monitorInfrastructureThresholdsIfDue } = await loadMonitor();
   world.dashboard = dashboard();
-  process.env.TOMVERSE_AMUX_DM_ROUTING = "enabled";
+  world.relayLastSyncAt = null;
 
   const result = await monitorInfrastructureThresholdsIfDue();
 
@@ -926,9 +926,9 @@ test("a relay that never called pages too", async () => {
 
 test("a relay that called within five minutes is healthy and pages nothing", async () => {
   resetWorld();
+  process.env.APP_ENV = "production";
   const { monitorInfrastructureThresholdsIfDue } = await loadMonitor();
   world.dashboard = dashboard();
-  process.env.TOMVERSE_AMUX_DM_ROUTING = "enabled";
   world.relayLastSyncAt = minutesAgo(4);
 
   const result = await monitorInfrastructureThresholdsIfDue();
@@ -939,33 +939,11 @@ test("a relay that called within five minutes is healthy and pages nothing", asy
   assert.deepEqual(world.incidents, []);
 });
 
-test("with DM routing off the relay is not watched, however long it is silent", async () => {
-  for (const value of [undefined, "disabled", "true", "Enabled"]) {
-    resetWorld();
-    const { monitorInfrastructureThresholdsIfDue } = await loadMonitor();
-    world.dashboard = dashboard();
-    if (value !== undefined) process.env.TOMVERSE_AMUX_DM_ROUTING = value;
-    world.relayLastSyncAt = minutesAgo(600);
-
-    const result = await monitorInfrastructureThresholdsIfDue();
-
-    assert.deepEqual(result, { checked: true, alerts: 0, advisories: 0 }, String(value));
-    assert.equal(
-      world.dependencyReports.some((report) => report.dependency === "amux-dm-relay"),
-      false
-    );
-    assert.equal(
-      (world.completedResults.at(-1) as { amuxDmRelay: string }).amuxDmRelay,
-      "off"
-    );
-  }
-});
-
 test("a relay check that cannot read records null and pages on its own behalf", async () => {
   resetWorld();
+  process.env.APP_ENV = "production";
   const { monitorInfrastructureThresholdsIfDue } = await loadMonitor();
   world.dashboard = dashboard();
-  process.env.TOMVERSE_AMUX_DM_ROUTING = "enabled";
   world.relayReadError = new Error("relation is busy");
 
   const result = await monitorInfrastructureThresholdsIfDue();
@@ -984,9 +962,9 @@ test("a relay check that cannot read records null and pages on its own behalf", 
 
 test("a relay waiting on a recent question is not paged, and not called healthy", async () => {
   resetWorld();
+  process.env.APP_ENV = "production";
   const { monitorInfrastructureThresholdsIfDue } = await loadMonitor();
   world.dashboard = dashboard();
-  process.env.TOMVERSE_AMUX_DM_ROUTING = "enabled";
   // The relay routed a question 20 minutes ago and has been waiting on the
   // broker since (up to 34 minutes), so it has not called sync for 19.
   world.relayLastSyncAt = minutesAgo(19);
@@ -1007,9 +985,9 @@ test("a relay waiting on a recent question is not paged, and not called healthy"
 
 test("a calling relay does not read the request ledger", async () => {
   resetWorld();
+  process.env.APP_ENV = "production";
   const { monitorInfrastructureThresholdsIfDue } = await loadMonitor();
   world.dashboard = dashboard();
-  process.env.TOMVERSE_AMUX_DM_ROUTING = "enabled";
   world.relayLastSyncAt = minutesAgo(1);
 
   await monitorInfrastructureThresholdsIfDue();

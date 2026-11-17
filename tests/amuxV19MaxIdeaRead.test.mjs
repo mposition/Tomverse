@@ -82,7 +82,7 @@ test("only an exact fresh Max claim may fetch the idea", async () =>
       { ...selection, identity: undefined,
         claim: { kind: "claimed", recovered: false,
           retryWrite: false } },
-      { ...selection, claim: { ...selection.claim, recovered: true } },
+      { ...selection, claim: { ...selection.claim, recovered: "true" } },
       { ...selection, claim: { ...selection.claim, retryWrite: true } },
       { ...selection, claim: { ...selection.claim, claimId: ideaId } },
       { ...selection, kind: "outcome_unknown" },
@@ -92,4 +92,10 @@ test("only an exact fresh Max claim may fetch the idea", async () =>
     assert.deepEqual(await readAmuxV19MaxClaimedIdeaOnce({ origin,
       selection, fetchImpl }), { kind: "ready", prompt: "synthetic page prompt" });
     assert.equal(calls, 1);
+    // A claim the readback found after a lost answer is the same committed
+    // claim and goes on (review r-20261116-212117-d0c52f).
+    assert.deepEqual(await readAmuxV19MaxClaimedIdeaOnce({ origin,
+      selection: { ...selection, claim: { ...selection.claim, recovered: true } },
+      fetchImpl }), { kind: "ready", prompt: "synthetic page prompt" });
+    assert.equal(calls, 2);
   }));

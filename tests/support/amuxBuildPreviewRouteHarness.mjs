@@ -62,9 +62,6 @@ mock.module(mod("lib/amux/ideaTransferPreviewService.ts"), {
   },
 });
 
-const switches = ["TOMVERSE_AMUX_V4_IDEA_SUBMIT", "TOMVERSE_AMUX_V4_IDEA_READBACK", "TOMVERSE_AMUX_V4_INITIAL_PLAN_WRITE",
-  "TOMVERSE_AMUX_V4_INITIAL_PLAN_READBACK", "TOMVERSE_AMUX_V4_TRANSFER_PREVIEW_WRITE",
-  "TOMVERSE_AMUX_V4_TRANSFER_PREVIEW_READ", "TOMVERSE_AMUX_V4_FRONTIER_CATALOG_READ"];
 const { POST } = await import(mod("app/api/admin/amux/ideas/build-preview/route.ts"));
 const requestId = "22222222-2222-4222-8222-222222222222";
 const previewId = "33333333-3333-4333-8333-333333333333";
@@ -76,7 +73,6 @@ const post = (value) => POST(new Request("https://t.test/api/admin/amux/ideas/bu
   method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(value) }));
 const reset = () => {
   calls = []; failAt = null; session = { user: { id: "owner-1" }, role: "owner" };
-  for (const name of switches) process.env[name] = "enabled";
 };
 
 // Save, plan and preview, in order, one rate-limit bucket of its own; the cookie binds the preview.
@@ -122,13 +118,6 @@ assert.equal(response.status, 201);
 assert.deepEqual([json.state, json.hasExternalSources], ["submitted", true]);
 assert.deepEqual(calls.map(([k]) => k), ["rate", "submit"]);
 
-// Every one of the three routes' switches is required; nothing runs without one.
-for (const name of switches) {
-  reset(); process.env[name] = "disabled";
-  response = await post(body());
-  assert.equal(response.status, 503, name);
-  assert.deepEqual(calls, []);
-}
 // Owner only; a malformed body is refused before any write.
 reset(); session = { user: { id: "o" }, role: "ops" };
 assert.equal((await post(body())).status, 403);

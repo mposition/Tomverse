@@ -66,6 +66,13 @@ const providerUnion = () => {
     return [...declaration[1].matchAll(/"([a-z0-9_-]+)"/g)].map((match) => match[1]);
 };
 
+const imageProviderUnion = () => {
+    const source = readFileSync(new URL("../lib/imageModelRegistry.ts", import.meta.url), "utf8");
+    const declaration = source.match(/export type ImageModelProvider =([\s\S]*?);/);
+    assert.ok(declaration, "ImageModelProvider is declared");
+    return [...declaration[1].matchAll(/"([a-z0-9_-]+)"/g)].map((match) => match[1]);
+};
+
 const emptyRow = (provider = "openai") => ({
     provider,
     recipientEntity: null,
@@ -101,7 +108,14 @@ test("every provider the catalogue can reach is enrolled", () => {
     // is one nobody asked the destination question about, and the report would
     // read a confident zero over a set it had not looked at.
     const enrolled = PROVIDER_DATA_DESTINATIONS.map((entry) => entry.provider).sort();
-    assert.deepEqual(enrolled, providerUnion().sort());
+    assert.deepEqual(enrolled, [...new Set([...providerUnion(), ...imageProviderUnion()])].sort());
+});
+
+test("every image provider is enrolled, so an image prompt is never sent somewhere the notice omits", () => {
+    // The chat union alone missed fal and bfl: both receive user prompts and
+    // neither serves a chat model.
+    const enrolled = new Set(PROVIDER_DATA_DESTINATIONS.map((entry) => entry.provider));
+    for (const provider of imageProviderUnion()) assert.ok(enrolled.has(provider), provider);
 });
 
 test("no provider is listed twice", () => {

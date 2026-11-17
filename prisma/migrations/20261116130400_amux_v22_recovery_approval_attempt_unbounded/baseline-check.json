@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "migrationSqlSha256": "1909de251df4fa42add520dead901d54b8af054ffd1c106aeb6a0218a6b83491",
+  "replacedChecks": [
+    {
+      "table": "AmuxV22TaskRecoveryApproval",
+      "constraint": "AmuxV22RecoveryApproval_shape_check",
+      "previousDefinitionSha256": "4112f6bed436eaf4c6ec9cb96515f74e186c591a59905a7781b267f1c40a836b"
+    }
+  ]
+}

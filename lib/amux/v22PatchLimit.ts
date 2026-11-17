@@ -26,6 +26,21 @@ export const AMUX_V22_FILE_MAX_BYTES = 100 * 1024 * 1024;
 export const AMUX_V22_PATCH_MAX_BYTES = 4 * 1024 * 1024;
 
 /**
+ * The changed-path inventory rides in the settlement body beside the receipt
+ * echo, so it is bound by the same proxy buffer as a patch and nothing
+ * smaller: a run that changed tens of thousands of files still reports them.
+ */
+export const AMUX_V22_CHANGED_PATHS_JSON_MAX_BYTES = AMUX_V22_PATCH_MAX_BYTES;
+
+/**
+ * One git step of the worker's checkout (fetch, diff, add, status). A wedge
+ * guard for a stuck lock or a dead filesystem, not a work limit: a step on a
+ * large checkout takes minutes, and one that fails here loses the run's
+ * change.
+ */
+export const AMUX_V22_GIT_STEP_TIMEOUT_MS = 2 * 60 * 60_000;
+
+/**
  * A JSON body carrying one patch with its Task result: the escaped patch
  * (the sidecar keeps it within twice the patch bound) and one MiB for the
  * result and the envelope, under the 10 MB proxy buffer.

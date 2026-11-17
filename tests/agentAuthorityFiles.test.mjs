@@ -6,7 +6,6 @@ import test from "node:test";
 import {
   AGENTS_NAMED_CONTRACT_CONSTANTS,
   CONTROL_PLANE_PATTERNS,
-  CONVENTION_VERSIONS,
   KNOWN_TOP_LEVEL_DIRECTORIES,
   RESERVED_DECISION_CONSTANTS,
   classifyPath,
@@ -80,17 +79,6 @@ test("every constant AGENTS.md and its machine index name is either a reserved d
     categorised,
     "decide whether each new constant is a value reserved for a person or a contract, and list it",
   );
-});
-
-test("the recorded convention versions are the installed ones", () => {
-  const lock = JSON.parse(readFileSync(new URL("package-lock.json", repoRoot), "utf8"));
-  for (const [name, version] of Object.entries(CONVENTION_VERSIONS)) {
-    assert.equal(
-      lock.packages[`node_modules/${name}`]?.version,
-      version,
-      `${name} changed: re-check the conventions the push policy relies on, then update CONVENTION_VERSIONS`,
-    );
-  }
 });
 
 test("classification of representative paths", () => {

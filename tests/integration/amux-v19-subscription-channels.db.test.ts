@@ -81,7 +81,7 @@ const sqlState = (error: unknown): string | null => {
 };
 class Rollback extends Error {}
 /** Run assertions inside a transaction, then discard it so the next channel
- * starts from an empty shared ledger (a shadow claim occupies all headroom). */
+ * starts from the same shared ledger. */
 async function rolledBack(fn: (tx: Prisma.TransactionClient) => Promise<void>) {
   await assert.rejects(prisma.$transaction(async (tx) => {
     await fn(tx);
@@ -161,8 +161,11 @@ async function insertShadowClaimByHand(tx: Prisma.TransactionClient, input: {
   const key = { namespace: AMUX_V4_ANALYSIS_NAMESPACE, monthStart };
   const window = await tx.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
     where: { namespace_monthStart: key } });
-  const reserved = window.limitMicroUsd! - window.spentMicroUsd - window.reservedMicroUsd -
-    window.shadowOverrunMicroUsd;
+  // A subscription claim reserves nothing (operator, 2026-11-16); a bounded
+  // one still occupies what is left of the month.
+  const shadow = (input.budgetMode ?? "max_shadow") === "max_shadow";
+  const reserved = shadow ? BigInt(0) : window.limitMicroUsd! - window.spentMicroUsd -
+    window.reservedMicroUsd - window.shadowOverrunMicroUsd;
   const price = await tx.amuxIdeaAnalysisPriceVersion.findUniqueOrThrow({
     where: { id: input.channel.priceVersionId } });
   const rates = input.priceless ? AMUX_V4_CLAUDE_OPUS_55_COST_PROFILE : price;
@@ -177,7 +180,8 @@ async function insertShadowClaimByHand(tx: Prisma.TransactionClient, input: {
       reservedMicroUsd: reserved.toString(), budgetMode: input.budgetMode ?? "max_shadow", ideaId: input.ideaId,
       reasoningEffort: "high", maxAuthProfile: input.maxAuthProfile,
       maxAuthEvidenceDigest: randomBytes(32).toString("hex"),
-      amountMeaning: "cli_shadow_headroom_not_ceiling", modelCallStarted: false } });
+      amountMeaning: shadow ? "cli_shadow_record_only" : "cli_shadow_headroom_not_ceiling",
+      modelCallStarted: false } });
   await tx.amuxIdeaAnalysisBudgetWindow.update({ where: { namespace_monthStart: key },
     data: { reservedMicroUsd: { increment: reserved } } });
   await tx.amuxIdeaSessionAnalysisBudgetClaim.create({ data: {
@@ -303,7 +307,9 @@ for (const [index, [provider]] of CHANNELS.entries()) {
       assert.equal(Object.hasOwn(metadata, "priceVersionId"), false);
       assert.equal(metadata.maxAuthProfile, AMUX_SUBSCRIPTION_AUTH_PROFILES[channel.provider]);
       assert.equal(metadata.budgetMode, "max_shadow");
-      assert.equal(audit.summary, "Occupied monthly shadow headroom for one subscription CLI analysis.");
+      assert.equal(audit.summary,
+        "Claimed one subscription CLI analysis; its shadow usage is recorded, nothing reserved.");
+      assert.equal(row.reservedMicroUsd, BigInt(0));
     });
     // The database guard: the same hand-written claim passes with this
     // channel's profile and is refused with any other channel's profile.
@@ -326,7 +332,7 @@ for (const [index, [provider]] of CHANNELS.entries()) {
       await assert.rejects(prisma.$transaction((tx) => insertShadowClaimByHand(tx, {
         channel, ...queued, maxAuthProfile: wrong })), (error: unknown) =>
         sqlState(error) === "23514" &&
-        /Max shadow claim must occupy remaining headroom/.test(String(error)), wrong);
+        /subscription claim must reserve nothing and record its shadow usage/.test(String(error)), wrong);
     }
     // A claim naming another channel and model than the reservation is
     // refused even with that other channel's own consistent profile.
@@ -345,15 +351,10 @@ test("a launcher that signed another channel cannot claim this reservation", asy
   assert.ok(authority);
   const queued = await queueIdea(authority);
   const secret = "syntheticMaxLauncherSecret_0123456789abcdefgh";
-  const names = ["TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET",
-    "TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_WRITE", "TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_READ",
-    "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_STOP_POLL_READ"] as const;
+  const names = ["TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET"] as const;
   const old = Object.fromEntries(names.map((name) => [name, process.env[name]]));
   try {
     process.env.TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET = secret;
-    process.env.TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_WRITE = "enabled";
-    process.env.TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_READ = "enabled";
-    process.env.TOMVERSE_AMUX_V19_SESSION_ANALYSIS_STOP_POLL_READ = "enabled";
     const identity = { claimId: randomUUID(), requestId: randomUUID(),
       reservationId: queued.reservationId, ideaId: queued.ideaId, invocationOrdinal: 0,
       priceVersionId: copilot.priceVersionId, provider: "anthropic",

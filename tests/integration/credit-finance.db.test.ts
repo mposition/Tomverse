@@ -652,6 +652,37 @@ test("refunds an expired durable reservation and restores add-on credits", async
   await releaseChatAccess(acquired.leaseId);
 });
 
+test("a plan with no daily limit still records today's plan credits and refunds them", async () => {
+  // The day bucket is the only "plan credits used today" counter (Admin
+  // Console list and detail, CSV, /api/user/usage). A Max/Pro account with no
+  // daily guardrail used to skip it, so it read 8 credits against 297 spent.
+  const user = await createUser("Max");
+  const bucketCount = async (period: "day" | "month") =>
+    usageBucketCount(
+      (
+        await prisma.chatUsageBucket.findFirst({
+          where: { key: `integration:user:${user.id}`, period },
+        })
+      )?.count
+    );
+  const acquired = await acquireChatAccess(
+    chatAccess(user, 1_000, 0),
+    chatBudget({ credits: 5 })
+  );
+  assert.equal(await bucketCount("day"), 5);
+  assert.equal(await bucketCount("month"), 5);
+
+  await prisma.chatCreditReservation.update({
+    where: { id: acquired.usageReservation.reservationId },
+    data: { expiresAt: new Date(Date.now() - 60_000) },
+  });
+  const result = await reconcileExpiredChatCreditReservations(new Date(), 10);
+  assert.equal(result.refunded, 1);
+  assert.equal(await bucketCount("day"), 0);
+  assert.equal(await bucketCount("month"), 0);
+  await releaseChatAccess(acquired.leaseId);
+});
+
 test("settles partial cancelled usage and refunds only the unused reservation", async () => {
   const user = await createUser();
   const lot = await createAddOnLot(user.id, 20);

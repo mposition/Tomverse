@@ -32,6 +32,10 @@ export const getModelBrand = (provider: AiProvider | string): ModelBrand => {
       return { mark: "KM", className: "from-white to-blue-50", image: "/model-icons/kimi.png" };
     case "cohere":
       return { mark: "CO", className: "from-white to-emerald-50", image: "/model-icons/cohere.png" };
+    case "bfl":
+      // Black Forest Labs (FLUX). The monochrome mark from @lobehub/icons-static-png
+      // 2.5.0 (MIT), light variant: the frame is near-white in both themes.
+      return { mark: "BFL", className: "from-white to-zinc-100", image: "/model-icons/bfl.png" };
     case "minimax":
       // MiniMax has no local image asset, so the letter mark needs a real
       // brand-colour surface. A near-white gradient makes the shared white
