@@ -198,6 +198,12 @@ const profileAlias = z.string().min(1).max(64).regex(/^[a-z0-9][a-z0-9-]{0,63}$/
 // r-20261116-223616-da3a14).
 const RECOVERY_PROFILE_LIMIT = 4_096;
 const RECOVERY_PROFILE_MEMBER_LIMIT = 256;
+/**
+ * One controller request or report carries one profile: up to 256 member
+ * names of 64 characters plus fixed fields. The route body bound and the box
+ * controller's response bound are both this value (tests/amuxV22RecoveryProfileLimits).
+ */
+export const AMUX_V22_RECOVERY_CONTROLLER_BODY_MAX_BYTES = 65_536;
 const recoveryProfileConfigSchema = z.object({
   version: z.literal(1),
   profiles: z.array(z.object({ alias: profileAlias,
@@ -275,7 +281,7 @@ export const amuxV22SafeStopEvidenceSchema = z.object({
   targetHost: z.literal(AMUX_V22_RECOVERY_HOST_SCOPE),
   sourceEvidenceId: z.string().uuid(), sourceEvidenceDigest: digest,
   workerProfileAlias: profileAlias,
-  profileWorkerNames: z.array(profileAlias).min(1).max(256),
+  profileWorkerNames: z.array(profileAlias).min(1).max(RECOVERY_PROFILE_MEMBER_LIMIT),
   targetUnit: z.string().min(1).max(128), profileConfigDigest: digest,
   hostInvocationId: z.null(), modelOutcome: z.literal("unknown"),
   stopProof: stopProofSchema,

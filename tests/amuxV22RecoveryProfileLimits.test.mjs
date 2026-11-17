@@ -27,3 +27,17 @@ test("the app's recovery profile bounds are the controller's", () => {
   assert.match(app, /\.max\(RECOVERY_PROFILE_MEMBER_LIMIT\)/);
   assert.match(app, /\.max\(RECOVERY_PROFILE_LIMIT\)/);
 });
+
+test("one controller request or report with a full profile fits both transport bounds", () => {
+  const controller = read("lib/amux/v22RecoveryController.mjs");
+  const app = read("lib/amux/v22TaskRecoveryCore.ts");
+  const route = read("app/api/internal/amux/v22/recovery-controller/route.ts");
+  const bytes = number(app, "AMUX_V22_RECOVERY_CONTROLLER_BODY_MAX_BYTES");
+  assert.equal(number(controller, "CONTROLLER_BODY_BYTES"), bytes);
+  assert.ok(controller.includes("async function boundedResponse(response, limit = CONTROLLER_BODY_BYTES)"));
+  assert.ok(route.includes("readLimitedJson(request, AMUX_V22_RECOVERY_CONTROLLER_BODY_MAX_BYTES,"));
+  // 256 names of 64 characters, quoted and comma-separated, plus the fixed
+  // fields of a safe-stop request or report (review r-20261116-232116-5ef32a).
+  const names = number(app, "RECOVERY_PROFILE_MEMBER_LIMIT") * (64 + 3);
+  assert.ok(bytes >= names + 16_384, `${bytes} < ${names + 16_384}`);
+});
