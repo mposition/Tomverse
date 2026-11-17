@@ -3,7 +3,7 @@ import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ResponseLatencyEvidenceView } from "@/components/admin/ResponseLatencyEvidenceView";
-import { summarizeResponseLatency, type ResponseLatencyEvidence } from "@/lib/responseLatencyCore";
+import { responseLatencyContext, summarizeResponseLatency, type ResponseLatencyEvidence } from "@/lib/responseLatencyCore";
 
 const evidence: ResponseLatencyEvidence = {
   status: "available", windowDays: 7, truncated: false,
@@ -29,4 +29,15 @@ test("historical cycle evidence stays collapsed and unavailable current evidence
   }));
   assert.match(unavailable, /response-latency-refresh/);
   assert.doesNotMatch(unavailable, /<table/);
+});
+
+test("cohort labels distinguish recorded server configuration from unknown historical context", () => {
+  const context = responseLatencyContext({ RAILWAY_GIT_COMMIT_SHA: "a".repeat(40), CHAT_ROUTER_PARALLEL_CONTEXT_PRECHECK_ENABLED: "true" });
+  const grouped: ResponseLatencyEvidence = { status: "available", windowDays: 7, truncated: false,
+    ...summarizeResponseLatency([context, undefined].map(value => ({ product: "chat", mode: "auto", source: "server", modelId: "a", provider: "openai", outcome: "completed", context: value, timings: { firstContentMs: 100 } }))) };
+  const html = renderToStaticMarkup(createElement(ResponseLatencyEvidenceView, { evidence: grouped }));
+  assert.equal((html.match(/data-testid="response-latency-context"/g) ?? []).length, 2);
+  assert.match(html, /aaaaaaaaaaaa/);
+  assert.match(html, /precheck=true/);
+  assert.match(html, /not recorded/);
 });
