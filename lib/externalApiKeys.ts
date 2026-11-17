@@ -2,10 +2,10 @@ import "server-only";
 import type { Session } from "next-auth";
 import { prisma } from "@/lib/prisma";
 import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
+import { keyCreditTotals } from "@/lib/externalApiAdmission";
 import {
     EXTERNAL_API_KEY_LIMITS,
     digestExternalApiKey,
-    externalApiKeyCommittedCredits,
     externalApiKeyState,
     generateExternalApiKey,
     parseExternalApiBearer,
@@ -57,28 +57,6 @@ export type ExternalApiKeySummary = {
     createdAt: string;
 };
 
-const committedForKeys = async (keyIds: string[]) => {
-    if (keyIds.length === 0) return new Map<string, { committed: number; held: number; count: number }>();
-    const rows = await prisma.externalApiRequest.findMany({
-        where: { keyId: { in: keyIds } },
-        select: {
-            keyId: true,
-            reservation: {
-                select: { status: true, reservedCredits: true, settledCredits: true },
-            },
-        },
-    });
-    const totals = new Map<string, { committed: number; held: number; count: number }>();
-    for (const row of rows) {
-        const current = totals.get(row.keyId) ?? { committed: 0, held: 0, count: 0 };
-        current.committed += externalApiKeyCommittedCredits([row.reservation]);
-        if (row.reservation.status === "reserved") current.held += row.reservation.reservedCredits;
-        current.count += 1;
-        totals.set(row.keyId, current);
-    }
-    return totals;
-};
-
 export const listExternalApiKeys = async (
     userId: string,
     now = new Date()
@@ -88,7 +66,7 @@ export const listExternalApiKeys = async (
         select: keyListSelect,
         orderBy: { createdAt: "desc" },
     });
-    const totals = await committedForKeys(keys.map((key) => key.id));
+    const totals = await keyCreditTotals(prisma, keys.map((key) => key.id));
     return keys.map((key) => {
         const total = totals.get(key.id) ?? { committed: 0, held: 0, count: 0 };
         return {

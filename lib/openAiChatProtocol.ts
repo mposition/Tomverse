@@ -37,16 +37,27 @@ export const PROTOCOL_LIMITS = {
 const SUPPORTED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 const TOOL_NAME_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
 
-const textPart = z.object({ type: z.literal("text"), text: z.string() }).passthrough();
+// Nested objects are strict too: an unknown field anywhere is refused by
+// name rather than silently dropped.
+const textPart = z.object({ type: z.literal("text"), text: z.string() }).strict();
 const imagePart = z
     .object({
         type: z.literal("image_url"),
-        image_url: z.object({
-            url: z.string().min(1),
-            detail: z.enum(["auto", "low", "high"]).optional(),
-        }),
+        image_url: z
+            .object({
+                url: z.string().min(1),
+                detail: z.enum(["auto", "low", "high"]).optional(),
+            })
+            .strict(),
     })
-    .passthrough();
+    .strict();
+
+/**
+ * Providers whose SDK adapter sends a tool's `strict` flag on to the model.
+ * For any other provider the flag would be dropped, so `strict: true` is
+ * refused there instead of promising schema-exact arguments it cannot give.
+ */
+const STRICT_TOOL_PROVIDERS = new Set(["openai", "mistral", "moonshotai"]);
 
 const textContent = z.union([z.string(), z.array(textPart)]);
 const toolCall = z.object({
@@ -98,7 +109,7 @@ const requestSchema = z
         stream: z.boolean().optional(),
         stream_options: z
             .object({ include_usage: z.boolean().optional() })
-            .passthrough()
+            .strict()
             .nullable()
             .optional(),
         tools: z.array(toolDefinition).max(PROTOCOL_LIMITS.maxTools).optional(),
@@ -286,7 +297,7 @@ export type ConvertedRequest = {
     /** Every piece of text that will reach the provider, for the estimate. */
     textSegments: string[];
     images: DecodedImage[];
-    tools: { name: string; description?: string; parameters: Record<string, unknown> }[];
+    tools: { name: string; description?: string; parameters: Record<string, unknown>; strict?: boolean }[];
     toolChoice:
         | "none"
         | "auto"
@@ -297,7 +308,7 @@ export type ConvertedRequest = {
 
 export const convertChatCompletionRequest = (
     request: ChatCompletionRequest,
-    model: Pick<ModelCapabilityView, "vision">
+    model: Pick<ModelCapabilityView, "vision"> & Partial<Pick<ModelCapabilityView, "provider">>
 ): ConvertedRequest => {
     const textSegments: string[] = [];
     const images: DecodedImage[] = [];
@@ -319,8 +330,17 @@ export const convertChatCompletionRequest = (
         if (Buffer.byteLength(schemaText, "utf8") > PROTOCOL_LIMITS.maxToolSchemaBytes) {
             throw new ProtocolError(413, "tool_schema_too_large", "A tool schema is larger than 64 KB.", `tools.${index}`);
         }
+        const strict = definition.function.strict ?? undefined;
+        if (strict === true && !STRICT_TOOL_PROVIDERS.has(model.provider ?? "")) {
+            throw new ProtocolError(
+                400,
+                "unsupported_parameter",
+                "strict tool schemas are not supported for this model.",
+                `tools.${index}.function.strict`
+            );
+        }
         textSegments.push(name, definition.function.description ?? "", schemaText);
-        return { name, description: definition.function.description, parameters };
+        return { name, description: definition.function.description, parameters, strict };
     });
     if (new Set(tools.map((tool) => tool.name)).size !== tools.length) {
         throw new ProtocolError(400, "invalid_tool", "Tool names must be unique.", "tools");
@@ -457,17 +477,8 @@ export const toOpenAiFinishReason = (
     // output limit must not reach the client as a finished call.
     if (sdkReason === "length") return "length";
     if (sdkReason === "content-filter") return "content_filter";
-    if (sawToolCalls) return "tool_calls";
-    switch (sdkReason) {
-        case "length":
-            return "length";
-        case "content-filter":
-            return "content_filter";
-        case "tool-calls":
-            return "tool_calls";
-        default:
-            return "stop";
-    }
+    if (sawToolCalls || sdkReason === "tool-calls") return "tool_calls";
+    return "stop";
 };
 
 export type UsageView = {

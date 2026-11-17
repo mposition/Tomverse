@@ -115,27 +115,6 @@ export const externalApiKeyState = (
     return "active";
 };
 
-/**
- * Credits a key has committed against its cap, from the shared reservations.
- *
- * A reservation still `reserved` -- in flight, or dispatched with an outcome
- * nobody has recorded yet -- counts at its full held amount. A settled or
- * refunded one counts at what it settled for. There is no third number: the
- * reservation is the ledger, and this only reads it.
- */
-export const externalApiKeyCommittedCredits = (
-    reservations: readonly {
-        status: string;
-        reservedCredits: number;
-        settledCredits: number;
-    }[]
-) =>
-    reservations.reduce(
-        (total, row) =>
-            total + (row.status === "reserved" ? row.reservedCredits : row.settledCredits),
-        0
-    );
-
 /** Lowercase hex SHA-256 of an arbitrary string, for digests of client values. */
 export const sha256Hex = (value: string) =>
     createHash("sha256").update(value, "utf8").digest("hex");

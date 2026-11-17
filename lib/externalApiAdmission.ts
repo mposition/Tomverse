@@ -1,7 +1,37 @@
 import "server-only";
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { ChatAccessError } from "@/lib/chatSecurity";
-import { externalApiKeyCommittedCredits, externalApiKeyState } from "@/lib/externalApiKeyCore";
+import { externalApiKeyState } from "@/lib/externalApiKeyCore";
+
+export type KeyCreditTotals = { committed: number; held: number; count: number };
+
+/**
+ * Credits each key has committed, summed in the database: a held
+ * reservation counts at its full reserved value, a settled or refunded one
+ * at what it settled for. One aggregate row per key, whatever the key's
+ * lifetime request count, so the cap check inside the credit-account lock
+ * does not grow with history.
+ */
+export const keyCreditTotals = async (
+    client: Pick<Prisma.TransactionClient, "$queryRaw">,
+    keyIds: readonly string[]
+): Promise<Map<string, KeyCreditTotals>> => {
+    const totals = new Map<string, KeyCreditTotals>();
+    if (keyIds.length === 0) return totals;
+    const rows = await client.$queryRaw<Array<{ keyId: string; committed: bigint; held: bigint; count: bigint }>>`
+        SELECT r."keyId" AS "keyId",
+               COALESCE(SUM(CASE WHEN c."status" = 'reserved' THEN c."reservedCredits" ELSE c."settledCredits" END), 0)::bigint AS "committed",
+               COALESCE(SUM(CASE WHEN c."status" = 'reserved' THEN c."reservedCredits" ELSE 0 END), 0)::bigint AS "held",
+               COUNT(*)::bigint AS "count"
+        FROM "ExternalApiRequest" r
+        JOIN "ChatCreditReservation" c ON c."id" = r."reservationId"
+        WHERE r."keyId" IN (${Prisma.join(keyIds)})
+        GROUP BY r."keyId"`;
+    for (const row of rows) {
+        totals.set(row.keyId, { committed: Number(row.committed), held: Number(row.held), count: Number(row.count) });
+    }
+    return totals;
+};
 
 /**
  * The part of an external API admission that runs inside the shared
@@ -48,15 +78,7 @@ export const externalApiAdmissionHook =
             throw new ChatAccessError(401, "invalid_api_key", "A valid Tomverse API key is required.");
         }
         if (key.creditCap !== null) {
-            const committed = await tx.externalApiRequest.findMany({
-                where: { keyId: key.id },
-                select: {
-                    reservation: {
-                        select: { status: true, reservedCredits: true, settledCredits: true },
-                    },
-                },
-            });
-            const used = externalApiKeyCommittedCredits(committed.map((row) => row.reservation));
+            const used = (await keyCreditTotals(tx, [key.id])).get(key.id)?.committed ?? 0;
             if (used + reservation.usageCredits > key.creditCap) {
                 throw new ChatAccessError(
                     429,

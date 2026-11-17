@@ -5,7 +5,8 @@ import { authOptions } from "@/lib/auth";
 import { getUserBillingPlan } from "@/lib/billingEntitlements";
 import { externalApiEnabled, externalApiUserAllowed } from "@/lib/externalApiCatalogCore";
 import { authenticateExternalApiKey, type AuthenticatedExternalApiKey } from "@/lib/externalApiKeys";
-import { externalApiErrorResponse, externalApiRefusal } from "@/lib/externalApiInference";
+import { consumeApiRateLimit } from "@/lib/apiSecurity";
+import { externalApiErrorResponse, externalApiRefusal, positiveInteger } from "@/lib/externalApiInference";
 
 /**
  * Shared front door for the /api/v1 Bearer routes and the cookie-managed
@@ -38,6 +39,12 @@ export const withBearerKey = async (
         if (!externalApiUserAllowed(process.env, key.userId)) {
             return externalApiErrorResponse(403, "The Tomverse API is not enabled for this account.", "account_not_enabled");
         }
+        // Read routes (models, usage) have their own per-account budget,
+        // separate from completions, so polling cannot crowd out real calls.
+        await consumeApiRateLimit(request, key.userId, "external-api-reads", {
+            minute: positiveInteger(process.env.EXTERNAL_API_READS_PER_MINUTE, 60),
+            day: positiveInteger(process.env.EXTERNAL_API_READS_PER_DAY, 5_000),
+        });
         return await handler(key);
     } catch (error) {
         const refusal = externalApiRefusal(error);

@@ -35,6 +35,7 @@ All default off. Server-side; hiding UI is never the gate.
 | `EXTERNAL_API_PUBLIC_BASE_URL` | Optional canonical base URL shown to users (e.g. `https://tomverse.app/api/v1`). Otherwise derived from the request host. |
 | `NEXT_PUBLIC_EXTERNAL_API_SETTINGS_VISIBLE` | Build-time. Shows the API keys row in the settings panel. `/settings/api` itself checks availability through the server. |
 | `EXTERNAL_API_REQUESTS_PER_MINUTE` / `_PER_DAY` | Per-account request-rate abuse guard, defaults 120 / 20 000. Credits, the key cap and concurrency are what bound usage; this only stops runaway clients. |
+| `EXTERNAL_API_READS_PER_MINUTE` / `_PER_DAY` | Separate per-account budget for `GET /models` and `GET /usage`, defaults 60 / 5 000. |
 | `EXTERNAL_API_TIMEOUT_MS` | Server timeout for one generation, default 600 000. |
 
 **Kill switch.** The Admin operational pause for AI chat
@@ -122,10 +123,10 @@ Base URL `https://<host>/api/v1`. Bearer authentication only.
 `developer`, `user`, `assistant`, `tool`; text parts; `image_url` parts with
 base64 `data:` URLs of PNG, JPEG, WebP or GIF up to 8 MB each, 16 per request),
 `stream`, `stream_options.include_usage`, `tools` (function tools, up to 128,
-64 KB per schema), `tool_choice` (`none`, `auto`, `required`, or a named
+64 KB per schema; `strict: true` only for providers whose adapter forwards it: OpenAI, Mistral, Moonshot), `tool_choice` (`none`, `auto`, `required`, or a named
 function), `parallel_tool_calls: true`, `max_tokens`, `max_completion_tokens`,
 `temperature`, `top_p`, `frequency_penalty`, `presence_penalty` (where the
-model accepts sampling parameters), `stop` (up to 4), `n: 1`, `store: false`,
+model accepts a temperature, including models registered with reasoning `none`), `stop` (up to 4), `n: 1`, `store: false`,
 `user` (accepted, no effect), `reasoning_effort` (OpenAI reasoning models only).
 The request body may be up to 12 MB.
 
@@ -134,14 +135,18 @@ it), `n` other than 1, `store: true`, `parallel_tool_calls: false`, both token
 limits with different values, a token limit above the model's maximum, images
 for a model without image input, remote image URLs (never fetched), a tool
 result answering no earlier tool call, and sampling parameters a model does not
-accept. Nothing is silently dropped.
+accept, and `strict: true` on a tool for a provider that would drop it.
+Unknown fields are refused inside text and image parts and `stream_options`
+too. Nothing is silently dropped.
 
 **Responses.** One choice. A tool-only reply has `content: null`,
 `tool_calls`, and `finish_reason: "tool_calls"`. A provider stop for length or
 a content filter is reported as `length` / `content_filter` even when a tool
 call had started, and a call the provider never finished is left out of a
 non-streaming `tool_calls`, so a truncated argument is never offered as a
-finished call. `usage` is `null` when the
+finished call. A reply the provider's content filter blocked entirely is a
+normal `200` with `content: null` and `finish_reason: "content_filter"`, charged
+nothing. `usage` is `null` when the
 provider reported none — never zeros. Streaming sends `chat.completion.chunk`
 events with one completion id, the assistant role once, text deltas, tool-call
 fragments (id and name on the first fragment of each call, indexed by first

@@ -70,7 +70,7 @@ import {
 
 const NO_STORE = { "Cache-Control": "no-store" } as const;
 
-const positiveInteger = (value: string | undefined, fallback: number) => {
+export const positiveInteger = (value: string | undefined, fallback: number) => {
     const parsed = Number(value);
     return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 };
@@ -203,7 +203,11 @@ export async function handleChatCompletions(request: Request): Promise<Response>
         const { temperature: _temperature, providerOptions: _providerOptions, ...otherSettings } = settings;
         void _temperature;
         void _providerOptions;
-        const samplingAllowed = model.reasoning === undefined;
+        // Sampling knobs follow the central compatibility layer: a model that
+        // takes a temperature (including one registered as reasoning "none")
+        // takes top_p and the penalties too.
+        const samplingAllowed =
+            getModelGenerationSettings(model, { temperature: 1 }).temperature !== undefined;
         for (const param of ["top_p", "frequency_penalty", "presence_penalty"] as const) {
             if (parsed[param] != null && !samplingAllowed) {
                 throw new ProtocolError(400, "unsupported_parameter", `${param} is not supported for this model.`, param);
@@ -287,6 +291,7 @@ export async function handleChatCompletions(request: Request): Promise<Response>
                 tool({
                     description: definition.description,
                     inputSchema: jsonSchema(definition.parameters as Parameters<typeof jsonSchema>[0]),
+                    ...(definition.strict !== undefined ? { strict: definition.strict } : {}),
                 }),
             ])
         );
@@ -587,7 +592,10 @@ const createRun = (input: {
         } else {
             // A reply that is only tool calls is a complete reply.
             outcome = collected.text.length > 0 || sawToolCalls ? "completed" : "empty";
-            if (outcome === "empty") {
+            // A provider content filter that blocked the whole reply is a
+            // normal finish (content_filter), not a provider failure. Nothing
+            // was produced, so nothing is charged.
+            if (outcome === "empty" && finishReason !== "content_filter") {
                 error = { status: 502, code: "empty_response", message: "The model returned no output." };
             }
         }

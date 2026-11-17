@@ -3,7 +3,6 @@ import test from "node:test";
 import {
     digestExternalApiKey,
     EXTERNAL_API_KEY_PREFIX_PATTERN,
-    externalApiKeyCommittedCredits,
     externalApiKeyExpiry,
     externalApiKeyState,
     generateExternalApiKey,
@@ -64,18 +63,6 @@ test("names, caps and expiry are normalised or refused", () => {
     assert.equal(externalApiKeyState({ revokedAt: null, expiresAt: null }, now), "active");
     assert.equal(externalApiKeyState({ revokedAt: null, expiresAt: now }, now), "expired");
     assert.equal(externalApiKeyState({ revokedAt: now, expiresAt: null }, now), "revoked");
-});
-
-test("committed credits count held reservations at full value and settled at their result", () => {
-    assert.equal(
-        externalApiKeyCommittedCredits([
-            { status: "reserved", reservedCredits: 4, settledCredits: 0 },
-            { status: "settled", reservedCredits: 4, settledCredits: 4 },
-            { status: "refunded", reservedCredits: 4, settledCredits: 0 },
-            { status: "settled", reservedCredits: 10, settledCredits: 3 },
-        ]),
-        11
-    );
 });
 
 const baseModel = {

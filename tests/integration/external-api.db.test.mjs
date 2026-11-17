@@ -300,6 +300,37 @@ test("external inference API over the real shared credit ledger", { skip: !datab
         assert.equal(lastCalls.at(-1).providerOptions?.openai?.store, false, "even when the client says nothing");
     });
 
+    await t.test("strict tool schemas reach a provider that honours them", async () => {
+        const userId = await newUser();
+        allow(userId);
+        const { key } = await issueKey(userId);
+        const tools = [{ type: "function", function: { name: "read", strict: true, parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"], additionalProperties: false } } }];
+        assert.equal((await call(key, body({ tools }))).status, 200);
+        const sent = lastCalls.at(-1).tools.find((entry) => entry.name === "read");
+        assert.equal(sent.strict, true);
+    });
+
+    await t.test("a reply blocked entirely by the provider's content filter is a normal, uncharged finish", async () => {
+        const userId = await newUser();
+        allow(userId);
+        const { key } = await issueKey(userId);
+        script = () => streamOf([{ type: "stream-start", warnings: [] }, finish("content-filter", usage(100, 0))]);
+        const response = await call(key, body());
+        assert.equal(response.status, 200);
+        const json = await response.json();
+        assert.equal(json.choices[0].finish_reason, "content_filter");
+        assert.equal(json.choices[0].message.content, null);
+        const streamed = await readSse(await call(key, body({ stream: true })));
+        assert.equal(streamed.events.at(-1), "[DONE]");
+        assert.equal(streamed.chunks.find((c) => c.choices?.[0]?.finish_reason)?.choices[0].finish_reason, "content_filter");
+        for (const reservation of await reservationsFor(userId)) {
+            assert.equal(reservation.status, "refunded", "nothing produced, nothing charged");
+            assert.equal(reservation.outcome, "empty");
+            assert.equal(reservation.settledCredits, 0);
+        }
+        script = textScript("Hello from the fixture.");
+    });
+
     await t.test("a client that left before dispatch is refunded and never reaches the provider", async () => {
         const userId = await newUser();
         allow(userId);

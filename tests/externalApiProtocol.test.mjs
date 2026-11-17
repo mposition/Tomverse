@@ -91,6 +91,24 @@ test("unknown parameters are refused by name, never dropped", () => {
     rejects(() => parseChatCompletionRequest({ model: "x" }), "invalid_request");
 });
 
+test("nested unknown fields are refused too", () => {
+    const withPart = (part) => ({ ...vscodeRequest, messages: [{ role: "user", content: [part] }] });
+    rejects(() => parseChatCompletionRequest(withPart({ type: "text", text: "x", cache_control: { type: "ephemeral" } })), "unsupported_parameter");
+    rejects(() => parseChatCompletionRequest(withPart({ type: "image_url", image_url: { url: PNG_1x1, fetch: true } })), "unsupported_parameter");
+    rejects(() => parseChatCompletionRequest({ ...vscodeRequest, stream_options: { include_usage: true, include_obfuscation: true } }), "unsupported_parameter");
+    assert.ok(parseChatCompletionRequest(withPart({ type: "image_url", image_url: { url: PNG_1x1, detail: "low" } })));
+});
+
+test("strict tools are forwarded where the provider honours them and refused elsewhere", () => {
+    const strictTools = { ...vscodeRequest, tools: [{ type: "function", function: { name: "run_in_terminal", strict: true, parameters: { type: "object", properties: {} } } }] };
+    const parsed = parseChatCompletionRequest(strictTools);
+    assert.equal(convertChatCompletionRequest(parsed, model).tools[0].strict, true);
+    rejects(() => convertChatCompletionRequest(parsed, { ...model, provider: "anthropic" }), "unsupported_parameter");
+    rejects(() => convertChatCompletionRequest(parsed, { vision: true }), "unsupported_parameter");
+    const relaxed = parseChatCompletionRequest({ ...strictTools, tools: [{ ...strictTools.tools[0], function: { ...strictTools.tools[0].function, strict: false } }] });
+    assert.equal(convertChatCompletionRequest(relaxed, { ...model, provider: "anthropic" }).tools[0].strict, false);
+});
+
 test("option combinations follow the documented rules", () => {
     const parse = (extra) => parseChatCompletionRequest({ ...vscodeRequest, ...extra });
     rejects(() => resolveRequestOptions(parse({ n: 2 }), model), "unsupported_parameter");
@@ -216,4 +234,6 @@ test("missing provider usage is null, never zero", () => {
     assert.equal(toOpenAiFinishReason("stop", true), "tool_calls");
     assert.equal(toOpenAiFinishReason("length", true), "length", "truncation wins over started tool calls");
     assert.equal(toOpenAiFinishReason("content-filter", true), "content_filter");
+    assert.equal(toOpenAiFinishReason("tool-calls", false), "tool_calls");
+    assert.equal(toOpenAiFinishReason("content-filter", false), "content_filter");
 });
