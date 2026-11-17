@@ -574,6 +574,100 @@ test("external inference API over the real shared credit ledger", { skip: !datab
         script = textScript("Hello from the fixture.");
     });
 
+    await t.test("cache reads and reasoning are recorded once, inside the reported totals", async () => {
+        const userId = await newUser();
+        allow(userId);
+        const { key } = await issueKey(userId);
+        script = textScript("Hello from the fixture.", usage(1000, 300, { cacheRead: 600, reasoning: 200 }));
+        const response = await call(key, body());
+        const json = await response.json();
+        assert.equal(json.usage.prompt_tokens, 1000);
+        assert.equal(json.usage.completion_tokens, 300, "reasoning is inside the output total, not added to it");
+        assert.equal(json.usage.prompt_tokens_details.cached_tokens, 600);
+        assert.equal(json.usage.completion_tokens_details.reasoning_tokens, 200);
+        const [reservation] = await reservationsFor(userId);
+        assert.equal(reservation.settledInputTokens, 1000);
+        assert.equal(reservation.settledCachedInputTokens, 600);
+        assert.equal(reservation.settledOutputTokens, 300);
+        script = textScript("Hello from the fixture.", usage(1000, 300));
+        await call(key, body());
+        const uncached = (await reservationsFor(userId))[1];
+        assert.ok(reservation.settledCostMicroUsd < uncached.settledCostMicroUsd, "cached input is priced at the cached rate");
+        script = textScript("Hello from the fixture.");
+    });
+
+    await t.test("the operator pause stops new requests but an in-flight one still settles", async () => {
+        const userId = await newUser();
+        allow(userId);
+        const { key } = await issueKey(userId);
+        let open;
+        const gate = new Promise((r) => (open = r));
+        script = () => ({
+            stream: new ReadableStream({
+                async start(controller) {
+                    controller.enqueue({ type: "stream-start", warnings: [] });
+                    await gate;
+                    controller.enqueue({ type: "text-start", id: "t" });
+                    controller.enqueue({ type: "text-delta", id: "t", delta: "finished anyway" });
+                    controller.enqueue({ type: "text-end", id: "t" });
+                    controller.enqueue(finish("stop"));
+                    controller.close();
+                },
+            }),
+        });
+        const inflight = call(key, body());
+        for (let i = 0; i < 200 && (await reservationsFor(userId)).length === 0; i += 1) await new Promise((r) => setTimeout(r, 10));
+        await db.appSetting.upsert({ where: { key: "feature.aiChatEnabled" }, create: { key: "feature.aiChatEnabled", value: "false" }, update: { value: "false" } });
+        try {
+            const before = dispatches;
+            assert.equal((await call(key, body())).status, 503);
+            assert.equal(dispatches, before);
+            open();
+            const response = await inflight;
+            assert.equal(response.status, 200);
+            const [reservation] = await reservationsFor(userId);
+            assert.equal(reservation.outcome, "completed");
+            assert.equal(reservation.status, "settled");
+        } finally {
+            await db.appSetting.update({ where: { key: "feature.aiChatEnabled" }, data: { value: "true" } });
+        }
+        script = textScript("Hello from the fixture.");
+    });
+
+    await t.test("a server timeout ends the stream with an error the client can see and settles as cancelled", async () => {
+        const userId = await newUser();
+        allow(userId);
+        const { key } = await issueKey(userId);
+        process.env.EXTERNAL_API_TIMEOUT_MS = "300";
+        script = (options) =>
+            streamOf(
+                [
+                    { type: "stream-start", warnings: [] },
+                    { type: "text-start", id: "t" },
+                    ...Array.from({ length: 40 }, () => ({ type: "text-delta", id: "t", delta: "slow " })),
+                    finish("stop"),
+                ],
+                { delayMs: 50, signal: options.abortSignal }
+            );
+        try {
+            const { events, chunks } = await readSse(await call(key, body({ stream: true })));
+            assert.notEqual(events.at(-1), "[DONE]");
+            assert.equal(chunks.at(-1).error.code, "upstream_timeout");
+        } finally {
+            delete process.env.EXTERNAL_API_TIMEOUT_MS;
+        }
+        let reservation;
+        for (let i = 0; i < 100; i += 1) {
+            [reservation] = await reservationsFor(userId);
+            if (reservation?.status !== "reserved") break;
+            await new Promise((r) => setTimeout(r, 20));
+        }
+        assert.equal(reservation.outcome, "cancelled");
+        const receipt = await db.externalApiRequest.findUnique({ where: { reservationId: reservation.id } });
+        assert.equal(receipt.errorCode, "upstream_timeout");
+        script = textScript("Hello from the fixture.");
+    });
+
     await t.test("missing provider usage is reported as null and settled from the reservation estimate", async () => {
         const userId = await newUser();
         allow(userId);
