@@ -738,6 +738,8 @@ export const en = {
         noModelsFound: "No models match these filters.",
         scrollToLatest: "Jump to latest",
         newResponseAvailable: "New response available",
+        generatingPill: "Generating response",
+        generatingScrollToLatest: "Response generating — jump to latest",
         panelPaused: "Paused",
         availableModel: "Available",
         unavailableModel: "Unavailable",
