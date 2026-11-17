@@ -318,7 +318,11 @@ const HANDLERS: Record<AuthoredArtifactKind, KindHandler> = {
       "for only the first week, keep the rows within that week. For PDF amount or numeric " +
       "table columns, set pdfNumberColumns to their zero-based indices and supply " +
       "numeric cells as numbers for grouped, right-aligned display. Keep identifiers " +
-      "and exact authored strings as strings. For PDF tables, set " +
+      "and exact authored strings as strings. Name every numeric column's unit " +
+      "in its header -- for a change column, whether it is a percent change (%) " +
+      "or a point change (%p) -- and write changes with their sign (+3, -1). " +
+      "For an index, state its base period and base value (for example " +
+      "2024 Q1 = 100) in a paragraph below the table. For PDF tables, set " +
       "pdfColumnWeights to match the content: give description columns more " +
       "space than short item labels and amounts (for example [1, 4, 1]). An image " +
       "block places a picture from a file attached to this message -- a photo, " +
