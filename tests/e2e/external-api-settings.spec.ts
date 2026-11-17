@@ -82,7 +82,19 @@ const mockKeys = async (page: Page, options: { enabled: boolean }) => {
                 for (const key of keys) key.state = "revoked";
                 return route.fulfill({ json: { revoked: true, alreadyRevoked: false } });
             }
-            return route.fulfill({ json: { requests: [] } });
+            if (request.method() === "PATCH") {
+                const body = request.postDataJSON();
+                for (const key of keys) Object.assign(key, body);
+                return route.fulfill({ json: { key: keys[0] } });
+            }
+            return route.fulfill({
+                json: {
+                    requests: [
+                        { requestId: "req_held", modelId: model.id, createdAt: "2026-11-17T01:00:00.000Z", status: "held", outcome: null, heldCredits: 1, chargedCredits: null, usage: null, errorCode: null },
+                        { requestId: "req_done", modelId: model.id, createdAt: "2026-11-17T00:30:00.000Z", status: "settled", outcome: "completed", heldCredits: 0, chargedCredits: 1, usage: { inputTokens: 120, outputTokens: 30 }, errorCode: null },
+                    ],
+                },
+            });
         }
     );
     return calls;
@@ -124,6 +136,25 @@ test("API keys: create shows the secret once with a ready config, then revoke @u
     await page.getByTestId("external-api-created-done").click();
     await expect(created).toHaveCount(0);
     await expect(page.getByText(SECRET)).toHaveCount(0);
+
+    // Rename and change the limit; each is one PATCH of only that field.
+    const row = page.getByTestId("external-api-key");
+    await row.getByRole("button", { name: "이름 변경" }).click();
+    await row.getByRole("textbox").fill("집 데스크톱");
+    await row.getByRole("button", { name: "저장" }).click();
+    await expect(row).toContainText("집 데스크톱");
+    await row.getByRole("button", { name: "한도 변경" }).click();
+    await row.getByRole("textbox").fill("");
+    await row.getByRole("button", { name: "저장" }).click();
+    await expect(row).toContainText("키 한도 없음");
+    expect(calls.filter((call) => call === "PATCH /api/user/api-keys/key_1")).toHaveLength(2);
+
+    // Receipts: an unresolved request is shown as held, never as zero credits.
+    await row.getByRole("button", { name: "최근 요청" }).click();
+    const usage = page.getByTestId("external-api-key-usage");
+    await expect(usage).toContainText("진행 중이거나 아직 확정되지 않음");
+    await expect(usage).toContainText("입력 120 · 출력 30");
+    await expect(usage).toContainText("req_done");
 
     page.once("dialog", (dialog) => dialog.accept());
     await page.getByTestId("external-api-key-revoke").click();
