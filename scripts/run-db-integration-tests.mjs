@@ -1130,6 +1130,16 @@ run(
     "tests/integration/code-managed-execution.db.test.mjs"],
   "Running the managed Code reservation, settlement, reconciliation, and timezone scenarios",
 );
+// The external inference API fakes only the model provider and exercises the
+// real shared credit ledger, key cap and revocation race. Own process for its
+// module mocks.
+run(
+  ["--conditions=react-server", "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
+    "--test-concurrency=1",
+    "tests/integration/external-api.db.test.mjs"],
+  "Running the external API key, reservation, cap, idempotency and failure scenarios",
+);
 // The budget suite mocks Prisma and the audit writer while exercising real
 // PostgreSQL constraints. Module mocks must be isolated from the batch above.
 run(

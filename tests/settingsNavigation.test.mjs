@@ -60,6 +60,7 @@ test("every entry names the tab it is actually in, and stays a separate row", ()
     "assistants",
     "account-data",
     "email-notifications",
+    "api-keys",
   ]);
 
   // Pinned per section rather than "all of them are in `data`". They were all
@@ -76,6 +77,8 @@ test("every entry names the tab it is actually in, and stays a separate row", ()
     // Communication choices sit with the account identity they reach, on the
     // default tab rather than behind the data-management tab.
     "email-notifications": "account",
+    // An account credential, beside sign-in and email.
+    "api-keys": "account",
   };
 
   const elementIds = new Set();

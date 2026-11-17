@@ -322,11 +322,18 @@ export type GuestAutoPreholdConversion = Readonly<{
     creditEntries: readonly GuestAutoHeldCreditEntry[];
 }>;
 
+/**
+ * Which product a reservation belongs to. `external_api` is a stateless
+ * /api/v1 inference request: no Conversation, no Message, and no productKey.
+ */
+export const CHAT_RESERVATION_SOURCES = ["chat", "comparison_review", "external_api"] as const;
+export type ChatReservationSource = (typeof CHAT_RESERVATION_SOURCES)[number];
+
 export type ChatUsageReservation = {
     reservationId: string;
     userId?: string;
     traceId: string;
-    source: "chat" | "comparison_review";
+    source: ChatReservationSource;
     modelId: string;
     provider: AiModel["provider"];
     entries: ReservationEntry[];
@@ -422,7 +429,7 @@ const durableReservationPayloadSchema = z
         reservationId: z.string().min(1).max(100),
         userId: z.string().min(1).max(100).optional(),
         traceId: z.string().min(1).max(120),
-        source: z.enum(["chat", "comparison_review"]),
+        source: z.enum(CHAT_RESERVATION_SOURCES),
         modelId: z.string().min(1).max(160),
         provider: z.string().min(1).max(80),
         entries: z.array(
@@ -2492,7 +2499,18 @@ export const acquireChatAccess = async (
     budget: ChatBudget,
     options?: {
         traceId?: string;
-        source?: "chat" | "comparison_review";
+        source?: ChatReservationSource;
+        /**
+         * Runs inside the reservation transaction, after the credit account
+         * lock and the reservation row. A throw refuses the request and rolls
+         * the hold back. The external API binds its key here and enforces the
+         * key's own credit cap (lib/externalApiAdmission.ts). It must not take
+         * a lock the credit account lock does not already order.
+         */
+        withinReservationTransaction?: (
+            tx: Prisma.TransactionClient,
+            reservation: { reservationId: string; usageCredits: number }
+        ) => Promise<void>;
         /** Tool names enabled for this turn, recorded on the limit decision. */
         enabledTools?: string[];
         /**
@@ -4024,6 +4042,17 @@ export const acquireChatAccess = async (
                     addOnReservedCredits,
                     expiresAt: reservationExpiresAt,
                 },
+            });
+        }
+        if (options?.withinReservationTransaction) {
+            // Last, so it sees the row it is binding to, and inside the same
+            // transaction, so a refusal here rolls the whole hold back. It runs
+            // with the credit account lock already held: every request of one
+            // account is serialised through that lock, which is what makes a
+            // per-key check here safe against concurrent requests.
+            await options.withinReservationTransaction(tx, {
+                reservationId,
+                usageCredits: budget.usageCredits,
             });
         }
     });

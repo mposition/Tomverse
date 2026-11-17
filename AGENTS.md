@@ -108,6 +108,7 @@ Report implemented and tested behavior separately from documentation, review, me
 | Conversation.productKey | `docs/policy/conversation-product-key.md` |
 | Chat concurrency and identity namespace | `docs/policy/chat-concurrency-and-identity.md` |
 | Code managed-path credits, guardrail and concurrency | `docs/policy/code-task-cost-guardrails.md`, `docs/policy/code-concurrency.md`, `docs/policy/credit-and-cost-limits.md` |
+| External inference API (/api/v1, API keys) | `docs/policy/external-api.md`, `docs/policy/credit-and-cost-limits.md` |
 | 프로모션 할인과 통화 | `docs/policy/promotion-discount-currency.md` |
 | 가격 카탈로그 default는 fixture가 아닙니다 | `docs/policy/promotion-discount-currency.md` |
 | Plan change (Pro <-> Max) | `docs/policy/plan-change.md` |
