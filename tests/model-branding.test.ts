@@ -17,6 +17,7 @@ const providersWithLogos = [
   "zhipu",
   "moonshot",
   "cohere",
+  "bfl",
 ];
 
 test("every provider logo points at a file in public/", () => {
@@ -30,4 +31,8 @@ test("every provider logo points at a file in public/", () => {
 
 test("Cohere models show the Cohere logo, not a letter mark", () => {
   assert.equal(getModelBrand("cohere").image, "/model-icons/cohere.png");
+});
+
+test("FLUX image models show the Black Forest Labs mark, not a letter mark", () => {
+  assert.equal(getModelBrand("bfl").image, "/model-icons/bfl.png");
 });

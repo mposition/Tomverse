@@ -160,10 +160,12 @@ test("only providers with an enabled model are required to have a budget", () =>
       // The canary figures approved 2026-08-14: $12/day, $50/month.
       IMAGE_PROVIDER_FAL_COST_MICROUSD_PER_DAY: "12000000",
       IMAGE_PROVIDER_FAL_COST_MICROUSD_PER_MONTH: "50000000",
+      IMAGE_PROVIDER_BFL_COST_MICROUSD_PER_DAY: "12000000",
+      IMAGE_PROVIDER_BFL_COST_MICROUSD_PER_MONTH: "50000000",
     },
     { production: true }
   );
-  // OpenAI, xAI and fal each have an enabled model. The three Google models are
+  // OpenAI, xAI, fal and bfl each have an enabled model. The three Google models are
   // registered but on a price hold, so they cannot receive a request and their
   // missing budget must not block a deploy.
   //
@@ -172,7 +174,7 @@ test("only providers with an enabled model are required to have a budget", () =>
   // still add up -- just against a pool with no money in it.
   assert.deepEqual(
     resolved.map((entry) => entry.provider),
-    ["openai", "xai", "fal"]
+    ["openai", "xai", "fal", "bfl"]
   );
   for (const entry of resolved) assert.ok(entry.resolved.limits, entry.provider);
 });

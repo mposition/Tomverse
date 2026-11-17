@@ -358,6 +358,20 @@ const openNewImageEntry = async (page: Page) => {
   }
 };
 
+/**
+ * Opens the "more models" row. With more enabled models than
+ * IMAGE_INLINE_MODEL_DISCOVERY_LIMIT (five since FLUX 3 Image and Klein,
+ * 2026-11-16) the composer shows only the selected chips inline and keeps the
+ * rest behind this toggle. Selecting a chip moves it inline and leaves the row
+ * open, so one call per test reaches every unselected model.
+ */
+const openMoreImageModels = async (page: Page) => {
+  const toggle = page.getByTestId("image-model-picker-toggle");
+  await expect(toggle).toBeVisible();
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+  await expect(page.getByTestId("image-model-picker-panel")).toBeVisible();
+};
+
 test("the entry point does not exist while the flag is off", { tag: "@ui-risk" }, async ({ page }) => {
   await mockAuthenticatedApi(page);
   await page.goto("/review");
@@ -659,14 +673,14 @@ test("the model picker drives the request and the quoted total", { tag: "@ui-ris
   await openNewImageEntry(page);
   const picker = page.getByTestId("image-model-picker");
   await expect(picker).toBeVisible();
-  // Two models are enabled and the disclosure threshold is three, so every one
-  // of them is an inline choice and the compact affordance must not appear at
-  // all. The compact branch itself is unreachable here until a fourth model is
-  // activated, and is pinned in tests/imageModelRegistry.test.mjs instead --
-  // the rule is what can be tested today, the rendering is not.
-  await expect(page.getByTestId("image-model-picker-toggle")).toHaveCount(0);
+  // Five models are enabled and the disclosure threshold is three, so the
+  // composer is compact: only the selected model is inline, and the others are
+  // one toggle away rather than missing.
   await expect(page.getByTestId("image-model-picker-panel")).toHaveCount(0);
+  await expect(page.getByTestId("image-model-grok-imagine-image-quality-20260403")).toHaveCount(0);
+  await openMoreImageModels(page);
   await expect(page.getByTestId("image-model-grok-imagine-image-quality-20260403")).toBeVisible();
+  await expect(page.getByTestId("image-model-flux-3-image")).toBeVisible();
   // The default model is pre-selected, and the last one cannot be removed:
   // a composer that looks ready must not refuse on submit.
   const defaultModel = page.getByTestId("image-model-gpt-image-2");
@@ -697,6 +711,7 @@ test("two providers can be compared in one request, priced per model and in tota
   const openai = page.getByTestId("image-model-gpt-image-2");
   const grok = page.getByTestId("image-model-grok-imagine-image-quality-20260403");
   await expect(openai).toHaveAttribute("aria-pressed", "true");
+  await openMoreImageModels(page);
   await expect(grok).toBeVisible();
   await grok.click();
   await expect(grok).toHaveAttribute("aria-pressed", "true");
@@ -728,6 +743,7 @@ test("an option one selected model cannot be priced blocks submission", { tag: "
   await page.goto("/review");
 
   await openNewImageEntry(page);
+  await openMoreImageModels(page);
   await page.getByTestId("image-model-grok-imagine-image-quality-20260403").click();
   await page.getByTestId("image-generation-prompt").fill("a red apple");
   await expect(page.getByTestId("image-generation-submit")).toBeEnabled();
@@ -754,6 +770,7 @@ test("promoting a draft keeps the composer settings and clears the prompt", { ta
   await page.goto("/review");
 
   await openNewImageEntry(page);
+  await openMoreImageModels(page);
   await page.getByTestId("image-model-grok-imagine-image-quality-20260403").click();
   await page.getByTestId("image-preset-draft").click();
   await page.getByTestId("image-size-1536x1024").click();
@@ -1200,6 +1217,7 @@ test("at a limit of two, the third model is refused and the reason is specific",
 
   await expect(openai).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByTestId("image-model-selection-count")).toContainText("1");
+  await openMoreImageModels(page);
   await grok.click();
   await expect(grok).toHaveAttribute("aria-pressed", "true");
 
@@ -1262,6 +1280,7 @@ test("at a limit of three, all three providers compare in one request", { tag: "
   await page.goto("/review");
 
   await openNewImageEntry(page);
+  await openMoreImageModels(page);
   await page.getByTestId("image-model-grok-imagine-image-quality-20260403").click();
   await page.getByTestId("image-model-fal-ai/nano-banana-2").click();
 
@@ -1319,6 +1338,7 @@ test("a server refusal a stale composer could not predict names the limit", { ta
   await page.goto("/review");
 
   await openNewImageEntry(page);
+  await openMoreImageModels(page);
   await page.getByTestId("image-model-grok-imagine-image-quality-20260403").click();
   await page.getByTestId("image-model-fal-ai/nano-banana-2").click();
   await page.getByTestId("image-generation-prompt").fill("a red apple");

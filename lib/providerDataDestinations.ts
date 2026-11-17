@@ -41,7 +41,15 @@
  * Pure: no database, no clock, no network.
  */
 
+import type { ImageModelProvider } from "@/lib/imageModelRegistry";
 import type { AiProvider } from "@/lib/models";
+
+/**
+ * Every provider a user's content can be sent to: the chat providers, and the
+ * image providers that serve no chat model (fal, bfl). An image prompt leaves
+ * Tomverse as surely as a chat message does, so it needs a row too.
+ */
+export type DestinationProvider = AiProvider | ImageModelProvider;
 
 /**
  * Whether we can name where this provider takes the data.
@@ -162,7 +170,7 @@ export type ZeroDataRetentionMode =
     | "CONTRACTUAL_NO_CONTENT_STORAGE";
 
 export type ProviderDataDestination = {
-    provider: AiProvider;
+    provider: DestinationProvider;
     /**
      * The legal entity that receives the data.
      *
@@ -248,7 +256,7 @@ const unknownRetention = (): RetentionFact => ({
     evidenceRef: null,
 });
 
-const unproven = (provider: AiProvider): ProviderDataDestination => ({
+const unproven = (provider: DestinationProvider): ProviderDataDestination => ({
     provider,
     recipientEntity: null,
     recipientCountryCodes: [],
@@ -306,7 +314,7 @@ const unspecified = (evidenceRef: string): RetentionFact =>
  * Named places stay as the owner recorded them.
  */
 const ready = (input: {
-    provider: AiProvider;
+    provider: DestinationProvider;
     recipientEntity: string;
     recipientCountryCodes: readonly string[];
     evidenceRef: string;
@@ -451,6 +459,29 @@ export const PROVIDER_DATA_DESTINATIONS: readonly ProviderDataDestination[] = [
         // Public entity identity only. This is not evidence of this account's
         // training opt-out, processing locations or retention arrangement.
         evidenceRef: "https://cohere.com/privacy",
+    },
+    {
+        // Image generation only (Nano Banana 2). Public entity identity from the
+        // privacy page, which says only that fal "is based in the United
+        // States"; no country is recorded without a reviewed document saying
+        // where the recipient is. Retention, training and locations unreviewed.
+        ...unproven("fal"),
+        recipientEntity: "fal - Features & Labels Inc.",
+        evidenceRef: "https://fal.ai/privacy",
+    },
+    {
+        // Image generation only (FLUX 3 Image and Klein, enabled 2026-11-17).
+        // The privacy policy names Black Forest Labs Inc. as controller for
+        // users outside the EEA, Switzerland and the UK (BFL GmbH inside).
+        // Unproven on purpose: the same page says inputs and outputs may be used
+        // to train BFL's models unless the user opts out by email, and also
+        // that it does not apply to content processed for business customers
+        // under contract. Which of the two governs Tomverse's API account is
+        // not established, so no training, retention or location answer is
+        // recorded here; the privacy page shows this row as unverified.
+        ...unproven("bfl"),
+        recipientEntity: "Black Forest Labs Inc.",
+        evidenceRef: "https://bfl.ai/legal/privacy-policy",
     },
     ready({
         provider: "openai",
@@ -739,7 +770,7 @@ export const PROVIDER_DATA_DESTINATIONS: readonly ProviderDataDestination[] = [
 ];
 
 export const providerDataDestination = (
-    provider: AiProvider
+    provider: DestinationProvider
 ): ProviderDataDestination | null =>
     PROVIDER_DATA_DESTINATIONS.find((entry) => entry.provider === provider) ??
     null;
@@ -763,7 +794,7 @@ export const providerDataDestination = (
  * same reason -- nobody can say where the data would go.
  */
 export const providerDestinationIsEstablished = (
-    provider: AiProvider
+    provider: DestinationProvider
 ): boolean => {
     const entry = providerDataDestination(provider);
     return entry !== null && destinationIsDisclosable(entry);
