@@ -98,9 +98,9 @@ no API wallet, no new price and no per-token billing for the user.
 
 | Outcome | User credits | Provider cost recorded |
 |---|---|---|
-| completed — text, or tool calls only | the reserved credits | reported usage; if usage is missing, the reservation's own estimate |
-| empty — no text and no tool call | 0 | reported usage, or the estimate |
-| cancelled — client disconnect or timeout | pro rata if more than 16 output tokens were produced | reported usage, or the streamed output estimate |
+| completed — text, tool calls only, or reasoning only | the reserved credits | reported usage; if usage is missing, the reservation's own estimate |
+| empty — no text, tool call or reasoning | 0 | reported usage, or the estimate |
+| cancelled — client disconnect or timeout | pro rata if more than 16 output tokens were produced | reported usage, or the streamed output estimate (the larger of the script-aware text estimator and bytes/4, over text, reasoning and tool arguments) |
 | failed — provider refused with a 4xx (not 408) before any output | 0 | 0 (the provider refused) |
 | failed — provider answered a 5xx or 408 before any output | 0 | reservation estimate (the provider may have processed it) |
 | failed — any other failure (network, mid-stream) | 0 | the reservation's estimate, never 0 by assumption |

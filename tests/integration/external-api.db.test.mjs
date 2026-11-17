@@ -609,6 +609,71 @@ test("external inference API over the real shared credit ledger", { skip: !datab
         script = textScript("Hello from the fixture.");
     });
 
+    await t.test("a cancelled Korean reply is estimated with the script-aware counter, not bytes/4", async () => {
+        const userId = await newUser();
+        allow(userId);
+        const { key } = await issueKey(userId);
+        const controller = new AbortController();
+        // 20 Hangul syllables: 60 bytes, so bytes/4 would say 15 tokens --
+        // under the pro-rata threshold -- while the text is really ~30.
+        const korean = ["안녕하세요", "반갑습니다", "오늘날씨가", "좋네요정말"];
+        script = (options) =>
+            streamOf(
+                [
+                    { type: "stream-start", warnings: [] },
+                    { type: "text-start", id: "t" },
+                    ...korean.map((delta) => ({ type: "text-delta", id: "t", delta })),
+                    ...Array.from({ length: 100 }, () => ({ type: "text-delta", id: "t", delta: "" })),
+                    finish("stop"),
+                ],
+                { delayMs: 15, signal: options.abortSignal }
+            );
+        const response = await call(key, body({ stream: true }), { signal: controller.signal });
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let seen = "";
+        while (!korean.every((part) => seen.includes(part))) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            seen += decoder.decode(value, { stream: true });
+        }
+        controller.abort();
+        await reader.cancel().catch(() => undefined);
+        let reservation;
+        for (let i = 0; i < 200; i += 1) {
+            [reservation] = await reservationsFor(userId);
+            if (reservation?.status !== "reserved") break;
+            await new Promise((r) => setTimeout(r, 25));
+        }
+        assert.equal(reservation.outcome, "cancelled");
+        assert.ok(reservation.settledOutputTokens > 16, `estimated ${reservation.settledOutputTokens} output tokens`);
+        script = textScript("Hello from the fixture.");
+    });
+
+    await t.test("a reply that is only reasoning is a completed, charged request", async () => {
+        const userId = await newUser();
+        allow(userId);
+        const { key } = await issueKey(userId);
+        script = () =>
+            streamOf([
+                { type: "stream-start", warnings: [] },
+                { type: "reasoning-start", id: "r" },
+                { type: "reasoning-delta", id: "r", delta: "Thinking about the whole output limit." },
+                { type: "reasoning-end", id: "r" },
+                finish("length", usage(100, 64, { reasoning: 64 })),
+            ]);
+        const response = await call(key, body());
+        assert.equal(response.status, 200);
+        const json = await response.json();
+        assert.equal(json.choices[0].finish_reason, "length");
+        assert.equal(json.choices[0].message.content, null);
+        const [reservation] = await reservationsFor(userId);
+        assert.equal(reservation.outcome, "completed");
+        assert.equal(reservation.status, "settled");
+        assert.ok(reservation.settledCredits > 0, "reasoning the client received is charged");
+        script = textScript("Hello from the fixture.");
+    });
+
     await t.test("failures: a provider refusal costs nothing, an unknown failure is not priced at zero", async () => {
         const userId = await newUser();
         allow(userId);

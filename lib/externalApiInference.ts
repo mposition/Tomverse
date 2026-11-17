@@ -18,7 +18,7 @@ import {
     settleChatUsage,
     type ChatUsageReservation,
 } from "@/lib/chatSecurity";
-import { atLeastOneToken, createTokenEstimateAccumulator } from "@/lib/chatTokenEstimate";
+import { atLeastOneToken, createTokenEstimateAccumulator, estimateTextTokens } from "@/lib/chatTokenEstimate";
 import { ApiSecurityError, consumeApiRateLimit, readLimitedText } from "@/lib/apiSecurity";
 import {
     externalApiEnabled,
@@ -601,8 +601,11 @@ const createRun = (input: {
             outcome = "failed";
             error = { status: 502, code: "upstream_error", message: "The model provider returned an error." };
         } else {
-            // A reply that is only tool calls is a complete reply.
-            outcome = collected.text.length > 0 || sawToolCalls ? "completed" : "empty";
+            // A reply that is only tool calls, or only reasoning (the client
+            // has already received it as reasoning_content, e.g. a model that
+            // spent its whole output limit thinking), is a complete reply.
+            outcome =
+                collected.text.length > 0 || sawToolCalls || collected.reasoning.length > 0 ? "completed" : "empty";
             // A provider content filter that blocked the whole reply is a
             // normal finish (content_filter), not a provider failure. Nothing
             // was produced, so nothing is charged.
@@ -622,12 +625,15 @@ const createRun = (input: {
         // nothing here is zero by assumption -- the reservation's own estimate
         // prices the provider side (undefined tokens), except where the
         // provider refused with an HTTP status before producing anything.
-        const outputBytes =
-            Buffer.byteLength(collected.text, "utf8") +
-            // Reasoning is billed as output too; a stream cut off mid-thought
-            // has produced it even when no answer text arrived.
-            Buffer.byteLength(collected.reasoning, "utf8") +
-            collected.toolCalls.reduce((total, call) => total + Buffer.byteLength(call.arguments, "utf8"), 0);
+        // Reasoning is billed as output too; a stream cut off mid-thought has
+        // produced it even when no answer text arrived.
+        const producedText = [collected.text, collected.reasoning, ...collected.toolCalls.map((call) => call.arguments)].join("");
+        const outputBytes = Buffer.byteLength(producedText, "utf8");
+        // A cancelled stream without provider usage is estimated on the high
+        // side: the script-aware estimator (dense for Korean, CJK and code)
+        // or bytes/4, whichever is larger, so a short-looking reply that was
+        // really over the pro-rata threshold is not refunded in full.
+        const cancelledOutputTokens = Math.max(Math.ceil(outputBytes / 4), estimateTextTokens(producedText));
         const observedUsage = usage as UsageView | null;
         const turnUsage = usageFromProvider && observedUsage
             ? {
@@ -641,7 +647,7 @@ const createRun = (input: {
             : outcome === "failed" && outputBytes === 0 && providerRefused(streamError)
               ? { inputTokens: 0, outputTokens: 0, usageFromProvider: false }
               : outcome === "cancelled"
-                ? { outputTokens: Math.ceil(outputBytes / 4), usageFromProvider: false }
+                ? { outputTokens: cancelledOutputTokens, usageFromProvider: false }
                 : { usageFromProvider: false };
         try {
             await settleChatUsage(input.reservation, { ...turnUsage, outcome });
