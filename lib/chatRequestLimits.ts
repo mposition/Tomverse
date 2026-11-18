@@ -18,6 +18,12 @@
  * limits on length alone.
  */
 
+import {
+    CHAT_REQUEST_ENVELOPE_BYTES,
+    chatRequestMaxBodyBytes,
+} from "@/lib/chatInputLimits";
+import { AVAILABLE_MODELS, type AiModel } from "@/lib/models";
+
 /**
  * The server's limits, as `validateChatPayload()` applies them.
  *
@@ -28,20 +34,34 @@
  * import adds a file -- and its computed accesses -- to a reviewed snapshot.
  * So the two numbers are copied, and `tests/chatRequestLimits.test.mjs` fails
  * the moment they differ.
+ *
+ * There is no total-character limit any more (operator decision 2026-11-18):
+ * what bounds the transcript is the request body size, which is sized from the
+ * largest model context window (`chatRequestMaxBodyBytes`). The window keeps
+ * its message text under the body limit less `CHAT_REQUEST_ENVELOPE_BYTES`,
+ * the room left for everything else the request carries.
  */
 export const CHAT_REQUEST_TRANSCRIPT_LIMITS = {
     maxMessages: 100,
-    maxTotalCharacters: 300_000,
+    maxBodyBytes: chatRequestMaxBodyBytes(
+        (AVAILABLE_MODELS as readonly AiModel[]).map(
+            (model) => model.contextWindowTokens
+        )
+    ),
 } as const;
 
 type TranscriptLimits = {
     readonly maxMessages: number;
-    readonly maxTotalCharacters: number;
+    readonly maxBodyBytes: number;
 };
 
-/** Counted as the server counts it: UTF-16 code units of `content`. */
+const encoder = new TextEncoder();
+
+/** What `content` adds to the JSON body: its encoded string, in UTF-8 bytes. */
 const contentLength = (message: { content: unknown }) =>
-    typeof message.content === "string" ? message.content.length : 0;
+    typeof message.content === "string"
+        ? encoder.encode(JSON.stringify(message.content)).length
+        : 0;
 
 /**
  * The newest suffix of `messages` that the server will accept.
@@ -56,7 +76,7 @@ const contentLength = (message: { content: unknown }) =>
  *    something else. The server then refuses it with its own code, which says
  *    what is actually wrong.
  *  * **Older messages are dropped whole, oldest first**, until both the count
- *    and the character total fit. A message is never cut in the middle.
+ *    and the message bytes fit. A message is never cut in the middle.
  *  * **The window opens on a user message.** Cut mid-exchange, it would begin
  *    with a reply to a question the model can no longer see, and some
  *    providers refuse a transcript that does not open with a user turn.
@@ -70,25 +90,26 @@ export function fitChatRequestTranscript<
     messages: readonly T[],
     limits: TranscriptLimits = CHAT_REQUEST_TRANSCRIPT_LIMITS
 ): readonly T[] {
+    const maxContentBytes = Math.max(
+        0,
+        limits.maxBodyBytes - CHAT_REQUEST_ENVELOPE_BYTES
+    );
     const total = messages.reduce(
         (sum, message) => sum + contentLength(message),
         0
     );
-    if (
-        messages.length <= limits.maxMessages &&
-        total <= limits.maxTotalCharacters
-    ) {
+    if (messages.length <= limits.maxMessages && total <= maxContentBytes) {
         return messages;
     }
 
     const last = messages.length - 1;
     let start = last;
-    let characters = contentLength(messages[last]);
+    let bytes = contentLength(messages[last]);
     for (let index = last - 1; index >= 0; index -= 1) {
-        const next = characters + contentLength(messages[index]);
+        const next = bytes + contentLength(messages[index]);
         if (last - index + 1 > limits.maxMessages) break;
-        if (next > limits.maxTotalCharacters) break;
-        characters = next;
+        if (next > maxContentBytes) break;
+        bytes = next;
         start = index;
     }
     while (start < last && messages[start].role !== "user") start += 1;

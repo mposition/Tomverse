@@ -1,6 +1,10 @@
 import "server-only";
 
-import { chatUserMaxInputTokens } from "@/lib/chatInputLimits";
+import {
+    chatAccountMaxInputTokens,
+    chatLongContextCostCredits,
+    chatRequestMaxBodyBytes,
+} from "@/lib/chatInputLimits";
 import { promptRefinerChatDecisionSchema, type PromptRefinerChatDecision } from "@/lib/promptRefinerSuggestion";
 
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
@@ -113,7 +117,10 @@ import {
     ANTHROPIC_PROMPT_CACHE_TTL,
     type AnthropicPromptCachePath,
 } from "@/lib/anthropicPromptCaching";
-import type { ResolvedModelPricing } from "@/lib/modelPricing";
+import {
+    getModelPricingProfile,
+    type ResolvedModelPricing,
+} from "@/lib/modelPricing";
 import type { PerplexityUsageCostSnapshot } from "@/lib/perplexityUsageCore";
 import { notifyProviderCreditIfNeeded } from "@/lib/providerMonitoring";
 import { getUserDayWindow } from "@/lib/userDailyUsage";
@@ -168,10 +175,13 @@ const GUEST_COOKIE_NAME = "tomverse_guest";
 const GUEST_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
 
 export const CHAT_REQUEST_LIMITS = {
-    maxBodyBytes: 2 * 1024 * 1024,
+    maxBodyBytes: chatRequestMaxBodyBytes(
+        (AVAILABLE_MODELS as readonly AiModel[]).map(
+            (model) => model.contextWindowTokens
+        )
+    ),
     maxMessages: 100,
     maxMessageCharacters: 50_000,
-    maxTotalCharacters: 300_000,
 } as const;
 
 export type AccessKind = "user" | "guest";
@@ -865,6 +875,30 @@ const promptCacheWriteReservedPremiumMicroUsd = ({
     return microdollarsFor(reservedInputTokens, premiumRate);
 };
 
+/**
+ * Where a flat registry price over a tiered profile stops being the price.
+ *
+ * `resolveModelPricing` lets a model-registry row's flat rates win over the
+ * profile's tiers, so a long prompt would be charged the short-context rate.
+ * Long context holds such a model's input limit at the first tier boundary
+ * instead (Gemini 3.1 Pro's 200K step). Null when the tiers are in force.
+ */
+const flatPriceMaxPromptTokens = (model: AiModel): number | null => {
+    const overridden =
+        model.inputUsdPerMillionTokens !== undefined ||
+        model.outputUsdPerMillionTokens !== undefined;
+    if (!overridden) return null;
+    const profile = getModelPricingProfile(model.id);
+    if (!profile) return null;
+    const bounds = [
+        ...profile.tiers,
+        ...(profile.priceSchedule ?? []).flatMap((revision) => revision.tiers ?? []),
+    ]
+        .map((tier) => tier.maxPromptTokens)
+        .filter((bound): bound is number => typeof bound === "number" && bound > 0);
+    return bounds.length > 0 ? Math.min(...bounds) : null;
+};
+
 export const createChatBudget = (
     kind: AccessKind,
     model: AiModel,
@@ -965,7 +999,10 @@ export const createChatBudget = (
     const maxInputTokens =
         kind === "guest"
             ? guestChatMaxInputTokens()
-            : chatUserMaxInputTokens();
+            : chatAccountMaxInputTokens({
+                  contextWindowTokens: model.contextWindowTokens,
+                  flatPriceMaxPromptTokens: flatPriceMaxPromptTokens(model),
+              });
 
     // The limit is checked against the raw estimate, deliberately: it bounds
     // the conversation the user sent, not the margin and tool overhead the
@@ -1051,36 +1088,50 @@ export const createChatBudget = (
             : pricing.maxOutputTokens;
     const reservedInputTokens =
         contextInputTokens * passes + totalOutputTokens * (passes - 1);
+    const reservedOutputTokens =
+        requestedTotalOutputCap === undefined
+            ? pricing.reservationOutputTokens
+            : totalOutputTokens;
+    const cacheWritePremiumMicroUsd = promptCacheWriteReservedPremiumMicroUsd({
+        model,
+        reservedInputTokens,
+        pricing,
+        promptCachePath: options?.promptCachePath,
+    });
+    // Above the flat input limit (long context) a turn is charged
+    // at least its own token cost. Native search is left out: it has its own
+    // surcharge credits below.
+    const longContextCredits = chatLongContextCostCredits({
+        estimatedInputTokens: estimatedInputTokens + reservationOnlyInputTokens,
+        reservedCostMicroUsd:
+            microdollarsFor(reservedInputTokens, pricing.inputUsdPerMillionTokens) +
+            microdollarsFor(reservedOutputTokens, pricing.outputUsdPerMillionTokens) +
+            cacheWritePremiumMicroUsd,
+    });
 
     return {
         modelId: model.id,
         minimumPlan: model.minimumPlan,
         modelUsageClass: model.usageClass,
         usageCredits:
-            getWeightedUsageCredits(
-                model,
-                estimatedInputTokens + reservationOnlyInputTokens
+            Math.max(
+                getWeightedUsageCredits(
+                    model,
+                    estimatedInputTokens + reservationOnlyInputTokens
+                ),
+                longContextCredits
             ) +
             (options?.webSearchSurchargeCredits || 0),
         inputTokens: reservedInputTokens,
         ...(passes > 1 ? { contextInputTokens } : {}),
         maxOutputTokens: totalOutputTokens,
         providerMaxOutputTokens: pricing.providerMaxOutputTokens,
-        reservedOutputTokens:
-            requestedTotalOutputCap === undefined
-                ? pricing.reservationOutputTokens
-                : totalOutputTokens,
+        reservedOutputTokens,
         inputUsdPerMillionTokens: pricing.inputUsdPerMillionTokens,
         outputUsdPerMillionTokens: pricing.outputUsdPerMillionTokens,
         cachedInputPriceMultiplier: pricing.cachedInputPriceMultiplier,
         cacheWriteUsdPerMillionTokens: pricing.cacheWriteUsdPerMillionTokens,
-        promptCacheWriteReservedPremiumMicroUsd:
-            promptCacheWriteReservedPremiumMicroUsd({
-                model,
-                reservedInputTokens,
-                pricing,
-                promptCachePath: options?.promptCachePath,
-            }),
+        promptCacheWriteReservedPremiumMicroUsd: cacheWritePremiumMicroUsd,
         nativeSearchReservedCostMicroUsd:
             options?.nativeSearch?.reservedCostMicroUsd ?? 0,
         nativeSearchCostPerQueryMicroUsd:
@@ -6191,7 +6242,8 @@ export const validateChatPayload = (body: unknown) => {
         }
     }
 
-    let totalCharacters = 0;
+    // No total-character limit: the transcript is bounded by the body size and
+    // by the input token limit (operator decision 2026-11-18).
     for (const message of payload.messages) {
         if (!message || typeof message !== "object") {
             throw new ChatAccessError(400, "INVALID_CHAT_MESSAGE", "Invalid message.");
@@ -6229,14 +6281,6 @@ export const validateChatPayload = (body: unknown) => {
                 400,
                 "INVALID_CHAT_CONTENT",
                 "Invalid message content."
-            );
-        }
-        totalCharacters += candidate.content.length;
-        if (totalCharacters > CHAT_REQUEST_LIMITS.maxTotalCharacters) {
-            throw new ChatAccessError(
-                413,
-                "CHAT_CONTENT_TOO_LARGE",
-                "Chat history is too large."
             );
         }
         if (

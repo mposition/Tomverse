@@ -55,6 +55,27 @@ guardrail = 크레딧 수 × COST_PER_CREDIT_CEILING_MICRO_USD × GUARDRAIL_HEAD
 적혀 있습니다(premium 8 크레딧 × 입력 배수 3 = 24 크레딧, 최대 입력
 128,000 토큰, 가장 비싼 premium 모델 기준).
 
+### 128k를 넘는 장문 turn (운영자 결정 2026-11-18)
+
+- **입력 상한은 모델의 문맥 창입니다.** 로그인 계정은 `contextWindowTokens`까지
+  보낼 수 있습니다. 창을 선언하지 않은 모델은 `CHAT_USER_MAX_INPUT_TOKENS`
+  (기본 128,000)에 머뭅니다. 게스트는 `CHAT_GUEST_MAX_INPUT_TOKENS`(16,000)
+  그대로입니다. 기본 켜짐이고 `CHAT_LONG_CONTEXT_ENABLED=0`으로 끕니다.
+- **128k까지는 예전과 같은 값을 받습니다.** 고정 가중치 × 입력 배수 그대로입니다.
+- **128k를 넘으면 실제 비용 기준입니다.** 받는 크레딧은
+  `max(고정 가중치 크레딧, ceil(예약 토큰 비용 ÷ CHAT_LONG_CONTEXT_MICRO_USD_PER_CREDIT))`입니다.
+  기본값 2,500 µUSD는 유료 크레딧이 가장 싸게 팔리는 값(Max, 약 US$0.00253)이라,
+  어느 유료 플랜에서도 원가 아래로 팔지 않습니다. 이 값은 크레딧당 비용 상한
+  40,000보다 작으므로 위의 guardrail 유도는 그대로 성립합니다.
+- **단가를 하나만 저장한 모델은 장문 구간 경계에서 막습니다.** registry 행에 단일
+  가격이 있고 profile에 장문 구간이 있으면, 입력 상한을 첫 구간 경계로 둡니다
+  (`lib/chatSecurity.ts`의 `flatPriceMaxPromptTokens`).
+- **크기 상한은 모델 최대치에서 계산합니다.** 대화 텍스트 합계 300,000자 상한은
+  없앴습니다. 본문 상한은 컴파일된 가장 큰 문맥 창 × 8바이트 + 256 KiB
+  (`chatRequestMaxBodyBytes`), 첨부 파싱 예산은 같은 창 × 5자입니다. 본문 상한이
+  Next.js proxy의 10 MB 버퍼를 넘지 않는지는 `tests/chatRequestLimits.test.mjs`가
+  확인합니다.
+
 ### Gemini 3.5 Flash-Lite를 standard 1크레딧으로 채택하는 예외
 
 2026-09-28에 Tommy가 승인했습니다. 채택 저장의 크레딧 하한은 최악 턴
