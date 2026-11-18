@@ -2,7 +2,6 @@ import "server-only";
 
 import { createHash } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
-import { z } from "zod";
 
 import { openAmuxContent, sealAmuxContent, verifyAmuxContentDigest,
   type SealedAmuxContent } from "@/lib/amux/ideaCrypto";
@@ -16,6 +15,8 @@ import { amuxV22TransferKeyRetired, assembleAmuxV22TransferPart,
   inspectAmuxV22TransferPart, readAmuxV22TransferBinding,
   type AmuxV22TransferHeader } from "@/lib/amux/v22TransferStore";
 import { prisma } from "@/lib/prisma";
+import { classifyAmuxV22NamedChangedPaths, type AmuxV22NamedChangedPathsBody } from
+  "@/lib/amux/v22ChangedPathsCore";
 
 /**
  * A v22 run's changed-path list, recorded as its own sealed body
@@ -140,32 +141,18 @@ export async function readAmuxV22ChangedPathsRecord(attemptId: string,
     bodyAvailable: row.bodyPurgedAt === null } : { status: "absent" as const };
 }
 
-/** The settlement and v52 review record fields that name a committed list
- * (docs/policy/amux-v22-result-transfer.md 1.6 5), spread into their strict
- * request schemas. */
-export const amuxV22NamedChangedPathsSchema = {
-  changed_paths_digest: z.string().regex(/^[0-9a-f]{64}$/).optional(),
-  changed_paths_count: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
-};
-
 /**
- * What a settlement or review record body says about its changed paths:
- * nothing (`absent`: the old body's `changed_paths` array, or none), a list
- * named by digest and count and opened here (`paths`), or one that is not
- * recorded (`unrecorded`). Both fields or neither, never beside the array,
- * and the empty digest only with no paths (`invalid`, a 400).
+ * What a settlement or review record body says about its changed paths
+ * (lib/amux/v22ChangedPathsCore.ts), with a named list opened here: `paths`,
+ * or `unrecorded` when the attempt holds no such list.
  */
 export async function resolveAmuxV22NamedChangedPaths(attemptId: string,
-  body: { changed_paths?: string[]; changed_paths_digest?: string;
-    changed_paths_count?: number },
+  body: AmuxV22NamedChangedPathsBody,
   db: PrismaClient = prisma): Promise<AmuxV22ChangedPathsOpen | { kind: "absent" } |
   { kind: "invalid" }> {
-  const digest = body.changed_paths_digest;
-  const count = body.changed_paths_count;
-  if (digest === undefined && count === undefined) return { kind: "absent" };
-  if (digest === undefined || count === undefined || body.changed_paths !== undefined ||
-      (digest === AMUX_V22_EMPTY_SHA256) !== (count === 0)) return { kind: "invalid" };
-  return openAmuxV22ChangedPaths(attemptId, { sha256: digest, count }, db);
+  const named = classifyAmuxV22NamedChangedPaths(body);
+  if (named.kind !== "named") return named;
+  return openAmuxV22ChangedPaths(attemptId, named, db);
 }
 
 /** A settlement's or review record's time allowance: the patch it judges and

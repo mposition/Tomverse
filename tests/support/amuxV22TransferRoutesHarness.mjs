@@ -12,12 +12,6 @@ import { pathToFileURL } from "node:url";
 
 const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path) => pathToFileURL(resolve(root, path)).href;
-// A `?real` import can hand a TypeScript module's exports under `default`
-// only (tsx's CommonJS interop, seen on CI's Node 22.23): take both forms.
-const realModule = async (path) => {
-  const { default: interop, ...named } = await import(`${mod(path)}?real`);
-  return { ...(interop && typeof interop === "object" ? interop : {}), ...named };
-};
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const attemptId = "00000000-0000-4000-8000-000000000001";
 const instanceId = "00000000-0000-4000-8000-000000000003";
@@ -29,8 +23,12 @@ mock.module(mod("lib/amux/guard.ts"), {
 });
 let nextPut = null;
 const putCalls = [];
-const realTransfer = await realModule("lib/amux/v22TransferStore.ts");
-mock.module(mod("lib/amux/v22TransferStore.ts"), { namedExports: { ...realTransfer,
+// The stores are replaced by name only: a mock built by spreading a real
+// module's exports lost them on CI's Node 22.23. What a route reads of the
+// changed-path list before any store comes from the pure core.
+const { classifyAmuxV22NamedChangedPaths } =
+  await import(mod("lib/amux/v22ChangedPathsCore.ts"));
+mock.module(mod("lib/amux/v22TransferStore.ts"), { namedExports: {
   putAmuxV22TransferChunk: async (input) => {
     putCalls.push(input);
     if (nextPut instanceof Error) throw nextPut;
@@ -38,11 +36,17 @@ mock.module(mod("lib/amux/v22TransferStore.ts"), { namedExports: { ...realTransf
   } } });
 let nextNamed = null;
 const namedCalls = [];
-const realPaths = await realModule("lib/amux/v22ChangedPathsStore.ts");
-mock.module(mod("lib/amux/v22ChangedPathsStore.ts"), { namedExports: { ...realPaths,
+mock.module(mod("lib/amux/v22ChangedPathsStore.ts"), { namedExports: {
   resolveAmuxV22NamedChangedPaths: async (id, body) => {
     namedCalls.push({ id, body });
-    return nextNamed ?? realPaths.resolveAmuxV22NamedChangedPaths(id, body, null);
+    if (nextNamed) return nextNamed;
+    const named = classifyAmuxV22NamedChangedPaths(body);
+    if (named.kind !== "named") return named;
+    // The empty list is recorded nowhere, as the store answers it; any other
+    // named list is opened by the store, which each case above sets itself.
+    if (named.sha256 === AMUX_V22_EMPTY_SHA256 && named.count === 0)
+      return { kind: "paths", paths: [] };
+    throw new Error("a named list reached the replaced store");
   },
   amuxV22SettlementAllowanceMs: async () => 2_000,
 } });

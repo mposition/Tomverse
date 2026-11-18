@@ -7,7 +7,8 @@ import { AMUX_MAX_EXPECTED_REVISION, AMUX_PRISMA_INT_MAX,
 import { AMUX_V22_EXECUTION_ROUTE_BUDGET_MS,
   withAmuxRouteBudget } from "@/lib/amux/dbBoundary";
 import { AMUX_V22_CHANGED_PATHS_UNRECORDED, recordAmuxV52Review } from "@/lib/amux/execution";
-import { amuxV22NamedChangedPathsSchema, amuxV22SettlementAllowanceMs,
+import { amuxV22NamedChangedPathsSchema } from "@/lib/amux/v22ChangedPathsCore";
+import { amuxV22SettlementAllowanceMs,
   resolveAmuxV22NamedChangedPaths } from "@/lib/amux/v22ChangedPathsStore";
 import { AMUX_V22_PROXY_BODY_MAX_BYTES } from "@/lib/amux/v22TransferCore";
 import { AMUX_V52_FINDINGS_SUMMARY_INPUT_MAX_CHARS } from "@/lib/amux/v52ReviewFindingsCore";
