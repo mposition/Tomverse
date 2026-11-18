@@ -368,7 +368,14 @@ const configCommand = async (ctx: Context, args: string[]) => {
     const [sub, key, value] = args;
     const config = { ...ctx.config };
     if (sub === "show" || sub === undefined) {
-        process.stdout.write(`${JSON.stringify({ ...config, endpoint: config.endpoint ?? `(default) ${resolveEndpoint(config).base}` }, null, 2)}\n`);
+        // Shown even when the stored endpoint is invalid: this is where one looks at it.
+        let endpointNote: string;
+        try {
+            endpointNote = config.endpoint ?? `(default) ${resolveEndpoint(config).base}`;
+        } catch (error) {
+            endpointNote = `${config.endpoint ?? "(default)"} -- invalid: ${(error as Error).message}`;
+        }
+        process.stdout.write(`${JSON.stringify({ ...config, endpoint: endpointNote }, null, 2)}\n`);
         return EXIT_CODES.success;
     }
     if (sub === "set") {

@@ -572,3 +572,13 @@ test("on POSIX an argv program is resolved to the absolute path the approval sho
     const plan = planCommand({ argv: ["node", "-e", "1"] }, tempDir("cmd"), 10_000);
     assert.ok(plan.file.startsWith("/"), plan.file);
 });
+test("search never returns, and with ripgrep never opens, a credential file: only listed files are searched", () =>
+    withGateway(
+        () => ({ text: "x" }),
+        async (gateway) => {
+            const root = makeRepo({ "credentials-prod.json": "TOKEN_X=leak\n", "config/secret-token.txt": "TOKEN_X=leak\n", "src/ok.ts": "TOKEN_X\n" });
+            const { runner } = await makeRunner(gateway, root);
+            const result = await (runner.tools.search_text as any).execute({ pattern: "TOKEN_X" }, { toolCallId: "s1", messages: [] });
+            assert.deepEqual(result.matches, ["src/ok.ts:1:TOKEN_X"], JSON.stringify(result));
+        }
+    ));

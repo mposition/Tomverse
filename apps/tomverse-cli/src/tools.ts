@@ -152,58 +152,83 @@ const readFileTool = (ctx: ToolContext, input: { path: string; startLine?: numbe
     };
 };
 
+const NEWLINE = "\n";
+const BACKSLASH = "\\";
+const LEADING_DOT_SLASH = /^\.[\\/]/;
+const TRAILING_EOL = /\r?\n$/;
+const REGEX_SPECIALS = /[.*+?^${}()|[\]\\]/g;
+
 const searchTool = (ctx: ToolContext, input: { pattern: string; path?: string; regex?: boolean; caseSensitive?: boolean; maxResults?: number }) => {
     const where = ctx.workspace.resolve(input.path ?? ".", "read");
     const max = Math.min(500, Math.max(1, input.maxResults ?? 100));
     const matches: string[] = [];
     let truncated = false;
+    // One list for both engines: the workspace listing, which already leaves out
+    // credential files, the CLI home and links out of the folder. Nothing else is
+    // opened -- ripgrep is given exactly these files, never a folder to walk.
+    const listed = ctx.workspace.listFiles(where.relative, 20_000);
     if (ripgrepAvailable()) {
         // --json gives each match's path and line as separate fields, so no
-        // character in a file name (':' or a newline) can make one path look
-        // like another. JSON escapes control characters, so one event is one line.
-        const args = ["--no-config", "--json", "--max-columns", "300", "--max-columns-preview", "--max-filesize", "1M"];
-        if (!input.regex) args.push("--fixed-strings");
-        if (!input.caseSensitive) args.push("--ignore-case");
-        args.push("-e", input.pattern, "--", where.relative === "." ? "." : where.relative);
-        const result = spawnSync("rg", args, { cwd: ctx.workspace.root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, windowsHide: true, shell: false, timeout: 30_000, env: commandEnv() });
-        if (result.status !== 0 && result.status !== 1) return { status: "error", error: (result.stderr || "search failed").slice(0, 500) };
-        for (const line of (result.stdout ?? "").split("\n")) {
-            if (!line) continue;
-            let event: { type?: string; data?: { path?: { text?: string }; line_number?: number; lines?: { text?: string } } };
-            try {
-                event = JSON.parse(line);
-            } catch {
-                continue;
+        // character in a file name can make one path look like another.
+        const base = ["--no-config", "--json", "--no-ignore", "--hidden", "--max-columns", "300", "--max-columns-preview", "--max-filesize", "1M"];
+        if (!input.regex) base.push("--fixed-strings");
+        if (!input.caseSensitive) base.push("--ignore-case");
+        base.push("-e", input.pattern, "--");
+        // Batches that fit a Windows command line.
+        const batches: string[][] = [];
+        let batch: string[] = [];
+        let length = 0;
+        for (const file of listed.files) {
+            if (batch.length && length + file.length + 3 > 24_000) {
+                batches.push(batch);
+                batch = [];
+                length = 0;
             }
-            if (event.type !== "match") continue;
-            // A path or line that is not valid UTF-8 comes as bytes: left out.
-            const rawPath = event.data?.path?.text;
-            const text = event.data?.lines?.text;
-            if (typeof rawPath !== "string" || typeof text !== "string") continue;
-            const file = rawPath.replace(/^\.[\\/]/, "").replaceAll("\\", "/");
-            if (isSecretPath(file)) continue;
-            // The same real-path rule as read_file: a match inside a link out of the folder is dropped.
-            try {
-                ctx.workspace.resolve(file, "read");
-            } catch {
-                continue;
-            }
-            if (matches.length >= max) {
-                truncated = true;
-                break;
-            }
-            matches.push(`${file}:${event.data?.line_number ?? "?"}:${text.replace(/\r?\n$/, "")}`);
+            batch.push(file);
+            length += file.length + 3;
         }
-        return { status: "ok", engine: "ripgrep", matches, truncated };
+        if (batch.length) batches.push(batch);
+        const started = Date.now();
+        outer: for (const files of batches) {
+            const result = spawnSync("rg", [...base, ...files], { cwd: ctx.workspace.root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, windowsHide: true, shell: false, timeout: Math.max(1000, 30_000 - (Date.now() - started)), env: commandEnv() });
+            if (result.status !== 0 && result.status !== 1) return { status: "error", error: (result.stderr || "search failed").slice(0, 500) };
+            for (const line of (result.stdout ?? "").split(NEWLINE)) {
+                if (!line) continue;
+                let event: { type?: string; data?: { path?: { text?: string }; line_number?: number; lines?: { text?: string } } };
+                try {
+                    event = JSON.parse(line);
+                } catch {
+                    continue;
+                }
+                if (event.type !== "match") continue;
+                // A path or line that is not valid UTF-8 comes as bytes: left out.
+                const rawPath = event.data?.path?.text;
+                const text = event.data?.lines?.text;
+                if (typeof rawPath !== "string" || typeof text !== "string") continue;
+                const file = rawPath.replace(LEADING_DOT_SLASH, "").replaceAll(BACKSLASH, "/");
+                if (matches.length >= max) {
+                    truncated = true;
+                    break outer;
+                }
+                matches.push(`${file}:${event.data?.line_number ?? "?"}:${text.replace(TRAILING_EOL, "")}`);
+            }
+        }
+        return { status: "ok", engine: "ripgrep", matches, truncated: truncated || listed.truncated };
     }
     let re: RegExp;
     try {
-        re = input.regex ? new RegExp(input.pattern, input.caseSensitive ? "" : "i") : new RegExp(input.pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), input.caseSensitive ? "" : "i");
+        re = input.regex ? new RegExp(input.pattern, input.caseSensitive ? "" : "i") : new RegExp(input.pattern.replace(REGEX_SPECIALS, "\\$&"), input.caseSensitive ? "" : "i");
     } catch (error) {
         return { status: "error", error: `Invalid pattern: ${(error as Error).message}` };
     }
-    const listed = ctx.workspace.listFiles(where.relative, 20_000);
+    // The same 30-second budget as ripgrep; lines are tested at most 2,000
+    // characters long, which bounds a slow regular expression too.
+    const started = Date.now();
     outer: for (const file of listed.files) {
+        if (Date.now() - started > 30_000) {
+            truncated = true;
+            break;
+        }
         const abs = ctx.workspace.resolve(file, "read").absolute;
         let bytes: Buffer;
         try {
@@ -215,7 +240,7 @@ const searchTool = (ctx: ToolContext, input: { pattern: string; path?: string; r
         if (bytes.subarray(0, 8192).includes(0)) continue;
         const lines = bytes.toString("utf8").split(/\r?\n/);
         for (const [index, line] of lines.entries()) {
-            if (!re.test(line)) continue;
+            if (!re.test(line.slice(0, 2000))) continue;
             if (matches.length >= max) {
                 truncated = true;
                 break outer;
