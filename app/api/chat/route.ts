@@ -8540,7 +8540,9 @@ async function handleChatPost(
                             cacheWriteInputTokens: spent.cacheWriteInputTokens,
                             outputTokens: spent.outputTokens,
                             providerCalls: spent.providerCalls,
-                            usageFromProvider: true,
+                            // An unreported call filled in at its allowance is
+                            // an estimate, recorded as one.
+                            usageFromProvider: spent.measured,
                         };
                     }
                     await settleSafely(

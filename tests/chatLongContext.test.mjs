@@ -641,7 +641,7 @@ test("a long-context tool loop shares its output budget and answers within its c
     // keeps its one call and its own tool choice.
     assert.match(route, /\(artifactToolConfig \|\| appManagedSearchTool\) &&[\s\S]{0,200}toolLoopStepCap > 1 &&/);
     // A turn stopped at a limit records the calls it already made.
-    assert.match(route, /const spent = longContextLoopStep\.settlementUsage\(\s*longContextLoopStep\.spent\(\)\.outputTokens\s*\);\s*researchFailureUsage = \{\s*inputTokens: spent\.inputTokens,\s*cachedInputTokens: spent\.cachedInputTokens,\s*cacheWriteInputTokens: spent\.cacheWriteInputTokens,\s*outputTokens: spent\.outputTokens,\s*providerCalls: spent\.providerCalls,\s*usageFromProvider: true,/);
+    assert.match(route, /const spent = longContextLoopStep\.settlementUsage\(\s*longContextLoopStep\.spent\(\)\.outputTokens\s*\);\s*researchFailureUsage = \{\s*inputTokens: spent\.inputTokens,\s*cachedInputTokens: spent\.cachedInputTokens,\s*cacheWriteInputTokens: spent\.cacheWriteInputTokens,\s*outputTokens: spent\.outputTokens,\s*providerCalls: spent\.providerCalls,[\s\S]{0,300}usageFromProvider: spent\.measured,/);
     // The MCP loop counts an unreported step's output as the budget spent.
     assert.match(
         readFileSync(new URL("../lib/mcpConnectorChatTool.ts", import.meta.url), "utf8"),
@@ -677,6 +677,7 @@ test("a cancelled or unreported multi-call turn settles on the input it sent", a
             { inputTokens: 200_000, outputTokens: 1_000, cachedInputTokens: 150_000, cacheWriteInputTokens: 40_000 },
             { inputTokens: 200_000, outputTokens: 2_000, cachedInputTokens: 0, cacheWriteInputTokens: 0 },
         ],
+        measured: true,
     });
     // Which the per-call pricing accepts as covering the totals.
     assert.equal(providerCallsCover(usage.providerCalls, usage), true);
@@ -685,6 +686,8 @@ test("a cancelled or unreported multi-call turn settles on the input it sent", a
     blind.prepareStep({ steps: [], messages: [] });
     blind.outputSpent({ steps: [{ usage: {} }] });
     assert.equal(blind.settlementUsage(0).providerCalls, undefined);
+    // And it is recorded as an estimate, not as the provider's own count.
+    assert.equal(blind.settlementUsage(0).measured, false);
     const route = readFileSync(new URL("../app/api/chat/route.ts", import.meta.url), "utf8");
     assert.match(route, /longContextLoopStep\.settlementUsage\(\s*usage\?\.outputTokens \?\? estimatedGeneratedOutputTokens\(\)\s*\)/);
     assert.match(route, /mcpConnector\?\.observedInputTokens\(\) \?\? 0/);

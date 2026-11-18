@@ -46,6 +46,8 @@ export type LoopSettlementUsage = {
     cacheWriteInputTokens: number;
     /** Every call, when all were measured and there were two or more. */
     providerCalls?: LoopCallUsage[];
+    /** True only when every finished call reported its own usage. */
+    measured: boolean;
 };
 
 export type LongContextToolLoopLimits = {
@@ -227,6 +229,7 @@ export const longContextToolLoopStep = (
                     outputTokens: Math.max(outputTokens, lastTally.outputTokens),
                     cachedInputTokens: 0,
                     cacheWriteInputTokens: 0,
+                    measured: false,
                 };
             }
             const finishedOutput = measuredCalls.reduce((sum, call) => sum + call.outputTokens, 0);
@@ -249,6 +252,7 @@ export const longContextToolLoopStep = (
                 cachedInputTokens: sum((call) => call.cachedInputTokens),
                 cacheWriteInputTokens: sum((call) => call.cacheWriteInputTokens),
                 ...(calls.length > 1 ? { providerCalls: calls } : {}),
+                measured: true,
             };
         },
     };
