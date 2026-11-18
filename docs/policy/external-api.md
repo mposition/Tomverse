@@ -228,12 +228,15 @@ catalogue, so a customer never has to recopy it.
 - **Router input:** the latest user message's text and the assistant text
   before it, bounded by the router itself. Nothing is stored: the external API
   passes no conversation id, so the router writes no `AutoRouterDecision` row.
-- **Tool loops:** a request that only carries tool results back keeps the model
-  picked for the user message it continues, remembered in process for ten
-  minutes under a SHA-256 digest of the key and the messages up to that user
-  message. A miss (another instance, a restart) routes again and shows as
-  `routed-by: router`, so across instances a tool loop can change model. A
-  new user message is routed again.
+- **Tool loops:** a request that carries tool results back goes to the model
+  that made those tool calls. When a Smart Adaptive answer ends with tool
+  calls, its model is remembered in process for ten minutes under the key and
+  each tool-call id; the round is looked up by the ids it carries, before the
+  router gate is asked. A tool-call id belongs to one answer, so concurrent
+  requests with the same history, refused requests and answers without calls
+  never overwrite each other. A miss (another instance, a restart) routes
+  again and shows as `routed-by: router`, so across instances a tool loop can
+  change model. A new user message is routed again.
 - **No answer** (router switch off, no router model configured, provider budget
   refused, timeout, invalid output, one candidate left): the default model
   (`DEFAULT_MODEL_ID`) if it fits, otherwise the first candidate in catalogue

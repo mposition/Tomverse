@@ -1,5 +1,4 @@
 import "server-only";
-import { createHash } from "node:crypto";
 import { assertOperationalFeatureEnabled } from "@/lib/appSettings";
 import { pickAutoModelWithLlm } from "@/lib/autoLlmRouter";
 import { estimateTextTokens } from "@/lib/chatTokenEstimate";
@@ -37,18 +36,44 @@ type RunnableEntry = Awaited<ReturnType<typeof externalApiRunnableModels>>[numbe
  *
  * A coding client sends every tool round as a new request, so routing each one
  * afresh would let the model change half-way through a task. A request that
- * only carries tool results back therefore keeps the model picked for the user
- * message it continues. The pick is remembered in this process, under a
- * digest of the key and the messages up to that user message, and only once
- * admission let the request through -- so the memory always holds the model
- * that answered, never one a refused or concurrent request decided on. No
- * content is kept, and a miss (another instance, a restart, ten minutes later)
- * simply routes again.
+ * carries tool results back therefore goes to the model that made those tool
+ * calls: when a Smart Adaptive answer ends with tool calls, its model is
+ * remembered in this process under the key and each tool-call id, and the
+ * round that answers them is looked up by the ids it carries. A tool-call id
+ * belongs to one answer, so concurrent requests with the same history, refused
+ * requests and requests that never produced a call cannot overwrite each
+ * other. Only ids and model ids are kept; a miss (another instance, a
+ * restart, ten minutes later) simply routes again.
  */
 
 const STICKY_MS = 10 * 60_000;
 const STICKY_MAX = 2_000;
 const sticky = new Map<string, { modelId: string; at: number }>();
+const callKey = (keyId: string, toolCallId: string) => `${keyId}\0${toolCallId}`;
+
+/** Called when a Smart Adaptive answer ended with these tool calls. */
+export const rememberSmartAdaptiveToolCalls = (
+    keyId: string,
+    modelId: string,
+    toolCallIds: readonly string[],
+    now = Date.now()
+) => {
+    for (const id of toolCallIds) {
+        const entryKey = callKey(keyId, id);
+        if (sticky.size >= STICKY_MAX && !sticky.has(entryKey)) sticky.delete(sticky.keys().next().value as string);
+        sticky.set(entryKey, { modelId, at: now });
+    }
+};
+
+/** The tool-call ids the trailing tool results of this request answer. */
+const answeredToolCallIds = (request: ChatCompletionRequest) => {
+    const messages = request.messages;
+    let index = messages.length - 1;
+    while (index >= 0 && messages[index].role === "tool") index -= 1;
+    if (index === messages.length - 1) return [];
+    const assistant = messages[index];
+    return assistant?.role === "assistant" ? (assistant.tool_calls ?? []).map((call) => call.id) : [];
+};
 const REFUSED_MS = 2 * 60_000;
 const refused = new Map<string, number>();
 
@@ -130,8 +155,6 @@ const latestTurn = (request: ChatCompletionRequest) => {
     return {
         prompt: textOf(messages[index].content),
         previousAnswer: previous,
-        continuesToolLoop: index < messages.length - 1,
-        digestSource: JSON.stringify(messages.slice(0, index + 1)),
     };
 };
 
@@ -174,31 +197,22 @@ export const routeSmartAdaptive = async (input: {
     const pool = eligible.length > 0 ? eligible : input.runnable;
     const fallback = pool.find((entry) => entry.model.id === DEFAULT_MODEL_ID) ?? pool[0];
     const turn = latestTurn(input.request);
-    if (!turn || eligible.length < 2) return { entry: fallback, routedBy: "default", admitted: () => undefined };
+    if (!turn || eligible.length < 2) return { entry: fallback, routedBy: "default" };
 
-    // A tool round keeps its remembered pick before the router gate is asked:
-    // a gate closed for a while (a refusal two minutes ago) must not hand a
-    // running task to another model.
+    // A tool round goes to the model that made the calls it answers, before
+    // the router gate is asked: a gate closed for a while (a refusal two
+    // minutes ago) must not hand a running task to another model.
     const now = input.now ?? Date.now();
-    const digest = createHash("sha256").update(input.keyId).update("\0").update(turn.digestSource).digest("hex");
-    const remembered = sticky.get(digest);
-    // Only a request that admission let through is remembered: its model is
-    // the one that actually answered, whatever a concurrent request decided.
-    const remember = (modelId: string) => () => {
-        if (sticky.size >= STICKY_MAX && !sticky.has(digest)) sticky.delete(sticky.keys().next().value as string);
-        sticky.set(digest, { modelId, at: Date.now() });
-    };
-    if (turn.continuesToolLoop && remembered && now - remembered.at < STICKY_MS) {
+    for (const id of answeredToolCallIds(input.request)) {
+        const remembered = sticky.get(callKey(input.keyId, id));
+        if (!remembered || now - remembered.at >= STICKY_MS) continue;
         const entry = eligible.find((candidate) => candidate.model.id === remembered.modelId);
-        if (entry) return { entry, routedBy: "continued", admitted: () => undefined };
-        // No longer a candidate (retired, or this round needs what it lacks).
-        sticky.delete(digest);
+        if (entry) return { entry, routedBy: "continued" };
     }
 
     // One router call per Idempotency-Key at a time in this process: a
-    // concurrent duplicate waits for that call and takes the same model, so
-    // whichever of them admission lets through answered with the model the
-    // tool-loop memory records; the other gets the duplicate's receipt.
+    // concurrent duplicate waits for that call and takes the same model, and
+    // admission answers it as the duplicate it is.
     // Keyed by the body as well: a different body under the same key is not a
     // duplicate of this request (admission refuses it as a reused key), so it
     // routes on its own rather than taking a pick made for another body.
@@ -220,18 +234,12 @@ export const routeSmartAdaptive = async (input: {
             routing.delete(flight);
         }
     };
-    const { entry, routedBy } = await decide();
-    return { entry, routedBy, admitted: remember(entry.model.id) };
+    return decide();
 };
 
 export type SmartAdaptiveDecision = {
     entry: RunnableEntry;
     routedBy: "router" | "continued" | "default";
-    /**
-     * Call once admission has let the request through: only then is its model
-     * remembered for the tool rounds that continue this user message.
-     */
-    admitted: () => void;
 };
 
 const routeWithRouter = async (

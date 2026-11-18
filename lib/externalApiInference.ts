@@ -37,7 +37,7 @@ import {
     SMART_ADAPTIVE_MODEL_ID,
 } from "@/lib/externalApiCatalogCore";
 import { getRuntimeModel } from "@/lib/modelRegistry";
-import { noteSmartAdaptiveRefusal, routeSmartAdaptive, smartAdaptiveRouterAllowed } from "@/lib/externalApiSmartAdaptive";
+import { noteSmartAdaptiveRefusal, rememberSmartAdaptiveToolCalls, routeSmartAdaptive, smartAdaptiveRouterAllowed } from "@/lib/externalApiSmartAdaptive";
 import { externalApiRunnableModels } from "@/lib/externalApiCatalog";
 import { externalApiAdmissionHook } from "@/lib/externalApiAdmission";
 import { authenticateExternalApiKey, ExternalApiKeyError } from "@/lib/externalApiKeys";
@@ -270,7 +270,6 @@ export async function handleChatCompletions(request: Request): Promise<Response>
         // Smart Adaptive: Tomverse picks one of the runnable models, and the
         // response says which one answered (the `model` field and a header).
         let routedHeaders: Record<string, string> = {};
-        let routedAdmitted: (() => void) | null = null;
         let entry = runnable.find((candidate) => candidate.capabilities.id === parsed.model);
         if (parsed.model === SMART_ADAPTIVE_MODEL_ID && runnable.length > 0) {
             const routed = await routeSmartAdaptive({
@@ -284,7 +283,6 @@ export async function handleChatCompletions(request: Request): Promise<Response>
                 requestDigest,
             });
             entry = routed.entry;
-            routedAdmitted = routed.admitted;
             routedHeaders = { "x-tomverse-routed-model": entry.model.id, "x-tomverse-routed-by": routed.routedBy };
         }
         if (!entry) {
@@ -420,8 +418,6 @@ export async function handleChatCompletions(request: Request): Promise<Response>
         }
         leaseId = grant.leaseId;
         reservation = grant.usageReservation;
-        // Admitted: this request's model is the one its tool rounds continue with.
-        routedAdmitted?.();
 
         const tools: ToolSet = Object.fromEntries(
             converted.tools.map((definition) => [
@@ -465,6 +461,11 @@ export async function handleChatCompletions(request: Request): Promise<Response>
             completionId: `chatcmpl-${requestId.slice(4)}`,
             includeUsage: options.includeUsage,
             dispose: disposeDispatch,
+            // Smart Adaptive: the round answering these calls goes to this model.
+            onToolCalls:
+                parsed.model === SMART_ADAPTIVE_MODEL_ID
+                    ? (ids) => rememberSmartAdaptiveToolCalls(key.keyId, model.id, ids)
+                    : undefined,
         });
         const result = streamText({
             // The SDK's default onError logs the raw error object, and provider
@@ -673,6 +674,8 @@ const createRun = (input: {
     completionId: string;
     includeUsage: boolean;
     dispose: () => void;
+    /** Told the ids of the tool calls the answer completed, if it made any. */
+    onToolCalls?: (ids: string[]) => void;
 }) => {
     const translator = createChunkTranslator({
         id: input.completionId,
@@ -870,6 +873,8 @@ const createRun = (input: {
             ]);
         }
         final = { ...collected, finishReason, usage, error };
+        const completedCalls = collected.toolCalls.filter((call) => call.complete).map((call) => call.id);
+        if (!error && completedCalls.length) input.onToolCalls?.(completedCalls);
     };
 
     return {

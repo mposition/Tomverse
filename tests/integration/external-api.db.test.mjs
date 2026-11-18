@@ -146,6 +146,16 @@ test("external inference API over the real shared credit ledger", { skip: !datab
             { type: "text-end", id: "t" },
             finish("stop", u),
         ]);
+    const callScript = (id) => () =>
+        streamOf([
+            { type: "stream-start", warnings: [] },
+            { type: "tool-input-start", id, toolName: "run" },
+            { type: "tool-input-delta", id, delta: "{}" },
+            { type: "tool-input-end", id },
+            { type: "tool-call", toolCallId: id, toolName: "run", input: "{}" },
+            finish("tool-calls", usage(200, 12)),
+        ]);
+    const runTool = [{ type: "function", function: { name: "run", parameters: { type: "object", properties: {} } } }];
     const toolScript = () => () =>
         streamOf([
             { type: "stream-start", warnings: [] },
@@ -376,7 +386,9 @@ test("external inference API over the real shared credit ledger", { skip: !datab
 
             process.env.EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED = "true";
             const question = { role: "user", content: "Run the tests and fix the failure" };
-            const first = await call(key, body({ model: "smart-adaptive", messages: [question] }));
+            // The answer is a tool call: its id is what the tool round carries back.
+            script = callScript("call_sa1");
+            const first = await call(key, body({ model: "smart-adaptive", messages: [question], tools: runTool }));
             assert.equal(first.status, 200);
             assert.equal(first.headers.get("x-tomverse-routed-model"), SECOND);
             assert.equal(first.headers.get("x-tomverse-routed-by"), "router");
@@ -390,16 +402,17 @@ test("external inference API over the real shared credit ledger", { skip: !datab
             const receipt = await db.externalApiRequest.findFirst({ where: { userId }, orderBy: { createdAt: "desc" } });
             assert.equal(receipt.modelId, SECOND, "the receipt and the charge are the routed model's");
 
-            // The tool round continues the same user message: same model, no router call.
+            // The tool round goes to the model that made the call: no router call.
             routerPick = MODEL_ID;
+            script = callScript("call_sa2");
             const round = await call(key, body({
                 model: "smart-adaptive",
                 messages: [
                     question,
-                    { role: "assistant", content: null, tool_calls: [{ id: "call_1", type: "function", function: { name: "run", arguments: "{}" } }] },
-                    { role: "tool", tool_call_id: "call_1", content: "1 failing" },
+                    { role: "assistant", content: null, tool_calls: [{ id: "call_sa1", type: "function", function: { name: "run", arguments: "{}" } }] },
+                    { role: "tool", tool_call_id: "call_sa1", content: "1 failing" },
                 ],
-                tools: [{ type: "function", function: { name: "run", parameters: { type: "object", properties: {} } } }],
+                tools: runTool,
             }));
             assert.equal(round.status, 200);
             assert.equal(round.headers.get("x-tomverse-routed-model"), SECOND);
@@ -409,20 +422,35 @@ test("external inference API over the real shared credit ledger", { skip: !datab
             // The router gate closed (here: its switch) does not hand a running
             // tool loop to another model.
             delete process.env.EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED;
+            script = textScript("All green.");
             const gated = await call(key, body({
                 model: "smart-adaptive",
                 messages: [
                     question,
-                    { role: "assistant", content: null, tool_calls: [{ id: "call_1", type: "function", function: { name: "run", arguments: "{}" } }] },
-                    { role: "tool", tool_call_id: "call_1", content: "1 failing" },
-                    { role: "assistant", content: null, tool_calls: [{ id: "call_2", type: "function", function: { name: "run", arguments: "{}" } }] },
-                    { role: "tool", tool_call_id: "call_2", content: "0 failing" },
+                    { role: "assistant", content: null, tool_calls: [{ id: "call_sa1", type: "function", function: { name: "run", arguments: "{}" } }] },
+                    { role: "tool", tool_call_id: "call_sa1", content: "1 failing" },
+                    { role: "assistant", content: null, tool_calls: [{ id: "call_sa2", type: "function", function: { name: "run", arguments: "{}" } }] },
+                    { role: "tool", tool_call_id: "call_sa2", content: "0 failing" },
                 ],
-                tools: [{ type: "function", function: { name: "run", parameters: { type: "object", properties: {} } } }],
+                tools: runTool,
             }));
             assert.equal(gated.headers.get("x-tomverse-routed-model"), SECOND);
             assert.equal(gated.headers.get("x-tomverse-routed-by"), "continued");
             process.env.EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED = "true";
+
+            // A tool result for a call this API never answered with routes afresh.
+            const stranger = await call(key, body({
+                model: "smart-adaptive",
+                messages: [
+                    question,
+                    { role: "assistant", content: null, tool_calls: [{ id: "call_unknown", type: "function", function: { name: "run", arguments: "{}" } }] },
+                    { role: "tool", tool_call_id: "call_unknown", content: "?" },
+                ],
+                tools: runTool,
+            }));
+            assert.equal(stranger.headers.get("x-tomverse-routed-by"), "router");
+            assert.equal(routerCalls.length, 2);
+            routerCalls.pop();
 
             // A new user message is routed again.
             const next = await call(key, body({ model: "smart-adaptive", messages: [question, { role: "assistant", content: "Done." }, { role: "user", content: "Thanks, now summarise" }] }));
@@ -515,11 +543,12 @@ test("external inference API over the real shared credit ledger", { skip: !datab
             // admission let through, not the one decided last.
             routerDelayMs = 100;
             routerPickQueue.push(SECOND, MODEL_ID);
+            script = callScript("call_s");
             const split = { headers: { "idempotency-key": "smart-adaptive-split" } };
             const splitQuestion = { role: "user", content: "Split decision" };
             const splitPair = await Promise.all([
-                call(key, body({ model: "smart-adaptive", temperature: 0.1, messages: [splitQuestion] }), split),
-                call(key, body({ model: "smart-adaptive", temperature: 0.9, messages: [splitQuestion] }), split),
+                call(key, body({ model: "smart-adaptive", temperature: 0.1, messages: [splitQuestion], tools: runTool }), split),
+                call(key, body({ model: "smart-adaptive", temperature: 0.9, messages: [splitQuestion], tools: runTool }), split),
             ]);
             await Promise.all(splitPair.map((response) => response.text()));
             routerDelayMs = 0;
@@ -533,10 +562,43 @@ test("external inference API over the real shared credit ledger", { skip: !datab
                     { role: "assistant", content: null, tool_calls: [{ id: "call_s", type: "function", function: { name: "run", arguments: "{}" } }] },
                     { role: "tool", tool_call_id: "call_s", content: "done" },
                 ],
-                tools: [{ type: "function", function: { name: "run", parameters: { type: "object", properties: {} } } }],
+                tools: runTool,
             }));
             assert.equal(followUp.headers.get("x-tomverse-routed-by"), "continued");
             assert.equal(followUp.headers.get("x-tomverse-routed-model"), answeredBy, "the memory holds the model that answered");
+
+            // Two independent requests with the same history, both admitted and
+            // routed to different models: each tool round goes to its own model,
+            // because each answer's tool-call id is its own.
+            let callSerial = 0;
+            script = (options) => callScript(`call_twin_${++callSerial}`)(options);
+            routerDelayMs = 50;
+            routerPickQueue.push(SECOND, MODEL_ID);
+            const sameHistory = { role: "user", content: "Same history" };
+            const both = await Promise.all([
+                call(key, body({ model: "smart-adaptive", messages: [sameHistory], tools: runTool })),
+                call(key, body({ model: "smart-adaptive", messages: [sameHistory], tools: runTool })),
+            ]);
+            routerDelayMs = 0;
+            const answers = await Promise.all(both.map((response) => response.json()));
+            assert.deepEqual(both.map((response) => response.status), [200, 200]);
+            assert.deepEqual(new Set(answers.map((answer) => answer.model)), new Set([SECOND, MODEL_ID]));
+            script = textScript("Round done.");
+            for (const answer of answers) {
+                const id = answer.choices[0].message.tool_calls[0].id;
+                const resumed = await call(key, body({
+                    model: "smart-adaptive",
+                    messages: [
+                        sameHistory,
+                        { role: "assistant", content: null, tool_calls: [{ id, type: "function", function: { name: "run", arguments: "{}" } }] },
+                        { role: "tool", tool_call_id: id, content: "ok" },
+                    ],
+                    tools: runTool,
+                }));
+                assert.equal(resumed.headers.get("x-tomverse-routed-by"), "continued");
+                assert.equal(resumed.headers.get("x-tomverse-routed-model"), answer.model, "each round goes to the model that made its call");
+            }
+            script = textScript("Hello from the fixture.");
 
             // A key whose cap is spent gets no paid router call; admission refuses as usual.
             const capped = await issueKey(userId, { creditCap: 1 });
@@ -556,6 +618,7 @@ test("external inference API over the real shared credit ledger", { skip: !datab
             routerPick = null;
             routerDelayMs = 0;
             routerPickQueue.length = 0;
+            script = textScript("Hello from the fixture.");
         }
     });
 
