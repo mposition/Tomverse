@@ -859,7 +859,13 @@ test("external inference API over the real shared credit ledger", { skip: !datab
         }
         assert.equal(reservation.outcome, "cancelled");
         assert.notEqual(reservation.status, "reserved");
-        const receipt = await db.externalApiRequest.findUnique({ where: { reservationId: reservation.id } });
+        // The receipt is written after settlement and the lease release.
+        let receipt;
+        for (let i = 0; i < 200; i += 1) {
+            receipt = await db.externalApiRequest.findUnique({ where: { reservationId: reservation.id } });
+            if (receipt?.completedAt) break;
+            await new Promise((r) => setTimeout(r, 25));
+        }
         assert.equal(receipt.errorCode, "request_cancelled");
         script = textScript("Hello from the fixture.");
     });
