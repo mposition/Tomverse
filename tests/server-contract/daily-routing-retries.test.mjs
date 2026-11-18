@@ -51,3 +51,15 @@ test("a malformed stored routing claim is not treated as new open work", async (
     assert.equal(await claimRecommendationInTransaction(tx, "https://test.invalid", now, { automaticRetries: true }), null);
   }
 });
+
+test("an exact linked recovery PR suppresses both open work and next-day retries without a new claim", async () => {
+  const options = { automaticRetries: true, coveredTaskIds: new Set(["cycle:0"]) };
+  assert.equal(await claimRecommendationInTransaction(tx, "https://test.invalid", now, options), null);
+  assert.equal(summary.recommendationStatus[0].claimId, failed.claimId);
+  assert.equal(audits.length, 0);
+  delete summary.recommendationStatus[0];
+  assert.equal(await claimRecommendationInTransaction(tx, "https://test.invalid", now, options), null);
+  summary.report.recommendations.push({ kind: "code", text: "Next task" });
+  const next = await claimRecommendationInTransaction(tx, "https://test.invalid", now, options);
+  assert.equal(next.id, "cycle:1");
+});

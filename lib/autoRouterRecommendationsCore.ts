@@ -277,13 +277,15 @@ export const openRecommendations = (
  */
 export const nextClaimableRecommendation = (
     cycles: readonly { id: string; createdAt: string; summary: unknown }[],
-    now: number
+    now: number,
+    coveredTaskIds: ReadonlySet<string> = new Set()
 ): (ActionableRecommendation & { cycleId: string; createdAt: string }) | null => {
     for (const cycle of [...cycles].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))) {
         const stored = record(record(cycle.summary)?.recommendationStatus);
         const entries = recommendationStatusEntries(cycle.summary);
         const item = actionableRecommendations(cycle.summary, now).find(
             (candidate) => candidate.kind === "code" && candidate.status === "open" &&
+                !coveredTaskIds.has(`${cycle.id}:${candidate.index}`) &&
                 (!Object.prototype.hasOwnProperty.call(stored ?? {}, String(candidate.index)) || entries.get(candidate.index)?.status === "open")
         );
         if (item) return { ...item, cycleId: cycle.id, createdAt: cycle.createdAt };

@@ -54,6 +54,17 @@ const text = (markup: string) => {
 };
 const count = (markup: string, needle: string) => markup.split(needle).length - 1;
 
+test("a recovered implementation shows current develop status separately from the original failure and suppresses reopen", () => {
+  const cycle = { ...cycles[0], implementations: { 1: { state: "merged" as const, prUrl: "https://github.com/mposition/Tomverse/pull/4041" } },
+    summary: { report, recommendationStatus: { 1: { status: "failed", reason: "tests", at: "2026-11-10T00:00:00Z", by: "agent" } } } };
+  const item = actionableRecommendations(cycle.summary)[0];
+  const html = renderToStaticMarkup(createElement(RecommendationControls, { cycle, item, busy: false, canSend: true, onSetStatus: noop, onSend: noop }));
+  assert.match(html, /Merged into develop/);
+  assert.match(html, /production deployment unconfirmed/);
+  assert.match(html, /data-status="failed"/);
+  assert.doesNotMatch(html, /admin-auto-router-recommendation-reopen/);
+});
+
 test("the inbox states how many it shows from how many cycles, and lists only unhandled recommendations", () => {
   const html = renderToStaticMarkup(createElement(OpenRecommendationsInbox, { cycles, busy: false, canSend: true, onSetStatus: noop, onSend: noop }));
   const body = text(html);
