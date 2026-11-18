@@ -4950,8 +4950,23 @@ async function handleChatPost(
                 reservationOnlyInputTokens,
                 additionalToolInputTokens: mcpConnector ? mcpConnector.definitionTokens + mcpConnector.resultInputAllowance : 0,
                 toolInputPasses: mcpConnector ? MCP_CHAT_MAX_STEPS : 1,
+                // Reserved only above the flat limit; the loop is then stopped
+                // at what was reserved (`toolLoopStepCap` below).
+                longContextToolInputPasses: Math.max(
+                    artifactToolPlan?.registerTool ? GENERATED_ARTIFACT_MAX_STEPS : 1,
+                    appManagedSearchEnabled && webSearchCapability.searchBackend
+                        ? APP_MANAGED_SEARCH_MAX_STEPS
+                        : 1
+                ),
                   }
               );
+        // On a long-context turn the application tool loop runs no more calls
+        // than the reservation holds: each re-sends the whole prompt, and a
+        // call past the hold would be one the turn's credits do not cover.
+        const toolLoopStepCap =
+            budget.longContextSettlement && !isResearchPreview
+                ? (budget.providerCallPasses ?? 1)
+                : Number.POSITIVE_INFINITY;
         if (
             isResearchPreview &&
             budget.maxOutputTokens !== researchPreviewAdmission?.limits?.totalOutputTokens
@@ -5584,19 +5599,22 @@ async function handleChatPost(
                       ...(appManagedSearchTool && !artifactToolConfig
                           ? {
                                 stopWhen: stepCountIs(
-                                    APP_MANAGED_SEARCH_MAX_STEPS
+                                    Math.min(APP_MANAGED_SEARCH_MAX_STEPS, toolLoopStepCap)
                                 ),
                             }
                           : {}),
                       ...(artifactToolConfig
                           ? {
                                 stopWhen: stepCountIs(
-                                    appManagedSearchTool
-                                        ? Math.max(
-                                              GENERATED_ARTIFACT_MAX_STEPS,
-                                              APP_MANAGED_SEARCH_MAX_STEPS
-                                          )
-                                        : GENERATED_ARTIFACT_MAX_STEPS
+                                    Math.min(
+                                        appManagedSearchTool
+                                            ? Math.max(
+                                                  GENERATED_ARTIFACT_MAX_STEPS,
+                                                  APP_MANAGED_SEARCH_MAX_STEPS
+                                              )
+                                            : GENERATED_ARTIFACT_MAX_STEPS,
+                                        toolLoopStepCap
+                                    )
                                 ),
                                 /*
                                   The two halves of "was this file begun, and

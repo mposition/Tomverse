@@ -1027,6 +1027,14 @@ export const createChatBudget = (
         additionalToolInputTokens?: number;
         /** Server-selected model passes; used only for internal cost holds. */
         toolInputPasses?: number;
+        /**
+         * The provider calls this turn's application tool loop may make
+         * (generated artifacts, app-managed search). Reserved only on a
+         * long-context turn, where each step re-sends a prompt priced by its
+         * own cost (operator decision 2026-11-18: reserve every step); the
+         * route then stops the loop at the reserved count.
+         */
+        longContextToolInputPasses?: number;
         /** Keep the deterministic tool envelope outside the authored-input
          * clamp so a multi-step run cannot silently under-reserve it. */
         toolInputAboveAuthoredLimit?: boolean;
@@ -1114,7 +1122,9 @@ export const createChatBudget = (
                   toolOverheadTokens: toolInputTokens,
               })
           ) + reservationOnlyInputTokens;
-    const passes = Math.max(1, Math.min(4, Math.trunc(options?.toolInputPasses ?? 1)));
+    const clampPasses = (value: number | undefined) =>
+        Math.max(1, Math.min(4, Math.trunc(value ?? 1) || 1));
+    const requestedPasses = clampPasses(options?.toolInputPasses);
     /*
       One decision for every long-context rule below: the switch is on and the
       *measured* input -- the figure the input limit itself is checked against
@@ -1124,6 +1134,12 @@ export const createChatBudget = (
     */
     const longContextTurn =
         chatLongContextEnabled() && estimatedInputTokens > chatUserMaxInputTokens();
+    // A long-context turn reserves every call its application tool loop may
+    // make: each re-sends a prompt charged at its own cost, and settlement
+    // never charges past the reservation (review r-20261118-102103-16e00a).
+    const passes = longContextTurn
+        ? Math.max(requestedPasses, clampPasses(options?.longContextToolInputPasses))
+        : requestedPasses;
     // On a long-context turn, choose the tier with room for the estimator's
     // error (see LONG_CONTEXT_TIER_ESTIMATE_MARGIN). Tier choice only: the
     // reserved token counts below are the estimate itself.

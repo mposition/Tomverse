@@ -649,6 +649,28 @@ test("without per-step usage a multi-call reservation only ever settles at a low
     );
 });
 
+// Review r-20261118-102103-16e00a, operator decision 2026-11-18: a long-context
+// turn reserves every call its application tool loop may make, and the loop
+// stops at what was reserved.
+test("a long-context turn reserves every call of its tool loop, and only then", () => {
+    const luna = getModel("gpt-6-luna");
+    const long = 200_000;
+    const withLoop = createChatBudget("user", luna, long, { longContextToolInputPasses: 8 });
+    assert.equal(withLoop.providerCallPasses, 4);
+    const without = createChatBudget("user", luna, long);
+    assert.equal(without.providerCallPasses, undefined);
+    assert.ok(withLoop.usageCredits > without.usageCredits);
+    assert.ok(withLoop.inputTokens > without.inputTokens * 3);
+    // An ordinary turn is reserved exactly as before.
+    const ordinary = createChatBudget("user", luna, 1_000, { longContextToolInputPasses: 8 });
+    assert.equal(ordinary.providerCallPasses, undefined);
+    assert.equal(ordinary.usageCredits, createChatBudget("user", luna, 1_000).usageCredits);
+    const route = readFileSync(new URL("../app/api/chat/route.ts", import.meta.url), "utf8");
+    assert.match(route, /longContextToolInputPasses: Math\.max\(\s*artifactToolPlan\?\.registerTool \? GENERATED_ARTIFACT_MAX_STEPS : 1,\s*appManagedSearchEnabled && webSearchCapability\.searchBackend\s*\? APP_MANAGED_SEARCH_MAX_STEPS\s*: 1\s*\)/);
+    assert.match(route, /budget\.longContextSettlement && !isResearchPreview\s*\? \(budget\.providerCallPasses \?\? 1\)\s*: Number\.POSITIVE_INFINITY/);
+    assert.equal(route.match(/toolLoopStepCap\s*\)/g)?.length, 2);
+});
+
 test("the call count travels from the budget to every settlement path", () => {
     const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
     const security = read("lib/chatSecurity.ts");
