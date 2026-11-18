@@ -537,3 +537,23 @@ test("a request limit reached on the resend path reports limit_reached, not an e
             assert.equal(journal.state.status, "limit_reached");
         }
     ));
+test("the CLI's own data folder is out of bounds wherever TOMVERSE_HOME puts it", () => {
+    const root = tempDir("ws");
+    const home = join(root, "my-cli-data");
+    mkdirSync(join(home, "sessions", "s1"), { recursive: true });
+    writeFileSync(join(home, "sessions", "s1", "session.json"), "{\"messages\":\"secret code\"}");
+    writeFileSync(join(root, "a.txt"), "x");
+    const ws = new Workspace(normalizeRoot(root), [home]);
+    assert.throws(() => ws.resolve("my-cli-data/sessions/s1/session.json", "read"), /own data folder/);
+    assert.throws(() => ws.resolve("my-cli-data/new.txt", "write"), /own data folder/);
+    assert.deepEqual(ws.listFiles(".", 100).files, ["a.txt"]);
+});
+
+test("listing does not walk into a junction or link to a folder outside", () => {
+    const root = tempDir("ws");
+    const outside = tempDir("outside");
+    writeFileSync(join(outside, "elsewhere.txt"), "x");
+    writeFileSync(join(root, "here.txt"), "x");
+    symlinkSync(outside, join(root, "j"), process.platform === "win32" ? "junction" : "dir");
+    assert.deepEqual(new Workspace(normalizeRoot(root), []).listFiles(".", 100).files, ["here.txt"]);
+});

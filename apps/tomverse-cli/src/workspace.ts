@@ -3,6 +3,7 @@ import { existsSync, lstatSync, readdirSync, realpathSync, statSync } from "node
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 import { commandEnv } from "./commands.js";
+import { tomverseHome } from "./config.js";
 
 /**
  * The folder the CLI works in, and every path check the file tools make. A
@@ -87,7 +88,26 @@ const SKIPPED_DIRS = new Set([
 export type ResolvedPath = { absolute: string; relative: string; exists: boolean };
 
 export class Workspace {
-    constructor(readonly root: string) {}
+    /**
+     * The CLI's own home (sessions, backups, config), wherever TOMVERSE_HOME
+     * puts it: never readable or writable through the file tools, even when it
+     * sits inside the workspace under another name.
+     */
+    private readonly privateDirs: string[];
+
+    constructor(readonly root: string, privateDirs: string[] = [tomverseHome()]) {
+        this.privateDirs = privateDirs.map((dir) => {
+            try {
+                return realpathSync.native(dir);
+            } catch {
+                return resolve(dir);
+            }
+        });
+    }
+
+    private isPrivate(absolute: string) {
+        return this.privateDirs.some((dir) => inside(dir, absolute));
+    }
 
     /** Resolves a model-named path; refuses anything whose real location leaves the root. */
     resolve(input: string, purpose: "read" | "write"): ResolvedPath {
@@ -118,6 +138,7 @@ export class Workspace {
         const absolute = missing.length ? join(real, ...missing) : real;
         if (!inside(this.root, absolute)) throw new PathError(`${input} resolves outside the workspace (through a link).`);
         const rel = relative(this.root, absolute).split(sep).join("/");
+        if (this.isPrivate(absolute)) throw new PathError(`${rel} is inside the Tomverse CLI's own data folder, which the file tools never touch.`);
         if (isSecretPath(rel)) {
             throw new PathError(`${rel} can hold credentials, so the CLI does not ${purpose === "read" ? "read" : "change"} it. You can open it yourself.`);
         }
@@ -151,7 +172,7 @@ export class Workspace {
             if (result.status === 0) {
                 const seen = new Set<string>();
                 for (const name of result.stdout.split("\0")) {
-                    if (!name || seen.has(name) || isSecretPath(name)) continue;
+                    if (!name || seen.has(name) || isSecretPath(name) || this.isPrivate(join(this.root, name))) continue;
                     seen.add(name);
                     if (!existsSync(join(this.root, name))) continue;
                     if (files.length >= limit) {
@@ -178,6 +199,14 @@ export class Workspace {
                 const rel = relative(this.root, abs).split(sep).join("/");
                 if (entry.isSymbolicLink()) continue;
                 if (entry.isDirectory()) {
+                    // A junction is a directory to Dirent; its real path gives it away.
+                    let real: string;
+                    try {
+                        real = realpathSync.native(abs);
+                    } catch {
+                        continue;
+                    }
+                    if (!same(real, abs) || this.isPrivate(real)) continue;
                     if (!SKIPPED_DIRS.has(entry.name) && !isSecretPath(`${rel}/`)) stack.push(abs);
                     continue;
                 }

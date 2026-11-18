@@ -13,6 +13,8 @@ import {
     rmSync,
     statSync,
     unlinkSync,
+    linkSync,
+    writeFileSync,
     writeSync,
 } from "node:fs";
 import { hostname } from "node:os";
@@ -450,22 +452,32 @@ export const deleteSession = (home: string, id: string) => {
 };
 
 /**
- * Takes a session's lock file, or throws SessionLockedError. A lock left by a
- * process that no longer runs on this host is taken over -- but only that
- * very lock: it is first moved aside atomically and compared with what was
- * inspected, and put back if another process had replaced it meanwhile. A
- * live process's lock is never removed.
+ * Takes a session's lock file, or throws SessionLockedError.
+ *
+ * A lock file is created whole: its content goes to a temporary file that is
+ * hard-linked into place, which fails if a lock exists -- so there is never an
+ * empty lock and never an overwrite. A lock left by a process that no longer
+ * runs on this host is taken over under a second, also exclusive, ".reclaim"
+ * guard: only its holder may remove the stale lock, after reading it again.
+ * Any other process sees the lock still there and stops, so a live process's
+ * lock is never removed. A guard left by a crashed reclaimer is not removed
+ * automatically; the error names it.
  */
 export const claimLock = (lockPath: string, id: string) => {
-    const claim = () => {
-        const fd = openSync(lockPath, "wx", 0o600);
-        writeSync(fd, JSON.stringify({ pid: process.pid, host: hostname(), at: now() }));
-        closeSync(fd);
+    const createExclusive = (path: string, content: string) => {
+        const tmp = `${path}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
+        writeFileSync(tmp, content, { mode: 0o600 });
+        try {
+            linkSync(tmp, path);
+        } finally {
+            unlinkSync(tmp);
+        }
     };
-    const locked = (holder: { pid?: number; host?: string }) =>
-        new SessionLockedError(`Session ${id} is open in another tomverse process${holder.pid ? ` (pid ${holder.pid}${holder.host ? ` on ${holder.host}` : ""})` : ""}.`);
+    const mine = () => JSON.stringify({ pid: process.pid, host: hostname(), at: now() });
+    const locked = (holder: { pid?: number; host?: string }, extra = "") =>
+        new SessionLockedError(`Session ${id} is open in another tomverse process${holder.pid ? ` (pid ${holder.pid}${holder.host ? ` on ${holder.host}` : ""})` : ""}.${extra}`);
     try {
-        claim();
+        createExclusive(lockPath, mine());
         return;
     } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw new JournalError(`Cannot lock the session: ${(error as Error).message}`);
@@ -480,31 +492,25 @@ export const claimLock = (lockPath: string, id: string) => {
     }
     const stale = holder.host === hostname() && typeof holder.pid === "number" && !processAlive(holder.pid);
     if (!stale) throw locked(holder);
-    const aside = `${lockPath}.stale-${process.pid}-${randomBytes(4).toString("hex")}`;
+    const guard = `${lockPath}.reclaim`;
     try {
-        renameSync(lockPath, aside);
+        createExclusive(guard, mine());
     } catch {
-        throw locked(holder);
+        throw locked(holder, ` Another process is taking over its stale lock; if none is running, delete ${guard}.`);
     }
-    let movedRaw = "";
     try {
-        movedRaw = readFileSync(aside, "utf8");
-    } catch {
-        // unreadable: treated as not the one inspected
-    }
-    if (movedRaw !== raw) {
-        // Another process took the lock between the look and the move: give it back.
+        // Under the guard no other process removes the lock, and none can create
+        // one while it exists, so reading it again tells whether it is still
+        // the stale one.
+        if (readFileSync(lockPath, "utf8") !== raw) throw locked(holder);
+        unlinkSync(lockPath);
         try {
-            renameSync(aside, lockPath);
+            createExclusive(lockPath, mine());
         } catch {
-            // it re-created one meanwhile; leave theirs
+            // Another process took the free lock first: it is theirs.
+            throw locked({});
         }
-        throw locked(holder);
-    }
-    unlinkSync(aside);
-    try {
-        claim();
-    } catch {
-        throw locked(holder);
+    } finally {
+        unlinkSync(guard);
     }
 };

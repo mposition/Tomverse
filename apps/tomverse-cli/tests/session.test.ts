@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -117,4 +117,18 @@ test("a live process's lock is never removed, by open or by delete; a dead one's
     claimLock(lock, journal.state.id);
     assert.equal(JSON.parse(readFileSync(lock, "utf8")).pid, process.pid);
     assert.deepEqual(readdirSync(join(sessionsDir(home), journal.state.id)).filter((f) => f.includes(".stale-")), []);
+});
+test("a leftover reclaim guard blocks a takeover instead of being guessed away; locks are never empty", () => {
+    const home = tempDir("home");
+    const journal = Journal.create(home, init());
+    journal.release();
+    const lock = join(sessionsDir(home), journal.state.id, "lock");
+    writeFileSync(lock, JSON.stringify({ pid: 2 ** 30, host: hostname(), at: "x" }));
+    writeFileSync(`${lock}.reclaim`, JSON.stringify({ pid: 2 ** 30, host: hostname(), at: "x" }));
+    assert.throws(() => claimLock(lock, journal.state.id), /delete .*\.reclaim/);
+    assert.equal(JSON.parse(readFileSync(lock, "utf8")).pid, 2 ** 30, "the lock is left as it was");
+    unlinkSync(`${lock}.reclaim`);
+    claimLock(lock, journal.state.id);
+    assert.equal(JSON.parse(readFileSync(lock, "utf8")).pid, process.pid);
+    assert.deepEqual(readdirSync(join(sessionsDir(home), journal.state.id)).filter((f) => /\.tmp$|\.reclaim$/.test(f)), []);
 });
