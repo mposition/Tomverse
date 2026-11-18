@@ -210,9 +210,10 @@ catalogue, so a customer never has to recopy it.
 - **Candidates:** the offered models that fit the request -- images only to a
   model that reads them, the requested output within the model's limit, and a
   rough input estimate plus that output within its window. The `GET /models`
-  entry advertises the largest window, the output limit every candidate meets
-  (clients send it back as `max_tokens`, and VS Code subtracts it from the
-  window to size the input), and the largest credits per request. A request
+  entry advertises the largest window, the default model's output limit
+  (clients send it back as `max_tokens`; a candidate that cannot give it is
+  left out only of requests that ask for that much, and VS Code subtracts it
+  from the window to size the input), and the largest credits per request. A request
   beyond every candidate gets the default model's ordinary limit error.
 - **Router input:** the latest user message's text and the assistant text
   before it, bounded by the router itself. Nothing is stored: the external API

@@ -94,13 +94,17 @@ export const smartAdaptiveRouterEnabled = (env: ExternalApiEnv) =>
 /**
  * What a client may assume of Smart Adaptive. Each request is routed only
  * among candidates that fit it (images, input length, requested output), so
- * the window is the largest any candidate offers. The output limit is the one
- * every candidate meets: clients send it back as `max_tokens`, and the
- * largest would leave a single candidate to route to (and VS Code subtracts it
- * from the window to size the input). Credits are the most a request can cost.
+ * the window is the largest any candidate offers. The output limit is the
+ * default model's: clients send it back as `max_tokens`, so the largest would
+ * leave a single candidate to route to, and the smallest would cut a coding
+ * tool's long edits short (VS Code also subtracts it from the window to size
+ * the input). A candidate that cannot give it is only left out of requests
+ * that ask for that much. Without the default model, the smallest. Credits are
+ * the most a request can cost.
  */
 export const smartAdaptiveCapabilities = (
-    candidates: readonly ExternalApiModelCapabilities[]
+    candidates: readonly ExternalApiModelCapabilities[],
+    defaultModelId?: string
 ): ExternalApiModelCapabilities | null =>
     candidates.length === 0
         ? null
@@ -112,7 +116,9 @@ export const smartAdaptiveCapabilities = (
               vision: candidates.some((candidate) => candidate.vision),
               reasoning: false,
               contextWindowTokens: Math.max(...candidates.map((candidate) => candidate.contextWindowTokens)),
-              maxOutputTokens: Math.min(...candidates.map((candidate) => candidate.maxOutputTokens)),
+              maxOutputTokens:
+                  candidates.find((candidate) => candidate.id === defaultModelId)?.maxOutputTokens ??
+                  Math.min(...candidates.map((candidate) => candidate.maxOutputTokens)),
               creditWeight: Math.max(...candidates.map((candidate) => candidate.creditWeight)),
           };
 

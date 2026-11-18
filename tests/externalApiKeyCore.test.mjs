@@ -131,7 +131,8 @@ test("Smart Adaptive is offered with any model, its router call is off by defaul
     const smart = smartAdaptiveCapabilities([a, b]);
     assert.equal(smart.id, SMART_ADAPTIVE_MODEL_ID);
     assert.equal(smart.contextWindowTokens, 200_000, "requests are routed only to a model they fit");
-    assert.equal(smart.maxOutputTokens, 8_000, "an output limit sent back as max_tokens still fits every candidate");
+    assert.equal(smart.maxOutputTokens, 8_000, "without the default model, the limit every candidate meets");
+    assert.equal(smartAdaptiveCapabilities([a, b], "a").maxOutputTokens, 64_000, "the default model's limit, not the smallest");
     assert.equal(smart.creditWeight, 3, "the most a request can cost");
     assert.equal(smart.vision, true, "images are routed to a model that reads them");
     assert.equal(vscodeCustomEndpointConfig("https://x/api/v1", [smart])[0].models[0].name, "Smart Adaptive (Tomverse)");

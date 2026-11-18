@@ -7,7 +7,7 @@ import {
     type ExternalApiModelCapabilities,
 } from "@/lib/externalApiCatalogCore";
 import { isProviderApiKeyConfigured } from "@/lib/modelRegistryShared";
-import { getModelUsageProfile, resolveModelRequestPricing, type AiModel, type ModelTier } from "@/lib/models";
+import { DEFAULT_MODEL_ID, getModelUsageProfile, resolveModelRequestPricing, type AiModel, type ModelTier } from "@/lib/models";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 
 /**
@@ -39,6 +39,6 @@ export const externalApiRunnableModels = async (
  */
 export const externalApiOfferedModels = async (plan: ModelTier): Promise<ExternalApiModelCapabilities[]> => {
     const runnable = (await externalApiRunnableModels(plan)).map((entry) => entry.capabilities);
-    const smart = smartAdaptiveCapabilities(runnable);
+    const smart = smartAdaptiveCapabilities(runnable, DEFAULT_MODEL_ID);
     return smart ? [smart, ...runnable] : runnable;
 };
