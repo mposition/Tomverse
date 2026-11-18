@@ -19,7 +19,8 @@ import { renderFileDiff, safeText } from "../src/display.js";
 import { canonicalDigest } from "../src/session.js";
 import { undoChange, UndoError, viewChanges } from "../src/changes.js";
 import { chmodSync, renameSync, statSync, symlinkSync } from "node:fs";
-import { planCommand, runCommand } from "../src/commands.js";
+import { planCommand, runCommand, CommandError } from "../src/commands.js";
+import { renderApproval } from "../src/interactive.js";
 
 const src = join(dirname(fileURLToPath(import.meta.url)), "..", "src");
 
@@ -473,3 +474,25 @@ test("another key never records a lookup for this session", () =>
             assert.equal(gateway.requests.filter((r) => r.url.startsWith("/api/v1/requests/status")).length, 0);
         }
     ));
+test("a 4xx without Tomverse's request id (a proxy in front) is not taken as a refusal before dispatch", () =>
+    withGateway(
+        () => ({ fault: "http", status: 413, code: "payload_too_large", fromProxy: true }),
+        async (gateway) => {
+            const { runner, journal } = await makeRunner(gateway, makeRepo(), { prompter: null });
+            assert.equal(await runner.runTask("Hi"), "unknown_outcome");
+            assert.equal(journal.unresolvedGenerations().length, 1);
+        }
+    ));
+test("a command shows each real line separately and cannot carry characters that only show escaped", () => {
+    const cwd = tempDir("cmd");
+    const two = planCommand({ command: "echo one\necho two" }, cwd, 10_000);
+    const shown = renderApproval({ approvalId: "a", toolCallId: "t", toolName: "run_command", input: {}, command: two });
+    assert.match(shown, /command \(2 lines\):\n    \| echo one\n    \| echo two/);
+    const literal = renderApproval({ approvalId: "a", toolCallId: "t", toolName: "run_command", input: {}, command: planCommand({ command: "echo one\\necho two" }, cwd, 10_000) });
+    assert.match(literal, /command:\n    \| echo one\\necho two/);
+    for (const bad of ["echo \u001b[2J", "echo a\rb", "echo \u202e", "echo \u200b"]) assert.throws(() => planCommand({ command: bad }, cwd, 10_000), CommandError);
+    assert.throws(() => planCommand({ argv: [process.execPath, "-e", "1\u2028"] }, cwd, 10_000), CommandError);
+    // In argv each argument is JSON-quoted, so a newline and a literal \n differ.
+    const argv = planCommand({ argv: [process.execPath, "-e", "a\nb", "c\\nd"] }, cwd, 10_000);
+    assert.ok(argv.display.includes('"a\\nb"') && argv.display.includes('"c\\\\nd"'), argv.display);
+});

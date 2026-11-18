@@ -173,6 +173,7 @@ test("Tomverse CLI guide: off until published; key in the shell only; endpoint o
     assert.equal(guide.powershell, `$env:TOMVERSE_API_KEY = "${KEY_PLACEHOLDER}"\ntomverse doctor`);
     assert.equal(guide.posix, `export TOMVERSE_API_KEY="${KEY_PLACEHOLDER}"\ntomverse doctor`);
     const staging = tomverseCliGuide({ TOMVERSE_CLI_GUIDE_ENABLED: "true" }, "https://dev.tomverse.app/api/v1");
-    assert.match(staging.posix, /tomverse config set endpoint https:\/\/dev\.tomverse\.app\/api\/v1/);
+    assert.match(staging.posix, /tomverse config set endpoint 'https:\/\/dev\.tomverse\.app\/api\/v1'/);
+    assert.match(tomverseCliGuide({ TOMVERSE_CLI_GUIDE_ENABLED: "true" }, "https://x.example/api/v1;rm -rf ~").posix, /endpoint 'https:\/\/x\.example\/api\/v1;rm -rf ~'/, "quoted as one argument");
     assert.ok(!/--api-key/.test(staging.posix + staging.powershell), "the key is never a command-line argument");
 });

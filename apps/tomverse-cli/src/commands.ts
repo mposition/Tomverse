@@ -49,6 +49,9 @@ export class CommandError extends Error {}
 
 const MAX_TIMEOUT_MS = 30 * 60_000;
 
+/** As for patches: what the approval cannot show as it is never reaches a command. Tab is allowed. */
+const UNSHOWABLE_IN_COMMAND = /[\u0000-\u0008\u000a-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060-\u206f\ufeff]/;
+
 /** Variables an approved command gets. Never a Tomverse key, whatever the config says. */
 const BASE_ENV = [
     "PATH", "Path", "PATHEXT", "SystemRoot", "SYSTEMROOT", "windir", "WINDIR", "COMSPEC", "ComSpec", "TEMP", "TMP", "TMPDIR",
@@ -112,7 +115,10 @@ export const planCommand = (input: CommandInput, cwd: string, defaultTimeoutMs: 
     const envNames = Object.keys(env).sort();
     if (hasArgv) {
         const argv = input.argv!;
-        if (argv.some((a) => typeof a !== "string" || a.includes("\0"))) throw new CommandError("argv must be strings without NUL.");
+        // A newline inside an argument is fine: the approval shows each argument JSON-quoted.
+        if (argv.some((a) => typeof a !== "string" || UNSHOWABLE_IN_COMMAND.test(a.replaceAll("\n", "")))) {
+            throw new CommandError("argv must be strings without control, invisible or bidi characters, so the approval shows exactly what runs.");
+        }
         let file = argv[0]!;
         if (process.platform === "win32") {
             const resolved = resolveWindowsProgram(file, env);
@@ -127,7 +133,10 @@ export const planCommand = (input: CommandInput, cwd: string, defaultTimeoutMs: 
     }
     const shell = userShell();
     const command = input.command!;
-    if (command.includes("\0")) throw new CommandError("The command cannot contain NUL.");
+    // Newlines are allowed (the approval shows each line); nothing that would only show escaped is.
+    if (UNSHOWABLE_IN_COMMAND.test(command.replaceAll("\n", ""))) {
+        throw new CommandError("The command contains control, invisible or bidi characters (or CR), so the approval could not show exactly what runs.");
+    }
     return { mode: "shell", file: shell, args: shellArgs(shell, command), display: command, shell, cwd, timeoutMs, envNames };
 };
 

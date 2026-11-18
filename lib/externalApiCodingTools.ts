@@ -172,7 +172,9 @@ export const TOMVERSE_CLI_DEFAULT_ENDPOINT = "https://tomverse.app/api/v1";
 
 export const tomverseCliGuide = (env: Record<string, string | undefined>, openAiBaseUrl: string) => {
     if (env.TOMVERSE_CLI_GUIDE_ENABLED !== "true") return null;
-    const endpoint = openAiBaseUrl === TOMVERSE_CLI_DEFAULT_ENDPOINT ? [] : [`tomverse config set endpoint ${openAiBaseUrl}`];
+    // Single-quoted for both shells, so the URL is one argument whatever it contains.
+    const quoted = `'${openAiBaseUrl.replaceAll("'", "")}'`;
+    const endpoint = openAiBaseUrl === TOMVERSE_CLI_DEFAULT_ENDPOINT ? [] : [`tomverse config set endpoint ${quoted}`];
     return {
         install: "npm install -g @tomverse/cli",
         powershell: [`$env:TOMVERSE_API_KEY = "${KEY_PLACEHOLDER}"`, ...endpoint, "tomverse doctor"].join("\n"),

@@ -45,7 +45,14 @@ export const renderApproval = (view: ApprovalView) => {
         const plan = view.command;
         lines.push("── Approval needed: run a command ──");
         if (plan.mode === "argv") lines.push(`  program: ${safeLine(plan.file)}`, `  argv:    ${safeLine(plan.display)}`);
-        else lines.push(`  shell:   ${safeLine(plan.file)} ${plan.args.slice(0, -1).map(safeLine).join(" ")}`, `  command: ${safeLine(plan.display)}`);
+        else {
+            // One shown line per real line, so a newline (a second command) is never
+            // confused with the two characters "\n" inside a line.
+            const commandLines = plan.display.split("\n");
+            lines.push(`  shell:   ${safeLine(plan.file)} ${plan.args.slice(0, -1).map(safeLine).join(" ")}`);
+            lines.push(`  command${commandLines.length > 1 ? ` (${commandLines.length} lines)` : ""}:`);
+            for (const line of commandLines) lines.push(`    | ${safeText(line)}`);
+        }
         lines.push(`  folder:  ${safeLine(plan.cwd)}`);
         lines.push(`  timeout: ${Math.round(plan.timeoutMs / 1000)} s`);
         lines.push(`  env:     ${plan.envNames.length} variables (${plan.envNames.join(", ")}); your Tomverse key is not passed`);

@@ -493,7 +493,7 @@ export class Runner {
 
     /**
      * Whether a failed request's outcome is known, after looking it up. A
-     * Tomverse 4xx (not 408) is a refusal before dispatch: known unless its
+     * Tomverse 4xx (not 408, and carrying Tomverse's request id) is a refusal before dispatch: known unless its
      * receipt is still held (a refund not gone through). Anything else -- a
      * 5xx or 408 that a proxy may send after the request went through, or no
      * answer at all -- is known only from a final receipt. Used by every
@@ -506,7 +506,11 @@ export class Runner {
         if (record.lookup === undefined) return false;
         const status = record.httpStatus ?? 0;
         const found = record.lookup === "found" && record.receipt;
-        if (status >= 400 && status < 500 && status !== 408) return !(found && record.receipt!.status === "held");
+        // A 4xx is a pre-dispatch refusal only when Tomverse itself sent it --
+        // its handlers put the request id on every refusal. A 4xx without one
+        // may come from a proxy in front, after forwarding the request.
+        const fromTomverse = typeof record.requestId === "string" && /^req_[0-9a-f]{32}$/.test(record.requestId);
+        if (fromTomverse && status >= 400 && status < 500 && status !== 408) return !(found && record.receipt!.status === "held");
         return Boolean(found && record.receipt!.status !== "held");
     }
 
