@@ -61,9 +61,10 @@ test("each sidecar failure is the platform's, unless the worker did the work", (
   // A run that worked past its deadline or its output bound did the work.
   assert.equal(classifyAmuxSidecarFailure({ code: "deadline" }), "result");
   assert.equal(classifyAmuxSidecarFailure({ code: "output_limit" }), "result");
-  // The local CLI flow's stops (#4004): a run with no sign of life for 30
-  // minutes is the worker's own; a person's stop and the sidecar's failed
-  // transcript write are not, and use none of the card's attempts.
+  // The local CLI flow's stops (#4004): `stalled` is no longer produced (owner
+  // decision 2026-11-18) but earlier attempts keep it, and it is still the
+  // worker's own run; a person's stop and the sidecar's failed transcript
+  // write are not, and use none of the card's attempts.
   assert.equal(classifyAmuxSidecarFailure({ code: "stalled", cliStarted: true }), "result");
   assert.equal(classifyAmuxSidecarFailure({ code: "operator_stop", cliStarted: true }), "sidecar_error");
   assert.equal(classifyAmuxSidecarFailure({ code: "transcript_write_failed", cliStarted: true }), "sidecar_error");
