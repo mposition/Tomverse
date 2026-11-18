@@ -259,7 +259,7 @@ export const recordAttemptCost = async (
                 // kept beside the usage source it would otherwise overwrite,
                 // as the reservation snapshot keeps reservationCostSource.
                 pricingSnapshot: {
-                    ...longContextSettlementRates(attempt.price, attempt.inputTokens, attempt.providerCalls),
+                    ...longContextSettlementRates(attempt.price, attempt.inputTokens, attempt.providerCalls, attempt),
                     reservationCostSource: attempt.price.costSource ?? null,
                     costSource: attempt.costSource,
                     ...(snapshot ?? {}),

@@ -2305,22 +2305,46 @@ export type ProviderCallUsage = {
     cacheWriteInputTokens?: number;
 };
 
-/** True when the calls are two or more and add up to exactly the usage settled. */
+/** The usage a call list is checked against: the turn's (or attempt's) totals. */
+export type SettledUsageTotals = {
+    inputTokens: number;
+    outputTokens: number;
+    cachedInputTokens?: number;
+    cacheWriteInputTokens?: number;
+};
+
+/**
+ * True when the calls are two or more and add up to exactly the usage settled:
+ * input, output, cache reads and cache writes alike (review
+ * r-20261118-102103-16e00a). A step list that disagrees with the totals in any
+ * one of them is not used at all.
+ */
 export const providerCallsCover = (
     calls: readonly ProviderCallUsage[],
-    usage: { inputTokens: number; outputTokens?: number }
-) =>
-    calls.length > 1 &&
-    calls.reduce((total, call) => total + call.inputTokens, 0) === usage.inputTokens &&
-    (usage.outputTokens === undefined ||
-        calls.reduce((total, call) => total + call.outputTokens, 0) === usage.outputTokens);
+    usage: SettledUsageTotals
+) => {
+    if (calls.length < 2) return false;
+    const total = (pick: (call: ProviderCallUsage) => number | undefined) =>
+        calls.reduce((sum, call) => sum + (pick(call) ?? 0), 0);
+    return (
+        total((call) => call.inputTokens) === usage.inputTokens &&
+        total((call) => call.outputTokens) === usage.outputTokens &&
+        total((call) => call.cachedInputTokens) === (usage.cachedInputTokens ?? 0) &&
+        total((call) => call.cacheWriteInputTokens) === (usage.cacheWriteInputTokens ?? 0)
+    );
+};
 
+/**
+ * `calls` are used only with the `usage` they must account for, so the rates
+ * recorded beside a settlement are always the ones it was priced at.
+ */
 export const longContextSettlementRates = <T extends SettlementRates>(
     rates: T,
     actualPromptTokens: number,
-    calls?: readonly ProviderCallUsage[] | null
+    calls?: readonly ProviderCallUsage[] | null,
+    usage?: SettledUsageTotals
 ): T => {
-    if (calls && providerCallsCover(calls, { inputTokens: actualPromptTokens })) {
+    if (calls && usage && providerCallsCover(calls, usage)) {
         return perCallSettlementRates(rates, calls);
     }
     const crossed = longContextSettlementTier({
@@ -2470,7 +2494,7 @@ export const longContextSettledUsageCost = (
         parts.reduce((total, part) => total + pick(part), 0);
     // The rates reported beside the sum are the token-weighted ones, for the
     // record only: the cost is the sum of the calls, not these times totals.
-    const shown = longContextSettlementRates(rates, usage.inputTokens, calls);
+    const shown = longContextSettlementRates(rates, usage.inputTokens, calls, usage);
     return {
         inputTokens: sum((part) => part.inputTokens),
         uncachedInputTokens: sum((part) => part.uncachedInputTokens),

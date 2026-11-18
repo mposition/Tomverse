@@ -14,7 +14,7 @@ import {
     CHAT_MAX_MESSAGE_CHARACTERS,
     CHAT_MAX_STORED_ANSWER_CHARACTERS,
 } from "../lib/chatRequestLimits.ts";
-import { longContextSettledUsageCost, longContextSettlementRates, resolveModelPricing } from "../lib/modelPricing.ts";
+import { longContextSettledUsageCost, longContextSettlementRates, providerCallsCover, resolveModelPricing } from "../lib/modelPricing.ts";
 import { calculateProviderUsageCost } from "../lib/providerUsageCost.ts";
 import { AVAILABLE_MODELS, getModel, getWeightedUsageCredits } from "../lib/models.ts";
 import {
@@ -253,7 +253,7 @@ test("an explicit output cap is not shrunk to the window room", () => {
 
 test("the attempt ledger keeps the settled rates and the price's own source", () => {
     const ledger = readFileSync(new URL("../lib/chatAttemptCostLedger.ts", import.meta.url), "utf8");
-    assert.match(ledger, /pricingSnapshot: \{\s*\.\.\.longContextSettlementRates\(attempt\.price, attempt\.inputTokens, attempt\.providerCalls\),\s*reservationCostSource: attempt\.price\.costSource \?\? null,/);
+    assert.match(ledger, /pricingSnapshot: \{\s*\.\.\.longContextSettlementRates\(attempt\.price, attempt\.inputTokens, attempt\.providerCalls, attempt\),\s*reservationCostSource: attempt\.price\.costSource \?\? null,/);
 });
 
 // Review r-20261118-075201-6d1a48: the public guide states the floor, uses the
@@ -434,7 +434,8 @@ test("a multi-call turn settles each call at its own tier", () => {
     };
     // Four 230k calls: each under 272k, so all short, though they sum to 920k.
     const four = Array.from({ length: 4 }, () => ({ inputTokens: 230_000, outputTokens: 2_000 }));
-    const allShort = longContextSettlementRates(reservedLong, 920_000, four);
+    const fourTotals = { inputTokens: 920_000, outputTokens: 8_000 };
+    const allShort = longContextSettlementRates(reservedLong, 920_000, four, fourTotals);
     assert.equal(allShort.inputUsdPerMillionTokens, short.inputUsdPerMillionTokens);
     assert.equal(allShort.outputUsdPerMillionTokens, short.outputUsdPerMillionTokens);
     assert.equal(allShort.longContextThresholdTokens, null);
@@ -445,7 +446,8 @@ test("a multi-call turn settles each call at its own tier", () => {
         { inputTokens: 300_000, outputTokens: 3_000 },
     ];
     const blended = longContextSettlementRates({ ...reservedLong, inputUsdPerMillionTokens: short.inputUsdPerMillionTokens,
-        outputUsdPerMillionTokens: short.outputUsdPerMillionTokens, longContextThresholdTokens: null }, 500_000, mixed);
+        outputUsdPerMillionTokens: short.outputUsdPerMillionTokens, longContextThresholdTokens: null }, 500_000, mixed,
+        { inputTokens: 500_000, outputTokens: 4_000 });
     const expectedInput = 200_000 * short.inputUsdPerMillionTokens + 300_000 * long.inputUsdPerMillionTokens;
     const expectedOutput = 1_000 * short.outputUsdPerMillionTokens + 3_000 * long.outputUsdPerMillionTokens;
     assert.ok(Math.abs(blended.inputUsdPerMillionTokens * 500_000 - expectedInput) < 1e-6);
@@ -453,7 +455,47 @@ test("a multi-call turn settles each call at its own tier", () => {
     assert.equal(blended.longContextThresholdTokens, 272_000);
     // A flat or stale price is never moved, call by call either.
     const flat = { ...reservedLong, costSource: "model_registry_override" };
-    assert.equal(longContextSettlementRates(flat, 920_000, four).inputUsdPerMillionTokens, long.inputUsdPerMillionTokens);
+    assert.equal(longContextSettlementRates(flat, 920_000, four, fourTotals).inputUsdPerMillionTokens, long.inputUsdPerMillionTokens);
+});
+
+// Review r-20261118-102103-16e00a: a step list is used only when it accounts
+// for every figure of the totals, cache reads and writes included, and the
+// rates recorded are always the ones the cost was priced at.
+test("a step list whose cache figures disagree with the totals is not used", () => {
+    const short = resolveModelPricing(getModel("gpt-6-luna"), { estimatedPromptTokens: 1_000 });
+    const long = resolveModelPricing(getModel("gpt-6-luna"), { estimatedPromptTokens: 300_000 });
+    const snapshot = {
+        modelId: "gpt-6-luna",
+        inputUsdPerMillionTokens: long.inputUsdPerMillionTokens,
+        outputUsdPerMillionTokens: long.outputUsdPerMillionTokens,
+        cachedInputPriceMultiplier: long.cachedInputPriceMultiplier,
+        longContextThresholdTokens: 272_000,
+        pricingVersion: long.pricingVersion,
+        costSource: long.costSource,
+        providerCallPasses: 2,
+    };
+    const calls = [
+        { inputTokens: 230_000, outputTokens: 1_000, cachedInputTokens: 0, cacheWriteInputTokens: 0 },
+        { inputTokens: 240_000, outputTokens: 1_000, cachedInputTokens: 0, cacheWriteInputTokens: 0 },
+    ];
+    // The totals record cache reads the steps do not: not covered.
+    const cachedTotals = { inputTokens: 470_000, outputTokens: 2_000, cachedInputTokens: 200_000 };
+    assert.equal(providerCallsCover(calls, cachedTotals), false);
+    assert.equal(
+        longContextSettledUsageCost(snapshot, cachedTotals, calls).totalCostMicroUsd,
+        longContextSettledUsageCost(snapshot, cachedTotals).totalCostMicroUsd
+    );
+    assert.equal(providerCallsCover(calls, { ...cachedTotals, cachedInputTokens: 0, cacheWriteInputTokens: 5 }), false);
+    // Covered: the recorded rates are the per-call ones; not covered, the
+    // summed-input rule's -- exactly what each cost used.
+    const covered = { inputTokens: 470_000, outputTokens: 2_000 };
+    assert.equal(providerCallsCover(calls, covered), true);
+    assert.equal(longContextSettlementRates(snapshot, 470_000, calls, covered).inputUsdPerMillionTokens, short.inputUsdPerMillionTokens);
+    assert.equal(longContextSettlementRates(snapshot, 470_000, calls, { ...covered, outputTokens: 9 }).inputUsdPerMillionTokens, long.inputUsdPerMillionTokens);
+    // Without the totals a call list is never used.
+    assert.equal(longContextSettlementRates(snapshot, 470_000, calls).inputUsdPerMillionTokens, long.inputUsdPerMillionTokens);
+    const ledger = readFileSync(new URL("../lib/chatAttemptCostLedger.ts", import.meta.url), "utf8");
+    assert.ok(ledger.includes("longContextSettlementRates(attempt.price, attempt.inputTokens, attempt.providerCalls, attempt)"));
 });
 
 test("the per-step usage reaches every settlement path", () => {
@@ -513,7 +555,8 @@ test("a multi-call turn's cost is the sum of each call's own cost, cache split i
     assert.equal(one.totalCostMicroUsd, at(short, calls[0]));
     // The credit view counts written tokens as plain input.
     const written = [{ ...calls[0], cachedInputTokens: 0, cacheWriteInputTokens: 50_000 }, calls[1]];
-    const credit = longContextSettledUsageCost(snapshot, totals, written, { pricedCacheWrites: false });
+    const writtenTotals = { inputTokens: 500_000, cachedInputTokens: 0, cacheWriteInputTokens: 50_000, outputTokens: 3_000 };
+    const credit = longContextSettledUsageCost(snapshot, writtenTotals, written, { pricedCacheWrites: false });
     assert.equal(credit.cacheWriteInputCostMicroUsd, 0);
     assert.equal(credit.totalCostMicroUsd, at(short, { ...written[0], cacheWriteInputTokens: 0 }) + at(long, calls[1]));
 });
