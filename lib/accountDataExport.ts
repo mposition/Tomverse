@@ -1295,6 +1295,7 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
         id: true,
         modelId: true,
         stream: true,
+        protocol: true,
         clientName: true,
         finishReason: true,
         errorCode: true,

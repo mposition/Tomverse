@@ -14,6 +14,7 @@ import {
     vscodeCustomEndpointConfig,
     type ExternalApiModelCapabilities,
 } from "@/lib/externalApiCatalogCore";
+import { claudeCodeConfig, codexConfig, codingToolModels, cursorConfig } from "@/lib/externalApiCodingTools";
 
 /**
  * Settings > API keys. Issues, lists, limits and revokes the account's
@@ -53,6 +54,7 @@ type Overview =
 type RequestRow = {
     requestId: string;
     modelId: string;
+    protocol?: string;
     createdAt: string;
     status: string;
     outcome: string | null;
@@ -112,6 +114,120 @@ function CopyBlock({ label, value, testId }: { label: string; value: string; tes
     );
 }
 
+const PROTOCOL_LABEL: Record<string, string> = {
+    chat_completions: "Chat Completions",
+    anthropic_messages: "Anthropic Messages",
+    responses: "Responses",
+};
+
+function ToolModelSelect({
+    models,
+    value,
+    onChange,
+    testId,
+}: {
+    models: ModelSummary[];
+    value: string | undefined;
+    onChange: (id: string) => void;
+    testId: string;
+}) {
+    const { t } = useLanguage();
+    return (
+        <label className="mt-3 grid gap-1 text-sm">
+            <span className="font-semibold">{t("externalApi.codingToolModel")}</span>
+            <select
+                data-testid={testId}
+                value={value}
+                onChange={(event) => onChange(event.target.value)}
+                className="rounded-lg border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900"
+            >
+                {models.map((model) => (
+                    <option key={model.id} value={model.id}>
+                        {model.name} ({model.id})
+                    </option>
+                ))}
+            </select>
+        </label>
+    );
+}
+
+/**
+ * Claude Code, Codex and Cursor: each tool's own configuration, built from the
+ * models its protocol carries. Native protocols never offer Smart Adaptive.
+ * Keys are placeholders here; the person pastes the key they saved.
+ */
+function CodingToolsSection({ baseUrl, models }: { baseUrl: string; models: ModelSummary[] }) {
+    const { t } = useLanguage();
+    const lists = useMemo(() => codingToolModels(models), [models]);
+    const [claudeId, setClaudeId] = useState<string | undefined>();
+    const [codexId, setCodexId] = useState<string | undefined>();
+    const [cursorId, setCursorId] = useState<string | undefined>();
+    const claude = lists.claudeCode.find((model) => model.id === claudeId) ?? lists.claudeCode[0];
+    const codex = lists.codex.find((model) => model.id === codexId) ?? lists.codex[0];
+    const cursor = lists.cursor.find((model) => model.id === cursorId) ?? lists.cursor[0];
+    const claudeConfig = claude ? claudeCodeConfig(baseUrl, claude, lists.claudeCode) : null;
+    const codexFiles = codex ? codexConfig(baseUrl, codex, lists.codex) : null;
+    const card = "mt-4 rounded-xl border border-zinc-200 p-3 dark:border-zinc-800";
+    return (
+        <section className="mt-6 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950/60" data-testid="external-api-coding-tools">
+            <h2 className="text-base font-bold">{t("externalApi.codingToolsTitle")}</h2>
+            <p className="mt-1 text-sm leading-6 text-zinc-500">{t("externalApi.codingToolsIntro")}</p>
+            <p className="mt-1 text-xs text-zinc-500">{t("externalApi.codingToolsVerified")}</p>
+
+            <div className={card} data-testid="external-api-tool-claude-code">
+                <h3 className="text-sm font-bold">{t("externalApi.claudeCodeTitle")}</h3>
+                <p className="mt-1 text-xs text-zinc-500">{t("externalApi.claudeCodeHint")}</p>
+                {claude && claudeConfig ? (
+                    <>
+                        <ToolModelSelect models={lists.claudeCode} value={claude.id} onChange={setClaudeId} testId="external-api-claude-code-model" />
+                        <CopyBlock label={`${t("externalApi.claudeCodeTerminal")} (PowerShell)`} value={claudeConfig.powershell} testId="external-api-claude-code-powershell" />
+                        <CopyBlock label={`${t("externalApi.claudeCodeTerminal")} (macOS / Linux)`} value={claudeConfig.posix} testId="external-api-claude-code-posix" />
+                        <CopyBlock label={t("externalApi.claudeCodeVscode")} value={claudeConfig.vscodeSettings} testId="external-api-claude-code-vscode" />
+                        <p className="mt-2 text-xs text-zinc-500">{t("externalApi.claudeCodeNotes")}</p>
+                    </>
+                ) : (
+                    <p className="mt-2 text-xs text-zinc-500">{t("externalApi.codingToolNoModels")}</p>
+                )}
+            </div>
+
+            <div className={card} data-testid="external-api-tool-codex">
+                <h3 className="text-sm font-bold">{t("externalApi.codexTitle")}</h3>
+                <p className="mt-1 text-xs text-zinc-500">{t("externalApi.codexHint")}</p>
+                {codex && codexFiles ? (
+                    <>
+                        <ToolModelSelect models={lists.codex} value={codex.id} onChange={setCodexId} testId="external-api-codex-model" />
+                        <CopyBlock label={t("externalApi.codexProvider")} value={codexFiles.providerToml} testId="external-api-codex-provider" />
+                        <CopyBlock label={t("externalApi.codexProfile")} value={codexFiles.profileToml} testId="external-api-codex-profile" />
+                        <CopyBlock label={`${t("externalApi.codexKey")} (PowerShell)`} value={codexFiles.powershellKey} testId="external-api-codex-key-powershell" />
+                        <CopyBlock label={`${t("externalApi.codexKey")} (macOS / Linux)`} value={codexFiles.posixKey} testId="external-api-codex-key-posix" />
+                        <CopyBlock label={t("externalApi.codexDefault")} value={codexFiles.defaultToml} testId="external-api-codex-default" />
+                        <p className="mt-2 text-xs text-zinc-500">{t("externalApi.codexNotes")}</p>
+                    </>
+                ) : (
+                    <p className="mt-2 text-xs text-zinc-500">{t("externalApi.codingToolNoModels")}</p>
+                )}
+            </div>
+
+            <div className={card} data-testid="external-api-tool-cursor">
+                <h3 className="text-sm font-bold">{t("externalApi.cursorTitle")}</h3>
+                <p className="mt-1 text-xs text-zinc-500">{t("externalApi.cursorHint")}</p>
+                {cursor ? (
+                    <>
+                        <ToolModelSelect models={lists.cursor} value={cursor.id} onChange={setCursorId} testId="external-api-cursor-model" />
+                        <CopyBlock label={t("externalApi.cursorTitle")} value={cursorConfig(baseUrl, cursor)} testId="external-api-cursor-config" />
+                        <p className="mt-2 text-xs text-zinc-500">{t("externalApi.cursorNotes")}</p>
+                    </>
+                ) : (
+                    <p className="mt-2 text-xs text-zinc-500">{t("externalApi.codingToolNoModels")}</p>
+                )}
+            </div>
+
+            <h3 className="mt-4 text-sm font-bold">{t("externalApi.toolErrorsTitle")}</h3>
+            <p className="mt-1 text-xs leading-5 text-zinc-500">{t("externalApi.toolErrors")}</p>
+        </section>
+    );
+}
+
 function KeyUsage({ keyId }: { keyId: string }) {
     const { t } = useLanguage();
     const [rows, setRows] = useState<RequestRow[] | null>(null);
@@ -138,7 +254,10 @@ function KeyUsage({ keyId }: { keyId: string }) {
             {rows.map((row) => (
                 <li key={row.requestId} className="py-2">
                     <div className="flex flex-wrap justify-between gap-2">
-                        <span className="font-semibold">{row.modelId}</span>
+                        <span className="font-semibold">
+                            {row.modelId}
+                            {row.protocol ? <span className="ml-2 font-normal text-zinc-500">{PROTOCOL_LABEL[row.protocol] ?? row.protocol}</span> : null}
+                        </span>
                         <span className="text-zinc-500">{new Date(row.createdAt).toLocaleString()}</span>
                     </div>
                     <div className="mt-0.5 flex flex-wrap gap-x-3 text-zinc-500">
@@ -559,6 +678,8 @@ export function ExternalApiSettings() {
                         <CopyBlock label={`${t("externalApi.vscodeTitle")} — ${t("externalApi.vscodeHint")}`} value={JSON.stringify(vscodeCustomEndpointConfig(overview.baseUrl, configModels), null, 2)} testId="external-api-vscode-config" />
                         <CopyBlock label={`${t("externalApi.genericTitle")} — ${t("externalApi.genericHint")}`} value={genericConfig(overview.baseUrl, configModels[0]?.id ?? SMART_ADAPTIVE_MODEL_ID)} testId="external-api-generic-config" />
                     </section>
+
+                    <CodingToolsSection baseUrl={overview.baseUrl} models={overview.models} />
                 </>
             ) : null}
         </div>

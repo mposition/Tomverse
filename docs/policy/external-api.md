@@ -4,14 +4,24 @@ Status: implemented, default off. Live activation, paid smoke tests and the
 production migration are separate, approved steps (section 9).
 
 The API lets an account use its existing Tomverse models and credits from
-coding tools that speak the OpenAI Chat Completions protocol: Aside (Custom
-Provider, Pi `openai-completions`) and VS Code (Custom Endpoint,
-`chat-completions`). It is a stateless inference gateway. It is not a
-Tomverse agent, not a tool runner and not a separate billing product.
+coding tools. Three wire protocols, one key, one ledger:
+
+- **OpenAI Chat Completions** (`/api/v1/chat/completions`): Aside (Custom
+  Provider, Pi `openai-completions`), VS Code (Custom Endpoint,
+  `chat-completions`) and Cursor (OpenAI base-URL override).
+- **Anthropic Messages** (`/api/anthropic/v1/messages`): Claude Code, CLI and
+  the official VS Code extension (section 10).
+- **OpenAI Responses** (`/api/v1/responses`): Codex, CLI and the official VS
+  Code extension (section 10).
+
+It is a stateless inference gateway. It is not a Tomverse agent, not a tool
+runner and not a separate billing product. The coding tool runs its own agent
+on the person's computer; Tomverse answers each model step.
 
 ## 1. What one request is
 
-- One `POST /api/v1/chat/completions` is one provider generation. The server
+- One generation request (`POST /api/v1/chat/completions`,
+  `/api/v1/responses` or `/api/anthropic/v1/messages`) is one provider generation. The server
   never executes a client tool and never loops. A tool call goes back to the
   client; the client's next request carrying the tool result is a new request
   with its own reservation and receipt.
@@ -37,6 +47,8 @@ All default off. Server-side; hiding UI is never the gate.
 | `EXTERNAL_API_HEARTBEAT_MS` | How often an in-flight request renews its concurrency slot and reservation, default 60 000. Runs from dispatch, including the wait for a streaming request's first part. Lowered only by tests. |
 | `EXTERNAL_API_READS_PER_MINUTE` / `_PER_DAY` | Separate per-account budget for `GET /models` and `GET /usage`, defaults 60 / 5 000. The settings read routes (key list, receipts) have a fixed 60 / 5 000; revocation has none, so it always works. |
 | `EXTERNAL_API_TIMEOUT_MS` | Server timeout for one generation, default 600 000. |
+| `EXTERNAL_API_ANTHROPIC_ENABLED` | Exactly `true` (and `EXTERNAL_API_ENABLED`) turns on the Anthropic Messages routes for Claude Code: `POST /api/anthropic/v1/messages`, its `count_tokens` and `GET /api/anthropic/v1/models`. Off: 503 `feature_unavailable`, nothing dispatched. |
+| `EXTERNAL_API_RESPONSES_ENABLED` | Exactly `true` (and `EXTERNAL_API_ENABLED`) turns on `POST /api/v1/responses` for Codex. Off: 503, nothing dispatched. |
 | `EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED` | Exactly `true` lets Smart Adaptive (section 5.1) ask Chat's router model which candidate answers. Off by default, because each routed request adds one router call, held against the provider operational budget rather than the user's credits. Off, `smart-adaptive` still works and every request goes to the default model. |
 
 **Kill switch.** The Admin operational pause for AI chat
@@ -251,8 +263,10 @@ catalogue, so a customer never has to recopy it.
 
 `ExternalApiKey`: name, prefix, digest, cap, expiry, revocation, last use.
 `ExternalApiRequest`: the link from a key to its reservation, model, whether
-it streamed, the client user agent, finish reason, error code, timestamps,
-and digests of the body and Idempotency-Key. No prompt, output, tool argument,
+it streamed, the wire protocol (`chat_completions`, `anthropic_messages` or
+`responses`; migration `20261118160000_external_api_request_protocol`, rows
+from before it read as Chat Completions), the client user agent, finish reason,
+error code, timestamps, and digests of the body and Idempotency-Key. No prompt, output, tool argument,
 image or key material is stored or logged. Every credit and token figure lives
 on the shared reservation.
 
@@ -267,8 +281,8 @@ every Chat reservation does.
 Smart Adaptive alone by default, plus any model the person ticks to pin it. The
 key appears only in the configuration shown right after creation. Any other app
 that takes a custom OpenAI Chat Completions endpoint needs only the three values
-the page also shows: base URL, key and model (`smart-adaptive`). A client that
-speaks only OpenAI's Responses API is not supported.
+the page also shows: base URL, key and model (`smart-adaptive`). Claude Code,
+Codex and Cursor have their own section on the page (section 10.4).
 
 - **Aside:** add a Custom Provider and paste the JSON: provider `tomverse`,
   `api: "openai-completions"`, `baseUrl`, `apiKey`, `authHeader: true`, and per
@@ -291,8 +305,10 @@ Both clients have been verified against this API (section 9).
 ## 8. Operations
 
 **Enable for a test account (after the approvals in section 9):** apply the
-migration `20261117150000_external_api_keys`, set `EXTERNAL_API_ALLOWED_USER_IDS` to the test account,
-`EXTERNAL_API_ENABLED=true`, deploy, then create a key at `/settings/api`.
+migrations `20261117150000_external_api_keys` and
+`20261118160000_external_api_request_protocol`, set `EXTERNAL_API_ALLOWED_USER_IDS` to the test account,
+`EXTERNAL_API_ENABLED=true` (and `EXTERNAL_API_ANTHROPIC_ENABLED` / `EXTERNAL_API_RESPONSES_ENABLED`
+for Claude Code / Codex), deploy, then create a key at `/settings/api`.
 
 **Observe.** Reservations: `source = 'external_api'` in `ChatCreditReservation`
 (Admin usage analytics already groups by source). Receipts: `ExternalApiRequest`
@@ -348,4 +364,128 @@ Not yet done, each a separate step:
   sooner and the turn takes its deterministic fallback; watch
   `chat_auto_llm_router_skipped` with `reason: provider_budget`.
   Not yet re-run live.
+- Claude Code and Codex with a real model (section 10.5): paid runs, approved
+  separately. Cursor needs a public HTTPS deployment, because Cursor sends the
+  requests from its own servers.
 - Production migration, merge and deployment.
+
+## 10. Native protocols (Claude Code, Codex)
+
+Claude Code speaks Anthropic Messages and Codex speaks OpenAI Responses; both
+keep state the model signed or encrypted (thinking signatures, encrypted
+reasoning) and pair request headers with body fields. A translation layer
+would break that state and fall behind each client release, so these routes
+**pass the client's body through** after deterministic checks, and relay the
+provider's stream byte for byte while reading it for usage. The lifecycle is
+the Chat Completions one (`lib/externalApiNative.ts`): the same key, rate
+bucket, `createChatBudget` → `acquireChatAccess` + `externalApiAdmissionHook`
+→ one dispatch → `settleChatUsage`, exactly once.
+
+### 10.1 What changes and what is refused
+
+Changed in the body: the model id becomes the provider's; the output limit
+(`max_tokens`, `max_output_tokens`) becomes the one the reservation prices --
+the client's own number when it is within the model's limit, the model's limit
+when the client asks for more or (Responses) sends none; Responses always gets
+`store: false`. A clamped limit is named in `x-tomverse-output-limit`.
+
+Refused before dispatch, with nothing held (`lib/anthropicMessagesProtocol.ts`,
+`lib/openAiResponsesProtocol.ts`):
+
+- tools the provider runs and bills itself: Anthropic server tools (web search,
+  web fetch, code execution, ...) and Responses hosted tools (web search, file
+  search, code interpreter, image generation, remote MCP); remote MCP servers
+  and containers. Client-executed tools pass: function, custom/freeform
+  (Codex's `apply_patch`, `exec`), namespaces of them, local shell, and
+  Anthropic's `bash`/`text_editor`/`computer` client tools;
+- content the provider would fetch (image or document URLs) and Files API ids,
+  which would read Tomverse's own provider account;
+- a prompt-cache TTL other than 5 minutes (the premium reserved is the
+  5-minute one), `speed` other than standard, premium `service_tier`s;
+- stored or server-side state: `previous_response_id`, `conversation`,
+  stored `prompt`, `background`, `item_reference`;
+- Smart Adaptive and models of another provider: a native request stays on
+  the model that produced its state. The model list per protocol is the same
+  runtime registry, plan and credential filter as `/models`, narrowed by
+  provider (`protocols` on each `/models` entry). A Responses request may
+  name the provider's model id (`gpt-5.6-luna`) when it maps to exactly one
+  offered model; Codex picks its patch tool by it.
+
+`anthropic-beta` is forwarded unchanged (filtering one half of a header/body
+pair yields a provider 400); the cost-bearing features are checked in the body.
+The client's Tomverse key never goes upstream: the provider URL and credential
+are the deployment's own (`lib/externalApiNativeUpstream.ts`, no redirects).
+
+### 10.2 Money
+
+- One generation request, one reservation, one receipt -- a coding task is
+  many requests, and so are compaction summaries.
+- Input estimate: every string and object key of the body (tool schemas are
+  mostly keys), images by measured size plus the flat allowance, opaque
+  signatures and encrypted state at bytes/4. Output: the limit above, reserved
+  in full.
+- Anthropic usage is cumulative across `message_start` and `message_delta`;
+  the ledger's input is uncached + cache read + cache write. A request carrying
+  a client `cache_control` marker reserves the 5-minute write premium
+  (caching path `external_api_messages`, `lib/anthropicPromptCaching.ts`) and
+  settles writes at the write rate. Responses usage: `input_tokens` includes
+  cached tokens, output includes reasoning.
+- Settlement follows section 4: provider usage when reported; zero when the
+  provider refused with a 4xx (not 408) or no credential existed; a cancelled
+  stream estimated from what it produced; otherwise the reservation estimate.
+  A stream that ends without its terminal event (`message_stop`,
+  `response.completed`/`incomplete`) is a failure and gets a protocol-native
+  `error` event, never a clean finish.
+- The provider's own 400 message is kept (Claude Code and Codex recover from
+  specific ones); anything naming Tomverse's provider account, limits or
+  availability is replaced, and provider rate-limit headers are not relayed.
+- Idempotency: one `(key, Idempotency-Key)` across all protocols. Native
+  request digests are prefixed with the protocol, so a key reused on another
+  endpoint is a 422 conflict; Chat Completions digests are unchanged.
+- `count_tokens` is free at Anthropic: rate limited as a read, no reservation.
+
+### 10.3 Compaction and resume
+
+Both clients compact locally: the summary is an ordinary generation request,
+reserved and settled like any other. Codex treats a custom provider's remote
+compaction as unsupported (`capabilities.remote_compaction` default), so no
+`/responses/compact` endpoint exists. Resume replays the client's own history.
+
+### 10.4 Client configuration (`lib/externalApiCodingTools.ts`)
+
+- **Claude Code:** `ANTHROPIC_BASE_URL=https://<host>/api/anthropic` (the client
+  adds `/v1/messages`), `ANTHROPIC_AUTH_TOKEN=<key>` (`x-api-key` is accepted
+  too), every model alias (`ANTHROPIC_MODEL`, `ANTHROPIC_DEFAULT_OPUS/SONNET/HAIKU_MODEL`,
+  `CLAUDE_CODE_SUBAGENT_MODEL`) pinned to offered models,
+  `CLAUDE_CODE_MAX_OUTPUT_TOKENS`, `CLAUDE_CODE_AUTO_COMPACT_WINDOW` below the
+  account input limit, `FORCE_PROMPT_CACHING_5M=1`,
+  `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`. Terminal: per-session variables.
+  VS Code: `claudeCode.environmentVariables` + `claudeCode.disableLoginPrompt`.
+- **Codex:** `[model_providers.tomverse]` in `~/.codex/config.toml`
+  (`wire_api = "responses"`, `env_key = "TOMVERSE_API_KEY"`, request and stream
+  retries 0, `supports_websockets = false`) and a profile file
+  `~/.codex/tomverse.config.toml` (`model_provider`, `model`,
+  `web_search = "disabled"`, `model_context_window`,
+  `model_auto_compact_token_limit`) selected with `codex --profile tomverse`;
+  without it the person's own account is untouched. The page also gives the
+  top-level form for a tool that reads `config.toml` only.
+- **Cursor:** OpenAI API key + base-URL override + a fixed custom model, on the
+  Chat Completions route. Cursor's backend makes the calls, so only a public
+  HTTPS deployment works; Tab, Cursor's own models and cloud agents never use
+  the key.
+
+### 10.5 Verification
+
+Verified 2026-11-18 on Windows 10 against this code, a migrated local database
+and a scripted fake provider (no paid call): Claude Code 2.1.278 CLI read a
+file, edited it, ran the test, compacted, and resumed the compacted session for
+a follow-up; a refused approval left the file unchanged; Codex 0.146.0 CLI
+applied a freeform patch inside `exec`, ran the test, compacted locally
+mid-task and resumed; after revocation both got 401 with nothing dispatched;
+every reservation was settled (none left held, including a 439-request burst
+stopped by the rate guard). Automated: `npm run test:external-api`,
+`npm run test:external-api-db` (`tests/integration/external-api-native.db.test.mjs`).
+
+Not yet verified, each a separate step: either client with a real model (paid),
+the official VS Code extensions of both, Cursor Chat and Agent (needs public
+HTTPS), and other operating systems.

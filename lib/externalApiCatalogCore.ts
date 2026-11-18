@@ -62,6 +62,11 @@ export type ExternalApiModelCapabilities = {
      * or encrypted model state is never translated between providers.
      */
     protocols: ExternalApiProtocol[];
+    /**
+     * The provider's own model id, for a client that keys behaviour on it
+     * (Codex picks its patch tool by model). Absent for Smart Adaptive.
+     */
+    providerModelId?: string;
 };
 
 export const externalApiModelCapabilities = (
@@ -83,6 +88,7 @@ export const externalApiModelCapabilities = (
     maxOutputTokens: limits.maxOutputTokens,
     creditWeight: limits.creditWeight,
     protocols: protocolsForProvider(model.provider),
+    providerModelId: model.apiModel,
 });
 
 /**
