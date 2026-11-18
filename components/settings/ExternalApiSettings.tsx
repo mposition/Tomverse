@@ -241,7 +241,7 @@ function KeyRow({ entry, onChanged, revokeOnly = false }: { entry: KeySummary; o
                     onSubmit={(event) => {
                         event.preventDefault();
                         if (editing === "name") void patch({ name: draft });
-                        else void patch({ creditCap: draft.trim() === "" ? null : Number(draft) });
+                        else if (/^[0-9]*$/.test(draft)) void patch({ creditCap: draft === "" ? null : Number(draft) });
                     }}
                 >
                     <input
@@ -249,7 +249,11 @@ function KeyRow({ entry, onChanged, revokeOnly = false }: { entry: KeySummary; o
                         aria-label={editing === "name" ? t("externalApi.nameLabel") : t("externalApi.capLabel")}
                         inputMode={editing === "cap" ? "numeric" : undefined}
                         value={draft}
-                        onChange={(event) => setDraft(event.target.value)}
+                        // The limit field keeps digits only, like the create form: an
+                        // empty field means "no limit", so nothing else may reach it.
+                        onChange={(event) =>
+                            setDraft(editing === "cap" ? event.target.value.replace(/[^0-9]/g, "") : event.target.value)
+                        }
                         className="min-w-0 flex-1 rounded-lg border border-zinc-300 bg-white px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900"
                     />
                     <button type="submit" className="rounded-lg bg-zinc-900 px-3 py-1 text-xs font-semibold text-white dark:bg-zinc-100 dark:text-zinc-900">

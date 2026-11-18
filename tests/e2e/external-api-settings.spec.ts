@@ -161,6 +161,11 @@ test("API keys: create shows the secret once with a ready config, then revoke @u
     await row.getByRole("button", { name: "저장" }).click();
     await expect(row).toContainText("집 데스크톱");
     await row.getByRole("button", { name: "한도 변경" }).click();
+    // Only digits reach the limit field; "abc" can never turn into "no limit".
+    await row.getByRole("textbox").fill("abc");
+    await expect(row.getByRole("textbox")).toHaveValue("");
+    await row.getByRole("textbox").fill("3x0");
+    await expect(row.getByRole("textbox")).toHaveValue("30");
     await row.getByRole("textbox").fill("");
     await row.getByRole("button", { name: "저장" }).click();
     await expect(row).toContainText("키 한도 없음");
