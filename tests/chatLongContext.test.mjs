@@ -193,6 +193,8 @@ test("one message may be as long as the largest model window holds", () => {
         "app/api/conversations/[conversationId]/messages/route.ts",
         "lib/chatComposerDraftCore.ts",
         "lib/chatDraftMessageConsume.ts",
+        // A guest message the chat accepted can be moved into the account.
+        "app/api/conversations/import-guest/route.ts",
     ]) {
         const text = read(path);
         assert.match(text, /CHAT_MAX_MESSAGE_CHARACTERS/, path);
@@ -205,6 +207,7 @@ test("one message may be as long as the largest model window holds", () => {
         "app/api/conversations/[conversationId]/messages/route.ts",
         "app/api/conversations/[conversationId]/messages/receipt/route.ts",
         "app/api/products/chat/drafts/[scopeKey]/route.ts",
+        "app/api/conversations/import-guest/route.ts",
     ]) {
         assert.match(read(path), /readLimitedJson\([\s\S]{0,40}CHAT_MAX_MESSAGE_BODY_BYTES/, path);
     }
