@@ -52,7 +52,7 @@ export type Receipt = {
     usage: { inputTokens: number; cachedInputTokens: number; cacheWriteInputTokens: number; outputTokens: number } | null;
 };
 
-export type GatewayErrorKind = "http" | "network" | "tls" | "timeout" | "redirect" | "protocol" | "aborted";
+export type GatewayErrorKind = "http" | "network" | "tls" | "timeout" | "redirect" | "protocol" | "aborted" | "limit";
 
 export class GatewayError extends Error {
     constructor(

@@ -586,8 +586,9 @@ output contract are in `apps/tomverse-cli/README.md`.
 - **Local boundary** (the CLI's code, not the server's): approvals bound to the
   exact tool input and file preimages and checked again inside the tool's
   execute, no re-run of a call that started, credential paths and `.git/`
-  never read, a minimal environment for commands without any Tomverse
-  variable, and no approval without a terminal. Commands run with the user's
+  never read, commands get a fixed short list of environment variables (PATH,
+  HOME, temp, locale, …) plus names the user adds, never a Tomverse one, and no
+  approval without a terminal. Commands run with the user's
   own permissions; the CLI does not claim a sandbox.
 - **Smart Adaptive.** The first answer's `x-tomverse-routed-model` is pinned for
   the session before any tool of that answer runs; later requests name it.

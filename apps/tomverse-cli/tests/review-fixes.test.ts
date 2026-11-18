@@ -13,7 +13,9 @@ import { planPatch, PatchError } from "../src/patch.js";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, writeFileSync } from "node:fs";
 import { TEST_KEY } from "./fakeGateway.js";
-import { Journal } from "../src/session.js";
+import { Journal, writeFileAtomic } from "../src/session.js";
+import { Gateway } from "../src/gateway.js";
+import { captureOutput } from "./helpers.js";
 import { Runner, findCompactionCut } from "../src/agent.js";
 import { renderFileDiff, safeText } from "../src/display.js";
 import { canonicalDigest } from "../src/session.js";
@@ -496,3 +498,42 @@ test("a command shows each real line separately and cannot carry characters that
     const argv = planCommand({ argv: [process.execPath, "-e", "a\nb", "c\\nd"] }, cwd, 10_000);
     assert.ok(argv.display.includes('"a\\nb"') && argv.display.includes('"c\\\\nd"'), argv.display);
 });
+test("the checkpoint that first holds an approval request already lists it as pending", () =>
+    withGateway(
+        () => ({ toolCalls: [{ name: "run_command", args: { argv: [process.execPath, "-e", "1"] } }] }),
+        async (gateway) => {
+            const writes: any[] = [];
+            const home = tempDir("home");
+            const root = makeRepo();
+            const endpoint = { base: gateway.base, origin: new URL(gateway.base).origin, basePath: "/api/v1" };
+            const client = new Gateway(endpoint, TEST_KEY);
+            const catalog = await client.models();
+            const journal = Journal.create(
+                home,
+                { workspace: { root }, endpointOrigin: endpoint.origin, keyPrefix: TEST_KEY.slice(0, 12), readOnly: false, model: { requested: "fake-coder", pinned: "fake-coder", pinnedFrom: "user", contextWindowTokens: 200000, maxOutputTokens: 8000 }, limits: { maxRequests: 20, timeoutMs: 900000, commandTimeoutMs: 120000 } },
+                {
+                    writeFileAtomic: (path, data) => {
+                        if (path.endsWith("session.json")) writes.push(JSON.parse(String(data)));
+                        writeFileAtomic(path, data);
+                    },
+                }
+            );
+            const runner = new Runner({ gateway: client, journal, workspace: new Workspace(root), output: captureOutput().output, prompter: null, catalog, commandEnv: [], instructions: null });
+            assert.equal(await runner.runTask("run it"), "needs_approval");
+            const first = writes.find((state) => JSON.stringify(state.messages).includes("tool-approval-request"));
+            assert.ok(first, "an approval request was saved");
+            assert.equal(first.pendingApprovals.length, 1, "in the same checkpoint");
+            journal.release();
+        }
+    ));
+
+test("a request limit reached on the resend path reports limit_reached, not an error", () =>
+    withGateway(
+        () => ({ fault: "drop_before_headers" }),
+        async (gateway) => {
+            const { runner, journal } = await makeRunner(gateway, makeRepo(), { prompter: scriptedPrompter([true, false]), maxRequests: 1 });
+            assert.equal(await runner.runTask("Hi"), "limit_reached");
+            assert.equal(gateway.completions.length, 1);
+            assert.equal(journal.state.status, "limit_reached");
+        }
+    ));

@@ -479,5 +479,14 @@ export const deleteSession = (home: string, id: string) => {
             throw new SessionLockedError(`Session ${id} is open in another tomverse process.`);
         }
     }
+    // Take the lock ourselves before removing, so no process opens it meanwhile.
+    try {
+        if (existsSync(lock)) unlinkSync(lock);
+        const fd = openSync(lock, "wx", 0o600);
+        writeSync(fd, JSON.stringify({ pid: process.pid, host: hostname(), at: now(), deleting: true }));
+        closeSync(fd);
+    } catch {
+        throw new SessionLockedError(`Session ${id} was just opened by another tomverse process.`);
+    }
     rmSync(dir, { recursive: true, force: true });
 };

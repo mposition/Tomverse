@@ -223,7 +223,7 @@ export class Runner {
             before: async () => {
                 const task = this.currentTask();
                 if (task.requests >= task.allowance) {
-                    throw new GatewayError("protocol", "The request limit for this task is reached; nothing was sent.");
+                    throw new GatewayError("limit", "The request limit for this task is reached; nothing was sent.");
                 }
                 const record = journal.newGeneration(purpose, first ? resendOf : undefined);
                 first = false;
@@ -448,6 +448,9 @@ export class Runner {
         journal.state.messages.push(...responseMessages);
         // The answer is in the history in the same checkpoint that closes its request.
         journal.closeGenerations(journal.state.generations.slice(before));
+        // The approvals this answer asks for go into the same checkpoint as the
+        // answer itself, so a crash in between cannot lose them.
+        if (pending.length) journal.state.pendingApprovals = pending;
         journal.commit();
         if (pending.length) return { kind: "approvals", pending };
         if (finishReason === "tool-calls") return { kind: "continue" };
@@ -474,6 +477,10 @@ export class Runner {
                 return { kind: "stop" as const, outcome: "unknown_outcome" as const, message };
             }
             return { kind: "stop" as const, outcome: "error" as const, message };
+        }
+        if (!record && (gatewayError?.kind === "limit" || /request limit for this task/.test(message))) {
+            options.output.info(message);
+            return { kind: "stop" as const, outcome: "limit_reached" as const, message };
         }
         if (!record) {
             options.output.info(`Stopped: ${message}`);
