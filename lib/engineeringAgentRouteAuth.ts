@@ -19,7 +19,8 @@ import { createHash, timingSafeEqual } from "node:crypto";
 
 import { ApiSecurityError } from "@/lib/apiSecurity";
 import {
-  ENGINEERING_AGENT_PATCH_BODY_MAX_BYTES,
+  ENGINEERING_AGENT_LEGACY_INLINE_PATCH_MAX_BYTES,
+  ENGINEERING_AGENT_PATCH_CHUNK_BYTES,
   EngineeringAgentStoreRefusedError,
   acceptEngineeringAgentRequest,
   moveEngineeringAgentRequest,
@@ -59,14 +60,18 @@ export const isEngineeringAgentRouteAuthorized = (
 };
 
 /**
- * Larger than the widest answer any route gives: a claim carries a patch of up
- * to ENGINEERING_AGENT_PATCH_BODY_MAX_BYTES, and JSON writes each control
- * character as six bytes, so that patch alone can serialise to six times its
- * size. The idempotent runners also measure their result inside the work
- * transaction, so an answer that cannot be sent is rolled back, not committed.
+ * Larger than the widest answer any route gives. An inline claim carries a
+ * patch of up to ENGINEERING_AGENT_LEGACY_INLINE_PATCH_MAX_BYTES, and JSON
+ * writes each control character as six bytes, so that patch alone can
+ * serialise to six times its size; a larger patch is never inline but read in
+ * chunks, one base64 chunk to an answer (publish/patch). It bounds an answer,
+ * never a patch. The idempotent runners also measure their result inside the
+ * work transaction, so an answer that cannot be sent is rolled back, not
+ * committed.
  */
 export const ENGINEERING_AGENT_RESPONSE_MAX_BYTES =
-  6 * ENGINEERING_AGENT_PATCH_BODY_MAX_BYTES + 64 * 1024;
+  Math.max(6 * ENGINEERING_AGENT_LEGACY_INLINE_PATCH_MAX_BYTES,
+    Math.ceil(ENGINEERING_AGENT_PATCH_CHUNK_BYTES / 3) * 4) + 64 * 1024;
 
 const serializedBytes = (body: unknown) =>
   Buffer.byteLength(

@@ -93,8 +93,10 @@ const SOURCE_SCOPE_REVIEWED_FILES = [
   "lib/amux/ideaSubmissionCore.ts",
   "lib/amux/intakeLimitsCore.ts",
   "lib/amux/localIntakeCore.ts",
-  "lib/amux/v22LocalCliFlowCore.ts",
 ].sort();
+// The v22 result transfer (2026-11-18) drops the size bound ideaCrypto
+// read from v22LocalCliFlowCore, so that module leaves the closure: one file
+// fewer, no new import, writer or outbound call.
 // localIntakeCore now imports intakeLimitsCore and v22LocalCliFlowCore (pure
 // modules: an env read and randomBytes, no writer or outbound call), so the
 // closure is 15 files. The digest pin is retired like the resolution preview's:
@@ -138,8 +140,10 @@ const RESOLUTION_PREVIEW_REVIEWED_FILES = [
   "lib/amux/ideaResolutionPreviewService.ts",
   "lib/amux/intakeLimitsCore.ts",
   "lib/amux/localIntakeCore.ts",
-  "lib/amux/v22LocalCliFlowCore.ts",
 ].sort();
+// The v22 result transfer (2026-11-18) drops the size bound ideaCrypto
+// read from v22LocalCliFlowCore, so that module leaves the closure: one file
+// fewer, no new import, writer or outbound call.
 // The owner-resolved readback remains read-only. Its two changed reader modules
 // were accepted in r-20261008-135430-282645; the operator waived the unavailable
 // Cursor retry on 2026-10-09. The closure and its mutation checks stay unchanged.

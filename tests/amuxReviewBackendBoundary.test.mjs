@@ -66,11 +66,13 @@ test("retry is bounded, planning correction is revision-proven, and approval nee
   assert.match(service, /review_pr_number: artifact\?\.prNumber \?\? null/);
   assert.match(service, /review_base_sha: artifact\?\.baseSha \?\? null/);
   assert.match(service, /review_head_sha: artifact\?\.headSha \?\? null/);
-  assert.match(service, /review_diff_digest: artifact\?\.diffDigest \?\? null/);
-  assert.match(service, /input\.outcome === "approve" \? state\.artifact\?\.diffDigest \?\? null : null/);
+  // The approval binds the v2 change digest (owner decision 2026-11-18); a proposal prepared
+  // before it is compared in its own version, v1 against the diff shown.
+  assert.match(service, /review_diff_digest: artifact\?\.changeDigest \?\? null/);
+  assert.match(service, /input\.outcome === "approve" \? state\.artifact\?\.changeDigest \?\? null : null/);
   assert.match(service, /proposal\.reviewHeadSha !== \(state\.artifact\?\.headSha \?\? null\)/);
   assert.match(service, /proposal\.reviewBaseSha !== \(state\.artifact\?\.baseSha \?\? null\)/);
-  assert.match(service, /proposal\.reviewDiffDigest !== \(state\.artifact\?\.diffDigest \?\? null\)/);
+  assert.match(service, /\(proposal\.reviewDiffDigest === null \? state\.artifact !== null :\s*state\.artifact === null \|\| !pullDigestHolds\(proposal\.reviewDiffDigest, state\.artifact\)\)/);
 });
 
 test("proposal preallocates decision identity and status lookup never reports an uncommitted failure", () => {

@@ -16,7 +16,8 @@ import {
 } from "@/lib/amux/dmT2MergeRead";
 import { CI_ADMISSION_HOLD_LABEL, type CiAdmissionPull } from "@/lib/ciAdmissionCore";
 import type { CiAdmissionGithub } from "@/lib/ciAdmissionGithub";
-import { readEngineeringAgentPullChange } from "@/lib/engineeringAgentGitHubRead";
+import { readEngineeringAgentPullChange, type EngineeringAgentPullDigestOptions } from "@/lib/engineeringAgentGitHubRead";
+import { pullDigestHolds, pullDigestVersion } from "@/lib/pullDiffDigestCore";
 import { qaReleaseDmMergeScope } from "@/lib/qaReleaseMergeLaneExclusionCore";
 
 /**
@@ -40,6 +41,10 @@ import { qaReleaseDmMergeScope } from "@/lib/qaReleaseMergeLaneExclusionCore";
 
 export const AMUX_DM_T2_MERGE_READY_ACTION = "amux.dm_t2_merge.ready_requested";
 type Env = Readonly<Record<string, string | undefined>>;
+
+/** An approval recorded before v2 is compared in v1, so only then is the pull request's diff read. */
+const legacyDiffFor = (approvedDiffDigest: string): EngineeringAgentPullDigestOptions =>
+  ({ legacyDiff: pullDigestVersion(approvedDiffDigest) === 1 });
 
 /** The whole text of some files at one commit (lib/amux/dmT2MergeFileRead.ts), loaded only when a change needs it. */
 type AmuxDmT2MergeFilesRead = (headSha: string, paths: readonly string[]) => Promise<ReadonlyMap<string, string | null>>;
@@ -100,9 +105,11 @@ export async function readAmuxDmT2MergeHolding(tx: Prisma.TransactionClient, inp
  * The merge lane's consume of an instruction, in its own transaction, right
  * before the merge: an engineering agent pull request is let through only
  * while its Decision Maker approval still holds (readAmuxDmT2MergeHolding) at
- * exactly the head the lane will merge, into develop, and only when the diff
- * digest the lane read from GitHub right before is the approved one (a merge
- * base that moved with develop changes it at the same head). The stored
+ * exactly the head the lane will merge, into develop, and only when the
+ * digest the lane read from GitHub right before is the approved one, in the
+ * approval's own version (lib/pullDiffDigestCore.ts: v2 `changeDigest`, v1
+ * `diffDigest`; a merge base that moved with develop changes either at the
+ * same head). The stored
  * patch must still pass the app's merge scope (amuxDmT2MergePatchGate: its
  * paths, and in the block list scope its lines): the lane judges paths in the
  * block list scope whatever the app's switch says, so with the kill switch on
@@ -110,7 +117,7 @@ export async function readAmuxDmT2MergeHolding(tx: Prisma.TransactionClient, inp
  * `not_engineering`: the lane's own rules decide it. At most three statements.
  */
 export async function amuxDmT2MergeConsumeAllowed(tx: Prisma.TransactionClient, input: {
-  prNumber: number; headSha: string; base: string; diffDigest: string | null; env?: Env;
+  prNumber: number; headSha: string; base: string; diffDigest: string | null; changeDigest?: string | null; env?: Env;
 }): Promise<"not_engineering" | "allowed" | "dm_approval_not_holding" | "dm_diff_changed"> {
   if (!(await readAmuxDmT2MergeIsEngineeringPull(tx, input.prNumber))) return "not_engineering";
   if (input.base !== "develop") return "dm_approval_not_holding";
@@ -118,7 +125,7 @@ export async function amuxDmT2MergeConsumeAllowed(tx: Prisma.TransactionClient, 
   const [held] = await readAmuxDmT2MergeHolding(tx, { env, limit: 1, prNumbers: [input.prNumber] });
   if (held === undefined || held.approvedHeadSha !== input.headSha) return "dm_approval_not_holding";
   if (!amuxDmT2MergePatchGate(held.patchBody, qaReleaseDmMergeScope(env)).pass) return "dm_approval_not_holding";
-  return input.diffDigest === held.approvedDiffDigest ? "allowed" : "dm_diff_changed";
+  return pullDigestHolds(held.approvedDiffDigest, input) ? "allowed" : "dm_diff_changed";
 }
 
 /**
@@ -136,7 +143,7 @@ export async function amuxDmT2MergeConsumeAllowed(tx: Prisma.TransactionClient, 
  * off or the kill switch is not off.
  */
 export async function readAmuxDmT2MergeLanePulls(env: Env = process.env, deps: {
-  change?: (prNumber: number) => Promise<AmuxDmT2MergeChangeNow>;
+  change?: (prNumber: number, options?: EngineeringAgentPullDigestOptions) => Promise<AmuxDmT2MergeChangeNow>;
   files?: AmuxDmT2MergeFilesRead;
 } = {}) {
   if (!amuxDmT2MergeEnabled(env)) return [];
@@ -146,8 +153,9 @@ export async function readAmuxDmT2MergeLanePulls(env: Env = process.env, deps: {
     return next ?? null;
   });
   if (!row) return [];
-  const change = deps.change ?? ((prNumber: number) => readEngineeringAgentPullChange(prNumber));
-  const now = await change(row.prNumber).catch(() => null);
+  const change = deps.change ?? ((prNumber: number, options?: EngineeringAgentPullDigestOptions) =>
+    readEngineeringAgentPullChange(prNumber, {}, options));
+  const now = await change(row.prNumber, legacyDiffFor(row.approvedDiffDigest)).catch(() => null);
   if (now === null) return [];
   const files = await filesForChange(now, row.approvedHeadSha, env, deps.files ?? readFilesAtHead);
   const held = amuxDmT2MergeChangeVerdict({ change: now, approved: { prNumber: row.prNumber,
@@ -176,8 +184,8 @@ export async function readAmuxDmT2MergeEvidence(input: {
 export type AmuxDmT2MergeReadyPorts = {
   /** The pull request as CI admission's App reads it now; null when there is none. */
   pull: (prNumber: number) => Promise<{ pull: CiAdmissionPull; open: boolean } | null>;
-  /** Its change as the engineering agent's read-only token reads it now. */
-  change: (prNumber: number) => Promise<AmuxDmT2MergeChangeNow>;
+  /** Its change as the engineering agent's read-only token reads it now; the v1 diff too for a v1 approval. */
+  change: (prNumber: number, options?: EngineeringAgentPullDigestOptions) => Promise<AmuxDmT2MergeChangeNow>;
   /** CI admission's App's write: draft to ready. */
   markReady: (pull: CiAdmissionPull) => Promise<void>;
   /** The whole text of files at the approved head, for the block list scope; the engineering read token's by default. */
@@ -186,7 +194,7 @@ export type AmuxDmT2MergeReadyPorts = {
 
 export const amuxDmT2MergeReadyPorts = (github: Pick<CiAdmissionGithub, "pull" | "markReady">): AmuxDmT2MergeReadyPorts => ({
   pull: (prNumber) => github.pull(prNumber),
-  change: (prNumber) => readEngineeringAgentPullChange(prNumber),
+  change: (prNumber, options) => readEngineeringAgentPullChange(prNumber, {}, options),
   markReady: (pull) => github.markReady(pull),
 });
 
@@ -264,7 +272,7 @@ export async function runAmuxDmT2MergeReadyStep(input: {
   let change: AmuxDmT2MergeChangeNow;
   try {
     now = await input.ports.pull(row.prNumber);
-    change = await input.ports.change(row.prNumber);
+    change = await input.ports.change(row.prNumber, legacyDiffFor(row.approvedDiffDigest));
   } catch (error) {
     return { outcome: "skipped", ...at, reason: `unreadable:${failureCode(error)}` };
   }

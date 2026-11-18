@@ -2751,6 +2751,29 @@ domains:
       Its expiry and key retirement do not by themselves decide account
       deletion or unified export; a public develop PR needs separate consent.
 
+  - domain: amuxTaskChangedPaths
+    prismaModel: AmuxV22TaskChangedPaths
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-v22-result-transfer.md 2.3 and 2.6, v22 Task changed-path list account deletion and export gate
+    subjectReference:
+      kind: parent_row
+      parentColumn: ideaId
+      parentModel: AmuxIdeaSubmission
+    inUnifiedExport: unverified
+    note: >-
+      The paths a v22 run changed, encrypted and tied to an operator idea by
+      ideaId; settlement names them by digest. The body expires with the
+      attempt's result, 90 days after the Task ends, and the purge queues the
+      key's deletion. That expiry does not by itself decide account deletion
+      or unified export. The chunked transfer's staging tables hold sealed
+      chunks only until the commit or the retention sweep and are not
+      registered.
+
   - domain: amuxReviewFindings
     prismaModel: AmuxV52ReviewFindings
     userLinkageRole: actor

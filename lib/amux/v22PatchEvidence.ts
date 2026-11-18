@@ -1,15 +1,16 @@
 import { isCanonicalRepoPath } from "@/lib/agentAuthorityFiles";
 import { v22PatchBinaryPayloads } from "@/lib/amux/v22PatchBinary";
-import { AMUX_V22_PATCH_MAX_BYTES } from "@/lib/amux/v22PatchLimit";
+import { AMUX_V22_LEGACY_INLINE_PATCH_MAX_BYTES } from "@/lib/amux/v22PatchLimit";
 import { detectSecrets } from "@/lib/engineeringAgentSecretPatterns";
 import { createHash } from "node:crypto";
 
 export type V22PublishFile = { path: string; mode: "100644";
   bytesBase64: string };
 
-/** The stored evidence, text or JSON: the one patch bound (owner decision
- * 2026-11-15; 64 KiB until then). */
-const MAX_PATCH_BYTES = AMUX_V22_PATCH_MAX_BYTES;
+/** The JSON (files) evidence a sidecar before 2026-11-15 sent keeps the old
+ * inline bound. Text evidence has none of ours (owner decision 2026-11-18,
+ * docs/policy/amux-v22-result-transfer.md): it is the patch itself. */
+const MAX_JSON_EVIDENCE_BYTES = AMUX_V22_LEGACY_INLINE_PATCH_MAX_BYTES;
 const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 const utf8 = new TextDecoder("utf-8", { fatal: true });
 
@@ -27,8 +28,8 @@ type V22PublishFileLimits = Readonly<{ maxFiles: number;
  * rows it left keep their evidence, but bounded only as the evidence is: the
  * candidate rebuilds from the text and reads none of them. */
 export const V22_STORED_FILE_LIMITS: V22PublishFileLimits = Object.freeze({
-  maxFiles: Number.MAX_SAFE_INTEGER, maxFileBytes: MAX_PATCH_BYTES,
-  maxTotalBytes: MAX_PATCH_BYTES });
+  maxFiles: Number.MAX_SAFE_INTEGER, maxFileBytes: MAX_JSON_EVIDENCE_BYTES,
+  maxTotalBytes: MAX_JSON_EVIDENCE_BYTES });
 
 /** Canonical paths and base64, UTF-8 text with no NUL and no secret. Throws
  * `invalid_patch_evidence`; returns copies of the checked fields. */
@@ -86,14 +87,16 @@ export function encodeV22PatchEvidence(text: string,
     throw new Error("invalid_patch_evidence");
   if (!files) {
     const bytes = Buffer.from(text, "utf8");
-    if (bytes.length < 1 || bytes.length > MAX_PATCH_BYTES ||
-        text.includes("\0")) throw new Error("invalid_patch_evidence");
+    if (bytes.length < 1 || text.includes("\0")) {
+      bytes.fill(0);
+      throw new Error("invalid_patch_evidence");
+    }
     return bytes;
   }
   const checked = checkV22PublishFiles(files, V22_STORED_FILE_LIMITS);
   const encoded = Buffer.from(JSON.stringify({ version: 1, text,
     files: checked }), "utf8");
-  if (encoded.length > MAX_PATCH_BYTES) {
+  if (encoded.length > MAX_JSON_EVIDENCE_BYTES) {
     encoded.fill(0);
     throw new Error("invalid_patch_evidence");
   }

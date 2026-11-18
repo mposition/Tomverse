@@ -74,7 +74,7 @@ export const adminEngineeringAgentMessages = defineAdminMessages({
       base_mismatch: "Not judged: the base commit does not have the files the patch changes, as the patch names them.",
       patch_mismatch: "Not judged: the patch does not apply exactly to the base, or does not yield the files it names.",
       secret_detected: "Not judged: a changed file contains what looks like a secret, so it is never published.",
-      patch_over_limit: "Not judged: the patch is larger than the 4 MiB the app can receive.",
+      patch_over_limit: "Not judged yet: an earlier size limit held this patch back. It is judged again.",
       tree_invalid: "Not judged: the resulting tree could not be verified.",
       base_blob_missing:
         "An earlier version could not read this patch (for example a new file). The first tier round after a deploy judges it again.",
@@ -268,7 +268,7 @@ export const adminEngineeringAgentMessages = defineAdminMessages({
       base_mismatch: "판정하지 않음: base commit에 patch가 바꾸는 파일이 patch가 적은 그대로 없습니다.",
       patch_mismatch: "판정하지 않음: patch가 base에 정확히 적용되지 않거나, 적은 결과 파일과 다릅니다.",
       secret_detected: "판정하지 않음: 바뀐 파일에 비밀값으로 보이는 내용이 있어 게시하지 않습니다.",
-      patch_over_limit: "판정하지 않음: patch가 앱이 받을 수 있는 4 MiB보다 큽니다.",
+      patch_over_limit: "아직 판정하지 않음: 예전 크기 상한에 걸렸던 patch입니다. 다시 판정합니다.",
       tree_invalid: "판정하지 않음: 결과 tree를 검증하지 못했습니다.",
       base_blob_missing:
         "이전 버전이 이 patch를 읽지 못했습니다(새 파일 등). 배포 뒤 첫 tier 라운드가 다시 판정합니다.",

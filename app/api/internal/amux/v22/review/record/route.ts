@@ -6,14 +6,17 @@ import { AMUX_MAX_EXPECTED_REVISION, AMUX_PRISMA_INT_MAX,
   amuxMachineIdSchema } from "@/lib/amux/claimContract";
 import { AMUX_V22_EXECUTION_ROUTE_BUDGET_MS,
   withAmuxRouteBudget } from "@/lib/amux/dbBoundary";
-import { recordAmuxV52Review } from "@/lib/amux/execution";
-import { AMUX_V22_PATCH_ENVELOPE_MAX_BYTES } from "@/lib/amux/v22PatchLimit";
+import { AMUX_V22_CHANGED_PATHS_UNRECORDED, recordAmuxV52Review } from "@/lib/amux/execution";
+import { amuxV22NamedChangedPathsSchema } from "@/lib/amux/v22ChangedPathsCore";
+import { amuxV22SettlementAllowanceMs,
+  resolveAmuxV22NamedChangedPaths } from "@/lib/amux/v22ChangedPathsStore";
+import { AMUX_V22_PROXY_BODY_MAX_BYTES } from "@/lib/amux/v22TransferCore";
 import { AMUX_V52_FINDINGS_SUMMARY_INPUT_MAX_CHARS } from "@/lib/amux/v52ReviewFindingsCore";
 
 /** The body holds the largest summary the schema takes even fully JSON-escaped
- * (six bytes a character) and never less than a patch envelope (review
- * r-20261116-212113-1a6291). */
-const REVIEW_RECORD_BODY_MAX_BYTES = Math.max(AMUX_V22_PATCH_ENVELOPE_MAX_BYTES,
+ * (six bytes a character) and never less than the proxy buffer an old
+ * bridge's inline path list rides in (review r-20261116-212113-1a6291). */
+const REVIEW_RECORD_BODY_MAX_BYTES = Math.max(AMUX_V22_PROXY_BODY_MAX_BYTES,
   AMUX_V52_FINDINGS_SUMMARY_INPUT_MAX_CHARS * 6 + 1024 * 1024);
 import { prepareAmuxV52ReviewFindings } from "@/lib/amux/v52ReviewFindingsStore";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
@@ -35,7 +38,10 @@ const requestSchema = z.object({
   instance_id: z.string().uuid(),
   generation: z.number().int().min(1).max(AMUX_PRISMA_INT_MAX),
   task_revision: z.number().int().min(0).max(AMUX_MAX_EXPECTED_REVISION),
-  changed_paths: z.array(z.string().min(1)).min(1),
+  // A bridge from before the chunked transfer sends the list itself; a
+  // current one names the list it committed.
+  changed_paths: z.array(z.string().min(1)).min(1).optional(),
+  ...amuxV22NamedChangedPathsSchema,
   evidence: evidenceSchema,
   // A reject's findings: the launcher's JSON document, or plain lines from an
   // older launcher. Normalised and sealed before they are stored.
@@ -81,9 +87,29 @@ export async function POST(request: Request) {
   if (request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !==
       "application/json")
     return amuxJsonNoStore({ error: "Invalid content type." }, 415);
+  let body: z.infer<typeof requestSchema>;
+  let allowanceMs: number;
+  try {
+    body = await readLimitedJson(request, REVIEW_RECORD_BODY_MAX_BYTES, requestSchema);
+    // The time the patch and the list take grows with them (v22TransferCore.ts).
+    allowanceMs = await amuxV22SettlementAllowanceMs(body.attempt_id);
+  } catch (error) {
+    if (isAmuxInputError(error))
+      return amuxJsonNoStore({ error: "Invalid request." }, 400);
+    return amuxInternalErrorResponse("v52_review_record", error);
+  }
   return withAmuxRouteBudget(async () => {
     try {
-      const body = await readLimitedJson(request, REVIEW_RECORD_BODY_MAX_BYTES, requestSchema);
+      // The named list is opened here, outside the record's DB boundary. A
+      // review always names at least one path, as the array always had.
+      const named = await resolveAmuxV22NamedChangedPaths(body.attempt_id, body);
+      if (named.kind === "invalid" || (named.kind === "absent" && !body.changed_paths) ||
+          (named.kind === "paths" && named.paths.length === 0))
+        return amuxJsonNoStore({ error: "Invalid request." }, 400);
+      if (named.kind === "unrecorded")
+        return amuxJsonNoStore({ recorded: false,
+          reason: AMUX_V22_CHANGED_PATHS_UNRECORDED }, 409);
+      const changedPaths = named.kind === "paths" ? named.paths : body.changed_paths!;
       // A reject's findings are sealed under the attempt's own key, made here
       // before the record's transaction; without them the verdict is recorded.
       const findings = await prepareAmuxV52ReviewFindings({
@@ -93,7 +119,7 @@ export async function POST(request: Request) {
         attemptId: body.attempt_id, worker: body.worker,
         instanceId: body.instance_id, generation: body.generation,
         taskRevision: body.task_revision,
-        changedPaths: body.changed_paths,
+        changedPaths,
         evidence: { jobId: body.evidence.job_id,
           baseSha: body.evidence.base_sha,
           commitSha: body.evidence.commit_sha,
@@ -109,5 +135,5 @@ export async function POST(request: Request) {
         return amuxJsonNoStore({ error: "Invalid request." }, 400);
       return amuxInternalErrorResponse("v52_review_record", error);
     }
-  }, AMUX_V22_EXECUTION_ROUTE_BUDGET_MS);
+  }, AMUX_V22_EXECUTION_ROUTE_BUDGET_MS + allowanceMs);
 }

@@ -851,6 +851,13 @@ const REGISTRY = {
     reason:
       "Only AMUX content purposes with an approved retention clock, including the seven-day CLI read manifest, can enter the external key-retirement ledger. Other content categories require their own deletion contract before admission.",
   },
+  AmuxV22TransferPart_part_check: {
+    owner: "list",
+    module: "lib/amux/v22TransferCore.ts",
+    list: "AMUX_V22_TRANSFER_PARTS",
+    reason:
+      "The parts a v22 run's result travels to the app as (docs/policy/amux-v22-result-transfer.md). The upload route's schema is the same list, and each part maps to one sealed content purpose.",
+  },
   AmuxIdeaRetentionHold_reason_check: {
     owner: "database",
     reason:

@@ -21,7 +21,9 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import {
+  ENGINEERING_AGENT_CHANGE_DIGEST_V2_FEATURE,
   ENGINEERING_AGENT_COMMIT_IDENTITY,
+  ENGINEERING_PUBLISHER_PATCH_CHUNKS_FEATURE,
   expectedCommitObject,
   prBodyCarriesMarker,
   prBodyMarker,
@@ -30,6 +32,7 @@ import {
 import { detectSecrets } from "../lib/engineeringAgentSecretPatterns.ts";
 
 const sha256 = (text) => createHash("sha256").update(text, "utf8").digest("hex");
+const sha256Bytes = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const requestKey = () => randomUUID().replace(/-/g, "");
 const SHA1 = /^[0-9a-f]{40}$/;
 
@@ -145,13 +148,62 @@ export const decideLookup = ({ runId, branch, consumed, branchOid, pulls, headCo
 };
 
 /**
+ * The patch a write claim applies (docs/policy/amux-v22-result-transfer.md §4).
+ * A claim that carries it as text -- an app before `patch_chunks` -- is used as
+ * it is. Otherwise, from an app that names `patch_chunks`, its chunks are read
+ * from `publish/patch` in order and joined; the whole is checked for the
+ * claimed length and digest, and only then decoded as UTF-8, failing on any
+ * byte that is not. `{ text }`, or `{ refused }` for bytes that are not the
+ * patch the claim names, or `{ unavailable }` when they could not be read.
+ */
+export const readClaimedPatch = async (app, work, appFeatures) => {
+  if (typeof work.patchBody === "string") return { text: work.patchBody };
+  const total = work.patchBytes;
+  const count = work.patchChunkCount;
+  if (!Array.isArray(appFeatures) || !appFeatures.includes(ENGINEERING_PUBLISHER_PATCH_CHUNKS_FEATURE) ||
+      !Number.isSafeInteger(total) || total < 0 || !Number.isSafeInteger(count) || count < 0) {
+    return { unavailable: true };
+  }
+  const chunks = [];
+  let received = 0;
+  for (let index = 0; index < count; index += 1) {
+    const answer = await app("publish/patch", {
+      workItemId: work.workItemId,
+      fencingToken: String(work.fencingToken),
+      index,
+    });
+    const chunk = answer.json;
+    if (answer.status !== 200 || chunk?.workItemId !== work.workItemId || chunk?.index !== index ||
+        chunk?.totalBytes !== total || chunk?.chunkCount !== count || typeof chunk?.bytesBase64 !== "string") {
+      return { unavailable: true };
+    }
+    const bytes = Buffer.from(chunk.bytesBase64, "base64");
+    // Only canonical base64: anything else is not what the app wrote.
+    if (bytes.byteLength === 0 || bytes.toString("base64") !== chunk.bytesBase64) return { unavailable: true };
+    received += bytes.byteLength;
+    if (received > total) return { refused: true };
+    chunks.push(bytes);
+  }
+  const whole = Buffer.concat(chunks, received);
+  if (whole.byteLength !== total || sha256Bytes(whole) !== work.patchDigest) return { refused: true };
+  try {
+    // ignoreBOM keeps a leading BOM, so the text is these bytes exactly.
+    return { text: new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(whole) };
+  } catch {
+    return { refused: true };
+  }
+};
+
+/**
  * One cycle. `ports`:
  *   app(path, body) -> { status, json }            the engineering routes
  *   mintToken() -> { token, revoke() }             a GitHub App installation token, only after a claim
  *   github(token) -> {
  *     branchOid(branch) -> sha | null,
  *     pullsForHead(branch) -> [{ number, state, baseRef, baseSha, headRef, headSha, body }]  (complete, or throws)
- *     pullDiffDigest(number) -> { digest } | { refused: true } | null   (null: not read; refused: not a diff AMUX would bind)
+ *     pullChangeDigest({ base, headSha }) -> { digest, headTreeSha } | null   (v2, lib/pullDiffDigestCore.ts; null: not read)
+ *     pullDiffDigest(number) -> { digest } | { refused: true } | null   (v1, for an app without change_digest_v2 only;
+ *                                                                        null: not read; refused: not a diff AMUX would bind)
  *     createPull({ title, body, head, draft }) ->{ status: "created", number } | { status: "rejected" } | { status: "unknown" },
  *   }
  *   workspace(baseSha) -> {
@@ -179,6 +231,11 @@ export async function runPublisherCycle(ports) {
   // The halt the app reads beside the claim: while anything halts, a round is
   // not a healthy one whatever it did (§12). Unknown is never taken as none.
   const halt = reportedHalt(claimed.json.halt);
+  // What the app says it takes (docs/policy/amux-v22-result-transfer.md §3-5):
+  // an app that names change_digest_v2 is given the v2 change digest; one
+  // before it, which knows only the diff digest, the v1 one.
+  const appFeatures = Array.isArray(claimed.json.appFeatures) ? claimed.json.appFeatures : [];
+  const changeDigestV2 = appFeatures.includes(ENGINEERING_AGENT_CHANGE_DIGEST_V2_FEATURE);
   if (work === null) return { finishedNormally: true, halt, reason: "nothing_to_publish" };
 
   const report = async (outcome, extra = {}) => {
@@ -227,16 +284,24 @@ export async function runPublisherCycle(ports) {
     const github = ports.github(token.token);
 
     // The binding: one commit -- the pull request's head, the branch and the
-    // verified commit all the same -- and the digest of a diff AMUX would bind.
-    // A diff that can never be bound goes to a person; one not read now is
-    // left for the next lookup (§10).
+    // verified commit all the same -- and its change digest (v2: merge base,
+    // head and tree, any size, binary files included). One not read now is
+    // left for the next lookup (§10). Only an app before v2 is given the v1
+    // diff digest, and a diff that can never be bound in v1 goes to a person.
+    const changeDigestOf = async (pull, treeId) => {
+      const change = await github.pullChangeDigest({ base: pull.baseRef, headSha: pull.headSha });
+      if (change === null) return null;
+      // The tree GitHub holds for the head is the tree the app judged.
+      return change.headTreeSha === treeId ? { digest: change.digest } : { unreadable: "pull_request_head_changed" };
+    };
     const snapshotOf = async (pull, treeId, verifiedHeadSha) => {
       if (!SHA1.test(pull.baseSha) || pull.headSha !== verifiedHeadSha) return { unreadable: "pull_request_head_changed" };
-      const diff = await github.pullDiffDigest(pull.number);
+      const diff = changeDigestV2 ? await changeDigestOf(pull, treeId) : await github.pullDiffDigest(pull.number);
       if (diff === null) return { unreadable: "snapshot_unreadable" };
+      if (diff.unreadable) return { unreadable: diff.unreadable };
       if (diff.refused) return { refused: "diff_not_bindable" };
-      // Read again after the diff, as AMUX's review does: a head that moved
-      // while the diff was read means the digest is not this commit's.
+      // Read again after the digest, as AMUX's review does: a head that moved
+      // while it was read means the digest is not this commit's.
       const again = (await github.pullsForHead(work.branch)).find((candidate) => candidate.number === pull.number);
       if (again?.headSha !== verifiedHeadSha || again?.baseSha !== pull.baseSha || (await github.branchOid(work.branch)) !== verifiedHeadSha) {
         return { unreadable: "pull_request_head_changed" };
@@ -318,8 +383,13 @@ export async function runPublisherCycle(ports) {
       );
     }
 
-    // A write claim. Everything before the push can only refuse.
-    if (sha256(work.patchBody) !== work.patchDigest || detectSecrets(work.patchBody).length > 0 || titleCarriesSecret()) {
+    // A write claim. Everything before the push can only refuse. A patch the
+    // app could not hand over was never applied: the item goes back to the
+    // queue, and its next claim is judged again under a new capability (§10).
+    const claimedPatch = await readClaimedPatch(ports.app, work, claimed.json.appFeatures);
+    if (claimedPatch.unavailable) return await report("refused_before_write", { reason: "patch_read_failed" });
+    const patchText = claimedPatch.refused ? null : claimedPatch.text;
+    if (patchText === null || sha256(patchText) !== work.patchDigest || detectSecrets(patchText).length > 0 || titleCarriesSecret()) {
       return await report("revalidation_refused", { reason: "content_check_failed" });
     }
     workspace = await ports.workspace(work.baseSha);
@@ -329,7 +399,7 @@ export async function runPublisherCycle(ports) {
     }
     const message = expected.slice(expected.indexOf("\n\n") + 2);
     const built = await workspace.build({
-      patch: work.patchBody,
+      patch: patchText,
       identity: ENGINEERING_AGENT_COMMIT_IDENTITY,
       date: workspace.baseCommitterDate,
       message,

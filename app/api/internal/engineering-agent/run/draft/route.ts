@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import { z } from "zod";
 
 import { readLimitedJson } from "@/lib/apiSecurity";
+import { AMUX_V22_PROXY_BODY_MAX_BYTES } from "@/lib/amux/v22TransferCore";
 import { isRunId } from "@/lib/engineeringAgentCore";
 import {
   engineeringAgentErrorResponse,
@@ -11,17 +12,14 @@ import {
   isEngineeringAgentRouteAuthorized,
   runIdempotentEngineeringAgentRequest,
 } from "@/lib/engineeringAgentRouteAuth";
-import {
-  ENGINEERING_AGENT_PATCH_BODY_MAX_BYTES,
-  openEngineeringAgentWorkItem,
-} from "@/lib/engineeringAgentStore";
+import { openEngineeringAgentWorkItem } from "@/lib/engineeringAgentStore";
 
 // The runner submits a T2 draft for its active run
 // (docs/policy/engineering-agent.md §7, §11): the patch and a reason code go
 // to the app's own table, never to a branch, and the owner decides. T2 is the
 // conservative tier, so the runner may always choose it; nothing it submits
-// here reaches GitHub. The store admits the patch by digest, size and the
-// app's secret patterns, and the database admits it only from an active run.
+// here reaches GitHub. The store admits the patch by digest and the app's
+// secret patterns, and the database admits it only from an active run.
 
 const requestSchema = z
   .object({
@@ -34,8 +32,10 @@ const requestSchema = z
   })
   .strict();
 
-// The patch at its ceiling, escaped as JSON, and the envelope around it.
-const BODY_MAX_BYTES = ENGINEERING_AGENT_PATCH_BODY_MAX_BYTES * 6 + 4 * 1024;
+// No bound of ours: the request body Next.js buffers through proxy.ts is the
+// external one (docs/policy/amux-v22-result-transfer.md §4). The legacy
+// runner sends its draft in one body; a v22 draft arrives with its settlement.
+const BODY_MAX_BYTES = AMUX_V22_PROXY_BODY_MAX_BYTES;
 
 export async function POST(request: Request) {
   if (!isEngineeringAgentRouteAuthorized(request, "runner")) return engineeringAgentUnauthorized();

@@ -118,7 +118,8 @@ export async function answerAmuxV22OwnerQuestion(input: { session: Session;
     });
 }
 
-const SEALED = { ideaId: true, ciphertext: true, keyId: true, keyVersion: true,
+// No body: it is read in slices when the row is opened (sealedByteaRead.ts).
+const SEALED = { ideaId: true, keyId: true, keyVersion: true,
   digest: true, digestKeyId: true, bodyPurgedAt: true } as const;
 
 /** Prisma calls `readAmuxV22ResumeRows` makes, for its caller's boundary. */

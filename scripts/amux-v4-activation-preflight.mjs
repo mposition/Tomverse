@@ -23,6 +23,7 @@ export const CONTENT_COLUMNS = Object.freeze([
   ["AmuxWorkItem", "v4BriefCiphertext", "v4BriefKeyId"],
   ["AmuxV22TaskResult", "ciphertext", "keyId"],
   ["AmuxV22TaskPatch", "ciphertext", "keyId"],
+  ["AmuxV22TaskChangedPaths", "ciphertext", "keyId"],
 ].map(Object.freeze));
 
 // Identifiers come only from the fixed source allowlist, never CLI input.

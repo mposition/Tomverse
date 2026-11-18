@@ -973,6 +973,12 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "unverified",
   },
   {
+    domain: "amuxTaskChangedPaths",
+    publicName: "amux_v22_task_changed_paths",
+    prismaModel: "AmuxV22TaskChangedPaths",
+    state: "unverified",
+  },
+  {
     domain: "amuxReviewFindings",
     publicName: "amux_v52_review_findings",
     prismaModel: "AmuxV52ReviewFindings",

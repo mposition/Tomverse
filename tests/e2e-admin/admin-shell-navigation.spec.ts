@@ -680,14 +680,12 @@ test.describe("admin console shell", () => {
     await page.goto("/admin/amux-backlog?tab=list");
     await expect(page.getByTestId("amux-backlog-list")).toBeVisible();
 
-    // Safety & recovery: halts, reservations and the legacy tools. Catalog
-    // import's code latch ships closed, so its chip reads off in any
-    // environment; the chip is read from that latch, not written.
+    // Safety & recovery: halts, reservations and the legacy tools.
     await page.goto("/admin/amux-promotion");
     await expect(page).toHaveURL("/admin/amux-recovery?tab=legacy");
     const recovery = page.getByRole("navigation", { name: "Safety and recovery sections" });
     await expect(recovery.getByRole("link")).toHaveCount(3);
-    await expect(page.locator("#amux-legacy-import")).toBeVisible();
+    await expect(page.locator("#amux-legacy-reconciliation")).toBeVisible();
   });
 });
 
@@ -851,7 +849,6 @@ test.describe("the Development group by role", () => {
       // admin-email-campaigns.spec.ts).
       await expect(page.getByRole("heading", { name: NOT_FOUND_HEADING })).toBeVisible();
       await expect(page.getByTestId("amux-card-list-panel")).toHaveCount(0);
-      await expect(page.getByTestId("amux-board-import-panel")).toHaveCount(0);
       await expect(page.getByTestId("amux-intake-panel")).toHaveCount(0);
       await expect(page.getByTestId("amux-board-promotion-panel")).toHaveCount(0);
     });

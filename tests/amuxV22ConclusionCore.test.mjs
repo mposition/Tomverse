@@ -153,5 +153,5 @@ test("settlement wiring: the verdict applies behind auto, proceed is terminal, a
   assert.match(source, /if \(conclusionApplied\)\s+await writeSystemAuditLog\(\{ tx, systemActor: AMUX_SYSTEM_AUDIT_ACTOR,\s+action: "amux\.v22\.conclusion\.applied"/);
   assert.doesNotMatch(source, /adminAuditLog\.create/, "never the audit table directly");
   const store = readFileSync(new URL("../lib/amux/v22TaskResultStore.ts", import.meta.url), "utf8");
-  assert.match(store, /conclusionVerdict: conclusion\?\.verdict \?\? null,/);
+  assert.match(store, /conclusionVerdict: prepared\.conclusion\?\.verdict \?\? null,/);
 });
