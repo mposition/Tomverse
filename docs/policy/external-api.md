@@ -475,14 +475,26 @@ compaction as unsupported (`capabilities.remote_compaction` default), so no
   account input limit, `FORCE_PROMPT_CACHING_5M=1`,
   `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`. Terminal: per-session variables.
   VS Code: `claudeCode.environmentVariables` + `claudeCode.disableLoginPrompt`.
+  Claude Code 2.1.278+ asks Anthropic to run auto mode's safety review inside
+  the model request (a `safeguards` body field and its beta values, passed
+  through unchanged). With a real Anthropic upstream that review should come
+  back in the relayed response; it has not been verified yet (section 10.5).
+  Without a review result Claude Code refuses actions that need one (Bash),
+  and manual permission mode works regardless.
 - **Codex:** `[model_providers.tomverse]` in `~/.codex/config.toml`
   (`wire_api = "responses"`, `env_key = "TOMVERSE_API_KEY"`, request and stream
   retries 0, `supports_websockets = false`) and a profile file
   `~/.codex/tomverse.config.toml` (`model_provider`, `model`,
-  `web_search = "disabled"`, `model_context_window`,
-  `model_auto_compact_token_limit`) selected with `codex --profile tomverse`;
-  without it the person's own account is untouched. The page also gives the
-  top-level form for a tool that reads `config.toml` only.
+  `web_search = "disabled"`, `approvals_reviewer = "user"`, `review_model`,
+  `model_context_window`, `model_auto_compact_token_limit`) selected with
+  `codex --profile tomverse`; without it the person's own account is
+  untouched. The official VS Code extension has no profile setting and reads
+  `config.toml`'s top level, so the page also gives that form. Approvals stay
+  with the person: Codex's automatic reviewer runs on its own reviewer model
+  (`codex-auto-review`), which Tomverse does not offer. The extension names
+  each thread with a small model it picks itself (observed: `gpt-6-luna`);
+  that is one more ordinary request with its own credits, and there is no
+  setting to change its model.
 - **Cursor:** OpenAI API key + base-URL override + a fixed custom model, on the
   Chat Completions route. Cursor's backend makes the calls, so only a public
   HTTPS deployment works; Tab, Cursor's own models and cloud agents never use
@@ -500,6 +512,16 @@ every reservation was settled (none left held, including a 439-request burst
 stopped by the rate guard). Automated: `npm run test:external-api`,
 `npm run test:external-api-db` (`tests/integration/external-api-native.db.test.mjs`).
 
-Not yet verified, each a separate step: either client with a real model (paid),
-the official VS Code extensions of both, Cursor Chat and Agent (needs public
+Official VS Code extensions, 2026-11-18, same fake provider, Windows 10, VS
+Code 1.146.0, isolated profile, configured only by the page's generated
+settings: Claude Code extension 2.1.327 (Manual mode) read, edited and ran the
+test through the extension UI; its bundled CLI also passed compact, resume and
+a refused approval. Codex extension openai.chatgpt 26.1111.21308 (bundled Codex
+0.169.0-alpha) edited the file with apply_patch and ran the test through the
+extension UI; its bundled CLI also passed local compaction and resume. All 50
+requests of that key settled, none held. In Auto mode the Claude extension
+refused Bash because the fake provider returns no safety-review result.
+
+Not yet verified, each a separate step: either client with a real model (paid,
+including Claude Code's auto mode review), Cursor Chat and Agent (needs public
 HTTPS), and other operating systems.

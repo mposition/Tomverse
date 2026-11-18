@@ -126,9 +126,9 @@ export const codexConfig = (
         'model_provider = "tomverse"',
         `model = "${modelId}"`,
         // Approvals go to the person. Codex's automatic approval reviewer is a
-        // separate agent on a model of its own choosing (observed: the VS Code
-        // extension's bundled Codex 0.169 called gpt-6-luna for it), which would
-        // spend credits on a model the person did not pick.
+        // separate agent on Codex's own reviewer model (`codex-auto-review` in
+        // the bundled catalogue), which Tomverse does not offer; /review runs on
+        // the chosen model. Both keys accepted by Codex 0.146 and 0.169.
         'approvals_reviewer = "user"',
         `review_model = "${modelId}"`,
         'web_search = "disabled"',
