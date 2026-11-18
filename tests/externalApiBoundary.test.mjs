@@ -12,6 +12,7 @@ const BEARER_FILES = [
     "app/api/v1/chat/completions/route.ts",
     "app/api/v1/models/route.ts",
     "app/api/v1/usage/route.ts",
+    "app/api/v1/requests/status/route.ts",
     "lib/externalApiInference.ts",
     "lib/externalApiAdmission.ts",
     "lib/externalApiKeys.ts",
@@ -72,6 +73,22 @@ test("native protocols: one upstream call per request, at a fixed provider URL w
     for (const line of logs) {
         assert.ok(!/authorization|\.key\b|\braw\b|\bbody\b|payload|upstreamBody|\btext\b/.test(line), line);
     }
+});
+
+test("request status lookup is a read: GET only, key-scoped, no dispatch, reservation or write", () => {
+    const route = read("app/api/v1/requests/status/route.ts");
+    assert.match(route, /export async function GET\(/);
+    assert.ok(!/export async function (POST|PUT|PATCH|DELETE)\b/.test(route));
+    assert.match(route, /withBearerKey\(/);
+    assert.match(route, /sha256Hex\(idempotencyKey/, "the raw Idempotency-Key is only ever digested");
+    for (const forbidden of ["acquireChatAccess", "streamText", "settleChatUsage", "handleChatCompletions", "console."]) {
+        assert.ok(!route.includes(forbidden), `status route must not use ${forbidden}`);
+    }
+    const keys = read("lib/externalApiKeys.ts");
+    const lookup = keys.match(/export const externalApiRequestStatus[\s\S]*?\n};/)[0];
+    assert.match(lookup, /where: \{ id: selector\.requestId, keyId \}/, "a request id is looked up within this key only");
+    assert.match(lookup, /keyId_idempotencyKeyDigest: \{ keyId,/);
+    assert.ok(!/\.(create|update|upsert|delete|\$executeRaw)/.test(lookup));
 });
 
 test("key management refuses any Authorization header instead of falling back to the cookie", () => {
