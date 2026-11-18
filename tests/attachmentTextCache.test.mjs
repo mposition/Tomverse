@@ -140,31 +140,39 @@ test("the route caches only an account's earlier, bound file, and never the turn
     // A cut or mixed extraction is never stored.
     assert.match(route, /fileParts\.length === filePartsBefore/);
     assert.match(route, /producedCharacters \+ 64 < parseRoomBefore/);
-    // Written, then the row is checked: deleted meanwhile means taken back out.
-    const write = route.slice(route.indexOf("await writeAttachmentTextCache("));
-    const recheck = write.indexOf("prisma.messageAttachment.findUnique");
-    const takeBack = write.indexOf("await deleteAttachmentTextCache(cacheObjectKey)");
-    assert.ok(recheck > 0 && takeBack > recheck);
+    // The route writes only through the row-holding writer, never directly.
+    assert.match(route, /await writeBoundAttachmentTextCache\(\{\s*attachmentId: resolved!\.attachmentId!,/);
+    assert.doesNotMatch(route, /writeAttachmentTextCache\(/);
 });
 
-// Review r-20261118-045547-8baacd: a cache written after the drain, or whose
-// own re-check failed or never ran, must still be deleted -- durably.
-test("every drain deletes the cached text of recently completed tombstones again", () => {
-    const storage = source("lib/messageAttachmentStorage.ts");
-    const sweep = storage.slice(storage.indexOf("const sweepLateAttachmentTextCaches"));
-    assert.match(sweep, /const since = new Date\(now\.getTime\(\) - LATE_TEXT_CACHE_SWEEP_WINDOW_MS\)/);
-    assert.match(sweep, /completedAt: \{ not: null, gte: since \}/);
-    assert.match(sweep, /await deleteAttachmentTextCache\(item\.objectKey\)/);
-    // Every completion in the window, page by page -- never only the newest N
-    // -- newest first, within a time budget so a stopped run has already
-    // covered the tombstones a late write can follow.
-    assert.match(sweep, /cursor: \{ id: cursor \}, skip: 1/);
-    assert.match(sweep, /if \(page\.length < take \|\| !last\) return deleted;/);
-    assert.match(sweep, /orderBy: \[\{ completedAt: "desc" \}, \{ id: "desc" \}\]/);
-    assert.match(sweep, /if \(Date\.now\(\) > deadline\) return deleted;/);
-    assert.match(storage, /export const LATE_TEXT_CACHE_SWEEP_WINDOW_MS = 24 \* 60 \* 60 \* 1000;/);
-    const drain = storage.slice(storage.indexOf("export const drainMessageAttachmentCleanupQueue"));
-    assert.match(drain, /await sweepLateAttachmentTextCaches\(now, limit\)/);
+// Review r-20261118-061358-048fc2: a cache must never outlive its attachment,
+// durably -- not within a window. The write holds the row, so a deletion is
+// ordered before it (nothing written) or after it (drained with the file).
+test("the cache is written only while its attachment row is held", () => {
+    const cache = source("lib/attachmentTextCache.ts");
+    const writer = cache.slice(cache.indexOf("export const writeBoundAttachmentTextCache"));
+    assert.match(writer, /prisma\.\$transaction\(/);
+    assert.match(writer, /FROM "MessageAttachment"\s*WHERE "id" = \$\{input\.attachmentId\} AND "objectKey" = \$\{input\.objectKey\}\s*FOR KEY SHARE/);
+    const lock = writer.indexOf("FOR KEY SHARE");
+    const gone = writer.indexOf("if (rows.length === 0) return false;");
+    const write = writer.indexOf("await writeAttachmentTextCache(input.objectKey, input.entries);");
+    assert.ok(lock > 0 && gone > lock && write > gone, "lock, then check, then write -- inside one transaction");
+    // No time window to fall out of any more.
+    assert.doesNotMatch(source("lib/messageAttachmentStorage.ts"), /sweepLateAttachmentTextCaches|LATE_TEXT_CACHE/);
+});
+
+test("reading the cache never deletes it", () => {
+    const cache = source("lib/attachmentTextCache.ts");
+    assert.match(cache, /readOwnR2ObjectBytes\(attachmentTextCacheKey\(objectKey\)/);
+    assert.doesNotMatch(cache, /readR2Object\(/);
+});
+
+// Same review: a cache hit must not hide a file storage lost.
+test("a cache hit still asks storage whether the original exists", () => {
+    const route = source("app/api/chat/route.ts");
+    const hit = route.slice(route.indexOf("const cached = await readAttachmentTextCache(attachment.objectKey);"));
+    assert.match(hit.slice(0, 900), /\(await probeR2Object\(attachment\.objectKey\)\)\.state === "missing"/);
+    assert.match(hit.slice(0, 900), /if \(cached && !originalGone\) \{/);
 });
 
 test("the chat page, receipt recovery and stored previews follow the account limits", () => {

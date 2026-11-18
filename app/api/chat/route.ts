@@ -39,6 +39,7 @@ import { authOptions } from "@/lib/auth";
 import {
     createR2UploadUrl,
     deleteR2Object,
+    probeR2Object,
     readR2Object,
     validateR2ObjectMetadata,
     writeR2Object,
@@ -245,9 +246,8 @@ import {
 import {
     ATTACHMENT_TEXT_CACHE_CATEGORIES,
     attachmentTextCacheEnabled,
-    deleteAttachmentTextCache,
     readAttachmentTextCache,
-    writeAttachmentTextCache,
+    writeBoundAttachmentTextCache,
 } from "@/lib/attachmentTextCache";
 import { chatUserMaxInputTokens } from "@/lib/chatInputLimits";
 import { extractLegacyOfficeText, type LegacyOfficeFormatId } from "@/lib/legacyOfficeText";
@@ -4478,7 +4478,16 @@ async function handleChatPost(
                     attachmentTextCacheEnabled();
                 if (textCacheEligible) {
                     const cached = await readAttachmentTextCache(attachment.objectKey);
-                    if (cached) {
+                    // The cache stands in for reading the file, not for
+                    // knowing it exists: storage is still asked, and a file it
+                    // confirms gone takes the ordinary path below, which marks
+                    // it unavailable and answers 410 exactly as before. An
+                    // unreachable answer is a fact about the connection, not
+                    // the file, so the cached text is used.
+                    const originalGone =
+                        cached !== null &&
+                        (await probeR2Object(attachment.objectKey)).state === "missing";
+                    if (cached && !originalGone) {
                         for (const entry of cached) {
                             const tokens = estimatePromptTokens(entry.text);
                             if (
@@ -4711,26 +4720,13 @@ async function handleChatPost(
                             ) &&
                             producedCharacters + 64 < parseRoomBefore
                         ) {
-                            const attachmentId = resolved?.attachmentId;
-                            const cacheObjectKey = attachment.objectKey;
-                            await writeAttachmentTextCache(
-                                cacheObjectKey,
-                                produced
-                            ).then(async () => {
-                                // Deleted while this turn was reading it: the
-                                // row and its cleanup tombstone commit together,
-                                // so a missing row means a drain may already
-                                // have run. Take the text back out; a drain that
-                                // runs later deletes it either way.
-                                const stillBound = attachmentId
-                                    ? await prisma.messageAttachment.findUnique({
-                                          where: { id: attachmentId },
-                                          select: { id: true },
-                                      })
-                                    : null;
-                                if (!stillBound) {
-                                    await deleteAttachmentTextCache(cacheObjectKey);
-                                }
+                            // Written only while the attachment row is held, so
+                            // a deletion either comes first (nothing written)
+                            // or waits and then drains this text with the file.
+                            await writeBoundAttachmentTextCache({
+                                attachmentId: resolved!.attachmentId!,
+                                objectKey: attachment.objectKey,
+                                entries: produced,
                             }).catch((error) => {
                                 logRequestError(
                                     "attachment_text_cache_write_failed",

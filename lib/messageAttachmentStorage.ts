@@ -851,76 +851,6 @@ export type MessageAttachmentCleanupSweepResult = {
 };
 
 /**
- * How long after a tombstone completes its cached text is deleted again.
- *
- * A turn can write an earlier file's extracted text (lib/attachmentTextCache.ts)
- * after the conversation was deleted and its tombstone already drained: the
- * write and the drain are not one transaction, and the turn's own re-check can
- * fail or never run if the process stops. Every drain therefore deletes the
- * cached text of tombstones completed within this window once more. A turn
- * that reads an earlier file finishes in minutes; a day leaves room for any
- * request and for a missed maintenance run. DeleteObject succeeds for a key
- * that is already gone, so repeating it is harmless.
- */
-export const LATE_TEXT_CACHE_SWEEP_WINDOW_MS = 24 * 60 * 60 * 1000;
-
-/**
- * Time one maintenance run may spend on the sweep, so it never crowds out the
- * work that follows it in the same route.
- */
-export const LATE_TEXT_CACHE_SWEEP_BUDGET_MS = 60 * 1000;
-
-/**
- * Every tombstone completed inside the window, newest first, page by page.
- *
- * Newest first because a late cache write follows its drain by minutes: the
- * tombstones that matter most are the most recent ones, and a run stopped by
- * its time budget has already covered them. Each tombstone is covered by
- * every run for a whole day, so one that a run did not reach was reached by
- * the earlier runs, when it was among the newest.
- */
-const sweepLateAttachmentTextCaches = async (
-  now: Date,
-  pageSize: number,
-  budgetMs = LATE_TEXT_CACHE_SWEEP_BUDGET_MS
-) => {
-  const since = new Date(now.getTime() - LATE_TEXT_CACHE_SWEEP_WINDOW_MS);
-  const deadline = Date.now() + budgetMs;
-  const take = Math.max(1, pageSize);
-  let cursor: string | null = null;
-  let deleted = 0;
-  for (;;) {
-    if (Date.now() > deadline) return deleted;
-    const page: Array<{ id: string; objectKey: string }> =
-      await prisma.messageAttachmentCleanup.findMany({
-        where: { completedAt: { not: null, gte: since } },
-        orderBy: [{ completedAt: "desc" }, { id: "desc" }],
-        take,
-        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-        select: { id: true, objectKey: true },
-      });
-    for (const item of page) {
-      try {
-        await deleteAttachmentTextCache(item.objectKey);
-        deleted += 1;
-      } catch (error) {
-        console.error(
-          JSON.stringify({
-            event: "message_attachment_late_text_cache_failed",
-            cleanupId: item.id,
-            error: classifyStorageError(error),
-            timestamp: now.toISOString(),
-          })
-        );
-      }
-    }
-    const last = page.at(-1);
-    if (page.length < take || !last) return deleted;
-    cursor = last.id;
-  }
-};
-
-/**
  * Drains pending tombstones.
  *
  * DeleteObject succeeds for a key that is already gone, so two overlapping
@@ -982,22 +912,9 @@ export const drainMessageAttachmentCleanupQueue = async (
     }
   }
 
-  const lateCacheDeleted = objectKeys
-    ? 0
-    : await sweepLateAttachmentTextCaches(now, limit);
-
   const exhausted = await prisma.messageAttachmentCleanup.count({
     where: { completedAt: null, attempts: { gte: CLEANUP_MAX_ATTEMPTS } },
   });
-  if (lateCacheDeleted > 0) {
-    console.info(
-      JSON.stringify({
-        event: "message_attachment_late_text_cache_swept",
-        deleted: lateCacheDeleted,
-        timestamp: now.toISOString(),
-      })
-    );
-  }
 
   if (pending.length > 0 || exhausted > 0) {
     console.info(

@@ -1,6 +1,7 @@
 import "server-only";
 
-import { deleteR2Object, readR2Object, writeR2Object } from "@/lib/r2";
+import { prisma } from "@/lib/prisma";
+import { deleteR2Object, readOwnR2ObjectBytes, writeR2Object } from "@/lib/r2";
 
 /**
  * The text read out of an earlier message's file, kept so the next turn does
@@ -19,9 +20,12 @@ import { deleteR2Object, readR2Object, writeR2Object } from "@/lib/r2";
  *   (docs/policy/user-attachment-persistence.md), so the text can never
  *   describe a different file.
  * - Only for a file bound to a message row of a signed-in account -- never a
- *   guest object and never an unbound upload -- so the one deletion path for
- *   attachments, the `MessageAttachmentCleanup` queue, removes it with the
- *   original (`drainMessageAttachmentCleanupQueue`).
+ *   guest object and never an unbound upload -- and only while that row is
+ *   held (`writeBoundAttachmentTextCache`), so the one deletion path for
+ *   attachments, the `MessageAttachmentCleanup` queue, always removes it with
+ *   the original (`drainMessageAttachmentCleanupQueue`).
+ * - A cache hit still asks storage whether the original exists, so a file
+ *   that storage lost is reported exactly as it was without the cache.
  * - Only text a model-independent extractor produced (PDF text or OCR, Office,
  *   legacy Office, plain text), complete and not cut by the parse budget. Images,
  *   a PDF sent to the model as a file, iWork notes and archives are read as
@@ -100,9 +104,11 @@ export const readAttachmentTextCache = async (
   objectKey: string
 ): Promise<CachedAttachmentText[] | null> => {
   try {
-    const buffer = await readR2Object(attachmentTextCacheKey(objectKey), {
+    // The reader for objects this server wrote: one GET, and never deletes
+    // on a metadata mismatch -- the general reader would, and a lost cache
+    // means the next turn parses (and may OCR) the file again.
+    const buffer = await readOwnR2ObjectBytes(attachmentTextCacheKey(objectKey), {
       maxBytes: MAX_CACHE_BYTES,
-      expectedContentType: CONTENT_TYPE,
     });
     return parseCachedAttachmentText(buffer.toString("utf8"));
   } catch {
@@ -118,6 +124,43 @@ export const writeAttachmentTextCache = async (
   if (body.byteLength > MAX_CACHE_BYTES) return;
   await writeR2Object(attachmentTextCacheKey(objectKey), body, CONTENT_TYPE);
 };
+
+/**
+ * Writes the cache only while its attachment row exists, and holds that row
+ * while it writes.
+ *
+ * The write happens inside a transaction that keeps a `FOR KEY SHARE` lock on
+ * the `MessageAttachment` row. Deleting the row -- a conversation, a bulk or
+ * an account deletion, cascades included -- needs a lock that conflicts with
+ * it, so the two are ordered:
+ *
+ * - The deletion came first: the row is gone and nothing is written.
+ * - The write came first: the deletion waits, then removes the row and leaves
+ *   its `MessageAttachmentCleanup` tombstone, and the drain deletes this text
+ *   with the original.
+ * - The process stops mid-write: the row still exists, so its eventual
+ *   deletion takes the text with it the same way.
+ *
+ * So a cache can never outlive its attachment, without a sweep and without a
+ * window. Answers whether it wrote.
+ */
+export const writeBoundAttachmentTextCache = (input: {
+  attachmentId: string;
+  objectKey: string;
+  entries: readonly CachedAttachmentText[];
+}) =>
+  prisma.$transaction(
+    async (tx) => {
+      const rows = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT "id" FROM "MessageAttachment"
+        WHERE "id" = ${input.attachmentId} AND "objectKey" = ${input.objectKey}
+        FOR KEY SHARE`;
+      if (rows.length === 0) return false;
+      await writeAttachmentTextCache(input.objectKey, input.entries);
+      return true;
+    },
+    { timeout: 30_000 }
+  );
 
 /**
  * Deletes the cached text of every version, so bumping the version never
