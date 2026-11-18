@@ -707,6 +707,7 @@ function ConnectSection({ baseUrl, models, apiKey }: { baseUrl: string; models: 
                 return (
                     <div data-testid="external-api-tool-cursor">
                         <p className="text-xs text-zinc-500">{t("externalApi.cursorHint")}</p>
+                        <p className="mt-1 text-xs font-semibold text-zinc-600 dark:text-zinc-300" data-testid="external-api-cursor-models">{t("externalApi.cursorModels")}</p>
                         <ToolModelSelect models={lists.cursor} value={cursor.id} onChange={setCursorId} testId="external-api-cursor-model" />
                         <CopyBlock label="Cursor Settings › Models" value={cursorConfig(baseUrl, cursor, key)} testId="external-api-cursor-config" />
                         <Notes>

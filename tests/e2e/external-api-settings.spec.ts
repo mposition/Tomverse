@@ -281,6 +281,8 @@ test("API keys: Claude Code, Codex and Cursor each get their own configuration @
     const cursor = page.getByTestId("external-api-cursor-config");
     await expect(cursor).toContainText(`Override OpenAI Base URL: ${baseUrl}`);
     await expect(cursor).not.toContainText("smart-adaptive");
+    // GPT models come from Cursor's own list; anything else is added once.
+    await expect(page.getByTestId("external-api-cursor-models")).toContainText("Add Custom Model");
     // The model list says which tools take each model.
     await page.getByTestId("external-api-models-search").fill("sonnet");
     await expect(page.getByTestId("external-api-models")).toContainText("Claude Code · Cursor");

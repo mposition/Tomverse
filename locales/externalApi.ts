@@ -116,6 +116,7 @@ const en = {
     otherChip: "OpenAI-compatible apps",
     notesTitle: "Good to know · how to undo",
     modelsPick: "Models in this configuration. Most people need only Smart Adaptive.",
+    cursorModels: "GPT models that Tomverse offers can be picked straight from Cursor's own model list. Add any other model, such as Claude or Smart Adaptive, once: type its ID in Cursor Settings › Models and choose Add Custom Model.",
 };
 
 type ExternalApiCopy = typeof en;
@@ -237,6 +238,7 @@ const ko: ExternalApiCopy = {
     otherChip: "OpenAI 호환 앱",
     notesTitle: "알아 둘 점 · 되돌리는 방법",
     modelsPick: "이 설정에 넣을 모델입니다. 대부분은 Smart Adaptive 하나면 충분합니다.",
+    cursorModels: "Tomverse가 제공하는 GPT 모델은 Cursor 기본 모델 목록에서 바로 고를 수 있습니다. Claude나 Smart Adaptive 같은 다른 모델은 Cursor Settings › Models에서 ID를 입력하고 Add Custom Model로 한 번만 추가하세요.",
 };
 
 const zh: ExternalApiCopy = {
@@ -356,6 +358,7 @@ const zh: ExternalApiCopy = {
     otherChip: "兼容 OpenAI 的应用",
     notesTitle: "注意事项 · 如何撤销",
     modelsPick: "此配置包含的模型。大多数人只需要 Smart Adaptive。",
+    cursorModels: "Tomverse 提供的 GPT 模型可以直接在 Cursor 自带的模型列表中选择。其他模型（如 Claude 或 Smart Adaptive）只需添加一次：在 Cursor Settings › Models 中输入 ID，然后选择 Add Custom Model。",
 };
 
 const zhHant: ExternalApiCopy = {
@@ -475,6 +478,7 @@ const zhHant: ExternalApiCopy = {
     otherChip: "相容 OpenAI 的應用程式",
     notesTitle: "注意事項 · 如何復原",
     modelsPick: "此設定包含的模型。大多數人只需要 Smart Adaptive。",
+    cursorModels: "Tomverse 提供的 GPT 模型可以直接在 Cursor 內建的模型清單中選擇。其他模型（例如 Claude 或 Smart Adaptive）只需新增一次：在 Cursor Settings › Models 輸入 ID，再選擇 Add Custom Model。",
 };
 
 const fr: ExternalApiCopy = {
@@ -594,6 +598,7 @@ const fr: ExternalApiCopy = {
     otherChip: "Apps compatibles OpenAI",
     notesTitle: "Bon à savoir · comment annuler",
     modelsPick: "Les modèles de cette configuration. La plupart des gens n'ont besoin que de Smart Adaptive.",
+    cursorModels: "Les modèles GPT proposés par Tomverse se choisissent directement dans la liste de modèles de Cursor. Ajoutez tout autre modèle, comme Claude ou Smart Adaptive, une seule fois : saisissez son ID dans Cursor Settings › Models et choisissez Add Custom Model.",
 };
 
 const de: ExternalApiCopy = {
@@ -713,6 +718,7 @@ const de: ExternalApiCopy = {
     otherChip: "OpenAI-kompatible Apps",
     notesTitle: "Gut zu wissen · rückgängig machen",
     modelsPick: "Die Modelle in dieser Konfiguration. Die meisten brauchen nur Smart Adaptive.",
+    cursorModels: "GPT-Modelle, die Tomverse anbietet, lassen sich direkt in Cursors eigener Modellliste auswählen. Jedes andere Modell, etwa Claude oder Smart Adaptive, fügen Sie einmal hinzu: ID in Cursor Settings › Models eingeben und Add Custom Model wählen.",
 };
 
 const es: ExternalApiCopy = {
@@ -832,6 +838,7 @@ const es: ExternalApiCopy = {
     otherChip: "Apps compatibles con OpenAI",
     notesTitle: "Conviene saber · cómo deshacerlo",
     modelsPick: "Los modelos de esta configuración. A la mayoría le basta con Smart Adaptive.",
+    cursorModels: "Los modelos GPT que ofrece Tomverse se eligen directamente en la lista de modelos de Cursor. Cualquier otro modelo, como Claude o Smart Adaptive, se añade una sola vez: escribe su ID en Cursor Settings › Models y elige Add Custom Model.",
 };
 
 const pt: ExternalApiCopy = {
@@ -951,6 +958,7 @@ const pt: ExternalApiCopy = {
     otherChip: "Apps compatíveis com OpenAI",
     notesTitle: "Bom saber · como desfazer",
     modelsPick: "Os modelos desta configuração. A maioria precisa só do Smart Adaptive.",
+    cursorModels: "Os modelos GPT oferecidos pelo Tomverse podem ser escolhidos direto na lista de modelos do Cursor. Qualquer outro modelo, como Claude ou Smart Adaptive, é adicionado uma única vez: digite o ID em Cursor Settings › Models e escolha Add Custom Model.",
 };
 
 export const externalApiCopy = { en, ko, zh, zhHant, fr, de, es, pt };

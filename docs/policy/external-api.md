@@ -257,6 +257,13 @@ catalogue, so a customer never has to recopy it.
   refused, timeout, invalid output, one candidate left): the default model
   (`DEFAULT_MODEL_ID`) if it fits, otherwise the first candidate in catalogue
   order, `routed-by: default`. A pick outside the candidates is never taken.
+- **A model named by its provider id.** Chat Completions, like the native
+  protocols, takes the provider's model id (`gpt-5.6-luna`) when exactly one
+  offered model uses it, so a coding tool's built-in model list (Cursor's GPT
+  models, with the OpenAI base URL overridden) works without a custom model.
+  An id two offered models share is a 400 `model_ambiguous` naming the
+  Tomverse ids. A name no offered model uses is never mapped to another model:
+  it is not found.
 - **A pinned model that is no longer offered** (retired, disabled, or its
   provider unconfigured) answers 404 `model_unavailable`, naming
   `smart-adaptive` and the settings page, instead of a bare `model_not_found`.
