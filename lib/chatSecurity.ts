@@ -292,6 +292,8 @@ export type ChatBudget = {
     longContextThresholdTokens: number | null;
     /** Set on a turn above the flat input limit: settle by actual cost. */
     longContextSettlement?: ChatLongContextSettlement | null;
+    /** Provider calls reserved for, when more than one (tool loops). */
+    providerCallPasses?: number;
 };
 
 type ReservationEntry = {
@@ -399,6 +401,7 @@ export type ChatUsageReservation = {
     costSource?: string;
     longContextThresholdTokens?: number | null;
     longContextSettlement?: ChatLongContextSettlement | null;
+    providerCallPasses?: number;
     /**
      * The cache-write rate this turn was reserved at, carried so settlement
      * prices the write at the same figure rather than re-reading a registry
@@ -582,6 +585,8 @@ const durableReservationPayloadSchema = z
         pricingVersion: z.string().min(1).max(120).optional(),
         costSource: z.string().min(1).max(60).optional(),
         longContextThresholdTokens: z.number().int().nonnegative().nullable().optional(),
+        // Absent on a one-call turn and on every reservation written before it.
+        providerCallPasses: z.number().int().min(2).max(4).optional(),
         // Optional: absent on every reservation written before long context,
         // which settles by the flat rule exactly as it did.
         longContextSettlement: z
@@ -1154,7 +1159,13 @@ export const createChatBudget = (
         requestedTotalOutputCap === undefined &&
         Number.isSafeInteger(model.contextWindowTokens) &&
         model.contextWindowTokens! > 0
-            ? Math.max(0, model.contextWindowTokens! - contextInputTokens)
+            ? Math.max(
+                  0,
+                  // What is sent: the image allowance is reserved, not sent,
+                  // so it takes no room from the answer.
+                  model.contextWindowTokens! -
+                      (contextInputTokens - reservationOnlyInputTokens)
+              )
             : Infinity;
     const totalOutputTokens = Math.min(
         windowRoom,
@@ -1235,6 +1246,7 @@ export const createChatBudget = (
         pricingVersion: pricing.pricingVersion,
         costSource: pricing.costSource,
         longContextThresholdTokens: pricing.longContextThresholdTokens,
+        ...(passes > 1 ? { providerCallPasses: passes } : {}),
     };
 };
 
@@ -4130,6 +4142,9 @@ export const acquireChatAccess = async (
             costSource: budget.costSource,
             longContextThresholdTokens: budget.longContextThresholdTokens,
             longContextSettlement: budget.longContextSettlement ?? null,
+            ...(budget.providerCallPasses
+                ? { providerCallPasses: budget.providerCallPasses }
+                : {}),
         };
         if (guestAutoPrehold) {
             const converted = await tx.chatCreditReservation.updateMany({
@@ -4698,6 +4713,7 @@ export const settleChatUsage = async (
                     canonical.longContextThresholdTokens ?? null,
                 pricingVersion: canonical.pricingVersion ?? null,
                 costSource: canonical.costSource ?? null,
+                providerCallPasses: canonical.providerCallPasses ?? null,
             },
             actualInput
         );
@@ -5017,6 +5033,7 @@ export const settleChatUsage = async (
                           longContextThresholdTokens:
                               canonical.longContextThresholdTokens ?? null,
                           costSource: canonical.costSource ?? null,
+                          providerCallPasses: canonical.providerCallPasses ?? null,
                       },
                       inputTokens: actualInput,
                       cachedInputTokens: actualCachedInput,

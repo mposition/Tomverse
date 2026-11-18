@@ -2268,6 +2268,14 @@ type SettlementRates = {
     pricingVersion?: string | null;
     /** The reservation's `costSource`; absent means "do not correct". */
     costSource?: string | null;
+    /**
+     * Provider calls the reservation allowed (tool loops, Research Preview).
+     * Above 1 the settled input is a sum of calls, not one prompt, so it can
+     * only ever lower the tier: a sum under a boundary puts every call under
+     * it, a sum over one says nothing about any single call
+     * (review r-20261118-083641-09ae82).
+     */
+    providerCallPasses?: number | null;
 };
 
 /**
@@ -2290,6 +2298,7 @@ export const longContextSettlementRates = <T extends SettlementRates>(
         reservedCostSource: rates.costSource,
     });
     if (!crossed) return rates;
+    if (crossed.raised && (rates.providerCallPasses ?? 1) > 1) return rates;
     // Toward the tier the prompt fell in, and never past it: a raise keeps a
     // dearer snapshot rate, a lowering never raises a cheaper one.
     const pick = crossed.raised ? Math.max : Math.min;

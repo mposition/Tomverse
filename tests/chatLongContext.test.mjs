@@ -417,6 +417,76 @@ test("a long-rate reservation whose prompt stayed under the boundary settles at 
     assert.equal(longContextSettlementRates(flat, 230_000), flat);
 });
 
+// Review r-20261118-083641-09ae82: a tool loop's settled input is a sum of
+// calls, each its own prompt. A sum under a boundary puts every call under it,
+// so it may lower the tier; a sum over one says nothing about any call.
+test("a multi-call reservation only ever settles at a lower tier", () => {
+    const short = resolveModelPricing(getModel("gpt-6-luna"), { estimatedPromptTokens: 1_000 });
+    const long = resolveModelPricing(getModel("gpt-6-luna"), { estimatedPromptTokens: 300_000 });
+    const base = {
+        modelId: "gpt-6-luna",
+        pricingVersion: short.pricingVersion,
+        costSource: short.costSource,
+        providerCallPasses: 4,
+    };
+    const reservedShort = {
+        ...base,
+        inputUsdPerMillionTokens: short.inputUsdPerMillionTokens,
+        outputUsdPerMillionTokens: short.outputUsdPerMillionTokens,
+        longContextThresholdTokens: null,
+    };
+    // Four 200k calls sum to 800k: still the short rate.
+    assert.equal(longContextSettlementRates(reservedShort, 800_000), reservedShort);
+    const reservedLong = {
+        ...base,
+        inputUsdPerMillionTokens: long.inputUsdPerMillionTokens,
+        outputUsdPerMillionTokens: long.outputUsdPerMillionTokens,
+        longContextThresholdTokens: 272_000,
+    };
+    assert.equal(
+        longContextSettlementRates(reservedLong, 230_000).inputUsdPerMillionTokens,
+        short.inputUsdPerMillionTokens
+    );
+    assert.equal(longContextSettlementRates(reservedLong, 800_000), reservedLong);
+    // One call: the sum is the prompt, and it raises as before.
+    const single = { ...reservedShort, providerCallPasses: null };
+    assert.equal(
+        longContextSettlementRates(single, 300_000).inputUsdPerMillionTokens,
+        long.inputUsdPerMillionTokens
+    );
+});
+
+test("the call count travels from the budget to every settlement path", () => {
+    const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
+    const security = read("lib/chatSecurity.ts");
+    assert.match(security, /\.\.\.\(passes > 1 \? \{ providerCallPasses: passes \} : \{\}\),/);
+    assert.match(security, /providerCallPasses: z\.number\(\)\.int\(\)\.min\(2\)\.max\(4\)\.optional\(\),/);
+    assert.equal(security.match(/providerCallPasses: canonical\.providerCallPasses \?\? null,/g)?.length, 2);
+    const route = read("app/api/chat/route.ts");
+    assert.match(route, /providerCallPasses: budget\.providerCallPasses \?\? null,/);
+    assert.match(route, /providerCallPasses: plan\.budget\.providerCallPasses \?\? null,/);
+    const luna = getModel("gpt-6-luna");
+    assert.equal(createChatBudget("user", luna, 1_000).providerCallPasses, undefined);
+    assert.equal(
+        createChatBudget("user", luna, 1_000, { toolInputPasses: 3 }).providerCallPasses,
+        3
+    );
+});
+
+// Review r-20261118-083641-09ae82 (cursor): the image allowance is reserved,
+// never sent, so it takes no room from the answer.
+test("the window room counts what is sent, not the image allowance", () => {
+    const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
+    assert.match(
+        read("lib/chatSecurity.ts"),
+        /model\.contextWindowTokens! -\s*\(contextInputTokens - reservationOnlyInputTokens\)/
+    );
+    assert.match(
+        read("app/api/chat/route.ts"),
+        /reservedInputTokens: Math\.max\(0, contextInputTokens - reservationOnlyInputTokens\),/
+    );
+});
+
 // Same review (nit): a profile can change its cached-input multiplier at a
 // boundary (Qwen 3.7 Plus, 0.2 to 1.0 above 256K); it moves with the tier.
 test("the cached-input multiplier moves with the settled tier", () => {

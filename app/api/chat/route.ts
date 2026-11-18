@@ -4930,7 +4930,9 @@ async function handleChatPost(
         // to hold one, so the guard reads the single-pass view of the budget.
         const outputBudget = fitChatOutputToContextWindow({
             contextWindowTokens: modelConfig.contextWindowTokens,
-            reservedInputTokens: contextInputTokens,
+            // What is sent: the image allowance is reserved, never sent, so
+            // it takes no room from the answer (lib/chatSecurity.ts windowRoom).
+            reservedInputTokens: Math.max(0, contextInputTokens - reservationOnlyInputTokens),
             requestOutputCapTokens: budget.maxOutputTokens,
             providerMaxOutputTokens: budget.providerMaxOutputTokens,
         });
@@ -5995,6 +5997,7 @@ async function handleChatPost(
                         ? ANTHROPIC_PROMPT_CACHE_TTL
                         : null,
                 pricingVersion: budget.pricingVersion ?? null,
+                providerCallPasses: budget.providerCallPasses ?? null,
                 longContextThresholdTokens: budget.longContextThresholdTokens,
                 costSource: budget.costSource ?? null,
             } satisfies AttemptPriceSnapshot,
@@ -7325,6 +7328,7 @@ async function handleChatPost(
                         ? ANTHROPIC_PROMPT_CACHE_TTL
                         : null,
                 pricingVersion: plan.budget.pricingVersion ?? null,
+                providerCallPasses: plan.budget.providerCallPasses ?? null,
                 // Same as the primary's snapshot: the long-context settlement
                 // rule needs both to decide whether a crossed tier is corrected.
                 longContextThresholdTokens: plan.budget.longContextThresholdTokens,

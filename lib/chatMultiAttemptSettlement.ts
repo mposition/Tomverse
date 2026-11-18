@@ -73,6 +73,8 @@ export type AttemptPriceSnapshot = {
     longContextThresholdTokens?: number | null;
     /** Where these rates came from (`ResolvedModelPricing.costSource`). */
     costSource?: string | null;
+    /** Provider calls the attempt was reserved for, when more than one. */
+    providerCallPasses?: number | null;
 };
 
 export type AttemptUsage = {
