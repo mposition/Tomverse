@@ -103,3 +103,18 @@ test("Cursor and the per-tool model lists", () => {
     assert.ok(!lists.cursor.some((m) => m.id === "smart-adaptive"), "Agent starts on a fixed model");
     assert.ok(![...lists.claudeCode, ...lists.codex].some((m) => m.id === "smart-adaptive"), "never on a native protocol");
 });
+
+test("a request names a model by Tomverse id or by one offered model's provider id, never another model", async () => {
+    const { pickRequestedModel } = await import("../lib/externalApiProtocols.ts");
+    const entries = [
+        { model: { id: "gpt-5-6-luna", apiModel: "gpt-5.6-luna" } },
+        { model: { id: "claude-sonnet-5", apiModel: "claude-sonnet-5" } },
+        { model: { id: "fast-a", apiModel: "shared-id" } },
+        { model: { id: "fast-b", apiModel: "shared-id" } },
+    ];
+    assert.equal(pickRequestedModel(entries, "gpt-5-6-luna").entry.model.id, "gpt-5-6-luna");
+    assert.equal(pickRequestedModel(entries, "gpt-5.6-luna").entry.model.id, "gpt-5-6-luna");
+    assert.equal(pickRequestedModel(entries, "claude-sonnet-5").entry.model.id, "claude-sonnet-5");
+    assert.deepEqual(pickRequestedModel(entries, "shared-id").ambiguous.map((entry) => entry.model.id), ["fast-a", "fast-b"]);
+    assert.equal(pickRequestedModel(entries, "gpt-5.6-sol"), null);
+});
