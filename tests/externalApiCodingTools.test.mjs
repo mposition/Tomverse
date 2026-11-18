@@ -79,6 +79,8 @@ test("Codex: a separate provider and profile, no retries, no WebSocket, no hoste
     assert.ok(config.profileToml.includes('model_provider = "tomverse"'));
     assert.ok(config.profileToml.includes('model = "gpt-5.6-luna"'), "the provider id, so Codex offers its freeform apply_patch");
     assert.ok(config.profileToml.includes('web_search = "disabled"'));
+    assert.ok(config.profileToml.includes('approvals_reviewer = "user"'), "no automatic reviewer on a model the person did not pick");
+    assert.ok(config.profileToml.includes('review_model = "gpt-5.6-luna"'));
     assert.ok(config.profileToml.includes("model_context_window = 256000"));
     const compactAt = Number(/model_auto_compact_token_limit = (\d+)/.exec(config.profileToml)[1]);
     assert.ok(compactAt < luna.contextWindowTokens - luna.maxOutputTokens);

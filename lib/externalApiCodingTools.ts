@@ -121,9 +121,16 @@ export const codexConfig = (
         "stream_max_retries = 0",
         "supports_websockets = false",
     ].join("\n");
+    const modelId = codexModelId(model, available);
     const selection = [
         'model_provider = "tomverse"',
-        `model = "${codexModelId(model, available)}"`,
+        `model = "${modelId}"`,
+        // Approvals go to the person. Codex's automatic approval reviewer is a
+        // separate agent on a model of its own choosing (observed: the VS Code
+        // extension's bundled Codex 0.169 called gpt-6-luna for it), which would
+        // spend credits on a model the person did not pick.
+        'approvals_reviewer = "user"',
+        `review_model = "${modelId}"`,
         'web_search = "disabled"',
         `model_context_window = ${model.contextWindowTokens}`,
         `model_auto_compact_token_limit = ${plannedInputWindow(model)}`,
