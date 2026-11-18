@@ -159,6 +159,8 @@ type CreditValueCopy = {
   comparisonUnit: string;
   longContextTitle: string;
   longContextBody: string;
+  /** Shown only while long context is on, with the configured threshold. */
+  longContextChargeNote: (tokens: string) => string;
   tokenUnit: string;
   preflightTitle: string;
   preflightBody: string;
@@ -183,6 +185,7 @@ const creditValueCopy: Record<Language, CreditValueCopy> = {
     comparisonUnit: "comparisons",
     longContextTitle: "Long conversations and files use more context",
     longContextBody: "Input context includes the current prompt, previous conversation, and extracted file content. As that context grows, the base model charge is multiplied by the bands below.",
+    longContextChargeNote: (tokens) => `Above ${tokens} input tokens (signed-in accounts), a request is charged its actual provider cost, never less than the multiplier charge above: the most it can use is held before sending, and the unused part is returned.`,
     tokenUnit: "input tokens",
     preflightTitle: "Check the base estimate before sending",
     preflightBody: "In the app’s model selector, check each model’s credit category and base credits. Before sending, the estimate adds the selected models’ base costs. Final usage may change when file content and long conversation history are processed and input-size multipliers apply.",
@@ -205,6 +208,7 @@ const creditValueCopy: Record<Language, CreditValueCopy> = {
     comparisonUnit: "비교",
     longContextTitle: "긴 대화와 파일은 더 많은 문맥을 사용합니다",
     longContextBody: "입력 문맥에는 현재 질문, 이전 대화와 추출된 파일 내용이 포함됩니다. 문맥이 길어지면 아래 구간에 따라 모델 기본 차감량에 배율이 적용됩니다.",
+    longContextChargeNote: (tokens) => `로그인 계정의 입력이 ${tokens}토큰을 넘으면 실제 공급사 비용으로 차감하며, 위 배율로 계산한 차감량보다 적게 차감하지는 않습니다. 보내기 전에 최대 사용량을 잡아 두고, 쓰지 않은 만큼은 돌려드립니다.`,
     tokenUnit: "입력 토큰",
     preflightTitle: "전송 전에 기본 예상량을 확인하세요",
     preflightBody: "앱의 모델 선택기에서 각 모델의 크레딧 사용 등급과 기본 크레딧을 확인하세요. 전송 전에는 선택한 모델의 기본값을 합산한 예상량이 표시됩니다. 파일 내용과 긴 대화 기록을 처리한 뒤 적용되는 배율에 따라 최종 사용량은 달라질 수 있습니다.",
@@ -227,6 +231,7 @@ const creditValueCopy: Record<Language, CreditValueCopy> = {
     comparisonUnit: "次比较",
     longContextTitle: "长对话和文件会使用更多上下文",
     longContextBody: "输入上下文包括当前问题、先前对话和提取的文件内容。上下文增长时，模型基础消耗会按以下区间乘以相应倍数。",
+    longContextChargeNote: (tokens) => `登录账户的输入超过 ${tokens} 个 token 时，按实际供应商成本扣除积分，但不少于上述倍数计算的消耗：发送前会先预留最大用量，未使用的部分会退还。`,
     tokenUnit: "输入 token",
     preflightTitle: "发送前查看基础预估",
     preflightBody: "在应用的模型选择器中查看各模型的积分等级与基础积分。发送前的预估为所选模型基础消耗之和；处理文件内容和长对话记录并应用输入倍数后，最终用量可能变化。",
@@ -249,6 +254,7 @@ const creditValueCopy: Record<Language, CreditValueCopy> = {
     comparisonUnit: "次比較",
     longContextTitle: "長對話與檔案會使用更多上下文",
     longContextBody: "輸入上下文包括目前的問題、先前的對話和擷取的檔案內容。上下文增加時，模型的基本消耗會依以下區間乘以相應的倍數。",
+    longContextChargeNote: (tokens) => `登入帳戶的輸入超過 ${tokens} 個 token 時，改按實際供應商成本扣除點數，但不少於上述倍數計算的消耗：傳送前會先預留最大用量，未使用的部分會退還。`,
     tokenUnit: "輸入 token",
     preflightTitle: "傳送前查看基本預估",
     preflightBody: "在應用程式的模型選擇器中，可以查看各模型的點數等級與基本點數。傳送前的預估為所選模型基本消耗的總和；處理檔案內容和長對話紀錄並套用輸入倍數後，最終用量可能會有所變化。",
@@ -271,6 +277,7 @@ const creditValueCopy: Record<Language, CreditValueCopy> = {
     comparisonUnit: "comparaisons",
     longContextTitle: "Les longues conversations et les fichiers utilisent plus de contexte",
     longContextBody: "Le contexte comprend la demande actuelle, la conversation précédente et le contenu extrait des fichiers. Le coût de base est multiplié selon les paliers ci-dessous.",
+    longContextChargeNote: (tokens) => `Au-delà de ${tokens} jetons en entrée (comptes connectés), une demande est facturée à son coût fournisseur réel, jamais moins que le palier ci-dessus : le maximum est réservé avant l’envoi et la part non utilisée est restituée.`,
     tokenUnit: "tokens d'entrée",
     preflightTitle: "Vérifiez l'estimation de base avant l'envoi",
     preflightBody: "Dans le sélecteur de l’application, consultez la catégorie de consommation et les crédits de base de chaque modèle. L’estimation avant l’envoi additionne ces coûts. Le total final peut varier après traitement des fichiers et d’un long historique, selon les multiplicateurs d’entrée.",
@@ -293,6 +300,7 @@ const creditValueCopy: Record<Language, CreditValueCopy> = {
     comparisonUnit: "Vergleiche",
     longContextTitle: "Lange Gespräche und Dateien verwenden mehr Kontext",
     longContextBody: "Der Eingabekontext umfasst die aktuelle Anfrage, den bisherigen Verlauf und extrahierte Dateiinhalte. Mit wachsendem Kontext wird der Basisverbrauch nach den folgenden Stufen multipliziert.",
+    longContextChargeNote: (tokens) => `Ab ${tokens} Eingabe-Token (angemeldete Konten) wird eine Anfrage nach den tatsächlichen Anbieterkosten berechnet, nie weniger als nach den Stufen oben: Das Maximum wird vor dem Senden reserviert, der ungenutzte Teil wird erstattet.`,
     tokenUnit: "Eingabe-Token",
     preflightTitle: "Basisprognose vor dem Senden prüfen",
     preflightBody: "In der Modellauswahl der App sehen Sie die Credit-Kategorie und die Basis-Credits je Modell. Die Schätzung vor dem Senden addiert diese Basiswerte. Nach Verarbeitung von Dateien und langem Verlauf können Eingabefaktoren den endgültigen Verbrauch verändern.",
@@ -315,6 +323,7 @@ const creditValueCopy: Record<Language, CreditValueCopy> = {
     comparisonUnit: "comparaciones",
     longContextTitle: "Las conversaciones largas y los archivos usan más contexto",
     longContextBody: "El contexto incluye la solicitud actual, la conversación previa y el contenido extraído de archivos. Al crecer, el coste base se multiplica según los tramos siguientes.",
+    longContextChargeNote: (tokens) => `Por encima de ${tokens} tokens de entrada (cuentas con sesión), la solicitud se cobra por su coste real del proveedor, nunca menos que según los tramos anteriores: se reserva el máximo antes de enviar y se devuelve la parte no usada.`,
     tokenUnit: "tokens de entrada",
     preflightTitle: "Comprueba la estimación base antes de enviar",
     preflightBody: "En el selector de la aplicación, consulta la categoría de consumo y los créditos base de cada modelo. La estimación previa suma esos costes. El uso final puede variar al procesar archivos e historiales largos y aplicar multiplicadores de entrada.",
@@ -337,6 +346,7 @@ const creditValueCopy: Record<Language, CreditValueCopy> = {
     comparisonUnit: "comparações",
     longContextTitle: "Conversas longas e arquivos usam mais contexto",
     longContextBody: "O contexto inclui o pedido atual, a conversa anterior e o conteúdo extraído dos arquivos. À medida que cresce, o custo-base é multiplicado pelas faixas abaixo.",
+    longContextChargeNote: (tokens) => `Acima de ${tokens} tokens de entrada (contas conectadas), o pedido é cobrado pelo custo real do provedor, nunca menos do que pelas faixas acima: o máximo é reservado antes do envio e a parte não usada é devolvida.`,
     tokenUnit: "tokens de entrada",
     preflightTitle: "Confira a estimativa-base antes de enviar",
     preflightBody: "No seletor de modelos do aplicativo, confira a categoria de consumo e os créditos-base de cada modelo. A estimativa antes do envio soma esses valores. O uso final pode mudar após o processamento de arquivos e históricos longos e a aplicação dos multiplicadores de entrada.",
@@ -1787,7 +1797,7 @@ export function PricingPageContent() {
               <p data-testid="pricing-plan-usage" className={`mt-3 text-sm font-bold ${plan.highlighted ? "text-blue-50" : "text-zinc-700 dark:text-zinc-200"}`}>
                 {plan.usage}
               </p>
-              {lang === "ko" ? <PricingKoreanPlanLimits plan={cardPlan} dailyCredits={publicPlan?.dailyMessageLimit ?? null} allowAttachments={publicPlan?.allowAttachments} appInputTokenLimit={billing.config?.appInputTokenLimit ?? null} /> : null}
+              {lang === "ko" ? <PricingKoreanPlanLimits plan={cardPlan} dailyCredits={publicPlan?.dailyMessageLimit ?? null} allowAttachments={publicPlan?.allowAttachments} appInputTokenLimit={billing.config?.appInputTokenLimit ?? null} appLongContext={billing.config?.appLongContext === true} /> : null}
               {lang === "en" ? <PricingCreditExample credits={billing.planLimits(planId).monthlyCredits} testId={`pricing-credit-example-plan-${planId}`} /> : null}
               {/*
                 The plan CTA is chosen by resolvePlanCtaState(), not by the
@@ -2327,6 +2337,9 @@ export function PricingPageContent() {
               </div>
               <p className="mt-3 min-w-0 break-words text-xs leading-6 text-zinc-600 dark:text-zinc-300">
                 {creditGuide.longContextBody}
+                {billing.config?.appLongContext === true && billing.config.appInputTokenLimit
+                  ? ` ${creditGuide.longContextChargeNote(numberFormatter.format(billing.config.appInputTokenLimit))}`
+                  : null}
               </p>
               <div className="mt-4 flex flex-wrap gap-2">
                 {inputMultiplierBands.map((band) => (

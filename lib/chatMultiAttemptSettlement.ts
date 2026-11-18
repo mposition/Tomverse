@@ -34,6 +34,8 @@
  * split can be argued about in a test rather than in a billing incident.
  */
 
+import type { ProviderCallUsage } from "@/lib/modelPricing";
+import { longContextSettledUsageCost } from "@/lib/modelPricing";
 import { calculateProviderUsageCost } from "@/lib/providerUsageCost";
 import type { AiModel } from "@/lib/models";
 
@@ -68,6 +70,12 @@ export type AttemptPriceSnapshot = {
     /** The cache TTL the request asked for, where it asked for one. */
     promptCacheTtl?: string | null;
     pricingVersion?: string | null;
+    /** The prompt size that selected these rates' tier; null or absent for the first. */
+    longContextThresholdTokens?: number | null;
+    /** Where these rates came from (`ResolvedModelPricing.costSource`). */
+    costSource?: string | null;
+    /** Provider calls the attempt was reserved for, when more than one. */
+    providerCallPasses?: number | null;
 };
 
 export type AttemptUsage = {
@@ -75,6 +83,8 @@ export type AttemptUsage = {
     attemptIndex: number;
     price: AttemptPriceSnapshot;
     inputTokens: number;
+    /** Per provider call, when the attempt made more than one (tool loops). */
+    providerCalls?: ProviderCallUsage[];
     cachedInputTokens: number;
     /**
      * Input tokens written into the prompt cache on this attempt.
@@ -146,16 +156,15 @@ export const priceAttempt = (
     priceOne(attempt);
 
 const priceOne = (attempt: AttemptUsage): { costMicroUsd: number; costSource: PricedAttempt["costSource"] } => {
-    const tokenCost = calculateProviderUsageCost({
-        inputTokens: attempt.inputTokens,
-        cachedInputTokens: attempt.cachedInputTokens,
-        cacheWriteInputTokens: attempt.cacheWriteInputTokens,
-        outputTokens: attempt.outputTokens,
-        inputUsdPerMillionTokens: attempt.price.inputUsdPerMillionTokens,
-        outputUsdPerMillionTokens: attempt.price.outputUsdPerMillionTokens,
-        cachedInputPriceMultiplier: attempt.price.cachedInputPriceMultiplier,
-        cacheWriteUsdPerMillionTokens: attempt.price.cacheWriteUsdPerMillionTokens,
-    });
+    // The same long-context rule as single-attempt settlement: each call at
+    // the tier its own prompt fell in.
+    const tokenCost = longContextSettledUsageCost(
+            calculateProviderUsageCost,
+            
+        attempt.price,
+        attempt,
+        attempt.providerCalls
+    );
     const reported = attempt.providerReportedCostMicroUsd;
     const base =
         typeof reported === "number" && Number.isFinite(reported) && reported >= 0

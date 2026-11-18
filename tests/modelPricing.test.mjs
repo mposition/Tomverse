@@ -264,13 +264,20 @@ test("GPT 6 Luna takes the GPT-5.6 long-context shape past 272,000 tokens", () =
   assert.equal(above.longContextThresholdTokens, 272_000);
 });
 
-// A tier boundary below the user input ceiling is reachable, and two things
-// then price it at the short rate: a flat price stored on the registry row
-// (see the Gemini test above), and settlement, which uses the tier the
-// reservation chose from its own token estimate rather than re-choosing from
-// the provider's count. That understates cost, the direction this codebase
-// does not accept -- so a reachable boundary is a named, dated exception, never
+// A tier boundary below the flat user input ceiling is reachable by every
+// turn, and two things would then price it at the short rate: a flat price
+// stored on the registry row (see the Gemini test above), and settlement, which
+// charges credits from the tier the reservation chose from its own token
+// estimate. That understates cost, the direction this codebase does not accept
+// -- so a boundary below the *flat* ceiling is a named, dated exception, never
 // a silent one.
+//
+// Long context (2026-11-18) lets an account go past this ceiling, up to the
+// model's window, and so past boundaries above it (GPT-5.6 272K, Grok 4.5
+// 200K, MiniMax M3 512K). Those turns are covered separately and tested in
+// tests/chatLongContext.test.mjs: a flat price holds the limit at the first
+// boundary, the reservation picks the tier with a quarter of room, and
+// settlement records a crossed tier at the higher rate.
 //
 // The one exception is the Anthropic Haiku line. Operator decision
 // 2026-10-12: a guest's default lineup always holds one OpenAI, one Anthropic

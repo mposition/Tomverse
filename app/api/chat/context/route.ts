@@ -1,3 +1,4 @@
+import { CHAT_MAX_MESSAGE_BODY_BYTES, CHAT_MAX_MESSAGE_CHARACTERS } from "@/lib/chatRequestLimits";
 import { prepareMemoryHistoryContext } from "@/lib/memoryHistorySnapshot";
 import { randomUUID } from "node:crypto";
 import { getServerSession } from "next-auth/next";
@@ -55,7 +56,7 @@ const contextSchema = z
     .object({
         conversationId: z.string().min(1).max(64).nullable().optional(),
         modelIds: z.array(z.string().min(1).max(100)).min(1).max(3),
-        prompt: z.string().max(50_000),
+        prompt: z.string().max(CHAT_MAX_MESSAGE_CHARACTERS),
         previousContextBundle: z.string().min(1).max(8_192).optional(),
     })
     .strict();
@@ -78,7 +79,7 @@ export async function POST(request: Request) {
             "chat-context-preparation",
             { minute: 60, day: 2_000 }
         );
-        const payload = await readLimitedJson(request, 64 * 1024, contextSchema);
+        const payload = await readLimitedJson(request, CHAT_MAX_MESSAGE_BODY_BYTES, contextSchema);
         if (payload.previousContextBundle !== undefined && !userId) {
             throw new ChatAccessError(400, "INVALID_CONTEXT_BUNDLE", "Invalid chat context.");
         }
