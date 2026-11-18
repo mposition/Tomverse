@@ -23,6 +23,14 @@ import { assembleAmuxV22TransferPart, createOrLoadAmuxContentUnitKeys,
   readAmuxV22TransferBinding, type AmuxV22TransferBinding,
   type AmuxV22TransferHeader } from "@/lib/amux/v22TransferStore";
 import { prisma } from "@/lib/prisma";
+import { reportAmuxOperationalIncident } from "@/lib/amux/operationalError";
+
+/** An outcome this route cannot name: the box reads it back before it sends
+ * again. Recorded by class and code only, never the body. */
+const outcomeUnknown = (operation: string, error: unknown) => {
+  reportAmuxOperationalIncident(operation, error);
+  return amuxJsonNoStore({ error: "outcome_unknown" }, 503);
+};
 
 /**
  * The v22 result commit (docs/policy/amux-v22-result-transfer.md 1.6 2 and 3).
@@ -88,7 +96,7 @@ export async function GET(request: Request): Promise<Response> {
         filesDigest: evidence?.files ?
           v22PublishFilesSha256(evidence.files) : null } : null } :
       { status: "absent" });
-  } catch { return amuxJsonNoStore({ error: "outcome_unknown" }, 503); }
+  } catch (error) { return outcomeUnknown("v22_task_result", error); }
 }
 
 /** Records one prepared result in its own transaction. A refusal the store
@@ -106,8 +114,7 @@ async function commit(prepared: PreparedAmuxV22TaskResult) {
   } catch (error) {
     if (!callbackReturned && error instanceof AmuxV22TaskResultError)
       return { ok: false as const, response: amuxJsonNoStore({ error: error.code }, 409) };
-    return { ok: false as const,
-      response: amuxJsonNoStore({ error: "outcome_unknown" }, 503) };
+    return { ok: false as const, response: outcomeUnknown("v22_task_result", error) };
   } finally { prepared.dispose(); }
 }
 
@@ -205,7 +212,7 @@ async function postInline(body: z.infer<typeof inlineSchema>): Promise<Response>
         filesDigest: patchStored ? patch?.filesDigest ?? null : null,
         patchRejected: patchRejected || (patch !== undefined && !patchStored) });
     } finally { keys.masterKey.fill(0); patchKeys?.masterKey.fill(0); }
-  } catch { return amuxJsonNoStore({ error: "outcome_unknown" }, 503); }
+  } catch (error) { return outcomeUnknown("v22_task_result", error); }
 }
 
 // ignoreBOM keeps a leading U+FEFF, so the text is exactly the bytes.
@@ -275,7 +282,7 @@ async function postChunked(body: z.infer<typeof chunkedSchema>): Promise<Respons
     if (Object.keys(missing).length)
       return amuxJsonNoStore({ error: "upload_incomplete", missing }, 409);
     return await assembleAndRecord(body, binding, parts);
-  } catch { return amuxJsonNoStore({ error: "outcome_unknown" }, 503); }
+  } catch (error) { return outcomeUnknown("v22_task_result", error); }
 }
 
 /** The app deletes a part whose chunks do not make the part they describe;

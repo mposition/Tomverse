@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { mock, test } from "node:test";
+import { z } from "zod";
 
 const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path: string) => pathToFileURL(resolve(root, path)).href;
@@ -18,7 +19,18 @@ mock.module(mod("lib/amux/dbBoundary.ts"), { namedExports: {
   AMUX_LIFECYCLE_ROUTE_BUDGET_MS: 12_000,
   withAmuxRouteBudget: (work: () => Promise<Response>) => work(),
 } });
+mock.module(mod("lib/amux/v22ChangedPathsStore.ts"), { namedExports: {
+  // The settle route's size allowance and named list read the database: no
+  // patch or list recorded here, and a body that names none.
+  amuxV22NamedChangedPathsSchema: {
+    changed_paths_digest: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+    changed_paths_count: z.number().int().min(0).optional(),
+  },
+  amuxV22SettlementAllowanceMs: async () => 0,
+  resolveAmuxV22NamedChangedPaths: async () => ({ kind: "absent" }),
+} });
 mock.module(mod("lib/amux/execution.ts"), { namedExports: {
+  AMUX_V22_CHANGED_PATHS_UNRECORDED: "changed_paths_unrecorded",
   heartbeatAmuxV22TaskExecution: async () => { heartbeatCalls += 1;
     return false; },
   settleAmuxV22TaskExecution: async () => { settleCalls += 1;

@@ -8,6 +8,14 @@ import { amuxJsonNoStore } from "@/lib/amux/internalRoute";
 import { commitAmuxV22ChangedPaths, readAmuxV22ChangedPathsRecord } from
   "@/lib/amux/v22ChangedPathsStore";
 import { AMUX_V22_STORAGE_MAX_BYTES } from "@/lib/amux/v22TransferCore";
+import { reportAmuxOperationalIncident } from "@/lib/amux/operationalError";
+
+/** An outcome this route cannot name: the box reads it back before it sends
+ * again. Recorded by class and code only, never the body. */
+const outcomeUnknown = (operation: string, error: unknown) => {
+  reportAmuxOperationalIncident(operation, error);
+  return amuxJsonNoStore({ error: "outcome_unknown" }, 503);
+};
 
 /**
  * The commit and readback of a v22 run's changed-path list, whose chunks the
@@ -35,7 +43,7 @@ export async function GET(request: Request): Promise<Response> {
   if (!attemptId.success) return amuxJsonNoStore({ error: "Invalid request." }, 400);
   try {
     return amuxJsonNoStore(await readAmuxV22ChangedPathsRecord(attemptId.data));
-  } catch { return amuxJsonNoStore({ error: "outcome_unknown" }, 503); }
+  } catch (error) { return outcomeUnknown("v22_changed_paths", error); }
 }
 
 export async function POST(request: Request): Promise<Response> {
@@ -64,5 +72,5 @@ export async function POST(request: Request): Promise<Response> {
       case "refused":
         return amuxJsonNoStore({ error: committed.code }, 409);
     }
-  } catch { return amuxJsonNoStore({ error: "outcome_unknown" }, 503); }
+  } catch (error) { return outcomeUnknown("v22_changed_paths", error); }
 }

@@ -10,6 +10,14 @@ import { AMUX_V22_STORAGE_MAX_BYTES, AMUX_V22_TRANSFER_BODY_MAX_BYTES,
   AMUX_V22_TRANSFER_PARTS, amuxV22TransferChunkCount,
   amuxV22TransferChunkRange } from "@/lib/amux/v22TransferCore";
 import { putAmuxV22TransferChunk } from "@/lib/amux/v22TransferStore";
+import { reportAmuxOperationalIncident } from "@/lib/amux/operationalError";
+
+/** An outcome this route cannot name: the box reads it back before it sends
+ * again. Recorded by class and code only, never the body. */
+const outcomeUnknown = (operation: string, error: unknown) => {
+  reportAmuxOperationalIncident(operation, error);
+  return amuxJsonNoStore({ error: "outcome_unknown" }, 503);
+};
 
 /**
  * One chunk of a v22 run's result, patch or changed-path list
@@ -70,6 +78,6 @@ export async function POST(request: Request): Promise<Response> {
       return amuxJsonNoStore({ attemptId: body.attemptId, part: body.part,
         index: body.index, duplicate: stored.duplicate, received: stored.received,
         chunkCount: amuxV22TransferChunkCount(body.totalBytes) });
-    } catch { return amuxJsonNoStore({ error: "outcome_unknown" }, 503); }
+    } catch (error) { return outcomeUnknown("v22_transfer_upload", error); }
   } finally { bytes.fill(0); }
 }
