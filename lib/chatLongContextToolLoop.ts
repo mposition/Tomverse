@@ -71,6 +71,12 @@ export type LongContextToolLoop = {
     outputSpent: (options: { steps: readonly StepUsage[] }) => boolean;
     /** What the finished steps used, unreported ones at their allowance. */
     spent: () => { inputTokens: number; outputTokens: number; steps: number };
+    /**
+     * The input every call already sent: the finished steps, plus the prompt
+     * of a call in flight. What a cancelled or unreported turn is settled on,
+     * instead of every call the reservation held.
+     */
+    sentInputTokens: () => number;
 };
 
 export const longContextToolLoopStep = (
@@ -164,5 +170,7 @@ export const longContextToolLoopStep = (
         prepareStep,
         outputSpent: ({ steps }) => tally(steps).outputTokens >= limits.maxOutputTokens,
         spent: () => lastTally,
+        sentInputTokens: () =>
+            lastTally.inputTokens + (allowed.at(lastTally.steps)?.prompt ?? 0),
     };
 };

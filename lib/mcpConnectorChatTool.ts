@@ -64,6 +64,8 @@ export async function buildMcpChatTools(input: {
     resultInputAllowance: MCP_LIMITS.turnCharacters,
     sources: () => [...sources.values()],
     cancel: () => controller.abort(),
+    /** Input every model call already sent, the one in flight included. */
+    observedInputTokens: () => cumulativeInput,
     setBudget: (input: { inputTokens: number; outputTokens: number; instructions: string }) => {
       inputCeiling = input.inputTokens; outputCeiling = input.outputTokens; instructions = input.instructions;
     },

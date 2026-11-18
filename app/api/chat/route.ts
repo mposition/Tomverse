@@ -12,7 +12,10 @@ import {
     type StepResult,
     type ToolSet,
 } from "ai";
-import { longContextToolLoopStep } from "@/lib/chatLongContextToolLoop";
+import {
+    LongContextToolLoopLimitError,
+    longContextToolLoopStep,
+} from "@/lib/chatLongContextToolLoop";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { parseChatLocation } from "@tomverse/chat-core";
 import { appendChatLocationContext } from "@/lib/chatLocationPrompt";
@@ -6394,8 +6397,21 @@ async function handleChatPost(
                     }
                     const providerUsageSnapshot =
                         (await takePerplexityCapture())?.usage ?? null;
+                    // Without provider usage (a cancel, a lost total) a
+                    // multi-call loop is settled on the input it already sent
+                    // -- its finished calls and the one in flight -- not on
+                    // every call the reservation held.
+                    const sentLoopInput =
+                        dispatched.attemptIndex === 0
+                            ? (longContextLoopStep?.sentInputTokens() ??
+                              mcpConnector?.observedInputTokens() ??
+                              0)
+                            : 0;
                     const settledInputTokens =
-                        usage?.inputTokens ?? reservation.inputTokens;
+                        usage?.inputTokens ??
+                        (sentLoopInput > 0
+                            ? Math.min(sentLoopInput, reservation.inputTokens)
+                            : reservation.inputTokens);
                     const settledOutputTokens =
                         usage?.outputTokens ?? estimatedGeneratedOutputTokens();
                     await settleChatUsage(reservation, {
@@ -8478,14 +8494,19 @@ async function handleChatPost(
                             }
                         }
                     } else if (
+                        (error instanceof LongContextToolLoopLimitError ||
+                            (error as { cause?: unknown } | null)?.cause instanceof
+                                LongContextToolLoopLimitError) &&
                         longContextLoopStep &&
                         dispatched.attemptIndex === 0 &&
                         longContextLoopStep.spent().steps > 0
                     ) {
                         // A long-context tool loop stopped before a call that
-                        // would not fit: the calls it already made are the
-                        // provider's real cost, recorded as such. The failed
-                        // turn's credits follow the failure rule.
+                        // would not fit: that call was never sent, so the
+                        // finished calls are the provider's whole cost,
+                        // recorded as such. The failed turn's credits follow
+                        // the failure rule. Any other failure may have a call
+                        // in flight and takes the general path in settleSafely.
                         const spent = longContextLoopStep.spent();
                         researchFailureUsage = {
                             inputTokens: spent.inputTokens,

@@ -648,6 +648,28 @@ test("a long-context tool loop shares its output budget and answers within its c
     );
 });
 
+// Review r-20261118-120327-201bac: a turn settled without provider usage (a
+// cancel) is charged the input its calls already sent -- not every call the
+// reservation held -- and only a limit stop counts the finished calls alone.
+test("a cancelled or unreported multi-call turn settles on the input it sent", async () => {
+    const { longContextToolLoopStep } = await import("../lib/chatLongContextToolLoop.ts");
+    const run = longContextToolLoopStep({ maxOutputTokens: 10_000, inputTokens: 4_000_000, firstPromptTokens: 200_000, callCap: 4, contextWindowTokens: 1_000_000 });
+    run.prepareStep({ steps: [], messages: [] });
+    // The first call is in flight: its prompt was sent.
+    assert.equal(run.sentInputTokens(), 200_000);
+    run.prepareStep({ steps: [{ usage: { inputTokens: 200_000, outputTokens: 1_000 } }], messages: [] });
+    // One finished, the second in flight.
+    assert.equal(run.sentInputTokens(), 200_000 + 200_000);
+    const route = readFileSync(new URL("../app/api/chat/route.ts", import.meta.url), "utf8");
+    assert.match(route, /longContextLoopStep\?\.sentInputTokens\(\) \?\?\s*mcpConnector\?\.observedInputTokens\(\) \?\?\s*0/);
+    assert.match(route, /usage\?\.inputTokens \?\?\s*\(sentLoopInput > 0\s*\? Math\.min\(sentLoopInput, reservation\.inputTokens\)\s*: reservation\.inputTokens\)/);
+    assert.match(route, /\(error instanceof LongContextToolLoopLimitError \|\|[\s\S]{0,120}LongContextToolLoopLimitError\) &&\s*longContextLoopStep &&/);
+    assert.match(
+        readFileSync(new URL("../lib/mcpConnectorChatTool.ts", import.meta.url), "utf8"),
+        /observedInputTokens: \(\) => cumulativeInput,/
+    );
+});
+
 test("the installed SDK reports usage as the sum of all steps", () => {
     const types = readFileSync(new URL("../node_modules/ai/dist/index.d.ts", import.meta.url), "utf8");
     const result = types.slice(types.indexOf("interface StreamTextResult"));

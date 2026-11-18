@@ -254,7 +254,7 @@ const creditValueCopy: Record<Language, CreditValueCopy> = {
     comparisonUnit: "次比較",
     longContextTitle: "長對話與檔案會使用更多上下文",
     longContextBody: "輸入上下文包括目前的問題、先前的對話和擷取的檔案內容。上下文增加時，模型的基本消耗會依以下區間乘以相應的倍數。",
-    longContextChargeNote: (tokens) => `登入帳戶的輸入超過 ${tokens} 個權杖時，改按實際供應商成本扣除點數，但不少於上述倍數計算的消耗：傳送前會先預留最大用量，未使用的部分會退還。`,
+    longContextChargeNote: (tokens) => `登入帳戶的輸入超過 ${tokens} 個 token 時，改按實際供應商成本扣除點數，但不少於上述倍數計算的消耗：傳送前會先預留最大用量，未使用的部分會退還。`,
     tokenUnit: "輸入 token",
     preflightTitle: "傳送前查看基本預估",
     preflightBody: "在應用程式的模型選擇器中，可以查看各模型的點數等級與基本點數。傳送前的預估為所選模型基本消耗的總和；處理檔案內容和長對話紀錄並套用輸入倍數後，最終用量可能會有所變化。",
