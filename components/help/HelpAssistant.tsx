@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { ArrowUp, BookOpen, Loader2, ThumbsDown, ThumbsUp } from "lucide-react";
+import { discardResponseBody } from "@/lib/discardResponseBody";
 import type { HelpAssistantAnswer, HelpAssistantTurn } from "@/lib/helpAssistantCore";
 import { helpActionHref, helpGuideHref } from "@/lib/helpCentre/links";
 import type { HelpGuideAction, HelpUiCopy } from "@/lib/helpCentre/types";
@@ -24,7 +25,11 @@ export function useHelpAssistantAvailability(): HelpAssistantAvailability {
   useEffect(() => {
     let cancelled = false;
     fetch("/api/help/assistant", { cache: "no-store" })
-      .then((response) => (response.ok ? response.json() : { enabled: false, signedIn: false }))
+      .then(async (response) => {
+        if (response.ok) return response.json();
+        await discardResponseBody(response);
+        return { enabled: false, signedIn: false };
+      })
       .then((value: { enabled?: unknown; signedIn?: unknown }) => {
         if (!cancelled) setAvailability({ enabled: value.enabled === true, signedIn: value.signedIn === true });
       })
@@ -98,7 +103,9 @@ function sendFeedback(helpful: boolean, guideIds: string[], lang: Language) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ helpful, guideIds, lang }),
-  }).catch(() => undefined);
+  })
+    .then((response) => discardResponseBody(response))
+    .catch(() => undefined);
 }
 
 function AnswerCard({
@@ -119,7 +126,7 @@ function AnswerCard({
   const shell = `rounded-2xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900/60 ${compact ? "p-4" : "p-5 sm:p-6"}`;
   const header = (badge: string | null, tone: "ok" | "muted") => (
     <div className="flex flex-wrap items-center gap-2 text-sm">
-      <span aria-hidden="true" className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-400 via-blue-400 to-purple-400 text-xs font-black text-zinc-950">T</span>
+      <span aria-hidden="true" className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-400 via-blue-400 to-purple-400 text-xs font-bold text-zinc-950">T</span>
       <span className="font-bold">{ui.assistantName}</span>
       {badge ? (
         <span className={`rounded-full border px-2.5 py-0.5 text-xs ${tone === "ok" ? "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-400/30 dark:bg-emerald-500/10 dark:text-emerald-300" : "border-zinc-200 text-zinc-500 dark:border-zinc-700 dark:text-zinc-400"}`}>{badge}</span>

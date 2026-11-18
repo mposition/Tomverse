@@ -201,7 +201,7 @@ export const es: HelpLocaleCopy = {
       title: "Rellenar tu pregunta con ejemplos de inicio",
       summary: "Al elegir una tarjeta de ejemplo en una conversación nueva, la pregunta se rellena en el cuadro de texto. No se envía nada hasta que envías el mensaje.",
       steps: [
-        { title: "Elegir una tarjeta", body: "Si está disponible, pulsa una tarjeta de «Lo que puedes hacer aquí» en la pantalla de chat nuevo. Para ver más, pulsa «Ver más sugerencias»." },
+        { title: "Elegir una tarjeta", body: "Si está disponible, pulsa una tarjeta de “Lo que puedes hacer aquí” en la pantalla de chat nuevo. Para ver más, pulsa «Ver más sugerencias»." },
         { title: "Ajustarla", body: "Modifica como quieras la frase que se rellenó en el cuadro de texto." },
         { title: "Enviar", body: "Solo se envía de verdad cuando pulsas «Enviar». Las tarjetas con una insignia como «Requiere iniciar sesión» te llevan al inicio de sesión o a la información de planes." },
       ],
@@ -417,7 +417,7 @@ export const es: HelpLocaleCopy = {
       ],
       faq: [
         { q: "¿Qué archivos puedo añadir como conocimiento?", a: "txt, md, csv, json, pdf, docx, xlsx, pptx, odt, ods y odp. No se pueden añadir imágenes." },
-        { q: "Si cambio las instrucciones, ¿se aplica también a las conversaciones en curso?", a: "No. Cambia solo cuando pulsas «Usar la revisión más reciente aquí» en la conversación." },
+        { q: "Si cambio las instrucciones, ¿se aplica también a las conversaciones en curso?", a: "No. Cambia solo cuando pulsas “Usar la revisión más reciente aquí” en la conversación." },
         { q: "¿Pueden otras personas ver mi asistente?", a: "No. El asistente solo se usa desde tu cuenta y no se comparte." },
       ],
     },

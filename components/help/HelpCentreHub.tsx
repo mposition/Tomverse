@@ -191,7 +191,7 @@ export function HelpCentreHub({ lang, copy }: { lang: Language; copy: HelpLocale
                   <span aria-hidden="true" className={`h-2.5 w-2.5 rounded-full ${category.dot}`} />
                   <h3 className="font-bold">{copy.categories[category.id].title}</h3>
                   {entries.some((entry) => entry.isNew) ? (
-                    <span className="rounded-md bg-cyan-400 px-1.5 py-0.5 text-[10px] font-black text-zinc-950">{ui.newBadge}</span>
+                    <span className="rounded-md bg-cyan-400 px-1.5 py-0.5 text-[11px] font-bold text-zinc-950">{ui.newBadge}</span>
                   ) : null}
                   <span className="ml-auto text-xs text-zinc-500">{entries.length}</span>
                 </div>
