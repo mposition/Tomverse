@@ -6,7 +6,7 @@ import { z } from "zod";
 import { commandEnv, planCommand, runCommand, CommandError, type CommandPlan } from "./commands.js";
 import { currentDigest, planPatch, PatchError, removeFile, writeFileReplacing, type PatchEdit, type PlannedEdit } from "./patch.js";
 import { canonicalDigest, JournalError, sha256, type Journal } from "./session.js";
-import { PathError, ripgrepAvailable, isSecretPath, type Workspace } from "./workspace.js";
+import { PathError, ripgrepAvailable, type Workspace } from "./workspace.js";
 
 /**
  * The tools the model can call. list_files, search_text and read_file only
