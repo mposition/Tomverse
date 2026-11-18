@@ -302,9 +302,32 @@ export const publicUpstreamError = (status: number, message: unknown) => {
 };
 
 /**
+ * Error types (Anthropic) and codes (Responses) that name a fault in the
+ * client's own request, and only those: a prefix rule would also pass
+ * provider-account codes such as `invalid_api_key` or `invalid_organization`.
+ */
+const CLIENT_FAULT_ERROR_KINDS = new Set([
+    "invalid_request_error",
+    "request_too_large",
+    "invalid_prompt",
+    "context_length_exceeded",
+    "invalid_image",
+    "invalid_image_format",
+    "invalid_base64_image",
+    "invalid_image_mode",
+    "image_too_large",
+    "image_too_small",
+    "image_parse_error",
+    "image_content_policy_violation",
+    "empty_image_file",
+    "unsupported_image_media_type",
+    "image_file_too_large",
+]);
+
+/**
  * One SSE event as relayed to the client. Every event keeps its own data;
- * only an error event's message is replaced when it describes Tomverse's
- * provider account (the same rule as an HTTP error body).
+ * an error event keeps the provider's message only for the client's own
+ * fault, and never one that describes Tomverse's provider account.
  */
 export const relayedSseEvent = (event: { event: string | null; data: string }) => {
     let data = event.data;
@@ -327,8 +350,7 @@ export const relayedSseEvent = (event: { event: string | null; data: string }) =
             // while they do not describe Tomverse's account. Everything else --
             // quota, billing, permission, rate and availability -- is neutral,
             // its code included.
-            const clientFault =
-                kind === "invalid_request_error" || kind === "request_too_large" || kind.startsWith("invalid_") || kind === "context_length_exceeded";
+            const clientFault = CLIENT_FAULT_ERROR_KINDS.has(kind);
             const keep = clientFault && typeof holder.message === "string" && !ACCOUNT_DETAIL.test(holder.message);
             if (!keep) {
                 holder.message = "The model provider returned an error.";

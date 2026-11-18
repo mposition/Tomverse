@@ -461,5 +461,11 @@ test("relayed events keep their data; an error event loses provider account deta
     assert.deepEqual(quota.response.error, { code: "upstream_error", message: "The model provider returned an error." });
     const prompt = JSON.parse(relayedSseEvent({ event: "response.failed", data: JSON.stringify({ type: "response.failed", response: { error: { code: "invalid_prompt", message: "Invalid prompt: tool output too long" } } }) }).split("data: ")[1]);
     assert.equal(prompt.response.error.message, "Invalid prompt: tool output too long");
+    // Provider-account codes are not client faults, whatever their prefix
+    // (review r-20261118-071536-f749ea).
+    for (const code of ["invalid_api_key", "invalid_organization", "invalid_project"]) {
+        const leaked = JSON.parse(relayedSseEvent({ event: "error", data: JSON.stringify({ type: "error", code, message: "Incorrect API key provided: sk-proj-***abc" }) }).split("data: ")[1]);
+        assert.deepEqual([leaked.code, leaked.message], ["upstream_error", "The model provider returned an error."], code);
+    }
     assert.equal(relayedSseEvent({ event: null, data: "line1\nline2" }), "data: line1\ndata: line2\n\n");
 });
