@@ -492,6 +492,20 @@ test("external inference API over the real shared credit ledger", { skip: !datab
             const twinReceipt = await db.externalApiRequest.findFirst({ where: { userId, idempotencyKeyDigest: { not: null } }, orderBy: { createdAt: "desc" } });
             assert.equal(twinReceipt.modelId, SECOND);
 
+            // A different body under the same Idempotency-Key is not a twin: it
+            // routes on its own and admission refuses one as a reused key.
+            routerDelayMs = 150;
+            const reused = { headers: { "idempotency-key": "smart-adaptive-reused" } };
+            const routedBeforeReused = routerCalls.length;
+            const pair = await Promise.all([
+                call(key, body({ model: "smart-adaptive", messages: [{ role: "user", content: "Body one" }] }), reused),
+                call(key, body({ model: "smart-adaptive", messages: [{ role: "user", content: "Body two" }] }), reused),
+            ]);
+            await Promise.all(pair.map((response) => response.text()));
+            routerDelayMs = 0;
+            assert.equal(routerCalls.length, routedBeforeReused + 2, "different bodies do not share a pick");
+            assert.deepEqual(pair.map((response) => response.status).sort(), [200, 422]);
+
             // A key whose cap is spent gets no paid router call; admission refuses as usual.
             const capped = await issueKey(userId, { creditCap: 1 });
             assert.equal((await call(capped.key, body({ model: "smart-adaptive", messages: [{ role: "user", content: "First" }] }))).status, 200);

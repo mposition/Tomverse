@@ -280,6 +280,7 @@ export async function handleChatCompletions(request: Request): Promise<Response>
                 requestId,
                 routerAllowed: () => smartAdaptiveRouterAllowed(key),
                 idempotencyKeyDigest,
+                requestDigest,
             });
             entry = routed.entry;
             routedHeaders = { "x-tomverse-routed-model": entry.model.id, "x-tomverse-routed-by": routed.routedBy };

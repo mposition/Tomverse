@@ -162,6 +162,8 @@ export const routeSmartAdaptive = async (input: {
     routerAllowed: () => Promise<boolean>;
     /** The request's Idempotency-Key digest, when it has one. */
     idempotencyKeyDigest?: string | null;
+    /** Digest of the request body: only an identical duplicate shares a pick. */
+    requestDigest?: string;
     now?: number;
 }): Promise<{ entry: RunnableEntry; routedBy: "router" | "continued" | "default" }> => {
     const eligible = smartAdaptiveCandidates(input.request, input.runnable);
@@ -189,7 +191,12 @@ export const routeSmartAdaptive = async (input: {
     // concurrent duplicate waits for that call and takes the same model, so
     // whichever of them admission lets through answered with the model the
     // tool-loop memory records; the other gets the duplicate's receipt.
-    const flight = input.idempotencyKeyDigest ? `${input.keyId}\0${input.idempotencyKeyDigest}` : null;
+    // Keyed by the body as well: a different body under the same key is not a
+    // duplicate of this request (admission refuses it as a reused key), so it
+    // routes on its own rather than taking a pick made for another body.
+    const flight = input.idempotencyKeyDigest
+        ? `${input.keyId}\0${input.idempotencyKeyDigest}\0${input.requestDigest ?? ""}`
+        : null;
     const pending = flight ? routing.get(flight) : undefined;
     if (pending) return pending;
     const decision = (async () =>
