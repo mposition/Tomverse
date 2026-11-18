@@ -66,10 +66,24 @@ guardrail = 크레딧 수 × COST_PER_CREDIT_CEILING_MICRO_USD × GUARDRAIL_HEAD
   `max(고정 가중치 크레딧, ceil(예약 토큰 비용 ÷ CHAT_LONG_CONTEXT_MICRO_USD_PER_CREDIT))`입니다.
   기본값 2,500 µUSD는 유료 크레딧이 가장 싸게 팔리는 값(Max, 약 US$0.00253)이라,
   어느 유료 플랜에서도 원가 아래로 팔지 않습니다. 이 값은 크레딧당 비용 상한
-  40,000보다 작으므로 위의 guardrail 유도는 그대로 성립합니다.
-- **단가를 하나만 저장한 모델은 장문 구간 경계에서 막습니다.** registry 행에 단일
-  가격이 있고 profile에 장문 구간이 있으면, 입력 상한을 첫 구간 경계로 둡니다
-  (`lib/chatSecurity.ts`의 `flatPriceMaxPromptTokens`).
+  40,000보다 작으므로 위의 guardrail 유도는 그대로 성립합니다. 예약 토큰 비용은
+  입력과 출력만입니다. native 검색은 자기 할증 크레딧이 따로 있고, prompt cache
+  쓰기 할증은 크레딧이 아닌 운영 예약입니다(`docs/policy/anthropic-prompt-caching.md`).
+- **장문 구간 경계를 넘을 수 있습니다.** GPT-5.6·GPT 6 계열 272K, Grok 4.5 200K,
+  MiniMax M3 512K, Claude Haiku 100K 경계가 로그인 계정의 입력 상한 아래에 있습니다.
+  두 가지로 원가 아래 정산을 막습니다.
+  - **예약:** 128k를 넘는 turn은 추정치 × 1.25(`LONG_CONTEXT_TIER_ESTIMATE_MARGIN`)로
+    구간을 고릅니다. 추정이 경계 바로 아래여도 장문 단가로 예약하고, 그 단가로 크레딧을
+    계산합니다.
+  - **정산:** 실제 프롬프트 토큰이 예약 구간보다 높은 구간에 들어가면, 공급사 비용은
+    두 단가 중 높은 쪽으로 기록합니다(`longContextSettlementRates`). 단일 시도 정산,
+    시도별 가격, 시도 비용 장부가 같은 함수를 씁니다. 사용자 크레딧은 예약값 그대로이므로,
+    추정이 25% 넘게 빗나간 turn만 크레딧이 원가보다 낮을 수 있습니다.
+- **단가를 하나만 쓰는 모델은 장문 구간 경계에서 막습니다.** registry 행이나
+  `CHAT_MODEL_<ID>_*_USD_PER_MILLION` 환경변수의 단일 가격이 profile의 구간보다
+  우선하면, 입력 상한을 첫 구간 경계로 둡니다. 해석된 가격이 경계를 넘었을 때
+  `registry_long_context`가 아니면 단일 가격으로 봅니다(`flatPriceMaxPromptTokens`).
+- **이전 메시지 첨부 몫은 그 모델의 입력 상한의 절반입니다**(`accountChatMaxInputTokens`).
 - **크기 상한은 모델 최대치에서 계산합니다.** 대화 텍스트 합계 300,000자 상한은
   없앴습니다. 본문 상한은 컴파일된 가장 큰 문맥 창 × 8바이트 + 256 KiB
   (`chatRequestMaxBodyBytes`), 첨부 파싱 예산은 같은 창 × 5자입니다. 본문 상한이
@@ -396,9 +410,8 @@ Gemini 3.5 Flash와 3.6 Flash는 입력 단가가 같고 3.6의 출력 단가가
 ID와 가격 profile은 과거 대화 표시와 비소급 정산을 위해 보존합니다. 1크레딧
 경량 역할은 별도 제품인 Gemini 3.5 Flash-Lite(`gemini-2-5-flash`)가 담당합니다.
 
-Luna의 장문 tier는 입력 상한(로그인 128,000 · 게스트 16,000 토큰) 때문에 chat
-경로에서 도달하지 않습니다. 계산은 검증돼 있으나 실제 과금 경로에서 발동한 적은
-없습니다.
+Luna의 장문 tier(272K 초과)는 장문 입력(아래 "128k를 넘는 장문 turn") 이후 로그인
+계정이 도달할 수 있습니다. 게스트(16,000 토큰)는 도달하지 않습니다.
 
 cached input 할인은 이 네 모델에 대해 검증된 출처가 없어서 배수 1(할인 없음)로
 둡니다. 보수적인 쪽이며 기존 동작과 동일합니다. 검증되면

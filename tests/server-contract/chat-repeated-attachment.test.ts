@@ -5,6 +5,8 @@ import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 import { createHash } from "node:crypto";
 import { fitChatRequestTranscript } from "../../lib/chatRequestLimits.ts";
+import { chatAccountMaxInputTokens } from "../../lib/chatInputLimits.ts";
+import { getModel } from "../../lib/models.ts";
 import { toChatRequestMessage } from "../../lib/chatMessageSerialization.ts";
 import { requestTranscriptForScope } from "../../lib/chatTranscriptRecovery.ts";
 import type { ChatAttachment, Message } from "../../components/chat/types";
@@ -496,7 +498,13 @@ test("the extracted-text budget counts a repeat once and two files twice", async
  * input allowance; past it a file is named to the model and left out.
  */
 test("earlier files past their share are left out of the turn instead of refusing it", async () => {
-  const words = "lorem ipsum dolor sit amet ".repeat(8_000); // ~216k characters
+  // Sized from the share itself -- half of this model's account input limit,
+  // which long context made its context window -- so that two files fit it and
+  // three do not. One repetition is about seven tokens.
+  const share = Math.floor(
+    chatAccountMaxInputTokens({ contextWindowTokens: getModel("gpt-5-4-mini")?.contextWindowTokens }) / 2
+  );
+  const words = "lorem ipsum dolor sit amet ".repeat(Math.round((share * 0.45) / 7));
   const inputTokens = (budget: unknown) => (budget as { inputTokens: number }).inputTokens;
 
   world = freshWorld(["past1"]);

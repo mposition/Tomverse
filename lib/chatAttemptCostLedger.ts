@@ -43,6 +43,7 @@ import type { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 import { calculateProviderUsageCost } from "@/lib/providerUsageCost";
+import { longContextSettlementRates } from "@/lib/modelPricing";
 import { recordInternalProviderUsage } from "@/lib/providerUsageAccounting";
 import type { PricedAttempt } from "@/lib/chatMultiAttemptSettlement";
 import {
@@ -288,11 +289,21 @@ export const recordAttemptCost = async (
             cachedInputTokens: attempt.cachedInputTokens,
             cacheWriteInputTokens: attempt.cacheWriteInputTokens,
             outputTokens: attempt.outputTokens,
-            inputUsdPerMillionTokens: attempt.price.inputUsdPerMillionTokens,
-            outputUsdPerMillionTokens: attempt.price.outputUsdPerMillionTokens,
-            cachedInputPriceMultiplier: attempt.price.cachedInputPriceMultiplier,
-            cacheWriteUsdPerMillionTokens:
-                attempt.price.cacheWriteUsdPerMillionTokens,
+            ...(() => {
+                // The rule `priceAttempt` applied to `costMicroUsd`, so the
+                // rollup's split adds up to the same total.
+                const price = longContextSettlementRates(
+                    attempt.price,
+                    attempt.inputTokens
+                );
+                return {
+                    inputUsdPerMillionTokens: price.inputUsdPerMillionTokens,
+                    outputUsdPerMillionTokens: price.outputUsdPerMillionTokens,
+                    cachedInputPriceMultiplier: price.cachedInputPriceMultiplier,
+                    cacheWriteUsdPerMillionTokens:
+                        price.cacheWriteUsdPerMillionTokens,
+                };
+            })(),
         });
     await recordInternalProviderUsage({
         client: tx,

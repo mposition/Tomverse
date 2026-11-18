@@ -4,6 +4,7 @@ import {
     chatAccountMaxInputTokens,
     chatLongContextCostCredits,
     chatRequestMaxBodyBytes,
+    chatUserMaxInputTokens,
 } from "@/lib/chatInputLimits";
 import { promptRefinerChatDecisionSchema, type PromptRefinerChatDecision } from "@/lib/promptRefinerSuggestion";
 
@@ -119,6 +120,7 @@ import {
 } from "@/lib/anthropicPromptCaching";
 import {
     getModelPricingProfile,
+    longContextSettlementRates,
     type ResolvedModelPricing,
 } from "@/lib/modelPricing";
 import type { PerplexityUsageCostSnapshot } from "@/lib/perplexityUsageCore";
@@ -876,18 +878,18 @@ const promptCacheWriteReservedPremiumMicroUsd = ({
 };
 
 /**
- * Where a flat registry price over a tiered profile stops being the price.
+ * Where a flat price over a tiered profile stops being the price.
  *
- * `resolveModelPricing` lets a model-registry row's flat rates win over the
- * profile's tiers, so a long prompt would be charged the short-context rate.
- * Long context holds such a model's input limit at the first tier boundary
- * instead (Gemini 3.1 Pro's 200K step). Null when the tiers are in force.
+ * `resolveModelPricing` lets a model-registry row's flat rates, and the
+ * `CHAT_MODEL_<ID>_*_USD_PER_MILLION` environment rates, win over the profile's
+ * tiers, so a long prompt would be charged the short-context rate. Read from
+ * the resolved price itself rather than from the row, so every override is
+ * seen: a tiered profile priced past its boundary without an override reports
+ * `registry_long_context`, and anything else is a flat price. Long context
+ * holds such a model's input limit at the first tier boundary (Gemini 3.1
+ * Pro's 200K step). Null when the tiers are in force.
  */
 const flatPriceMaxPromptTokens = (model: AiModel): number | null => {
-    const overridden =
-        model.inputUsdPerMillionTokens !== undefined ||
-        model.outputUsdPerMillionTokens !== undefined;
-    if (!overridden) return null;
     const profile = getModelPricingProfile(model.id);
     if (!profile) return null;
     const bounds = [
@@ -896,8 +898,28 @@ const flatPriceMaxPromptTokens = (model: AiModel): number | null => {
     ]
         .map((tier) => tier.maxPromptTokens)
         .filter((bound): bound is number => typeof bound === "number" && bound > 0);
-    return bounds.length > 0 ? Math.min(...bounds) : null;
+    if (bounds.length === 0) return null;
+    const past = resolveModelRequestPricing(model, {
+        estimatedPromptTokens: Math.max(...bounds) + 1,
+    });
+    return past.costSource === "registry_long_context" ? null : Math.min(...bounds);
 };
+
+/** A signed-in account's input limit on this model (long context included). */
+export const accountChatMaxInputTokens = (model: AiModel) =>
+    chatAccountMaxInputTokens({
+        contextWindowTokens: model.contextWindowTokens,
+        flatPriceMaxPromptTokens: flatPriceMaxPromptTokens(model),
+    });
+
+/**
+ * Above the flat limit the price tier is chosen from the estimate with this
+ * much room, because settlement keeps the reservation's tier for the credits
+ * it charges and the estimator carries no margin of its own. A turn the
+ * estimate puts within a quarter below a long-context boundary is priced past
+ * it. Turns at or below the flat limit are priced exactly as before.
+ */
+export const LONG_CONTEXT_TIER_ESTIMATE_MARGIN = 1.25;
 
 export const createChatBudget = (
     kind: AccessKind,
@@ -999,10 +1021,7 @@ export const createChatBudget = (
     const maxInputTokens =
         kind === "guest"
             ? guestChatMaxInputTokens()
-            : chatAccountMaxInputTokens({
-                  contextWindowTokens: model.contextWindowTokens,
-                  flatPriceMaxPromptTokens: flatPriceMaxPromptTokens(model),
-              });
+            : accountChatMaxInputTokens(model);
 
     // The limit is checked against the raw estimate, deliberately: it bounds
     // the conversation the user sent, not the margin and tool overhead the
@@ -1072,11 +1091,20 @@ export const createChatBudget = (
               })
           ) + reservationOnlyInputTokens;
     const passes = Math.max(1, Math.min(4, Math.trunc(options?.toolInputPasses ?? 1)));
+    // Above the flat limit, choose the tier with room for the estimator's
+    // error (see LONG_CONTEXT_TIER_ESTIMATE_MARGIN). Tier choice only: the
+    // reserved token counts below are the estimate itself.
+    const tierPromptTokens = (tokens: number) =>
+        estimatedInputTokens > chatUserMaxInputTokens()
+            ? Math.ceil(tokens * LONG_CONTEXT_TIER_ESTIMATE_MARGIN)
+            : tokens;
     let pricing = resolveModelRequestPricing(model, {
-        estimatedPromptTokens: contextInputTokens,
+        estimatedPromptTokens: tierPromptTokens(contextInputTokens),
     });
     if (passes > 1) pricing = resolveModelRequestPricing(model, {
-        estimatedPromptTokens: contextInputTokens + pricing.maxOutputTokens,
+        estimatedPromptTokens: tierPromptTokens(
+            contextInputTokens + pricing.maxOutputTokens
+        ),
     });
     // Every paid step re-sends its context. Earlier assistant output can also
     // be re-sent; reserve it without changing authored-input credit weight.
@@ -1098,15 +1126,16 @@ export const createChatBudget = (
         pricing,
         promptCachePath: options?.promptCachePath,
     });
-    // Above the flat input limit (long context) a turn is charged
-    // at least its own token cost. Native search is left out: it has its own
-    // surcharge credits below.
+    // Above the flat input limit (long context) a turn is charged at least its
+    // own token cost. Two things are left out because they are not credits:
+    // native search has its own surcharge below, and the prompt-cache write
+    // premium is an operational reservation refunded at settlement, never part
+    // of `usageCredits` (docs/policy/anthropic-prompt-caching.md).
     const longContextCredits = chatLongContextCostCredits({
         estimatedInputTokens: estimatedInputTokens + reservationOnlyInputTokens,
         reservedCostMicroUsd:
             microdollarsFor(reservedInputTokens, pricing.inputUsdPerMillionTokens) +
-            microdollarsFor(reservedOutputTokens, pricing.outputUsdPerMillionTokens) +
-            cacheWritePremiumMicroUsd,
+            microdollarsFor(reservedOutputTokens, pricing.outputUsdPerMillionTokens),
     });
 
     return {
@@ -4590,13 +4619,27 @@ export const settleChatUsage = async (
             searchSurchargeCredits: usage.searchSurchargeCredits,
             searchExecuted: usage.searchExecuted,
         });
+        // A prompt that arrived in a higher long-context tier than its
+        // reservation priced is recorded at the higher rate; never lower.
+        const settledRates = longContextSettlementRates(
+            {
+                modelId: canonical.modelId,
+                inputUsdPerMillionTokens: canonical.inputUsdPerMillionTokens,
+                outputUsdPerMillionTokens: canonical.outputUsdPerMillionTokens,
+                cacheWriteUsdPerMillionTokens:
+                    canonical.cacheWriteUsdPerMillionTokens ?? null,
+                longContextThresholdTokens:
+                    canonical.longContextThresholdTokens ?? null,
+            },
+            actualInput
+        );
         const tokenCostBreakdown = calculateProviderUsageCost({
             inputTokens: actualInput,
             cachedInputTokens: actualCachedInput,
             cacheWriteInputTokens: actualCacheWriteInput,
             outputTokens: actualOutput,
-            inputUsdPerMillionTokens: canonical.inputUsdPerMillionTokens,
-            outputUsdPerMillionTokens: canonical.outputUsdPerMillionTokens,
+            inputUsdPerMillionTokens: settledRates.inputUsdPerMillionTokens,
+            outputUsdPerMillionTokens: settledRates.outputUsdPerMillionTokens,
             cachedInputPriceMultiplier:
                 canonical.cachedInputPriceMultiplier,
             // From the reservation's own snapshot, not from today's registry:
@@ -4606,7 +4649,7 @@ export const settleChatUsage = async (
             // existed, which prices its writes at nothing -- correct, because
             // such a turn sent no cache marker and wrote no cache entry.
             cacheWriteUsdPerMillionTokens:
-                canonical.cacheWriteUsdPerMillionTokens ?? null,
+                settledRates.cacheWriteUsdPerMillionTokens ?? null,
         });
         const providerUsageSnapshot =
             canonical.provider === "perplexity" &&

@@ -67,6 +67,8 @@ export type FeaturedBillingPromotion = {
 
 type BillingConfig = {
   appInputTokenLimit?: number;
+  /** Accounts may send up to the model's context window (lib/chatInputLimits.ts). */
+  appLongContext?: boolean;
   plans: BillingPlan[];
   creditPacks?: PublicCreditPack[];
   featuredPromotion?: FeaturedBillingPromotion | null;

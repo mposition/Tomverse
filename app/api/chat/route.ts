@@ -239,7 +239,6 @@ import {
     PAST_ATTACHMENT_OMITTED_TEXT,
     pastTurnAttachmentTokenBudget,
 } from "@/lib/chatAttachmentLimits";
-import { chatUserMaxInputTokens } from "@/lib/chatInputLimits";
 import { extractLegacyOfficeText, type LegacyOfficeFormatId } from "@/lib/legacyOfficeText";
 import { legacyOfficeValidationCode } from "@/lib/chatAttachmentValidation";
 import {
@@ -268,6 +267,7 @@ import {
     assertModelAccess,
     assertChatRequestSize,
     ChatAccessError,
+    accountChatMaxInputTokens,
     assertUserOperationalAccess,
     chatErrorResponse,
     createChatBudget,
@@ -3330,7 +3330,9 @@ async function handleChatPost(
         // are left out of the turn rather than failing it. See
         // lib/chatAttachmentLimits.ts.
         const pastAttachmentTokenBudget = pastTurnAttachmentTokenBudget(
-            access.kind === "guest" ? guestChatMaxInputTokens() : chatUserMaxInputTokens()
+            access.kind === "guest"
+                ? guestChatMaxInputTokens()
+                : accountChatMaxInputTokens(modelConfig)
         );
         let pastAttachmentTokens = 0;
         let totalImageCount = 0;
@@ -5992,6 +5994,7 @@ async function handleChatPost(
                         ? ANTHROPIC_PROMPT_CACHE_TTL
                         : null,
                 pricingVersion: budget.pricingVersion ?? null,
+                longContextThresholdTokens: budget.longContextThresholdTokens,
             } satisfies AttemptPriceSnapshot,
         };
         durableCheckpointWriter?.setAttribution(

@@ -1787,7 +1787,7 @@ export function PricingPageContent() {
               <p data-testid="pricing-plan-usage" className={`mt-3 text-sm font-bold ${plan.highlighted ? "text-blue-50" : "text-zinc-700 dark:text-zinc-200"}`}>
                 {plan.usage}
               </p>
-              {lang === "ko" ? <PricingKoreanPlanLimits plan={cardPlan} dailyCredits={publicPlan?.dailyMessageLimit ?? null} allowAttachments={publicPlan?.allowAttachments} appInputTokenLimit={billing.config?.appInputTokenLimit ?? null} /> : null}
+              {lang === "ko" ? <PricingKoreanPlanLimits plan={cardPlan} dailyCredits={publicPlan?.dailyMessageLimit ?? null} allowAttachments={publicPlan?.allowAttachments} appInputTokenLimit={billing.config?.appInputTokenLimit ?? null} appLongContext={billing.config?.appLongContext === true} /> : null}
               {lang === "en" ? <PricingCreditExample credits={billing.planLimits(planId).monthlyCredits} testId={`pricing-credit-example-plan-${planId}`} /> : null}
               {/*
                 The plan CTA is chosen by resolvePlanCtaState(), not by the

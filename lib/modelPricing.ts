@@ -2179,3 +2179,94 @@ export const findPendingPriceRegisterProblems = ({
 
     return problems;
 };
+
+/**
+ * The profile tier a settled prompt actually fell in, when that is a higher
+ * long-context tier than the one its reservation priced.
+ *
+ * Settlement prices a turn with the rates its reservation snapshotted, chosen
+ * from a token estimate. With long context an account can reach a tier
+ * boundary (GPT-5.6 272K, Grok 4.5 200K, MiniMax M3 512K), and a prompt the
+ * estimate put below it can arrive above it. Then the provider charges the
+ * long rate and the short one would be recorded. This answers with the tier
+ * the provider's own count selects, so the caller can settle at whichever rate
+ * is higher -- never lower than the reservation's. Null when the profile has
+ * one tier, when there is no profile, or when the reserved tier already
+ * reaches as far as the actual prompt.
+ */
+export const longContextSettlementTier = (input: {
+    modelId: string;
+    actualPromptTokens: number;
+    reservedLongContextThresholdTokens: number | null;
+    at?: Date | number;
+}) => {
+    const profile = pricingById.get(input.modelId);
+    if (!profile) return null;
+    const revision = selectPriceRevision(profile, input.at);
+    const tiers = revision?.tiers ?? profile.tiers;
+    if (tiers.length < 2) return null;
+    const { tier } = selectTier(tiers, input.actualPromptTokens);
+    // The boundary below the selected tier, walked rather than indexed.
+    let threshold: number | null = null;
+    let below: number | null = null;
+    for (const candidate of tiers) {
+        if (candidate === tier) {
+            threshold = below;
+            break;
+        }
+        below = candidate.maxPromptTokens;
+    }
+    if ((threshold ?? 0) <= (input.reservedLongContextThresholdTokens ?? 0)) {
+        return null;
+    }
+    return {
+        inputUsdPerMillionTokens: tier.inputUsdPerMillionTokens,
+        outputUsdPerMillionTokens: tier.outputUsdPerMillionTokens,
+        cacheWriteUsdPerMillionTokens: tier.cacheWriteUsdPerMillionTokens ?? null,
+        longContextThresholdTokens: threshold,
+    };
+};
+
+type SettlementRates = {
+    modelId: string;
+    inputUsdPerMillionTokens: number;
+    outputUsdPerMillionTokens: number;
+    cacheWriteUsdPerMillionTokens?: number | null;
+    longContextThresholdTokens?: number | null;
+};
+
+/**
+ * A snapshot's rates for settling `actualPromptTokens`: each the higher of the
+ * snapshot's and the crossed long-context tier's (`longContextSettlementTier`).
+ * The one rule every settlement path applies, single-attempt and per-attempt,
+ * so the provider ledger and the reservation cannot disagree.
+ */
+export const longContextSettlementRates = <T extends SettlementRates>(
+    rates: T,
+    actualPromptTokens: number
+): T => {
+    const crossed = longContextSettlementTier({
+        modelId: rates.modelId,
+        actualPromptTokens,
+        reservedLongContextThresholdTokens: rates.longContextThresholdTokens ?? null,
+    });
+    if (!crossed) return rates;
+    const cacheWrite = rates.cacheWriteUsdPerMillionTokens;
+    return {
+        ...rates,
+        inputUsdPerMillionTokens: Math.max(
+            rates.inputUsdPerMillionTokens,
+            crossed.inputUsdPerMillionTokens
+        ),
+        outputUsdPerMillionTokens: Math.max(
+            rates.outputUsdPerMillionTokens,
+            crossed.outputUsdPerMillionTokens
+        ),
+        cacheWriteUsdPerMillionTokens:
+            typeof cacheWrite === "number" &&
+            typeof crossed.cacheWriteUsdPerMillionTokens === "number"
+                ? Math.max(cacheWrite, crossed.cacheWriteUsdPerMillionTokens)
+                : cacheWrite,
+        longContextThresholdTokens: crossed.longContextThresholdTokens,
+    };
+};

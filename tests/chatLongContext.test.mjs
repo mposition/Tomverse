@@ -6,7 +6,9 @@ import {
     chatAccountMaxInputTokens,
     chatLongContextCostCredits,
 } from "../lib/chatInputLimits.ts";
-import { createChatBudget } from "../lib/chatSecurity.ts";
+import { readFileSync } from "node:fs";
+import { accountChatMaxInputTokens, createChatBudget } from "../lib/chatSecurity.ts";
+import { longContextSettlementRates, resolveModelPricing } from "../lib/modelPricing.ts";
 import { AVAILABLE_MODELS, getModel, getWeightedUsageCredits } from "../lib/models.ts";
 import {
     CHAT_ATTACHMENT_CHARACTERS_PER_CONTEXT_TOKEN,
@@ -124,6 +126,87 @@ test("the attachment parse budget covers the largest model context window", () =
     const largest = Math.max(...AVAILABLE_MODELS.map((model) => model.contextWindowTokens ?? 0));
     assert.ok(CHAT_ATTACHMENT_PARSE_CHARACTERS >= largest * CHAT_ATTACHMENT_CHARACTERS_PER_CONTEXT_TOKEN);
     assert.ok(CHAT_ATTACHMENT_PARSE_CHARACTERS >= 2_000_000);
+});
+
+// Review r-20261118-041545-22a7ea, blocker: the prompt-cache write premium is an
+// operational reservation, never part of usageCredits.
+test("a long Anthropic turn is not charged its cache-write premium as credits", () => {
+    const opus = getModel("claude-opus-4-8");
+    const cached = createChatBudget("user", opus, 300_000, { promptCachePath: "chat_turn" });
+    assert.ok(cached.promptCacheWriteReservedPremiumMicroUsd > 0, "the premium is still reserved");
+    const plain = createChatBudget("user", opus, 300_000);
+    assert.equal(cached.usageCredits, plain.usageCredits);
+    assert.equal(
+        cached.usageCredits,
+        Math.ceil(
+            (Math.ceil(cached.inputTokens * cached.inputUsdPerMillionTokens) +
+                Math.ceil(cached.reservedOutputTokens * cached.outputUsdPerMillionTokens)) /
+                RATE
+        )
+    );
+});
+
+// Review, major: a flat environment price is a flat price too.
+test("an environment flat price holds the limit at the first tier boundary", () => {
+    const luna = getModel("gpt-6-luna");
+    assert.equal(accountChatMaxInputTokens(luna), luna.contextWindowTokens);
+    withEnv({ CHAT_MODEL_GPT_6_LUNA_INPUT_USD_PER_MILLION: "0.2" }, () => {
+        assert.equal(accountChatMaxInputTokens(luna), 272_000);
+        assert.throws(() => createChatBudget("user", luna, 272_001), /token budget/i);
+    });
+});
+
+// Review, major: a boundary below the window is reachable.
+test("above the flat limit the tier is chosen with a quarter of room", () => {
+    const luna = getModel("gpt-6-luna");
+    // 230k x 1.25 = 287.5k: past Luna's 272k boundary, so priced long.
+    const near = createChatBudget("user", luna, 230_000);
+    assert.equal(near.longContextThresholdTokens, 272_000);
+    // 200k x 1.25 = 250k: still short.
+    assert.equal(createChatBudget("user", luna, 200_000).longContextThresholdTokens, null);
+    // At or below the flat limit nothing moves.
+    assert.equal(createChatBudget("user", luna, FLAT).longContextThresholdTokens, null);
+});
+
+test("settlement records a crossed tier at the higher rate, never a lower one", () => {
+    const short = resolveModelPricing(getModel("gpt-6-luna"), { estimatedPromptTokens: 1_000 });
+    const long = resolveModelPricing(getModel("gpt-6-luna"), { estimatedPromptTokens: 300_000 });
+    const snapshot = {
+        modelId: "gpt-6-luna",
+        inputUsdPerMillionTokens: short.inputUsdPerMillionTokens,
+        outputUsdPerMillionTokens: short.outputUsdPerMillionTokens,
+        cacheWriteUsdPerMillionTokens: short.cacheWriteUsdPerMillionTokens,
+        longContextThresholdTokens: null,
+    };
+    assert.equal(longContextSettlementRates(snapshot, 250_000), snapshot);
+    const crossed = longContextSettlementRates(snapshot, 300_000);
+    assert.equal(crossed.inputUsdPerMillionTokens, long.inputUsdPerMillionTokens);
+    assert.equal(crossed.outputUsdPerMillionTokens, long.outputUsdPerMillionTokens);
+    assert.equal(crossed.longContextThresholdTokens, 272_000);
+    // Already priced long: unchanged.
+    const reservedLong = { ...snapshot, ...long, modelId: "gpt-6-luna", longContextThresholdTokens: 272_000 };
+    assert.equal(longContextSettlementRates(reservedLong, 900_000), reservedLong);
+    // A snapshot above the tier's rate is never lowered.
+    const dear = { ...snapshot, inputUsdPerMillionTokens: 99, outputUsdPerMillionTokens: 99 };
+    assert.equal(longContextSettlementRates(dear, 300_000).inputUsdPerMillionTokens, 99);
+});
+
+test("every settlement path applies the same long-context rule", () => {
+    const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
+    assert.match(read("lib/chatSecurity.ts"), /longContextSettlementRates\(/);
+    assert.match(read("lib/chatMultiAttemptSettlement.ts"), /longContextSettlementRates\(attempt\.price, attempt\.inputTokens\)/);
+    assert.match(read("lib/chatAttemptCostLedger.ts"), /longContextSettlementRates\(/);
+    assert.match(read("app/api/chat/route.ts"), /longContextThresholdTokens: budget\.longContextThresholdTokens,\s*\} satisfies AttemptPriceSnapshot/);
+});
+
+// Review, major: earlier files share half of this model's limit, not of 128k.
+test("the earlier-files share follows the model's account limit", () => {
+    const route = readFileSync(new URL("../app/api/chat/route.ts", import.meta.url), "utf8");
+    const start = route.indexOf("const pastAttachmentTokenBudget = pastTurnAttachmentTokenBudget(");
+    assert.ok(start > 0);
+    const call = route.slice(start, route.indexOf(");", start));
+    assert.match(call, /accountChatMaxInputTokens\(modelConfig\)/);
+    assert.doesNotMatch(call, /chatUserMaxInputTokens/);
 });
 
 test("guests are untouched", () => {

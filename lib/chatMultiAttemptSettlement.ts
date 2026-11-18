@@ -35,6 +35,7 @@
  */
 
 import { calculateProviderUsageCost } from "@/lib/providerUsageCost";
+import { longContextSettlementRates } from "@/lib/modelPricing";
 import type { AiModel } from "@/lib/models";
 
 /** Bump when an allocation rule changes, so a settled row can be attributed. */
@@ -68,6 +69,8 @@ export type AttemptPriceSnapshot = {
     /** The cache TTL the request asked for, where it asked for one. */
     promptCacheTtl?: string | null;
     pricingVersion?: string | null;
+    /** The prompt size that selected these rates' tier; null or absent for the first. */
+    longContextThresholdTokens?: number | null;
 };
 
 export type AttemptUsage = {
@@ -146,15 +149,18 @@ export const priceAttempt = (
     priceOne(attempt);
 
 const priceOne = (attempt: AttemptUsage): { costMicroUsd: number; costSource: PricedAttempt["costSource"] } => {
+    // The same long-context rule as single-attempt settlement: never lower
+    // than the snapshot, higher when the prompt crossed a tier boundary.
+    const price = longContextSettlementRates(attempt.price, attempt.inputTokens);
     const tokenCost = calculateProviderUsageCost({
         inputTokens: attempt.inputTokens,
         cachedInputTokens: attempt.cachedInputTokens,
         cacheWriteInputTokens: attempt.cacheWriteInputTokens,
         outputTokens: attempt.outputTokens,
-        inputUsdPerMillionTokens: attempt.price.inputUsdPerMillionTokens,
-        outputUsdPerMillionTokens: attempt.price.outputUsdPerMillionTokens,
-        cachedInputPriceMultiplier: attempt.price.cachedInputPriceMultiplier,
-        cacheWriteUsdPerMillionTokens: attempt.price.cacheWriteUsdPerMillionTokens,
+        inputUsdPerMillionTokens: price.inputUsdPerMillionTokens,
+        outputUsdPerMillionTokens: price.outputUsdPerMillionTokens,
+        cachedInputPriceMultiplier: price.cachedInputPriceMultiplier,
+        cacheWriteUsdPerMillionTokens: price.cacheWriteUsdPerMillionTokens,
     });
     const reported = attempt.providerReportedCostMicroUsd;
     const base =
