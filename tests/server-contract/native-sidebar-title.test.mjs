@@ -37,8 +37,9 @@ mock.module(mod("lib/conversationTitle.ts"), { namedExports: {
   generateConversationTitle: async () => { generationCalls++; if (renameDuringGeneration) title = "Manual web rename"; return { ok: true, title: "Generated" }; },
   applyGeneratedTitle: async input => {
     assert.equal(input.userId, "bearer-owner"); assert.equal(input.conversationId, "c1");
-    const updated = title === input.expectedTitle; if (updated) title = input.newTitle; return { updated };
+    const updated = title === input.expectedTitle || title === input.interimTitle; if (updated) title = input.newTitle; return { updated };
   }, recordTitleGenerationUsage: async () => {},
+  interimTitleFromFirstMessage: content => content.trim().slice(0, 30).trim() || null,
 } });
 mock.module(mod("lib/chatSecurity.ts"), { namedExports: { getUserChatUsageKey: id => `usage:${id}`, getChatCostGuardrails: () => ({ planDay: 1, planMonth: 10 }) } });
 mock.module(mod("lib/billingConfig.ts"), { namedExports: { getBillingPlanByTier: async () => ({ dailyMessageLimit: 20, monthlyMessageLimit: 100 }) } });
