@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
+import { createServer } from "node:http";
 import { resolve } from "node:path";
-import test, { mock } from "node:test";
+import test, { after, mock } from "node:test";
 import { pathToFileURL } from "node:url";
 
 import pg from "pg";
@@ -16,8 +17,8 @@ import { seedAmuxV4PortfolioRecoveryPrerequisites } from
 // changed-path list arrive in sealed chunks, commit through the routes the
 // Rust bridge calls, read back in slices, and leave no staging behind; what no
 // commit takes is swept and its unit key queued for deletion. The routes run
-// against the seeded attempt inside the test's own transaction, with an
-// in-memory unit key store in place of S3.
+// against the seeded attempt inside the test's own transaction, with unit
+// keys in a loopback S3.
 
 const raw = process.env.TEST_DATABASE_URL;
 const allowed = (() => {
@@ -30,12 +31,6 @@ const skip = allowed ? undefined : "requires a dedicated loopback test database"
 
 const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path) => pathToFileURL(resolve(root, path)).href;
-// A `?real` import can hand a TypeScript module's exports under `default`
-// only (tsx's CommonJS interop, seen on CI's Node 22.23): take both forms.
-const realModule = async (path) => {
-  const { default: interop, ...named } = await import(`${mod(path)}?real`);
-  return { ...(interop && typeof interop === "object" ? interop : {}), ...named };
-};
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const MIB = 1024 * 1024;
 
@@ -60,38 +55,52 @@ mock.module(mod("lib/amux/operationalError.ts"), { namedExports: {
       errorClass: "Error", errorCode: "AMUX_INTERNAL_OPERATION_FAILED" };
   },
 } });
-// The real modules under another URL, so the mocks below keep their exports.
-const realGuard = await realModule("lib/amux/guard.ts");
-mock.module(mod("lib/amux/guard.ts"), {
-  namedExports: { ...realGuard, isAmuxSyncAuthorized: () => true },
+// The real guard and key store, as other AMUX DB suites run them
+// (amux-v19-system-registration): a synthetic sync secret, synthetic content
+// keys, and unit keys held by a loopback S3 in this process. No module of
+// theirs is mocked: a mock built by spreading a module's exports lost them on
+// CI's Node 22.23 and failed every upload.
+const SYNC_SECRET = "synthetic-transfer-sync-secret-0123456789abcdef";
+Object.assign(process.env, {
+  NODE_ENV: "test",
+  TOMVERSE_AMUX_SYNC_SECRET: SYNC_SECRET,
+  AMUX_V4_CONTENT_MASTER_KEY_ID: "synthetic-v22-transfer",
+  AMUX_V4_CONTENT_MASTER_KEY_VERSION: "1",
+  AMUX_V4_CONTENT_MASTER_KEY_B64: randomBytes(32).toString("base64"),
+  AMUX_V4_CONTENT_DIGEST_KEY_ID: "synthetic-v22-transfer-digest",
+  AMUX_V4_CONTENT_DIGEST_KEY_B64: randomBytes(32).toString("base64"),
+  AMUX_V4_KEY_STORE_BUCKET: "amux-v22-transfer-test",
+  AMUX_V4_KEY_STORE_REGION: "test-region",
+  AMUX_V4_KEY_STORE_ACCESS_KEY_ID: "synthetic-access",
+  AMUX_V4_KEY_STORE_SECRET_ACCESS_KEY: "synthetic-secret",
+  AMUX_V4_KEY_STORE_URL_STYLE: "path",
 });
-const realKeyStore = await realModule("lib/amux/ideaKeyStore.ts");
-const unitKeys = new Map();
-const digestKey = randomBytes(32);
-const coordinate = (identity) => `${identity.ideaId}\0${identity.purpose}\0${identity.subjectId}`;
-const keysOf = (identity) => ({ masterKeyId: realKeyStore.amuxContentUnitKeyId(identity),
-  masterKeyVersion: 1, masterKey: Buffer.from(unitKeys.get(coordinate(identity))),
-  digestKeyId: "synthetic-digest", digestKey: Buffer.from(digestKey) });
-const keyCalls = { create: 0, load: 0, deleted: [] };
-mock.module(mod("lib/amux/ideaKeyStore.ts"), { namedExports: { ...realKeyStore,
-  createAmuxContentUnitKeys: async (identity) => {
-    keyCalls.create += 1;
-    if (unitKeys.has(coordinate(identity)))
-      throw new realKeyStore.AmuxIdeaKeyStoreError("conflict");
-    unitKeys.set(coordinate(identity), randomBytes(32));
-    return keysOf(identity);
-  },
-  loadAmuxContentUnitKeys: async (identity) => {
-    keyCalls.load += 1;
-    if (!unitKeys.has(coordinate(identity)))
-      throw new realKeyStore.AmuxIdeaKeyStoreError("missing");
-    return keysOf(identity);
-  },
-  deleteAmuxContentUnitKey: async (identity) => {
-    keyCalls.deleted.push(coordinate(identity));
-    unitKeys.delete(coordinate(identity));
-  },
-} });
+const objects = new Map();
+const keyServer = createServer(async (incoming, response) => {
+  const key = new URL(incoming.url ?? "/", "http://127.0.0.1").pathname;
+  if (incoming.method === "PUT") {
+    if (objects.has(key)) { response.writeHead(412); response.end(); return; }
+    const chunks = [];
+    for await (const chunk of incoming) chunks.push(Buffer.from(chunk));
+    objects.set(key, Buffer.concat(chunks));
+    response.writeHead(200, { ETag: '"synthetic"' }); response.end();
+  } else if (incoming.method === "GET") {
+    const value = objects.get(key);
+    if (!value) { response.writeHead(404); response.end(); return; }
+    response.writeHead(200, { "Content-Length": value.length,
+      "Content-Type": "application/octet-stream" }); response.end(value);
+  } else if (incoming.method === "HEAD") {
+    response.writeHead(objects.has(key) ? 200 : 404); response.end();
+  } else if (incoming.method === "DELETE") {
+    objects.delete(key); response.writeHead(204); response.end();
+  } else { response.writeHead(405); response.end(); }
+});
+await new Promise((done, fail) => {
+  keyServer.once("error", fail);
+  keyServer.listen(0, "127.0.0.1", () => done());
+});
+process.env.AMUX_V4_KEY_STORE_ENDPOINT = `http://127.0.0.1:${keyServer.address().port}`;
+after(() => new Promise((done) => keyServer.close(() => done())));
 
 const upload = await import(mod("app/api/internal/amux/v22/execution/upload/route.ts"));
 const result = await import(mod("app/api/internal/amux/v22/execution/result/route.ts"));
@@ -147,15 +156,17 @@ async function withLiveAttempt(taskRole, work) {
   }
 }
 
-const json = (body) => ({ method: "POST", headers: { "content-type": "application/json" },
-  body: JSON.stringify(body) });
+const authorization = { authorization: `Bearer ${SYNC_SECRET}` };
+const json = (body) => ({ method: "POST",
+  headers: { "content-type": "application/json", ...authorization }, body: JSON.stringify(body) });
 const endpoint = (path) => `https://tomverse.test/api/internal/amux/v22/execution/${path}`;
 const post = async (handler, path, body) => {
   const response = await handler.POST(new Request(endpoint(path), json(body)));
   return { status: response.status, body: await response.json() };
 };
 const get = async (handler, path, attemptId) => {
-  const response = await handler.GET(new Request(`${endpoint(path)}?attemptId=${attemptId}`));
+  const response = await handler.GET(new Request(`${endpoint(path)}?attemptId=${attemptId}`,
+    { headers: authorization }));
   return { status: response.status, body: await response.json() };
 };
 
