@@ -357,7 +357,12 @@ test("the approval diff is never shortened: every removed and added line is show
 test("a change of line ending alone is shown in the approval diff", () => {
     const diff = renderFileDiff("mixed.txt", "a\r\nb\nc\r\n", "a\nb\nc\r\n");
     assert.match(diff.split("\n")[0]!, /\(1 line\(s\) removed, 1 added\)/);
-    assert.ok(diff.includes("- a [CRLF]") && diff.includes("+ a"), diff);
+    assert.ok(diff.includes("- a [CR]") && diff.includes("+ a"), diff);
+    // A CR slipped into an LF file (a shebang that stops working) is visible.
+    assert.ok(renderFileDiff("run.sh", "#!/bin/sh\necho hi\n", "#!/bin/sh\r\necho hi\n").includes("+ #!/bin/sh [CR]"));
+    // So is one at the very end of a file without a final newline, even in a CRLF file.
+    assert.ok(renderFileDiff("a.txt", "a\nb", "a\nb\r").includes("+ b [CR]"));
+    assert.ok(renderFileDiff("c.txt", "a\r\nb", "a\r\nb\r").includes("+ b [CR]"));
     // A file that is CRLF throughout and stays so is not marked line by line.
-    assert.ok(!renderFileDiff("crlf.txt", "a\r\nb\r\n", "a\r\nc\r\n").includes("[CRLF]"));
+    assert.ok(!renderFileDiff("crlf.txt", "a\r\nb\r\n", "a\r\nc\r\n").includes("[CR]"));
 });
