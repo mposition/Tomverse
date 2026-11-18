@@ -433,15 +433,23 @@ const pickModel = async (ctx: Context, catalog: CatalogModel[], prompter: Prompt
 const exitFor = (outcome: Outcome) => EXIT_CODES[outcome];
 
 const installSigint = (runner: Runner, output: Output) => {
-    let presses = 0;
+    // A second Ctrl+C within a few seconds of the first quits; a later one is a
+    // new cancel. Quitting still gives the first cancel's process-tree cleanup
+    // a moment to finish, so a running command is not left behind.
+    let firstAt = 0;
     const handler = () => {
-        presses += 1;
-        if (presses > 1) {
+        const now = Date.now();
+        if (firstAt && now - firstAt < 3000) {
             output.info("Stopping now.");
-            runner.journal.release();
-            process.exit(EXIT_CODES.cancelled);
+            runner.cancel();
+            setTimeout(() => {
+                runner.journal.release();
+                process.exit(EXIT_CODES.cancelled);
+            }, 2000).unref();
+            return;
         }
-        output.info("\nCancelling (press Ctrl+C again to quit at once)...");
+        firstAt = now;
+        output.info("\nCancelling (press Ctrl+C again to quit)...");
         runner.cancel();
     };
     process.on("SIGINT", handler);
@@ -502,7 +510,7 @@ const startSession = async (ctx: Context, task: string | null, interactive: bool
             outcome = await runner.runTask(task);
             await finalEvent(ctx, runner, gateway, outcome);
         }
-        if (interactive) outcome = await repl(ctx, runner, gateway);
+        if (interactive) outcome = await repl(ctx, runner, gateway, outcome);
         return exitFor(outcome);
     } finally {
         removeSigint();
@@ -510,8 +518,9 @@ const startSession = async (ctx: Context, task: string | null, interactive: bool
     }
 };
 
-const repl = async (ctx: Context, runner: Runner, gateway: Gateway): Promise<Outcome> => {
-    let last: Outcome = "success";
+const repl = async (ctx: Context, runner: Runner, gateway: Gateway, initial: Outcome = "success"): Promise<Outcome> => {
+    // The exit code is the last task's outcome, so `tomverse && …` never goes on after one that failed.
+    let last: Outcome = initial;
     ctx.output.info("Type a task, or /help. Ctrl+D or /exit to leave.");
     for (;;) {
         const line = await askLine("tomverse> ");
@@ -607,7 +616,7 @@ const resume = async (ctx: Context, args: string[], interactive: boolean) => {
             if (task) outcome = await runner.runTask(task);
             else if (wasMidTask && state.tasks.length) outcome = await runner.loop();
             if (task || (wasMidTask && state.tasks.length)) await finalEvent(ctx, runner, gateway, outcome);
-            if (interactive) outcome = await repl(ctx, runner, gateway);
+            if (interactive) outcome = await repl(ctx, runner, gateway, outcome);
             return exitFor(outcome);
         } finally {
             removeSigint();

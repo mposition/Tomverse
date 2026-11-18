@@ -340,6 +340,8 @@ export class Runner {
                 }
                 if (task.requests >= task.allowance) continue;
                 const started = Date.now();
+                // A cancel during compaction stops here, before a new request is recorded.
+                if (this.controller.signal.aborted) return this.finish("cancelled");
                 const step = await this.step(timeAllowance - task.activeMs);
                 task.activeMs = task.activeMs + (Date.now() - started);
                 journal.commit();
