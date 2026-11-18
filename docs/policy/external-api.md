@@ -325,7 +325,9 @@ Not yet done, each a separate step:
   approval and stopping mid-answer.
 - The router's former 200-token output limit counted reasoning and twice cut the
   router's answer off on a request carrying a previous answer (`invalid`, the
-  default model then answered). Raised to 644 (reason and topic at a token per
-  character, JSON and reasoning headroom); shared with Chat's Smart Adaptive.
+  default model then answered). Every routing call (router, image and location
+  intent, search plan, rewrite) now shares one generous ceiling,
+  `ROUTING_CALL_MAX_OUTPUT_TOKENS` (8,192, `lib/routingCallLimits.ts`), used only
+  for the worst-case cost hold, and a cut-off answer logs `output_truncated`.
   Not yet re-run live.
 - Production migration, merge and deployment.

@@ -15,6 +15,7 @@
  */
 
 import { turnCarriesAttachments } from "@/lib/autoDispatchPreflight";
+import { ROUTING_CALL_MAX_OUTPUT_TOKENS } from "@/lib/routingCallLimits";
 import { getModelUsageCredits, modelSupportsImageInput, type AiModel } from "@/lib/models";
 import { getArtifactToolSupport, planGeneratedArtifactTool } from "@/lib/generatedArtifactToolPolicy";
 import { getWebSearchCapability, nativeSearchIsDispatchable } from "@/lib/webSearchCapability";
@@ -90,24 +91,8 @@ export const autoLlmRouterSession = (
     return topic || recentPicks.length > 0 ? { topic, recentPicks } : null;
 };
 
-/**
- * Room for the answer the parser keeps, written in any script, plus the
- * reasoning an OpenAI router spends first at effort `low`. The schema puts
- * `reason` before `modelId`, so a cap that runs out mid-reason loses the pick:
- * at 200 the router was cut off (`finishReason: length`, outcome `invalid`)
- * on follow-up turns, where the previous answer makes it reason longer
- * (2026-11-18, gpt-6-luna). A Hangul character can be a token of its own, so
- * the kept reason and topic are counted at a token per character. The cap only
- * bounds a rambling model and the worst-case cost hold; a normal answer stops
- * well short of it.
- */
-const ROUTER_JSON_OVERHEAD_TOKENS = 64;
-const ROUTER_REASONING_HEADROOM_TOKENS = 160;
-export const AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS =
-    AUTO_LLM_ROUTER_MAX_REASON_CHARS +
-    AUTO_LLM_ROUTER_MAX_TOPIC_CHARS +
-    ROUTER_JSON_OVERHEAD_TOKENS +
-    ROUTER_REASONING_HEADROOM_TOKENS;
+/** See lib/routingCallLimits.ts: a ceiling for the cost hold, not a size target. */
+export const AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS = ROUTING_CALL_MAX_OUTPUT_TOKENS;
 
 /**
  * Past this the turn proceeds on the deterministic choice. The optimizer cycle
@@ -406,8 +391,6 @@ export const autoLlmRouterDecisionVersion = (input: {
 export const AUTO_LLM_ROUTER_REWRITE_SOURCE_MAX_CHARS = 1_500;
 /** A rewrite longer than this is dropped rather than cut. */
 export const AUTO_LLM_ROUTER_REWRITE_MAX_CHARS = 1_500;
-/** The call's budget when a rewrite is asked for: the rewrite itself needs room. */
-export const AUTO_LLM_ROUTER_REWRITE_MAX_OUTPUT_TOKENS = 900;
 export const AUTO_LLM_ROUTER_REWRITE_TIMEOUT_MS = AUTO_LLM_ROUTER_TIMEOUT_MS;
 
 /**

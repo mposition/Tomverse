@@ -15,7 +15,6 @@ import {
 } from "@/lib/autoLlmRouterSettings";
 import { callCostMicroUsd } from "@/lib/autoRouterOptimizerCore";
 import {
-    CHAT_IMAGE_INTENT_FOLLOW_UP_MAX_OUTPUT_TOKENS,
     CHAT_IMAGE_INTENT_FOLLOW_UP_TIMEOUT_MS,
     CHAT_IMAGE_INTENT_MAX_OUTPUT_TOKENS,
     CHAT_IMAGE_INTENT_SYSTEM,
@@ -209,10 +208,7 @@ async function prepareChatImageRequest(input: ChatImageRequestInput): Promise<Pr
             ? await readPreviousImagePrompt(input.userId, input.conversationId, input.request)
             : null;
     const prompt = chatImageIntentUserMessage(input.text, candidates, previous, attachedPhoto);
-    // A follow-up writes a whole prompt, not just a decision.
-    const maxOutputTokens = previous
-        ? CHAT_IMAGE_INTENT_FOLLOW_UP_MAX_OUTPUT_TOKENS
-        : CHAT_IMAGE_INTENT_MAX_OUTPUT_TOKENS;
+    const maxOutputTokens = CHAT_IMAGE_INTENT_MAX_OUTPUT_TOKENS;
     const timeoutMs = previous
         ? CHAT_IMAGE_INTENT_FOLLOW_UP_TIMEOUT_MS
         : CHAT_IMAGE_INTENT_TIMEOUT_MS;
