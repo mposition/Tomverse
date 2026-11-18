@@ -1,11 +1,12 @@
 import type { ChatAttachment } from "@/components/chat/types";
 import type { ConversationDraft } from "@/lib/conversationDraftStore";
+import { CHAT_MAX_ATTACHMENTS_PER_MESSAGE } from "@/lib/chatAttachmentLimits";
 
 export function artifactRevisionDraftConflict(
   draft: ConversationDraft,
   filename: string
 ): "count" | "name" | null {
-  if (draft.attachments.length >= 5) return "count";
+  if (draft.attachments.length >= CHAT_MAX_ATTACHMENTS_PER_MESSAGE) return "count";
   const name = filename.normalize("NFKC").toLowerCase();
   return draft.attachments.some((item) =>
     item.name.normalize("NFKC").toLowerCase() === name

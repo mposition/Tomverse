@@ -864,35 +864,43 @@ export type MessageAttachmentCleanupSweepResult = {
  */
 export const LATE_TEXT_CACHE_SWEEP_WINDOW_MS = 24 * 60 * 60 * 1000;
 
-const sweepLateAttachmentTextCaches = async (now: Date, limit: number) => {
-  const recent = await prisma.messageAttachmentCleanup.findMany({
-    where: {
-      completedAt: {
-        not: null,
-        gte: new Date(now.getTime() - LATE_TEXT_CACHE_SWEEP_WINDOW_MS),
-      },
-    },
-    orderBy: { completedAt: "desc" },
-    take: Math.max(limit, 500),
-    select: { id: true, objectKey: true },
-  });
+/**
+ * Every tombstone completed inside the window, page by page -- not the newest
+ * N, which would leave older ones in the window unchecked on a busy day.
+ */
+const sweepLateAttachmentTextCaches = async (now: Date, pageSize: number) => {
+  const since = new Date(now.getTime() - LATE_TEXT_CACHE_SWEEP_WINDOW_MS);
+  const take = Math.max(1, pageSize);
+  let cursor: string | null = null;
   let deleted = 0;
-  for (const item of recent) {
-    try {
-      await deleteAttachmentTextCache(item.objectKey);
-      deleted += 1;
-    } catch (error) {
-      console.error(
-        JSON.stringify({
-          event: "message_attachment_late_text_cache_failed",
-          cleanupId: item.id,
-          error: classifyStorageError(error),
-          timestamp: now.toISOString(),
-        })
-      );
+  for (;;) {
+    const page: Array<{ id: string; objectKey: string }> =
+      await prisma.messageAttachmentCleanup.findMany({
+        where: { completedAt: { not: null, gte: since } },
+        orderBy: { id: "asc" },
+        take,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+        select: { id: true, objectKey: true },
+      });
+    for (const item of page) {
+      try {
+        await deleteAttachmentTextCache(item.objectKey);
+        deleted += 1;
+      } catch (error) {
+        console.error(
+          JSON.stringify({
+            event: "message_attachment_late_text_cache_failed",
+            cleanupId: item.id,
+            error: classifyStorageError(error),
+            timestamp: now.toISOString(),
+          })
+        );
+      }
     }
+    const last = page.at(-1);
+    if (page.length < take || !last) return deleted;
+    cursor = last.id;
   }
-  return deleted;
 };
 
 /**

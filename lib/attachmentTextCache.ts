@@ -28,7 +28,7 @@ import { deleteR2Object, readR2Object, writeR2Object } from "@/lib/r2";
  *   before.
  *
  * Bump the version when an extractor's output changes: old entries are then
- * simply never read again and go with their original.
+ * never read again, and deletion removes every version up to the current one.
  *
  * `CHAT_ATTACHMENT_TEXT_CACHE=0` turns it off; reading then behaves exactly as
  * it did, and nothing already written is consulted.
@@ -46,8 +46,16 @@ export const attachmentTextCacheEnabled = (
   environment: Record<string, string | undefined> = process.env
 ) => environment.CHAT_ATTACHMENT_TEXT_CACHE !== "0";
 
-export const attachmentTextCacheKey = (objectKey: string) =>
-  `${objectKey}.extracted-v${ATTACHMENT_TEXT_CACHE_VERSION}.json`;
+export const attachmentTextCacheKey = (
+  objectKey: string,
+  version: number = ATTACHMENT_TEXT_CACHE_VERSION
+) => `${objectKey}.extracted-v${version}.json`;
+
+/** Every key a version of this cache may have written, oldest first. */
+export const attachmentTextCacheKeys = (objectKey: string) =>
+  Array.from({ length: ATTACHMENT_TEXT_CACHE_VERSION }, (_, index) =>
+    attachmentTextCacheKey(objectKey, index + 1)
+  );
 
 /** The categories whose extracted text does not depend on the model or a switch. */
 export const ATTACHMENT_TEXT_CACHE_CATEGORIES: ReadonlySet<string> = new Set([
@@ -111,6 +119,13 @@ export const writeAttachmentTextCache = async (
   await writeR2Object(attachmentTextCacheKey(objectKey), body, CONTENT_TYPE);
 };
 
-/** Succeeds for a key that was never written, like every DeleteObject. */
-export const deleteAttachmentTextCache = (objectKey: string) =>
-  deleteR2Object(attachmentTextCacheKey(objectKey));
+/**
+ * Deletes the cached text of every version, so bumping the version never
+ * leaves an older one behind. Succeeds for keys that were never written, like
+ * every DeleteObject.
+ */
+export const deleteAttachmentTextCache = async (objectKey: string) => {
+  for (const key of attachmentTextCacheKeys(objectKey)) {
+    await deleteR2Object(key);
+  }
+};

@@ -6,6 +6,7 @@ import {
     ATTACHMENT_TEXT_CACHE_VERSION,
     attachmentTextCacheEnabled,
     attachmentTextCacheKey,
+    attachmentTextCacheKeys,
     parseCachedAttachmentText,
     serializeCachedAttachmentText,
 } from "../lib/attachmentTextCache.ts";
@@ -68,6 +69,20 @@ test("the cache sits next to the original, inside its account prefix", () => {
     assert.ok(attachmentTextCacheKey(key).startsWith(key));
 });
 
+test("deletion covers every cache version up to the current one", () => {
+    const key = "attachments/acct-1/abc.pdf";
+    const keys = attachmentTextCacheKeys(key);
+    assert.equal(keys.length, ATTACHMENT_TEXT_CACHE_VERSION);
+    assert.equal(keys.at(-1), attachmentTextCacheKey(key));
+    assert.equal(keys[0], `${key}.extracted-v1.json`);
+    const cache = source("lib/attachmentTextCache.ts");
+    assert.match(cache, /for \(const key of attachmentTextCacheKeys\(objectKey\)\)/);
+});
+
+test("too many attachments names the real limit", () => {
+    assert.match(source("app/api/chat/route.ts"), /at most \$\{MAX_ATTACHMENTS\} attachments/);
+});
+
 test("what is written is read back exactly, and anything else is a miss", () => {
     const entries = [{ kind: "PDF file", text: "line one\nline two" }, { kind: "file", text: "한국어" }];
     assert.deepEqual(parseCachedAttachmentText(serializeCachedAttachmentText(entries)), entries);
@@ -125,8 +140,12 @@ test("the route caches only an account's earlier, bound file, and never the turn
 test("every drain deletes the cached text of recently completed tombstones again", () => {
     const storage = source("lib/messageAttachmentStorage.ts");
     const sweep = storage.slice(storage.indexOf("const sweepLateAttachmentTextCaches"));
-    assert.match(sweep, /completedAt: \{\s*not: null,\s*gte: new Date\(now\.getTime\(\) - LATE_TEXT_CACHE_SWEEP_WINDOW_MS\)/);
+    assert.match(sweep, /const since = new Date\(now\.getTime\(\) - LATE_TEXT_CACHE_SWEEP_WINDOW_MS\)/);
+    assert.match(sweep, /completedAt: \{ not: null, gte: since \}/);
     assert.match(sweep, /await deleteAttachmentTextCache\(item\.objectKey\)/);
+    // Every completion in the window, page by page -- never only the newest N.
+    assert.match(sweep, /cursor: \{ id: cursor \}, skip: 1/);
+    assert.match(sweep, /if \(page\.length < take \|\| !last\) return deleted;/);
     assert.match(storage, /export const LATE_TEXT_CACHE_SWEEP_WINDOW_MS = 24 \* 60 \* 60 \* 1000;/);
     const drain = storage.slice(storage.indexOf("export const drainMessageAttachmentCleanupQueue"));
     assert.match(drain, /await sweepLateAttachmentTextCaches\(now, limit\)/);

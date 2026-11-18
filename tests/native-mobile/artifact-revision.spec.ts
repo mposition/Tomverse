@@ -126,13 +126,13 @@ test("Native logout rejects a late preparation and never adds it to another acco
   await expect(input(page)).toHaveValue(""); await input(page).fill("Other account draft"); await release(page);
   await expect(input(page)).toHaveValue("Other account draft"); await expect(page.locator(".attachments li")).toHaveCount(0);
 });
-test("Native files added during preparation preserve five inputs and clean only the unused copy", async ({ page }) => {
+test("Native files added during preparation preserve ten inputs and clean only the unused copy", async ({ page }) => {
   await open(page); await fixture(page, { hold: true }); await input(page).fill("Keep this draft");
   await cards(page).first().getByTestId("native-artifact-revise").click(); await expect.poll(async () => (await read(page)).calls.length).toBe(1);
-  await page.getByTestId("file-picker").setInputFiles(Array.from({ length: 5 }, (_, index) => ({ name: `notes-${index}.txt`, mimeType: "text/plain", buffer: Buffer.from("notes") })));
-  await expect(page.locator(".attachments li")).toHaveCount(5); await release(page);
-  await expect(page.getByRole("alert")).toContainText("up to 5 files"); await expect(input(page)).toHaveValue("Keep this draft");
-  await expect(page.locator(".attachments li")).toHaveCount(5); expect((await read(page)).removed).toHaveLength(1);
+  await page.getByTestId("file-picker").setInputFiles(Array.from({ length: 10 }, (_, index) => ({ name: `notes-${index}.txt`, mimeType: "text/plain", buffer: Buffer.from("notes") })));
+  await expect(page.locator(".attachments li")).toHaveCount(10); await release(page);
+  await expect(page.getByRole("alert")).toContainText("up to 10 files"); await expect(input(page)).toHaveValue("Keep this draft");
+  await expect(page.locator(".attachments li")).toHaveCount(10); expect((await read(page)).removed).toHaveLength(1);
 });
 test("Native uploads completing after a prepared revision cannot exceed five or delete the prepared input", async ({ page }) => {
   await open(page); await fixture(page, { hold: true, uploadHold: true }); await input(page).fill("Keep this draft");

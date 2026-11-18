@@ -3072,7 +3072,7 @@ async function handleChatPost(
             throw new ChatAccessError(
                 413,
                 "TOO_MANY_ATTACHMENTS",
-                "A chat request can contain at most 5 attachments."
+                `A chat request can contain at most ${MAX_ATTACHMENTS} attachments.`
             );
         }
         if (requestAttachments.length > MAX_CONVERSATION_ATTACHMENTS) {
