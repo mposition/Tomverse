@@ -72,6 +72,45 @@ test("applyGeneratedTitle no-ops when the title already changed (manual rename w
   assert.equal(stored.title, "My Renamed Chat");
 });
 
+test("applyGeneratedTitle accepts the server-derived interim title when the client's expectedTitle is stale", async () => {
+  const user = await createUser();
+  const conversation = await createConversation(user.id, "Plan a weekend trip");
+
+  // The Auto first send reported "New chat" instead of the created title.
+  const result = await applyGeneratedTitle({
+    conversationId: conversation.id,
+    userId: user.id,
+    expectedTitle: "New chat",
+    interimTitle: "Plan a weekend trip",
+    newTitle: "Weekend Trip Planning",
+  });
+
+  assert.equal(result.updated, true);
+  const stored = await prisma.conversation.findUniqueOrThrow({
+    where: { id: conversation.id },
+  });
+  assert.equal(stored.title, "Weekend Trip Planning");
+});
+
+test("applyGeneratedTitle with an interim title still never overwrites a manual rename", async () => {
+  const user = await createUser();
+  const conversation = await createConversation(user.id, "My Renamed Chat");
+
+  const result = await applyGeneratedTitle({
+    conversationId: conversation.id,
+    userId: user.id,
+    expectedTitle: "New chat",
+    interimTitle: "Plan a weekend trip",
+    newTitle: "Weekend Trip Planning",
+  });
+
+  assert.equal(result.updated, false);
+  const stored = await prisma.conversation.findUniqueOrThrow({
+    where: { id: conversation.id },
+  });
+  assert.equal(stored.title, "My Renamed Chat");
+});
+
 test("applyGeneratedTitle is scoped to the owning user and cannot touch another user's conversation", async () => {
   const owner = await createUser();
   const attacker = await createUser();
