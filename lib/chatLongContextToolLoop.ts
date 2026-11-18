@@ -23,7 +23,29 @@ import { estimatePromptTokens, WEB_SEARCH_INPUT_TOKEN_OVERHEAD } from "@/lib/cha
  */
 
 type StepUsage = {
-    usage: { inputTokens?: number; outputTokens?: number };
+    usage: {
+        inputTokens?: number;
+        outputTokens?: number;
+        inputTokenDetails?: { cacheReadTokens?: number; cacheWriteTokens?: number };
+    };
+};
+
+/** One provider call, as settlement prices it (lib/modelPricing.ts). */
+export type LoopCallUsage = {
+    inputTokens: number;
+    outputTokens: number;
+    cachedInputTokens: number;
+    cacheWriteInputTokens: number;
+};
+
+/** A turn's usage rebuilt from its calls, for a settlement without totals. */
+export type LoopSettlementUsage = {
+    inputTokens: number;
+    outputTokens: number;
+    cachedInputTokens: number;
+    cacheWriteInputTokens: number;
+    /** Every call, when all were measured and there were two or more. */
+    providerCalls?: LoopCallUsage[];
 };
 
 export type LongContextToolLoopLimits = {
@@ -77,6 +99,14 @@ export type LongContextToolLoop = {
      * instead of every call the reservation held.
      */
     sentInputTokens: () => number;
+    /**
+     * The turn's usage, call by call, for a settlement the provider gave no
+     * totals for (a cancel) or a limit stop: the finished calls with their own
+     * cache split, and a call in flight at its prompt with the rest of
+     * `outputTokens` -- so cache writes and each call's tier are priced as on
+     * a completed turn (review r-20261118-122423-d82874).
+     */
+    settlementUsage: (outputTokens: number) => LoopSettlementUsage;
 };
 
 export const longContextToolLoopStep = (
@@ -86,9 +116,24 @@ export const longContextToolLoopStep = (
     const allowed: Array<{ prompt: number; outputCap: number }> = [];
     let firstMessagesTokens = 0;
     let lastTally = { inputTokens: 0, outputTokens: 0, steps: 0 };
+    // The finished calls as measured, or null once any was not.
+    let measuredCalls: LoopCallUsage[] | null = [];
     const tally = (steps: readonly StepUsage[]) => {
         let inputTokens = 0;
         let outputTokens = 0;
+        measuredCalls = steps.every(
+            (step) => counted(step.usage.inputTokens) && counted(step.usage.outputTokens)
+        )
+            ? steps.map((step) => ({
+                  inputTokens: step.usage.inputTokens!,
+                  outputTokens: step.usage.outputTokens!,
+                  cachedInputTokens: Math.max(0, step.usage.inputTokenDetails?.cacheReadTokens ?? 0),
+                  cacheWriteInputTokens: Math.max(
+                      0,
+                      step.usage.inputTokenDetails?.cacheWriteTokens ?? 0
+                  ),
+              }))
+            : null;
         steps.forEach((step, index) => {
             const granted = allowed.at(index);
             inputTokens += counted(step.usage.inputTokens)
@@ -172,5 +217,39 @@ export const longContextToolLoopStep = (
         spent: () => lastTally,
         sentInputTokens: () =>
             lastTally.inputTokens + (allowed.at(lastTally.steps)?.prompt ?? 0),
+        settlementUsage: (outputTokens) => {
+            const inFlight = allowed.at(lastTally.steps);
+            if (!measuredCalls) {
+                // A finished call went unreported: totals only, at the most
+                // each was allowed.
+                return {
+                    inputTokens: lastTally.inputTokens + (inFlight?.prompt ?? 0),
+                    outputTokens: Math.max(outputTokens, lastTally.outputTokens),
+                    cachedInputTokens: 0,
+                    cacheWriteInputTokens: 0,
+                };
+            }
+            const finishedOutput = measuredCalls.reduce((sum, call) => sum + call.outputTokens, 0);
+            const calls: LoopCallUsage[] = inFlight
+                ? [
+                      ...measuredCalls,
+                      {
+                          inputTokens: inFlight.prompt,
+                          outputTokens: Math.max(0, outputTokens - finishedOutput),
+                          cachedInputTokens: 0,
+                          cacheWriteInputTokens: 0,
+                      },
+                  ]
+                : measuredCalls;
+            const sum = (pick: (call: LoopCallUsage) => number) =>
+                calls.reduce((total, call) => total + pick(call), 0);
+            return {
+                inputTokens: sum((call) => call.inputTokens),
+                outputTokens: sum((call) => call.outputTokens),
+                cachedInputTokens: sum((call) => call.cachedInputTokens),
+                cacheWriteInputTokens: sum((call) => call.cacheWriteInputTokens),
+                ...(calls.length > 1 ? { providerCalls: calls } : {}),
+            };
+        },
     };
 };

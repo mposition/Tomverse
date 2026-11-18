@@ -73,9 +73,11 @@ export async function buildMcpChatTools(input: {
       input.signal.throwIfAborted(); controller.signal.throwIfAborted();
       if (steps.length >= MCP_CHAT_MAX_STEPS) throw new McpConnectorError("model_step_limit");
       if (Buffer.byteLength(JSON.stringify(messages)) > 256_000) throw new McpConnectorError("model_input_limit");
-      cumulativeInput = Math.max(cumulativeInput, steps.reduce((sum, step) => sum + (step.usage.inputTokens || 0), 0)) +
+      // Counted as sent only once the call passes both limits below: a call
+      // refused here is never sent (review r-20261118-122423-d82874).
+      const nextInput = Math.max(cumulativeInput, steps.reduce((sum, step) => sum + (step.usage.inputTokens || 0), 0)) +
         toReservedInputTokens(estimateTokenBreakdown(JSON.stringify(messages) + instructions)) + definitionTokens;
-      if (cumulativeInput > inputCeiling) throw new McpConnectorError("model_input_budget");
+      if (nextInput > inputCeiling) throw new McpConnectorError("model_input_budget");
       // A step whose output the provider did not report is taken to have spent
       // the budget: counting it as zero would reopen the whole output cap on
       // every later step (review r-20261118-113741-eaa398).
@@ -83,6 +85,7 @@ export async function buildMcpChatTools(input: {
         ? outputCeiling
         : steps.reduce((sum, step) => sum + step.usage.outputTokens!, 0);
       if (used >= outputCeiling) throw new McpConnectorError("model_output_limit");
+      cumulativeInput = nextInput;
       return { maxOutputTokens: outputCeiling - used, ...(steps.length === MCP_CHAT_MAX_STEPS - 1 ? { toolChoice: "none" as const } : {}) };
     },
   };

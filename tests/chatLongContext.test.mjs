@@ -503,8 +503,9 @@ test("the per-step usage reaches every settlement path", () => {
     const route = read("app/api/chat/route.ts");
     assert.match(route, /const providerCalls = await providerCallUsage\(dispatched\.stream\);/);
     assert.match(route, /providerCalls: await providerCallUsage\(dispatched\.stream\),/);
-    assert.match(route, /providerCalls: usage\?\.providerCalls,\s*outcome,/);
-    assert.match(route, /inputTokens: settledInputTokens,\s*providerCalls: usage\?\.providerCalls,/);
+    assert.match(route, /providerCalls: settledProviderCalls,\s*outcome,/);
+    assert.match(route, /inputTokens: settledInputTokens,\s*providerCalls: settledProviderCalls,/);
+    assert.match(route, /const settledProviderCalls =\s*usage\?\.providerCalls \?\?/);
     const security = read("lib/chatSecurity.ts");
     // Provider cost and credits alike are the sum of the calls.
     assert.match(security, /const tokenCostBreakdown = longContextSettledUsageCost\(\s*snapshotRates,\s*settledUsage,\s*usage\.providerCalls\s*\);/);
@@ -640,7 +641,7 @@ test("a long-context tool loop shares its output budget and answers within its c
     // keeps its one call and its own tool choice.
     assert.match(route, /\(artifactToolConfig \|\| appManagedSearchTool\) &&[\s\S]{0,200}toolLoopStepCap > 1 &&/);
     // A turn stopped at a limit records the calls it already made.
-    assert.match(route, /const spent = longContextLoopStep\.spent\(\);\s*researchFailureUsage = \{\s*inputTokens: spent\.inputTokens,\s*outputTokens: spent\.outputTokens,\s*usageFromProvider: true,/);
+    assert.match(route, /const spent = longContextLoopStep\.settlementUsage\(\s*longContextLoopStep\.spent\(\)\.outputTokens\s*\);\s*researchFailureUsage = \{\s*inputTokens: spent\.inputTokens,\s*cachedInputTokens: spent\.cachedInputTokens,\s*cacheWriteInputTokens: spent\.cacheWriteInputTokens,\s*outputTokens: spent\.outputTokens,\s*providerCalls: spent\.providerCalls,\s*usageFromProvider: true,/);
     // The MCP loop counts an unreported step's output as the budget spent.
     assert.match(
         readFileSync(new URL("../lib/mcpConnectorChatTool.ts", import.meta.url), "utf8"),
@@ -660,14 +661,40 @@ test("a cancelled or unreported multi-call turn settles on the input it sent", a
     run.prepareStep({ steps: [{ usage: { inputTokens: 200_000, outputTokens: 1_000 } }], messages: [] });
     // One finished, the second in flight.
     assert.equal(run.sentInputTokens(), 200_000 + 200_000);
+    // Review r-20261118-122423-d82874: rebuilt call by call, cache split
+    // included -- the in-flight call at its prompt with the rest of the output.
+    const cached = (input, output, read, write) => ({ usage: { inputTokens: input, outputTokens: output, inputTokenDetails: { cacheReadTokens: read, cacheWriteTokens: write } } });
+    const priced = longContextToolLoopStep({ maxOutputTokens: 10_000, inputTokens: 4_000_000, firstPromptTokens: 200_000, callCap: 4, contextWindowTokens: 1_000_000 });
+    priced.prepareStep({ steps: [], messages: [] });
+    priced.prepareStep({ steps: [cached(200_000, 1_000, 150_000, 40_000)], messages: [] });
+    const usage = priced.settlementUsage(3_000);
+    assert.deepEqual(usage, {
+        inputTokens: 400_000,
+        outputTokens: 3_000,
+        cachedInputTokens: 150_000,
+        cacheWriteInputTokens: 40_000,
+        providerCalls: [
+            { inputTokens: 200_000, outputTokens: 1_000, cachedInputTokens: 150_000, cacheWriteInputTokens: 40_000 },
+            { inputTokens: 200_000, outputTokens: 2_000, cachedInputTokens: 0, cacheWriteInputTokens: 0 },
+        ],
+    });
+    // Which the per-call pricing accepts as covering the totals.
+    assert.equal(providerCallsCover(usage.providerCalls, usage), true);
+    // An unreported finished call: totals only.
+    const blind = longContextToolLoopStep({ maxOutputTokens: 10_000, inputTokens: 4_000_000, firstPromptTokens: 200_000, callCap: 4, contextWindowTokens: 1_000_000 });
+    blind.prepareStep({ steps: [], messages: [] });
+    blind.outputSpent({ steps: [{ usage: {} }] });
+    assert.equal(blind.settlementUsage(0).providerCalls, undefined);
     const route = readFileSync(new URL("../app/api/chat/route.ts", import.meta.url), "utf8");
-    assert.match(route, /longContextLoopStep\?\.sentInputTokens\(\) \?\?\s*mcpConnector\?\.observedInputTokens\(\) \?\?\s*0/);
-    assert.match(route, /usage\?\.inputTokens \?\?\s*\(sentLoopInput > 0\s*\? Math\.min\(sentLoopInput, reservation\.inputTokens\)\s*: reservation\.inputTokens\)/);
+    assert.match(route, /longContextLoopStep\.settlementUsage\(\s*usage\?\.outputTokens \?\? estimatedGeneratedOutputTokens\(\)\s*\)/);
+    assert.match(route, /mcpConnector\?\.observedInputTokens\(\) \?\? 0/);
+    assert.match(route, /usage\?\.providerCalls \?\? \(loopFits \? loopUsage!\.providerCalls : undefined\)/);
+    assert.match(route, /cachedInputTokens: settledCachedInputTokens,\s*cacheWriteInputTokens: settledCacheWriteInputTokens,/);
     assert.match(route, /\(error instanceof LongContextToolLoopLimitError \|\|[\s\S]{0,120}LongContextToolLoopLimitError\) &&\s*longContextLoopStep &&/);
-    assert.match(
-        readFileSync(new URL("../lib/mcpConnectorChatTool.ts", import.meta.url), "utf8"),
-        /observedInputTokens: \(\) => cumulativeInput,/
-    );
+    const mcp = readFileSync(new URL("../lib/mcpConnectorChatTool.ts", import.meta.url), "utf8");
+    assert.match(mcp, /observedInputTokens: \(\) => cumulativeInput,/);
+    // The MCP loop counts a call as sent only once it passed both limits.
+    assert.ok(mcp.indexOf("cumulativeInput = nextInput;") > mcp.indexOf("throw new McpConnectorError(\"model_output_limit\")"));
 });
 
 test("the installed SDK reports usage as the sum of all steps", () => {

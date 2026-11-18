@@ -6401,30 +6401,54 @@ async function handleChatPost(
                     // multi-call loop is settled on the input it already sent
                     // -- its finished calls and the one in flight -- not on
                     // every call the reservation held.
-                    const sentLoopInput =
-                        dispatched.attemptIndex === 0
-                            ? (longContextLoopStep?.sentInputTokens() ??
-                              mcpConnector?.observedInputTokens() ??
-                              0)
+                    // A long-context app loop rebuilds that input call by call,
+                    // cache split included, so its cache writes and each
+                    // call's tier are priced as on a completed turn.
+                    const loopUsage =
+                        usage?.inputTokens === undefined &&
+                        dispatched.attemptIndex === 0 &&
+                        longContextLoopStep &&
+                        longContextLoopStep.sentInputTokens() > 0
+                            ? longContextLoopStep.settlementUsage(
+                                  usage?.outputTokens ?? estimatedGeneratedOutputTokens()
+                              )
+                            : null;
+                    const sentMcpInput =
+                        !loopUsage && dispatched.attemptIndex === 0
+                            ? (mcpConnector?.observedInputTokens() ?? 0)
                             : 0;
+                    const loopFits =
+                        loopUsage !== null && loopUsage.inputTokens <= reservation.inputTokens;
                     const settledInputTokens =
                         usage?.inputTokens ??
-                        (sentLoopInput > 0
-                            ? Math.min(sentLoopInput, reservation.inputTokens)
-                            : reservation.inputTokens);
+                        (loopUsage
+                            ? Math.min(loopUsage.inputTokens, reservation.inputTokens)
+                            : sentMcpInput > 0
+                              ? Math.min(sentMcpInput, reservation.inputTokens)
+                              : reservation.inputTokens);
                     const settledOutputTokens =
-                        usage?.outputTokens ?? estimatedGeneratedOutputTokens();
+                        usage?.outputTokens ??
+                        loopUsage?.outputTokens ??
+                        estimatedGeneratedOutputTokens();
+                    const settledCachedInputTokens =
+                        usage?.cachedInputTokens ??
+                        (loopFits ? loopUsage!.cachedInputTokens : undefined);
+                    const settledCacheWriteInputTokens =
+                        usage?.cacheWriteInputTokens ??
+                        (loopFits ? loopUsage!.cacheWriteInputTokens : undefined);
+                    const settledProviderCalls =
+                        usage?.providerCalls ?? (loopFits ? loopUsage!.providerCalls : undefined);
                     await settleChatUsage(reservation, {
                         inputTokens: settledInputTokens,
-                        cachedInputTokens: usage?.cachedInputTokens,
-                        cacheWriteInputTokens: usage?.cacheWriteInputTokens,
+                        cachedInputTokens: settledCachedInputTokens,
+                        cacheWriteInputTokens: settledCacheWriteInputTokens,
                         outputTokens: settledOutputTokens,
                         reasoningTokens: usage?.reasoningTokens,
                         // Absent provider usage metadata, the output figure
                         // above is the documented fallback estimate rather
                         // than a measured value -- recorded as such.
                         usageFromProvider: usage?.usageFromProvider === true,
-                        providerCalls: usage?.providerCalls,
+                        providerCalls: settledProviderCalls,
                         outcome,
                         searchSurchargeCredits: usage?.searchSurchargeCredits,
                         searchExecuted: usage?.searchExecuted,
@@ -6444,11 +6468,11 @@ async function handleChatPost(
                                       attemptIndex: dispatched.attemptIndex,
                                       price: dispatched.price,
                                       inputTokens: settledInputTokens,
-                                      providerCalls: usage?.providerCalls,
+                                      providerCalls: settledProviderCalls,
                                       cachedInputTokens:
-                                          usage?.cachedInputTokens ?? 0,
+                                          settledCachedInputTokens ?? 0,
                                       cacheWriteInputTokens:
-                                          usage?.cacheWriteInputTokens ?? 0,
+                                          settledCacheWriteInputTokens ?? 0,
                                       outputTokens: settledOutputTokens,
                                       reasoningTokens: usage?.reasoningTokens,
                                       usageFromProvider:
@@ -8507,10 +8531,15 @@ async function handleChatPost(
                         // recorded as such. The failed turn's credits follow
                         // the failure rule. Any other failure may have a call
                         // in flight and takes the general path in settleSafely.
-                        const spent = longContextLoopStep.spent();
+                        const spent = longContextLoopStep.settlementUsage(
+                            longContextLoopStep.spent().outputTokens
+                        );
                         researchFailureUsage = {
                             inputTokens: spent.inputTokens,
+                            cachedInputTokens: spent.cachedInputTokens,
+                            cacheWriteInputTokens: spent.cacheWriteInputTokens,
                             outputTokens: spent.outputTokens,
+                            providerCalls: spent.providerCalls,
                             usageFromProvider: true,
                         };
                     }
