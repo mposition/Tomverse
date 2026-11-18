@@ -601,7 +601,12 @@ test("malformed PR artifacts never become completion or retry evidence", () => {
     html_url: "https://github.com/mposition/Tomverse/pull/812",
   };
   assert.equal(isValidAmuxReviewArtifact(artifact), true);
+  // Owner decision 2026-11-18: the v2 change digest, and a diff that is not shown, are an artifact.
+  assert.equal(isValidAmuxReviewArtifact({ ...artifact, diff_digest: `v2:${"e".repeat(64)}`, diff_text: null,
+    diff_hidden: "oversized" }), true);
   const malformed = [
+    { ...artifact, diff_digest: `v3:${"e".repeat(64)}` },
+    { ...artifact, diff_digest: `v2:${"e".repeat(63)}` },
     { ...artifact, pr_number: 0 },
     { ...artifact, pr_number: -1 },
     { ...artifact, pr_number: Number.NaN },

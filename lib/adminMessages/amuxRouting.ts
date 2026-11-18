@@ -239,10 +239,12 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
     lastAttemptReason: "Last attempt reason",
     previousBlockReason: "Previous human block reason",
     reviewPrDiff: "PR diff (read-only review content)",
+    reviewDiffNotShown:
+      "The diff is not shown here: it is too large, binary, or has characters that could hide or reorder it. Review the pull request on GitHub; an approval binds its merge base, head and tree.",
     reviewPr: "GitHub review PR",
     reviewBaseSha: "Base SHA",
     reviewHeadSha: "Head SHA",
-    reviewDiffDigest: "Diff SHA-256",
+    reviewDiffDigest: "Change digest",
     reviewResultSha256: "Worker result SHA-256",
     reviewContentMissing:
       "No review subject with a verifiable digest is available. Decision proposals are unavailable.",
@@ -582,10 +584,12 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
     lastAttemptReason: "마지막 시도 사유",
     previousBlockReason: "이전 사람 차단 사유",
     reviewPrDiff: "PR diff(읽기 전용 검토 내용)",
+    reviewDiffNotShown:
+      "diff를 여기에 보이지 않습니다. 너무 크거나 binary이거나, 내용을 숨기거나 순서를 바꿀 수 있는 문자가 있습니다. GitHub에서 PR을 검토하세요. 승인은 merge base·head·tree에 묶입니다.",
     reviewPr: "GitHub 검토 PR",
     reviewBaseSha: "Base SHA",
     reviewHeadSha: "Head SHA",
-    reviewDiffDigest: "Diff SHA-256",
+    reviewDiffDigest: "변경 digest",
     reviewResultSha256: "Worker 결과 SHA-256",
     reviewContentMissing:
       "검증 가능한 digest를 가진 검토 대상이 없습니다. 결정 제안을 만들 수 없습니다.",

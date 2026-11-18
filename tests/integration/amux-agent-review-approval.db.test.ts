@@ -544,7 +544,14 @@ test("approve proposals bind a complete GitHub PR head and diff digest to the ta
   await assert.rejects(issueApproveProposal(fixture, { reviewHeadSha: "F".repeat(40) }));
   await assert.rejects(issueApproveProposal(fixture, { reviewBaseSha: "F".repeat(40) }));
   await assert.rejects(issueApproveProposal(fixture, { reviewDiffDigest: "F".repeat(64) }));
+  // Owner decision 2026-11-18: the v2 change digest is the binding now; only its exact form is taken.
+  for (const malformed of [`v2:${"F".repeat(64)}`, `v2:${"e".repeat(63)}`, `v3:${"e".repeat(64)}`, `V2:${"e".repeat(64)}`]) {
+    await assert.rejects(issueApproveProposal(fixture, { reviewDiffDigest: malformed }),
+      /AmuxReviewProposal_source_evidence_check/, malformed);
+  }
   assert.equal(await prisma.amuxReviewProposal.count({ where: { escalationId: fixture.escalation.id } }), 1);
+  const v2 = await issueApproveProposal(await reviewFixture(), { reviewDiffDigest: `v2:${"e".repeat(64)}` });
+  assert.equal(v2.reviewDiffDigest, `v2:${"e".repeat(64)}`);
 });
 
 test("PR-less approval remains forbidden for a legacy review task", async () => {

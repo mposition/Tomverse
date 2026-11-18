@@ -27,6 +27,7 @@ import {
   reportedHalt,
 } from "../lib/engineeringAgentCore.ts";
 import { detectSecrets } from "../lib/engineeringAgentSecretPatterns.ts";
+import { readPullChangeDigest } from "../lib/pullDiffDigestCore.ts";
 import { runPublisherCycle } from "./engineering-agent-publisher-core.mjs";
 import { isSupervisedWorker, superviseCycle } from "./engineering-agent-supervisor.mjs";
 
@@ -40,7 +41,7 @@ const OWNER = "mposition";
 const REPOSITORY = "Tomverse";
 const REPOSITORY_URL = `https://github.com/${OWNER}/${REPOSITORY}.git`;
 const API = "https://api.github.com";
-/** AMUX's review diff limit (lib/amux/reviewGitHub.ts): a larger diff is not one it binds. */
+/** The v1 diff limit, for an app before the v2 change digest only: a larger diff is not one it binds. */
 const MAX_DIFF_BYTES = 1024 * 1024;
 /** Revoking the token must finish inside the supervisor's grace before SIGKILL. */
 const REVOKE_TIMEOUT_MS = 3_000;
@@ -216,9 +217,9 @@ const githubRequest = async (token, method, path, { body, accept, timeoutMs = TI
   });
 
 /**
- * The digest AMUX's review binds (lib/amux/reviewGitHub.ts): the diff's own
- * bytes, and only for a diff AMUX would take -- valid UTF-8, a git diff, no
- * binary patch, no control or bidirectional character that could hide or
+ * The v1 digest, for an app before the v2 change digest only: the diff's own
+ * bytes, and only for a diff that app would take -- valid UTF-8, a git diff,
+ * no binary patch, no control or bidirectional character that could hide or
  * reorder what a person reviews. Anything else is refused, never hashed.
  */
 export const bindableDiffDigest = (bytes) => {
@@ -272,6 +273,24 @@ const githubPorts = (token) => ({
     const body = await response.json();
     if (!Array.isArray(body)) throw new Error("github_read_failed");
     return body.map(pullOf);
+  },
+  // The v2 change digest, read the one way every reader reads it
+  // (lib/pullDiffDigestCore.ts); null when it is not read now.
+  pullChangeDigest: async ({ base, headSha }) => {
+    const getJson = async (path) => {
+      const response = await githubRequest(token, "GET", `/repos/${OWNER}/${REPOSITORY}${path}`);
+      if (!response.ok) {
+        await response.body?.cancel().catch(() => undefined);
+        throw new Error("github_read_failed");
+      }
+      return response.json();
+    };
+    try {
+      const change = await readPullChangeDigest(getJson, { base, headSha });
+      return { digest: change.digest, headTreeSha: change.headTreeSha };
+    } catch {
+      return null;
+    }
   },
   pullDiffDigest: async (number) => {
     const response = await githubRequest(token, "GET", `/repos/${OWNER}/${REPOSITORY}/pulls/${number}`, {

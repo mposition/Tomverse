@@ -41,7 +41,7 @@ const operator = () => ({ user: { id: `dm-t2-operator-${randomUUID()}`, email: "
 type Card = { taskId: string; settlementId: string; bindingId: string; prNumber: number; ref: string };
 
 /** A v22 Task in review with the publisher's review draft for its run, filed as an owner queue settlement. */
-async function reviewDraft(tx: LifecycleTx, patch: string): Promise<Card> {
+async function reviewDraft(tx: LifecycleTx, patch: string, bindingDigest = DIFF): Promise<Card> {
   const seed = await seedAmuxV4PortfolioRecoveryPrerequisites(queryAdapter(tx), {
     taskRole: "implement", settlementStatus: "review", settlementReason: "human_review_required" }) as {
     taskId: string; priorAttemptId: string };
@@ -69,7 +69,7 @@ async function reviewDraft(tx: LifecycleTx, patch: string): Promise<Card> {
     await tx.$executeRaw`INSERT INTO "EngineeringAgentBinding"
       ("id", "runId", "prNumber", "headSha", "verifiedHeadSha", "ref", "snapshot", "currentPrNumber", "updatedAt")
       VALUES (${bindingId}, ${runId}, ${prNumber}, ${HEAD}, ${HEAD}, ${ref},
-        ${JSON.stringify({ baseSha: BASE, diffDigest: DIFF, treeId: "f".repeat(40),
+        ${JSON.stringify({ baseSha: BASE, diffDigest: bindingDigest, treeId: "f".repeat(40),
           invalidatedReviewIds: [] })}::jsonb, ${prNumber}, CURRENT_TIMESTAMP)`;
   });
   const { recordDecisionMakerSwitchByOperator, amuxDmOwnerSettlementId, withAmuxDbBoundary, AMUX_DB_BOUNDARIES,
@@ -470,5 +470,42 @@ test("the lane's consume lets an engineering pull request merge only while its D
       diffDigest: DIFF, env: ON }), "allowed");
     assert.equal(await amuxDmT2MergeConsumeAllowed(tx, { prNumber: card.prNumber, headSha: HEAD, base: "main",
       diffDigest: DIFF, env: ON }), "dm_approval_not_holding", "never into main");
+  });
+});
+
+test("owner decision 2026-11-18: a v2 binding is approved, readied and consumed on its change digest alone", async () => {
+  const CHANGE = `v2:${"7".repeat(64)}`;
+  const { amuxDmT2MergeConsumeAllowed, runAmuxDmT2MergeReadyStep } = await services();
+  await lifecycle(async (tx) => {
+    const card = await reviewDraft(tx, ORDINARY, CHANGE);
+    // The approval names the binding's v2 digest (the settlement's CHECK takes it).
+    assert.deepEqual(await approve(card, ON), { applied: true, outcome: "approved" });
+    const [settled] = await tx.$queryRaw<Array<{ approvedDiffDigest: string }>>`
+      SELECT "approvedDiffDigest" FROM "AmuxDmOwnerSettlement" WHERE "id" = ${card.settlementId}`;
+    assert.equal(settled!.approvedDiffDigest, CHANGE);
+
+    // Readied on the v2 digest read now; the v1 diff is not read for it (a large or binary diff binds too).
+    const reads: unknown[] = [];
+    const v2 = (changeDigest: string | null) => ({ ...github(card).ports,
+      change: async (_prNumber: number, options?: unknown) => {
+        reads.push(options);
+        return { state: "open" as const, baseRef: "develop", headRef: card.ref, headSha: HEAD, changeDigest,
+          diffDigest: null, changedFiles: ["components/Ordinary.tsx"], crossRepository: false };
+      } });
+    const moved = await runAmuxDmT2MergeReadyStep({ drafts: draftsOf(card), room: true, running: NONE,
+      ports: v2(`v2:${"8".repeat(64)}`), env: ON });
+    assert.deepEqual([moved.outcome, (moved as { reason?: string }).reason], ["skipped", "diff_changed"],
+      "develop moved the merge base: not the approved change");
+    assert.deepEqual(reads, [{ legacyDiff: false }]);
+    assert.equal((await runAmuxDmT2MergeReadyStep({ drafts: draftsOf(card), room: true, running: NONE,
+      ports: v2(CHANGE), env: ON })).outcome, "marked_ready");
+
+    // The lane's consume: the change digest it read right before, in v2.
+    const consumeAllowed = (digests: { changeDigest?: string | null; diffDigest: string | null }) =>
+      amuxDmT2MergeConsumeAllowed(tx, { prNumber: card.prNumber, headSha: HEAD, base: "develop", env: ON, ...digests });
+    assert.equal(await consumeAllowed({ changeDigest: CHANGE, diffDigest: null }), "allowed");
+    assert.equal(await consumeAllowed({ changeDigest: CHANGE, diffDigest: DIFF }), "allowed");
+    assert.equal(await consumeAllowed({ changeDigest: `v2:${"8".repeat(64)}`, diffDigest: null }), "dm_diff_changed");
+    assert.equal(await consumeAllowed({ diffDigest: DIFF }), "dm_diff_changed", "a lane before v2 sends v1 alone");
   });
 });

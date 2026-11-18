@@ -11,8 +11,6 @@ export const adminAmuxWorkspaceMessages = defineAdminMessages({
   en: {
     testCardIntake: "Register U21 test card",
     status: {
-      preview_apply_off: "Preview · apply off",
-      apply_on: "Apply on",
       behind_server_switch: "Behind server switch",
       server_switch_on: "Server switch on",
       read_only: "Read only",
@@ -29,7 +27,6 @@ export const adminAmuxWorkspaceMessages = defineAdminMessages({
       open: "Open",
       close: "Close",
       sections: {
-        import: "Catalog import",
         reconciliation: "Source reconciliation",
         metadata: "Card metadata",
         recommendation: "Recommendation pool",
@@ -46,8 +43,6 @@ export const adminAmuxWorkspaceMessages = defineAdminMessages({
   ko: {
     testCardIntake: "U21 테스트 카드 등록",
     status: {
-      preview_apply_off: "미리보기 · 적용 꺼짐",
-      apply_on: "적용 켜짐",
       behind_server_switch: "서버 스위치 꺼짐",
       server_switch_on: "서버 스위치 켜짐",
       read_only: "읽기 전용",
@@ -63,7 +58,6 @@ export const adminAmuxWorkspaceMessages = defineAdminMessages({
       open: "열기",
       close: "닫기",
       sections: {
-        import: "카탈로그 이관",
         reconciliation: "소스 재조정",
         metadata: "카드 메타데이터",
         recommendation: "추천 풀",

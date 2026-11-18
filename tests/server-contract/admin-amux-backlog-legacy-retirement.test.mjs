@@ -193,5 +193,5 @@ test("import, reconciliation and metadata moved to Safety & recovery and redirec
   assert.deepEqual(backlogReads, []);
   // Their panels are no longer mounted by this page at all.
   const page = readFileSync(resolve(root, "app/(site)/(application)/admin/amux-backlog/page.tsx"), "utf8");
-  assert.doesNotMatch(page, /AmuxBoardImportPanel|AmuxReconciliationPanel|AmuxBacklogMetadataPanel/);
+  assert.doesNotMatch(page, /AmuxReconciliationPanel|AmuxBacklogMetadataPanel/);
 });

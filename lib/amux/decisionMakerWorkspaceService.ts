@@ -50,7 +50,7 @@ export type DmWorkspaceEvidence = {
 };
 
 type SealedResult = {
-  attemptId: string | null; resultIdeaId: string | null; ciphertext: Uint8Array | null; keyId: string | null;
+  attemptId: string | null; resultIdeaId: string | null; keyId: string | null;
   keyVersion: number | null; digest: string | null; digestKeyId: string | null; sourceSha256: string | null;
   bodyPurgedAt: Date | null;
 };
@@ -87,7 +87,7 @@ export async function readDecisionMakerWorkspaceSource(tx: Prisma.TransactionCli
       NULL::text AS "bindingId", NULL::text AS "taskId", NULL::jsonb AS "sourceSnapshot",
       NULL::bytea AS "bodyCiphertext", NULL::text AS "bodyKeyId", NULL::int AS "bodyKeyVersion",
       NULL::text AS "bodyDigest", NULL::text AS "bodyDigestKeyId", NULL::text AS "attemptId",
-      NULL::text AS "resultIdeaId", NULL::bytea AS "ciphertext", NULL::text AS "keyId", NULL::int AS "keyVersion",
+      NULL::text AS "resultIdeaId", NULL::text AS "keyId", NULL::int AS "keyVersion",
       NULL::text AS "digest", NULL::text AS "digestKeyId", NULL::text AS "sourceSha256",
       NULL::timestamp AS "bodyPurgedAt"
     FROM "EngineeringAgentDmReview" d JOIN "EngineeringAgentWorkItem" w ON w."id" = d."workItemId"
@@ -95,7 +95,7 @@ export async function readDecisionMakerWorkspaceSource(tx: Prisma.TransactionCli
     UNION ALL
     SELECT 'settlement', NULL, NULL, s."kind", s."bindingId", w."id", w."sourceSnapshot",
       w."v4BodyCiphertext", w."v4BodyKeyId", w."v4BodyKeyVersion", w."v4BodyDigest", w."v4BodyDigestKeyId",
-      s."attemptId", r."ideaId", r."ciphertext", r."keyId", r."keyVersion", r."digest", r."digestKeyId",
+      s."attemptId", r."ideaId", r."keyId", r."keyVersion", r."digest", r."digestKeyId",
       r."sourceSha256", r."bodyPurgedAt"
     FROM "AmuxDmOwnerSettlement" s JOIN "AmuxWorkItem" w ON w."id" = s."taskId"
     LEFT JOIN "AmuxV22TaskResult" r ON r."attemptId" = s."attemptId" AND r."taskId" = s."taskId"
@@ -103,14 +103,14 @@ export async function readDecisionMakerWorkspaceSource(tx: Prisma.TransactionCli
     UNION ALL
     SELECT 'result_review', NULL, NULL, NULL, NULL, w."id", w."sourceSnapshot",
       w."v4BodyCiphertext", w."v4BodyKeyId", w."v4BodyKeyVersion", w."v4BodyDigest", w."v4BodyDigestKeyId",
-      v."attemptId", r."ideaId", r."ciphertext", r."keyId", r."keyVersion", r."digest", r."digestKeyId",
+      v."attemptId", r."ideaId", r."keyId", r."keyVersion", r."digest", r."digestKeyId",
       r."sourceSha256", r."bodyPurgedAt"
     FROM "AmuxV22ResultReview" v JOIN "AmuxWorkItem" w ON w."id" = v."taskId"
     LEFT JOIN "AmuxV22TaskResult" r ON r."attemptId" = v."attemptId" AND r."taskId" = v."taskId"
     WHERE v."localCardId" = ${request.cardId}
     UNION ALL
     SELECT 'v22_question', NULL, NULL, NULL, NULL, q."taskId", NULL, NULL, NULL, NULL, NULL, NULL,
-      q."attemptId", r."ideaId", r."ciphertext", r."keyId", r."keyVersion", r."digest", r."digestKeyId",
+      q."attemptId", r."ideaId", r."keyId", r."keyVersion", r."digest", r."digestKeyId",
       r."sourceSha256", r."bodyPurgedAt"
     FROM "AmuxV22TaskQuestion" q
     LEFT JOIN "AmuxV22TaskResult" r ON r."attemptId" = q."attemptId" AND r."taskId" = q."taskId"
@@ -124,14 +124,14 @@ export async function readDecisionMakerWorkspaceSource(tx: Prisma.TransactionCli
     taskId: row.taskId!, sourceSnapshot: row.sourceSnapshot ?? null, bodyCiphertext: row.bodyCiphertext ?? null,
     bodyKeyId: row.bodyKeyId ?? null, bodyKeyVersion: row.bodyKeyVersion ?? null, bodyDigest: row.bodyDigest ?? null,
     bodyDigestKeyId: row.bodyDigestKeyId ?? null, attemptId: row.attemptId ?? null,
-    resultIdeaId: row.resultIdeaId ?? null, ciphertext: row.ciphertext ?? null, keyId: row.keyId ?? null,
+    resultIdeaId: row.resultIdeaId ?? null, keyId: row.keyId ?? null,
     keyVersion: row.keyVersion ?? null, digest: row.digest ?? null, digestKeyId: row.digestKeyId ?? null,
     sourceSha256: row.sourceSha256 ?? null, bodyPurgedAt: row.bodyPurgedAt ?? null,
   };
   if (row.source === "result_review") return { kind: "result_review", ...sealed };
   if (row.source === "v22_question") {
-    const { attemptId, resultIdeaId, ciphertext, keyId, keyVersion, digest, digestKeyId, sourceSha256, bodyPurgedAt } = sealed;
-    return { kind: "v22_question", attemptId, resultIdeaId, ciphertext, keyId, keyVersion, digest, digestKeyId,
+    const { attemptId, resultIdeaId, keyId, keyVersion, digest, digestKeyId, sourceSha256, bodyPurgedAt } = sealed;
+    return { kind: "v22_question", attemptId, resultIdeaId, keyId, keyVersion, digest, digestKeyId,
       sourceSha256, bodyPurgedAt };
   }
   const pulls = row.settlementKind === "t2_pr" && row.bindingId ?
@@ -145,7 +145,7 @@ export async function readDecisionMakerWorkspaceSource(tx: Prisma.TransactionCli
 /** The run's whole result text, or null when it left none or it cannot be opened. */
 const openResultText = async (row: SealedResult) => {
   if (!row.attemptId || !row.resultIdeaId || !row.digest || !row.digestKeyId || !row.sourceSha256) return null;
-  return openAmuxV22TaskResultRow(row.attemptId, { ideaId: row.resultIdeaId, ciphertext: row.ciphertext,
+  return openAmuxV22TaskResultRow(row.attemptId, { ideaId: row.resultIdeaId,
     keyId: row.keyId, keyVersion: row.keyVersion, digest: row.digest, digestKeyId: row.digestKeyId,
     bodyPurgedAt: row.bodyPurgedAt, sourceSha256: row.sourceSha256 }).catch(() => null);
 };

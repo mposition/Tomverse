@@ -18,6 +18,7 @@
 
 import { DECISION_VALUE_ALARMS } from "../agentPushPolicy.ts";
 import { CI_ADMISSION_HOLD_LABEL, ciRunKey } from "../ciAdmissionCore.ts";
+import { PULL_DIGEST_PATTERN, pullDigestCurrent } from "../pullDiffDigestCore.ts";
 import {
   qaReleaseDmApprovedHumanPaths, qaReleaseDmMergeAllowed, qaReleaseDmMergeInAllowList, type QaReleaseDmMergeScope,
 } from "../qaReleaseMergeLaneExclusionCore.ts";
@@ -31,7 +32,8 @@ export const amuxDmT2MergeEnabled = (env: Readonly<Record<string, string | undef
 export const AMUX_DM_T2_MERGE_HEAD = /^agent\/engineering\/[0-9]{1,20}$/;
 
 const SHA = /^[0-9a-f]{40}$/;
-const DIGEST = /^[0-9a-f]{64}$/;
+/** An approval's digest, v1 or v2 as it was approved (lib/pullDiffDigestCore.ts). */
+const DIGEST = PULL_DIGEST_PATTERN;
 
 /**
  * Every path a unified diff names, both sides of a rename; null when it names
@@ -334,10 +336,13 @@ export type AmuxDmT2MergePullNow = {
   labels?: readonly string[];
 };
 
-/** The pull request's change as the engineering agent's read-only token reads it now. */
+/**
+ * The pull request's change as the engineering agent's read-only token reads
+ * it now: its v2 change digest, and its v1 diff digest when the approval is v1.
+ */
 export type AmuxDmT2MergeChangeNow = {
   state: "open" | "closed"; baseRef: string; headRef: string; headSha: string;
-  diffDigest: string | null; changedFiles: string[] | null;
+  changeDigest?: string | null; diffDigest: string | null; changedFiles: string[] | null;
   /** The head is in another repository than the base (a fork), or that could not be read. */
   crossRepository: boolean;
 };
@@ -348,8 +353,9 @@ export type AmuxDmT2MergeSkipReason = "pull_closed" | "fork_pr" | "base_not_deve
 /**
  * Whether a pull request's change, read fresh from GitHub, is still the one
  * the Decision Maker approved: open, into develop, on the approved branch and
- * head, its diff byte for byte the approved one (a merge base that moved with
- * develop changes it), and every path one the merge scope lets through. In
+ * head, its change digest the approved one in the approval's own version (v2:
+ * merge base, head and tree; v1: the diff byte for byte; a merge base that
+ * moved with develop changes either), and every path one the merge scope lets through. In
  * the block list scope the approved patch, as stored, must pass too, lines
  * and all (amuxDmT2MergePatchGate); none stored does not. Anything unread or
  * different does not hold. What the app checks before it marks a pull request
@@ -375,8 +381,9 @@ export function amuxDmT2MergeChangeVerdict(input: {
   if (change.baseRef !== "develop") return { holds: false, reason: "base_not_develop" };
   if (change.headRef !== approved.headRef) return { holds: false, reason: "branch_moved" };
   if (change.headSha !== approved.approvedHeadSha) return { holds: false, reason: "head_moved" };
-  if (change.diffDigest === null) return { holds: false, reason: "diff_unreadable" };
-  if (change.diffDigest !== approved.approvedDiffDigest) return { holds: false, reason: "diff_changed" };
+  const digestNow = pullDigestCurrent(approved.approvedDiffDigest, change);
+  if (digestNow === null) return { holds: false, reason: "diff_unreadable" };
+  if (digestNow !== approved.approvedDiffDigest) return { holds: false, reason: "diff_changed" };
   const gate = amuxDmT2MergeGate(change.changedFiles, scope);
   if (!gate.pass) return { holds: false, reason: gate.reason, paths: gate.paths };
   if (scope !== "blocklist") return { holds: true };

@@ -26,7 +26,15 @@ mock.module(mod("lib/amux/dbBoundary.ts"), { namedExports: {
   AMUX_LIFECYCLE_ROUTE_BUDGET_MS: 12_000,
   withAmuxRouteBudget: (work: () => Promise<Response>) => work(),
 } });
+mock.module(mod("lib/amux/v22ChangedPathsStore.ts"), { namedExports: {
+  // The settle route's size allowance and named list read the database: no
+  // patch or list recorded here, and a body that names none (its request
+  // fields come from lib/amux/v22ChangedPathsCore.ts, which is not replaced).
+  amuxV22SettlementAllowanceMs: async () => 0,
+  resolveAmuxV22NamedChangedPaths: async () => ({ kind: "absent" }),
+} });
 mock.module(mod("lib/amux/execution.ts"), { namedExports: {
+  AMUX_V22_CHANGED_PATHS_UNRECORDED: "changed_paths_unrecorded",
   startAmuxV22TaskExecution: async (input: { publicationBaseSha?: string | null }) => {
     startReachedService = true;
     startInput = input;

@@ -418,6 +418,7 @@ test("a lane round merges a reported lib/ and app/api/ change into develop, and 
         exclusionInputs: async (p) => ({ headBranch: p.headRefName, changedFiles: files.map((path) => ({ path })),
           changedFilesComplete: true, policyTestPaths: [], agentOwnPatterns: [] }),
         readPull: async () => pull,
+        changeDigest: async () => `v2:${"c".repeat(64)}`,
         diffDigest: async () => DIFF,
         merge: async (number, headSha) => { merges.push([number, headSha]); return { result: "merged", sha: "9".repeat(40) }; },
         onDevelop: async () => true,

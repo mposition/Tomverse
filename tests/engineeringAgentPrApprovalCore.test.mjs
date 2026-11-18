@@ -3,10 +3,12 @@ import test from "node:test";
 
 import {
   ENGINEERING_AGENT_PR_APPROVER_IDS,
+  decideEngineeringAgentDmApprovedMerge,
   decideEngineeringAgentMergedPr,
   decideEngineeringAgentPrApproval,
 } from "../lib/engineeringAgentPrApprovalCore.ts";
 import { ENGINEERING_AGENT_NOT_APPROVED_REASONS } from "../lib/engineeringAgentCore.ts";
+import { pullChangeDigest } from "../lib/pullDiffDigestCore.ts";
 
 const HEAD = "a".repeat(40);
 const BASE = "b".repeat(40);
@@ -63,6 +65,41 @@ test("a read that could not complete decides nothing", () => {
     { verdict: "undetermined", reason: "checks_unreadable" });
   assert.deepEqual(decideEngineeringAgentPrApproval(input({ current: null })),
     { verdict: "undetermined", reason: "snapshot_unreadable" });
+});
+
+test("a v2 binding is compared in v2, a v1 binding in v1, never across (owner decision 2026-11-18)", () => {
+  const v2 = pullChangeDigest({ mergeBaseSha: BASE, headSha: HEAD, headTreeSha: "c".repeat(40) });
+  const v2Input = (current) => input({ snapshot: { ...input().snapshot, diffDigest: v2 }, current });
+  assert.equal(decideEngineeringAgentPrApproval(v2Input({ baseSha: BASE, changeDigest: v2, diffDigest: null })).verdict,
+    "approved");
+  // develop absorbed part of the branch: the merge base moved at the same head.
+  const movedBase = pullChangeDigest({ mergeBaseSha: "e".repeat(40), headSha: HEAD, headTreeSha: "c".repeat(40) });
+  assert.deepEqual(decideEngineeringAgentPrApproval(v2Input({ baseSha: BASE, changeDigest: movedBase })),
+    { verdict: "not_approved", reason: "snapshot_changed" });
+  // The v2 digest not read decides nothing, whatever v1 says.
+  assert.deepEqual(decideEngineeringAgentPrApproval(v2Input({ baseSha: BASE, changeDigest: null, diffDigest: "d".repeat(64) })),
+    { verdict: "undetermined", reason: "snapshot_unreadable" });
+  // A v1 binding made before v2 still approves on its own diff digest, and only on it.
+  assert.equal(decideEngineeringAgentPrApproval(input({ current: { baseSha: BASE, changeDigest: v2, diffDigest: "d".repeat(64) } }))
+    .verdict, "approved");
+  assert.deepEqual(decideEngineeringAgentPrApproval(input({ current: { baseSha: BASE, changeDigest: v2, diffDigest: null } })),
+    { verdict: "undetermined", reason: "snapshot_unreadable" });
+});
+
+test("a Decision Maker approved merge is judged in the approval's own version", () => {
+  const v2 = pullChangeDigest({ mergeBaseSha: BASE, headSha: HEAD, headTreeSha: "c".repeat(40) });
+  const decidedAt = new Date("2026-11-18T01:00:00Z");
+  const merge = (approvedDiffDigest, digests) => decideEngineeringAgentDmApprovedMerge({
+    baseRef: "develop", headSha: HEAD, mergedAt: new Date("2026-11-18T02:00:00Z"), mergedByKind: "bot",
+    approval: { approvedHeadSha: HEAD, approvedDiffDigest, decidedAt }, laneMerge: "merged",
+    changeDigest: null, diffDigest: null, ...digests });
+  assert.equal(merge(v2, { changeDigest: v2 }), "done");
+  assert.equal(merge(v2, { changeDigest: pullChangeDigest({ mergeBaseSha: "e".repeat(40), headSha: HEAD,
+    headTreeSha: "c".repeat(40) }) }), "not_approved");
+  assert.equal(merge(v2, { diffDigest: "d".repeat(64) }), "waiting");
+  assert.equal(merge("d".repeat(64), { changeDigest: v2, diffDigest: "d".repeat(64) }), "done");
+  assert.equal(merge("d".repeat(64), { changeDigest: v2 }), "waiting");
+  assert.equal(merge("not-a-digest", { changeDigest: v2 }), "not_approved");
 });
 
 test("a later change request withdraws an approval; a bare comment does not", () => {

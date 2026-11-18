@@ -1092,6 +1092,16 @@ run(
     "tests/integration/amux-v19-plan-refusal.db.test.ts"],
   "Running the v19 plan-refusal scenarios after the fresh-scope suites"
 );
+// The v22 chunked result transfer (docs/policy/amux-v22-result-transfer.md):
+// upload, commit and readback routes against a seeded live attempt, sliced
+// reads of sealed bodies, and the staging sweep. Its Prisma, guard and key
+// store mocks stay in their own process.
+run(
+  ["--conditions=react-server", "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
+    "--test-concurrency=1", "tests/integration/amuxV22TransferStaging.db.test.mjs"],
+  "Running the v22 chunked result transfer, sliced read and staging sweep scenarios",
+);
 // Native pass redemption uses real promotion/entitlement rows with mocked
 // authentication and email/provider seams. Keep those mocks in their own process.
 run(

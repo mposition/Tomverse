@@ -39,6 +39,7 @@ import { evaluateLockedAmuxCostAdmission, lockAmuxResourcePolicies } from "@/lib
 import { amuxResourceRefs } from "@/lib/amux/resourcePolicyCore";
 import { ENGINEERING_AGENT_V22_TIER_PENDING_REASON } from "@/lib/engineeringAgentCore";
 import { prisma } from "@/lib/prisma";
+import { pullDigestHolds } from "@/lib/pullDiffDigestCore";
 import { amuxV22TaskUnknownUsageAttemptIds, recordAmuxV22UsageAcceptances } from "@/lib/amux/v22AttemptUsageAcceptance";
 
 export class AmuxReviewRefusal extends Error {
@@ -336,7 +337,8 @@ async function snapshot(
     review_pr_number: artifact?.prNumber ?? null,
     review_base_sha: artifact?.baseSha ?? null,
     review_head_sha: artifact?.headSha ?? null,
-    review_diff_digest: artifact?.diffDigest ?? null,
+    // The v2 change digest the approval binds (lib/pullDiffDigestCore.ts).
+    review_diff_digest: artifact?.changeDigest ?? null,
     ...(task.sourceSystem === "admin-idea-v4" ? { v4_evidence: {
       title_digest: task.v4TitleDigest,
       body_digest: task.v4BodyDigest,
@@ -436,8 +438,11 @@ export async function getAmuxReviewDetail(escalationId: string) {
       pr_number: artifact.prNumber,
       base_sha: artifact.baseSha,
       head_sha: artifact.headSha,
-      diff_digest: artifact.diffDigest,
+      diff_digest: artifact.changeDigest,
+      // Null when the diff is not shown here (too large, binary or unsafe to
+      // display): the person reviews the pull request on GitHub.
       diff_text: artifact.diffText,
+      diff_hidden: artifact.diffHidden,
       html_url: artifact.htmlUrl,
     } : null,
     allowed_outcomes: outcomes,
@@ -503,7 +508,7 @@ export async function createAmuxReviewProposal(input: {
         reviewPrNumber: input.outcome === "approve" ? state.artifact?.prNumber ?? null : null,
         reviewBaseSha: input.outcome === "approve" ? state.artifact?.baseSha ?? null : null,
         reviewHeadSha: input.outcome === "approve" ? state.artifact?.headSha ?? null : null,
-        reviewDiffDigest: input.outcome === "approve" ? state.artifact?.diffDigest ?? null : null,
+        reviewDiffDigest: input.outcome === "approve" ? state.artifact?.changeDigest ?? null : null,
         issuedAt: new Date(),
         expiresAt: new Date(Date.now() + 86_400_000),
       },
@@ -672,7 +677,9 @@ export async function resolveAmuxReview(input: {
         (proposal.reviewPrNumber !== (state.artifact?.prNumber ?? null) ||
          proposal.reviewBaseSha !== (state.artifact?.baseSha ?? null) ||
          proposal.reviewHeadSha !== (state.artifact?.headSha ?? null) ||
-         proposal.reviewDiffDigest !== (state.artifact?.diffDigest ?? null))) {
+         // In the proposal's own version: v2 now, v1 for one prepared before it.
+         (proposal.reviewDiffDigest === null ? state.artifact !== null :
+           state.artifact === null || !pullDigestHolds(proposal.reviewDiffDigest, state.artifact)))) {
       return refuse("AMUX_REVIEW_SOURCE_CHANGED");
     }
     const target = amuxReviewTargetStatus(

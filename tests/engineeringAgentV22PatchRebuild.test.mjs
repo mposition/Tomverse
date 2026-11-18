@@ -498,9 +498,22 @@ test("what cannot be rebuilt is refused before any GitHub read", async () => {
     ]) {
       assert.deepEqual(await load(patchText), { ok: false, reason }, patchText);
     }
+    // No size is refused (owner decision 2026-11-18): text past the old 4 MiB
+    // bound is read like any other, and refused only for what it says.
     assert.deepEqual(await load(`diff --git a/x b/x\n+${"x".repeat(4 * 1024 * 1024)}\n`),
-      { ok: false, reason: "patch_over_limit" });
+      { ok: false, reason: "patch_unreadable" });
     assert.equal(reads, 0);
+  } finally { fixture.cleanup(); }
+});
+
+test("a patch past the old 4 MiB bound is rebuilt like any other", async () => {
+  const fixture = repo({ "lib/a.ts": "export const a = 1;\n" });
+  try {
+    const line = `export const value = "${"v".repeat(60)}";\n`;
+    const big = line.repeat(Math.ceil((5 * 1024 * 1024) / line.length));
+    const change = fixture.changeFiles({ "lib/big.ts": big, "lib/a.ts": "export const a = 2;\n" });
+    assert.ok(Buffer.byteLength(change.patchText, "utf8") > 5 * 1024 * 1024);
+    await sameTree(fixture, change);
   } finally { fixture.cleanup(); }
 });
 

@@ -90,6 +90,7 @@ const UNAUDITED = new Map([
   ["readEngineeringAgentHaltState", "reads only"],
   ["readEngineeringAgentOwnerQueues", "reads only"],
   ["readEngineeringAgentKnownPublishes", "reads only"],
+  ["readEngineeringAgentPublishPatchChunk", "reads only: a chunk of the patch its live write claim applies"],
   ["lockEngineeringAgentMismatchAmuxRows", "takes the AMUX attempt, audit chain, card and delivery locks in order; writes nothing"],
   ["lockEngineeringAgentV22Run", "takes a run row lock after AMUX locks; writes nothing"],
   ["requireEngineeringAgentRunAdmission", "reads only; the run it admits is audited"],
@@ -143,6 +144,9 @@ const RECORDS_WHAT_HAPPENED = [
   "readEngineeringAgentHaltState",
   "readEngineeringAgentOwnerQueues",
   "readEngineeringAgentKnownPublishes",
+  // A read for the holder of a live write claim; the claim read the switches,
+  // and the last look reads them again before the push.
+  "readEngineeringAgentPublishPatchChunk",
   "lockEngineeringAgentMismatchAmuxRows",
   "lockEngineeringAgentV22Run",
   "resolveEngineeringAgentStateMismatch",

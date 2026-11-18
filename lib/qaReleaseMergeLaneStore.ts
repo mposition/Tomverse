@@ -200,7 +200,8 @@ type ConsumeRead = {
  */
 export async function consumeQaReleaseMergeInstruction(input: {
   callerRevision: number | null;
-  request: { attemptId: string; pullRequestNumber: number; headSha: string; base: string; diffDigest?: string };
+  request: { attemptId: string; pullRequestNumber: number; headSha: string; base: string; diffDigest?: string;
+    changeDigest?: string };
   budget: QaReleaseRoundBudget;
   /** The environment the Decision Maker's develop merge switch is read from; the process's by default. */
   env?: Readonly<Record<string, string | undefined>>;
@@ -259,14 +260,14 @@ export async function consumeQaReleaseMergeInstruction(input: {
       if (!judgement.consume) return { consumed: false as const, reason: judgement.reason };
       // An engineering agent pull request is merged only on a Decision Maker
       // approval that still holds now, at exactly this head, into develop, and
-      // only at the approved diff digest the lane read right before (owner
+      // only at the approved change digest the lane read right before (owner
       // decision 2026-11-13; reviews r-20261114-020758-a98fec,
       // r-20261114-021949-8dbd49): its list entry was read a while ago, and a
       // kill switch, a moved Task, a superseded binding, a new head or a diff
       // changed by develop since then refuses the merge here.
       const dm = await amuxDmT2MergeConsumeAllowed(tx, { prNumber: input.request.pullRequestNumber,
         headSha: input.request.headSha, base: input.request.base, diffDigest: input.request.diffDigest ?? null,
-        env: input.env });
+        changeDigest: input.request.changeDigest ?? null, env: input.env });
       if (dm !== "allowed" && dm !== "not_engineering") return { consumed: false as const, reason: dm };
 
       const auditLogId = await writeSystemAuditLog({
