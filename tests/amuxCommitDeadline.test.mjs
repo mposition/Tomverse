@@ -384,6 +384,11 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // thirty attempts; no commit-deadline marker, classifier or deferred trigger
   // changes.
   "20261118100000_amux_review_retry_no_attempt_bound",
+  // Owner decision 2026-11-18 (docs/policy/amux-v22-result-transfer.md): the
+  // v22 result and patch CHECKs keep only a lower bound, and three transfer
+  // tables with their own no-update and immutability triggers are added; no
+  // commit-deadline marker, classifier or deferred trigger changes.
+  "20261118120000_amux_v22_result_transfer",
   // Owner decision 2026-11-15: the Decision Maker body store's caps grow, a CHECK
   // and one number of the body guard; no commit-deadline marker, classifier or
   // deferred trigger changes.
