@@ -457,6 +457,56 @@ test("the connection wait is the maximum outside a route and the route's slack i
   assert.equal(amuxDbConnectionWaitMs(1_400, 1_400), 1);
 });
 
+test("a worst case that fits its route is kept; a longer one runs in what the route has left", async () => {
+  const { AMUX_DB_MIN_TRANSACTION_MS, amuxDbTransactionBudgetWithinRouteMs } = await modules();
+  assert.equal(AMUX_DB_MIN_TRANSACTION_MS, 500);
+  // Outside a route, and inside one that holds it, the planned budget stands.
+  assert.equal(amuxDbTransactionBudgetWithinRouteMs(24_200, null), 24_200);
+  assert.equal(amuxDbTransactionBudgetWithinRouteMs(1_400, 1_700), 1_400);
+  assert.equal(amuxDbTransactionBudgetWithinRouteMs(1_400, 1_400), 1_400);
+  // v22 settlement on 2026-11-16: 80 calls, 24,200 ms planned, 24,000 ms route.
+  assert.equal(amuxDbTransactionBudgetWithinRouteMs(24_200, 24_000), 22_000);
+  assert.equal(amuxDbTransactionBudgetWithinRouteMs(3_200, 2_500.7), 500);
+  // Not one call fits: nothing starts.
+  assert.equal(amuxDbTransactionBudgetWithinRouteMs(3_200, 2_499), null);
+  assert.equal(amuxDbTransactionBudgetWithinRouteMs(1_500, 1_400), null);
+});
+
+// Ten calls: a 3,200 ms worst case.
+const MUTATION_LONG = { operation: "commit_contract_long", prismaCallCeiling: 10, isolation: "mutation" } as const;
+
+test("a mutation planned longer than its route commits with its deadline cut to the route", async () => {
+  const { withAmuxDbBoundary, withAmuxRouteBudget } = await modules();
+  reset();
+  const result = await withAmuxRouteBudget(
+    () => withAmuxDbBoundary(MUTATION_LONG, async (tx: PrismaClient) => {
+      await tx.$queryRaw`SELECT 1 AS callback_statement`;
+      return "result";
+    }),
+    3_000,
+  );
+  assert.equal(result, "result");
+  const setup = sent.find((entry) => entry.text.includes("'tomverse.amux_deadline',"));
+  assert.ok(setup, "the boundary ran its setup");
+  // About 1,000 ms (3,000 less the 2,000 ms connection wait, less the time
+  // already spent), never the 3,200 ms worst case.
+  const deadlineMs = setup.values.find((value) => typeof value === "number" && value > 100);
+  assert.ok(typeof deadlineMs === "number" && deadlineMs <= 1_000 && deadlineMs >= 900, String(deadlineMs));
+  assert.deepEqual(texts().slice(-1), ["COMMIT"]);
+});
+
+test("a mutation whose route cannot hold one call is refused before any SQL", async () => {
+  const { AmuxDbBoundaryError, withAmuxDbBoundary, withAmuxRouteBudget } = await modules();
+  reset();
+  const error = await caught(withAmuxRouteBudget(
+    () => withAmuxDbBoundary(MUTATION_LONG, async () => "never"),
+    2_300,
+  ));
+  assert.ok(error instanceof AmuxDbBoundaryError);
+  assert.equal(error.code, "AMUX_DB_DEADLINE_EXCEEDED");
+  assert.equal(boundarySqlSent(), false);
+});
+
 test("a mutation that cannot start within its connection wait wrote nothing and is busy", async () => {
   const { AmuxDbBoundaryError, amuxInternalErrorResponse, withAmuxRouteBudget } = await modules();
   reset({ connectDelayMs: SLOW_POOL_MS });

@@ -1137,6 +1137,33 @@ export const amuxDbTransactionBudgetMs = (boundary: AmuxDbBoundary) =>
   boundary.prismaCallCeiling * AMUX_DB_IDLE_GAP_PLANNING_MS +
   AMUX_DB_COMMIT_RESERVE_MS;
 
+/** One call and the commit reserve: less than this is no transaction at all. */
+export const AMUX_DB_MIN_TRANSACTION_MS =
+  AMUX_DB_STATEMENT_TIMEOUT_MS + AMUX_DB_IDLE_GAP_PLANNING_MS +
+  AMUX_DB_COMMIT_RESERVE_MS;
+
+/**
+ * The time one bounded transaction may take inside its route.
+ *
+ * The planned budget is a worst case: every declared call at its full
+ * statement timeout. A route that holds it keeps it unchanged. A route that
+ * cannot hold it no longer refuses the transaction before it starts (v22
+ * settlement, 80 declared calls, planned 24,200 ms in a 24,000 ms route, was
+ * refused on every attempt from 2026-11-16): the transaction runs inside what
+ * the route has left less the connection wait, and its database deadline,
+ * commit fence and Prisma timeout all use that time, so it still ends inside
+ * the route. Owner direction 2026-11-16: no refusal of ours for a count or a
+ * size. Null: not even one call fits, so nothing is started.
+ */
+export const amuxDbTransactionBudgetWithinRouteMs = (
+  plannedMs: number,
+  routeRemainingMs: number | null,
+): number | null => {
+  if (routeRemainingMs === null || plannedMs <= routeRemainingMs) return plannedMs;
+  const fitted = Math.floor(routeRemainingMs - AMUX_DB_MAX_WAIT_MS);
+  return fitted >= AMUX_DB_MIN_TRANSACTION_MS ? fitted : null;
+};
+
 /**
  * Prisma's `maxWait` for one transaction.
  *
@@ -1684,12 +1711,15 @@ export async function withAmuxDbBoundary<T>(
           boundary.prismaCallCeiling + AMUX_ORCHESTRATOR_ADMISSION_LOCK_CALLS,
       }
     : boundary;
-  const transactionBudgetMs = amuxDbTransactionBudgetMs(effectiveBoundary);
   const routeRemainingMs =
     routeDeadline === undefined
       ? null
       : routeDeadline.localDeadlineMs - Date.now();
-  if (routeRemainingMs !== null && routeRemainingMs < transactionBudgetMs) {
+  const transactionBudgetMs = amuxDbTransactionBudgetWithinRouteMs(
+    amuxDbTransactionBudgetMs(effectiveBoundary),
+    routeRemainingMs,
+  );
+  if (transactionBudgetMs === null) {
     throw new AmuxDbBoundaryError(
       "AMUX_DB_DEADLINE_EXCEEDED",
       boundary.operation,
