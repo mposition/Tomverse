@@ -1,3 +1,4 @@
+import { CHAT_MAX_MESSAGE_BODY_BYTES } from "@/lib/chatRequestLimits";
 import { NextResponse } from "next/server";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { reviewHandoffDescriptorSchema } from "@/lib/reviewContinuationHandoffCore";
@@ -67,7 +68,7 @@ export async function POST(
       response.headers.set("Cache-Control", "private, no-store");
       return response;
     }
-    const receiptRequest = await readLimitedJson(req, 64 * 1024, chatDraftMessageReceiptSchema);
+    const receiptRequest = await readLimitedJson(req, CHAT_MAX_MESSAGE_BODY_BYTES, chatDraftMessageReceiptSchema);
     const handoffDraft = conversation.productKey === "review" &&
       reviewHandoffDescriptorSchema.safeParse(conversation.continuationBridge?.reviewHandoff).success &&
       receiptRequest.draftConsume.scopeKey === conversationId &&

@@ -1,4 +1,5 @@
 import "server-only";
+import { CHAT_MAX_MESSAGE_CHARACTERS } from "@/lib/chatRequestLimits";
 
 import type { Prisma } from "@prisma/client";
 import { z } from "zod";
@@ -68,7 +69,7 @@ export const chatDraftMessageReceiptSchema = z
         clientRequestId: z.string().uuid(),
         // Receipt recovery must compare the exact authored draft bytes. It is
         // read-only and cannot normalize a Message after the original write.
-        content: z.string().max(50_000),
+        content: z.string().max(CHAT_MAX_MESSAGE_CHARACTERS),
         attachmentUploadIds: z.array(opaqueId).max(CHAT_MAX_ATTACHMENTS_PER_MESSAGE).optional(),
         attachmentReferences: chatDraftAttachmentReferencesSchema.optional(),
       })

@@ -1,6 +1,16 @@
 import "server-only";
 
-import { chatUserMaxInputTokens } from "@/lib/chatInputLimits";
+import {
+    chatAccountMaxInputTokens,
+    chatLongContextCostCredits,
+    chatLongContextEnabled,
+    chatLongContextMicroUsdPerCredit,
+    chatLongContextSettledCredits,
+    chatMaxMessageCharacters,
+    chatRequestMaxBodyBytes,
+    chatUserMaxInputTokens,
+    type ChatLongContextSettlement,
+} from "@/lib/chatInputLimits";
 import { promptRefinerChatDecisionSchema, type PromptRefinerChatDecision } from "@/lib/promptRefinerSuggestion";
 
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
@@ -107,13 +117,18 @@ import {
     type AddOnCreditReservationEntry,
 } from "@/lib/creditLedger";
 import { lockCreditAccount, offsetCreditDebt } from "@/lib/creditDebt";
-import { calculateProviderUsageCost } from "@/lib/providerUsageCost";
 import {
     anthropicPromptCacheApplies,
     ANTHROPIC_PROMPT_CACHE_TTL,
     type AnthropicPromptCachePath,
 } from "@/lib/anthropicPromptCaching";
-import type { ResolvedModelPricing } from "@/lib/modelPricing";
+import {
+    getModelPricingProfile,
+    type ProviderCallUsage,
+    type ResolvedModelPricing,
+} from "@/lib/modelPricing";
+import { longContextSettledUsageCost } from "@/lib/modelPricing";
+import { calculateProviderUsageCost } from "@/lib/providerUsageCost";
 import type { PerplexityUsageCostSnapshot } from "@/lib/perplexityUsageCore";
 import { notifyProviderCreditIfNeeded } from "@/lib/providerMonitoring";
 import { getUserDayWindow } from "@/lib/userDailyUsage";
@@ -167,11 +182,15 @@ import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 const GUEST_COOKIE_NAME = "tomverse_guest";
 const GUEST_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
 
+const CHAT_CONTEXT_WINDOWS = (AVAILABLE_MODELS as readonly AiModel[]).map(
+    (model) => model.contextWindowTokens
+);
+
 export const CHAT_REQUEST_LIMITS = {
-    maxBodyBytes: 2 * 1024 * 1024,
+    maxBodyBytes: chatRequestMaxBodyBytes(CHAT_CONTEXT_WINDOWS),
     maxMessages: 100,
-    maxMessageCharacters: 50_000,
-    maxTotalCharacters: 300_000,
+    // Sized from the largest model window, not a fixed 50,000 (2026-11-18).
+    maxMessageCharacters: chatMaxMessageCharacters(CHAT_CONTEXT_WINDOWS),
 } as const;
 
 export type AccessKind = "user" | "guest";
@@ -272,6 +291,10 @@ export type ChatBudget = {
     costSource: string;
     /** Prompt-size threshold that selected the applied price tier, if any. */
     longContextThresholdTokens: number | null;
+    /** Set on a turn above the flat input limit: settle by actual cost. */
+    longContextSettlement?: ChatLongContextSettlement | null;
+    /** Provider calls reserved for, when more than one (tool loops). */
+    providerCallPasses?: number;
 };
 
 type ReservationEntry = {
@@ -385,6 +408,8 @@ export type ChatUsageReservation = {
     pricingVersion?: string;
     costSource?: string;
     longContextThresholdTokens?: number | null;
+    longContextSettlement?: ChatLongContextSettlement | null;
+    providerCallPasses?: number;
     /**
      * The cache-write rate this turn was reserved at, carried so settlement
      * prices the write at the same figure rather than re-reading a registry
@@ -568,6 +593,18 @@ const durableReservationPayloadSchema = z
         pricingVersion: z.string().min(1).max(120).optional(),
         costSource: z.string().min(1).max(60).optional(),
         longContextThresholdTokens: z.number().int().nonnegative().nullable().optional(),
+        // Absent on a one-call turn and on every reservation written before it.
+        providerCallPasses: z.number().int().min(2).max(4).optional(),
+        // Optional: absent on every reservation written before long context,
+        // which settles by the flat rule exactly as it did.
+        longContextSettlement: z
+            .object({
+                microUsdPerCredit: z.number().int().positive(),
+                floorCredits: z.number().int().nonnegative(),
+            })
+            .strict()
+            .nullable()
+            .optional(),
         planReservedCredits: z.number().int().nonnegative(),
         addOnReservedCredits: z.number().int().nonnegative(),
         addOnReservations: z.array(
@@ -872,6 +909,50 @@ const promptCacheWriteReservedPremiumMicroUsd = ({
     return microdollarsFor(reservedInputTokens, premiumRate);
 };
 
+/**
+ * Where a flat price over a tiered profile stops being the price.
+ *
+ * `resolveModelPricing` lets a model-registry row's flat rates, and the
+ * `CHAT_MODEL_<ID>_*_USD_PER_MILLION` environment rates, win over the profile's
+ * tiers, so a long prompt would be charged the short-context rate. Read from
+ * the resolved price itself rather than from the row, so every override is
+ * seen: a tiered profile priced past its boundary without an override reports
+ * `registry_long_context`, and anything else is a flat price. Long context
+ * holds such a model's input limit at the first tier boundary (Gemini 3.1
+ * Pro's 200K step). Null when the tiers are in force.
+ */
+const flatPriceMaxPromptTokens = (model: AiModel): number | null => {
+    const profile = getModelPricingProfile(model.id);
+    if (!profile) return null;
+    const bounds = [
+        ...profile.tiers,
+        ...(profile.priceSchedule ?? []).flatMap((revision) => revision.tiers ?? []),
+    ]
+        .map((tier) => tier.maxPromptTokens)
+        .filter((bound): bound is number => typeof bound === "number" && bound > 0);
+    if (bounds.length === 0) return null;
+    const past = resolveModelRequestPricing(model, {
+        estimatedPromptTokens: Math.max(...bounds) + 1,
+    });
+    return past.costSource === "registry_long_context" ? null : Math.min(...bounds);
+};
+
+/** A signed-in account's input limit on this model (long context included). */
+export const accountChatMaxInputTokens = (model: AiModel) =>
+    chatAccountMaxInputTokens({
+        contextWindowTokens: model.contextWindowTokens,
+        flatPriceMaxPromptTokens: flatPriceMaxPromptTokens(model),
+    });
+
+/**
+ * Above the flat limit the price tier is chosen from the estimate with this
+ * much room, because settlement keeps the reservation's tier for the credits
+ * it charges and the estimator carries no margin of its own. A turn the
+ * estimate puts within a quarter below a long-context boundary is priced past
+ * it. Turns at or below the flat limit are priced exactly as before.
+ */
+export const LONG_CONTEXT_TIER_ESTIMATE_MARGIN = 1.25;
+
 export const createChatBudget = (
     kind: AccessKind,
     model: AiModel,
@@ -954,6 +1035,14 @@ export const createChatBudget = (
         additionalToolInputTokens?: number;
         /** Server-selected model passes; used only for internal cost holds. */
         toolInputPasses?: number;
+        /**
+         * The provider calls this turn's application tool loop may make
+         * (generated artifacts, app-managed search). Reserved only on a
+         * long-context turn, where each step re-sends a prompt priced by its
+         * own cost (operator decision 2026-11-18: reserve every step); the
+         * route then stops the loop at the reserved count.
+         */
+        longContextToolInputPasses?: number;
         /** Keep the deterministic tool envelope outside the authored-input
          * clamp so a multi-step run cannot silently under-reserve it. */
         toolInputAboveAuthoredLimit?: boolean;
@@ -972,7 +1061,7 @@ export const createChatBudget = (
     const maxInputTokens =
         kind === "guest"
             ? guestChatMaxInputTokens()
-            : chatUserMaxInputTokens();
+            : accountChatMaxInputTokens(model);
 
     // The limit is checked against the raw estimate, deliberately: it bounds
     // the conversation the user sent, not the margin and tool overhead the
@@ -1041,53 +1130,136 @@ export const createChatBudget = (
                   toolOverheadTokens: toolInputTokens,
               })
           ) + reservationOnlyInputTokens;
-    const passes = Math.max(1, Math.min(4, Math.trunc(options?.toolInputPasses ?? 1)));
+    const clampPasses = (value: number | undefined) =>
+        Math.max(1, Math.min(4, Math.trunc(value ?? 1) || 1));
+    const requestedPasses = clampPasses(options?.toolInputPasses);
+    /*
+      One decision for every long-context rule below: the switch is on and the
+      *measured* input -- the figure the input limit itself is checked against
+      -- is past the flat limit. Not the reservation-only image allowance,
+      which is neither part of that limit nor sent to the provider: a 115k
+      turn with one image is an ordinary turn and is priced as one.
+    */
+    const longContextTurn =
+        chatLongContextEnabled() && estimatedInputTokens > chatUserMaxInputTokens();
+    // A long-context turn reserves every call its application tool loop may
+    // make: each re-sends a prompt charged at its own cost, and settlement
+    // never charges past the reservation (review r-20261118-102103-16e00a).
+    const passes = longContextTurn
+        ? Math.max(requestedPasses, clampPasses(options?.longContextToolInputPasses))
+        : requestedPasses;
+    // On a long-context turn, choose the tier with room for the estimator's
+    // error (see LONG_CONTEXT_TIER_ESTIMATE_MARGIN). Tier choice only: the
+    // reserved token counts below are the estimate itself.
+    // The margin is applied to what is sent: the reservation-only image
+    // allowance is never sent, so it must not push a short-tier prompt onto
+    // the long rate and inflate what the reservation holds.
+    const tierPromptTokens = (tokens: number) =>
+        longContextTurn
+            ? Math.ceil(
+                  Math.max(0, tokens - reservationOnlyInputTokens) *
+                      LONG_CONTEXT_TIER_ESTIMATE_MARGIN
+              )
+            : tokens;
     let pricing = resolveModelRequestPricing(model, {
-        estimatedPromptTokens: contextInputTokens,
+        estimatedPromptTokens: tierPromptTokens(contextInputTokens),
     });
     if (passes > 1) pricing = resolveModelRequestPricing(model, {
-        estimatedPromptTokens: contextInputTokens + pricing.maxOutputTokens,
+        estimatedPromptTokens: tierPromptTokens(
+            contextInputTokens + pricing.maxOutputTokens
+        ),
     });
     // Every paid step re-sends its context. Earlier assistant output can also
     // be re-sent; reserve it without changing authored-input credit weight.
     const requestedTotalOutputCap = options?.totalOutputTokenCap;
-    const totalOutputTokens =
+    // On a long-context turn the answer can only use the room the window
+    // leaves after the input -- the same room the route later fits the request
+    // to -- so that is what is reserved, not the model's whole output ceiling.
+    // A caller that names its own output cap (Research Preview) keeps it: its
+    // admission is checked against that exact figure, and the window check
+    // after the budget still refuses a request that does not fit.
+    const windowRoom =
+        longContextTurn &&
+        requestedTotalOutputCap === undefined &&
+        Number.isSafeInteger(model.contextWindowTokens) &&
+        model.contextWindowTokens! > 0
+            ? Math.max(
+                  0,
+                  // What is sent: the image allowance is reserved, not sent,
+                  // so it takes no room from the answer.
+                  model.contextWindowTokens! -
+                      (contextInputTokens - reservationOnlyInputTokens)
+              )
+            : Infinity;
+    const totalOutputTokens = Math.min(
+        windowRoom,
         Number.isSafeInteger(requestedTotalOutputCap) &&
-        requestedTotalOutputCap! > 0
+            requestedTotalOutputCap! > 0
             ? Math.min(pricing.maxOutputTokens, requestedTotalOutputCap!)
-            : pricing.maxOutputTokens;
+            : pricing.maxOutputTokens
+    );
     const reservedInputTokens =
         contextInputTokens * passes + totalOutputTokens * (passes - 1);
+    // On a long-context turn the provider-cost reservation holds the whole
+    // output ceiling too, the same worst case the credits hold, so the
+    // provider budget check sees what this turn may really spend. The unused
+    // part is released at settlement as it always is.
+    const reservedOutputTokens =
+        requestedTotalOutputCap === undefined && !longContextTurn
+            ? pricing.reservationOutputTokens
+            : totalOutputTokens;
+    const cacheWritePremiumMicroUsd = promptCacheWriteReservedPremiumMicroUsd({
+        model,
+        reservedInputTokens,
+        pricing,
+        promptCachePath: options?.promptCachePath,
+    });
+    // Above the flat input limit (long context) a turn is charged its own
+    // token cost. The reservation holds the worst case -- the whole output
+    // ceiling, since an answer may use all of it -- and settlement charges the
+    // actual cost and refunds the rest (`chatLongContextSettledCredits`). Two
+    // things are left out because they are not credits: native search has its
+    // own surcharge below, and the prompt-cache write premium is an
+    // operational reservation refunded at settlement, never part of
+    // `usageCredits` (docs/policy/anthropic-prompt-caching.md).
+    const flatCredits = getWeightedUsageCredits(
+        model,
+        estimatedInputTokens + reservationOnlyInputTokens
+    );
+    const longContextCredits = longContextTurn
+        ? chatLongContextCostCredits({
+              estimatedInputTokens,
+              reservedCostMicroUsd:
+                  microdollarsFor(reservedInputTokens, pricing.inputUsdPerMillionTokens) +
+                  microdollarsFor(totalOutputTokens, pricing.outputUsdPerMillionTokens),
+          })
+        : 0;
+    const longContextSettlement =
+        longContextCredits > 0
+            ? {
+                  microUsdPerCredit: chatLongContextMicroUsdPerCredit(),
+                  floorCredits: flatCredits,
+              }
+            : null;
 
     return {
         modelId: model.id,
         minimumPlan: model.minimumPlan,
         modelUsageClass: model.usageClass,
         usageCredits:
-            getWeightedUsageCredits(
-                model,
-                estimatedInputTokens + reservationOnlyInputTokens
-            ) +
+            Math.max(flatCredits, longContextCredits) +
             (options?.webSearchSurchargeCredits || 0),
+        longContextSettlement,
         inputTokens: reservedInputTokens,
         ...(passes > 1 ? { contextInputTokens } : {}),
         maxOutputTokens: totalOutputTokens,
         providerMaxOutputTokens: pricing.providerMaxOutputTokens,
-        reservedOutputTokens:
-            requestedTotalOutputCap === undefined
-                ? pricing.reservationOutputTokens
-                : totalOutputTokens,
+        reservedOutputTokens,
         inputUsdPerMillionTokens: pricing.inputUsdPerMillionTokens,
         outputUsdPerMillionTokens: pricing.outputUsdPerMillionTokens,
         cachedInputPriceMultiplier: pricing.cachedInputPriceMultiplier,
         cacheWriteUsdPerMillionTokens: pricing.cacheWriteUsdPerMillionTokens,
-        promptCacheWriteReservedPremiumMicroUsd:
-            promptCacheWriteReservedPremiumMicroUsd({
-                model,
-                reservedInputTokens,
-                pricing,
-                promptCachePath: options?.promptCachePath,
-            }),
+        promptCacheWriteReservedPremiumMicroUsd: cacheWritePremiumMicroUsd,
         nativeSearchReservedCostMicroUsd:
             options?.nativeSearch?.reservedCostMicroUsd ?? 0,
         nativeSearchCostPerQueryMicroUsd:
@@ -1098,6 +1270,7 @@ export const createChatBudget = (
         pricingVersion: pricing.pricingVersion,
         costSource: pricing.costSource,
         longContextThresholdTokens: pricing.longContextThresholdTokens,
+        ...(passes > 1 ? { providerCallPasses: passes } : {}),
     };
 };
 
@@ -4003,6 +4176,10 @@ export const acquireChatAccess = async (
             pricingVersion: budget.pricingVersion,
             costSource: budget.costSource,
             longContextThresholdTokens: budget.longContextThresholdTokens,
+            longContextSettlement: budget.longContextSettlement ?? null,
+            ...(budget.providerCallPasses
+                ? { providerCallPasses: budget.providerCallPasses }
+                : {}),
         };
         if (guestAutoPrehold) {
             const converted = await tx.chatCreditReservation.updateMany({
@@ -4258,6 +4435,8 @@ export const settleChatUsage = async (
         reasoningTokens?: number;
         /** True when the numbers came from provider usage metadata. */
         usageFromProvider?: boolean;
+        /** Per provider call, when the turn made more than one (tool loops). */
+        providerCalls?: ProviderCallUsage[];
         outcome: "completed" | "cancelled" | "failed" | "empty";
         /** Extra credits reserved on top of the base weight for a native web search attempt. */
         searchSurchargeCredits?: number;
@@ -4533,6 +4712,7 @@ export const settleChatUsage = async (
                   // charged for a search the user's answer never used.
                   searchCostMicroUsd: billedAttempt.searchCostMicroUsd,
                   searchQueryCount: billedAttempt.searchQueryCount,
+                  providerCalls: billedAttempt.providerCalls,
               }
             : turnUsage;
         const actualInput = Number.isSafeInteger(usage.inputTokens)
@@ -4558,7 +4738,7 @@ export const settleChatUsage = async (
                 : 0
         );
         const actualTokens = actualInput + actualOutput;
-        const actualCredits = getSettledUsageCredits({
+        const flatSettledCredits = getSettledUsageCredits({
             reservedCredits: canonical.usageCredits,
             reservedInputTokens: canonical.inputTokens,
             reservedOutputTokens: canonical.reservedOutputTokens,
@@ -4568,23 +4748,74 @@ export const settleChatUsage = async (
             searchSurchargeCredits: usage.searchSurchargeCredits,
             searchExecuted: usage.searchExecuted,
         });
-        const tokenCostBreakdown = calculateProviderUsageCost({
+        // A prompt that arrived in another long-context tier than its
+        // reservation priced is settled at that tier's rate, up or down --
+        // and a multi-step turn each call at its own (longContextSettledUsageCost).
+        // The reservation's own snapshot, not rates this rule already moved.
+        const snapshotRates = (
+            {
+                modelId: canonical.modelId,
+                inputUsdPerMillionTokens: canonical.inputUsdPerMillionTokens,
+                outputUsdPerMillionTokens: canonical.outputUsdPerMillionTokens,
+                cacheWriteUsdPerMillionTokens:
+                    canonical.cacheWriteUsdPerMillionTokens ?? null,
+                cachedInputPriceMultiplier: canonical.cachedInputPriceMultiplier,
+                longContextThresholdTokens:
+                    canonical.longContextThresholdTokens ?? null,
+                pricingVersion: canonical.pricingVersion ?? null,
+                costSource: canonical.costSource ?? null,
+                providerCallPasses: canonical.providerCallPasses ?? null,
+            }
+        );
+        const settledUsage = {
             inputTokens: actualInput,
             cachedInputTokens: actualCachedInput,
             cacheWriteInputTokens: actualCacheWriteInput,
             outputTokens: actualOutput,
-            inputUsdPerMillionTokens: canonical.inputUsdPerMillionTokens,
-            outputUsdPerMillionTokens: canonical.outputUsdPerMillionTokens,
-            cachedInputPriceMultiplier:
-                canonical.cachedInputPriceMultiplier,
-            // From the reservation's own snapshot, not from today's registry:
-            // this settles a request that was priced when it was reserved, and
-            // re-reading the rate here would apply a later price change
-            // retroactively. Null on a reservation taken before this column
-            // existed, which prices its writes at nothing -- correct, because
-            // such a turn sent no cache marker and wrote no cache entry.
-            cacheWriteUsdPerMillionTokens:
-                canonical.cacheWriteUsdPerMillionTokens ?? null,
+        };
+        // From the reservation's own snapshot, not from today's registry: this
+        // settles a request that was priced when it was reserved, and
+        // re-reading the rate here would apply a later price change
+        // retroactively. A null write rate (a reservation taken before that
+        // column existed) prices writes at nothing -- correct, because such a
+        // turn sent no cache marker and wrote no cache entry.
+        const tokenCostBreakdown = longContextSettledUsageCost(
+            calculateProviderUsageCost,
+            
+            snapshotRates,
+            settledUsage,
+            usage.providerCalls
+        );
+        /*
+          A long-context turn is charged its actual token cost, never above the
+          flat rule's result and never below its flat-weighted credits. Priced
+          at the billed attempt's own rates when a fallback answered, and
+          without the cache-write premium: written tokens count at the plain
+          input rate, as everywhere else credits are concerned.
+        */
+        const creditCost = canonical.longContextSettlement
+            ? longContextSettledUsageCost(
+            calculateProviderUsageCost,
+            
+                  billedAttempt ? billedAttempt.price : snapshotRates,
+                  settledUsage,
+                  usage.providerCalls,
+                  { pricedCacheWrites: false }
+              ).totalCostMicroUsd
+            : 0;
+        const actualCredits = chatLongContextSettledCredits({
+            settlement: canonical.longContextSettlement,
+            flatSettledCredits,
+            reservedCredits:
+                usage.searchExecuted === false
+                    ? Math.max(
+                          0,
+                          canonical.usageCredits - (usage.searchSurchargeCredits ?? 0)
+                      )
+                    : canonical.usageCredits,
+            tokenCostMicroUsd: creditCost,
+            searchSurchargeCredits:
+                usage.searchExecuted === false ? 0 : usage.searchSurchargeCredits ?? 0,
         });
         const providerUsageSnapshot =
             canonical.provider === "perplexity" &&
@@ -4846,8 +5077,13 @@ export const settleChatUsage = async (
                           promptCacheTtl:
                               canonical.promptCacheTtl ?? null,
                           pricingVersion: canonical.pricingVersion ?? null,
+                          longContextThresholdTokens:
+                              canonical.longContextThresholdTokens ?? null,
+                          costSource: canonical.costSource ?? null,
+                          providerCallPasses: canonical.providerCallPasses ?? null,
                       },
                       inputTokens: actualInput,
+                      providerCalls: usage.providerCalls,
                       cachedInputTokens: actualCachedInput,
                       cacheWriteInputTokens: actualCacheWriteInput,
                       outputTokens: actualOutput,
@@ -6231,7 +6467,8 @@ export const validateChatPayload = (body: unknown) => {
         }
     }
 
-    let totalCharacters = 0;
+    // No total-character limit: the transcript is bounded by the body size and
+    // by the input token limit (operator decision 2026-11-18).
     for (const message of payload.messages) {
         if (!message || typeof message !== "object") {
             throw new ChatAccessError(400, "INVALID_CHAT_MESSAGE", "Invalid message.");
@@ -6269,14 +6506,6 @@ export const validateChatPayload = (body: unknown) => {
                 400,
                 "INVALID_CHAT_CONTENT",
                 "Invalid message content."
-            );
-        }
-        totalCharacters += candidate.content.length;
-        if (totalCharacters > CHAT_REQUEST_LIMITS.maxTotalCharacters) {
-            throw new ChatAccessError(
-                413,
-                "CHAT_CONTENT_TOO_LARGE",
-                "Chat history is too large."
             );
         }
         if (
