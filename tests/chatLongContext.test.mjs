@@ -212,8 +212,11 @@ test("one message may be as long as the largest model window holds", () => {
 
 test("settlement charges the actual cost, between the flat floor and the flat rule", () => {
     const settlement = { microUsdPerCredit: RATE, floorCredits: 9 };
-    const settle = (flatSettledCredits, tokenCostMicroUsd, searchSurchargeCredits = 0) =>
-        chatLongContextSettledCredits({ settlement, flatSettledCredits, tokenCostMicroUsd, searchSurchargeCredits });
+    const settle = (flatSettledCredits, tokenCostMicroUsd, searchSurchargeCredits = 0, reservedCredits = flatSettledCredits) =>
+        chatLongContextSettledCredits({ settlement, flatSettledCredits, reservedCredits, tokenCostMicroUsd, searchSurchargeCredits });
+    // Review r-20261118-054146-5cc718: a cancelled, output-heavy turn is
+    // capped by the reservation, not by the token-count share of it.
+    assert.equal(settle(30, 200_000, 0, 200), 80);
     // A short answer refunds most of the worst case.
     assert.equal(settle(200, 50_000), 20);
     // Never below the flat-weighted credits.
@@ -226,7 +229,7 @@ test("settlement charges the actual cost, between the flat floor and the flat ru
     assert.equal(settle(0, 50_000), 0);
     // A flat reservation settles by the flat rule.
     assert.equal(
-        chatLongContextSettledCredits({ settlement: null, flatSettledCredits: 24, tokenCostMicroUsd: 9e9, searchSurchargeCredits: 0 }),
+        chatLongContextSettledCredits({ settlement: null, flatSettledCredits: 24, reservedCredits: 24, tokenCostMicroUsd: 9e9, searchSurchargeCredits: 0 }),
         24
     );
 });

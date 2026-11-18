@@ -4712,6 +4712,13 @@ export const settleChatUsage = async (
         const actualCredits = chatLongContextSettledCredits({
             settlement: canonical.longContextSettlement,
             flatSettledCredits,
+            reservedCredits:
+                usage.searchExecuted === false
+                    ? Math.max(
+                          0,
+                          canonical.usageCredits - (usage.searchSurchargeCredits ?? 0)
+                      )
+                    : canonical.usageCredits,
             tokenCostMicroUsd: creditCost,
             searchSurchargeCredits:
                 usage.searchExecuted === false ? 0 : usage.searchSurchargeCredits ?? 0,

@@ -28,8 +28,11 @@ export const chatUserMaxInputTokens = (
  * Long context: a signed-in account may send up to the model's own context
  * window instead of the flat `CHAT_USER_MAX_INPUT_TOKENS`.
  *
- * On unless `CHAT_LONG_CONTEXT_ENABLED=0` (operator decision 2026-11-18). The
- * flat limit stays the threshold that matters for pricing:
+ * On unless `CHAT_LONG_CONTEXT_ENABLED=0`. Default on by the operator's
+ * explicit instruction in chat on 2026-11-18 (implement it switched on), which
+ * overrides the usual default-off rule for this one switch; activating it in
+ * production still waits for the merge and deployment approval. The flat
+ * limit stays the threshold that matters for pricing:
  * everything up to it is charged by the flat credit weights exactly as before,
  * and a turn above it is charged at least its own provider cost, converted at
  * `CHAT_LONG_CONTEXT_MICRO_USD_PER_CREDIT`. The input multiplier stops at 3x
@@ -145,17 +148,22 @@ export type ChatLongContextSettlement = {
 /**
  * The credits a long-context turn is finally charged: its actual token cost at
  * the reserved credit value, never below the flat-weighted credits and never
- * above what the flat rule settles (the reservation, less a search that did
- * not run, or the cancelled share of it).
+ * above the reservation (less a search surcharge for a search that did not
+ * run).
  *
  * The reservation holds the worst case -- the whole output ceiling -- because
- * an answer may use all of it; this is where the unused part is refunded. A
- * turn the flat rule settles at zero (failed, empty, cancelled before output)
- * stays at zero.
+ * an answer may use all of it; this is where the unused part is refunded. The
+ * ceiling is the reservation and not the flat rule's cancelled share: that
+ * share scales by token count, and an output-heavy cancelled turn on a model
+ * whose output costs more than its input would settle below its cost. A turn
+ * the flat rule settles at zero (failed, empty, cancelled before output) stays
+ * at zero.
  */
 export const chatLongContextSettledCredits = (input: {
   settlement: ChatLongContextSettlement | null | undefined;
   flatSettledCredits: number;
+  /** The reservation's credits, with an unexecuted search surcharge removed. */
+  reservedCredits: number;
   tokenCostMicroUsd: number;
   searchSurchargeCredits: number;
 }) => {
@@ -168,7 +176,7 @@ export const chatLongContextSettledCredits = (input: {
       settlement.floorCredits,
       Math.ceil(Math.max(0, input.tokenCostMicroUsd) / rate)
     ) + Math.max(0, input.searchSurchargeCredits);
-  return Math.min(flatSettledCredits, byCost);
+  return Math.min(Math.max(flatSettledCredits, input.reservedCredits), byCost);
 };
 
 /**
