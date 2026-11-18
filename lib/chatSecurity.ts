@@ -126,6 +126,7 @@ import {
 import {
     getModelPricingProfile,
     longContextSettlementRates,
+    type ProviderCallUsage,
     type ResolvedModelPricing,
 } from "@/lib/modelPricing";
 import type { PerplexityUsageCostSnapshot } from "@/lib/perplexityUsageCore";
@@ -4389,6 +4390,8 @@ export const settleChatUsage = async (
         reasoningTokens?: number;
         /** True when the numbers came from provider usage metadata. */
         usageFromProvider?: boolean;
+        /** Per provider call, when the turn made more than one (tool loops). */
+        providerCalls?: ProviderCallUsage[];
         outcome: "completed" | "cancelled" | "failed" | "empty";
         /** Extra credits reserved on top of the base weight for a native web search attempt. */
         searchSurchargeCredits?: number;
@@ -4664,6 +4667,7 @@ export const settleChatUsage = async (
                   // charged for a search the user's answer never used.
                   searchCostMicroUsd: billedAttempt.searchCostMicroUsd,
                   searchQueryCount: billedAttempt.searchQueryCount,
+                  providerCalls: billedAttempt.providerCalls,
               }
             : turnUsage;
         const actualInput = Number.isSafeInteger(usage.inputTokens)
@@ -4715,7 +4719,8 @@ export const settleChatUsage = async (
                 costSource: canonical.costSource ?? null,
                 providerCallPasses: canonical.providerCallPasses ?? null,
             },
-            actualInput
+            actualInput,
+            usage.providerCalls
         );
         const tokenCostBreakdown = calculateProviderUsageCost({
             inputTokens: actualInput,
@@ -4742,7 +4747,11 @@ export const settleChatUsage = async (
           input rate, as everywhere else credits are concerned.
         */
         const creditRates = billedAttempt
-            ? longContextSettlementRates(billedAttempt.price, billedAttempt.inputTokens)
+            ? longContextSettlementRates(
+                  billedAttempt.price,
+                  billedAttempt.inputTokens,
+                  billedAttempt.providerCalls
+              )
             : settledRates;
         const creditCost = canonical.longContextSettlement
             ? calculateProviderUsageCost({
@@ -5036,6 +5045,7 @@ export const settleChatUsage = async (
                           providerCallPasses: canonical.providerCallPasses ?? null,
                       },
                       inputTokens: actualInput,
+                      providerCalls: usage.providerCalls,
                       cachedInputTokens: actualCachedInput,
                       cacheWriteInputTokens: actualCacheWriteInput,
                       outputTokens: actualOutput,

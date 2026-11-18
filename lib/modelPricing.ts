@@ -2285,11 +2285,23 @@ type SettlementRates = {
  * under the boundary its reservation priced.
  * The one rule every settlement path applies, single-attempt and per-attempt,
  * so the provider ledger and the reservation cannot disagree.
+ *
+ * With `calls` -- one entry per provider call of a tool loop or Research
+ * Preview, from the SDK's per-step usage -- each call is settled at the tier
+ * its own prompt fell in, and the rates returned are those, weighted by each
+ * call's tokens: priced on the turn's totals they give exactly the sum of the
+ * per-call costs (review r-20261118-090529-1f7c7f). Without them a multi-call
+ * turn (`providerCallPasses` > 1) can only be lowered, as its total is a sum
+ * of prompts and says nothing about any one call.
  */
+export type ProviderCallUsage = { inputTokens: number; outputTokens: number };
+
 export const longContextSettlementRates = <T extends SettlementRates>(
     rates: T,
-    actualPromptTokens: number
+    actualPromptTokens: number,
+    calls?: readonly ProviderCallUsage[] | null
 ): T => {
+    if (calls && calls.length > 1) return perCallSettlementRates(rates, calls);
     const crossed = longContextSettlementTier({
         modelId: rates.modelId,
         actualPromptTokens,
@@ -2327,5 +2339,52 @@ export const longContextSettlementRates = <T extends SettlementRates>(
               }
             : {}),
         longContextThresholdTokens: crossed.longContextThresholdTokens,
+    };
+};
+
+const perCallSettlementRates = <T extends SettlementRates>(
+    rates: T,
+    calls: readonly ProviderCallUsage[]
+): T => {
+    // Each call is one prompt, so the one-call rule applies to it in full.
+    const single: T = { ...rates, providerCallPasses: null };
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let inputCost = 0;
+    let outputCost = 0;
+    let cacheWriteCost = 0;
+    let cachedMultiplierWeight = 0;
+    let threshold: number | null = null;
+    for (const call of calls) {
+        const input = Math.max(0, Math.trunc(call.inputTokens) || 0);
+        const output = Math.max(0, Math.trunc(call.outputTokens) || 0);
+        const callRates = longContextSettlementRates(single, input);
+        inputTokens += input;
+        outputTokens += output;
+        inputCost += input * callRates.inputUsdPerMillionTokens;
+        outputCost += output * callRates.outputUsdPerMillionTokens;
+        cacheWriteCost += input * (callRates.cacheWriteUsdPerMillionTokens ?? 0);
+        cachedMultiplierWeight += input * (callRates.cachedInputPriceMultiplier ?? 0);
+        const callThreshold = callRates.longContextThresholdTokens ?? null;
+        if (callThreshold !== null && (threshold === null || callThreshold > threshold)) {
+            threshold = callThreshold;
+        }
+    }
+    if (inputTokens === 0 && outputTokens === 0) return rates;
+    const cacheWrite = rates.cacheWriteUsdPerMillionTokens;
+    return {
+        ...rates,
+        inputUsdPerMillionTokens:
+            inputTokens > 0 ? inputCost / inputTokens : rates.inputUsdPerMillionTokens,
+        outputUsdPerMillionTokens:
+            outputTokens > 0 ? outputCost / outputTokens : rates.outputUsdPerMillionTokens,
+        cacheWriteUsdPerMillionTokens:
+            typeof cacheWrite === "number" && inputTokens > 0
+                ? cacheWriteCost / inputTokens
+                : cacheWrite,
+        ...(typeof rates.cachedInputPriceMultiplier === "number" && inputTokens > 0
+            ? { cachedInputPriceMultiplier: cachedMultiplierWeight / inputTokens }
+            : {}),
+        longContextThresholdTokens: threshold,
     };
 };

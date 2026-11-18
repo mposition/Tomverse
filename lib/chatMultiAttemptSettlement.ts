@@ -35,7 +35,7 @@
  */
 
 import { calculateProviderUsageCost } from "@/lib/providerUsageCost";
-import { longContextSettlementRates } from "@/lib/modelPricing";
+import { longContextSettlementRates, type ProviderCallUsage } from "@/lib/modelPricing";
 import type { AiModel } from "@/lib/models";
 
 /** Bump when an allocation rule changes, so a settled row can be attributed. */
@@ -82,6 +82,8 @@ export type AttemptUsage = {
     attemptIndex: number;
     price: AttemptPriceSnapshot;
     inputTokens: number;
+    /** Per provider call, when the attempt made more than one (tool loops). */
+    providerCalls?: ProviderCallUsage[];
     cachedInputTokens: number;
     /**
      * Input tokens written into the prompt cache on this attempt.
@@ -155,7 +157,11 @@ export const priceAttempt = (
 const priceOne = (attempt: AttemptUsage): { costMicroUsd: number; costSource: PricedAttempt["costSource"] } => {
     // The same long-context rule as single-attempt settlement: the rate of
     // the tier the attempt's prompt actually fell in.
-    const price = longContextSettlementRates(attempt.price, attempt.inputTokens);
+    const price = longContextSettlementRates(
+        attempt.price,
+        attempt.inputTokens,
+        attempt.providerCalls
+    );
     const tokenCost = calculateProviderUsageCost({
         inputTokens: attempt.inputTokens,
         cachedInputTokens: attempt.cachedInputTokens,

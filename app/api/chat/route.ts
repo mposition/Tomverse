@@ -105,7 +105,7 @@ import {
     profileTextFor,
     turnCarriesAttachments,
 } from "@/lib/autoDispatchPreflight";
-import { resolveModelPricing } from "@/lib/modelPricing";
+import { resolveModelPricing, type ProviderCallUsage } from "@/lib/modelPricing";
 import {
     authoriseDispatch,
     beginInstrumentedDispatch,
@@ -499,6 +499,30 @@ import {
     ATTACHMENT_STORAGE_UNAVAILABLE_CODE,
     ATTACHMENT_UNAVAILABLE_CODE,
 } from "@/lib/chatAttachmentErrorCopy";
+
+/**
+ * Each provider call of a multi-step turn (a tool loop, Research Preview), from
+ * the SDK's per-step usage: every call is its own prompt and is settled at the
+ * long-context tier that prompt fell in (lib/modelPricing.ts). Undefined for a
+ * one-call turn, or when the steps cannot be read -- settlement then keeps to
+ * its rule for a summed input.
+ */
+const providerCallUsage = async (stream: {
+    steps: PromiseLike<
+        ReadonlyArray<{ usage: { inputTokens?: number; outputTokens?: number } }>
+    >;
+}): Promise<ProviderCallUsage[] | undefined> => {
+    try {
+        const steps = await stream.steps;
+        if (steps.length < 2) return undefined;
+        return steps.map((step) => ({
+            inputTokens: Math.max(0, step.usage.inputTokens ?? 0),
+            outputTokens: Math.max(0, step.usage.outputTokens ?? 0),
+        }));
+    } catch {
+        return undefined;
+    }
+};
 
 const MAX_ATTACHMENTS = 5;
 // Every request resends the full conversation history (including past
@@ -6170,6 +6194,7 @@ async function handleChatPost(
                 outputTokens?: number;
                 reasoningTokens?: number;
                 usageFromProvider?: boolean;
+                providerCalls?: ProviderCallUsage[];
                 searchSurchargeCredits?: number;
                 searchExecuted?: boolean;
                 // The provider's half of a native search, and whether anybody
@@ -6282,6 +6307,7 @@ async function handleChatPost(
                         // above is the documented fallback estimate rather
                         // than a measured value -- recorded as such.
                         usageFromProvider: usage?.usageFromProvider === true,
+                        providerCalls: usage?.providerCalls,
                         outcome,
                         searchSurchargeCredits: usage?.searchSurchargeCredits,
                         searchExecuted: usage?.searchExecuted,
@@ -6301,6 +6327,7 @@ async function handleChatPost(
                                       attemptIndex: dispatched.attemptIndex,
                                       price: dispatched.price,
                                       inputTokens: settledInputTokens,
+                                      providerCalls: usage?.providerCalls,
                                       cachedInputTokens:
                                           usage?.cachedInputTokens ?? 0,
                                       cacheWriteInputTokens:
@@ -7713,6 +7740,7 @@ async function handleChatPost(
 
                         if (usageResult.status === "fulfilled") {
                             const usage = usageResult.value;
+                            const providerCalls = await providerCallUsage(dispatched.stream);
                             await settleSafely(
                                 generatedText.trim() ? "completed" : "empty",
                                 {
@@ -7736,6 +7764,7 @@ async function handleChatPost(
                                         usage.outputTokenDetails
                                             .reasoningTokens,
                                     usageFromProvider: true,
+                                    providerCalls,
                                     ...searchSettlementFields,
                                 }
                             );
@@ -8328,6 +8357,7 @@ async function handleChatPost(
                             try {
                                 const usage = await dispatched.stream.usage;
                                 researchFailureUsage = {
+                                    providerCalls: await providerCallUsage(dispatched.stream),
                                     inputTokens: usage.inputTokens,
                                     cachedInputTokens:
                                         usage.inputTokenDetails.cacheReadTokens,

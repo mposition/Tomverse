@@ -257,7 +257,7 @@ export const recordAttemptCost = async (
                 // kept beside the usage source it would otherwise overwrite,
                 // as the reservation snapshot keeps reservationCostSource.
                 pricingSnapshot: {
-                    ...longContextSettlementRates(attempt.price, attempt.inputTokens),
+                    ...longContextSettlementRates(attempt.price, attempt.inputTokens, attempt.providerCalls),
                     reservationCostSource: attempt.price.costSource ?? null,
                     costSource: attempt.costSource,
                     ...(snapshot ?? {}),
@@ -299,7 +299,8 @@ export const recordAttemptCost = async (
                 // rollup's split adds up to the same total.
                 const price = longContextSettlementRates(
                     attempt.price,
-                    attempt.inputTokens
+                    attempt.inputTokens,
+                    attempt.providerCalls
                 );
                 return {
                     inputUsdPerMillionTokens: price.inputUsdPerMillionTokens,

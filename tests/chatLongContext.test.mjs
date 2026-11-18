@@ -252,7 +252,7 @@ test("an explicit output cap is not shrunk to the window room", () => {
 
 test("the attempt ledger keeps the settled rates and the price's own source", () => {
     const ledger = readFileSync(new URL("../lib/chatAttemptCostLedger.ts", import.meta.url), "utf8");
-    assert.match(ledger, /pricingSnapshot: \{\s*\.\.\.longContextSettlementRates\(attempt\.price, attempt\.inputTokens\),\s*reservationCostSource: attempt\.price\.costSource \?\? null,/);
+    assert.match(ledger, /pricingSnapshot: \{\s*\.\.\.longContextSettlementRates\(attempt\.price, attempt\.inputTokens, attempt\.providerCalls\),\s*reservationCostSource: attempt\.price\.costSource \?\? null,/);
 });
 
 // Review r-20261118-075201-6d1a48: the public guide states the floor, uses the
@@ -417,10 +417,64 @@ test("a long-rate reservation whose prompt stayed under the boundary settles at 
     assert.equal(longContextSettlementRates(flat, 230_000), flat);
 });
 
-// Review r-20261118-083641-09ae82: a tool loop's settled input is a sum of
-// calls, each its own prompt. A sum under a boundary puts every call under it,
-// so it may lower the tier; a sum over one says nothing about any call.
-test("a multi-call reservation only ever settles at a lower tier", () => {
+// Review r-20261118-090529-1f7c7f: with the SDK's per-step usage, every call is
+// settled at the tier its own prompt fell in.
+test("a multi-call turn settles each call at its own tier", () => {
+    const short = resolveModelPricing(getModel("gpt-6-luna"), { estimatedPromptTokens: 1_000 });
+    const long = resolveModelPricing(getModel("gpt-6-luna"), { estimatedPromptTokens: 300_000 });
+    const reservedLong = {
+        modelId: "gpt-6-luna",
+        inputUsdPerMillionTokens: long.inputUsdPerMillionTokens,
+        outputUsdPerMillionTokens: long.outputUsdPerMillionTokens,
+        longContextThresholdTokens: 272_000,
+        pricingVersion: long.pricingVersion,
+        costSource: long.costSource,
+        providerCallPasses: 4,
+    };
+    // Four 230k calls: each under 272k, so all short, though they sum to 920k.
+    const four = Array.from({ length: 4 }, () => ({ inputTokens: 230_000, outputTokens: 2_000 }));
+    const allShort = longContextSettlementRates(reservedLong, 920_000, four);
+    assert.equal(allShort.inputUsdPerMillionTokens, short.inputUsdPerMillionTokens);
+    assert.equal(allShort.outputUsdPerMillionTokens, short.outputUsdPerMillionTokens);
+    assert.equal(allShort.longContextThresholdTokens, null);
+    // One short call and one long: priced on the totals, the blended rates
+    // give exactly the sum of the two calls' own costs.
+    const mixed = [
+        { inputTokens: 200_000, outputTokens: 1_000 },
+        { inputTokens: 300_000, outputTokens: 3_000 },
+    ];
+    const blended = longContextSettlementRates({ ...reservedLong, inputUsdPerMillionTokens: short.inputUsdPerMillionTokens,
+        outputUsdPerMillionTokens: short.outputUsdPerMillionTokens, longContextThresholdTokens: null }, 500_000, mixed);
+    const expectedInput = 200_000 * short.inputUsdPerMillionTokens + 300_000 * long.inputUsdPerMillionTokens;
+    const expectedOutput = 1_000 * short.outputUsdPerMillionTokens + 3_000 * long.outputUsdPerMillionTokens;
+    assert.ok(Math.abs(blended.inputUsdPerMillionTokens * 500_000 - expectedInput) < 1e-6);
+    assert.ok(Math.abs(blended.outputUsdPerMillionTokens * 4_000 - expectedOutput) < 1e-6);
+    assert.equal(blended.longContextThresholdTokens, 272_000);
+    // A flat or stale price is never moved, call by call either.
+    const flat = { ...reservedLong, costSource: "model_registry_override" };
+    assert.equal(longContextSettlementRates(flat, 920_000, four).inputUsdPerMillionTokens, long.inputUsdPerMillionTokens);
+});
+
+test("the per-step usage reaches every settlement path", () => {
+    const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
+    const route = read("app/api/chat/route.ts");
+    assert.match(route, /const providerCalls = await providerCallUsage\(dispatched\.stream\);/);
+    assert.match(route, /providerCalls: await providerCallUsage\(dispatched\.stream\),/);
+    assert.match(route, /providerCalls: usage\?\.providerCalls,\s*outcome,/);
+    assert.match(route, /inputTokens: settledInputTokens,\s*providerCalls: usage\?\.providerCalls,/);
+    const security = read("lib/chatSecurity.ts");
+    assert.match(security, /actualInput,\s*usage\.providerCalls\s*\)/);
+    assert.match(security, /providerCalls: billedAttempt\.providerCalls,/);
+    assert.match(security, /inputTokens: actualInput,\s*providerCalls: usage\.providerCalls,/);
+    assert.match(read("lib/chatMultiAttemptSettlement.ts"), /attempt\.inputTokens,\s*attempt\.providerCalls\s*\)/);
+    assert.equal(read("lib/chatAttemptCostLedger.ts").match(/attempt\.providerCalls/g)?.length, 2);
+});
+
+// Review r-20261118-083641-09ae82: without per-step usage (an attempt replaced
+// by a fallback), a multi-call total is a sum of prompts. A sum under a
+// boundary puts every call under it, so it may lower the tier; a sum over one
+// says nothing about any call, so the reserved tier stands.
+test("without per-step usage a multi-call reservation only ever settles at a lower tier", () => {
     const short = resolveModelPricing(getModel("gpt-6-luna"), { estimatedPromptTokens: 1_000 });
     const long = resolveModelPricing(getModel("gpt-6-luna"), { estimatedPromptTokens: 300_000 });
     const base = {
@@ -550,7 +604,7 @@ test("a flat or fallback price is settled exactly as reserved", () => {
 test("every settlement path applies the same long-context rule", () => {
     const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
     assert.match(read("lib/chatSecurity.ts"), /longContextSettlementRates\(/);
-    assert.match(read("lib/chatMultiAttemptSettlement.ts"), /longContextSettlementRates\(attempt\.price, attempt\.inputTokens\)/);
+    assert.match(read("lib/chatMultiAttemptSettlement.ts"), /longContextSettlementRates\(\s*attempt\.price,\s*attempt\.inputTokens,\s*attempt\.providerCalls\s*\)/);
     assert.match(read("lib/chatAttemptCostLedger.ts"), /longContextSettlementRates\(/);
     assert.match(
         read("app/api/chat/route.ts"),

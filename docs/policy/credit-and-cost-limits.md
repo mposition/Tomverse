@@ -85,8 +85,10 @@ guardrail = 크레딧 수 × COST_PER_CREDIT_CEILING_MICRO_USD × GUARDRAIL_HEAD
   - **정산:** 실제 프롬프트 토큰이 들어간 구간의 단가로 정산합니다
     (`longContextSettlementRates`). 예약보다 높은 구간이면 두 단가 중 높은 쪽, 여유분
     때문에 장문 단가로 예약했지만 실제로는 경계 아래면 단문 단가로 내립니다. 도구 반복이나 Research Preview처럼
-    공급사를 여러 번 부르는 turn(`providerCallPasses`)은 입력 합계가 한 호출의 크기가 아니므로
-    내리는 방향만 다시 고릅니다. 공급사 비용과 위의 실제 비용 크레딧이
+    공급사를 여러 번 부르는 turn은 SDK의 step별 사용량(`providerCalls`)으로 호출마다 그
+    호출의 프롬프트가 들어간 구간 단가를 적용합니다. step 사용량이 없는 시도(fallback으로
+    교체된 시도)는 입력 합계가 한 호출의 크기가 아니므로(`providerCallPasses`) 내리는
+    방향만 다시 고릅니다. 공급사 비용과 위의 실제 비용 크레딧이
     모두 이 단가를 씁니다. 단일 시도 정산, 시도별 가격, 시도 비용 장부가 같은 함수를 씁니다.
   - **보정하지 않는 경우:** 예약의 `pricingVersion`이 지금 가격표와 다르거나(가격 개정은
     소급하지 않습니다), 예약 가격이 profile 구간이 아니라 registry·env 단일 가격이나
