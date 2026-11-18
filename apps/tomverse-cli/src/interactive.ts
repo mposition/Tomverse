@@ -36,7 +36,7 @@ export const renderApproval = (view: ApprovalView) => {
         lines.push(`── Approval needed: change ${view.patch.length} file(s) ──`);
         if (view.explanation) lines.push(safeLine(view.explanation));
         for (const edit of view.patch) {
-            const notes = [edit.bom ? "keeps BOM" : "", edit.eol === "crlf" ? "keeps CRLF" : edit.eol === "mixed" ? "mixed line endings" : ""].filter(Boolean).join(", ");
+            const notes = [edit.bom ? "keeps BOM" : "", edit.eol === "crlf" ? (edit.action === "create" ? "CRLF line endings" : "keeps CRLF") : edit.eol === "mixed" ? "mixed line endings" : ""].filter(Boolean).join(", ");
             lines.push("");
             lines.push(`${edit.action.toUpperCase()} ${safeLine(edit.path)}${notes ? ` (${notes})` : ""}`);
             lines.push(renderFileDiff(edit.path, edit.beforeText, edit.afterText));

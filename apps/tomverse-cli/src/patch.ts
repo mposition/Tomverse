@@ -56,6 +56,23 @@ const decode = (bytes: Buffer, path: string) => {
 
 const encode = (text: string, bom: boolean) => (bom ? Buffer.concat([BOM, Buffer.from(text, "utf8")]) : Buffer.from(text, "utf8"));
 
+/**
+ * What the approval screen cannot show as it is: control and bidi characters
+ * (displayed escaped) never enter a file through a patch, so the diff a person
+ * approves is exactly the text that is written. Tab, LF and the CR of a
+ * consistent CRLF file are the only exceptions; see crRule below.
+ */
+const UNSHOWABLE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/;
+
+const assertShowable = (text: string, what: string) => {
+    if (UNSHOWABLE.test(text)) {
+        throw new PatchError(`${what} contains control or bidi characters, which the approval screen can only show escaped, so the CLI does not write them.`);
+    }
+};
+
+/** True when every LF is part of CRLF and every CR is followed by LF. */
+const consistentCrlf = (text: string) => !/\r(?!\n)/.test(text) && !/(^|[^\r])\n/.test(text);
+
 const countOccurrences = (haystack: string, needle: string) => {
     let count = 0;
     for (let at = haystack.indexOf(needle); at !== -1; at = haystack.indexOf(needle, at + needle.length)) count += 1;
@@ -79,8 +96,14 @@ export const planPatch = (workspace: Workspace, edits: PatchEdit[]): PlannedEdit
         if (edit.action === "create") {
             if (exists) throw new PatchError(`${resolved.relative} already exists; use an update.`);
             if (typeof edit.content !== "string") throw new PatchError(`Creating ${resolved.relative} needs content.`);
+            assertShowable(edit.content, `The content of ${resolved.relative}`);
+            // CR only as consistent CRLF line endings, which the approval states.
+            const crlf = edit.content.includes("\r");
+            if (crlf && !consistentCrlf(edit.content)) {
+                throw new PatchError(`The content of ${resolved.relative} mixes CR with LF line endings; use LF, or CRLF on every line.`);
+            }
             const afterBytes = Buffer.from(edit.content, "utf8");
-            return { path: resolved.relative, absolute: resolved.absolute, action: "create", preimage, beforeText: null, afterText: edit.content, afterBytes, postimage: sha256(afterBytes), eol: "none", bom: false };
+            return { path: resolved.relative, absolute: resolved.absolute, action: "create", preimage, beforeText: null, afterText: edit.content, afterBytes, postimage: sha256(afterBytes), eol: crlf ? "crlf" : "none", bom: false };
         }
         if (!exists || !bytes) throw new PatchError(`${resolved.relative} does not exist.`);
         const { text, bom, eol } = decode(bytes, resolved.relative);
@@ -96,6 +119,15 @@ export const planPatch = (workspace: Workspace, edits: PatchEdit[]): PlannedEdit
         for (const [index, replacement] of edit.replacements.entries()) {
             if (typeof replacement.old !== "string" || typeof replacement.new !== "string" || replacement.old.length === 0) {
                 throw new PatchError(`Replacement ${index + 1} for ${resolved.relative} needs non-empty old text and new text.`);
+            }
+            assertShowable(replacement.new, `Replacement ${index + 1} for ${resolved.relative}`);
+            // A CR is never added or removed on its own: in a CRLF file the
+            // endings are the file's, elsewhere an edit cannot carry a CR.
+            const carriesCr = (normalize ? replacement.new.replaceAll("\r\n", "\n") : replacement.new).includes("\r") || (!normalize && replacement.old.includes("\r"));
+            if (carriesCr) {
+                throw new PatchError(
+                    `Replacement ${index + 1} for ${resolved.relative} contains a carriage return; ${eol === "mixed" ? "this file mixes line endings, so" : "in this file"} an edit cannot add or remove CR characters. Leave line endings out of old and new text.`
+                );
             }
             const oldText = normalize ? replacement.old.replaceAll("\r\n", "\n") : replacement.old;
             const newText = normalize ? replacement.new.replaceAll("\r\n", "\n") : replacement.new;

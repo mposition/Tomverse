@@ -9,6 +9,7 @@ import { makeRepo, makeRunner, scriptedPrompter, tempDir } from "./helpers.js";
 import { readKey } from "../src/auth.js";
 import { costLine } from "../src/main.js";
 import { normalizeRoot, PathError, Workspace } from "../src/workspace.js";
+import { planPatch, PatchError } from "../src/patch.js";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, writeFileSync } from "node:fs";
 import { TEST_KEY } from "./fakeGateway.js";
@@ -354,15 +355,29 @@ test("the approval diff is never shortened: every removed and added line is show
     assert.ok(diff.includes("- old 999") && diff.includes("+ new 999"));
     assert.ok(!/not shown/.test(diff));
 });
-test("a change of line ending alone is shown in the approval diff", () => {
-    const diff = renderFileDiff("mixed.txt", "a\r\nb\nc\r\n", "a\nb\nc\r\n");
-    assert.match(diff.split("\n")[0]!, /\(1 line\(s\) removed, 1 added\)/);
-    assert.ok(diff.includes("- a [CR]") && diff.includes("+ a"), diff);
-    // A CR slipped into an LF file (a shebang that stops working) is visible.
-    assert.ok(renderFileDiff("run.sh", "#!/bin/sh\necho hi\n", "#!/bin/sh\r\necho hi\n").includes("+ #!/bin/sh [CR]"));
-    // So is one at the very end of a file without a final newline, even in a CRLF file.
-    assert.ok(renderFileDiff("a.txt", "a\nb", "a\nb\r").includes("+ b [CR]"));
-    assert.ok(renderFileDiff("c.txt", "a\r\nb", "a\r\nb\r").includes("+ b [CR]"));
-    // A file that is CRLF throughout and stays so is not marked line by line.
-    assert.ok(!renderFileDiff("crlf.txt", "a\r\nb\r\n", "a\r\nc\r\n").includes("[CR]"));
+test("a patch never writes a byte the approval diff cannot show as it is", () => {
+    const root = tempDir("patch");
+    const ws = new Workspace(normalizeRoot(root));
+    writeFileSync(join(root, "lf.sh"), "#!/bin/sh\necho hi\n");
+    writeFileSync(join(root, "mixed.txt"), "a\r\nb\nc\r\n");
+    writeFileSync(join(root, "crlf.txt"), "a\r\nb\r\n");
+    // No CR into an LF file (a shebang that would stop working), none out of a mixed one.
+    assert.throws(() => planPatch(ws, [{ path: "lf.sh", action: "update", replacements: [{ old: "#!/bin/sh", new: "#!/bin/sh\r" }] }]), /carriage return/);
+    assert.throws(() => planPatch(ws, [{ path: "mixed.txt", action: "update", replacements: [{ old: "a\r\n", new: "a\n" }] }]), /mixes line endings/);
+    // A literal " [CR]" or "\u{d}" is ordinary text and stays exactly that.
+    const [literal] = planPatch(ws, [{ path: "lf.sh", action: "update", replacements: [{ old: "echo hi", new: "echo hi [CR] \\u{d}" }] }]);
+    assert.ok(!literal!.afterBytes!.includes(0x0d));
+    // Control and bidi characters are refused in new text.
+    for (const bad of ["\u001b[2J", "\u202e", "\u0000", "a\rb"]) {
+        assert.throws(() => planPatch(ws, [{ path: "lf.sh", action: "update", replacements: [{ old: "echo hi", new: `echo ${bad}` }] }]), PatchError, JSON.stringify(bad));
+    }
+    // A CRLF file keeps CRLF on every line, and a new CRLF file is allowed only when consistent.
+    const [crlf] = planPatch(ws, [{ path: "crlf.txt", action: "update", replacements: [{ old: "b", new: "b\nc" }] }]);
+    assert.equal(crlf!.afterText, "a\r\nb\r\nc\r\n");
+    const [created] = planPatch(ws, [{ path: "new.bat", action: "create", content: "@echo off\r\necho hi\r\n" }]);
+    assert.equal(created!.eol, "crlf");
+    assert.throws(() => planPatch(ws, [{ path: "new.sh", action: "create", content: "#!/bin/sh\r\necho\n" }]), /mixes CR/);
+    assert.throws(() => planPatch(ws, [{ path: "new2.sh", action: "create", content: "#!/bin/sh\r" }]), /mixes CR/);
+    // And the diff shows what is written: no per-line markers are needed.
+    assert.ok(!renderFileDiff("crlf.txt", "a\r\nb\r\n", "a\r\nc\r\n").includes("\\u{d}"));
 });
