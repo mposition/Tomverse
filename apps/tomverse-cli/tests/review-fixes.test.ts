@@ -381,3 +381,8 @@ test("a patch never writes a byte the approval diff cannot show as it is", () =>
     // And the diff shows what is written: no per-line markers are needed.
     assert.ok(!renderFileDiff("crlf.txt", "a\r\nb\r\n", "a\r\nc\r\n").includes("\\u{d}"));
 });
+
+test("a lone CR at the very end of a file is shown, not taken for a line ending", () => {
+    assert.ok(renderFileDiff("x.txt", "a\nb\r", null).includes("- b\\u{d}"));
+    assert.ok(!renderFileDiff("y.txt", "a\r\nb\r\n", null).includes("\\u{d}"));
+});

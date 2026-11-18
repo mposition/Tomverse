@@ -325,7 +325,11 @@ export class Runner {
                     }
                     return this.finish("limit_reached", `Limit reached: ${which}.`);
                 }
-                await this.maybeCompact(false);
+                // Compaction is model time too: it counts against the task's active time and runs only within what is left.
+                const compactStarted = Date.now();
+                await this.maybeCompact(false, timeAllowance - task.activeMs);
+                task.activeMs += Date.now() - compactStarted;
+                if (task.activeMs >= timeAllowance) continue;
                 // Any request whose answer is not in the history (a compaction
                 // or a step that broke off, here or before a restart): never
                 // another paid request without the user's say.
@@ -634,7 +638,7 @@ export class Runner {
     }
 
     /** Summarises older history with one request of the same model, when it is getting large. */
-    async maybeCompact(force: boolean): Promise<"compacted" | "skipped" | "failed" | "unknown"> {
+    async maybeCompact(force: boolean, remainingMs = 180_000): Promise<"compacted" | "skipped" | "failed" | "unknown"> {
         const { journal, options } = this;
         const model = this.model();
         const window = model.contextWindowTokens || 128_000;
@@ -671,7 +675,7 @@ export class Runner {
                 messages: [{ role: "user", content: `Summarize this session so far.\n\n${transcriptFor(head, budgetChars)}` }],
                 maxRetries: 0,
                 maxOutputTokens: Math.min(4000, model.maxOutputTokens || 4000),
-                abortSignal: AbortSignal.any([this.controller.signal, AbortSignal.timeout(180_000)]),
+                abortSignal: AbortSignal.any([this.controller.signal, AbortSignal.timeout(Math.max(1000, Math.min(180_000, remainingMs)))]),
             });
             const summary = result.text.trim();
             if (!summary) throw new Error("The summary was empty.");

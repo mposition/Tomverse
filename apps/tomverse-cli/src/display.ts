@@ -55,7 +55,9 @@ export const renderFileDiff = (path: string, before: string | null, after: strin
     // else), which the approval states, so the CR is not shown per line.
     const a = before === null ? [] : before.split("\n");
     const b = after === null ? [] : after.split("\n");
-    const shown = (line: string | undefined) => (line === undefined ? "" : line.endsWith("\r") ? line.slice(0, -1) : line);
+    // Only a CR before a newline is a line ending; one at the very end of the
+    // file stays in the text, and safeText shows it as \u{d}.
+    const shown = (line: string | undefined, last: boolean) => (line === undefined ? "" : !last && line.endsWith("\r") ? line.slice(0, -1) : line);
     // Trim the common head and tail; show what changed with three lines of context.
     let start = 0;
     while (start < a.length && start < b.length && a[start] === b[start]) start += 1;
@@ -69,9 +71,9 @@ export const renderFileDiff = (path: string, before: string | null, after: strin
     const header = before === null ? `+++ new file ${path} ${counts}` : after === null ? `--- delete ${path} ${counts}` : `*** ${path} ${counts}`;
     const lines: string[] = [header];
     const from = Math.max(0, start - 3);
-    for (let i = from; i < start; i += 1) lines.push(`  ${shown(a[i])}`);
-    for (let i = start; i < endA; i += 1) lines.push(`- ${shown(a[i])}`);
-    for (let i = start; i < endB; i += 1) lines.push(`+ ${shown(b[i])}`);
-    for (let i = endA; i < Math.min(a.length, endA + 3); i += 1) lines.push(`  ${shown(a[i])}`);
+    for (let i = from; i < start; i += 1) lines.push(`  ${shown(a[i], i === a.length - 1)}`);
+    for (let i = start; i < endA; i += 1) lines.push(`- ${shown(a[i], i === a.length - 1)}`);
+    for (let i = start; i < endB; i += 1) lines.push(`+ ${shown(b[i], i === b.length - 1)}`);
+    for (let i = endA; i < Math.min(a.length, endA + 3); i += 1) lines.push(`  ${shown(a[i], i === a.length - 1)}`);
     return lines.map(safeText).join("\n");
 };
