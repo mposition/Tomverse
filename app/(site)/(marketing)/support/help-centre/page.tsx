@@ -1,8 +1,8 @@
 import { HelpCentreHub } from "@/components/help/HelpCentreHub";
 import { helpCentreCopy } from "@/lib/helpCentre/copy";
-import { helpHubMetadata } from "@/lib/helpCentre/metadata";
+import { publicMarketingPageMetadata } from "@/lib/publicMarketingMetadata";
 
-export const metadata = helpHubMetadata("en", false);
+export const metadata = publicMarketingPageMetadata("/support/help-centre");
 
 export default function HelpCentrePage() {
   return <HelpCentreHub lang="en" copy={helpCentreCopy("en")} />;

@@ -1,21 +1,14 @@
 import type { Metadata } from "next";
 import type { Language } from "@/lib/language";
-import { createPageMetadata, localizedPath, queryLanguageAlternates } from "@/lib/seo";
+import { createPageMetadata, queryLanguageAlternates } from "@/lib/seo";
 import { helpCentreCopy } from "./copy";
-import { HELP_HUB_PATH, helpGuidePath } from "./links";
+import { helpGuidePath } from "./links";
 
-export function helpHubMetadata(lang: Language, localizedRoute: boolean): Metadata {
-  const ui = helpCentreCopy(lang).ui;
-  return createPageMetadata({
-    title: ui.metaTitle,
-    description: ui.metaDescription,
-    path: localizedRoute ? localizedPath(lang, HELP_HUB_PATH) : HELP_HUB_PATH,
-    locale: lang,
-    localizedBasePath: HELP_HUB_PATH,
-    absoluteTitle: true,
-  });
-}
-
+/*
+ * The hub's metadata is lib/publicMarketingMetadata.ts ("/support/help-centre"),
+ * like every prerendered localised marketing page. Guides are request-time
+ * pages with `?lang=` URLs, so they build their own here.
+ */
 export function helpGuideMetadata(lang: Language, guideId: string): Metadata {
   const copy = helpCentreCopy(lang);
   const words = copy.guides[guideId];
