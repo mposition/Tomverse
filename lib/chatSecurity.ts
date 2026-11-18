@@ -124,10 +124,11 @@ import {
 } from "@/lib/anthropicPromptCaching";
 import {
     getModelPricingProfile,
-    longContextSettledUsageCost,
     type ProviderCallUsage,
     type ResolvedModelPricing,
 } from "@/lib/modelPricing";
+import { longContextSettledUsageCost } from "@/lib/modelPricing";
+import { calculateProviderUsageCost } from "@/lib/providerUsageCost";
 import type { PerplexityUsageCostSnapshot } from "@/lib/perplexityUsageCore";
 import { notifyProviderCreditIfNeeded } from "@/lib/providerMonitoring";
 import { getUserDayWindow } from "@/lib/userDailyUsage";
@@ -4779,6 +4780,8 @@ export const settleChatUsage = async (
         // column existed) prices writes at nothing -- correct, because such a
         // turn sent no cache marker and wrote no cache entry.
         const tokenCostBreakdown = longContextSettledUsageCost(
+            calculateProviderUsageCost,
+            
             snapshotRates,
             settledUsage,
             usage.providerCalls
@@ -4792,6 +4795,8 @@ export const settleChatUsage = async (
         */
         const creditCost = canonical.longContextSettlement
             ? longContextSettledUsageCost(
+            calculateProviderUsageCost,
+            
                   billedAttempt ? billedAttempt.price : snapshotRates,
                   settledUsage,
                   usage.providerCalls,

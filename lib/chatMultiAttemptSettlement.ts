@@ -34,7 +34,9 @@
  * split can be argued about in a test rather than in a billing incident.
  */
 
-import { longContextSettledUsageCost, type ProviderCallUsage } from "@/lib/modelPricing";
+import type { ProviderCallUsage } from "@/lib/modelPricing";
+import { longContextSettledUsageCost } from "@/lib/modelPricing";
+import { calculateProviderUsageCost } from "@/lib/providerUsageCost";
 import type { AiModel } from "@/lib/models";
 
 /** Bump when an allocation rule changes, so a settled row can be attributed. */
@@ -157,6 +159,8 @@ const priceOne = (attempt: AttemptUsage): { costMicroUsd: number; costSource: Pr
     // The same long-context rule as single-attempt settlement: each call at
     // the tier its own prompt fell in.
     const tokenCost = longContextSettledUsageCost(
+            calculateProviderUsageCost,
+            
         attempt.price,
         attempt,
         attempt.providerCalls

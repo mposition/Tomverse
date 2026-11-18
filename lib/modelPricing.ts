@@ -30,9 +30,9 @@
 //      existing UsageBucket is never recomputed when this table changes.
 
 import type { AiProvider, AiModel, ModelUsageClass } from "@/lib/models";
-import {
-    calculateProviderUsageCost,
-    type ProviderUsageCostBreakdown,
+import type {
+    ProviderUsageCostBreakdown,
+    ProviderUsageCostInput,
 } from "@/lib/providerUsageCost";
 
 export type ModelPricingRouting = "direct_provider_api" | "relay";
@@ -2260,7 +2260,7 @@ export const longContextSettlementTier = (input: {
     };
 };
 
-type SettlementRates = {
+export type SettlementRates = {
     modelId: string;
     inputUsdPerMillionTokens: number;
     outputUsdPerMillionTokens: number;
@@ -2443,10 +2443,15 @@ const perCallSettlementRates = <T extends SettlementRates>(
  * multiplier is capped at 1. `rates` is the reservation's own snapshot, not
  * rates this rule already moved.
  *
+ * `cost` is `calculateProviderUsageCost` (lib/providerUsageCost.ts), passed in
+ * so this file keeps no runtime import: scripts load it under plain Node and
+ * replay it from a fixed source list.
+ *
  * `pricedCacheWrites: false` is the credit view: written tokens count as plain
  * input, as everywhere else credits are concerned.
  */
 export const longContextSettledUsageCost = (
+    cost: (input: ProviderUsageCostInput) => ProviderUsageCostBreakdown,
     rates: SettlementRates & { cachedInputPriceMultiplier?: number },
     usage: {
         inputTokens: number;
@@ -2467,7 +2472,7 @@ export const longContextSettledUsageCost = (
         },
         callRates: SettlementRates & { cachedInputPriceMultiplier?: number }
     ) =>
-        calculateProviderUsageCost({
+        cost({
             inputTokens: tokens.inputTokens,
             cachedInputTokens: tokens.cachedInputTokens,
             cacheWriteInputTokens: priced ? tokens.cacheWriteInputTokens : 0,

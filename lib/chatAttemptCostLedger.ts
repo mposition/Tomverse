@@ -42,10 +42,9 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
-import {
-    longContextSettledUsageCost,
-    longContextSettlementRates,
-} from "@/lib/modelPricing";
+import { longContextSettlementRates } from "@/lib/modelPricing";
+import { longContextSettledUsageCost } from "@/lib/modelPricing";
+import { calculateProviderUsageCost } from "@/lib/providerUsageCost";
 import { recordInternalProviderUsage } from "@/lib/providerUsageAccounting";
 import type { PricedAttempt } from "@/lib/chatMultiAttemptSettlement";
 import {
@@ -293,7 +292,9 @@ export const recordAttemptCost = async (
             : null) ??
         // The rule `priceAttempt` applied to `costMicroUsd`, so the
         // rollup's split adds up to the same total.
-        longContextSettledUsageCost(attempt.price, attempt, attempt.providerCalls);
+        longContextSettledUsageCost(
+            calculateProviderUsageCost,
+            attempt.price, attempt, attempt.providerCalls);
     await recordInternalProviderUsage({
         client: tx,
         date: day,

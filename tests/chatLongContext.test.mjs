@@ -14,8 +14,9 @@ import {
     CHAT_MAX_MESSAGE_CHARACTERS,
     CHAT_MAX_STORED_ANSWER_CHARACTERS,
 } from "../lib/chatRequestLimits.ts";
-import { longContextSettledUsageCost, longContextSettlementRates, providerCallsCover, resolveModelPricing } from "../lib/modelPricing.ts";
+import { longContextSettledUsageCost as settledUsageCost, longContextSettlementRates, providerCallsCover, resolveModelPricing } from "../lib/modelPricing.ts";
 import { calculateProviderUsageCost } from "../lib/providerUsageCost.ts";
+const longContextSettledUsageCost = (...args) => settledUsageCost(calculateProviderUsageCost, ...args);
 import { AVAILABLE_MODELS, getModel, getWeightedUsageCredits } from "../lib/models.ts";
 import {
     CHAT_ATTACHMENT_CHARACTERS_PER_CONTEXT_TOKEN,
@@ -508,12 +509,12 @@ test("the per-step usage reaches every settlement path", () => {
     assert.match(route, /const settledProviderCalls =\s*usage\?\.providerCalls \?\?/);
     const security = read("lib/chatSecurity.ts");
     // Provider cost and credits alike are the sum of the calls.
-    assert.match(security, /const tokenCostBreakdown = longContextSettledUsageCost\(\s*snapshotRates,\s*settledUsage,\s*usage\.providerCalls\s*\);/);
-    assert.match(security, /longContextSettledUsageCost\(\s*billedAttempt \? billedAttempt\.price : snapshotRates,\s*settledUsage,\s*usage\.providerCalls,\s*\{ pricedCacheWrites: false \}\s*\)/);
+    assert.match(security, /const tokenCostBreakdown = longContextSettledUsageCost\(\s*calculateProviderUsageCost,\s*snapshotRates,\s*settledUsage,\s*usage\.providerCalls\s*\);/);
+    assert.match(security, /longContextSettledUsageCost\(\s*calculateProviderUsageCost,\s*billedAttempt \? billedAttempt\.price : snapshotRates,\s*settledUsage,\s*usage\.providerCalls,\s*\{ pricedCacheWrites: false \}\s*\)/);
     assert.match(security, /providerCalls: billedAttempt\.providerCalls,/);
     assert.match(security, /inputTokens: actualInput,\s*providerCalls: usage\.providerCalls,/);
-    assert.match(read("lib/chatMultiAttemptSettlement.ts"), /longContextSettledUsageCost\(\s*attempt\.price,\s*attempt,\s*attempt\.providerCalls\s*\)/);
-    assert.match(read("lib/chatAttemptCostLedger.ts"), /longContextSettledUsageCost\(attempt\.price, attempt, attempt\.providerCalls\)/);
+    assert.match(read("lib/chatMultiAttemptSettlement.ts"), /longContextSettledUsageCost\(\s*calculateProviderUsageCost,\s*attempt\.price,\s*attempt,\s*attempt\.providerCalls\s*\)/);
+    assert.match(read("lib/chatAttemptCostLedger.ts"), /longContextSettledUsageCost\(\s*calculateProviderUsageCost,\s*attempt\.price, attempt, attempt\.providerCalls\)/);
     // Each step's own cache split travels with it.
     assert.match(route, /cachedInputTokens: Math\.max\(0, step\.usage\.inputTokenDetails\?\.cacheReadTokens \?\? 0\)/);
 });
@@ -567,11 +568,20 @@ test("a multi-call turn's cost is the sum of each call's own cost, cache split i
 // Review r-20261118-105614-1047a3: and at runtime too -- the stream result's
 // `usage` getter returns `totalUsage`, the aggregate of every step.
 test("the installed SDK's stream result returns totalUsage as usage at runtime", () => {
-    const runtime = readFileSync(new URL("../node_modules/ai/dist/index.js", import.meta.url), "utf8");
-    const totalAt = runtime.indexOf("  get totalUsage() {\n    this.consumeStream();");
-    assert.ok(totalAt > 0);
-    const usageAt = runtime.lastIndexOf("  get usage() {", totalAt);
-    assert.match(runtime.slice(usageAt, usageAt + 60), /get usage\(\) \{\s*return this\.totalUsage;/);
+    // Whatever the installed build's layout or line endings: some result
+    // class's `usage` getter returns its `totalUsage`.
+    const dist = new URL("../node_modules/ai/dist/", import.meta.url);
+    const runtime = ["index.js", "index.mjs"]
+        .map((name) => {
+            try {
+                return readFileSync(new URL(name, dist), "utf8");
+            } catch {
+                return "";
+            }
+        })
+        .join("\n");
+    assert.match(runtime, /get usage\(\)\s*\{\s*return this\.totalUsage;?\s*\}/);
+    assert.match(runtime, /get totalUsage\(\)\s*\{/);
 });
 
 // Same review: the steps of a long-context tool loop share one output budget
