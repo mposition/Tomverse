@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { Check, Copy, KeyRound } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
@@ -17,11 +17,12 @@ import {
 import { claudeCodeConfig, codexConfig, codingToolModels, cursorConfig } from "@/lib/externalApiCodingTools";
 
 /**
- * Settings > API keys. Issues, lists, limits and revokes the account's
- * external API keys, and builds the client configuration from the models this
- * account can run: Smart Adaptive alone by default, plus any model ticked. A
- * new key's secret is held only in this component's state until the person
- * dismisses it.
+ * Settings > API keys. Lists, limits and revokes the account's external API
+ * keys; a new key is made in a dialog and its secret shown once in another.
+ * "Connect a tool" shows one tool's setup at a time, built from the models
+ * this account can run, and "Models allowed through the API" is searchable,
+ * so the page stays short however many tools and models there are. A new
+ * key's secret is held only in this component's state, never stored.
  */
 
 type KeySummary = {
@@ -151,83 +152,6 @@ function ToolModelSelect({
     );
 }
 
-/**
- * Claude Code, Codex and Cursor: each tool's own configuration, built from the
- * models its protocol carries. Native protocols never offer Smart Adaptive.
- * Keys are placeholders here; the person pastes the key they saved.
- */
-function CodingToolsSection({ baseUrl, models }: { baseUrl: string; models: ModelSummary[] }) {
-    const { t } = useLanguage();
-    const lists = useMemo(() => codingToolModels(models), [models]);
-    const [claudeId, setClaudeId] = useState<string | undefined>();
-    const [codexId, setCodexId] = useState<string | undefined>();
-    const [cursorId, setCursorId] = useState<string | undefined>();
-    const claude = lists.claudeCode.find((model) => model.id === claudeId) ?? lists.claudeCode[0];
-    const codex = lists.codex.find((model) => model.id === codexId) ?? lists.codex[0];
-    const cursor = lists.cursor.find((model) => model.id === cursorId) ?? lists.cursor[0];
-    const claudeConfig = claude ? claudeCodeConfig(baseUrl, claude, lists.claudeCode) : null;
-    const codexFiles = codex ? codexConfig(baseUrl, codex, lists.codex) : null;
-    const card = "mt-4 rounded-xl border border-zinc-200 p-3 dark:border-zinc-800";
-    return (
-        <section className="mt-6 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950/60" data-testid="external-api-coding-tools">
-            <h2 className="text-base font-bold">{t("externalApi.codingToolsTitle")}</h2>
-            <p className="mt-1 text-sm leading-6 text-zinc-500">{t("externalApi.codingToolsIntro")}</p>
-            <p className="mt-1 text-xs text-zinc-500">{t("externalApi.codingToolsVerified")}</p>
-
-            <div className={card} data-testid="external-api-tool-claude-code">
-                <h3 className="text-sm font-bold">{t("externalApi.claudeCodeTitle")}</h3>
-                <p className="mt-1 text-xs text-zinc-500">{t("externalApi.claudeCodeHint")}</p>
-                {claude && claudeConfig ? (
-                    <>
-                        <ToolModelSelect models={lists.claudeCode} value={claude.id} onChange={setClaudeId} testId="external-api-claude-code-model" />
-                        <CopyBlock label={`${t("externalApi.claudeCodeTerminal")} (PowerShell)`} value={claudeConfig.powershell} testId="external-api-claude-code-powershell" />
-                        <CopyBlock label={`${t("externalApi.claudeCodeTerminal")} (macOS / Linux)`} value={claudeConfig.posix} testId="external-api-claude-code-posix" />
-                        <CopyBlock label={t("externalApi.claudeCodeVscode")} value={claudeConfig.vscodeSettings} testId="external-api-claude-code-vscode" />
-                        <p className="mt-2 text-xs text-zinc-500">{t("externalApi.claudeCodeNotes")}</p>
-                    </>
-                ) : (
-                    <p className="mt-2 text-xs text-zinc-500">{t("externalApi.codingToolNoModels")}</p>
-                )}
-            </div>
-
-            <div className={card} data-testid="external-api-tool-codex">
-                <h3 className="text-sm font-bold">{t("externalApi.codexTitle")}</h3>
-                <p className="mt-1 text-xs text-zinc-500">{t("externalApi.codexHint")}</p>
-                {codex && codexFiles ? (
-                    <>
-                        <ToolModelSelect models={lists.codex} value={codex.id} onChange={setCodexId} testId="external-api-codex-model" />
-                        <CopyBlock label={t("externalApi.codexProvider")} value={codexFiles.providerToml} testId="external-api-codex-provider" />
-                        <CopyBlock label={t("externalApi.codexProfile")} value={codexFiles.profileToml} testId="external-api-codex-profile" />
-                        <CopyBlock label={`${t("externalApi.codexKey")} (PowerShell)`} value={codexFiles.powershellKey} testId="external-api-codex-key-powershell" />
-                        <CopyBlock label={`${t("externalApi.codexKey")} (macOS / Linux)`} value={codexFiles.posixKey} testId="external-api-codex-key-posix" />
-                        <CopyBlock label={t("externalApi.codexDefault")} value={codexFiles.defaultToml} testId="external-api-codex-default" />
-                        <p className="mt-2 text-xs text-zinc-500">{t("externalApi.codexNotes")}</p>
-                    </>
-                ) : (
-                    <p className="mt-2 text-xs text-zinc-500">{t("externalApi.codingToolNoModels")}</p>
-                )}
-            </div>
-
-            <div className={card} data-testid="external-api-tool-cursor">
-                <h3 className="text-sm font-bold">{t("externalApi.cursorTitle")}</h3>
-                <p className="mt-1 text-xs text-zinc-500">{t("externalApi.cursorHint")}</p>
-                {cursor ? (
-                    <>
-                        <ToolModelSelect models={lists.cursor} value={cursor.id} onChange={setCursorId} testId="external-api-cursor-model" />
-                        <CopyBlock label={t("externalApi.cursorTitle")} value={cursorConfig(baseUrl, cursor)} testId="external-api-cursor-config" />
-                        <p className="mt-2 text-xs text-zinc-500">{t("externalApi.cursorNotes")}</p>
-                    </>
-                ) : (
-                    <p className="mt-2 text-xs text-zinc-500">{t("externalApi.codingToolNoModels")}</p>
-                )}
-            </div>
-
-            <h3 className="mt-4 text-sm font-bold">{t("externalApi.toolErrorsTitle")}</h3>
-            <p className="mt-1 text-xs leading-5 text-zinc-500">{t("externalApi.toolErrors")}</p>
-        </section>
-    );
-}
-
 function KeyUsage({ keyId }: { keyId: string }) {
     const { t } = useLanguage();
     const [rows, setRows] = useState<RequestRow[] | null>(null);
@@ -296,6 +220,9 @@ const parseCapDraft = (draft: string, max: number): { ok: true; value: number | 
     return Number.isSafeInteger(value) && value >= 1 && value <= max ? { ok: true, value } : { ok: false };
 };
 
+/** Name, key, usage and last use: the columns of the key list on a wide screen. */
+const KEY_COLUMNS = "sm:grid sm:grid-cols-[minmax(0,2.1fr)_minmax(0,1.2fr)_minmax(0,1.6fr)_minmax(0,1fr)_2rem] sm:items-center sm:gap-3";
+
 function KeyRow({
     entry,
     onChanged,
@@ -312,6 +239,7 @@ function KeyRow({
     const [draft, setDraft] = useState("");
     const [error, setError] = useState<string | null>(null);
     const [showUsage, setShowUsage] = useState(false);
+    const [menuOpen, setMenuOpen] = useState(false);
     const active = entry.state === "active" && !revokeOnly;
 
     const patch = async (payload: Record<string, unknown>) => {
@@ -350,44 +278,107 @@ function KeyRow({
             : entry.state === "expired"
               ? t("externalApi.stateExpired")
               : t("externalApi.stateRevoked");
+    const usageText =
+        entry.creditCap !== null
+            ? fill(t("externalApi.capUsage"), { used: entry.committedCredits.toLocaleString(), cap: entry.creditCap.toLocaleString() })
+            : fill(t("externalApi.noCap"), { used: entry.committedCredits.toLocaleString() });
+    const usageShare = entry.creditCap ? Math.min(1, (entry.committedCredits + entry.heldCredits) / entry.creditCap) : 0;
+    const lastUsed = entry.lastUsedAt
+        ? new Date(entry.lastUsedAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
+        : t("externalApi.neverUsed");
+    const menuItem = "block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800";
+    const pick = (action: () => void) => () => {
+        setMenuOpen(false);
+        action();
+    };
 
     return (
-        <li className="py-4" data-testid="external-api-key" data-key-state={entry.state}>
-            <div className="flex flex-wrap items-start justify-between gap-2">
-                <div className="min-w-0">
-                    <p className="truncate text-sm font-bold">{entry.name}</p>
-                    <p className="font-mono text-xs text-zinc-500">{entry.keyPrefix}_…</p>
+        <li
+            className={`mt-2 rounded-xl border border-zinc-200 p-3 first:mt-0 dark:border-zinc-800 sm:mt-0 sm:rounded-none sm:border-x-0 sm:border-b-0 sm:px-4 sm:first:border-t-0 ${entry.state === "active" ? "" : "opacity-60"}`}
+            data-testid="external-api-key"
+            data-key-state={entry.state}
+        >
+            <div className={KEY_COLUMNS}>
+                <div className="flex min-w-0 items-start justify-between gap-2 sm:block">
+                    <div className="min-w-0">
+                        <p className="truncate text-sm font-bold">{entry.name}</p>
+                        <p className="mt-1 text-xs text-zinc-500">
+                            <span
+                                className={`mr-1 rounded-full px-2 py-0.5 font-semibold ${
+                                    entry.state === "active"
+                                        ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                                        : "bg-zinc-200 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
+                                }`}
+                            >
+                                {stateLabel}
+                            </span>
+                            {entry.expiresAt ? fill(t("externalApi.expiresAt"), { date: new Date(entry.expiresAt).toLocaleDateString() }) : null}
+                        </p>
+                    </div>
                 </div>
-                <span
-                    className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-                        active
-                            ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
-                            : "bg-zinc-200 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
-                    }`}
-                >
-                    {stateLabel}
-                </span>
+                <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-2 text-xs sm:contents">
+                    <div className="sm:block">
+                        <dt className="text-zinc-500 sm:sr-only">{t("externalApi.colKey")}</dt>
+                        <dd className="truncate font-mono text-zinc-600 dark:text-zinc-300">{entry.keyPrefix}_…</dd>
+                    </div>
+                    <div className="sm:order-none sm:col-start-4 sm:row-start-1">
+                        <dt className="text-zinc-500 sm:sr-only">{t("externalApi.colLastUsed")}</dt>
+                        <dd className="text-zinc-600 dark:text-zinc-300">{lastUsed}</dd>
+                    </div>
+                    <div className="col-span-2 sm:col-span-1 sm:col-start-3 sm:row-start-1">
+                        <dt className="text-zinc-500 sm:sr-only">{t("externalApi.colUsage")}</dt>
+                        <dd className="text-zinc-700 dark:text-zinc-200">
+                            {usageText}
+                            {entry.heldCredits > 0 ? <span className="block text-zinc-500">{fill(t("externalApi.held"), { held: entry.heldCredits })}</span> : null}
+                            {entry.creditCap ? (
+                                <span className="mt-1 block h-1.5 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800" aria-hidden="true">
+                                    <span className="block h-full rounded-full bg-cyan-500" style={{ width: `${Math.max(2, Math.round(usageShare * 100))}%` }} />
+                                </span>
+                            ) : null}
+                        </dd>
+                    </div>
+                </dl>
+                <div className="relative mt-2 flex justify-end sm:col-start-5 sm:row-start-1 sm:mt-0">
+                    <button
+                        type="button"
+                        aria-label={`${t("externalApi.keyActions")}: ${entry.name}`}
+                        aria-expanded={menuOpen}
+                        data-testid="external-api-key-menu"
+                        onClick={() => setMenuOpen((value) => !value)}
+                        className="rounded-lg px-2 py-1 text-lg leading-none text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                    >
+                        ⋯
+                    </button>
+                    {menuOpen ? (
+                        <div className="absolute right-0 top-8 z-10 w-44 rounded-xl border border-zinc-200 bg-white p-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-900" role="menu">
+                            {active ? (
+                                <>
+                                    <button type="button" role="menuitem" className={menuItem} onClick={pick(() => { setDraft(entry.name); setEditing("name"); })}>
+                                        {t("externalApi.rename")}
+                                    </button>
+                                    <button type="button" role="menuitem" className={menuItem} onClick={pick(() => { setDraft(entry.creditCap?.toString() ?? ""); setEditing("cap"); })}>
+                                        {t("externalApi.changeCap")}
+                                    </button>
+                                </>
+                            ) : null}
+                            {revokeOnly ? null : (
+                                <button type="button" role="menuitem" className={menuItem} onClick={pick(() => setShowUsage((value) => !value))}>
+                                    {showUsage ? t("externalApi.usageHide") : t("externalApi.usageShow")}
+                                </button>
+                            )}
+                            {entry.state !== "revoked" ? (
+                                <button type="button" role="menuitem" data-testid="external-api-key-revoke" className={`${menuItem} text-red-600`} onClick={pick(() => void revoke())}>
+                                    {t("externalApi.revoke")}
+                                </button>
+                            ) : null}
+                        </div>
+                    ) : null}
+                </div>
             </div>
-            <p className="mt-1 text-xs text-zinc-500">
-                {entry.creditCap !== null
-                    ? fill(t("externalApi.capUsage"), { used: entry.committedCredits, cap: entry.creditCap })
-                    : fill(t("externalApi.noCap"), { used: entry.committedCredits })}
-                {entry.heldCredits > 0 ? ` · ${fill(t("externalApi.held"), { held: entry.heldCredits })}` : ""}
-            </p>
-            <p className="mt-0.5 text-xs text-zinc-500">
-                {fill(t("externalApi.createdAt"), { date: new Date(entry.createdAt).toLocaleDateString() })}
-                {" · "}
-                {entry.lastUsedAt
-                    ? fill(t("externalApi.lastUsed"), { date: new Date(entry.lastUsedAt).toLocaleString() })
-                    : t("externalApi.neverUsed")}
-                {entry.expiresAt
-                    ? ` · ${fill(t("externalApi.expiresAt"), { date: new Date(entry.expiresAt).toLocaleDateString() })}`
-                    : ""}
-            </p>
 
             {editing ? (
                 <form
-                    className="mt-2 flex flex-wrap gap-2"
+                    className="mt-3 flex flex-wrap gap-2"
                     onSubmit={(event) => {
                         event.preventDefault();
                         if (editing === "name") void patch({ name: draft });
@@ -413,31 +404,56 @@ function KeyRow({
                         {t("externalApi.cancel")}
                     </button>
                 </form>
-            ) : (
-                <div className="mt-2 flex flex-wrap gap-2 text-xs font-semibold">
-                    {active ? (
-                        <>
-                            <button type="button" onClick={() => { setDraft(entry.name); setEditing("name"); }} className="rounded-lg px-2 py-1 text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800">
-                                {t("externalApi.rename")}
-                            </button>
-                            <button type="button" onClick={() => { setDraft(entry.creditCap?.toString() ?? ""); setEditing("cap"); }} className="rounded-lg px-2 py-1 text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800">
-                                {t("externalApi.changeCap")}
-                            </button>
-                        </>
-                    ) : null}
-                    {revokeOnly ? null : <button type="button" onClick={() => setShowUsage((value) => !value)} className="rounded-lg px-2 py-1 text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800">
-                        {showUsage ? t("externalApi.usageHide") : t("externalApi.usageShow")}
-                    </button>}
-                    {entry.state !== "revoked" ? (
-                        <button type="button" data-testid="external-api-key-revoke" onClick={() => void revoke()} className="rounded-lg px-2 py-1 text-red-600 hover:bg-zinc-100 dark:hover:bg-zinc-800">
-                            {t("externalApi.revoke")}
-                        </button>
-                    ) : null}
-                </div>
-            )}
+            ) : null}
             {error ? <p className="mt-1 text-xs text-red-600">{error}</p> : null}
             {showUsage ? <KeyUsage keyId={entry.id} /> : null}
         </li>
+    );
+}
+
+function KeyList({ keys, onChanged, revokeOnly = false, maxCreditCap = 0 }: { keys: KeySummary[]; onChanged: () => void; revokeOnly?: boolean; maxCreditCap?: number }) {
+    const { t } = useLanguage();
+    return (
+        <div className="mt-3 sm:overflow-visible sm:rounded-xl sm:border sm:border-zinc-200 sm:dark:border-zinc-800">
+            <div className={`hidden bg-zinc-50 px-4 py-2 text-xs font-semibold text-zinc-500 dark:bg-zinc-900 sm:rounded-t-xl ${KEY_COLUMNS}`} aria-hidden="true">
+                <span>{t("externalApi.colName")}</span>
+                <span>{t("externalApi.colKey")}</span>
+                <span>{t("externalApi.colUsage")}</span>
+                <span>{t("externalApi.colLastUsed")}</span>
+                <span />
+            </div>
+            <ul data-testid="external-api-keys">
+                {keys.map((entry) => (
+                    <KeyRow key={entry.id} entry={entry} onChanged={onChanged} revokeOnly={revokeOnly} maxCreditCap={maxCreditCap} />
+                ))}
+            </ul>
+        </div>
+    );
+}
+
+/** A dialog over the page; a sheet from the bottom on a narrow screen. */
+function Modal({ title, onClose, children, testId }: { title: string; onClose: () => void; children: ReactNode; testId: string }) {
+    useEffect(() => {
+        const onKey = (event: KeyboardEvent) => {
+            if (event.key === "Escape") onClose();
+        };
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+    }, [onClose]);
+    return (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 sm:items-center sm:p-4" onClick={onClose}>
+            <div
+                role="dialog"
+                aria-modal="true"
+                aria-label={title}
+                data-testid={testId}
+                onClick={(event) => event.stopPropagation()}
+                className="max-h-[90dvh] w-full overflow-y-auto rounded-t-2xl border border-zinc-200 bg-white p-5 shadow-xl dark:border-zinc-700 dark:bg-zinc-950 sm:max-w-lg sm:rounded-2xl"
+            >
+                <h2 className="text-lg font-bold">{title}</h2>
+                {children}
+            </div>
+        </div>
     );
 }
 
@@ -447,11 +463,340 @@ const genericConfig = (baseUrl: string, modelId: string, apiKey: string = KEY_PL
 API key: ${apiKey}
 Model: ${modelId}`;
 
-/** Smart Adaptive when offered, otherwise every model: what a first copy holds. */
-const defaultPicked = (overview: Overview): string[] => {
-    if (!overview.enabled) return [];
-    const ids = overview.models.map((model) => model.id);
-    return ids.includes(SMART_ADAPTIVE_MODEL_ID) ? [SMART_ADAPTIVE_MODEL_ID] : ids;
+/** Narrows a model list by name or id, so a long catalogue stays one screen. */
+const matchesModel = (model: ModelSummary, query: string) => {
+    const needle = query.trim().toLowerCase();
+    return !needle || model.name.toLowerCase().includes(needle) || model.id.toLowerCase().includes(needle);
+};
+
+/** Rows shown before "show more" when nothing is searched. */
+const MODEL_PREVIEW_COUNT = 3;
+
+function ModelSearchList({
+    models,
+    picked,
+    onToggle,
+    toolsFor,
+    testId,
+}: {
+    models: ModelSummary[];
+    /** With `picked`, each row is a checkbox that puts the model in a configuration. */
+    picked?: string[];
+    onToggle?: (id: string) => void;
+    /** The tools a model works with, shown under its name. */
+    toolsFor?: (model: ModelSummary) => string;
+    testId: string;
+}) {
+    const { t } = useLanguage();
+    const [query, setQuery] = useState("");
+    const [expanded, setExpanded] = useState(false);
+    const matching = models.filter((model) => matchesModel(model, query));
+    const searching = query.trim() !== "";
+    const shown = searching || expanded ? matching : matching.slice(0, MODEL_PREVIEW_COUNT);
+    const hidden = matching.length - shown.length;
+    return (
+        <div className="mt-3">
+            <input
+                type="search"
+                data-testid={`${testId}-search`}
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder={t("externalApi.modelSearch")}
+                aria-label={t("externalApi.modelSearch")}
+                className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+            />
+            <ul className="mt-2 grid gap-2 text-sm" data-testid={testId}>
+                {shown.map((model) => {
+                    const details = (
+                        <span className="flex min-w-0 flex-1 flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+                            <span className="min-w-0">
+                                <span className="font-semibold">{model.name}</span>
+                                <span className="block break-all font-mono text-xs text-zinc-500">{model.id}</span>
+                                {model.id === SMART_ADAPTIVE_MODEL_ID ? (
+                                    <span className="block text-xs text-zinc-600 dark:text-zinc-300">{t("externalApi.smartAdaptiveHint")}</span>
+                                ) : toolsFor ? (
+                                    <span className="block text-xs text-zinc-500">{toolsFor(model)}</span>
+                                ) : null}
+                            </span>
+                            <span className="self-start shrink-0 rounded-full border border-zinc-300 px-2 py-0.5 text-xs text-zinc-500 dark:border-zinc-700">
+                                {model.vision ? t("externalApi.inputTextImage") : t("externalApi.inputText")} · {fill(t("externalApi.creditsPerRequest"), { credits: model.creditWeight })}
+                            </span>
+                        </span>
+                    );
+                    return (
+                        <li key={model.id} className="rounded-xl bg-zinc-50 px-3 py-2 dark:bg-zinc-900">
+                            {picked && onToggle ? (
+                                <label className="flex items-start gap-3">
+                                    <input
+                                        type="checkbox"
+                                        className="mt-1"
+                                        checked={picked.includes(model.id)}
+                                        onChange={() => onToggle(model.id)}
+                                        aria-label={`${t("externalApi.includeInConfig")}: ${model.name}`}
+                                        data-testid={`external-api-pick-${model.id}`}
+                                    />
+                                    {details}
+                                </label>
+                            ) : (
+                                details
+                            )}
+                        </li>
+                    );
+                })}
+                {matching.length === 0 ? <li className="px-3 py-2 text-xs text-zinc-500">{t("externalApi.modelSearchEmpty")}</li> : null}
+            </ul>
+            {hidden > 0 ? (
+                <button type="button" data-testid={`${testId}-more`} onClick={() => setExpanded(true)} className="mt-2 text-sm font-semibold text-blue-600 hover:underline dark:text-blue-400">
+                    {fill(t("externalApi.modelsMore"), { count: hidden })}
+                </button>
+            ) : null}
+        </div>
+    );
+}
+
+function Segmented<T extends string>({ options, value, onChange, testId }: { options: [T, string][]; value: T; onChange: (value: T) => void; testId: string }) {
+    return (
+        <div className="inline-flex rounded-lg border border-zinc-300 p-0.5 text-xs dark:border-zinc-700" role="group">
+            {options.map(([id, label]) => (
+                <button
+                    key={id}
+                    type="button"
+                    aria-pressed={value === id}
+                    data-testid={`${testId}-${id}`}
+                    onClick={() => onChange(id)}
+                    className={`rounded-md px-2.5 py-1 font-semibold ${value === id ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900" : "text-zinc-600 dark:text-zinc-300"}`}
+                >
+                    {label}
+                </button>
+            ))}
+        </div>
+    );
+}
+
+function Notes({ children }: { children: ReactNode }) {
+    const { t } = useLanguage();
+    return (
+        <details className="mt-3 rounded-xl border border-zinc-200 px-3 py-2 text-xs leading-5 text-zinc-500 dark:border-zinc-800">
+            <summary className="cursor-pointer font-semibold text-zinc-700 dark:text-zinc-200">{t("externalApi.notesTitle")}</summary>
+            <div className="mt-2 grid gap-2">{children}</div>
+        </details>
+    );
+}
+
+type Platform = "claude-code" | "codex" | "cursor" | "aside" | "vscode" | "other";
+const PLATFORMS: Platform[] = ["claude-code", "codex", "cursor", "aside", "vscode", "other"];
+type Shell = "powershell" | "posix";
+type Surface = "terminal" | "extension";
+const SHELLS: [Shell, string][] = [
+    ["powershell", "Windows (PowerShell)"],
+    ["posix", "macOS / Linux"],
+];
+
+/**
+ * One tool at a time: the person picks where the key is used and sees only
+ * that tool's setup. Configurations carry the new key while this page holds
+ * it and a placeholder otherwise. Native protocols never offer Smart Adaptive
+ * (codingToolModels).
+ */
+function ConnectSection({ baseUrl, models, apiKey }: { baseUrl: string; models: ModelSummary[]; apiKey: string | null }) {
+    const { t } = useLanguage();
+    const key = apiKey ?? KEY_PLACEHOLDER;
+    const [platform, setPlatform] = useState<Platform | null>(null);
+    const [shell, setShell] = useState<Shell>("powershell");
+    const [surface, setSurface] = useState<Surface>("terminal");
+    const lists = useMemo(() => codingToolModels(models), [models]);
+    const [claudeId, setClaudeId] = useState<string | undefined>();
+    const [codexId, setCodexId] = useState<string | undefined>();
+    const [cursorId, setCursorId] = useState<string | undefined>();
+    const [otherId, setOtherId] = useState<string | undefined>();
+    // Aside and VS Code take a model list: Smart Adaptive alone until the
+    // person ticks more, because its id survives catalogue changes.
+    const [picked, setPicked] = useState<string[] | null>(null);
+    const pickedIds =
+        picked ?? (models.some((model) => model.id === SMART_ADAPTIVE_MODEL_ID) ? [SMART_ADAPTIVE_MODEL_ID] : models.map((model) => model.id));
+    const pickedModels = models.filter((model) => pickedIds.includes(model.id));
+    const togglePicked = (id: string) => {
+        if (!pickedIds.includes(id)) setPicked([...pickedIds, id]);
+        // Keep at least one model, so a copied configuration is never empty.
+        else if (pickedIds.length > 1) setPicked(pickedIds.filter((value) => value !== id));
+    };
+
+    const surfaces: [Surface, string][] = [
+        ["terminal", t("externalApi.terminal")],
+        ["extension", t("externalApi.vscodeExtension")],
+    ];
+    const platformName = (id: Platform) =>
+        ({ "claude-code": "Claude Code", codex: "Codex", cursor: "Cursor", aside: "Aside", vscode: "VS Code", other: t("externalApi.platformOther") })[id];
+    const platformHint = (id: Platform) =>
+        ({
+            "claude-code": `${t("externalApi.terminal")} · ${t("externalApi.vscodeExtension")}`,
+            codex: `${t("externalApi.terminal")} · ${t("externalApi.vscodeExtension")}`,
+            cursor: "Chat · Agent",
+            aside: "Custom Provider",
+            vscode: t("externalApi.vscodeChip"),
+            other: t("externalApi.otherChip"),
+        })[id];
+    const noModels = <p className="mt-3 text-xs text-zinc-500">{t("externalApi.codingToolNoModels")}</p>;
+
+    const panel = (() => {
+        switch (platform) {
+            case "claude-code": {
+                const claude = lists.claudeCode.find((model) => model.id === claudeId) ?? lists.claudeCode[0];
+                if (!claude) return noModels;
+                const config = claudeCodeConfig(baseUrl, claude, lists.claudeCode, key);
+                return (
+                    <div data-testid="external-api-tool-claude-code">
+                        <p className="text-xs text-zinc-500">{t("externalApi.claudeCodeHint")}</p>
+                        <ToolModelSelect models={lists.claudeCode} value={claude.id} onChange={setClaudeId} testId="external-api-claude-code-model" />
+                        <div className="mt-3 flex flex-wrap gap-2">
+                            <Segmented options={surfaces} value={surface} onChange={setSurface} testId="external-api-surface" />
+                            {surface === "terminal" ? <Segmented options={SHELLS} value={shell} onChange={setShell} testId="external-api-shell" /> : null}
+                        </div>
+                        {surface === "extension" ? (
+                            <CopyBlock label={t("externalApi.claudeCodeVscode")} value={config.vscodeSettings} testId="external-api-claude-code-vscode" />
+                        ) : shell === "powershell" ? (
+                            <CopyBlock label={t("externalApi.claudeCodeTerminal")} value={config.powershell} testId="external-api-claude-code-powershell" />
+                        ) : (
+                            <CopyBlock label={t("externalApi.claudeCodeTerminal")} value={config.posix} testId="external-api-claude-code-posix" />
+                        )}
+                        <Notes>
+                            <p>{t("externalApi.codingToolsIntro")}</p>
+                            <p>{t("externalApi.claudeCodeNotes")}</p>
+                            <p>{t("externalApi.codingToolsVerified")}</p>
+                        </Notes>
+                    </div>
+                );
+            }
+            case "codex": {
+                const codex = lists.codex.find((model) => model.id === codexId) ?? lists.codex[0];
+                if (!codex) return noModels;
+                const files = codexConfig(baseUrl, codex, lists.codex);
+                const withKey = (text: string) => text.replace(KEY_PLACEHOLDER, key);
+                return (
+                    <div data-testid="external-api-tool-codex">
+                        <p className="text-xs text-zinc-500">{t("externalApi.codexHint")}</p>
+                        <ToolModelSelect models={lists.codex} value={codex.id} onChange={setCodexId} testId="external-api-codex-model" />
+                        <div className="mt-3 flex flex-wrap gap-2">
+                            <Segmented options={surfaces} value={surface} onChange={setSurface} testId="external-api-surface" />
+                            <Segmented options={SHELLS} value={shell} onChange={setShell} testId="external-api-shell" />
+                        </div>
+                        {surface === "terminal" ? (
+                            <>
+                                <CopyBlock label={t("externalApi.codexProvider")} value={files.providerToml} testId="external-api-codex-provider" />
+                                <CopyBlock label={t("externalApi.codexProfile")} value={files.profileToml} testId="external-api-codex-profile" />
+                            </>
+                        ) : (
+                            <CopyBlock label={t("externalApi.codexDefault")} value={files.defaultToml} testId="external-api-codex-default" />
+                        )}
+                        <CopyBlock
+                            label={t("externalApi.codexKey")}
+                            value={withKey(shell === "powershell" ? files.powershellKey : files.posixKey)}
+                            testId={`external-api-codex-key-${shell}`}
+                        />
+                        <Notes>
+                            <p>{t("externalApi.codingToolsIntro")}</p>
+                            <p>{t("externalApi.codexNotes")}</p>
+                            <p>{t("externalApi.codingToolsVerified")}</p>
+                        </Notes>
+                    </div>
+                );
+            }
+            case "cursor": {
+                const cursor = lists.cursor.find((model) => model.id === cursorId) ?? lists.cursor[0];
+                if (!cursor) return noModels;
+                return (
+                    <div data-testid="external-api-tool-cursor">
+                        <p className="text-xs text-zinc-500">{t("externalApi.cursorHint")}</p>
+                        <p className="mt-1 text-xs font-semibold text-zinc-600 dark:text-zinc-300" data-testid="external-api-cursor-models">{t("externalApi.cursorModels")}</p>
+                        <ToolModelSelect models={lists.cursor} value={cursor.id} onChange={setCursorId} testId="external-api-cursor-model" />
+                        <CopyBlock label="Cursor Settings › Models" value={cursorConfig(baseUrl, cursor, key)} testId="external-api-cursor-config" />
+                        <Notes>
+                            <p>{t("externalApi.codingToolsIntro")}</p>
+                            <p>{t("externalApi.cursorNotes")}</p>
+                        </Notes>
+                    </div>
+                );
+            }
+            case "aside":
+            case "vscode":
+                return (
+                    <div data-testid={`external-api-tool-${platform}`}>
+                        <p className="text-xs text-zinc-500">{platform === "aside" ? t("externalApi.asideHint") : t("externalApi.vscodeHint")}</p>
+                        <p className="mt-3 text-sm font-semibold">{t("externalApi.modelsPick")}</p>
+                        <ModelSearchList models={models} picked={pickedIds} onToggle={togglePicked} testId="external-api-pick-models" />
+                        {platform === "aside" ? (
+                            <CopyBlock label="Aside" value={JSON.stringify(asideProviderConfig(baseUrl, pickedModels, key), null, 2)} testId="external-api-aside-config" />
+                        ) : (
+                            // VS Code asks for the key itself and stores it securely.
+                            <CopyBlock label="VS Code" value={JSON.stringify(vscodeCustomEndpointConfig(baseUrl, pickedModels), null, 2)} testId="external-api-vscode-config" />
+                        )}
+                    </div>
+                );
+            case "other": {
+                const other = models.find((model) => model.id === otherId) ?? models.find((model) => model.id === SMART_ADAPTIVE_MODEL_ID) ?? models[0];
+                return (
+                    <div data-testid="external-api-tool-other">
+                        <p className="text-xs text-zinc-500">{t("externalApi.genericHint")}</p>
+                        {other ? <ToolModelSelect models={models} value={other.id} onChange={setOtherId} testId="external-api-other-model" /> : null}
+                        <CopyBlock label={t("externalApi.genericTitle")} value={genericConfig(baseUrl, other?.id ?? SMART_ADAPTIVE_MODEL_ID, key)} testId="external-api-generic-config" />
+                    </div>
+                );
+            }
+            default:
+                return null;
+        }
+    })();
+
+    return (
+        <section id="connect" className="mt-6 scroll-mt-6 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950/60" data-testid="external-api-connect">
+            <h2 className="text-base font-bold">{t("externalApi.connectTitle")}</h2>
+            <p className="mt-1 text-sm leading-6 text-zinc-500">{t("externalApi.connectIntro")}</p>
+            {apiKey ? (
+                <p className="mt-1 text-xs font-semibold text-emerald-700 dark:text-emerald-400" data-testid="external-api-key-filled">
+                    ✓ {t("externalApi.keyFilledIn")}
+                </p>
+            ) : null}
+            <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3" role="group" aria-label={t("externalApi.connectTitle")}>
+                {PLATFORMS.map((id) => (
+                    <button
+                        key={id}
+                        type="button"
+                        aria-pressed={platform === id}
+                        data-testid={`external-api-platform-${id}`}
+                        onClick={() => setPlatform(id)}
+                        className={`rounded-xl border p-3 text-left ${
+                            platform === id
+                                ? "border-zinc-900 bg-zinc-50 ring-1 ring-zinc-900 dark:border-zinc-100 dark:bg-zinc-900 dark:ring-zinc-100"
+                                : "border-zinc-300 hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-900"
+                        }`}
+                    >
+                        <span className="block text-sm font-bold">{platformName(id)}</span>
+                        <span className="mt-0.5 hidden text-xs text-zinc-500 sm:block">{platformHint(id)}</span>
+                    </button>
+                ))}
+            </div>
+            {platform ? (
+                <div className="mt-4 border-t border-zinc-200 pt-4 dark:border-zinc-800">
+                    <h3 className="mb-1 text-base font-bold">{platformName(platform)}</h3>
+                    {panel}
+                </div>
+            ) : null}
+        </section>
+    );
+}
+
+/** Which tools can use a model, from the protocols it carries. */
+const toolsForModel = (model: ModelSummary, otherLabel: string) => {
+    const lists = codingToolModels([model]);
+    const chat = model.protocols?.includes("chat_completions") ?? true;
+    return [
+        lists.claudeCode.length ? "Claude Code" : null,
+        lists.codex.length ? "Codex" : null,
+        lists.cursor.length ? "Cursor" : null,
+        ...(chat ? ["Aside", "VS Code", otherLabel] : []),
+    ]
+        .filter(Boolean)
+        .join(" · ");
 };
 
 export function ExternalApiSettings() {
@@ -460,15 +805,16 @@ export function ExternalApiSettings() {
     const [overview, setOverview] = useState<Overview | null>(null);
     const [failed, setFailed] = useState(false);
     const [signedOut, setSignedOut] = useState(false);
+    const [createOpen, setCreateOpen] = useState(false);
     const [name, setName] = useState("");
     const [cap, setCap] = useState("");
     const [expiry, setExpiry] = useState<string>("90");
     const [creating, setCreating] = useState(false);
     const [createError, setCreateError] = useState<string | null>(null);
-    const [created, setCreated] = useState<{ key: string } | null>(null);
-    // Which offered models go into the copied configurations. Smart Adaptive
-    // alone until the person ticks more: its id survives catalogue changes.
-    const [picked, setPicked] = useState<string[] | null>(null);
+    // The new key's secret, held only in this component: shown once in its
+    // dialog, then filled into the tool setup until the person leaves the page.
+    const [newKey, setNewKey] = useState<string | null>(null);
+    const [keyDialogOpen, setKeyDialogOpen] = useState(false);
 
     const [version, setVersion] = useState(0);
     const load = useCallback(() => setVersion((value) => value + 1), []);
@@ -487,7 +833,6 @@ export function ExternalApiSettings() {
                 }
                 setFailed(false);
                 setOverview(body as Overview);
-                setPicked((current) => current ?? defaultPicked(body as Overview));
             })
             .catch(() => {
                 if (!cancelled) setFailed(true);
@@ -497,17 +842,11 @@ export function ExternalApiSettings() {
         };
     }, [version]);
 
-    const configModels = useMemo(
-        () => (overview?.enabled ? overview.models.filter((model) => picked?.includes(model.id)) : []),
-        [overview, picked]
-    );
-    const togglePicked = (id: string) =>
-        setPicked((current) => {
-            const list = current ?? [];
-            if (!list.includes(id)) return [...list, id];
-            // Keep at least one model, so a copied configuration is never empty.
-            return list.length > 1 ? list.filter((value) => value !== id) : list;
-        });
+    const closeCreate = useCallback(() => {
+        setCreateOpen(false);
+        setCreateError(null);
+    }, []);
+    const closeKeyDialog = useCallback(() => setKeyDialogOpen(false), []);
 
     const create = async () => {
         const maxCreditCap = overview?.enabled ? overview.limits.maxCreditCap : 0;
@@ -533,7 +872,9 @@ export function ExternalApiSettings() {
                 setCreateError(body?.error ?? t("externalApi.errorGeneric"));
                 return;
             }
-            setCreated({ key: body.key });
+            setNewKey(body.key);
+            setCreateOpen(false);
+            setKeyDialogOpen(true);
             setName("");
             setCap("");
             load();
@@ -544,23 +885,24 @@ export function ExternalApiSettings() {
         }
     };
 
+    const card = "mt-6 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950/60";
+    const primary = "rounded-xl bg-zinc-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900";
+    const secondary = "rounded-xl border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-700 dark:border-zinc-700 dark:text-zinc-200";
+    const input = "rounded-lg border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900";
+
     return (
-        <div className="mx-auto w-full max-w-2xl px-6 py-10" data-testid="external-api-settings">
+        <div className="mx-auto w-full max-w-2xl px-4 py-8 sm:px-6 sm:py-10" data-testid="external-api-settings">
             <SettingsDetailNav section="api-keys" currentLabel={t("externalApi.pageTitle")} backTestId="external-api-back" />
             <h1 className="mt-6 flex items-center gap-2 text-2xl font-black">
                 <KeyRound className="h-6 w-6" aria-hidden="true" />
                 {t("externalApi.pageTitle")}
             </h1>
-            <p className="mt-2 text-sm leading-6 text-zinc-500 dark:text-zinc-400">{t("externalApi.intro")}</p>
-            <p className="mt-2 text-sm leading-6 text-zinc-500 dark:text-zinc-400">{t("externalApi.shareWarning")}</p>
+            <p className="mt-2 text-sm leading-6 text-zinc-500 dark:text-zinc-400">{t("externalApi.introShort")}</p>
 
             {signedOut ? (
-                <section className="mt-8 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950/60" data-testid="external-api-signin">
+                <section className={card} data-testid="external-api-signin">
                     <p className="text-sm text-zinc-600 dark:text-zinc-300">{t("externalApi.signInRequired")}</p>
-                    <Link
-                        href={`/auth/signin?callbackUrl=${encodeURIComponent("/settings/api")}`}
-                        className="mt-3 inline-flex rounded-xl bg-zinc-900 px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
-                    >
+                    <Link href={`/auth/signin?callbackUrl=${encodeURIComponent("/settings/api")}`} className={`mt-3 inline-flex ${primary}`}>
                         {t("auth.login")}
                     </Link>
                 </section>
@@ -569,18 +911,14 @@ export function ExternalApiSettings() {
             {!failed && !overview ? <p className="mt-8 text-sm text-zinc-500">{t("externalApi.loading")}</p> : null}
             {overview && !overview.enabled ? (
                 <>
-                    <p className="mt-8 rounded-2xl border border-zinc-200 bg-white p-4 text-sm dark:border-zinc-800 dark:bg-zinc-950/60" data-testid="external-api-unavailable">
+                    <p className={`${card} text-sm`} data-testid="external-api-unavailable">
                         {t("externalApi.unavailable")}
                     </p>
                     {overview.keys?.length ? (
                         // Still listed so a key issued earlier can be revoked.
-                        <section className="mt-6 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950/60">
+                        <section className={card}>
                             <h2 className="text-base font-bold">{t("externalApi.keysTitle")}</h2>
-                            <ul className="divide-y divide-zinc-200 dark:divide-zinc-800" data-testid="external-api-keys">
-                                {overview.keys.map((entry) => (
-                                    <KeyRow key={entry.id} entry={entry} onChanged={() => void load()} revokeOnly />
-                                ))}
-                            </ul>
+                            <KeyList keys={overview.keys} onChanged={load} revokeOnly />
                         </section>
                     ) : null}
                 </>
@@ -588,113 +926,111 @@ export function ExternalApiSettings() {
 
             {overview && overview.enabled ? (
                 <>
-                    {created ? (
-                        <section className="mt-8 rounded-2xl border-2 border-zinc-900 bg-white p-4 dark:border-zinc-100 dark:bg-zinc-950" data-testid="external-api-created">
-                            <h2 className="text-base font-bold">{t("externalApi.createdTitle")}</h2>
-                            <p className="mt-1 text-sm text-zinc-500">{t("externalApi.createdBody")}</p>
-                            <CopyBlock label="API key" value={created.key} testId="external-api-created-key" />
-                            <CopyBlock label={`${t("externalApi.asideTitle")} — ${t("externalApi.asideHint")}`} value={JSON.stringify(asideProviderConfig(overview.baseUrl, configModels, created.key), null, 2)} testId="external-api-created-aside" />
-                            <CopyBlock label={`${t("externalApi.vscodeTitle")} — ${t("externalApi.vscodeHint")}`} value={JSON.stringify(vscodeCustomEndpointConfig(overview.baseUrl, configModels), null, 2)} testId="external-api-created-vscode" />
-                            <CopyBlock label={`${t("externalApi.genericTitle")} — ${t("externalApi.genericHint")}`} value={genericConfig(overview.baseUrl, configModels[0]?.id ?? SMART_ADAPTIVE_MODEL_ID, created.key)} testId="external-api-created-generic" />
-                            <button type="button" data-testid="external-api-created-done" onClick={() => setCreated(null)} className="mt-4 rounded-xl bg-zinc-900 px-4 py-2 text-sm font-semibold text-white dark:bg-zinc-100 dark:text-zinc-900">
-                                {t("externalApi.done")}
+                    <section className={card}>
+                        <div className="flex items-center justify-between gap-3">
+                            <h2 className="text-base font-bold">{t("externalApi.keysTitle")}</h2>
+                            <button type="button" data-testid="external-api-new" onClick={() => setCreateOpen(true)} className={primary}>
+                                + {t("externalApi.newKey")}
                             </button>
-                        </section>
-                    ) : null}
-
-                    <section className="mt-8 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950/60">
-                        <h2 className="text-base font-bold">{t("externalApi.createTitle")}</h2>
-                        <form
-                            className="mt-3 grid gap-3"
-                            onSubmit={(event) => {
-                                event.preventDefault();
-                                void create();
-                            }}
-                        >
-                            <label className="grid gap-1 text-sm">
-                                <span className="font-semibold">{t("externalApi.nameLabel")}</span>
-                                <input data-testid="external-api-name" required maxLength={80} value={name} placeholder={t("externalApi.namePlaceholder")} onChange={(event) => setName(event.target.value)} className="rounded-lg border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900" />
-                            </label>
-                            <label className="grid gap-1 text-sm">
-                                <span className="font-semibold">{t("externalApi.capLabel")}</span>
-                                <input data-testid="external-api-cap" inputMode="numeric" value={cap} onChange={(event) => setCap(event.target.value)} className="rounded-lg border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900" />
-                                <span className="text-xs text-zinc-500">{t("externalApi.capHint")}</span>
-                            </label>
-                            <label className="grid gap-1 text-sm">
-                                <span className="font-semibold">{t("externalApi.expiryLabel")}</span>
-                                <select data-testid="external-api-expiry" value={expiry} onChange={(event) => setExpiry(event.target.value)} className="rounded-lg border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900">
-                                    {overview.limits.expiryDays.map((days) => (
-                                        <option key={days} value={String(days)}>
-                                            {fill(t("externalApi.expiryDays"), { days })}
-                                        </option>
-                                    ))}
-                                    <option value="never">{t("externalApi.expiryNever")}</option>
-                                </select>
-                            </label>
-                            {createError ? <p className="text-sm text-red-600">{createError}</p> : null}
-                            <button type="submit" data-testid="external-api-create" disabled={creating || !name.trim()} className="justify-self-start rounded-xl bg-zinc-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900">
-                                {creating ? t("externalApi.creating") : t("externalApi.createButton")}
-                            </button>
-                        </form>
-                    </section>
-
-                    <section className="mt-6 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950/60">
-                        <h2 className="text-base font-bold">{t("externalApi.keysTitle")}</h2>
+                        </div>
                         {overview.keys.length === 0 ? (
-                            <p className="mt-2 text-sm text-zinc-500">{t("externalApi.noKeys")}</p>
+                            <p className="mt-3 text-sm text-zinc-500">{t("externalApi.noKeys")}</p>
                         ) : (
-                            <ul className="divide-y divide-zinc-200 dark:divide-zinc-800" data-testid="external-api-keys">
-                                {overview.keys.map((entry) => (
-                                    <KeyRow key={entry.id} entry={entry} onChanged={() => void load()} maxCreditCap={overview.limits.maxCreditCap} />
-                                ))}
-                            </ul>
+                            <KeyList keys={overview.keys} onChanged={load} maxCreditCap={overview.limits.maxCreditCap} />
                         )}
                         <Link href={settingsHrefForProduct(`${SETTINGS_HOME_PATH}?${SETTINGS_TAB_QUERY_PARAM}=plan`, product)} className="mt-3 inline-block text-sm font-semibold text-blue-600 hover:underline dark:text-blue-400">
                             {t("externalApi.accountUsageLink")}
                         </Link>
                     </section>
 
-                    <section className="mt-6 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950/60">
-                        <h2 className="text-base font-bold">{t("externalApi.modelsTitle")}</h2>
+                    <ConnectSection baseUrl={overview.baseUrl} models={overview.models} apiKey={newKey} />
+
+                    <section className={card} data-testid="external-api-allowed-models">
+                        <div className="flex items-center justify-between gap-3">
+                            <h2 className="text-base font-bold">{t("externalApi.modelsTitle")}</h2>
+                            <span className="text-xs text-zinc-500">{fill(t("externalApi.modelsCount"), { count: overview.models.length })}</span>
+                        </div>
+                        <p className="mt-1 text-sm text-zinc-500">{t("externalApi.modelsIntro")}</p>
                         {overview.models.length === 0 ? (
                             <p className="mt-2 text-sm text-zinc-500">{t("externalApi.noModels")}</p>
                         ) : (
-                            <ul className="mt-2 grid gap-2 text-sm" data-testid="external-api-models">
-                                {overview.models.map((model) => (
-                                    <li key={model.id} className="rounded-xl bg-zinc-50 px-3 py-2 dark:bg-zinc-900">
-                                        <label className="flex items-start gap-3">
-                                            <input
-                                                type="checkbox"
-                                                className="mt-1"
-                                                checked={picked?.includes(model.id) ?? false}
-                                                onChange={() => togglePicked(model.id)}
-                                                aria-label={`${t("externalApi.includeInConfig")}: ${model.name}`}
-                                                data-testid={`external-api-pick-${model.id}`}
-                                            />
-                                            <span className="min-w-0">
-                                                <span className="font-semibold">{model.name}</span>{" "}
-                                                <span className="font-mono text-xs text-zinc-500">{model.id}</span>
-                                                {model.id === SMART_ADAPTIVE_MODEL_ID ? (
-                                                    <span className="block text-xs text-zinc-600 dark:text-zinc-300">{t("externalApi.smartAdaptiveHint")}</span>
-                                                ) : null}
-                                                <span className="block text-xs text-zinc-500">
-                                                    {model.vision ? t("externalApi.inputTextImage") : t("externalApi.inputText")} · {t("externalApi.toolCalls")} ·{" "}
-                                                    {fill(t("externalApi.creditsPerRequest"), { credits: model.creditWeight })}
-                                                </span>
-                                            </span>
-                                        </label>
-                                    </li>
-                                ))}
-                            </ul>
+                            <ModelSearchList models={overview.models} toolsFor={(model) => toolsForModel(model, t("externalApi.platformOther"))} testId="external-api-models" />
                         )}
-                        <CopyBlock label={t("externalApi.baseUrlLabel")} value={overview.baseUrl} testId="external-api-base-url" />
-                        <p className="mt-3 text-xs text-zinc-500">{t("externalApi.configFromSelection")}</p>
-                        <CopyBlock label={`${t("externalApi.asideTitle")} — ${t("externalApi.asideHint")}`} value={JSON.stringify(asideProviderConfig(overview.baseUrl, configModels), null, 2)} testId="external-api-aside-config" />
-                        <CopyBlock label={`${t("externalApi.vscodeTitle")} — ${t("externalApi.vscodeHint")}`} value={JSON.stringify(vscodeCustomEndpointConfig(overview.baseUrl, configModels), null, 2)} testId="external-api-vscode-config" />
-                        <CopyBlock label={`${t("externalApi.genericTitle")} — ${t("externalApi.genericHint")}`} value={genericConfig(overview.baseUrl, configModels[0]?.id ?? SMART_ADAPTIVE_MODEL_ID)} testId="external-api-generic-config" />
                     </section>
 
-                    <CodingToolsSection baseUrl={overview.baseUrl} models={overview.models} />
+                    <details className="mt-6 rounded-2xl border border-zinc-200 px-4 py-3 text-sm text-zinc-500 dark:border-zinc-800">
+                        <summary className="cursor-pointer font-semibold">{t("externalApi.toolErrorsTitle")}</summary>
+                        <p className="mt-2 text-xs leading-5">{t("externalApi.toolErrors")}</p>
+                    </details>
+
+                    {createOpen ? (
+                        <Modal title={t("externalApi.createTitle")} onClose={closeCreate} testId="external-api-create-dialog">
+                            <p className="mt-1 text-sm text-zinc-500">{t("externalApi.createIntro")}</p>
+                            <form
+                                className="mt-4 grid gap-3"
+                                onSubmit={(event) => {
+                                    event.preventDefault();
+                                    void create();
+                                }}
+                            >
+                                <label className="grid gap-1 text-sm">
+                                    <span className="font-semibold">{t("externalApi.nameLabel")}</span>
+                                    <input autoFocus data-testid="external-api-name" required maxLength={80} value={name} placeholder={t("externalApi.namePlaceholder")} onChange={(event) => setName(event.target.value)} className={input} />
+                                </label>
+                                <label className="grid gap-1 text-sm">
+                                    <span className="font-semibold">{t("externalApi.capLabel")}</span>
+                                    <input data-testid="external-api-cap" inputMode="numeric" value={cap} onChange={(event) => setCap(event.target.value)} className={input} />
+                                    <span className="text-xs text-zinc-500">{t("externalApi.capHint")}</span>
+                                </label>
+                                <label className="grid gap-1 text-sm">
+                                    <span className="font-semibold">{t("externalApi.expiryLabel")}</span>
+                                    <select data-testid="external-api-expiry" value={expiry} onChange={(event) => setExpiry(event.target.value)} className={input}>
+                                        {overview.limits.expiryDays.map((days) => (
+                                            <option key={days} value={String(days)}>
+                                                {fill(t("externalApi.expiryDays"), { days })}
+                                            </option>
+                                        ))}
+                                        <option value="never">{t("externalApi.expiryNever")}</option>
+                                    </select>
+                                </label>
+                                {createError ? <p className="text-sm text-red-600">{createError}</p> : null}
+                                <div className="mt-2 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                                    <button type="button" onClick={closeCreate} className={secondary}>
+                                        {t("externalApi.cancel")}
+                                    </button>
+                                    <button type="submit" data-testid="external-api-create" disabled={creating || !name.trim()} className={primary}>
+                                        {creating ? t("externalApi.creating") : t("externalApi.createButton")}
+                                    </button>
+                                </div>
+                            </form>
+                        </Modal>
+                    ) : null}
+
+                    {keyDialogOpen && newKey ? (
+                        <Modal title={t("externalApi.createdTitle")} onClose={closeKeyDialog} testId="external-api-created">
+                            <p className="mt-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/50 dark:text-amber-200">
+                                {t("externalApi.createdBody")}
+                            </p>
+                            <CopyBlock label="API key" value={newKey} testId="external-api-created-key" />
+                            <p className="mt-3 text-xs text-zinc-500">{t("externalApi.keyFilledIn")}</p>
+                            <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                                <button type="button" onClick={closeKeyDialog} className={secondary}>
+                                    {t("externalApi.close")}
+                                </button>
+                                <button
+                                    type="button"
+                                    data-testid="external-api-created-done"
+                                    onClick={() => {
+                                        closeKeyDialog();
+                                        document.getElementById("connect")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                                    }}
+                                    className={primary}
+                                >
+                                    {t("externalApi.savedGoConnect")}
+                                </button>
+                            </div>
+                        </Modal>
+                    ) : null}
                 </>
             ) : null}
         </div>

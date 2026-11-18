@@ -40,6 +40,7 @@ import { getRuntimeModel } from "@/lib/modelRegistry";
 import { noteSmartAdaptiveRefusal, rememberSmartAdaptiveToolCalls, routeSmartAdaptive, smartAdaptiveRouterAllowed } from "@/lib/externalApiSmartAdaptive";
 import { externalApiRunnableModels } from "@/lib/externalApiCatalog";
 import { externalApiAdmissionHook } from "@/lib/externalApiAdmission";
+import { pickRequestedModel } from "@/lib/externalApiProtocols";
 import { authenticateExternalApiKey, ExternalApiKeyError } from "@/lib/externalApiKeys";
 import { sha256Hex } from "@/lib/externalApiKeyCore";
 import { getModelGenerationSettings } from "@/lib/modelGenerationCompatibility";
@@ -270,7 +271,17 @@ export async function handleChatCompletions(request: Request): Promise<Response>
         // Smart Adaptive: Tomverse picks one of the runnable models, and the
         // response says which one answered (the `model` field and a header).
         let routedHeaders: Record<string, string> = {};
-        let entry = runnable.find((candidate) => candidate.capabilities.id === parsed.model);
+        // A Tomverse id, or the provider's own id for exactly one offered model.
+        const picked = parsed.model === SMART_ADAPTIVE_MODEL_ID ? null : pickRequestedModel(runnable, parsed.model);
+        if (picked && "ambiguous" in picked) {
+            throw new ProtocolError(
+                400,
+                "model_ambiguous",
+                `'${parsed.model}' names more than one Tomverse model. Use the Tomverse model id: ${picked.ambiguous.map((candidate) => candidate.model.id).join(", ")}.`,
+                "model"
+            );
+        }
+        let entry = picked?.entry;
         if (parsed.model === SMART_ADAPTIVE_MODEL_ID && runnable.length > 0) {
             const routed = await routeSmartAdaptive({
                 request: parsed,
