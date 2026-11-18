@@ -102,7 +102,7 @@ mediaType, size, kind, objectKey, uploadId, createdAt.
   그 지식은 누군가 옮기기 전까지만 한 곳에 있다.
 - **저장은 한 트랜잭션이다.** 메시지 행과 첨부 행이 함께 commit된다. 저장된 turn이
   나열할 수 없는 파일 수를 보여 주는 상태는 존재하지 않는다.
-- **복원된 질문의 새 전송**은 최대 5개의 순서 있는 opaque reference를 받는다.
+- **복원된 질문의 새 전송**은 최대 10개(`CHAT_MAX_ATTACHMENTS_PER_MESSAGE`)의 순서 있는 opaque reference를 받는다.
   한 항목은 `uploadId` 또는 `attachmentId` 하나만 가지며, 기존 `attachmentUploadIds`와
   동시에 쓰지 않는다. 한 메시지 안의 같은 handle 중복과 한 batch 안의 message ID
   중복은 복사 전에 거부한다. 이름·bytes·storage key를 클라이언트가 지정하지 않는다.
@@ -163,7 +163,28 @@ R2 쓰기와 DB 쓰기는 한 트랜잭션이 아니다. 그래서 `generated-ar
 같은 결정을 한다 — **객체 먼저, 행 나중. 삭제는 행 먼저, tombstone, 객체 나중.**
 
 - **삭제되는 것**: 대화 삭제, 대화 일괄 삭제, 계정 삭제. 셋 다 같은 트랜잭션에서
-  `MessageAttachmentCleanup`을 남긴다.
+  `MessageAttachmentCleanup`을 남긴다. drain은 원본과 함께 그 옆의 추출 텍스트
+  (`<objectKey>.extracted-v<N>.json`, §7.1)를 지운 뒤에 행을 완료한다.
+
+### 7.1 추출 텍스트 캐시 (운영자 결정 2026-11-18)
+
+- **왜:** 매 turn이 이전 메시지의 파일을 R2에서 다시 읽고 다시 파싱했다. 스캔 PDF는
+  매 turn 유료 OCR을 다시 탔다. 이 비용이 파일 크기에 비례해서 첨부 상한이 10MB에
+  묶여 있었다.
+- **무엇을:** 이전 메시지의 파일을 처음 다시 읽는 turn이, 추출한 텍스트를 원본 옆에
+  `<objectKey>.extracted-v<N>.json`으로 저장한다. 다음 turn부터는 그 텍스트만 읽는다.
+  캐시를 읽은 파일은 원본 바이트를 읽지 않으므로 요청 합계(`CHAT_MAX_TOTAL_ATTACHMENT_BYTES`)에
+  세지 않는다. 이전 파일 몫(입력 상한의 절반)과 파싱 예산은 그대로 적용한다.
+- **누구의 것만:** 메시지 행에 결속된 로그인 계정 파일만이다. 게스트 객체와 결속 전
+  업로드는 캐시하지 않는다. 그래서 삭제 경로는 위의 cleanup queue 하나다.
+- **어떤 형식만:** 모델과 스위치에 따라 결과가 달라지지 않는 추출기만이다(PDF 텍스트·OCR,
+  Office, 옛 Office, 텍스트). 이미지, 모델에 파일로 넘긴 PDF, iWork 안내문, 압축파일은
+  예전처럼 읽는다. 파싱 예산에 잘린 추출과 생략 표시는 저장하지 않는다.
+- **무효화:** 추출기 출력이 바뀌면 버전 `N`을 올린다. 옛 캐시는 다시 읽히지 않고 원본과
+  함께 지워진다. `CHAT_ATTACHMENT_TEXT_CACHE=0`이면 캐시를 읽지도 쓰지도 않는다.
+- **삭제와의 경합:** 캐시를 쓴 직후 첨부 행이 아직 있는지 확인하고, 없으면 그 자리에서
+  캐시를 지운다. 행 삭제와 tombstone은 한 트랜잭션이라, 확인 전에 삭제됐으면 여기서
+  지우고 확인 뒤에 삭제되면 drain이 지운다.
 - **삭제되지 않는 것**: **한 모델의 assistant history 초기화.** 첨부는 비교의 세
   패널이 공유하는 *질문*에 속하고, 한 모델의 답변을 지우는 것은 질문을 지우는
   것이 아니다. `enqueueMessageAttachmentCleanupForMessages`는 기본 role을 갖지

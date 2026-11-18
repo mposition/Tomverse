@@ -85,6 +85,10 @@ import {
 } from "@/lib/chatAttachmentFormats";
 import { chatAttachmentErrorCopyKey } from "@/lib/chatAttachmentErrorCopy";
 import {
+  CHAT_MAX_ATTACHMENTS_PER_MESSAGE,
+  CHAT_MAX_ATTACHMENT_BYTES,
+} from "@/lib/chatAttachmentLimits";
+import {
   APP_DEFAULTS,
   isWebSearchEnabled,
   webSearchModeForToggle,
@@ -174,8 +178,8 @@ type PublicModelStatusRecord = {
   fallbackModelIds: string[];
 };
 
-const MAX_ATTACHMENTS = 5;
-const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
+const MAX_ATTACHMENTS = CHAT_MAX_ATTACHMENTS_PER_MESSAGE;
+const MAX_ATTACHMENT_SIZE = CHAT_MAX_ATTACHMENT_BYTES;
 const GOOGLE_DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 const GOOGLE_WORKSPACE_TYPES = [
   "application/vnd.google-apps.document",

@@ -1,3 +1,5 @@
+import { CHAT_MAX_ATTACHMENT_BYTES } from "@/lib/chatAttachmentLimits";
+
 /**
  * What an uploaded ZIP is allowed to cost, and why each number is that number.
  *
@@ -64,17 +66,16 @@ export type ChatArchiveLimits = {
 
 /**
  * A signed-in account. The container ceiling is the per-file attachment
- * ceiling (`MAX_ATTACHMENT_SIZE`), the per-entry ceiling matches it because
- * an entry may be an attachment-sized document, and the total is five times
- * that -- generous enough for a source tree, far below anything that would
- * matter to the process.
+ * ceiling (`CHAT_MAX_ATTACHMENT_BYTES`), the per-entry ceiling matches it
+ * because an entry may be an attachment-sized document, and the total is four
+ * times that (operator decision 2026-11-18; was 10 MB / 10 MB / 50 MB).
  */
 const ACCOUNT_ARCHIVE_LIMITS: ChatArchiveLimits = {
-    maxArchiveBytes: 10 * 1024 * 1024,
+    maxArchiveBytes: CHAT_MAX_ATTACHMENT_BYTES,
     maxEntries: 100,
     maxProcessedFiles: 20,
-    maxEntryUncompressedBytes: 10 * 1024 * 1024,
-    maxTotalUncompressedBytes: 50 * 1024 * 1024,
+    maxEntryUncompressedBytes: CHAT_MAX_ATTACHMENT_BYTES,
+    maxTotalUncompressedBytes: 4 * CHAT_MAX_ATTACHMENT_BYTES,
     maxCompressionRatio: 100,
     maxNestedArchiveDepth: 0,
     maxOcrPdfs: 3,
@@ -107,7 +108,7 @@ export const chatArchiveLimits = (scope: ChatArchiveScope): ChatArchiveLimits =>
 export const CHAT_ARCHIVE_INFLATE_TIMEOUT_MS = 15_000;
 
 /** Heap ceiling for that worker. Above the total-inflation cap, not far above. */
-export const CHAT_ARCHIVE_WORKER_MAX_OLD_SPACE_MB = 256;
+export const CHAT_ARCHIVE_WORKER_MAX_OLD_SPACE_MB = 320;
 
 /**
  * Every way reading an archive can end badly, as codes rather than sentences.

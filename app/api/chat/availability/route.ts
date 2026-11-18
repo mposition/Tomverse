@@ -1,3 +1,7 @@
+import {
+    CHAT_MAX_ATTACHMENTS_PER_MESSAGE,
+    CHAT_MAX_ATTACHMENT_BYTES,
+} from "@/lib/chatAttachmentLimits";
 export const dynamic = "force-dynamic";
 
 import { randomUUID } from "node:crypto";
@@ -62,11 +66,11 @@ const availabilitySchema = z
                 z
                     .object({
                         mediaType: z.string().min(1).max(160),
-                        size: z.number().int().min(0).max(10 * 1024 * 1024),
+                        size: z.number().int().min(0).max(CHAT_MAX_ATTACHMENT_BYTES),
                     })
                     .strict()
             )
-            .max(5)
+            .max(CHAT_MAX_ATTACHMENTS_PER_MESSAGE)
             .optional(),
     })
     .strict();

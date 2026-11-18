@@ -235,10 +235,20 @@ import { assertModelRuntimeAvailable } from "@/lib/modelAvailability";
 import { OfficeTextOverflowError, parseOfficeSafely } from "@/lib/officeSecurity";
 import {
     CHAT_ATTACHMENT_PARSE_CHARACTERS,
+    CHAT_MAX_ATTACHMENTS_PER_MESSAGE,
+    CHAT_MAX_ATTACHMENT_BYTES,
+    CHAT_MAX_TOTAL_ATTACHMENT_BYTES,
     PAST_ATTACHMENT_OMITTED_KIND,
     PAST_ATTACHMENT_OMITTED_TEXT,
     pastTurnAttachmentTokenBudget,
 } from "@/lib/chatAttachmentLimits";
+import {
+    ATTACHMENT_TEXT_CACHE_CATEGORIES,
+    attachmentTextCacheEnabled,
+    deleteAttachmentTextCache,
+    readAttachmentTextCache,
+    writeAttachmentTextCache,
+} from "@/lib/attachmentTextCache";
 import { chatUserMaxInputTokens } from "@/lib/chatInputLimits";
 import { extractLegacyOfficeText, type LegacyOfficeFormatId } from "@/lib/legacyOfficeText";
 import { legacyOfficeValidationCode } from "@/lib/chatAttachmentValidation";
@@ -499,7 +509,7 @@ import {
     ATTACHMENT_UNAVAILABLE_CODE,
 } from "@/lib/chatAttachmentErrorCopy";
 
-const MAX_ATTACHMENTS = 5;
+const MAX_ATTACHMENTS = CHAT_MAX_ATTACHMENTS_PER_MESSAGE;
 // Every request resends the full conversation history (including past
 // attachments, which get re-fetched from R2 and re-parsed on every turn), so
 // this is a generous safety ceiling on total reprocessing cost, not a
@@ -510,8 +520,8 @@ const MAX_CONVERSATION_ATTACHMENTS = 30;
 // Far below the account ceiling on purpose: a guest chat is a trial, not an
 // archive.
 const GUEST_MAX_CONVERSATION_ATTACHMENTS = 5;
-const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
-const MAX_TOTAL_ATTACHMENT_SIZE = 25 * 1024 * 1024;
+const MAX_ATTACHMENT_SIZE = CHAT_MAX_ATTACHMENT_BYTES;
+const MAX_TOTAL_ATTACHMENT_SIZE = CHAT_MAX_TOTAL_ATTACHMENT_BYTES;
 const MAX_STORED_MESSAGE_CHARACTERS = 100_000;
 type IncomingAttachment = {
     name?: unknown;
@@ -4451,6 +4461,49 @@ async function handleChatPost(
                     continue;
                 }
 
+                /*
+                  An earlier message's file whose text an earlier turn already
+                  extracted is not read or parsed again (lib/attachmentTextCache.ts).
+                  It answers to the same past-file share and parse budget as a
+                  freshly read one, and does not count towards the request's
+                  byte total, because no bytes are read.
+                */
+                const textCacheEligible =
+                    !isLatestMessage &&
+                    !isGuestObject &&
+                    Boolean(resolved?.attachmentId) &&
+                    ATTACHMENT_TEXT_CACHE_CATEGORIES.has(format.category) &&
+                    !(revisionEnabled && format.id === "xlsx" && resolved?.sourceLineageId) &&
+                    attachmentTextCacheEnabled();
+                if (textCacheEligible) {
+                    const cached = await readAttachmentTextCache(attachment.objectKey);
+                    if (cached) {
+                        for (const entry of cached) {
+                            const tokens = estimatePromptTokens(entry.text);
+                            if (
+                                pastAttachmentTokens + tokens > pastAttachmentTokenBudget ||
+                                totalExtractedCharacters + entry.text.length >
+                                    CHAT_ATTACHMENT_PARSE_CHARACTERS
+                            ) {
+                                textAttachments.push({
+                                    name: attachment.name,
+                                    kind: PAST_ATTACHMENT_OMITTED_KIND,
+                                    text: PAST_ATTACHMENT_OMITTED_TEXT,
+                                });
+                                continue;
+                            }
+                            pastAttachmentTokens += tokens;
+                            totalExtractedCharacters += entry.text.length;
+                            textAttachments.push({
+                                name: attachment.name,
+                                kind: entry.kind,
+                                text: entry.text,
+                            });
+                        }
+                        continue;
+                    }
+                }
+
                 let attachmentBuffer: Buffer;
                 try {
                     attachmentBuffer = await readR2Object(attachment.objectKey, {
@@ -4630,12 +4683,70 @@ async function handleChatPost(
                             text: structured });
                         continue;
                     }
+                    const textEntriesBefore = textAttachments.length;
+                    const filePartsBefore = fileParts.length;
+                    const parseRoomBefore =
+                        CHAT_ATTACHMENT_PARSE_CHARACTERS - totalExtractedCharacters;
                     await ingestAttachmentFile({
                         format,
                         name: attachment.name,
                         buffer: attachmentBuffer,
                         fromArchive: false,
                     });
+                    if (textCacheEligible) {
+                        // Stored only when the extraction is whole: text and
+                        // nothing else, not omitted, and not stopped by the
+                        // parse budget (the extractors stop 64 short of it).
+                        const produced = textAttachments.slice(textEntriesBefore);
+                        const producedCharacters = produced.reduce(
+                            (sum, entry) => sum + entry.text.length,
+                            0
+                        );
+                        if (
+                            produced.length > 0 &&
+                            fileParts.length === filePartsBefore &&
+                            produced.every(
+                                (entry) => entry.kind !== PAST_ATTACHMENT_OMITTED_KIND
+                            ) &&
+                            producedCharacters + 64 < parseRoomBefore
+                        ) {
+                            const attachmentId = resolved?.attachmentId;
+                            const cacheObjectKey = attachment.objectKey;
+                            await writeAttachmentTextCache(
+                                cacheObjectKey,
+                                produced
+                            ).then(async () => {
+                                // Deleted while this turn was reading it: the
+                                // row and its cleanup tombstone commit together,
+                                // so a missing row means a drain may already
+                                // have run. Take the text back out; a drain that
+                                // runs later deletes it either way.
+                                const stillBound = attachmentId
+                                    ? await prisma.messageAttachment.findUnique({
+                                          where: { id: attachmentId },
+                                          select: { id: true },
+                                      })
+                                    : null;
+                                if (!stillBound) {
+                                    await deleteAttachmentTextCache(cacheObjectKey);
+                                }
+                            }).catch((error) => {
+                                logRequestError(
+                                    "attachment_text_cache_write_failed",
+                                    traceId,
+                                    error,
+                                    requestedModelId,
+                                    {
+                                        phase: "attachment_text_cache",
+                                        failureLayer: "storage",
+                                        ...(resolved?.attachmentId
+                                            ? { attachmentId: resolved.attachmentId }
+                                            : {}),
+                                    }
+                                );
+                            });
+                        }
+                    }
                     continue;
                 }
 

@@ -35,6 +35,7 @@ import {
 } from "@/lib/messageAttachmentCore";
 import { prisma } from "@/lib/prisma";
 import { deleteR2Object } from "@/lib/r2";
+import { deleteAttachmentTextCache } from "@/lib/attachmentTextCache";
 import { classifyStorageError } from "@/lib/storageObjectErrors";
 
 /**
@@ -878,6 +879,8 @@ export const drainMessageAttachmentCleanupQueue = async (
   for (const item of pending) {
     try {
       await deleteR2Object(item.objectKey);
+      // The extracted text an earlier turn kept next to it goes with it.
+      await deleteAttachmentTextCache(item.objectKey);
       await prisma.messageAttachmentCleanup.update({
         where: { id: item.id },
         data: { completedAt: now, lastError: null },

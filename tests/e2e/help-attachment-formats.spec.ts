@@ -11,7 +11,7 @@ test("help centre shows supported extensions and limits without horizontal overf
   }
   const table = section.getByRole("table", { name: "Attachment access and limits" });
   await expect(table).toBeVisible();
-  const rows = [["Files per message", ["1", "Up to 5"]], ["Per-file size", ["5 MiB", "10 MiB"]], ["Total per message", ["5 MiB", "25 MiB"]], ["Google Drive", ["Unavailable", "Sign-in required"]]] as const;
+  const rows = [["Files per message", ["1", "Up to 10"]], ["Per-file size", ["5 MiB", "50 MiB"]], ["Total per message", ["5 MiB", "100 MiB"]], ["Google Drive", ["Unavailable", "Sign-in required"]]] as const;
   for (const [name, values] of rows) {
     const row = table.getByRole("row").filter({ has: page.getByRole("rowheader", { name, exact: true }) });
     await expect(row.getByRole("cell")).toHaveText([...values]);

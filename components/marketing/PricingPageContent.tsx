@@ -623,7 +623,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
       rows: [
         { label: "Model access", free: "Selected models", pro: "All available models · Pro usage limits", max: "All available models · largest monthly allowance" },
         { label: "Multi-model comparison", free: "Up to 3 models", pro: "Up to 3 models", max: "Up to 3 models" },
-        { label: "File attachments (where enabled)", free: "5 files · 10 MiB each · 25 MiB total", pro: "5 files · 10 MiB each · 25 MiB total", max: "5 files · 10 MiB each · 25 MiB total" },
+        { label: "File attachments (where enabled)", free: "10 files · 50 MiB each · 100 MiB total", pro: "10 files · 50 MiB each · 100 MiB total", max: "10 files · 50 MiB each · 100 MiB total" },
         { label: "Conversation sharing", free: "Share and download", pro: "Share and download", max: "Share and download" },
         { label: "AI credits", free: "300/month", pro: "3,000/month", max: "10,000/month" },
       ],
@@ -680,7 +680,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
         cta: "Upgrade to Max",
         href: REVIEW_WORKSPACE_PATH,
         usage: "10,000 monthly AI credits",
-        features: ["Access to all available models","No daily limit on Standard models","Premium usage follows monthly credits and the Fair Use Policy","Where attachments are enabled: 5 files per message · 10 MiB each · 25 MiB combined","For frequent advanced-model and long-document work","Where available, create AI images"],
+        features: ["Access to all available models","No daily limit on Standard models","Premium usage follows monthly credits and the Fair Use Policy","Where attachments are enabled: 10 files per message · 50 MiB each · 100 MiB combined","For frequent advanced-model and long-document work","Where available, create AI images"],
       },
     ],
   },
@@ -701,7 +701,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
       rows: [
         { label: "모델 접근", free: "선별된 모델", pro: "모든 사용 가능 모델 · Pro 사용량 적용", max: "모든 사용 가능 모델 · 가장 큰 월 제공량" },
         { label: "다중 모델 비교", free: "최대 3개 모델", pro: "최대 3개 모델", max: "최대 3개 모델" },
-        { label: "파일 첨부 (허용 시)", free: "5개 · 각 10 MiB · 총 25 MiB", pro: "5개 · 각 10 MiB · 총 25 MiB", max: "5개 · 각 10 MiB · 총 25 MiB" },
+        { label: "파일 첨부 (허용 시)", free: "10개 · 각 50 MiB · 총 100 MiB", pro: "10개 · 각 50 MiB · 총 100 MiB", max: "10개 · 각 50 MiB · 총 100 MiB" },
         { label: "대화 공유", free: "공유 및 다운로드", pro: "공유 및 다운로드", max: "공유 및 다운로드" },
         { label: "AI 크레딧", free: "월 300", pro: "월 3,000", max: "월 10,000" },
       ],
@@ -716,7 +716,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
     plans: [
       { name: "Free", eyebrow: "처음 시작하는 사용자", price: "$0", period: "월", description: "가벼운 일상 사용과 고급 모델 체험을 위한 월 300 AI 크레딧", cta: "무료로 시작", href: REVIEW_SIGN_IN_HREF, usage: "월 300 AI 크레딧", features: ["선별된 모델 이용","선별된 고비용 모델 월 최대 30응답","최대 3개 모델 비교","저장한 대화 기록","로그인 후 파일 첨부, 공유 및 다운로드","가벼운 일상 질문부터 시작하기","사용 가능한 경우 AI 이미지 만들기"] },
       { name: "Pro", eyebrow: "일상 생산성", price: "$15", period: "월", description: "일상적인 멀티모델 비교를 위한 월 3,000 AI 크레딧", cta: "Pro로 업그레이드", href: REVIEW_WORKSPACE_PATH, highlighted: true, badge: "추천", usage: "월 3,000 AI 크레딧", features: ["모든 사용 가능 모델 이용","모델별 크레딧 차감량에 따라 월 제공량 사용","최대 3개 모델 나란히 비교","파일 첨부 및 Google Drive 파일","대화 공유 및 다운로드","사용 가능한 경우 AI 이미지 만들기"] },
-      { name: "Max", eyebrow: "고강도 AI 워크플로", price: "$25", period: "월", description: "집중적인 고급 모델·긴 문서 작업을 위한 월 10,000 AI 크레딧", cta: "Max로 업그레이드", href: REVIEW_WORKSPACE_PATH, usage: "월 10,000 AI 크레딧", features: ["모든 사용 가능 모델 이용","월 10,000 AI 크레딧 제공","Premium 등급 모델 사용에는 월 크레딧 및 공정 사용 정책 적용","첨부 허용 시 5개 · 각 10 MiB · 총 25 MiB","고급 모델과 긴 문서를 자주 쓰는 경우에 적합","사용 가능한 경우 AI 이미지 만들기"] },
+      { name: "Max", eyebrow: "고강도 AI 워크플로", price: "$25", period: "월", description: "집중적인 고급 모델·긴 문서 작업을 위한 월 10,000 AI 크레딧", cta: "Max로 업그레이드", href: REVIEW_WORKSPACE_PATH, usage: "월 10,000 AI 크레딧", features: ["모든 사용 가능 모델 이용","월 10,000 AI 크레딧 제공","Premium 등급 모델 사용에는 월 크레딧 및 공정 사용 정책 적용","첨부 허용 시 10개 · 각 50 MiB · 총 100 MiB","고급 모델과 긴 문서를 자주 쓰는 경우에 적합","사용 가능한 경우 AI 이미지 만들기"] },
     ],
   },
   zh: {
