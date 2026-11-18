@@ -40,7 +40,7 @@ export const nativeRevisionConflict = (files: MobileAttachment[], name: string) 
   artifactRevisionDraftConflict({ text: "", attachments: files.map(asAttachment) }, name);
 
 export function appendNativeRevisionDraft(draft: NativeRevisionDraft, file: MobileAttachment, request: string): {
-  draft: NativeRevisionDraft; conflict: "count" | "name" | "text" | null;
+  draft: NativeRevisionDraft; conflict: "count" | "name" | "text" | "size" | null;
 } {
   const appended = appendArtifactRevisionDraft({ text: draft.text, attachments: draft.files.map(asAttachment) }, asAttachment(file), request);
   if (appended.conflict) return { draft, conflict: appended.conflict };

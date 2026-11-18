@@ -3343,6 +3343,45 @@ async function handleChatPost(
                 0
             ) - MAX_CONVERSATION_ATTACHMENTS
         );
+        /*
+          The files that count leaves out are still asked about: a lost file is
+          refused, never silently skipped (docs/policy/user-attachment-persistence.md
+          §11.4). Asked all at once, before the loop, so a long conversation
+          costs one round of HEADs rather than one per file in turn. A file
+          already recorded unavailable needs no question; one storage cannot
+          answer for is left out, as on the byte share.
+        */
+        const countOmittedMissingKeys = new Set<string>();
+        if (olderAttachmentsToOmit > 0) {
+            const keys: string[] = [];
+            let remaining = olderAttachmentsToOmit;
+            for (const [index, message] of executionMessages.entries()) {
+                if (remaining <= 0 || index === executionMessages.length - 1) break;
+                const attachments = (
+                    Array.isArray(message.attachments) ? message.attachments : []
+                ) as IncomingAttachment[];
+                for (const incoming of attachments) {
+                    if (remaining <= 0) break;
+                    remaining -= 1;
+                    const referenceKey = attachmentReferenceKey(incoming);
+                    const resolved = referenceKey
+                        ? resolvedAttachments.get(referenceKey)
+                        : undefined;
+                    if (resolved?.unavailableAt) continue;
+                    const key =
+                        resolved?.objectKey ??
+                        (typeof incoming?.objectKey === "string" ? incoming.objectKey : null);
+                    if (key) keys.push(key);
+                }
+            }
+            for (let start = 0; start < keys.length; start += 16) {
+                const batch = keys.slice(start, start + 16);
+                const probes = await Promise.all(batch.map((key) => probeR2Object(key)));
+                probes.forEach((probe, offset) => {
+                    if (probe.state === "missing") countOmittedMissingKeys.add(batch[offset]);
+                });
+            }
+        }
         let totalExtractedCharacters = 0;
         // Earlier messages' files share half the input allowance; past it they
         // are left out of the turn rather than failing it. See
@@ -4443,17 +4482,10 @@ async function handleChatPost(
                     throw new Error("Attachment access denied.");
                 }
 
-                // The oldest earlier files past the conversation's count are
-                // named to the model and left out unread; the turn still goes.
-                if (!isLatestMessage && olderAttachmentsToOmit > 0) {
-                    olderAttachmentsToOmit -= 1;
-                    textAttachments.push({
-                        name: attachment.name,
-                        kind: PAST_ATTACHMENT_OMITTED_KIND,
-                        text: PAST_ATTACHMENT_OMITTED_TEXT,
-                    });
-                    continue;
-                }
+                // One of the oldest earlier files past the conversation's count:
+                // decided here, in the same order the probe above counted them.
+                const countOmitted = !isLatestMessage && olderAttachmentsToOmit > 0;
+                if (countOmitted) olderAttachmentsToOmit -= 1;
 
                 const attachmentScope: "current_turn" | "past_turn" =
                     isLatestMessage ? "current_turn" : "past_turn";
@@ -4478,6 +4510,18 @@ async function handleChatPost(
                             scope: attachmentScope,
                         });
                     }
+                    continue;
+                }
+
+                // Named to the model and left out unread -- unless storage
+                // confirmed it gone, when it takes the ordinary path below,
+                // which marks it unavailable and answers 410 (§11.4).
+                if (countOmitted && !countOmittedMissingKeys.has(attachment.objectKey)) {
+                    textAttachments.push({
+                        name: attachment.name,
+                        kind: PAST_ATTACHMENT_OMITTED_KIND,
+                        text: PAST_ATTACHMENT_OMITTED_TEXT,
+                    });
                     continue;
                 }
 

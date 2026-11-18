@@ -197,10 +197,47 @@ test("past the conversation's file count the oldest earlier files are left out, 
     assert.match(route, /let olderAttachmentsToOmit = Math\.max\(\s*0,[\s\S]{0,300}- MAX_CONVERSATION_ATTACHMENTS\s*\);/);
     assert.match(
         route,
-        /if \(!isLatestMessage && olderAttachmentsToOmit > 0\) \{\s*olderAttachmentsToOmit -= 1;\s*textAttachments\.push\(\{\s*name: attachment\.name,\s*kind: PAST_ATTACHMENT_OMITTED_KIND,/
+        /const countOmitted = !isLatestMessage && olderAttachmentsToOmit > 0;\s*if \(countOmitted\) olderAttachmentsToOmit -= 1;/
     );
     // A guest chat keeps its own small refusal.
     assert.ok(route.includes('"GUEST_TOO_MANY_CONVERSATION_ATTACHMENTS"'));
+});
+
+// Review r-20261118-084640-df1e0e: a file left out by count is still a file
+// whose loss is refused (policy §11.4), never silently skipped.
+test("a file left out by count is still checked for loss first", () => {
+    const route = source("app/api/chat/route.ts");
+    // Asked of storage before the loop, in parallel batches.
+    assert.match(route, /const countOmittedMissingKeys = new Set<string>\(\);/);
+    assert.match(route, /await Promise\.all\(batch\.map\(\(key\) => probeR2Object\(key\)\)\)/);
+    assert.match(route, /if \(probe\.state === "missing"\) countOmittedMissingKeys\.add/);
+    // A recorded loss is honoured before the count decides anything ...
+    const decided = route.indexOf("const countOmitted = !isLatestMessage");
+    const recorded = route.indexOf("if (resolved?.attachmentId && resolved.unavailableAt) {", decided);
+    const omitted = route.indexOf("if (countOmitted && !countOmittedMissingKeys.has(attachment.objectKey)) {", decided);
+    assert.ok(decided > 0 && recorded > decided && omitted > recorded);
+    // ... and a confirmed loss takes the ordinary path, which answers 410.
+    assert.match(
+        route.slice(omitted, omitted + 400),
+        /kind: PAST_ATTACHMENT_OMITTED_KIND,[\s\S]*continue;/
+    );
+    // One refusal can name every lost file a request carries.
+    assert.match(source("lib/chatSecurity.ts"), /ids\.length > 1_000 \|\|/);
+    assert.match(source("lib/messageAttachmentCore.ts"), /acknowledgedUnavailableAttachmentsSchema = z\s*\.array\(opaqueId\)[\s\S]{0,200}\.max\(1_000\)/);
+    assert.ok(1_000 >= 100 * CHAT_MAX_ATTACHMENTS_PER_MESSAGE);
+});
+
+test("a generated-file revision copy that would pass the message total is refused", async () => {
+    const { appendArtifactRevisionDraft } = await import("../lib/generatedArtifactRevisionDraft.ts");
+    const file = (name, size) => ({ id: name, name, mediaType: "text/plain", size, kind: "text", uploadId: name });
+    const draft = { text: "", attachments: [file("a.txt", 60 * 1024 * 1024)] };
+    assert.equal(appendArtifactRevisionDraft(draft, file("b.txt", 50 * 1024 * 1024), "edit").conflict, "size");
+    assert.equal(appendArtifactRevisionDraft(draft, file("c.txt", 40 * 1024 * 1024), "edit").conflict, null);
+    const web = source("components/chat/GeneratedArtifactRevisionContext.tsx");
+    assert.match(web, /conflict === "size"\s*\? "chat\.attachmentTotalSizeError"/);
+    assert.match(source("apps/mobile/src/useArtifactRevisionDraft.ts"), /reason === "size" \? mobileUploadCopy\[language\]\.sizeLimit/);
+    // Drive imports are sized as each lands.
+    assert.match(source("components/chat/ChatInput.tsx"), /if \(importedBytes \+ importedSize > CHAT_MAX_TOTAL_ATTACHMENT_BYTES\) \{/);
 });
 
 // Same review: every surface that counts or sizes a message's files agrees.

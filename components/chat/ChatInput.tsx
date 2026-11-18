@@ -2948,6 +2948,9 @@ export function ChatInput({
       });
 
       const importedAttachments: ChatAttachment[] = [];
+      // Drive files are sized by the import, so the message total is checked
+      // as each one lands; one that would pass it is discarded unbound.
+      let importedBytes = attachmentBytesTotal(attachments);
       for (const file of selectedFiles.slice(0, availableSlots)) {
         const response = await fetch("/api/chat", {
           method: "PUT",
@@ -2966,6 +2969,18 @@ export function ChatInput({
         }
 
         const imported = await response.json();
+        const importedSize = Number.isFinite(imported.size) ? imported.size : 0;
+        if (importedBytes + importedSize > CHAT_MAX_TOTAL_ATTACHMENT_BYTES) {
+          try {
+            const discard = await fetch("/api/chat", { method: "DELETE",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ uploadId: imported.uploadId }) });
+            await discardResponseBody(discard);
+          } catch { /* An unbound upload retains the existing account-cleanup lifetime. */ }
+          dispatchAppToast(t("chat.attachmentTotalSizeError"), "error");
+          break;
+        }
+        importedBytes += importedSize;
         importedAttachments.push({
           id: crypto.randomUUID(),
           name: imported.name,
