@@ -50,9 +50,19 @@ export const createOutput = (json: boolean, streams = { out: process.stdout, err
  * header counts the removed and added lines so a long one is seen as long.
  */
 export const renderFileDiff = (path: string, before: string | null, after: string | null): string => {
-    // Line endings are kept in the file; the diff compares lines without them.
-    const a = before === null ? [] : before.split(/\r?\n/);
-    const b = after === null ? [] : after.split(/\r?\n/);
+    // Lines are compared with their endings, so a change of CRLF to LF alone is
+    // a changed line. Where endings matter (a file with both, or a different
+    // style before and after) a changed line shows its CRLF as [CRLF].
+    const a = before === null ? [] : before.split("\n");
+    const b = after === null ? [] : after.split("\n");
+    const style = (lines: string[]) => {
+        const ended = lines.slice(0, -1);
+        const crlf = ended.filter((l) => l.endsWith("\r")).length;
+        return crlf === 0 ? "lf" : crlf === ended.length ? "crlf" : "mixed";
+    };
+    const endingsMatter = style(a) === "mixed" || style(b) === "mixed" || (a.length > 1 && b.length > 1 && style(a) !== style(b));
+    const shown = (line: string | undefined, changed: boolean) =>
+        line === undefined ? "" : line.endsWith("\r") ? `${line.slice(0, -1)}${changed && endingsMatter ? " [CRLF]" : ""}` : line;
     // Trim the common head and tail; show what changed with three lines of context.
     let start = 0;
     while (start < a.length && start < b.length && a[start] === b[start]) start += 1;
@@ -66,9 +76,9 @@ export const renderFileDiff = (path: string, before: string | null, after: strin
     const header = before === null ? `+++ new file ${path} ${counts}` : after === null ? `--- delete ${path} ${counts}` : `*** ${path} ${counts}`;
     const lines: string[] = [header];
     const from = Math.max(0, start - 3);
-    for (let i = from; i < start; i += 1) lines.push(`  ${a[i]}`);
-    for (let i = start; i < endA; i += 1) lines.push(`- ${a[i]}`);
-    for (let i = start; i < endB; i += 1) lines.push(`+ ${b[i]}`);
-    for (let i = endA; i < Math.min(a.length, endA + 3); i += 1) lines.push(`  ${a[i]}`);
+    for (let i = from; i < start; i += 1) lines.push(`  ${shown(a[i], false)}`);
+    for (let i = start; i < endA; i += 1) lines.push(`- ${shown(a[i], true)}`);
+    for (let i = start; i < endB; i += 1) lines.push(`+ ${shown(b[i], true)}`);
+    for (let i = endA; i < Math.min(a.length, endA + 3); i += 1) lines.push(`  ${shown(a[i], false)}`);
     return lines.map(safeText).join("\n");
 };

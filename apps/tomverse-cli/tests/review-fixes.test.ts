@@ -354,3 +354,10 @@ test("the approval diff is never shortened: every removed and added line is show
     assert.ok(diff.includes("- old 999") && diff.includes("+ new 999"));
     assert.ok(!/not shown/.test(diff));
 });
+test("a change of line ending alone is shown in the approval diff", () => {
+    const diff = renderFileDiff("mixed.txt", "a\r\nb\nc\r\n", "a\nb\nc\r\n");
+    assert.match(diff.split("\n")[0]!, /\(1 line\(s\) removed, 1 added\)/);
+    assert.ok(diff.includes("- a [CRLF]") && diff.includes("+ a"), diff);
+    // A file that is CRLF throughout and stays so is not marked line by line.
+    assert.ok(!renderFileDiff("crlf.txt", "a\r\nb\r\n", "a\r\nc\r\n").includes("[CRLF]"));
+});
