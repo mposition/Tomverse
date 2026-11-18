@@ -256,6 +256,10 @@ export type AmuxV22TransferInspection =
 /** Which chunks of the part a commit still lacks, read without its bodies. */
 export async function inspectAmuxV22TransferPart(db: Db, attemptId: string,
   header: AmuxV22TransferHeader): Promise<AmuxV22TransferInspection> {
+  // A size past what one Postgres value stores is refused before its chunk
+  // list is built: every caller bounds it first, and this holds the class.
+  if (header.totalBytes > AMUX_V22_STORAGE_MAX_BYTES)
+    throw new RangeError("transfer part exceeds storage");
   const count = amuxV22TransferChunkCount(header.totalBytes);
   const all = () => Array.from({ length: count }, (_, index) => index);
   const row = await db.amuxV22TransferPart.findUnique({

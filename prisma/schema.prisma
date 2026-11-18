@@ -8695,7 +8695,8 @@ model AmuxV22TransferChunk {
 /// One encrypted changed-path list per v22 attempt (purpose
 /// `task_changed_paths`), recorded apart from the result because a failed run
 /// with no result still settles with its paths. Settlement and the v52 review
-/// record name it by digest. The body is purged on the result's 90-day rule.
+/// record name it by digest. Like the result, its body is not purged: the v22
+/// task result retention was removed on 2026-11-18.
 model AmuxV22TaskChangedPaths {
   attemptId    String    @id
   taskId       String

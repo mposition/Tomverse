@@ -15,7 +15,8 @@ import { AmuxV22TaskResultError, amuxV22TaskResultTransactionOptions,
   prepareAmuxV22TaskResultRecord, recordAmuxV22TaskResult,
   readAmuxV22TaskPatchEvidence, v22TaskResultSha256,
   type PreparedAmuxV22TaskResult } from "@/lib/amux/v22TaskResultStore";
-import { AMUX_V22_PROXY_BODY_MAX_BYTES, type AmuxV22TransferPart } from
+import { AMUX_V22_PROXY_BODY_MAX_BYTES, AMUX_V22_STORAGE_MAX_BYTES,
+  type AmuxV22TransferPart } from
   "@/lib/amux/v22TransferCore";
 import { assembleAmuxV22TransferPart, createOrLoadAmuxContentUnitKeys,
   deleteAmuxV22TransferParts, inspectAmuxV22TransferPart,
@@ -252,6 +253,12 @@ async function postChunked(body: z.infer<typeof chunkedSchema>): Promise<Respons
     }
     const binding = await readAmuxV22TransferBinding(prisma, body.attemptId, body.worker);
     if (!binding) return amuxJsonNoStore({ error: "binding_mismatch" }, 409);
+    // The same external storage bound the upload holds a part to: a declared
+    // size past it could never be stored, and is answered before its chunk
+    // list is ever built.
+    if (body.resultBytes > AMUX_V22_STORAGE_MAX_BYTES ||
+        (body.patch && body.patch.bytes > AMUX_V22_STORAGE_MAX_BYTES))
+      return amuxJsonNoStore({ error: "exceeds_processing" }, 409);
     const parts: AmuxV22TransferHeader[] = [{ part: "result",
       totalBytes: body.resultBytes, sha256: body.sourceSha256, baseSha: null,
       count: null }];

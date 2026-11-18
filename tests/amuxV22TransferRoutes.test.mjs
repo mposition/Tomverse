@@ -62,3 +62,30 @@ test("each route names its own errors and the store keeps the commit outside the
   assert.doesNotMatch(record, /sealAmuxContent\(|encodeV22PatchEvidence\(|parseAmuxV22Conclusion\(/);
   assert.match(record, /set_config\('statement_timeout', \$\{String\(5_000 \+ allowance\)\}/);
 });
+
+test("a chunked commit past the storage bound is answered before its chunk list is built", async () => {
+  // Review r-20261118-113223-aacd9b: a declared size up to MAX_SAFE_INTEGER
+  // once made the commit build a chunk list of that length.
+  const result = readFileSync("app/api/internal/amux/v22/execution/result/route.ts", "utf8");
+  const bound = result.indexOf("body.resultBytes > AMUX_V22_STORAGE_MAX_BYTES");
+  const patchBound = result.indexOf("body.patch.bytes > AMUX_V22_STORAGE_MAX_BYTES");
+  const inspect = result.indexOf("inspectAmuxV22TransferPart(prisma");
+  assert.ok(bound > 0 && patchBound > bound && inspect > patchBound);
+  assert.match(result.slice(patchBound, inspect), /\{ error: "exceeds_processing" \}, 409/);
+  // The store holds the class: any caller past the bound throws before the
+  // database is read or a list is made.
+  const child = spawnSync(process.execPath, ["--conditions=react-server", "--import", "tsx",
+    "--input-type=module", "-e", `
+      const store = await import(${JSON.stringify(
+        new URL("../lib/amux/v22TransferStore.ts", import.meta.url).href)});
+      const inspectAmuxV22TransferPart = store.inspectAmuxV22TransferPart ?? store.default.inspectAmuxV22TransferPart;
+      const db = new Proxy({}, { get() { throw new Error("database read"); } });
+      try {
+        await inspectAmuxV22TransferPart(db, "00000000-0000-4000-8000-000000000001",
+          { part: "result", totalBytes: ${AMUX_V22_STORAGE_MAX_BYTES + 1}, sha256: "a".repeat(64),
+            baseSha: null, count: null });
+        console.log("NO_THROW");
+      } catch (error) { console.log(error instanceof RangeError ? "RANGE" : String(error)); }
+    `], { cwd: process.cwd(), encoding: "utf8", env: { ...process.env, NODE_NO_WARNINGS: "1" } });
+  assert.equal(child.stdout.trim().split("\n").at(-1), "RANGE", child.stderr);
+});
