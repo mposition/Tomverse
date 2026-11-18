@@ -327,6 +327,14 @@ test("external inference API over the real shared credit ledger", { skip: !datab
         assert.equal(reservation.outcome, "failed");
         assert.equal(reservation.settledCredits, 0);
         assert.equal(reservation.settledCostMicroUsd, 0n, "nothing left this process, so no provider cost");
+        // Streaming too: the status waits for the first real part, so the
+        // client gets the same 400, not a 200 stream carrying an error.
+        const streamed = await call(key, body({ stream: true }));
+        assert.equal(streamed.status, 400);
+        assert.ok((streamed.headers.get("content-type") ?? "").includes("application/json"));
+        assert.equal((await streamed.json()).error.code, "unsupported_request");
+        const second = (await reservationsFor(userId)).at(-1);
+        assert.equal(second.settledCostMicroUsd, 0n);
         script = textScript("Hello from the fixture.");
     });
 

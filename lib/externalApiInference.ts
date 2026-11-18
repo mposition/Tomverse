@@ -154,6 +154,52 @@ type Outcome = "completed" | "empty" | "cancelled" | "failed";
 const refusedBeforeDispatch = (error: unknown) =>
     InvalidPromptError.isInstance(error) || UnsupportedFunctionalityError.isInstance(error);
 
+type StreamPart = { type: string; [key: string]: unknown };
+const LIFECYCLE_PARTS = new Set(["start", "start-step"]);
+
+/**
+ * Reads the SDK stream up to its first part that is not lifecycle
+ * bookkeeping, and hands back a replay of everything from the start. Used to
+ * see whether the request was refused before it was sent, before an HTTP
+ * status is committed.
+ */
+const peekFirstPart = async (source: AsyncIterable<StreamPart>) => {
+    const iterator = source[Symbol.asyncIterator]();
+    const buffered: StreamPart[] = [];
+    let finished = false;
+    let thrown: { error: unknown } | null = null;
+    try {
+        for (;;) {
+            const next = await iterator.next();
+            if (next.done) {
+                finished = true;
+                break;
+            }
+            buffered.push(next.value);
+            if (!LIFECYCLE_PARTS.has(next.value.type)) break;
+        }
+    } catch (error) {
+        thrown = { error };
+    }
+    const first = buffered.at(-1);
+    const refused = thrown
+        ? refusedBeforeDispatch(thrown.error)
+        : first?.type === "error" && refusedBeforeDispatch(first.error);
+    const replay: AsyncIterable<StreamPart> = {
+        async *[Symbol.asyncIterator]() {
+            yield* buffered;
+            if (thrown) throw thrown.error;
+            if (finished) return;
+            for (;;) {
+                const next = await iterator.next();
+                if (next.done) return;
+                yield next.value;
+            }
+        },
+    };
+    return { refusedBeforeDispatch: refused, replay };
+};
+
 const providerRefused = (error: unknown) =>
     refusedBeforeDispatch(error) ||
     (APICallError.isInstance(error) &&
@@ -402,6 +448,20 @@ export async function handleChatCompletions(request: Request): Promise<Response>
 
         handedToStream = true;
         if (options.stream) {
+            // The HTTP status is decided after the first real stream part, so a
+            // request the SDK or adapter refused before sending gets a 400 like
+            // the non-streaming path, not a 200 with an error event.
+            const peeked = await peekFirstPart(result.fullStream as AsyncIterable<StreamPart>);
+            if (peeked.refusedBeforeDispatch) {
+                await run.consume(peeked.replay, () => undefined);
+                const refusedFinal = run.final();
+                const refusedError = refusedFinal.error ?? {
+                    status: 400,
+                    code: "unsupported_request",
+                    message: "This model's provider cannot accept this request as sent. Nothing was sent or charged.",
+                };
+                return externalApiErrorResponse(refusedError.status, refusedError.message, refusedError.code, { requestId });
+            }
             const encoder = new TextEncoder();
             const stream = new ReadableStream<Uint8Array>({
                 async start(streamController) {
@@ -412,21 +472,27 @@ export async function handleChatCompletions(request: Request): Promise<Response>
                             // The client went away; the run still settles.
                         }
                     };
-                    await run.consume(result.fullStream as AsyncIterable<{ type: string; [key: string]: unknown }>, (chunk) =>
-                        write(sseData(chunk))
-                    );
-                    const final = run.final();
-                    if (final.error) {
-                        // Never a clean [DONE] after a failure: the client must
-                        // be able to tell an interrupted answer from a finished one.
-                        write(sseData(openAiError(final.error.message, final.error.code, "server_error")));
-                    } else {
-                        write(SSE_DONE);
-                    }
                     try {
-                        streamController.close();
-                    } catch {
-                        // Already cancelled by the client.
+                        await run.consume(peeked.replay, (chunk) => write(sseData(chunk)));
+                        const final = run.final();
+                        if (final.error) {
+                            // Never a clean [DONE] after a failure: the client must
+                            // be able to tell an interrupted answer from a finished one.
+                            write(sseData(openAiError(final.error.message, final.error.code, "server_error")));
+                        } else {
+                            write(SSE_DONE);
+                        }
+                    } catch (unexpected) {
+                        // The run settles inside consume; this only keeps an
+                        // unexpected throw from leaving the client's stream open.
+                        console.error(JSON.stringify({ event: "external_api_stream_failed", requestId, ...safeErrorMetadata(unexpected) }));
+                        write(sseData(openAiError("The request could not be completed.", "internal_error", "server_error")));
+                    } finally {
+                        try {
+                            streamController.close();
+                        } catch {
+                            // Already cancelled by the client.
+                        }
                     }
                 },
                 cancel() {
@@ -479,6 +545,14 @@ export async function handleChatCompletions(request: Request): Promise<Response>
         if (leaseId && !handedToStream) await releaseChatAccess(leaseId).catch(() => undefined);
         const refusal = externalApiRefusal(error, requestId);
         if (refusal) return refusal;
+        if (refusedBeforeDispatch(error)) {
+            return externalApiErrorResponse(
+                400,
+                "This model's provider cannot accept this request as sent. Nothing was sent or charged.",
+                "unsupported_request",
+                { requestId }
+            );
+        }
         console.error(JSON.stringify({ event: "external_api_request_failed", requestId, ...safeErrorMetadata(error) }));
         return externalApiErrorResponse(500, "The request could not be processed.", "internal_error", { requestId });
     }
@@ -718,10 +792,13 @@ const createRun = (input: {
         });
         if (outcome === "completed") {
             void Promise.allSettled([recordProviderSuccess(input.model.provider), recordModelSuccess(input.model.id)]);
-        } else if (outcome === "failed") {
+        } else if (outcome === "failed" && !refusedBeforeDispatch(streamError)) {
+            // A refusal built before dispatch is local, not a provider fault.
+            // Everything else is a provider call failure, recorded under the
+            // registered provider-call root so provider health counts it.
             const meta = safeErrorMetadata(streamError);
             void Promise.allSettled([
-                recordProviderFailure(input.model.provider, "EXTERNAL_API_FAILED", {
+                recordProviderFailure(input.model.provider, "AI_STREAM_FAILED", {
                     modelId: input.model.id,
                     phase: "stream",
                     traceId: input.requestId,
@@ -730,7 +807,7 @@ const createRun = (input: {
                     httpStatus: meta.statusCode,
                     retryable: meta.isRetryable,
                 }),
-                recordModelFailure(input.model.id, input.model.provider, "EXTERNAL_API_FAILED"),
+                recordModelFailure(input.model.id, input.model.provider, "AI_STREAM_FAILED"),
             ]);
         }
         final = { ...collected, finishReason, usage, error };
