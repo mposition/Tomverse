@@ -71,7 +71,7 @@ export type ApprovalRecord = {
     toolName: string;
     inputDigest: string;
     /** What the decision was bound to, checked again right before execution. */
-    binding: { files?: Array<{ path: string; preimage: string | null }>; cwd?: string };
+    binding: { files?: Array<{ path: string; preimage: string | null }>; cwd?: string; program?: string };
     decision: "approved" | "denied";
     decidedAt: string;
 };

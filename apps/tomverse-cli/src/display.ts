@@ -7,9 +7,9 @@
  * `\u{..}` marker instead, so nothing is silently dropped either.
  */
 
-// C0 controls except tab and newline, DEL, C1 controls, and the Unicode
-// bidi embedding/override/isolate controls.
-const UNSAFE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f‎‏‪-‮⁦-⁩]/g;
+// C0 controls except tab and newline, DEL, C1 controls, the Unicode bidi
+// marks and controls, the Arabic letter mark, and the line/paragraph separators.
+const UNSAFE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g;
 
 export const safeText = (text: string): string =>
     text.replace(UNSAFE, (ch) => `\\u{${ch.codePointAt(0)!.toString(16)}}`);

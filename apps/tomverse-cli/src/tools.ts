@@ -128,7 +128,7 @@ const readFileTool = (ctx: ToolContext, input: { path: string; startLine?: numbe
     if (stat.size > 8 * 1024 * 1024) return { status: "error", error: `${resolved.relative} is ${stat.size} bytes; too large to read. Search it instead.` };
     const bytes = readFileSync(resolved.absolute);
     if (bytes.subarray(0, 8192).includes(0)) return { status: "error", error: `${resolved.relative} looks binary.` };
-    const text = bytes.toString("utf8").replace(/^﻿/, "");
+    const text = bytes.toString("utf8").replace(/^\uFEFF/, "");
     const lines = text.split(/\r?\n/);
     const start = Math.max(1, Math.floor(input.startLine ?? 1));
     let end = Math.min(lines.length, Math.floor(input.endLine ?? start + READ_LINE_LIMIT - 1), start + READ_LINE_LIMIT - 1);
@@ -359,6 +359,10 @@ export const createTools = (ctx: ToolContext, readOnly: boolean): ToolSet => {
             }
             if (decision.approval.binding.cwd !== plan.cwd) {
                 return { status: "error", error: "The working folder resolves differently than when it was approved; not run." };
+            }
+            // The program the approval showed (resolved on PATH on Windows) is the one that runs.
+            if (decision.approval.binding.program !== undefined && decision.approval.binding.program !== plan.file) {
+                return { status: "error", error: `The program now resolves to ${plan.file}, not the ${decision.approval.binding.program} that was approved; not run.` };
             }
             startTool(ctx, "run_command", toolCallId, decision.digest);
             ctx.onActivity(`run ${plan.display}`);

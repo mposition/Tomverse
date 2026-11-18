@@ -15,7 +15,8 @@ import { existsSync, writeFileSync } from "node:fs";
 import { TEST_KEY } from "./fakeGateway.js";
 import { Journal } from "../src/session.js";
 import { Runner } from "../src/agent.js";
-import { renderFileDiff } from "../src/display.js";
+import { renderFileDiff, safeText } from "../src/display.js";
+import { canonicalDigest } from "../src/session.js";
 import { undoChange, UndoError, viewChanges } from "../src/changes.js";
 import { chmodSync, renameSync, statSync, symlinkSync } from "node:fs";
 import { planCommand, runCommand } from "../src/commands.js";
@@ -386,3 +387,26 @@ test("a lone CR at the very end of a file is shown, not taken for a line ending"
     assert.ok(renderFileDiff("x.txt", "a\nb\r", null).includes("- b\\u{d}"));
     assert.ok(!renderFileDiff("y.txt", "a\r\nb\r\n", null).includes("\\u{d}"));
 });
+test("line/paragraph separators and the Arabic letter mark are shown escaped and never written", () => {
+    for (const ch of ["\u2028", "\u2029", "\u061c"]) {
+        assert.ok(!safeText(`rm -rf build${ch}x`).includes(ch));
+        const root = tempDir("patch");
+        writeFileSync(join(root, "a.txt"), "x\n");
+        assert.throws(() => planPatch(new Workspace(normalizeRoot(root)), [{ path: "a.txt", action: "update", replacements: [{ old: "x", new: `y${ch}` }] }]), PatchError);
+    }
+});
+
+test("a command runs only with the program path the approval showed", () =>
+    withGateway(
+        () => ({ text: "x" }),
+        async (gateway) => {
+            const { runner, journal } = await makeRunner(gateway, makeRepo());
+            const exec = (runner.tools.run_command as any).execute;
+            const input = { argv: [process.execPath, "-e", "1"] };
+            journal.state.approvals.push({ approvalId: "a1", toolCallId: "t1", toolName: "run_command", inputDigest: canonicalDigest(input), binding: { cwd: journal.state.workspace.root, program: join(tempDir("other"), "node.exe") }, decision: "approved", decidedAt: "" });
+            const result = await exec(input, { toolCallId: "t1", messages: [] });
+            assert.equal(result.status, "error");
+            assert.match(result.error, /not the .* that was approved/);
+            assert.equal(journal.state.tools.length, 0, "nothing started");
+        }
+    ));

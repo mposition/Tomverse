@@ -624,7 +624,7 @@ export class Runner {
                 binding: view.patch
                     ? { files: view.patch.map((p) => ({ path: p.path, preimage: p.preimage })) }
                     : view.command
-                      ? { cwd: view.command.cwd }
+                      ? { cwd: view.command.cwd, program: view.command.file }
                       : {},
                 decision: approved ? "approved" : "denied",
                 decidedAt: new Date().toISOString(),
