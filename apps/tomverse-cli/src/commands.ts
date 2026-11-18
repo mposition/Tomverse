@@ -40,6 +40,8 @@ export type CommandResult = {
     stdoutOmittedBytes: number;
     stderrOmittedBytes: number;
     residualProcesses: number[];
+    /** False when the child processes could not be listed, so survivors may be missed. */
+    processTreeChecked: boolean;
     spawnError?: string;
 };
 
@@ -171,10 +173,11 @@ class BoundedCapture {
 }
 
 /** Every process recorded below `pid`, including orphans whose parent is gone. */
-const windowsDescendants = (pid: number): number[] => {
+const windowsDescendants = (pid: number): number[] | null => {
     const script = `$all = Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId; $seen = @(${pid}); $out = @(); do { $next = @($all | Where-Object { $seen -contains $_.ParentProcessId -and -not ($seen -contains $_.ProcessId) } | ForEach-Object { $_.ProcessId }); $seen += $next; $out += $next } while ($next.Count -gt 0); $out -join ','`;
     const result = spawnSync(userShell(), ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], { encoding: "utf8", windowsHide: true, timeout: 15_000, env: commandEnv() });
-    return (result.stdout ?? "").trim().split(",").filter(Boolean).map(Number).filter(Number.isFinite);
+    if (result.status !== 0 || typeof result.stdout !== "string") return null;
+    return result.stdout.trim().split(",").filter(Boolean).map(Number).filter(Number.isFinite);
 };
 
 const alive = (pid: number) => {
@@ -201,24 +204,26 @@ const groupAlive = (pgid: number) => {
  * listed, then `taskkill /T /F`. Either way the result lists any process that
  * is still alive afterwards rather than assuming the tree is gone.
  */
-export const killTree = async (child: ChildProcess): Promise<number[]> => {
+export const killTree = async (child: ChildProcess): Promise<{ residual: number[]; treeChecked: boolean }> => {
     const pid = child.pid;
-    if (!pid) return [];
+    if (!pid) return { residual: [], treeChecked: true };
     if (process.platform === "win32") {
         // End the tree at once; listing it first can take seconds, and the
         // tree keeps running meanwhile.
         spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true, timeout: 15_000, env: commandEnv() });
         // Then look for anything below it that survived (an orphan keeps its
         // recorded parent id) and end that too.
-        const descendants = windowsDescendants(pid).filter(alive);
+        const listed = windowsDescendants(pid);
+        const descendants = (listed ?? []).filter(alive);
         for (const d of descendants) spawnSync("taskkill", ["/PID", String(d), "/T", "/F"], { windowsHide: true, timeout: 15_000, env: commandEnv() });
         await new Promise((r) => setTimeout(r, 300));
-        return [pid, ...descendants].filter(alive);
+        return { residual: [pid, ...descendants].filter(alive), treeChecked: listed !== null };
     }
     // The group covers everything that did not leave it; a descendant that
     // made its own session (setsid) is found through the parent links, listed
     // before anything is signalled, while those links still exist.
-    const descendants = posixDescendants(pid);
+    const listed = posixDescendants(pid);
+    const descendants = listed ?? [];
     const signalAll = (sig: NodeJS.Signals) => {
         try {
             process.kill(-pid, sig);
@@ -240,13 +245,14 @@ export const killTree = async (child: ChildProcess): Promise<number[]> => {
         signalAll("SIGKILL");
         for (let i = 0; i < 20 && anyAlive(); i += 1) await new Promise((r) => setTimeout(r, 50));
     }
-    return [...(groupAlive(pid) ? [pid] : []), ...descendants.filter(alive)];
+    // Without the listing, a descendant in another session cannot be seen: say so.
+    return { residual: [...(groupAlive(pid) ? [pid] : []), ...descendants.filter(alive)], treeChecked: listed !== null };
 };
 
 /** Processes below `pid` by parent links (`ps`), including ones in other sessions. */
-const posixDescendants = (pid: number): number[] => {
+const posixDescendants = (pid: number): number[] | null => {
     const result = spawnSync("ps", ["-A", "-o", "pid=,ppid="], { encoding: "utf8", timeout: 10_000, env: commandEnv() });
-    if (result.status !== 0) return [];
+    if (result.status !== 0 || typeof result.stdout !== "string") return null;
     const children = new Map<number, number[]>();
     for (const line of result.stdout.split("\n")) {
         const [p, pp] = line.trim().split(/\s+/).map(Number);
@@ -273,6 +279,7 @@ export const runCommand = (plan: CommandPlan, signal: AbortSignal, onOutput?: (s
         let timedOut = false;
         let cancelled = false;
         let residual: number[] = [];
+        let treeChecked = true;
         let killing: Promise<void> | null = null;
         let child: ChildProcess;
         try {
@@ -286,7 +293,7 @@ export const runCommand = (plan: CommandPlan, signal: AbortSignal, onOutput?: (s
                 detached: process.platform !== "win32",
             });
         } catch (error) {
-            resolve({ exitCode: null, signal: null, timedOut: false, cancelled: false, durationMs: 0, stdout: "", stderr: "", stdoutOmittedBytes: 0, stderrOmittedBytes: 0, residualProcesses: [], spawnError: String((error as Error).message) });
+            resolve({ exitCode: null, signal: null, timedOut: false, cancelled: false, durationMs: 0, stdout: "", stderr: "", stdoutOmittedBytes: 0, stderrOmittedBytes: 0, residualProcesses: [], processTreeChecked: true, spawnError: String((error as Error).message) });
             return;
         }
         const stop = (why: "timeout" | "cancel") => {
@@ -294,7 +301,8 @@ export const runCommand = (plan: CommandPlan, signal: AbortSignal, onOutput?: (s
             if (why === "timeout") timedOut = true;
             else cancelled = true;
             killing = killTree(child).then((left) => {
-                residual = left;
+                residual = left.residual;
+                treeChecked = left.treeChecked;
             });
         };
         const timer = setTimeout(() => stop("timeout"), plan.timeoutMs);
@@ -319,7 +327,9 @@ export const runCommand = (plan: CommandPlan, signal: AbortSignal, onOutput?: (s
             if (killing) await killing;
             else if (process.platform !== "win32" && child.pid && groupAlive(child.pid)) {
                 // The command exited but left background processes in its group.
-                residual = await killTree(child);
+                const left = await killTree(child);
+                residual = left.residual;
+                treeChecked = left.treeChecked;
             }
             resolve({
                 exitCode: code,
@@ -332,6 +342,7 @@ export const runCommand = (plan: CommandPlan, signal: AbortSignal, onOutput?: (s
                 stdoutOmittedBytes: stdout.omitted,
                 stderrOmittedBytes: stderr.omitted,
                 residualProcesses: residual,
+                processTreeChecked: treeChecked,
                 ...(spawnError ? { spawnError } : {}),
             });
         });

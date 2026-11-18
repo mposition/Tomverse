@@ -372,6 +372,7 @@ export const createTools = (ctx: ToolContext, readOnly: boolean): ToolSet => {
                 stderr: result.stderr,
                 ...(result.stdoutOmittedBytes || result.stderrOmittedBytes ? { omittedBytes: { stdout: result.stdoutOmittedBytes, stderr: result.stderrOmittedBytes } } : {}),
                 ...(result.residualProcesses.length ? { residualProcesses: result.residualProcesses } : {}),
+                ...(result.processTreeChecked ? {} : { processTreeChecked: false, note: "The command's child processes could not be listed; some may still be running." }),
                 ...(result.spawnError ? { error: result.spawnError } : {}),
             };
             return endTool(ctx, toolCallId, result.spawnError ? "failed" : "completed", output);

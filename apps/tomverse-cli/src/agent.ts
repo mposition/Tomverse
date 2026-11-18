@@ -493,7 +493,10 @@ export class Runner {
      * failure path, so the rule is the same for a step and a compaction.
      */
     async resolvedAfterFailure(record: GenerationRecord) {
+        record.lookup = undefined;
         await this.lookUp(record);
+        // The lookup itself failed: nothing is known, so nothing is closed.
+        if (record.lookup === undefined) return false;
         const status = record.httpStatus ?? 0;
         const found = record.lookup === "found" && record.receipt;
         if (status >= 400 && status < 500 && status !== 408) return !(found && record.receipt!.status === "held");

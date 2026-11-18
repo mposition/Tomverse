@@ -49,6 +49,8 @@ export class FakeGateway {
     readonly completions: Recorded[] = [];
     readonly receipts = new Map<string, { requestId: string; idempotencyKey: string | null; status: string; chargedCredits: number | null; heldCredits: number; modelId: string }>();
     revoked = false;
+    /** The status lookup answers 503, as when it cannot be reached. */
+    statusFails = false;
     private server: Server | null = null;
     port = 0;
 
@@ -106,6 +108,7 @@ export class FakeGateway {
             });
         }
         if (url.pathname === "/api/v1/requests/status") {
+            if (this.statusFails) return this.json(res, 503, { error: { message: "unavailable", code: "feature_unavailable" } });
             const byId = url.searchParams.get("request_id");
             const idem = req.headers["idempotency-key"];
             const hit = [...this.receipts.values()].find((r) => (byId ? r.requestId === byId : r.idempotencyKey === idem));

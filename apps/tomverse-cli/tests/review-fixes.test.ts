@@ -318,3 +318,30 @@ test("a model Smart Adaptive pinned that is no longer offered is never replaced 
             assert.match(journal.state.lastError ?? "", /does not switch models/);
         }
     ));
+test("when the lookup itself fails after a 4xx, the request stays unresolved", () =>
+    withGateway(
+        () => ({ fault: "http", status: 400, code: "invalid_request" }),
+        async (gateway) => {
+            gateway.statusFails = true;
+            const { runner, journal } = await makeRunner(gateway, makeRepo(), { prompter: null });
+            assert.equal(await runner.runTask("Hi"), "unknown_outcome");
+            assert.equal(journal.unresolvedGenerations().length, 1);
+        }
+    ));
+
+test("without ps the command result says the process tree could not be checked", { skip: process.platform === "win32" && "POSIX ps" }, async () => {
+    const savedPath = process.env.PATH;
+    const empty = tempDir("nops");
+    const plan = planCommand({ argv: [process.execPath, "-e", "setInterval(() => {}, 1000)"] }, empty, 60_000);
+    process.env.PATH = empty;
+    try {
+        const controller = new AbortController();
+        const running = runCommand(plan, controller.signal);
+        setTimeout(() => controller.abort(), 500);
+        const result = await running;
+        assert.equal(result.cancelled, true);
+        assert.equal(result.processTreeChecked, false);
+    } finally {
+        process.env.PATH = savedPath;
+    }
+});
