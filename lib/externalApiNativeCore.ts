@@ -15,22 +15,14 @@ import { atLeastOneToken, createTokenEstimateAccumulator, type TokenEstimateBrea
  * client's own state and fall behind every client release.
  */
 
-export const EXTERNAL_API_PROTOCOLS = ["chat_completions", "anthropic_messages", "responses"] as const;
-export type ExternalApiProtocol = (typeof EXTERNAL_API_PROTOCOLS)[number];
+import type { ExternalApiProtocol } from "@/lib/externalApiProtocols";
 
-/** Which runtime providers a native protocol can carry without translation. */
-export const NATIVE_PROTOCOL_PROVIDER: Record<Exclude<ExternalApiProtocol, "chat_completions">, string> = {
-    anthropic_messages: "anthropic",
-    responses: "openai",
-};
-
-/** Every protocol a model of this provider can be called through. */
-export const protocolsForProvider = (provider: string): ExternalApiProtocol[] => [
-    "chat_completions",
-    ...(Object.entries(NATIVE_PROTOCOL_PROVIDER)
-        .filter(([, owner]) => owner === provider)
-        .map(([protocol]) => protocol as ExternalApiProtocol)),
-];
+export {
+    EXTERNAL_API_PROTOCOLS,
+    NATIVE_PROTOCOL_PROVIDER,
+    protocolsForProvider,
+    type ExternalApiProtocol,
+} from "@/lib/externalApiProtocols";
 
 type Env = Record<string, string | undefined>;
 
@@ -148,6 +140,20 @@ export const estimateNativeInput = (
     let measuredImageTokens = 0;
     let images = 0;
     let files = 0;
+    let fileAllowanceRemainder = 0;
+    /**
+     * A non-image inline file (a PDF, say) by its decoded size at bytes/4,
+     * against the input limit -- never a flat allowance alone, which a large
+     * document would exceed many times over. The rest of the flat
+     * per-attachment allowance, if the file is smaller, is reserved only.
+     */
+    const addFile = (base64: string) => {
+        files += 1;
+        const bytes = Math.floor((base64.replace(/=+$/, "").length * 3) / 4);
+        const tokens = Math.ceil(bytes / 4);
+        estimate.addTokens(tokens);
+        fileAllowanceRemainder += Math.max(0, estimateNativeAttachmentTokens(1) - tokens);
+    };
     const addImage = (base64: string) => {
         images += 1;
         let bytes: Uint8Array;
@@ -165,9 +171,7 @@ export const estimateNativeInput = (
             if (key && OPAQUE_KEYS.has(key)) return void estimate.addTokens(Math.ceil(value.length / 4));
             // Anthropic: { type: "image", source: { type: "base64", data } }.
             if (key === "data" && parent?.type === "base64") {
-                return void (String(parent.media_type ?? "").startsWith("image/")
-                    ? addImage(value)
-                    : ((files += 1), estimate.addTokens(estimateNativeAttachmentTokens(1))));
+                return void (String(parent.media_type ?? "").startsWith("image/") ? addImage(value) : addFile(value));
             }
             // A redacted thinking block's payload.
             if (key === "data" && parent?.type === "redacted_thinking") {
@@ -177,9 +181,7 @@ export const estimateNativeInput = (
             const dataUrl = BASE64_DATA_URL.exec(value);
             if (dataUrl && (key === "image_url" || key === "file_data" || key === "url")) {
                 const payloadText = value.slice(dataUrl[0].length);
-                return void ((dataUrl[1] ?? "").startsWith("image/")
-                    ? addImage(payloadText)
-                    : ((files += 1), estimate.addTokens(estimateNativeAttachmentTokens(1))));
+                return void ((dataUrl[1] ?? "").startsWith("image/") ? addImage(payloadText) : addFile(payloadText));
             }
             return void estimate.addText(value);
         }
@@ -201,7 +203,8 @@ export const estimateNativeInput = (
     visit(payload, null, null);
     return {
         breakdown: atLeastOneToken(estimate.breakdown()),
-        reservationOnlyInputTokens: Math.max(0, estimateNativeAttachmentTokens(images) - measuredImageTokens),
+        reservationOnlyInputTokens:
+            Math.max(0, estimateNativeAttachmentTokens(images) - measuredImageTokens) + fileAllowanceRemainder,
         images,
         files,
     };
@@ -260,6 +263,33 @@ export const publicUpstreamError = (status: number, message: unknown) => {
         return { status: 504, message: "The model provider did not respond in time.", kind: "timeout" as const };
     }
     return { status: 529, message: "The model provider is temporarily unavailable. Try again shortly.", kind: "unavailable" as const };
+};
+
+/**
+ * One SSE event as relayed to the client. Every event keeps its own data;
+ * only an error event's message is replaced when it describes Tomverse's
+ * provider account (the same rule as an HTTP error body).
+ */
+export const relayedSseEvent = (event: { event: string | null; data: string }) => {
+    let data = event.data;
+    const parsed = parseJsonEvent(event.data);
+    if (parsed) {
+        const type = typeof parsed.type === "string" ? parsed.type : event.event;
+        const holder =
+            type === "error" && isRecord(parsed.error)
+                ? parsed.error
+                : type === "error"
+                  ? parsed
+                  : type === "response.failed" && isRecord(parsed.response) && isRecord(parsed.response.error)
+                    ? parsed.response.error
+                    : null;
+        if (holder && typeof holder.message === "string" && ACCOUNT_DETAIL.test(holder.message)) {
+            holder.message = "The model provider returned an error.";
+            data = JSON.stringify(parsed);
+        }
+    }
+    const lines = data.split("\n").map((line) => `data: ${line}`).join("\n");
+    return `${event.event ? `event: ${event.event}\n` : ""}${lines}\n\n`;
 };
 
 /**

@@ -327,6 +327,26 @@ test("native protocols over the real shared credit ledger", { skip: !databaseUrl
         assert.ok(Number(unknown.settledCostMicroUsd) > 0, "a 5xx outcome is unknown: provider cost stays at the estimate");
     });
 
+    await t.test("an in-stream provider error loses account detail on the way to the client", async () => {
+        const userId = await newUser();
+        allow(userId);
+        const { key } = await issueKey(userId);
+        reply = ({ signal }) =>
+            streamResponse(
+                sse([
+                    ["message_start", { type: "message_start", message: { id: "m", usage: { input_tokens: 10, output_tokens: 1 } } }],
+                    ["error", { type: "error", error: { type: "overloaded_error", message: "Workspace org_123 is over its spend limit" } }],
+                ]),
+                {},
+                signal
+            );
+        const text = await (await claude(key, claudeBody())).text();
+        assert.match(text, /event: error/);
+        assert.doesNotMatch(text, /org_123|spend limit/);
+        const [reservation] = await reservationsFor(userId);
+        assert.equal(reservation.outcome, "failed");
+    });
+
     await t.test("a stream cut before message_stop is a failure with an error event, never a clean finish", async () => {
         const userId = await newUser();
         allow(userId);
@@ -363,6 +383,43 @@ test("native protocols over the real shared credit ledger", { skip: !databaseUrl
         assert.notEqual(reservations[0].status, "reserved");
         assert.equal(reservations[0].outcome, "cancelled");
         assert.equal(await db.chatRequestLease.count({ where: { subjectKey: { contains: userId } } }), 0, "the concurrency slot is released");
+    });
+
+    await t.test("a client that holds the stream open without reading is still settled at the timeout", async () => {
+        // Review r-20261118-061521-aa7d75: a pull-based relay that only ends on
+        // the next pull would never settle here, and the heartbeat would keep
+        // the hold and the concurrency slot alive for as long as the socket.
+        const userId = await newUser();
+        allow(userId);
+        const { key } = await issueKey(userId);
+        process.env.EXTERNAL_API_TIMEOUT_MS = "300";
+        try {
+            reply = ({ signal }) => streamResponse(anthropicStream(), { delayMs: 200 }, signal);
+            const response = await claude(key, claudeBody());
+            assert.equal(response.status, 200);
+            // The body is never read.
+            let settled = null;
+            for (let i = 0; i < 100 && !settled; i += 1) {
+                await new Promise((r) => setTimeout(r, 30));
+                const [row] = await reservationsFor(userId);
+                if (row && row.status !== "reserved") settled = row;
+            }
+            assert.ok(settled, "settled without a single read from the client");
+            assert.equal(settled.outcome, "cancelled");
+            // The receipt is completed right after settlement.
+            let receipt = await receiptFor(settled.id);
+            for (let i = 0; i < 50 && !receipt.completedAt; i += 1) {
+                await new Promise((r) => setTimeout(r, 20));
+                receipt = await receiptFor(settled.id);
+            }
+            assert.equal(receipt.errorCode, "upstream_timeout");
+            assert.equal(await db.chatRequestLease.count({ where: { subjectKey: { contains: userId } } }), 0, "slot released");
+            // Reading now gets what was relayed and a closing error event, then the end.
+            const text = await response.text();
+            assert.match(text, /event: error/);
+        } finally {
+            delete process.env.EXTERNAL_API_TIMEOUT_MS;
+        }
     });
 
     await t.test("provider unreachable: one attempt, no retry, failed at the estimate", async () => {

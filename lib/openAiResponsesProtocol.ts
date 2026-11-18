@@ -20,13 +20,18 @@ import {
  * reasoning, which is passed through untouched.
  *
  * Tools: everything the client executes (function, custom/freeform tools such
- * as apply_patch, namespaces of those, local shell) passes; hosted tools the
+ * as Codex's apply_patch and exec, namespaces of those, local shell) passes; hosted tools the
  * provider runs and bills separately (web search, file search, code
  * interpreter, image generation, remote MCP) are refused. Codex offers web
  * search by default, so its Tomverse configuration turns it off.
  */
 
-const CLIENT_TOOL_TYPES = new Set(["function", "custom", "namespace", "local_shell", "shell", "apply_patch"]);
+/**
+ * Only tool types the client itself executes, as Codex was observed to send
+ * them. OpenAI's `shell` and `apply_patch` tool types can run in a
+ * provider-side environment, so they are refused with the hosted tools.
+ */
+const CLIENT_TOOL_TYPES = new Set(["function", "custom", "namespace", "local_shell"]);
 
 export type PreparedResponsesRequest = {
     upstreamBody: string;

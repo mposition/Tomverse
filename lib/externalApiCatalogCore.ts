@@ -1,6 +1,6 @@
 import type { AiModel, ModelTier } from "@/lib/models";
 import { canUseModelWithPlan } from "@/lib/models";
-import { protocolsForProvider, type ExternalApiProtocol } from "@/lib/externalApiNativeCore";
+import { protocolsForProvider, type ExternalApiProtocol } from "@/lib/externalApiProtocols";
 
 /**
  * Which models the external API exposes, and the client configuration built

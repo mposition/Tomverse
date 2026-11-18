@@ -2,7 +2,7 @@ import "server-only";
 import { Prisma } from "@prisma/client";
 import { ChatAccessError } from "@/lib/chatSecurity";
 import { externalApiKeyState } from "@/lib/externalApiKeyCore";
-import type { ExternalApiProtocol } from "@/lib/externalApiNativeCore";
+import type { ExternalApiProtocol } from "@/lib/externalApiProtocols";
 
 export type KeyCreditTotals = { committed: number; held: number; count: number };
 

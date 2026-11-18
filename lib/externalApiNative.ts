@@ -25,6 +25,7 @@ import { sha256Hex } from "@/lib/externalApiKeyCore";
 import {
     createSseParser,
     emptyObservation,
+    relayedSseEvent,
     estimateNativeInput,
     isRecord,
     nativeProtocolEnabled,
@@ -376,7 +377,11 @@ const createNativeRun = (input: {
 /**
  * Relays the provider's stream to the client unchanged, reading it for usage.
  * Pull-based, so a slow client slows the upstream read rather than buffering
- * it; a client that leaves aborts the upstream call and settles the request.
+ * it. The end of the request does not wait for a pull, though: a timeout or a
+ * client that leaves aborts the controller, and the abort itself settles the
+ * request and closes the stream -- a client that holds the connection open
+ * without reading cannot keep the reservation and the concurrency slot alive
+ * past the timeout.
  */
 const relayStream = (
     upstream: ReadableStream<Uint8Array>,
@@ -388,48 +393,79 @@ const relayStream = (
     const reader = upstream.getReader();
     const decoder = new TextDecoder();
     const observer = spec.createObserver();
-    const parser = createSseParser((event) => observer.observe(event));
     const encoder = new TextEncoder();
-    const end = async (transportError?: unknown) => {
-        parser.push(decoder.decode());
-        parser.end();
-        const observation = observer.final();
-        const result = await run.finish({ observation, transportError, providerRequestId });
-        // The provider's own error event already told the client; otherwise a
-        // stream that did not finish ends with one of ours, never silently.
-        const tail =
-            result.error && !observation.providerError && result.error.code !== "empty_response"
-                ? spec.streamErrorEvent(result.error.status, result.error.code, result.error.message)
-                : null;
-        return tail ? encoder.encode(tail) : null;
+    // Events are relayed as they complete, each with its own data unchanged
+    // except an error event's account detail (relayedSseEvent).
+    let pending: string[] = [];
+    const parser = createSseParser((event) => {
+        observer.observe(event);
+        pending.push(relayedSseEvent(event));
+    });
+    const flush = (client: ReadableStreamDefaultController<Uint8Array> | null) => {
+        if (!pending.length) return;
+        const text = pending.join("");
+        pending = [];
+        client?.enqueue(encoder.encode(text));
     };
-    return new ReadableStream<Uint8Array>({
-        async pull(streamController) {
-            let chunk: ReadableStreamReadResult<Uint8Array>;
+    let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
+    let ended: Promise<void> | null = null;
+    /** Settles once and closes the client stream once, whichever path gets here first. */
+    const end = (transportError?: unknown) =>
+        (ended ??= (async () => {
+            controller.signal.removeEventListener("abort", onAbort);
+            parser.push(decoder.decode());
+            parser.end();
+            const observation = observer.final();
+            const result = await run.finish({ observation, transportError, providerRequestId });
+            // The provider's own error event already told the client; otherwise
+            // a stream that did not finish ends with one of ours, never silently.
+            const tail =
+                result.error && !observation.providerError && result.error.code !== "empty_response"
+                    ? spec.streamErrorEvent(result.error.status, result.error.code, result.error.message)
+                    : null;
             try {
-                chunk = await reader.read();
-            } catch (error) {
-                const tail = await end(controller.signal.aborted ? undefined : error);
+                flush(streamController);
+                if (tail) streamController?.enqueue(encoder.encode(tail));
+                streamController?.close();
+            } catch {
+                // The client is already gone.
+            }
+        })());
+    const onAbort = () => {
+        void reader.cancel().catch(() => undefined);
+        void end();
+    };
+    controller.signal.addEventListener("abort", onAbort, { once: true });
+    return new ReadableStream<Uint8Array>({
+        start(controllerForClient) {
+            streamController = controllerForClient;
+        },
+        async pull(client) {
+            // Reads until at least one whole event can go out: a pull that
+            // enqueues nothing would not be called again for a waiting reader.
+            for (;;) {
+                if (ended) return;
+                let chunk: ReadableStreamReadResult<Uint8Array>;
                 try {
-                    if (tail) streamController.enqueue(tail);
-                    streamController.close();
-                } catch {
-                    // The client is already gone.
+                    chunk = await reader.read();
+                } catch (error) {
+                    await end(controller.signal.aborted ? undefined : error);
+                    return;
                 }
-                return;
+                if (ended) return;
+                if (chunk.done) {
+                    await end();
+                    return;
+                }
+                parser.push(decoder.decode(chunk.value, { stream: true }));
+                if (pending.length) {
+                    flush(client);
+                    return;
+                }
             }
-            if (chunk.done) {
-                const tail = await end();
-                if (tail) streamController.enqueue(tail);
-                streamController.close();
-                return;
-            }
-            parser.push(decoder.decode(chunk.value, { stream: true }));
-            streamController.enqueue(chunk.value);
         },
         async cancel() {
             controller.abort("client_disconnected");
-            await reader.cancel().catch(() => undefined);
             await end();
         },
     });

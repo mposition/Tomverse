@@ -8,6 +8,7 @@ import {
     requestDigestInput,
     upstreamRefusedBeforeWork,
     nativeProtocolEnabled,
+    relayedSseEvent,
 } from "../lib/externalApiNativeCore.ts";
 import {
     anthropicErrorBody,
@@ -294,6 +295,11 @@ test("Responses: stateful, hosted-tool and remote-content requests are refused b
     assert.equal(refusal(codexBody({ background: true })), "stateful_request_unsupported");
     assert.equal(refusal(codexBody({ service_tier: "priority" })), "unsupported_feature");
     assert.equal(refusal(codexBody({ tools: [{ type: "web_search" }] })), "hosted_tool_unsupported");
+    // OpenAI's shell and apply_patch tool types can run provider-side; Codex
+    // sends its own as function/custom tools.
+    assert.equal(refusal(codexBody({ tools: [{ type: "shell" }] })), "hosted_tool_unsupported");
+    assert.equal(refusal(codexBody({ tools: [{ type: "apply_patch" }] })), "hosted_tool_unsupported");
+    assert.equal(refusal(codexBody({ tools: [{ type: "local_shell" }] })), null);
     assert.equal(refusal(codexBody({ tools: [{ type: "mcp", server_url: "https://x.test" }] })), "hosted_tool_unsupported");
     assert.equal(
         refusal(codexBody({ tools: [{ type: "namespace", name: "multi_agent_v1", tools: [{ type: "image_generation" }] }] })),
@@ -414,4 +420,31 @@ test("protocol metadata: digests, providers and switches", () => {
     assert.equal(nativeProtocolEnabled({ EXTERNAL_API_ANTHROPIC_ENABLED: "true" }, "anthropic_messages"), true);
     assert.equal(nativeProtocolEnabled({ EXTERNAL_API_ANTHROPIC_ENABLED: "true" }, "responses"), false);
     assert.equal(nativeProtocolEnabled({ EXTERNAL_API_RESPONSES_ENABLED: "true" }, "responses"), true);
+});
+
+test("non-image inline files count by their size, not a flat allowance", () => {
+    const small = estimateNativeInput({ messages: [{ role: "user", content: [{ type: "document", source: { type: "base64", media_type: "application/pdf", data: "JVBERi0x" } }] }] }, "anthropic");
+    assert.equal(small.files, 1);
+    assert.ok(small.reservationOnlyInputTokens > 0, "a small file still reserves the flat allowance");
+    const big = "A".repeat(4_000_000); // ~3 MB decoded
+    const large = estimateNativeInput({ messages: [{ role: "user", content: [{ type: "document", source: { type: "base64", media_type: "application/pdf", data: big } }] }] }, "anthropic");
+    assert.ok(large.breakdown.rawTotal >= 700_000, "a large document counts against the input limit by size");
+    assert.equal(large.reservationOnlyInputTokens, 0);
+    const responsesFile = estimateNativeInput({ input: [{ type: "message", content: [{ type: "input_file", file_data: `data:application/pdf;base64,${big}` }] }] }, "openai");
+    assert.ok(responsesFile.breakdown.rawTotal >= 700_000);
+});
+
+test("relayed events keep their data; an error event loses provider account detail", () => {
+    const plain = { event: "content_block_delta", data: JSON.stringify({ type: "content_block_delta", delta: { text: "credit card form" } }) };
+    assert.equal(relayedSseEvent(plain), `event: content_block_delta\ndata: ${plain.data}\n\n`, "ordinary events are unchanged, even when they mention credit");
+    const leak = relayedSseEvent({ event: "error", data: JSON.stringify({ type: "error", error: { type: "api_error", message: "Your credit balance is too low (org_123)" } }) });
+    assert.doesNotMatch(leak, /credit|org_123/);
+    assert.match(leak, /"type":"api_error"/);
+    const failed = relayedSseEvent({ event: "response.failed", data: JSON.stringify({ type: "response.failed", response: { status: "failed", error: { code: "insufficient_quota", message: "You exceeded your current quota" } } }) });
+    assert.doesNotMatch(failed, /exceeded your current quota/);
+    const responsesError = relayedSseEvent({ event: "error", data: JSON.stringify({ type: "error", code: "x", message: "Rate limit reached for organization org-abc" }) });
+    assert.doesNotMatch(responsesError, /org-abc/);
+    const clientFault = relayedSseEvent({ event: "error", data: JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "messages.1: Invalid signature" } }) });
+    assert.match(clientFault, /Invalid signature/, "the client's own error stays");
+    assert.equal(relayedSseEvent({ event: null, data: "line1\nline2" }), "data: line1\ndata: line2\n\n");
 });

@@ -376,7 +376,8 @@ keep state the model signed or encrypted (thinking signatures, encrypted
 reasoning) and pair request headers with body fields. A translation layer
 would break that state and fall behind each client release, so these routes
 **pass the client's body through** after deterministic checks, and relay the
-provider's stream byte for byte while reading it for usage. The lifecycle is
+provider's stream event by event, each event's data unchanged, while reading
+it for usage. The lifecycle is
 the Chat Completions one (`lib/externalApiNative.ts`): the same key, rate
 bucket, `createChatBudget` → `acquireChatAccess` + `externalApiAdmissionHook`
 → one dispatch → `settleChatUsage`, exactly once.
@@ -394,7 +395,8 @@ Refused before dispatch, with nothing held (`lib/anthropicMessagesProtocol.ts`,
 
 - tools the provider runs and bills itself: Anthropic server tools (web search,
   web fetch, code execution, ...) and Responses hosted tools (web search, file
-  search, code interpreter, image generation, remote MCP); remote MCP servers
+  search, code interpreter, image generation, remote MCP, and the `shell` and
+  `apply_patch` tool types, which can run provider-side); remote MCP servers
   and containers. Client-executed tools pass: function, custom/freeform
   (Codex's `apply_patch`, `exec`), namespaces of them, local shell, and
   Anthropic's `bash`/`text_editor`/`computer` client tools;
@@ -438,11 +440,18 @@ are the deployment's own (`lib/externalApiNativeUpstream.ts`, no redirects).
   `error` event, never a clean finish.
 - The provider's own 400 message is kept (Claude Code and Codex recover from
   specific ones); anything naming Tomverse's provider account, limits or
-  availability is replaced, and provider rate-limit headers are not relayed.
+  availability is replaced -- in an HTTP error body and in an in-stream `error`
+  or `response.failed` event alike -- and provider rate-limit headers are not
+  relayed.
 - Idempotency: one `(key, Idempotency-Key)` across all protocols. Native
   request digests are prefixed with the protocol, so a key reused on another
   endpoint is a 422 conflict; Chat Completions digests are unchanged.
 - `count_tokens` is free at Anthropic: rate limited as a read, no reservation.
+- A timeout or a departed client ends the request from the abort itself, not
+  from the next read: a client holding the connection open without reading
+  cannot keep the hold or the concurrency slot past `EXTERNAL_API_TIMEOUT_MS`.
+- A non-image inline file counts against the input limit at its decoded
+  size / 4, never at a flat allowance alone.
 
 ### 10.3 Compaction and resume
 

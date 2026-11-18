@@ -9,7 +9,7 @@ import {
 import { isProviderApiKeyConfigured } from "@/lib/modelRegistryShared";
 import { DEFAULT_MODEL_ID, getModelUsageProfile, resolveModelRequestPricing, type AiModel, type ModelTier } from "@/lib/models";
 import { getRuntimeModels } from "@/lib/modelRegistry";
-import type { ExternalApiProtocol } from "@/lib/externalApiNativeCore";
+import type { ExternalApiProtocol } from "@/lib/externalApiProtocols";
 
 /**
  * The models this plan can run through the external API right now, read from
