@@ -14,6 +14,8 @@ import { existsSync, writeFileSync } from "node:fs";
 import { TEST_KEY } from "./fakeGateway.js";
 import { Journal } from "../src/session.js";
 import { Runner } from "../src/agent.js";
+import { undoChange, UndoError, viewChanges } from "../src/changes.js";
+import { renameSync, symlinkSync } from "node:fs";
 
 const src = join(dirname(fileURLToPath(import.meta.url)), "..", "src");
 
@@ -169,5 +171,36 @@ test("search results are attributed by the whole path, even one containing ':'",
             const { runner } = await makeRunner(gateway, root);
             const result = await (runner.tools.search_text as any).execute({ pattern: "TOKEN" }, { toolCallId: "s1", messages: [] });
             assert.ok(!JSON.stringify(result).includes("leak-me"), JSON.stringify(result));
+        }
+    ));
+test("a cancelled request whose receipt is still held stays unresolved", () =>
+    withGateway(
+        () => ({ fault: "hang" }),
+        async (gateway) => {
+            const { runner, journal } = await makeRunner(gateway, makeRepo(), { prompter: null });
+            const running = runner.runTask("Hi");
+            setTimeout(() => runner.cancel(), 300);
+            assert.equal(await running, "cancelled");
+            assert.equal(journal.state.generations[0]!.receipt?.status, "held");
+            assert.equal(journal.unresolvedGenerations().length, 1, "the next request needs the user's say");
+        }
+    ));
+
+test("undo re-checks the real path: a parent swapped for a link out of the workspace is refused", () =>
+    withGateway(
+        (body) => (toolResultsSinceUser(body).length ? { text: "ok" } : { toolCalls: [{ name: "apply_patch", args: { edits: [{ path: "sub/f.txt", action: "create", content: "new\n" }] } }] }),
+        async (gateway) => {
+            const root = makeRepo();
+            const { runner, journal } = await makeRunner(gateway, root, { prompter: scriptedPrompter([true]) });
+            await runner.runTask("create");
+            const change = journal.state.changes[0]!;
+            // Move the folder out and put a link to it in its place; the file
+            // outside now holds exactly what the CLI wrote.
+            const outside = tempDir("outside");
+            renameSync(join(root, "sub"), join(outside, "sub"));
+            symlinkSync(join(outside, "sub"), join(root, "sub"), process.platform === "win32" ? "junction" : "dir");
+            assert.equal(viewChanges(journal)[0]!.current, "outside");
+            assert.throws(() => undoChange(journal, change.changeId), UndoError);
+            assert.equal(readFileSync(join(outside, "sub", "f.txt"), "utf8"), "new\n", "the file outside is untouched");
         }
     ));

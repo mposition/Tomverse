@@ -122,8 +122,10 @@ const doctor = async (ctx: Context) => {
     try {
         const endpoint = resolveEndpoint(ctx.config);
         add("endpoint", "pass", endpoint.base);
+        // Noted before reading: readKey takes the key out of the environment.
+        const source = process.env.TOMVERSE_API_KEY?.trim() ? "TOMVERSE_API_KEY" : "terminal input";
         const key = await readKey();
-        add("key", "pass", `${maskKey(key)} (from ${process.env.TOMVERSE_API_KEY ? "TOMVERSE_API_KEY" : "terminal input"})`);
+        add("key", "pass", `${maskKey(key)} (from ${source})`);
         gateway = new Gateway(endpoint, key);
     } catch (error) {
         add(error instanceof AuthError ? "key" : "endpoint", "fail", (error as Error).message);
@@ -315,7 +317,7 @@ const diff = async (ctx: Context) => {
         const views = viewChanges(journal);
         if (!views.length) process.stdout.write(`Session ${id} changed no files.\n`);
         for (const view of views) {
-            const note = { as_written: "as the CLI left it", changed_since: "CHANGED SINCE (undo will refuse)", missing: "MISSING", undone: "undone", not_applied: "not applied" }[view.current];
+            const note = { as_written: "as the CLI left it", changed_since: "CHANGED SINCE (undo will refuse)", missing: "MISSING", undone: "undone", not_applied: "not applied", outside: "NO LONGER INSIDE THE WORKSPACE (undo will refuse)" }[view.current];
             process.stdout.write(`\n${view.changeId}  ${view.kind} ${safeLine(view.path)}  [${note}]\n`);
             if (view.current === "as_written" || view.current === "changed_since") process.stdout.write(`${renderChange(journal, view)}\n`);
         }

@@ -1,8 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import { renderFileDiff } from "./display.js";
 import { currentDigest, removeFile, writeFileReplacing } from "./patch.js";
 import { sha256, type ChangeRecord, type Journal } from "./session.js";
+import { Workspace } from "./workspace.js";
 
 /**
  * The CLI's own changes and nothing else. Changes that were in the folder
@@ -12,13 +12,27 @@ import { sha256, type ChangeRecord, type Journal } from "./session.js";
  * no reset, clean or folder-wide restore.
  */
 
-export type ChangeView = ChangeRecord & { current: "as_written" | "changed_since" | "missing" | "undone" | "not_applied" };
+export type ChangeView = ChangeRecord & { current: "as_written" | "changed_since" | "missing" | "undone" | "not_applied" | "outside" };
+
+/**
+ * Where a recorded path is now, by the same real-path rule as every file tool:
+ * if a parent folder has since become a link out of the workspace, it is not
+ * followed. Null when it no longer resolves inside.
+ */
+const locate = (journal: Journal, path: string, purpose: "read" | "write") => {
+    try {
+        return new Workspace(journal.state.workspace.root).resolve(path, purpose).absolute;
+    } catch {
+        return null;
+    }
+};
 
 export const viewChanges = (journal: Journal): ChangeView[] =>
     journal.state.changes.map((change) => {
         if (change.state === "undone") return { ...change, current: "undone" };
         if (change.state !== "applied") return { ...change, current: "not_applied" };
-        const absolute = join(journal.state.workspace.root, change.path);
+        const absolute = locate(journal, change.path, "read");
+        if (!absolute) return { ...change, current: "outside" };
         const digest = currentDigest(absolute);
         if (change.kind === "delete") return { ...change, current: digest === null ? "as_written" : "changed_since" };
         if (digest === null) return { ...change, current: "missing" };
@@ -26,9 +40,9 @@ export const viewChanges = (journal: Journal): ChangeView[] =>
     });
 
 export const renderChange = (journal: Journal, change: ChangeRecord) => {
-    const absolute = join(journal.state.workspace.root, change.path);
+    const absolute = locate(journal, change.path, "read");
     const before = change.preimage.backup ? journal.readBackup(change.preimage.backup)?.toString("utf8") ?? null : null;
-    const now = existsSync(absolute) ? readFileSync(absolute, "utf8") : null;
+    const now = absolute && existsSync(absolute) ? readFileSync(absolute, "utf8") : null;
     return renderFileDiff(change.path, change.kind === "create" ? null : before, change.kind === "delete" ? null : now);
 };
 
@@ -41,7 +55,9 @@ export const undoChange = (journal: Journal, changeId: string) => {
     if (change.state !== "applied") throw new UndoError(`${changeId} was not applied, so there is nothing to undo.`);
     const later = journal.state.changes.find((c) => c.path === change.path && c.state === "applied" && journal.state.changes.indexOf(c) > journal.state.changes.indexOf(change));
     if (later) throw new UndoError(`${change.path} was changed again by ${later.changeId}; undo that first.`);
-    const absolute = join(journal.state.workspace.root, change.path);
+    // Checked again right before the write: a link swapped in later is refused.
+    const absolute = locate(journal, change.path, "write");
+    if (!absolute) throw new UndoError(`${change.path} no longer resolves inside the workspace (a link?). Undo stopped and changed nothing.`);
     const digest = currentDigest(absolute);
     const expected = change.kind === "delete" ? null : change.postimage.sha256;
     if (digest !== expected) {

@@ -139,7 +139,12 @@ test("Tomverse CLI over the real gateway and shared credit ledger", { skip: !dat
             res.end();
         });
     });
-    await new Promise((r) => server.listen(0, "127.0.0.1", r));
+    // fetch refuses the Fetch standard's bad ports (6665-6669 among those an OS may hand out).
+    for (;;) {
+        await new Promise((r) => server.listen(0, "127.0.0.1", r));
+        if (![6000, 6566, 6665, 6666, 6667, 6668, 6669, 6679, 6697, 10080].includes(server.address().port)) break;
+        await new Promise((r) => server.close(r));
+    }
     const base = `http://127.0.0.1:${server.address().port}/api/v1`;
     t.after(async () => {
         server.closeAllConnections();

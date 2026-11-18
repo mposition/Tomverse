@@ -57,11 +57,16 @@ export class FakeGateway {
     }
 
     async start() {
-        this.server = createServer((req, res) => this.handle(req, res));
-        await new Promise<void>((resolve) => this.server!.listen(0, "127.0.0.1", resolve));
-        const address = this.server.address();
-        this.port = typeof address === "object" && address ? address.port : 0;
-        return this;
+        // fetch refuses the Fetch standard's "bad ports" (e.g. 6665-6669), which a
+        // random port can be; take another one then.
+        for (;;) {
+            this.server = createServer((req, res) => this.handle(req, res));
+            await new Promise<void>((resolve) => this.server!.listen(0, "127.0.0.1", resolve));
+            const address = this.server.address();
+            this.port = typeof address === "object" && address ? address.port : 0;
+            if (!FETCH_BAD_PORTS.has(this.port)) return this;
+            await new Promise<void>((resolve) => this.server!.close(() => resolve()));
+        }
     }
 
     async stop() {
@@ -215,7 +220,13 @@ const chunk = (model: string, delta: Record<string, unknown>) => ({
     choices: [{ index: 0, delta, finish_reason: null }],
 });
 
-export const TEST_KEY = `tvk_abcdefgh_${"A".repeat(43)}`;
+const FETCH_BAD_PORTS = new Set([
+    1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 79, 87, 95, 101, 102, 103, 104, 109, 110, 111, 113, 115, 117, 119, 123, 135, 137, 139, 143,
+    161, 179, 389, 427, 465, 512, 513, 514, 515, 526, 530, 531, 532, 540, 548, 554, 556, 563, 587, 601, 636, 989, 990, 993, 995, 1719, 1720, 1723, 2049, 3659, 4045,
+    4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6679, 6697, 10080,
+]);
+
+export const TEST_KEY =`tvk_abcdefgh_${"A".repeat(43)}`;
 
 /** Tool results the model has been given since the last user message. */
 export const toolResultsSinceUser = (body: any) => {

@@ -158,6 +158,7 @@ test("doctor and models make no model request; usage --session sums only this se
         for (const name of ["node", "endpoint", "key", "models", "credits", "recovery", "folder"]) assert.ok(checks.some((c) => c.name === name), name);
         assert.ok(!checks.some((c) => c.status === "fail"), JSON.stringify(checks));
         assert.ok(checks.find((c) => c.name === "key").detail.includes("tvk_abcdefgh_…"));
+        assert.match(checks.find((c) => c.name === "key").detail, /from TOMVERSE_API_KEY/);
         const models = jsonl((await run(["models", "--json"], { cwd: root, home, env })).stdout);
         assert.deepEqual(models.map((m) => m.id), ["fake-coder", "fake-small", "smart-adaptive"]);
         assert.equal(gateway.completions.length, 0, "no generation, no charge");

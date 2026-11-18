@@ -415,9 +415,12 @@ export class Runner {
         if (streamError || this.controller.signal.aborted) {
             const record = journal.state.generations.slice(before).at(-1);
             if (this.controller.signal.aborted) {
-                // Cancelled by the user: looked up and acknowledged, never sent again.
-                journal.closeGenerations(journal.state.generations.slice(before));
+                // Cancelled by the user: never sent again. Closed only once the
+                // server's receipt is final; otherwise it stays unresolved and the
+                // next request needs the user's say.
                 await this.lookUp(record);
+                if (record?.lookup === "found" && record.receipt && record.receipt.status !== "held") journal.closeGenerations([record]);
+                journal.commit();
                 return { kind: "stop", outcome: "cancelled", message: "Cancelled." };
             }
             return this.failedStep(streamError, record, signal);
