@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
+import { commandEnv } from "./commands.js";
 
 /**
  * The folder the CLI works in, and every path check the file tools make. A
@@ -29,6 +30,11 @@ export const normalizeRoot = (input: string) => {
     if (!statSync(real).isDirectory()) throw new PathError(`${real} is not a folder.`);
     if (/^\\\\[?.]\\/.test(real)) throw new PathError("Device paths (\\\\?\\ or \\\\.\\) are not supported as a workspace.");
     if (parse(real).root === real) throw new PathError("A drive or filesystem root is too broad to work in. Choose a project folder.");
+    // Paths are checked relative to the root, so a root inside a credential
+    // folder (.ssh, .aws, .git, the CLI's own home …) would expose all of it.
+    if (real.split(/[\\/]/).some((segment) => SECRET_DIRS.has(segment.toLowerCase()))) {
+        throw new PathError(`${real} is inside a folder that can hold credentials; the CLI does not work there.`);
+    }
     const home = (() => {
         try {
             return realpathSync.native(homedir());
@@ -133,7 +139,7 @@ export class Workspace {
             const result = spawnSync(
                 "git",
                 ["-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false", "ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", start.relative === "." ? "." : start.relative],
-                { cwd: this.root, encoding: "utf8", maxBuffer: 32 * 1024 * 1024, windowsHide: true, shell: false }
+                { cwd: this.root, encoding: "utf8", maxBuffer: 32 * 1024 * 1024, windowsHide: true, shell: false, env: commandEnv() }
             );
             if (result.status === 0) {
                 const seen = new Set<string>();
@@ -185,7 +191,7 @@ export class Workspace {
 let gitChecked: boolean | null = null;
 export const gitAvailable = () => {
     if (gitChecked === null) {
-        const result = spawnSync("git", ["--version"], { encoding: "utf8", windowsHide: true, shell: false });
+        const result = spawnSync("git", ["--version"], { encoding: "utf8", windowsHide: true, shell: false, env: commandEnv() });
         gitChecked = result.status === 0;
     }
     return gitChecked;
@@ -194,7 +200,7 @@ export const gitAvailable = () => {
 let rgChecked: boolean | null = null;
 export const ripgrepAvailable = () => {
     if (rgChecked === null) {
-        const result = spawnSync("rg", ["--version"], { encoding: "utf8", windowsHide: true, shell: false });
+        const result = spawnSync("rg", ["--version"], { encoding: "utf8", windowsHide: true, shell: false, env: commandEnv() });
         rgChecked = result.status === 0;
     }
     return rgChecked;

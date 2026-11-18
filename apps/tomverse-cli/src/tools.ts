@@ -3,7 +3,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { tool, type ToolSet } from "ai";
 import { z } from "zod";
-import { planCommand, runCommand, CommandError, type CommandPlan } from "./commands.js";
+import { commandEnv, planCommand, runCommand, CommandError, type CommandPlan } from "./commands.js";
 import { currentDigest, planPatch, PatchError, removeFile, writeFileReplacing, type PatchEdit, type PlannedEdit } from "./patch.js";
 import { canonicalDigest, JournalError, sha256, type Journal } from "./session.js";
 import { PathError, ripgrepAvailable, isSecretPath, type Workspace } from "./workspace.js";
@@ -162,7 +162,7 @@ const searchTool = (ctx: ToolContext, input: { pattern: string; path?: string; r
         if (!input.regex) args.push("--fixed-strings");
         if (!input.caseSensitive) args.push("--ignore-case");
         args.push("-e", input.pattern, "--", where.relative === "." ? "." : where.relative);
-        const result = spawnSync("rg", args, { cwd: ctx.workspace.root, encoding: "utf8", maxBuffer: 16 * 1024 * 1024, windowsHide: true, shell: false, timeout: 30_000 });
+        const result = spawnSync("rg", args, { cwd: ctx.workspace.root, encoding: "utf8", maxBuffer: 16 * 1024 * 1024, windowsHide: true, shell: false, timeout: 30_000, env: commandEnv() });
         if (result.status !== 0 && result.status !== 1) return { status: "error", error: (result.stderr || "search failed").slice(0, 500) };
         for (const line of (result.stdout ?? "").split(/\r?\n/)) {
             if (!line) continue;

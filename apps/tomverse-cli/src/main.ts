@@ -224,8 +224,14 @@ export const sessionCost = async (gateway: Gateway, journal: Journal) => {
     return { requests: generations.length, charged, held, unknown };
 };
 
-const costLine = (cost: Awaited<ReturnType<typeof sessionCost>>) =>
-    `${cost.requests} model request(s): ${cost.charged} credits charged${cost.held ? `, ${cost.held} held (not final)` : ""}${cost.unknown.length ? `, ${cost.unknown.length} not found or unknown (#${cost.unknown.join(", #")})` : ""}.`;
+export const costLine = (cost: Awaited<ReturnType<typeof sessionCost>>) => {
+    const open = cost.held > 0 || cost.unknown.length > 0;
+    const parts = [`${cost.charged} credits settled`];
+    if (cost.held) parts.push(`${cost.held} held (not final)`);
+    if (cost.unknown.length) parts.push(`${cost.unknown.length} not found or unknown (#${cost.unknown.join(", #")})`);
+    // Never a bare total while part of it is not known.
+    return `${cost.requests} model request(s): ${parts.join(", ")}${open ? " -- the total is not final" : ""}.`;
+};
 
 const usage = async (ctx: Context) => {
     const { gateway, key } = await connect(ctx);
@@ -588,7 +594,10 @@ const resume = async (ctx: Context, args: string[], interactive: boolean) => {
                     await finalEvent(ctx, runner, gateway, outcome);
                     return exitFor(outcome);
                 }
+                // The user has seen what is unknown and chose to go on: those requests are closed.
+                journal.closeGenerations(unresolved);
                 if (notes.length) journal.state.messages.push({ role: "user", content: `[Tomverse CLI] The previous run stopped unexpectedly. ${notes.join(" ")}` });
+                journal.commit();
             }
             if (task) outcome = await runner.runTask(task);
             else if (wasMidTask && state.tasks.length) outcome = await runner.loop();

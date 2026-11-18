@@ -55,6 +55,12 @@ export type GenerationRecord = {
     lookupAt?: string;
     /** A request the user chose to send again after an unknown outcome. */
     resendOf?: number;
+    /**
+     * Nothing more to do for this request: its answer is in the saved history
+     * (set in the same checkpoint), the API refused it, or the user acknowledged
+     * that its answer is lost or unknown. Anything not closed is unresolved.
+     */
+    closed?: boolean;
     createdAt: string;
     updatedAt: string;
 };
@@ -405,9 +411,16 @@ export class Journal {
         return record;
     }
 
-    /** Requests whose outcome the CLI has not seen end. */
+    /**
+     * Requests not closed: sent (or maybe sent) and their answer is not in the
+     * history -- including one fully received just before the process died.
+     */
     unresolvedGenerations() {
-        return this.state.generations.filter((g) => g.state === "intent" || g.state === "failed" || g.state === "interrupted");
+        return this.state.generations.filter((g) => !g.closed);
+    }
+
+    closeGenerations(records: GenerationRecord[]) {
+        for (const record of records) record.closed = true;
     }
 }
 

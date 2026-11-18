@@ -28,7 +28,12 @@ export const readKey = async (
     output: NodeJS.WriteStream = process.stderr
 ): Promise<string> => {
     const fromEnv = env.TOMVERSE_API_KEY?.trim();
-    if (fromEnv) return validateKey(fromEnv);
+    if (fromEnv) {
+        // Taken out of this process's environment at once, so no process the
+        // CLI starts later -- a command, git, ripgrep -- can inherit it.
+        delete env.TOMVERSE_API_KEY;
+        return validateKey(fromEnv);
+    }
     if (!input.isTTY) {
         throw new AuthError("Set TOMVERSE_API_KEY, or run in a terminal to type the key.");
     }

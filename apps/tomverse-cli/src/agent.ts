@@ -324,6 +324,18 @@ export class Runner {
                     return this.finish("limit_reached", `Limit reached: ${which}.`);
                 }
                 await this.maybeCompact(false);
+                // Any request whose answer is not in the history (a compaction
+                // or a step that broke off, here or before a restart): never
+                // another paid request without the user's say.
+                const open = journal.unresolvedGenerations();
+                if (open.length) {
+                    if (options.prompter && (await options.prompter.confirm(`${open.length} earlier request(s) have an unknown outcome. Continue the task anyway? The next step is a new model request.`))) {
+                        journal.closeGenerations(open);
+                        journal.commit();
+                    } else {
+                        return this.finish("unknown_outcome", `The outcome of request(s) #${open.map((g) => g.seq).join(", #")} is not known.`);
+                    }
+                }
                 if (task.requests >= task.allowance) continue;
                 const started = Date.now();
                 const step = await this.step(timeAllowance - task.activeMs);
@@ -403,6 +415,8 @@ export class Runner {
         if (streamError || this.controller.signal.aborted) {
             const record = journal.state.generations.slice(before).at(-1);
             if (this.controller.signal.aborted) {
+                // Cancelled by the user: looked up and acknowledged, never sent again.
+                journal.closeGenerations(journal.state.generations.slice(before));
                 await this.lookUp(record);
                 return { kind: "stop", outcome: "cancelled", message: "Cancelled." };
             }
@@ -415,6 +429,8 @@ export class Runner {
             return this.failedStep(error, journal.state.generations.slice(before).at(-1), signal);
         }
         journal.state.messages.push(...responseMessages);
+        // The answer is in the history in the same checkpoint that closes its request.
+        journal.closeGenerations(journal.state.generations.slice(before));
         journal.commit();
         if (pending.length) return { kind: "approvals", pending };
         if (finishReason === "tool-calls") return { kind: "continue" };
@@ -432,6 +448,7 @@ export class Runner {
         if (record && (record.httpStatus ?? 0) >= 400 && status && status >= 400) {
             // The server answered with an error: that request is settled on its side.
             record.error = { kind: "http", message, ...(apiCode(error) ? { code: apiCode(error)! } : {}) };
+            record.closed = true;
             this.journal.commit();
             options.output.info(`The API refused the request: ${message}`);
             options.output.event({ type: "error", code: apiCode(error) ?? "api_error", message, request_id: record.requestId ?? null });
@@ -446,6 +463,7 @@ export class Runner {
         options.output.info(this.unknownReport(record));
         if (options.prompter && (await options.prompter.confirm("Send this step to the model again as a new request (it can be charged again)?"))) {
             this.journal.state.pendingResendOf = record.seq;
+            record.closed = true;
             this.journal.commit();
             return { kind: "continue" as const };
         }
@@ -484,7 +502,11 @@ export class Runner {
     }
 
     unknownReport(record: GenerationRecord) {
-        const lines = [`Request ${record.seq} did not finish here (${record.error?.message ?? record.state}).`];
+        const lines = [
+            record.state === "complete" || record.state === "headers"
+                ? `Request ${record.seq} was answered, but the CLI stopped before the answer was saved.`
+                : `Request ${record.seq} did not finish here (${record.error?.message ?? record.state}).`,
+        ];
         if (record.lookup === "found" && record.receipt) {
             const r = record.receipt;
             lines.push(
@@ -575,7 +597,7 @@ export class Runner {
     }
 
     /** Summarises older history with one request of the same model, when it is getting large. */
-    async maybeCompact(force: boolean): Promise<"compacted" | "skipped" | "failed"> {
+    async maybeCompact(force: boolean): Promise<"compacted" | "skipped" | "failed" | "unknown"> {
         const { journal, options } = this;
         const model = this.model();
         const window = model.contextWindowTokens || 128_000;
@@ -599,6 +621,7 @@ export class Runner {
         const tail = journal.state.messages.slice(cut);
         const budgetChars = Math.max(20_000, Math.floor((window - reserve) * 0.6 * 3));
         options.output.info("Compacting the conversation (one model request)...");
+        const attemptStart = journal.state.generations.length;
         try {
             const result = await generateText({
                 model: options.gateway.chatModel(model.id, this.hooks("compact")),
@@ -613,6 +636,7 @@ export class Runner {
             const facts = this.recordedFacts();
             journal.state.messages = [{ role: "user", content: `${SUMMARY_HEADER}\n${summary}\n\n${facts}` }, ...tail];
             journal.state.compactions.push({ at: new Date().toISOString(), requestSeq: journal.state.generations.length, replacedMessages: cut });
+            journal.closeGenerations(journal.state.generations.filter((g) => g.purpose === "compact"));
             journal.commit();
             options.output.event({ type: "compaction", replaced_messages: cut, kept_messages: tail.length });
             options.output.info(`Compacted ${cut} earlier messages into a summary.`);
@@ -624,6 +648,17 @@ export class Runner {
             options.output.event({ type: "compaction_failed", message: this.describe(error) });
             journal.state.lastError = `compaction failed: ${this.describe(error)}`;
             journal.state.compactionFailedForTask = journal.state.tasks.length;
+            const record = journal.state.generations.slice(attemptStart).at(-1);
+            if (record && !((record.httpStatus ?? 0) >= 400)) {
+                // Sent, and no answer: its outcome and cost are unknown. The
+                // caller asks before any further request.
+                await this.lookUp(record);
+                options.output.info(this.unknownReport(record));
+                journal.commit();
+                return "unknown";
+            }
+            // Refused by the API, or never sent: nothing is unknown.
+            journal.closeGenerations(journal.state.generations.slice(attemptStart));
             journal.commit();
             return "failed";
         }

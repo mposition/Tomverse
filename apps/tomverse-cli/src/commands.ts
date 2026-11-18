@@ -173,7 +173,7 @@ class BoundedCapture {
 /** Every process recorded below `pid`, including orphans whose parent is gone. */
 const windowsDescendants = (pid: number): number[] => {
     const script = `$all = Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId; $seen = @(${pid}); $out = @(); do { $next = @($all | Where-Object { $seen -contains $_.ParentProcessId -and -not ($seen -contains $_.ProcessId) } | ForEach-Object { $_.ProcessId }); $seen += $next; $out += $next } while ($next.Count -gt 0); $out -join ','`;
-    const result = spawnSync(userShell(), ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], { encoding: "utf8", windowsHide: true, timeout: 15_000 });
+    const result = spawnSync(userShell(), ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], { encoding: "utf8", windowsHide: true, timeout: 15_000, env: commandEnv() });
     return (result.stdout ?? "").trim().split(",").filter(Boolean).map(Number).filter(Number.isFinite);
 };
 
@@ -207,11 +207,11 @@ export const killTree = async (child: ChildProcess): Promise<number[]> => {
     if (process.platform === "win32") {
         // End the tree at once; listing it first can take seconds, and the
         // tree keeps running meanwhile.
-        spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true, timeout: 15_000 });
+        spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true, timeout: 15_000, env: commandEnv() });
         // Then look for anything below it that survived (an orphan keeps its
         // recorded parent id) and end that too.
         const descendants = windowsDescendants(pid).filter(alive);
-        for (const d of descendants) spawnSync("taskkill", ["/PID", String(d), "/T", "/F"], { windowsHide: true, timeout: 15_000 });
+        for (const d of descendants) spawnSync("taskkill", ["/PID", String(d), "/T", "/F"], { windowsHide: true, timeout: 15_000, env: commandEnv() });
         await new Promise((r) => setTimeout(r, 300));
         return [pid, ...descendants].filter(alive);
     }
