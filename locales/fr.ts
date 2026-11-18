@@ -1,4 +1,5 @@
 import { reviewActionsCopy } from "./reviewActions";
+import { externalApiCopy } from "./externalApi";
 import { reviewHandoffCopy } from "./reviewHandoff";
 import { researchPreviewCopy } from "./researchPreview";
 import { workspaceWelcomeCopy } from "./workspaceWelcome";
@@ -7,6 +8,7 @@ import { en } from "./en";
 
 export const fr = {
     reviewActions: reviewActionsCopy.fr,
+    externalApi: externalApiCopy.fr,
     reviewHandoff: reviewHandoffCopy.fr,
     journey: {
         receiptSent: "Source incluse dans cet essai : {selected} choisis + {recent} récents ({unique} messages uniques)",
@@ -453,8 +455,9 @@ export const fr = {
         removeAttachment: "Retirer la pièce jointe",
         dropFilesHere: "Déposez les fichiers à joindre",
         dropFilesDescription: "Images, PDF, texte et fichiers Office sont pris en charge.",
-        attachmentCountError: "Vous pouvez joindre jusqu'à 5 fichiers.",
-        attachmentSizeError: "Chaque fichier doit faire 10 Mo ou moins.",
+        attachmentCountError: "Vous pouvez joindre jusqu'à 10 fichiers.",
+        attachmentSizeError: "Chaque fichier doit faire 50 Mo ou moins.",
+        attachmentTotalSizeError: "Les fichiers d'un message peuvent totaliser jusqu'à 100 Mo.",
         attachmentTypeError: "Ce type de fichier n'est pas pris en charge.",
         attachmentTypeMismatch: "L'extension du fichier ne correspond pas à son format réel.",
         attachmentEncodingUnreadable: "L'encodage de caractères du fichier n'a pas pu être lu.",
@@ -559,7 +562,7 @@ export const fr = {
         addAndTools: "Ajouts et outils",
         attachSourceSubtitle: "Depuis votre appareil ou Google Drive",
         attachSourceTitle: "Ajouter un fichier",
-        attachLimitsSummary: "Images, PDF, texte, code, ZIP et documents Office · 5 maximum · 10 Mo chacun",
+        attachLimitsSummary: "Images, PDF, texte, code, ZIP et documents Office · 10 maximum · 50 Mo chacun",
         backToMenu: "Retour au menu",
         openChatMenu: "Ouvrir le menu de la conversation",
         uploadFromComputer: "Choisir depuis votre ordinateur",
@@ -700,7 +703,7 @@ export const fr = {
         favoriteModels: "Favoris",
         recentModels: "Récents",
         attachmentGuideTitle: "Pièces jointes prises en charge",
-        attachmentGuideBody: "Images, PDF, texte, fichiers Office et Google Drive sont pris en charge. Jusqu'à 5 fichiers de 10 Mo chacun.",
+        attachmentGuideBody: "Images, PDF, texte, fichiers Office et Google Drive sont pris en charge. Jusqu'à 10 fichiers de 50 Mo chacun.",
         imageUnsupportedSelected: "Ces modèles sélectionnés ne peuvent pas lire les images :",
         markdownImageBlocked: "Image externe non chargée pour protéger votre vie privée",
         removeImageUnsupportedModels: "Retirer les modèles incompatibles",

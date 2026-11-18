@@ -50,6 +50,7 @@ import { authOptions } from "@/lib/auth";
 import {
     createR2UploadUrl,
     deleteR2Object,
+    probeR2Object,
     readR2Object,
     validateR2ObjectMetadata,
     writeR2Object,
@@ -247,10 +248,20 @@ import { CHAT_MAX_STORED_ANSWER_CHARACTERS } from "@/lib/chatRequestLimits";
 import { OfficeTextOverflowError, parseOfficeSafely } from "@/lib/officeSecurity";
 import {
     CHAT_ATTACHMENT_PARSE_CHARACTERS,
+    CHAT_MAX_ATTACHMENTS_PER_MESSAGE,
+    CHAT_MAX_ATTACHMENT_BYTES,
+    CHAT_MAX_TOTAL_ATTACHMENT_BYTES,
     PAST_ATTACHMENT_OMITTED_KIND,
     PAST_ATTACHMENT_OMITTED_TEXT,
     pastTurnAttachmentTokenBudget,
 } from "@/lib/chatAttachmentLimits";
+import {
+    ATTACHMENT_TEXT_CACHE_CATEGORIES,
+    attachmentTextCacheEnabled,
+    readAttachmentTextCache,
+    writeAttachmentTextCache,
+} from "@/lib/attachmentTextCache";
+import { chatUserMaxInputTokens } from "@/lib/chatInputLimits";
 import { extractLegacyOfficeText, type LegacyOfficeFormatId } from "@/lib/legacyOfficeText";
 import { legacyOfficeValidationCode } from "@/lib/chatAttachmentValidation";
 import {
@@ -562,19 +573,20 @@ const providerCallUsage = async (stream: {
     }
 };
 
-const MAX_ATTACHMENTS = 5;
-// Every request resends the full conversation history (including past
-// attachments, which get re-fetched from R2 and re-parsed on every turn), so
-// this is a generous safety ceiling on total reprocessing cost, not a
-// per-message limit — see MAX_ATTACHMENTS for the per-send cap.
-const MAX_CONVERSATION_ATTACHMENTS = 30;
+const MAX_ATTACHMENTS = CHAT_MAX_ATTACHMENTS_PER_MESSAGE;
+// Every request resends the full conversation history, so this bounds how many
+// earlier files one turn walks. Raised from 30 with the 10-file message limit
+// (2026-11-18): an earlier file whose text is cached (lib/attachmentTextCache.ts)
+// is one small read, not a fetch and re-parse, and the byte total still bounds
+// whatever is read whole. See MAX_ATTACHMENTS for the per-send cap.
+const MAX_CONVERSATION_ATTACHMENTS = 100;
 // Guests resend their whole local history on every turn too, so this bounds
 // how much ephemeral storage one guest chat can force the server to re-read.
 // Far below the account ceiling on purpose: a guest chat is a trial, not an
 // archive.
 const GUEST_MAX_CONVERSATION_ATTACHMENTS = 5;
-const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
-const MAX_TOTAL_ATTACHMENT_SIZE = 25 * 1024 * 1024;
+const MAX_ATTACHMENT_SIZE = CHAT_MAX_ATTACHMENT_BYTES;
+const MAX_TOTAL_ATTACHMENT_SIZE = CHAT_MAX_TOTAL_ATTACHMENT_BYTES;
 const MAX_STORED_MESSAGE_CHARACTERS = CHAT_MAX_STORED_ANSWER_CHARACTERS;
 type IncomingAttachment = {
     name?: unknown;
@@ -3125,16 +3137,13 @@ async function handleChatPost(
             throw new ChatAccessError(
                 413,
                 "TOO_MANY_ATTACHMENTS",
-                "A chat request can contain at most 5 attachments."
+                `A chat request can contain at most ${MAX_ATTACHMENTS} attachments.`
             );
         }
-        if (requestAttachments.length > MAX_CONVERSATION_ATTACHMENTS) {
-            throw new ChatAccessError(
-                413,
-                "TOO_MANY_CONVERSATION_ATTACHMENTS",
-                "This conversation has reached its attachment limit. Start a new chat to attach more files."
-            );
-        }
+        // No refusal for the conversation's file count: past
+        // MAX_CONVERSATION_ATTACHMENTS the oldest earlier files are named to
+        // the model and left out (see `olderAttachmentsToOmit`), so a long
+        // conversation can always be continued.
         /*
           One attachment is named once per turn, whichever handle names it.
 
@@ -3168,13 +3177,6 @@ async function handleChatPost(
                 }
                 attachmentIdentities.add(identity);
             }
-        }
-        if (attachmentIdentities.size > MAX_CONVERSATION_ATTACHMENTS) {
-            throw new ChatAccessError(
-                413,
-                "TOO_MANY_ATTACHMENT_OBJECTS",
-                "This conversation has reached its attachment limit. Start a new chat to attach more files."
-            );
         }
         // Resolved before the model, because Auto needs the plan to decide
         // whether this account is routed at all. Reused here rather than
@@ -3388,6 +3390,70 @@ async function handleChatPost(
         }
         let estimatedInputTokens = 0;
         let totalAttachmentBytes = 0;
+        // Earlier messages' files read whole have a byte share of their own, the
+        // same size as the turn's: past it they are named to the model and left
+        // out, as past the token share, so a conversation's history can never
+        // stop a new message from being sent.
+        let pastAttachmentBytes = 0;
+        // How many of the oldest earlier files this turn walks past without
+        // reading: the conversation's count above MAX_CONVERSATION_ATTACHMENTS.
+        // The turn's own files (at most MAX_ATTACHMENTS) are never among them.
+        // Counted as the loop below reads them: an assistant message's
+        // attachments are never read, so they never take a place.
+        const readAttachmentCount = (message: (typeof executionMessages)[number]) =>
+            message.role !== "assistant" && Array.isArray(message.attachments)
+                ? message.attachments.length
+                : 0;
+        let olderAttachmentsToOmit = Math.max(
+            0,
+            executionMessages.reduce(
+                (count, message) => count + readAttachmentCount(message),
+                0
+            ) - MAX_CONVERSATION_ATTACHMENTS
+        );
+        /*
+          The files that count leaves out are still asked about: a lost file is
+          refused, never silently skipped (docs/policy/user-attachment-persistence.md
+          §11.4). Asked all at once, before the loop, so a long conversation
+          costs one round of HEADs rather than one per file in turn. A file
+          already recorded unavailable needs no question; one storage cannot
+          answer for is left out, as on the byte share.
+        */
+        const countOmittedMissingKeys = new Set<string>();
+        if (olderAttachmentsToOmit > 0) {
+            const keys: string[] = [];
+            let remaining = olderAttachmentsToOmit;
+            for (const [index, message] of executionMessages.entries()) {
+                if (remaining <= 0 || index === executionMessages.length - 1) break;
+                if (readAttachmentCount(message) === 0) continue;
+                for (const incoming of message.attachments as IncomingAttachment[]) {
+                    if (remaining <= 0) break;
+                    remaining -= 1;
+                    const referenceKey = attachmentReferenceKey(incoming);
+                    const resolved = referenceKey
+                        ? resolvedAttachments.get(referenceKey)
+                        : undefined;
+                    if (resolved?.unavailableAt) continue;
+                    // Only a key the caller owns is ever asked about, so this
+                    // probe can never tell anyone whether another account's
+                    // object exists. The loop below refuses any other key
+                    // before reading; a guest chat never reaches this count.
+                    const key =
+                        resolved?.objectKey ??
+                        (typeof incoming?.objectKey === "string" ? incoming.objectKey : null);
+                    if (key && userObjectPrefix && key.startsWith(userObjectPrefix)) {
+                        keys.push(key);
+                    }
+                }
+            }
+            for (let start = 0; start < keys.length; start += 16) {
+                const batch = keys.slice(start, start + 16);
+                const probes = await Promise.all(batch.map((key) => probeR2Object(key)));
+                probes.forEach((probe, offset) => {
+                    if (probe.state === "missing") countOmittedMissingKeys.add(batch[offset]);
+                });
+            }
+        }
         let totalExtractedCharacters = 0;
         // Earlier messages' files share half the input allowance; past it they
         // are left out of the turn rather than failing it. See
@@ -4490,6 +4556,11 @@ async function handleChatPost(
                     throw new Error("Attachment access denied.");
                 }
 
+                // One of the oldest earlier files past the conversation's count:
+                // decided here, in the same order the probe above counted them.
+                const countOmitted = !isLatestMessage && olderAttachmentsToOmit > 0;
+                if (countOmitted) olderAttachmentsToOmit -= 1;
+
                 const attachmentScope: "current_turn" | "past_turn" =
                     isLatestMessage ? "current_turn" : "past_turn";
                 /*
@@ -4513,6 +4584,89 @@ async function handleChatPost(
                             scope: attachmentScope,
                         });
                     }
+                    continue;
+                }
+
+                // Named to the model and left out unread -- unless storage
+                // confirmed it gone, when it takes the ordinary path below,
+                // which marks it unavailable and answers 410 (§11.4).
+                if (countOmitted && !countOmittedMissingKeys.has(attachment.objectKey)) {
+                    textAttachments.push({
+                        name: attachment.name,
+                        kind: PAST_ATTACHMENT_OMITTED_KIND,
+                        text: PAST_ATTACHMENT_OMITTED_TEXT,
+                    });
+                    continue;
+                }
+
+                /*
+                  An earlier message's file whose text an earlier turn already
+                  extracted is not read or parsed again (lib/attachmentTextCache.ts).
+                  It answers to the same past-file share and parse budget as a
+                  freshly read one, and does not count towards the request's
+                  byte total, because no bytes are read.
+                */
+                const textCacheEligible =
+                    !isLatestMessage &&
+                    !isGuestObject &&
+                    Boolean(resolved?.attachmentId) &&
+                    ATTACHMENT_TEXT_CACHE_CATEGORIES.has(format.category) &&
+                    !(revisionEnabled && format.id === "xlsx" && resolved?.sourceLineageId) &&
+                    attachmentTextCacheEnabled();
+                if (textCacheEligible) {
+                    const cached = await readAttachmentTextCache(resolved!.attachmentId!);
+                    // The cache stands in for reading the file, not for
+                    // knowing it exists: storage is still asked, and a file it
+                    // confirms gone takes the ordinary path below, which marks
+                    // it unavailable and answers 410 exactly as before. An
+                    // unreachable answer is a fact about the connection, not
+                    // the file, so the cached text is used.
+                    const originalGone =
+                        cached !== null &&
+                        (await probeR2Object(attachment.objectKey)).state === "missing";
+                    if (cached && !originalGone) {
+                        for (const entry of cached) {
+                            const tokens = estimatePromptTokens(entry.text);
+                            if (
+                                pastAttachmentTokens + tokens > pastAttachmentTokenBudget ||
+                                totalExtractedCharacters + entry.text.length >
+                                    CHAT_ATTACHMENT_PARSE_CHARACTERS
+                            ) {
+                                textAttachments.push({
+                                    name: attachment.name,
+                                    kind: PAST_ATTACHMENT_OMITTED_KIND,
+                                    text: PAST_ATTACHMENT_OMITTED_TEXT,
+                                });
+                                continue;
+                            }
+                            pastAttachmentTokens += tokens;
+                            totalExtractedCharacters += entry.text.length;
+                            textAttachments.push({
+                                name: attachment.name,
+                                kind: entry.kind,
+                                text: entry.text,
+                            });
+                        }
+                        continue;
+                    }
+                }
+
+                // An earlier file the share cannot take is not even read --
+                // but storage is still asked whether it exists, so a file it
+                // confirms gone takes the ordinary path below, which marks it
+                // unavailable and answers 410, instead of reading as merely
+                // over budget.
+                if (
+                    !isLatestMessage &&
+                    typeof resolved?.size === "number" &&
+                    pastAttachmentBytes + resolved.size > MAX_TOTAL_ATTACHMENT_SIZE &&
+                    (await probeR2Object(attachment.objectKey)).state !== "missing"
+                ) {
+                    textAttachments.push({
+                        name: attachment.name,
+                        kind: PAST_ATTACHMENT_OMITTED_KIND,
+                        text: PAST_ATTACHMENT_OMITTED_TEXT,
+                    });
                     continue;
                 }
 
@@ -4661,13 +4815,25 @@ async function handleChatPost(
                         }
                     );
                 }
-                totalAttachmentBytes += attachmentBytes;
-                if (totalAttachmentBytes > MAX_TOTAL_ATTACHMENT_SIZE) {
-                    throw new ChatAccessError(
-                        413,
-                        "ATTACHMENT_TOTAL_TOO_LARGE",
-                        "Attachments exceed the total request size limit."
-                    );
+                if (isLatestMessage) {
+                    totalAttachmentBytes += attachmentBytes;
+                    if (totalAttachmentBytes > MAX_TOTAL_ATTACHMENT_SIZE) {
+                        throw new ChatAccessError(
+                            413,
+                            "ATTACHMENT_TOTAL_TOO_LARGE",
+                            "Attachments exceed the total request size limit."
+                        );
+                    }
+                } else {
+                    pastAttachmentBytes += attachmentBytes;
+                    if (pastAttachmentBytes > MAX_TOTAL_ATTACHMENT_SIZE) {
+                        textAttachments.push({
+                            name: attachment.name,
+                            kind: PAST_ATTACHMENT_OMITTED_KIND,
+                            text: PAST_ATTACHMENT_OMITTED_TEXT,
+                        });
+                        continue;
+                    }
                 }
 
                 if (format.category !== "archive") {
@@ -4695,12 +4861,56 @@ async function handleChatPost(
                             text: structured });
                         continue;
                     }
+                    const textEntriesBefore = textAttachments.length;
+                    const filePartsBefore = fileParts.length;
+                    const parseRoomBefore =
+                        CHAT_ATTACHMENT_PARSE_CHARACTERS - totalExtractedCharacters;
                     await ingestAttachmentFile({
                         format,
                         name: attachment.name,
                         buffer: attachmentBuffer,
                         fromArchive: false,
                     });
+                    if (textCacheEligible) {
+                        // Stored only when the extraction is whole: text and
+                        // nothing else, not omitted, and not stopped by the
+                        // parse budget (the extractors stop 64 short of it).
+                        const produced = textAttachments.slice(textEntriesBefore);
+                        const producedCharacters = produced.reduce(
+                            (sum, entry) => sum + entry.text.length,
+                            0
+                        );
+                        if (
+                            produced.length > 0 &&
+                            fileParts.length === filePartsBefore &&
+                            produced.every(
+                                (entry) => entry.kind !== PAST_ATTACHMENT_OMITTED_KIND
+                            ) &&
+                            producedCharacters + 64 < parseRoomBefore
+                        ) {
+                            // A row cascaded from the attachment: a deletion
+                            // removes it in the same transaction, and a write
+                            // for a row already gone fails and writes nothing.
+                            await writeAttachmentTextCache(
+                                resolved!.attachmentId!,
+                                produced
+                            ).catch((error) => {
+                                logRequestError(
+                                    "attachment_text_cache_write_failed",
+                                    traceId,
+                                    error,
+                                    requestedModelId,
+                                    {
+                                        phase: "attachment_text_cache",
+                                        failureLayer: "database",
+                                        ...(resolved?.attachmentId
+                                            ? { attachmentId: resolved.attachmentId }
+                                            : {}),
+                                    }
+                                );
+                            });
+                        }
+                    }
                     continue;
                 }
 

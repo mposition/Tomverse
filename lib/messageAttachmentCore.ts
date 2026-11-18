@@ -122,7 +122,9 @@ export const isMessageAttachmentUnavailableReason = (
  */
 export const acknowledgedUnavailableAttachmentsSchema = z
   .array(opaqueId)
-  .max(50)
+  // Every file one request can carry (100 messages of 10); keep equal to
+  // the check in lib/chatSecurity.ts.
+  .max(1_000)
   .optional();
 
 /* ------------------------------------------------------------------------ */

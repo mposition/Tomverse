@@ -1,8 +1,11 @@
 import { Worker } from "node:worker_threads";
 
 const MAX_ZIP_ENTRIES = 2_000;
-const MAX_UNCOMPRESSED_BYTES = 50 * 1024 * 1024;
-const MAX_ENTRY_UNCOMPRESSED_BYTES = 25 * 1024 * 1024;
+// Sized from the 50 MB attachment ceiling (operator decision 2026-11-18; was
+// 50 MB / 25 MB): an entry may be the size of the file, the whole document four
+// times it. The compression-ratio check below still refuses a zip bomb.
+const MAX_UNCOMPRESSED_BYTES = 200 * 1024 * 1024;
+const MAX_ENTRY_UNCOMPRESSED_BYTES = 50 * 1024 * 1024;
 const MAX_COMPRESSION_RATIO = 100;
 const OFFICE_PARSE_TIMEOUT_MS = 12_000;
 const ZIP_EOCD_SIGNATURE = 0x06054b50;
@@ -234,7 +237,7 @@ const runOfficeWorker = async <T>(
         },
         transferList: [transferableBuffer],
         resourceLimits: {
-            maxOldGenerationSizeMb: 128,
+            maxOldGenerationSizeMb: 512,
             maxYoungGenerationSizeMb: 32,
             stackSizeMb: 4,
         },

@@ -1,4 +1,5 @@
 import "server-only";
+import { ROUTING_CALL_MAX_OUTPUT_TOKENS } from "@/lib/routingCallLimits";
 import { generateText, Output } from "ai";
 import { z } from "zod";
 import { getActiveAiModel } from "@/lib/activeAiModel";
@@ -32,7 +33,7 @@ export async function detectChatLocationIntent(text: string, options?: {
     const prices = { inputUsdPerMillionTokens: pricing.inputUsdPerMillionTokens,
       outputUsdPerMillionTokens: pricing.outputUsdPerMillionTokens };
     const prompt = JSON.stringify({ userMessage: text.slice(0, 8_000) });
-    const maxOutputTokens = 400;
+    const maxOutputTokens = ROUTING_CALL_MAX_OUTPUT_TOKENS;
     const worst = autoLlmRouterWorstCaseMicroUsd({ system: CHAT_LOCATION_INTENT_PROMPT, prompt, maxOutputTokens, ...prices });
     const at = new Date();
     if (worst === null || options?.signal.aborted) return false;

@@ -93,7 +93,7 @@ const openDataSettings = async (page: Page) => {
 };
 
 for (const theme of ["light", "dark"] as const) {
-  test(`settings consent uses readable text with actions below its explanation in ${theme}`, async ({ page, baseURL, isMobile }) => {
+  test(`settings consent is the bottom bar and settings reopen it in ${theme}`, async ({ page, baseURL, isMobile }) => {
     await page.setViewportSize({ width: isMobile ? 320 : 1280, height: 800 });
     await prepareGuestPage(page, "ko");
     const account = await mockAuthenticatedApi(page);
@@ -105,33 +105,20 @@ for (const theme of ["light", "dark"] as const) {
     await openDataSettings(page);
     // The development-only Next toolbar occupies the footer's first button.
     await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
-    const notice = page.getByTestId("settings-consent-slot").getByTestId("chat-consent-notice");
+    const notice = page.getByTestId("chat-consent-notice");
     await expect(notice).toBeVisible({ timeout: 15_000 });
-    await expect(notice).toContainText("동의하면 기능 사용·유입 경로 통계를 수집해 Tomverse를 개선합니다.", { useInnerText: true });
-    if (isMobile) {
-      const title = notice.getByTestId("data-consent-mobile-title");
-      await expect(title).toBeVisible();
-      await expect(title).toHaveText("개인정보를 보호하는 제품 분석");
-      await expectAccessibleContrast(title, "Data consent purpose");
-    }
+    await expect(notice).toContainText("기능 사용·유입 경로 통계를 수집해", { useInnerText: true });
     await notice.scrollIntoViewIfNeeded();
     const metrics = await notice.evaluate(element => {
       const visible = (selector: string) => Array.from(element.querySelectorAll(selector)).filter(node => node.getBoundingClientRect().height > 0);
-      const paragraphs = visible("p");
       const buttons = visible("button");
       return {
-        fonts: visible("p,a,button").map(node => Number.parseFloat(getComputedStyle(node).fontSize)),
-        explanationBottom: Math.max(...paragraphs.map(node => node.getBoundingClientRect().bottom)),
-        actionTop: Math.min(...buttons.map(node => node.getBoundingClientRect().top)),
         targets: buttons.map(node => ({ width: node.getBoundingClientRect().width, height: node.getBoundingClientRect().height })),
         position: getComputedStyle(element).position,
       };
     });
-    expect(metrics.fonts.length).toBeGreaterThanOrEqual(4);
-    expect(metrics.fonts.every(size => size >= 14)).toBe(true);
-    expect(metrics.actionTop).toBeGreaterThan(metrics.explanationBottom);
     expect(metrics.targets.every(box => box.width >= 44 && box.height >= 44)).toBe(true);
-    expect(metrics.position).not.toBe("fixed");
+    expect(metrics.position).toBe("fixed");
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
     await notice.getByTestId("analytics-consent-decline").click();
     await expect(notice).toHaveCount(0);

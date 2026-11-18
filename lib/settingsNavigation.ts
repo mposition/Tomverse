@@ -88,6 +88,7 @@ export const SETTINGS_SECTION_IDS = [
     "assistants",
     "account-data",
     "email-notifications",
+    "api-keys",
 ] as const;
 
 export type SettingsSectionId = (typeof SETTINGS_SECTION_IDS)[number];
@@ -114,6 +115,9 @@ export const SETTINGS_SECTION_TAB: Record<SettingsSectionId, AccountSettingsTab>
         // marketing choice discoverable without recasting email as stored
         // account data.
         "email-notifications": "account",
+        // Keys are an account credential, next to sign-in and email rather
+        // than among the data operations.
+        "api-keys": "account",
     };
 
 /**

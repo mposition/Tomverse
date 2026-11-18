@@ -19,7 +19,7 @@ export function PricingKoreanPlanLimits({ plan, dailyCredits, allowAttachments, 
     <div data-testid={`pricing-plan-limits-${plan.toLowerCase()}`} className="mt-4 space-y-3 border-t border-current/20 pt-4 text-sm leading-6">
       <dl className="space-y-2">
         <div><dt className="font-bold">일일 플랜 크레딧</dt><dd>{dailyCredits === null ? "현재 일일 한도는 앱 사용량 안내에서 확인하세요." : dailyCredits === 0 ? "별도 일일 플랜 크레딧 한도 없음" : `${format(dailyCredits)} 크레딧`}</dd></div>
-        <div><dt className="font-bold">파일 첨부</dt><dd>{allowAttachments === false ? "현재 플랜 설정에서 첨부 기능을 제공하지 않습니다." : `${allowAttachments === undefined ? "첨부가 허용된 계정: " : ""}메시지당 5개 · 파일당 10 MiB · 총 25 MiB`}</dd></div>
+        <div><dt className="font-bold">파일 첨부</dt><dd>{allowAttachments === false ? "현재 플랜 설정에서 첨부 기능을 제공하지 않습니다." : `${allowAttachments === undefined ? "첨부가 허용된 계정: " : ""}메시지당 10개 · 파일당 50 MiB · 총 100 MiB`}</dd></div>
         <div><dt className="font-bold">앱 입력 상한</dt><dd>{appInputTokenLimit === null ? "현재 입력 상한은 앱의 요청 안내에서 확인하세요." : appLongContext ? `선택한 모델의 맥락 최대값까지 · ${format(appInputTokenLimit)} 토큰을 넘는 요청은 실제 비용 기준 크레딧 · 플랜 공통` : `${format(appInputTokenLimit)} 토큰 · 플랜 공통`}</dd></div>
       </dl>
       <p>월 크레딧, 모델별 한도와 운영 안전장치는 별도로 적용됩니다. 추가 구매 크레딧은 플랜 크레딧과 구분됩니다.</p>

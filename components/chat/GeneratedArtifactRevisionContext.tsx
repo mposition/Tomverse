@@ -24,8 +24,9 @@ export function useGeneratedArtifactRevision(input: {
   const { enabled, scopeKey, conversationId, readDraft, updateDraft, t } = input;
   const prepare = useCallback(async (artifact: ChatStreamArtifact): Promise<string | null> => {
     if (!enabled || !conversationId) return t("chat.artifactRevisionFailed");
-    const conflictCopy = (conflict: "count" | "name") => t(conflict === "count"
-      ? "chat.attachmentCountError" : "chat.artifactRevisionNameConflict");
+    const conflictCopy = (conflict: "count" | "name" | "size") => t(conflict === "count"
+      ? "chat.attachmentCountError" : conflict === "size"
+        ? "chat.attachmentTotalSizeError" : "chat.artifactRevisionNameConflict");
     const conflict = artifactRevisionDraftConflict(readDraft(scopeKey), artifact.filename);
     if (conflict) return conflictCopy(conflict);
     const key = `${scopeKey}\0${artifact.id}`;
@@ -63,7 +64,7 @@ export function useGeneratedArtifactRevision(input: {
           : office ? "chat.artifactRevisionOfficePrompt" : "chat.artifactRevisionPrompt";
         const request = t(promptKey)
           .replaceAll("{filename}", payload.name);
-        let appendConflict: "count" | "name" | null = null;
+        let appendConflict: "count" | "name" | "size" | null = null;
         updateDraft((current) => {
           const result = appendArtifactRevisionDraft(current, attachment, request);
           appendConflict = result.conflict;

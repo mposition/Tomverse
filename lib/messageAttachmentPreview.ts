@@ -11,6 +11,8 @@
  * URL in the browser.
  */
 
+import { CHAT_MAX_ATTACHMENT_BYTES } from "@/lib/chatAttachmentLimits";
+
 /**
  * The raster formats a chat message may carry (lib/chatAttachmentFormats.ts),
  * and nothing else. Each one renders inside an <img> and cannot run script;
@@ -23,8 +25,8 @@ export const PREVIEWABLE_ATTACHMENT_MEDIA_TYPES: ReadonlySet<string> = new Set([
   "image/gif",
 ]);
 
-/** The per-file upload ceiling (app/api/chat/route.ts MAX_ATTACHMENT_SIZE). */
-export const MAX_PREVIEW_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+/** The per-file upload ceiling (`CHAT_MAX_ATTACHMENT_BYTES`). */
+export const MAX_PREVIEW_ATTACHMENT_BYTES = CHAT_MAX_ATTACHMENT_BYTES;
 
 export const isPreviewableAttachmentMediaType = (mediaType: unknown): boolean =>
   typeof mediaType === "string" && PREVIEWABLE_ATTACHMENT_MEDIA_TYPES.has(mediaType);

@@ -211,7 +211,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
       {
         "id": "files-and-drive",
         "title": "7. Files and Google Drive",
-        "description": "Where guest attachments are offered, you can send one supported image or readable document up to 5 MiB. Signed-in accounts with attachment access can send up to five files per message, 10 MiB each and 25 MiB combined. Google Drive requires sign-in. The selected AI providers process the required file content; upload only material you are allowed to use.",
+        "description": "Where guest attachments are offered, you can send one supported image or readable document up to 5 MiB. Signed-in accounts with attachment access can send up to ten files per message, 50 MiB each and 100 MiB combined. Google Drive requires sign-in. The selected AI providers process the required file content; upload only material you are allowed to use.",
         "items": [
           {
             "term": "Supported",
@@ -500,7 +500,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
       {
         "id": "files-and-drive",
         "title": "7. 파일과 Google Drive",
-        "description": "첨부가 제공되는 게스트 체험에서는 지원 이미지·읽을 수 있는 문서 1개를 최대 5MiB까지 보낼 수 있습니다. 첨부 권한이 있는 로그인 계정은 메시지당 최대 5개, 각 10MiB, 합계 25MiB까지 사용할 수 있습니다. Google Drive 연결에는 로그인이 필요합니다. 필요한 파일 내용은 선택한 AI 제공자가 처리하므로 업로드 권한이 있는 자료만 사용하세요.",
+        "description": "첨부가 제공되는 게스트 체험에서는 지원 이미지·읽을 수 있는 문서 1개를 최대 5MiB까지 보낼 수 있습니다. 첨부 권한이 있는 로그인 계정은 메시지당 최대 10개, 각 50MiB, 합계 100MiB까지 사용할 수 있습니다. Google Drive 연결에는 로그인이 필요합니다. 필요한 파일 내용은 선택한 AI 제공자가 처리하므로 업로드 권한이 있는 자료만 사용하세요.",
         "items": [
           {
             "term": "지원 형식",
@@ -789,7 +789,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
       {
         "id": "files-and-drive",
         "title": "7. 文件和 Google Drive",
-        "description": "在提供访客附件的体验中，可发送一个不超过 5 MiB 的支持图片或可读文档。拥有附件权限的登录账户每条消息最多五个文件，每个 10 MiB，总计 25 MiB。连接 Google Drive 需要登录。所选 AI 提供商会处理必要文件内容，请只上传有权使用的资料。",
+        "description": "在提供访客附件的体验中，可发送一个不超过 5 MiB 的支持图片或可读文档。拥有附件权限的登录账户每条消息最多十个文件，每个 50 MiB，总计 100 MiB。连接 Google Drive 需要登录。所选 AI 提供商会处理必要文件内容，请只上传有权使用的资料。",
         "items": [
           {
             "term": "支持",
@@ -1078,7 +1078,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
       {
         "id": "files-and-drive",
         "title": "7. 檔案與 Google Drive",
-        "description": "在提供訪客附件的體驗中，可傳送一個不超過 5 MiB 的支援圖片或可讀取文件。擁有附件權限的登入帳戶，每則訊息最多可附五個檔案，每個 10 MiB，總計 25 MiB。連接 Google Drive 需要登入。所選 AI 供應商會處理必要的檔案內容，請只上傳你有權使用的資料。",
+        "description": "在提供訪客附件的體驗中，可傳送一個不超過 5 MiB 的支援圖片或可讀取文件。擁有附件權限的登入帳戶，每則訊息最多可附十個檔案，每個 50 MiB，總計 100 MiB。連接 Google Drive 需要登入。所選 AI 供應商會處理必要的檔案內容，請只上傳你有權使用的資料。",
         "items": [
           {
             "term": "支援",
@@ -1367,7 +1367,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
       {
         "id": "files-and-drive",
         "title": "7. Fichiers et Google Drive",
-        "description": "Lorsque les pièces jointes sont proposées aux visiteurs, vous pouvez envoyer une image prise en charge ou un document lisible de 5 Mio maximum. Les comptes connectés autorisés peuvent envoyer cinq fichiers par message, 10 Mio chacun et 25 Mio au total. Google Drive nécessite une connexion. Les fournisseurs d’IA choisis traitent le contenu nécessaire ; utilisez uniquement des documents que vous êtes autorisé à transmettre.",
+        "description": "Lorsque les pièces jointes sont proposées aux visiteurs, vous pouvez envoyer une image prise en charge ou un document lisible de 5 Mio maximum. Les comptes connectés autorisés peuvent envoyer dix fichiers par message, 50 Mio chacun et 100 Mio au total. Google Drive nécessite une connexion. Les fournisseurs d’IA choisis traitent le contenu nécessaire ; utilisez uniquement des documents que vous êtes autorisé à transmettre.",
         "items": [
           {
             "term": "Pris en charge",
@@ -1656,7 +1656,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
       {
         "id": "files-and-drive",
         "title": "7. Dateien und Google Drive",
-        "description": "Wenn Gastanhänge angeboten werden, ist ein unterstütztes Bild oder lesbares Dokument bis 5 MiB möglich. Angemeldete Konten mit Anhangzugriff können fünf Dateien pro Nachricht senden, je 10 MiB und insgesamt 25 MiB. Google Drive erfordert eine Anmeldung. Die gewählten KI-Anbieter verarbeiten nötige Dateiinhalte; laden Sie nur erlaubte Materialien hoch.",
+        "description": "Wenn Gastanhänge angeboten werden, ist ein unterstütztes Bild oder lesbares Dokument bis 5 MiB möglich. Angemeldete Konten mit Anhangzugriff können zehn Dateien pro Nachricht senden, je 50 MiB und insgesamt 100 MiB. Google Drive erfordert eine Anmeldung. Die gewählten KI-Anbieter verarbeiten nötige Dateiinhalte; laden Sie nur erlaubte Materialien hoch.",
         "items": [
           {
             "term": "Unterstützt",
@@ -1945,7 +1945,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
       {
         "id": "files-and-drive",
         "title": "7. Archivos y Google Drive",
-        "description": "Cuando se ofrecen adjuntos a visitantes, puedes enviar una imagen compatible o un documento legible de hasta 5 MiB. Las cuentas con sesión y permiso para adjuntar pueden enviar cinco archivos por mensaje, de 10 MiB cada uno y 25 MiB en total. Google Drive requiere iniciar sesión. Los proveedores elegidos procesan el contenido necesario; sube solo material que tengas permiso para usar.",
+        "description": "Cuando se ofrecen adjuntos a visitantes, puedes enviar una imagen compatible o un documento legible de hasta 5 MiB. Las cuentas con sesión y permiso para adjuntar pueden enviar diez archivos por mensaje, de 50 MiB cada uno y 100 MiB en total. Google Drive requiere iniciar sesión. Los proveedores elegidos procesan el contenido necesario; sube solo material que tengas permiso para usar.",
         "items": [
           {
             "term": "Compatibles",
@@ -2234,7 +2234,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
       {
         "id": "files-and-drive",
         "title": "7. Arquivos e Google Drive",
-        "description": "Quando anexos são oferecidos a visitantes, você pode enviar uma imagem compatível ou um documento legível de até 5 MiB. Contas conectadas com acesso a anexos podem enviar cinco arquivos por mensagem, 10 MiB por arquivo e 25 MiB no total. O Google Drive exige login. Os provedores de IA escolhidos processam o conteúdo necessário; envie apenas materiais que você tem permissão para usar.",
+        "description": "Quando anexos são oferecidos a visitantes, você pode enviar uma imagem compatível ou um documento legível de até 5 MiB. Contas conectadas com acesso a anexos podem enviar dez arquivos por mensagem, 50 MiB por arquivo e 100 MiB no total. O Google Drive exige login. Os provedores de IA escolhidos processam o conteúdo necessário; envie apenas materiais que você tem permissão para usar.",
         "items": [
           {
             "term": "Suportados",

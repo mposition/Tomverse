@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CHAT_MAX_ATTACHMENTS_PER_MESSAGE } from "@/lib/chatAttachmentLimits";
 import { CONNECTED_JOURNEY_FIELDS, connectedJourneyFields, connectedJourneyPropertiesSchema } from "./connectedJourneyShared";
 import { BILLING_CURRENCIES, type BillingCurrency } from "@/lib/billingMarkets";
 import { ANALYTICS_LANGUAGES, SUPPORTED_LANGUAGES } from "@/lib/language";
@@ -341,7 +342,7 @@ export const analyticsPropertiesSchema = z
     // surface exists -- cannot be asked.
     image_intent_surface: z.enum(["composer", "after_answer"]).optional(),
     method: z.string().trim().min(1).max(32).optional(),
-    attachment_count: z.number().int().min(1).max(5).optional(),
+    attachment_count: z.number().int().min(1).max(CHAT_MAX_ATTACHMENTS_PER_MESSAGE).optional(),
     model_id: z.string().trim().min(1).max(80).optional(),
     billing_interval: z.enum(["monthly", "annual"]).optional(),
     plan_id: z.enum(["free", "pro", "max"]).optional(),
@@ -761,10 +762,6 @@ export const normalizeAnalyticsPlan = (value: unknown) =>
       ? "Guest"
       : "Free";
 
-// The stored consent decision's key. It lives here rather than in
-// `productAnalyticsClient` because that module is `"use client"`, and the
-// pre-paint reservation script (see MarketingConsentReservation) is rendered by
-// a Server Component that has to embed this exact string. One source of truth
-// keeps the script and the reader from drifting apart -- a mismatch would
-// silently reserve space for visitors who have already decided.
+// The stored consent decision's key, shared by the client reader and the
+// storage listener so the two cannot drift apart.
 export const ANALYTICS_CONSENT_STORAGE_KEY = "tomverse_analytics_consent_v1";

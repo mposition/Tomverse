@@ -1,3 +1,7 @@
+import {
+    CHAT_MAX_ATTACHMENTS_PER_MESSAGE,
+    CHAT_MAX_ATTACHMENT_BYTES,
+} from "@/lib/chatAttachmentLimits";
 export const dynamic = "force-dynamic";
 import { CHAT_MAX_MESSAGE_BODY_BYTES, CHAT_MAX_MESSAGE_CHARACTERS } from "@/lib/chatRequestLimits";
 
@@ -63,11 +67,11 @@ const availabilitySchema = z
                 z
                     .object({
                         mediaType: z.string().min(1).max(160),
-                        size: z.number().int().min(0).max(10 * 1024 * 1024),
+                        size: z.number().int().min(0).max(CHAT_MAX_ATTACHMENT_BYTES),
                     })
                     .strict()
             )
-            .max(5)
+            .max(CHAT_MAX_ATTACHMENTS_PER_MESSAGE)
             .optional(),
     })
     .strict();

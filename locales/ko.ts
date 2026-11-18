@@ -1,4 +1,5 @@
 import { reviewActionsCopy } from "./reviewActions";
+import { externalApiCopy } from "./externalApi";
 import { reviewHandoffCopy } from "./reviewHandoff";
 import { researchPreviewCopy } from "./researchPreview";
 import { workspaceWelcomeCopy } from "./workspaceWelcome";
@@ -9,6 +10,7 @@ import { en } from "./en";
 // it that way. It was the only complete locale with nothing enforcing it.
 export const ko = {
     reviewActions: reviewActionsCopy.ko,
+    externalApi: externalApiCopy.ko,
     reviewHandoff: reviewHandoffCopy.ko,
     journey: {
         receiptSent: "이번 시도 입력에 원문 포함: 선택 {selected}개 + 최근 {recent}개 (고유 메시지 {unique}개)",
@@ -434,8 +436,9 @@ export const ko = {
         removeAttachment: "첨부파일 제거",
         dropFilesHere: "파일을 놓으면 첨부됩니다",
         dropFilesDescription: "이미지, PDF, 텍스트, Office 파일을 지원합니다.",
-        attachmentCountError: "파일은 최대 5개까지 첨부할 수 있습니다.",
-        attachmentSizeError: "각 파일은 10MB 이하여야 합니다.",
+        attachmentCountError: "파일은 최대 10개까지 첨부할 수 있습니다.",
+        attachmentSizeError: "각 파일은 50MB 이하여야 합니다.",
+        attachmentTotalSizeError: "한 메시지의 파일은 합계 100MB까지 첨부할 수 있습니다.",
         attachmentTypeError: "지원하지 않는 파일 형식입니다.",
         attachmentTypeMismatch: "파일 확장자와 실제 형식이 일치하지 않습니다.",
         attachmentEncodingUnreadable: "파일의 문자 인코딩을 읽을 수 없습니다.",
@@ -558,7 +561,7 @@ export const ko = {
         addAndTools: "추가 및 도구",
         attachSourceSubtitle: "내 기기 또는 Google Drive",
         attachSourceTitle: "파일 추가",
-        attachLimitsSummary: "이미지·PDF·텍스트·코드·ZIP·Office 문서 · 최대 5개 · 각 10MB",
+        attachLimitsSummary: "이미지·PDF·텍스트·코드·ZIP·Office 문서 · 최대 10개 · 각 50MB",
         backToMenu: "이전 메뉴로",
         openChatMenu: "대화 메뉴 열기",
         uploadFromComputer: "컴퓨터에서 선택",
@@ -746,7 +749,7 @@ export const ko = {
         favoriteModels: "즐겨찾기",
         recentModels: "최근 사용",
         attachmentGuideTitle: "지원하는 첨부파일",
-        attachmentGuideBody: "이미지, PDF, 텍스트, Office 파일, Google Drive 파일을 지원합니다. 최대 5개, 파일당 10MB까지 가능합니다.",
+        attachmentGuideBody: "이미지, PDF, 텍스트, Office 파일, Google Drive 파일을 지원합니다. 최대 10개, 파일당 50MB까지 가능합니다.",
         imageUnsupportedSelected: "이미지를 읽을 수 없는 선택 모델:",
         markdownImageBlocked: "개인정보 보호를 위해 외부 이미지를 불러오지 않음",
         removeImageUnsupportedModels: "미지원 모델 선택 해제",

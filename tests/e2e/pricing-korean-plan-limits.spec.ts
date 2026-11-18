@@ -37,9 +37,9 @@ for (const scenario of [
       );
     }
     const attachmentRow = page.getByRole("row").filter({ hasText: "파일 첨부 (허용 시)" });
-    await expect(attachmentRow.getByRole("cell").nth(2)).toHaveText(scenario.proAttachments ? "5개 · 각 10 MiB · 총 25 MiB" : "현재 제공하지 않음");
-    await expect(max).toContainText("메시지당 5개 · 파일당 10 MiB · 총 25 MiB");
-    await expect(pro).toContainText(scenario.proAttachments ? "메시지당 5개 · 파일당 10 MiB · 총 25 MiB" : "현재 플랜 설정에서 첨부 기능을 제공하지 않습니다.");
+    await expect(attachmentRow.getByRole("cell").nth(2)).toHaveText(scenario.proAttachments ? "10개 · 각 50 MiB · 총 100 MiB" : "현재 제공하지 않음");
+    await expect(max).toContainText("메시지당 10개 · 파일당 50 MiB · 총 100 MiB");
+    await expect(pro).toContainText(scenario.proAttachments ? "메시지당 10개 · 파일당 50 MiB · 총 100 MiB" : "현재 플랜 설정에서 첨부 기능을 제공하지 않습니다.");
     await expect(page.getByTestId("pricing-plan-card-max")).not.toContainText("더 높은 첨부파일 및 맥락 한도");
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   });

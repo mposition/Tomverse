@@ -1,4 +1,5 @@
 import { reviewActionsCopy } from "./reviewActions";
+import { externalApiCopy } from "./externalApi";
 import { reviewHandoffCopy } from "./reviewHandoff";
 import { researchPreviewCopy } from "./researchPreview";
 import { workspaceWelcomeCopy } from "./workspaceWelcome";
@@ -7,6 +8,7 @@ import { en } from "./en";
 
 export const de = {
     reviewActions: reviewActionsCopy.de,
+    externalApi: externalApiCopy.de,
     reviewHandoff: reviewHandoffCopy.de,
     journey: {
         receiptSent: "Quelle in diesem Versuch: {selected} ausgewählt + {recent} aktuell ({unique} eindeutige Nachrichten)",
@@ -442,8 +444,9 @@ export const de = {
         removeAttachment: "Anhang entfernen",
         dropFilesHere: "Dateien zum Anhängen ablegen",
         dropFilesDescription: "Bilder, PDFs, Text und Office-Dateien werden unterstützt.",
-        attachmentCountError: "Sie können bis zu 5 Dateien anhängen.",
-        attachmentSizeError: "Jede Datei darf höchstens 10 MB groß sein.",
+        attachmentCountError: "Sie können bis zu 10 Dateien anhängen.",
+        attachmentSizeError: "Jede Datei darf höchstens 50 MB groß sein.",
+        attachmentTotalSizeError: "Die Dateien einer Nachricht dürfen zusammen höchstens 100 MB groß sein.",
         attachmentTypeError: "Dieser Dateityp wird nicht unterstützt.",
         attachmentTypeMismatch: "Die Dateiendung stimmt nicht mit dem tatsächlichen Format überein.",
         attachmentEncodingUnreadable: "Die Zeichenkodierung der Datei konnte nicht gelesen werden.",
@@ -548,7 +551,7 @@ export const de = {
         addAndTools: "Hinzufügen und Werkzeuge",
         attachSourceSubtitle: "Vom Gerät oder aus Google Drive",
         attachSourceTitle: "Datei hinzufügen",
-        attachLimitsSummary: "Bilder, PDFs, Text, Code, ZIP und Office-Dokumente · höchstens 5 · je 10 MB",
+        attachLimitsSummary: "Bilder, PDFs, Text, Code, ZIP und Office-Dokumente · höchstens 10 · je 50 MB",
         backToMenu: "Zurück zum Menü",
         openChatMenu: "Chat-Menü öffnen",
         uploadFromComputer: "Vom Computer auswählen",
@@ -689,7 +692,7 @@ export const de = {
         favoriteModels: "Favoriten",
         recentModels: "Zuletzt verwendet",
         attachmentGuideTitle: "Unterstützte Anhänge",
-        attachmentGuideBody: "Bilder, PDFs, Text, Office-Dateien und Google Drive-Dateien werden unterstützt. Bis zu 5 Dateien mit je 10 MB.",
+        attachmentGuideBody: "Bilder, PDFs, Text, Office-Dateien und Google Drive-Dateien werden unterstützt. Bis zu 10 Dateien mit je 50 MB.",
         imageUnsupportedSelected: "Diese ausgewählten Modelle können Bilder nicht lesen:",
         markdownImageBlocked: "Externes Bild zum Schutz Ihrer Privatsphäre nicht geladen",
         removeImageUnsupportedModels: "Nicht kompatible Modelle entfernen",

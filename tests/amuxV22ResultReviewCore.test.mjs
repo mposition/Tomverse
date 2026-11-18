@@ -103,7 +103,7 @@ test("applying a review: system resolution in one transaction through the chain 
     "a block leaves the person's escalation open");
   assert.match(source, /resolvedById: AMUX_V22_RESULT_REVIEW_RESOLVER/, "the system resolves, never a borrowed person");
   assert.match(source, /AMUX_V22_RESULT_REVIEW_RESOLVER = "system:amux-v22-result-review"/);
-  assert.match(source, /settlementDestinationForBudget\(\{ requested_status: "todo"/, "a retry stays inside the attempt budget");
+  assert.doesNotMatch(source, /settlementDestinationForBudget/, "no count of attempts turns a retry into a block (2026-11-18)");
   assert.match(source, /row\.newestAttemptId !== row\.attemptId/, "a Task that ran again cancels the review");
   assert.match(source, /writeSystemAuditLog\(\{ tx, systemActor: AMUX_SYSTEM_AUDIT_ACTOR,\s+action: AMUX_V22_RESULT_REVIEW_APPLIED_ACTION/);
   assert.doesNotMatch(source, /adminAuditLog\./);

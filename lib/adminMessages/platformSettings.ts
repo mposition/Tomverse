@@ -64,6 +64,7 @@ export const adminPlatformSettingsMessages = defineAdminMessages({
       details: "Policy notes for each switch",
       items: {
         chatStarter: { label: "Chat starter cards", detail: "Suggestions on a new chat's welcome screen" },
+        helpAssistant: { label: "Help Centre assistant", detail: "Answers signed-in readers' questions from the help guides (platform-paid model call)" },
         imageGeneration: { label: "Image generation", detail: "Make images from a prompt (opt-in beta)" },
         externalImport: { label: "Import conversations", detail: "Bring ChatGPT, Claude and Gemini history in" },
         externalContinuation: { label: "Continue an imported chat", detail: "Start a new chat from an imported one" },
@@ -283,6 +284,7 @@ export const adminPlatformSettingsMessages = defineAdminMessages({
       details: "스위치별 정책 메모",
       items: {
         chatStarter: { label: "채팅 시작 카드", detail: "새 대화 첫 화면의 추천 카드" },
+        helpAssistant: { label: "도움말 비서", detail: "로그인한 사용자의 질문에 도움말 문서로 답합니다 (플랫폼 부담 모델 호출)" },
         imageGeneration: { label: "이미지 생성", detail: "요청으로 이미지 만들기 (옵트인 베타)" },
         externalImport: { label: "대화 가져오기", detail: "ChatGPT, Claude, Gemini 대화 기록 가져오기" },
         externalContinuation: { label: "가져온 대화 이어가기", detail: "가져온 대화에서 새 대화 시작" },

@@ -3,6 +3,7 @@ import { readDeviceDraft, writeDeviceDraft } from "@tomverse/chat-core/device-dr
 import type { ChatStreamArtifact } from "../../../lib/generatedArtifactCore";
 import { mobileArtifactRevisionCopy } from "../../../locales/mobileArtifactRevision";
 import { mobileErrorText } from "../../../locales/mobileErrors";
+import { mobileUploadCopy } from "../../../locales/mobileUpload";
 import type { MobileLanguage } from "../../../locales/mobile";
 import { appendNativeRevisionDraft, nativeRevisionConflict, readNativeDraftFiles, writeNativeDraftFiles, type NativeFileUpdate } from "./nativeRevisionDraft";
 import type { ChatTransport, MobileAttachment } from "./chatTransport";
@@ -51,7 +52,8 @@ export function useArtifactRevisionDraft(input: {
     const copy = mobileArtifactRevisionCopy(language);
     if (!enabled || !owner || !conversationId || !transport.prepareArtifactRevision) return copy.failed;
     const epoch = active.current.epoch;
-    const conflictCopy = (reason: "name" | "count" | "text") => reason === "name" ? copy.nameConflict : reason === "count" ? copy.countConflict : copy.textConflict;
+    const conflictCopy = (reason: "name" | "count" | "text" | "size") => reason === "name" ? copy.nameConflict : reason === "count" ? copy.countConflict
+      : reason === "size" ? mobileUploadCopy[language].sizeLimit : copy.textConflict;
     const conflict = nativeRevisionConflict(readFiles(owner, conversationId), artifact.filename);
     if (conflict) return conflictCopy(conflict);
     const key = `${scope}:${artifact.id}`;

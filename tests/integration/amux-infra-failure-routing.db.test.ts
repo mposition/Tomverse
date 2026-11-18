@@ -58,10 +58,11 @@ async function secondCard(tx: LifecycleTx, seedTaskId: string) {
   return taskId;
 }
 
-/** Ended runs of the card on worker-two that never did its work. */
-async function earlyExits(tx: LifecycleTx, taskId: string, minutesAgo: number[]) {
+/** Ended runs of the card on worker-two that never did its work (or, with `run`, other ended runs). */
+async function earlyExits(tx: LifecycleTx, taskId: string, minutesAgo: number[],
+  run = { worker: "worker-two", outcome: "blocked", reason: "infra_early_exit" }) {
   const [instance] = await tx.$queryRaw<Array<{ instanceId: string }>>`
-    SELECT "instanceId" FROM "AmuxWorkerRuntime" WHERE "workerName" = 'worker-two'`;
+    SELECT "instanceId" FROM "AmuxWorkerRuntime" WHERE "workerName" = ${run.worker}`;
   const numbers = await tx.$queryRaw<Array<{ greatest: number | null }>>`
     SELECT MAX("attemptNumber") AS "greatest" FROM "AmuxExecutionAttempt" WHERE "taskId" = ${taskId}`;
   let next = (numbers[0]?.greatest ?? 0) + 1;
@@ -71,9 +72,9 @@ async function earlyExits(tx: LifecycleTx, taskId: string, minutesAgo: number[])
         ("id", "taskId", "worker", "workerInstanceId", "workerGeneration", "taskRevision",
          "attemptNumber", "reservedCostMicrousd", "heartbeatAt", "startedAt", "endedAt",
          "outcome", "toStatus", "endedBy", "reason", "updatedAt")
-        VALUES (${randomUUID()}, ${taskId}, 'worker-two', ${instance!.instanceId}, 1, 3, ${next},
+        VALUES (${randomUUID()}, ${taskId}, ${run.worker}, ${instance!.instanceId}, 1, 3, ${next},
           1000, now(), now() - make_interval(mins => ${minutes + 1}), now() - make_interval(mins => ${minutes}),
-          'blocked', 'todo', 'worker-two', 'infra_early_exit', now())`;
+          ${run.outcome}, 'todo', ${run.worker}, ${run.reason}, now())`;
       next += 1;
     }
   });
@@ -100,8 +101,8 @@ test("a worker that exits right after start: attempts kept, other worker first, 
       "the number stays unique; the count is the card's own");
     assert.deepEqual(await s.countAmuxInfraAttemptsBefore(tx, taskId, randomUUID()),
       { total: 3, window: 3 });
-    assert.deepEqual(await s.readAmuxRecentResultSignatures(tx, taskId, randomUUID(), 2),
-      ["failed:reported_result"], "an infrastructure failure is never a repeat of the card's own result");
+    assert.deepEqual(await s.readAmuxResultFailureStreak(tx, taskId), { streak: 1 },
+      "an infrastructure failure is never a repeat of the card's own result");
 
     // The next claim tries the other worker first.
     const failedOn = await s.recentAmuxInfraFailureWorkers(tx, taskId);
@@ -164,8 +165,7 @@ test("platform failures have no bound: the card stays claimable and only waits l
     assert.ok(facts.lastEndedAt instanceof Date);
     const budget = s.decideAmuxAttemptBudget({ historical_rows: facts.historicalRows,
       greatest_attempt_number: facts.greatestAttemptNumber, infra_rows: facts.infraRows });
-    assert.deepEqual(budget, { allowed: true, next_attempt_number: 14,
-      max_attempts: s.AMUX_MAX_EXECUTION_ATTEMPTS });
+    assert.deepEqual(budget, { allowed: true, next_attempt_number: 14, max_attempts: null });
     // The wait doubles from a minute and holds at an hour.
     assert.equal(amuxInfraRetryDelayMs(facts.infraWindowRows), 60 * 60_000);
     // A person's retry starts the count of the wait over; the earlier failures
@@ -184,6 +184,48 @@ test("platform failures have no bound: the card stays claimable and only waits l
     assert.equal(amuxInfraRetryDelayMs(after.infraWindowRows), 0);
     assert.deepEqual(await s.countAmuxInfraAttemptsBefore(tx, taskId, randomUUID()),
       { total: 12, window: 0 });
+  });
+});
+
+test("a result that fails the same way again and again only makes the claim wait longer", async () => {
+  // Owner direction 2026-11-18: the third identical failure no longer hands the
+  // card to a person; the claim waits a minute that doubles up to an hour.
+  await lifecycle(async (tx) => {
+    const seed = await seedAmuxV4PortfolioRecoveryPrerequisites(queryAdapter(tx),
+      { taskRole: "investigate" }) as { taskId: string };
+    const taskId = await secondCard(tx, seed.taskId);
+    const failed = { worker: "worker-one", outcome: "failed", reason: "reported_result" };
+    // The card's first run plus six more: seven identical result failures.
+    await earlyExits(tx, taskId, [18, 16, 14, 12, 10, 8], failed);
+    await fixtureCommitted(tx);
+    const s = await services();
+    const facts = await s.readAmuxAttemptBudgetFacts(tx, taskId);
+    assert.equal(facts.historicalRows, 7);
+    assert.equal(facts.lastEndedIsInfra, false);
+    assert.deepEqual(await s.readAmuxResultFailureStreak(tx, taskId), { streak: 7 });
+    assert.equal(s.amuxResultRetryDelayMs(7), 8 * 60_000);
+    const budget = s.decideAmuxAttemptBudget({ historical_rows: facts.historicalRows,
+      greatest_attempt_number: facts.greatestAttemptNumber, infra_rows: facts.infraRows });
+    assert.deepEqual(budget, { allowed: true, next_attempt_number: 8, max_attempts: null });
+    // A platform failure in between is not part of the streak ...
+    await earlyExits(tx, taskId, [6]);
+    assert.deepEqual(await s.readAmuxResultFailureStreak(tx, taskId), { streak: 7 });
+    // ... and a different failure of the card's own result starts it over.
+    await earlyExits(tx, taskId, [4], { worker: "worker-one", outcome: "failed", reason: "cli_turn_limit" });
+    assert.deepEqual(await s.readAmuxResultFailureStreak(tx, taskId), { streak: 1 });
+    await earlyExits(tx, taskId, [2], failed);
+    await earlyExits(tx, taskId, [1], failed);
+    assert.deepEqual(await s.readAmuxResultFailureStreak(tx, taskId), { streak: 2 });
+    // A person's retry starts the streak over too.
+    await withoutTriggers(tx, async () => {
+      await tx.$executeRaw`INSERT INTO "AmuxHumanEscalation"
+        ("id", "taskId", "specialty", "reason", "status", "openedBy", "resolvedById",
+         "resolvedAt", "resolution", "resolutionOutcome", "updatedAt")
+        VALUES (${randomUUID()}, ${taskId}, 'execution-recovery', 'execution_blocked',
+          'resolved', 'system:amux-v22-settlement', 'synthetic-owner', now(),
+          'Fixed the card.', 'retry', now())`;
+    });
+    assert.deepEqual(await s.readAmuxResultFailureStreak(tx, taskId), { streak: 0 });
   });
 });
 

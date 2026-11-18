@@ -135,6 +135,7 @@ model User {
   modelMigrationRecords                ModelMigrationRecord[]
   mobileDevices                        MobileDevice[]
   mobileTokenFamilies                  MobileTokenFamily[]
+  externalApiKeys                      ExternalApiKey[]
   mobileLoginGrants                    MobileLoginGrant[]
   mobileAuthEvents                     MobileAuthEvent[]
   quotaScopes                          QuotaScope[]
@@ -845,6 +846,11 @@ model MessageAttachment {
   /// tool needs the second one to know what it has covered.
   availabilityCheckedAt DateTime?
 
+  /// The text an earlier turn extracted from this file, reused by later turns
+  /// (lib/attachmentTextCache.ts). Deleted with this row, in the same
+  /// transaction, by the cascade.
+  textCache MessageAttachmentTextCache?
+
   createdAt DateTime @default(now())
 
   @@unique([messageId, ordinal])
@@ -852,6 +858,28 @@ model MessageAttachment {
   @@index([userId, createdAt])
   @@index([unavailableAt])
   @@index([sourceArtifactId])
+}
+
+/// The text a model-independent extractor read out of one bound account
+/// attachment (PDF text or OCR, Office, legacy Office, plain text), kept so a
+/// later turn does not read and parse the file again
+/// (docs/policy/user-attachment-persistence.md section 7.1).
+///
+/// A row of its own, cascaded from MessageAttachment, rather than an object
+/// next to the file: deleting the attachment -- a conversation, a bulk or an
+/// account deletion -- removes this text in the same transaction, so it can
+/// never outlive the file whatever order a turn and a deletion run in.
+model MessageAttachmentTextCache {
+  attachmentId String            @id
+  attachment   MessageAttachment @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
+
+  /// ATTACHMENT_TEXT_CACHE_VERSION when written; a row of another version is
+  /// never read.
+  version Int
+  /// [{ kind, text }], what the extractor produced, in order.
+  entries Json
+
+  createdAt DateTime @default(now())
 }
 
 /// A finalised upload that has not been bound to a message yet.
@@ -2022,6 +2050,7 @@ model ChatCreditReservation {
   settlementAttempt      ChatAttemptUsage?  @relation("ReservationSettlementAttempt", fields: [id, settlementAttemptIndex], references: [reservationId, attemptIndex], onDelete: NoAction, onUpdate: NoAction, map: "ChatCreditReservation_settlementAttempt_fkey")
   attemptUsage           ChatAttemptUsage[]
   researchPreviewRun     ResearchPreviewRun?
+  externalApiRequest     ExternalApiRequest?
 
   @@index([status, expiresAt])
   @@index([userId, createdAt])
@@ -2029,6 +2058,63 @@ model ChatCreditReservation {
   @@unique([subjectKey, clientTurnId])
   @@index([providerRequestId])
   @@index([providerResponseId])
+}
+
+/// A key the account holder issued for the external inference API (/api/v1).
+/// The secret is shown once, at creation; only its SHA-256 digest is stored.
+/// It authorises inference, the account's own runnable model list and this
+/// key's own usage -- nothing else (docs/policy/external-api.md).
+model ExternalApiKey {
+  id           String    @id @default(cuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name         String
+  /// Public, non-secret identifier shown in lists and receipts.
+  keyPrefix    String    @unique
+  secretDigest String    @unique
+  /// Optional lifetime credit ceiling the account holder chose for this key.
+  /// Counted from the shared reservations: settled, held and unresolved.
+  creditCap    Int?
+  expiresAt    DateTime?
+  revokedAt    DateTime?
+  lastUsedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  requests     ExternalApiRequest[]
+
+  @@index([userId, createdAt])
+}
+
+/// One external inference request: the content-free link between a key and
+/// the shared ChatCreditReservation that holds and settles its credits. Every
+/// amount lives on the reservation; this row stores no prompt, output, tool
+/// argument, image or key material.
+model ExternalApiRequest {
+  id                   String                @id
+  keyId                String
+  key                  ExternalApiKey        @relation(fields: [keyId], references: [id], onDelete: Cascade)
+  userId               String
+  reservationId        String                @unique
+  reservation          ChatCreditReservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  /// SHA-256 of the client's Idempotency-Key header, when it sent one.
+  idempotencyKeyDigest String?
+  /// SHA-256 of the raw request body bytes, to tell a retry from a reuse; a
+  /// re-serialised body with reordered keys counts as a different request.
+  requestDigest        String
+  clientName           String?
+  modelId              String
+  stream               Boolean
+  /// Wire protocol: chat_completions, anthropic_messages or responses. Rows
+  /// written before the column existed are Chat Completions.
+  protocol             String                @default("chat_completions")
+  finishReason         String?
+  errorCode            String?
+  createdAt            DateTime              @default(now())
+  completedAt          DateTime?
+
+  @@unique([keyId, idempotencyKeyDigest])
+  @@index([userId, createdAt])
+  @@index([keyId, createdAt])
 }
 
 /// A default-off, owner-scoped Research Preview execution that can survive a
