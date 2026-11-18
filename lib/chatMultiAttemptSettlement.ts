@@ -71,6 +71,8 @@ export type AttemptPriceSnapshot = {
     pricingVersion?: string | null;
     /** The prompt size that selected these rates' tier; null or absent for the first. */
     longContextThresholdTokens?: number | null;
+    /** Where these rates came from (`ResolvedModelPricing.costSource`). */
+    costSource?: string | null;
 };
 
 export type AttemptUsage = {

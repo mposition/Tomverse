@@ -115,6 +115,44 @@ export const chatRequestMaxBodyBytes = (
 };
 
 /**
+ * What a long-context reservation carries to settlement: the credit value it
+ * was reserved at and the flat-weighted credits it may never settle below.
+ */
+export type ChatLongContextSettlement = {
+  microUsdPerCredit: number;
+  floorCredits: number;
+};
+
+/**
+ * The credits a long-context turn is finally charged: its actual token cost at
+ * the reserved credit value, never below the flat-weighted credits and never
+ * above what the flat rule settles (the reservation, less a search that did
+ * not run, or the cancelled share of it).
+ *
+ * The reservation holds the worst case -- the whole output ceiling -- because
+ * an answer may use all of it; this is where the unused part is refunded. A
+ * turn the flat rule settles at zero (failed, empty, cancelled before output)
+ * stays at zero.
+ */
+export const chatLongContextSettledCredits = (input: {
+  settlement: ChatLongContextSettlement | null | undefined;
+  flatSettledCredits: number;
+  tokenCostMicroUsd: number;
+  searchSurchargeCredits: number;
+}) => {
+  const { settlement, flatSettledCredits } = input;
+  if (!settlement || flatSettledCredits <= 0) return flatSettledCredits;
+  const rate = settlement.microUsdPerCredit;
+  if (!Number.isFinite(rate) || rate <= 0) return flatSettledCredits;
+  const byCost =
+    Math.max(
+      settlement.floorCredits,
+      Math.ceil(Math.max(0, input.tokenCostMicroUsd) / rate)
+    ) + Math.max(0, input.searchSurchargeCredits);
+  return Math.min(flatSettledCredits, byCost);
+};
+
+/**
  * Credits a turn above the flat limit is charged, at least.
  *
  * Zero at or below the flat limit, so a turn the flat weights already price is

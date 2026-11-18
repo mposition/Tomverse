@@ -3,8 +3,11 @@ import "server-only";
 import {
     chatAccountMaxInputTokens,
     chatLongContextCostCredits,
+    chatLongContextMicroUsdPerCredit,
+    chatLongContextSettledCredits,
     chatRequestMaxBodyBytes,
     chatUserMaxInputTokens,
+    type ChatLongContextSettlement,
 } from "@/lib/chatInputLimits";
 import { promptRefinerChatDecisionSchema, type PromptRefinerChatDecision } from "@/lib/promptRefinerSuggestion";
 
@@ -284,6 +287,8 @@ export type ChatBudget = {
     costSource: string;
     /** Prompt-size threshold that selected the applied price tier, if any. */
     longContextThresholdTokens: number | null;
+    /** Set on a turn above the flat input limit: settle by actual cost. */
+    longContextSettlement?: ChatLongContextSettlement | null;
 };
 
 type ReservationEntry = {
@@ -390,6 +395,7 @@ export type ChatUsageReservation = {
     pricingVersion?: string;
     costSource?: string;
     longContextThresholdTokens?: number | null;
+    longContextSettlement?: ChatLongContextSettlement | null;
     /**
      * The cache-write rate this turn was reserved at, carried so settlement
      * prices the write at the same figure rather than re-reading a registry
@@ -573,6 +579,16 @@ const durableReservationPayloadSchema = z
         pricingVersion: z.string().min(1).max(120).optional(),
         costSource: z.string().min(1).max(60).optional(),
         longContextThresholdTokens: z.number().int().nonnegative().nullable().optional(),
+        // Optional: absent on every reservation written before long context,
+        // which settles by the flat rule exactly as it did.
+        longContextSettlement: z
+            .object({
+                microUsdPerCredit: z.number().int().positive(),
+                floorCredits: z.number().int().nonnegative(),
+            })
+            .strict()
+            .nullable()
+            .optional(),
         planReservedCredits: z.number().int().nonnegative(),
         addOnReservedCredits: z.number().int().nonnegative(),
         addOnReservations: z.array(
@@ -1126,31 +1142,40 @@ export const createChatBudget = (
         pricing,
         promptCachePath: options?.promptCachePath,
     });
-    // Above the flat input limit (long context) a turn is charged at least its
-    // own token cost. Two things are left out because they are not credits:
-    // native search has its own surcharge below, and the prompt-cache write
-    // premium is an operational reservation refunded at settlement, never part
-    // of `usageCredits` (docs/policy/anthropic-prompt-caching.md).
+    // Above the flat input limit (long context) a turn is charged its own
+    // token cost. The reservation holds the worst case -- the whole output
+    // ceiling, since an answer may use all of it -- and settlement charges the
+    // actual cost and refunds the rest (`chatLongContextSettledCredits`). Two
+    // things are left out because they are not credits: native search has its
+    // own surcharge below, and the prompt-cache write premium is an
+    // operational reservation refunded at settlement, never part of
+    // `usageCredits` (docs/policy/anthropic-prompt-caching.md).
+    const flatCredits = getWeightedUsageCredits(
+        model,
+        estimatedInputTokens + reservationOnlyInputTokens
+    );
     const longContextCredits = chatLongContextCostCredits({
         estimatedInputTokens: estimatedInputTokens + reservationOnlyInputTokens,
         reservedCostMicroUsd:
             microdollarsFor(reservedInputTokens, pricing.inputUsdPerMillionTokens) +
-            microdollarsFor(reservedOutputTokens, pricing.outputUsdPerMillionTokens),
+            microdollarsFor(totalOutputTokens, pricing.outputUsdPerMillionTokens),
     });
+    const longContextSettlement =
+        longContextCredits > 0
+            ? {
+                  microUsdPerCredit: chatLongContextMicroUsdPerCredit(),
+                  floorCredits: flatCredits,
+              }
+            : null;
 
     return {
         modelId: model.id,
         minimumPlan: model.minimumPlan,
         modelUsageClass: model.usageClass,
         usageCredits:
-            Math.max(
-                getWeightedUsageCredits(
-                    model,
-                    estimatedInputTokens + reservationOnlyInputTokens
-                ),
-                longContextCredits
-            ) +
+            Math.max(flatCredits, longContextCredits) +
             (options?.webSearchSurchargeCredits || 0),
+        longContextSettlement,
         inputTokens: reservedInputTokens,
         ...(passes > 1 ? { contextInputTokens } : {}),
         maxOutputTokens: totalOutputTokens,
@@ -4065,6 +4090,7 @@ export const acquireChatAccess = async (
             pricingVersion: budget.pricingVersion,
             costSource: budget.costSource,
             longContextThresholdTokens: budget.longContextThresholdTokens,
+            longContextSettlement: budget.longContextSettlement ?? null,
         };
         if (guestAutoPrehold) {
             const converted = await tx.chatCreditReservation.updateMany({
@@ -4609,7 +4635,7 @@ export const settleChatUsage = async (
                 : 0
         );
         const actualTokens = actualInput + actualOutput;
-        const actualCredits = getSettledUsageCredits({
+        const flatSettledCredits = getSettledUsageCredits({
             reservedCredits: canonical.usageCredits,
             reservedInputTokens: canonical.inputTokens,
             reservedOutputTokens: canonical.reservedOutputTokens,
@@ -4630,6 +4656,8 @@ export const settleChatUsage = async (
                     canonical.cacheWriteUsdPerMillionTokens ?? null,
                 longContextThresholdTokens:
                     canonical.longContextThresholdTokens ?? null,
+                pricingVersion: canonical.pricingVersion ?? null,
+                costSource: canonical.costSource ?? null,
             },
             actualInput
         );
@@ -4650,6 +4678,35 @@ export const settleChatUsage = async (
             // such a turn sent no cache marker and wrote no cache entry.
             cacheWriteUsdPerMillionTokens:
                 settledRates.cacheWriteUsdPerMillionTokens ?? null,
+        });
+        /*
+          A long-context turn is charged its actual token cost, never above the
+          flat rule's result and never below its flat-weighted credits. Priced
+          at the billed attempt's own rates when a fallback answered, and
+          without the cache-write premium: written tokens count at the plain
+          input rate, as everywhere else credits are concerned.
+        */
+        const creditRates = billedAttempt
+            ? longContextSettlementRates(billedAttempt.price, billedAttempt.inputTokens)
+            : { ...settledRates, cachedInputPriceMultiplier: canonical.cachedInputPriceMultiplier };
+        const creditCost = canonical.longContextSettlement
+            ? calculateProviderUsageCost({
+                  inputTokens: actualInput,
+                  cachedInputTokens: actualCachedInput,
+                  cacheWriteInputTokens: 0,
+                  outputTokens: actualOutput,
+                  inputUsdPerMillionTokens: creditRates.inputUsdPerMillionTokens,
+                  outputUsdPerMillionTokens: creditRates.outputUsdPerMillionTokens,
+                  cachedInputPriceMultiplier: creditRates.cachedInputPriceMultiplier,
+                  cacheWriteUsdPerMillionTokens: null,
+              }).totalCostMicroUsd
+            : 0;
+        const actualCredits = chatLongContextSettledCredits({
+            settlement: canonical.longContextSettlement,
+            flatSettledCredits,
+            tokenCostMicroUsd: creditCost,
+            searchSurchargeCredits:
+                usage.searchExecuted === false ? 0 : usage.searchSurchargeCredits ?? 0,
         });
         const providerUsageSnapshot =
             canonical.provider === "perplexity" &&

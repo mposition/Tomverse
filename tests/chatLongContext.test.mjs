@@ -5,6 +5,7 @@ import {
     CHAT_USER_MAX_INPUT_TOKENS_DEFAULT,
     chatAccountMaxInputTokens,
     chatLongContextCostCredits,
+    chatLongContextSettledCredits,
 } from "../lib/chatInputLimits.ts";
 import { readFileSync } from "node:fs";
 import { accountChatMaxInputTokens, createChatBudget } from "../lib/chatSecurity.ts";
@@ -38,10 +39,11 @@ const withEnv = (values, run) => {
     }
 };
 
+// The worst case a long-context reservation holds: the input and the whole
+// output ceiling, without the cache-write premium (not credits).
 const tokenCostMicroUsd = (budget) =>
     Math.ceil(budget.inputTokens * budget.inputUsdPerMillionTokens) +
-    Math.ceil(budget.reservedOutputTokens * budget.outputUsdPerMillionTokens) +
-    budget.promptCacheWriteReservedPremiumMicroUsd;
+    Math.ceil(budget.maxOutputTokens * budget.outputUsdPerMillionTokens);
 
 test("the input limit is the model's window by default, the flat limit when switched off", () => {
     assert.equal(chatAccountMaxInputTokens({ contextWindowTokens: 1_050_000 }, {}), 1_050_000);
@@ -136,14 +138,51 @@ test("a long Anthropic turn is not charged its cache-write premium as credits", 
     assert.ok(cached.promptCacheWriteReservedPremiumMicroUsd > 0, "the premium is still reserved");
     const plain = createChatBudget("user", opus, 300_000);
     assert.equal(cached.usageCredits, plain.usageCredits);
+    assert.equal(cached.usageCredits, Math.ceil(tokenCostMicroUsd(cached) / RATE));
+});
+
+// Review r-20261118-045351-43dc45, blocker: the reservation held only the
+// typical output, and settlement never raised it. It now holds the whole
+// output ceiling and settlement charges the actual cost.
+test("a long turn reserves the whole output ceiling and carries its settlement terms", () => {
+    const luna = getModel("gpt-6-luna");
+    const budget = createChatBudget("user", luna, 200_000);
+    assert.ok(budget.maxOutputTokens > budget.reservedOutputTokens);
+    assert.equal(budget.usageCredits, Math.ceil(tokenCostMicroUsd(budget) / RATE));
+    assert.deepEqual(budget.longContextSettlement, {
+        microUsdPerCredit: RATE,
+        floorCredits: getWeightedUsageCredits(luna, 200_000),
+    });
+    assert.equal(createChatBudget("user", luna, FLAT).longContextSettlement, null);
+});
+
+test("settlement charges the actual cost, between the flat floor and the flat rule", () => {
+    const settlement = { microUsdPerCredit: RATE, floorCredits: 9 };
+    const settle = (flatSettledCredits, tokenCostMicroUsd, searchSurchargeCredits = 0) =>
+        chatLongContextSettledCredits({ settlement, flatSettledCredits, tokenCostMicroUsd, searchSurchargeCredits });
+    // A short answer refunds most of the worst case.
+    assert.equal(settle(200, 50_000), 20);
+    // Never below the flat-weighted credits.
+    assert.equal(settle(200, 1_000), 9);
+    // Never above what the flat rule settles (the reservation).
+    assert.equal(settle(200, 10_000_000), 200);
+    // A search that ran keeps its surcharge on top.
+    assert.equal(settle(208, 50_000, 8), 28);
+    // Nothing charged stays nothing charged.
+    assert.equal(settle(0, 50_000), 0);
+    // A flat reservation settles by the flat rule.
     assert.equal(
-        cached.usageCredits,
-        Math.ceil(
-            (Math.ceil(cached.inputTokens * cached.inputUsdPerMillionTokens) +
-                Math.ceil(cached.reservedOutputTokens * cached.outputUsdPerMillionTokens)) /
-                RATE
-        )
+        chatLongContextSettledCredits({ settlement: null, flatSettledCredits: 24, tokenCostMicroUsd: 9e9, searchSurchargeCredits: 0 }),
+        24
     );
+});
+
+test("single-attempt settlement routes long-context credits through the cost rule", () => {
+    const source = readFileSync(new URL("../lib/chatSecurity.ts", import.meta.url), "utf8");
+    const settle = source.slice(source.indexOf("const flatSettledCredits = getSettledUsageCredits({"));
+    assert.ok(settle.length > 0);
+    assert.match(settle, /const actualCredits = chatLongContextSettledCredits\(\{\s*settlement: canonical\.longContextSettlement,/);
+    assert.match(source, /longContextSettlement: budget\.longContextSettlement \?\? null,/);
 });
 
 // Review, major: a flat environment price is a flat price too.
@@ -177,7 +216,10 @@ test("settlement records a crossed tier at the higher rate, never a lower one", 
         outputUsdPerMillionTokens: short.outputUsdPerMillionTokens,
         cacheWriteUsdPerMillionTokens: short.cacheWriteUsdPerMillionTokens,
         longContextThresholdTokens: null,
+        pricingVersion: short.pricingVersion,
+        costSource: short.costSource,
     };
+    assert.equal(short.costSource, "registry");
     assert.equal(longContextSettlementRates(snapshot, 250_000), snapshot);
     const crossed = longContextSettlementRates(snapshot, 300_000);
     assert.equal(crossed.inputUsdPerMillionTokens, long.inputUsdPerMillionTokens);
@@ -191,12 +233,55 @@ test("settlement records a crossed tier at the higher rate, never a lower one", 
     assert.equal(longContextSettlementRates(dear, 300_000).inputUsdPerMillionTokens, 99);
 });
 
+// Review r-20261118-045351-43dc45: the correction never rewrites a price the
+// reservation did not take from the tiers in force.
+test("a reservation under another price version is settled exactly as reserved", () => {
+    const short = resolveModelPricing(getModel("gpt-6-luna"), { estimatedPromptTokens: 1_000 });
+    const snapshot = {
+        modelId: "gpt-6-luna",
+        inputUsdPerMillionTokens: short.inputUsdPerMillionTokens,
+        outputUsdPerMillionTokens: short.outputUsdPerMillionTokens,
+        longContextThresholdTokens: null,
+        costSource: short.costSource,
+    };
+    for (const pricingVersion of ["openai-gpt-6-luna-1999-01-01", null, undefined]) {
+        const stale = { ...snapshot, pricingVersion };
+        assert.equal(longContextSettlementRates(stale, 300_000), stale, String(pricingVersion));
+    }
+});
+
+test("a flat or fallback price is settled exactly as reserved", () => {
+    const short = resolveModelPricing(getModel("gpt-6-luna"), { estimatedPromptTokens: 1_000 });
+    for (const costSource of [
+        "model_registry_override",
+        "registry_env_override",
+        "conservative_fallback",
+        "conservative_fallback_env_override",
+        null,
+    ]) {
+        const flat = {
+            modelId: "gpt-6-luna",
+            inputUsdPerMillionTokens: 0.1,
+            outputUsdPerMillionTokens: 0.5,
+            longContextThresholdTokens: null,
+            pricingVersion: short.pricingVersion,
+            costSource,
+        };
+        assert.equal(longContextSettlementRates(flat, 300_000), flat, String(costSource));
+    }
+});
+
 test("every settlement path applies the same long-context rule", () => {
     const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
     assert.match(read("lib/chatSecurity.ts"), /longContextSettlementRates\(/);
     assert.match(read("lib/chatMultiAttemptSettlement.ts"), /longContextSettlementRates\(attempt\.price, attempt\.inputTokens\)/);
     assert.match(read("lib/chatAttemptCostLedger.ts"), /longContextSettlementRates\(/);
-    assert.match(read("app/api/chat/route.ts"), /longContextThresholdTokens: budget\.longContextThresholdTokens,\s*\} satisfies AttemptPriceSnapshot/);
+    assert.match(
+        read("app/api/chat/route.ts"),
+        /longContextThresholdTokens: budget\.longContextThresholdTokens,\s*costSource: budget\.costSource \?\? null,\s*\} satisfies AttemptPriceSnapshot/
+    );
+    const single = read("lib/chatSecurity.ts");
+    assert.match(single, /pricingVersion: canonical\.pricingVersion \?\? null,\s*costSource: canonical\.costSource \?\? null,/);
 });
 
 // Review, major: earlier files share half of this model's limit, not of 128k.

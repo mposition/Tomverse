@@ -583,10 +583,10 @@ export const MODEL_PRICING: readonly ModelPricingProfile[] = [
         // come out of the 0.1 cached multiplier. The cache-write rates are
         // recorded and not billed -- see ModelPriceTier.
         //
-        // Reachability: this application caps input at 128,000 tokens for a
-        // signed-in account and 16,000 for a guest (lib/chatSecurity.ts), so
-        // the long tier is priced correctly but has never been reached on the
-        // chat path.
+        // Reachability: since long context (2026-11-18) a signed-in account
+        // may send up to the model's window, so the long tier is reachable;
+        // a guest stays at 16,000 tokens (lib/chatInputLimits.ts). See
+        // longContextSettlementRates for how a crossed tier is settled.
         modelId: "gpt-5-6-luna",
         provider: "openai",
         apiModelId: "gpt-5.6-luna",
@@ -1219,9 +1219,9 @@ export const MODEL_PRICING: readonly ModelPricingProfile[] = [
         //   prompt  > 100,000 tokens: 0.50 in / 0.05 cache hit / 0.625 5m
         //                             cache write / 2.50 out
         // Anthropic counts cache reads and writes in the prompt length. Unlike
-        // the 272K tiers elsewhere in this file, this one is reachable: a
-        // signed-in account's input cap is 128,000 tokens
-        // (lib/chatSecurity.ts).
+        // the 272K tiers elsewhere in this file, this one is reachable even at
+        // the flat 128,000-token account limit; long context reaches the rest
+        // (lib/chatInputLimits.ts).
         //
         // 128,000 is the published synchronous output cap. The production
         // registry row was adopted first; a non-null registry price column
@@ -1392,7 +1392,7 @@ export const MODEL_PRICING: readonly ModelPricingProfile[] = [
         // Was reserved at the US$15 / US$60 premium fallback -- six times the
         // real input rate. Leaves PENDING_VERIFIED_PRICE_REGISTER with this.
         // One tier: the published price does not step below the 991K input
-        // ceiling, which is already above CHAT_USER_MAX_INPUT_TOKENS.
+        // ceiling, so there is no tier boundary for long context to cross.
         tiers: flatTier(2.5, 7.5, 0.2),
         reasoningTokenBilling: "billed_as_output",
         maxOutputTokens: 131_072,
@@ -2190,19 +2190,43 @@ export const findPendingPriceRegisterProblems = ({
  * estimate put below it can arrive above it. Then the provider charges the
  * long rate and the short one would be recorded. This answers with the tier
  * the provider's own count selects, so the caller can settle at whichever rate
- * is higher -- never lower than the reservation's. Null when the profile has
- * one tier, when there is no profile, or when the reserved tier already
- * reaches as far as the actual prompt.
+ * is higher -- never lower than the reservation's.
+ *
+ * Bounded so it never rewrites a price the reservation did not take from these
+ * tiers (review r-20261118-045351-43dc45):
+ * - `reservedPricingVersion` must be the version in force now. A revision that
+ *   took effect after the reservation answers null, so the snapshot is
+ *   settled exactly as before and a price change stays non-retroactive.
+ * - `reservedCostSource` must say the reservation was priced from the
+ *   profile's tiers (`registry` or `registry_long_context`). A registry-row or
+ *   environment flat price, or a class fallback, answers null.
+ *
+ * Also null when the profile has one tier, when there is no profile, or when
+ * the reserved tier already reaches as far as the actual prompt.
  */
+export const LONG_CONTEXT_SETTLEMENT_COST_SOURCES: ReadonlySet<string> = new Set([
+    "registry",
+    "registry_long_context",
+]);
+
 export const longContextSettlementTier = (input: {
     modelId: string;
     actualPromptTokens: number;
     reservedLongContextThresholdTokens: number | null;
+    reservedPricingVersion: string | null | undefined;
+    reservedCostSource: string | null | undefined;
     at?: Date | number;
 }) => {
+    if (!input.reservedCostSource || !LONG_CONTEXT_SETTLEMENT_COST_SOURCES.has(input.reservedCostSource)) {
+        return null;
+    }
     const profile = pricingById.get(input.modelId);
     if (!profile) return null;
     const revision = selectPriceRevision(profile, input.at);
+    const version = revision?.pricingVersion ?? profile.pricingVersion;
+    if (!input.reservedPricingVersion || input.reservedPricingVersion !== version) {
+        return null;
+    }
     const tiers = revision?.tiers ?? profile.tiers;
     if (tiers.length < 2) return null;
     const { tier } = selectTier(tiers, input.actualPromptTokens);
@@ -2233,6 +2257,10 @@ type SettlementRates = {
     outputUsdPerMillionTokens: number;
     cacheWriteUsdPerMillionTokens?: number | null;
     longContextThresholdTokens?: number | null;
+    /** The reservation's `pricingVersion`; absent means "do not correct". */
+    pricingVersion?: string | null;
+    /** The reservation's `costSource`; absent means "do not correct". */
+    costSource?: string | null;
 };
 
 /**
@@ -2249,6 +2277,8 @@ export const longContextSettlementRates = <T extends SettlementRates>(
         modelId: rates.modelId,
         actualPromptTokens,
         reservedLongContextThresholdTokens: rates.longContextThresholdTokens ?? null,
+        reservedPricingVersion: rates.pricingVersion,
+        reservedCostSource: rates.costSource,
     });
     if (!crossed) return rates;
     const cacheWrite = rates.cacheWriteUsdPerMillionTokens;

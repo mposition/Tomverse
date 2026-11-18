@@ -5995,6 +5995,7 @@ async function handleChatPost(
                         : null,
                 pricingVersion: budget.pricingVersion ?? null,
                 longContextThresholdTokens: budget.longContextThresholdTokens,
+                costSource: budget.costSource ?? null,
             } satisfies AttemptPriceSnapshot,
         };
         durableCheckpointWriter?.setAttribution(
