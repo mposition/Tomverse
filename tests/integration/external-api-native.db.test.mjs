@@ -287,6 +287,21 @@ test("native protocols over the real shared credit ledger", { skip: !databaseUrl
         assert.equal((await reservationsFor(userId)).length, 0, "nothing held");
     });
 
+    await t.test("a forwarded header fetch could not send is a 400 before anything is held", async () => {
+        const userId = await newUser();
+        allow(userId);
+        const { key } = await issueKey(userId);
+        const before = sent.length;
+        const response = await claude(key, claudeBody(), { headers: { "anthropic-beta": "context-management-2025-06-27,é" } });
+        assert.equal(response.status, 400);
+        assert.equal((await response.json()).tomverse.code, "invalid_header");
+        assert.equal(sent.length, before);
+        assert.equal((await reservationsFor(userId)).length, 0, "nothing reserved, so no provider budget consumed");
+        const priced = await claude(key, claudeBody({ inference_geo: "us" }));
+        assert.equal(priced.status, 400);
+        assert.equal((await reservationsFor(userId)).length, 0);
+    });
+
     await t.test("Claude Code: x-api-key carries the Tomverse key; a revoked key dispatches nothing", async () => {
         const userId = await newUser();
         allow(userId);

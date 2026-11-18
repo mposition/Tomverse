@@ -6,6 +6,7 @@ import {
     NativeProtocolError,
     nonNegative,
     parseJsonEvent,
+    refusePriceSelectors,
     type NativeObservation,
     type NativeUsage,
 } from "@/lib/externalApiNativeCore";
@@ -93,9 +94,7 @@ export const prepareResponsesRequest = (
     if (body.background === true) {
         throw refuse("stateful_request_unsupported", "Background responses are not supported through Tomverse.", "background");
     }
-    if (body.service_tier !== undefined && body.service_tier !== null && body.service_tier !== "auto" && body.service_tier !== "default") {
-        throw refuse("unsupported_feature", "service_tier is not supported through Tomverse.", "service_tier");
-    }
+    refusePriceSelectors(body);
     checkTools(body.tools, "tools");
     if (Array.isArray(body.input)) {
         for (const item of body.input) {

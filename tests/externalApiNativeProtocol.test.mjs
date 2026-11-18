@@ -136,6 +136,10 @@ test("Anthropic: provider-run tools, remote content, 1h cache and fast mode are 
     assert.equal(refusal(claudeCodeBody({ tools: [{ type: "code_execution_20250825", name: "code_execution" }] })), "server_tool_unsupported");
     assert.equal(refusal(claudeCodeBody({ mcp_servers: [{ type: "url", url: "https://example.test" }] })), "unsupported_feature");
     assert.equal(refusal(claudeCodeBody({ speed: "fast" })), "unsupported_feature");
+    // Price selectors, whatever their value: requests run at the standard price.
+    for (const selector of [{ service_tier: "auto" }, { service_tier: "standard_only" }, { inference_geo: "us" }, { inference_geo: "global" }]) {
+        assert.equal(refusal(claudeCodeBody(selector)), "unsupported_feature", JSON.stringify(selector));
+    }
     const image = (source) => claudeCodeBody({ messages: [{ role: "user", content: [{ type: "image", source }] }] });
     assert.equal(refusal(image({ type: "url", url: "http://169.254.169.254/" })), "remote_content_unsupported");
     assert.equal(refusal(image({ type: "file", file_id: "file_1" })), "remote_content_unsupported");
@@ -293,7 +297,9 @@ test("Responses: stateful, hosted-tool and remote-content requests are refused b
     assert.equal(refusal(codexBody({ previous_response_id: "resp_1" })), "stateful_request_unsupported");
     assert.equal(refusal(codexBody({ conversation: "conv_1" })), "stateful_request_unsupported");
     assert.equal(refusal(codexBody({ background: true })), "stateful_request_unsupported");
-    assert.equal(refusal(codexBody({ service_tier: "priority" })), "unsupported_feature");
+    for (const tier of ["priority", "flex", "auto", "default"]) {
+        assert.equal(refusal(codexBody({ service_tier: tier })), "unsupported_feature", tier);
+    }
     assert.equal(refusal(codexBody({ tools: [{ type: "web_search" }] })), "hosted_tool_unsupported");
     // OpenAI's shell and apply_patch tool types can run provider-side; Codex
     // sends its own as function/custom tools.
@@ -446,5 +452,14 @@ test("relayed events keep their data; an error event loses provider account deta
     assert.doesNotMatch(responsesError, /org-abc/);
     const clientFault = relayedSseEvent({ event: "error", data: JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "messages.1: Invalid signature" } }) });
     assert.match(clientFault, /Invalid signature/, "the client's own error stays");
+    // By type and code, not wording: billing and quota never pass, whatever they say.
+    const billing = JSON.parse(relayedSseEvent({ event: "error", data: JSON.stringify({ type: "error", error: { type: "billing_error", message: "Plan inactive for ws_42" } }) }).split("data: ")[1]);
+    assert.deepEqual(billing.error, { type: "api_error", message: "The model provider returned an error." });
+    const overloaded = JSON.parse(relayedSseEvent({ event: "error", data: JSON.stringify({ type: "error", error: { type: "overloaded_error", message: "Overloaded" } }) }).split("data: ")[1]);
+    assert.equal(overloaded.error.type, "overloaded_error", "the client still recognises an overload and retries");
+    const quota = JSON.parse(relayedSseEvent({ event: "response.failed", data: JSON.stringify({ type: "response.failed", response: { error: { code: "insufficient_quota", message: "key sk-proj-abc" } } }) }).split("data: ")[1]);
+    assert.deepEqual(quota.response.error, { code: "upstream_error", message: "The model provider returned an error." });
+    const prompt = JSON.parse(relayedSseEvent({ event: "response.failed", data: JSON.stringify({ type: "response.failed", response: { error: { code: "invalid_prompt", message: "Invalid prompt: tool output too long" } } }) }).split("data: ")[1]);
+    assert.equal(prompt.response.error.message, "Invalid prompt: tool output too long");
     assert.equal(relayedSseEvent({ event: null, data: "line1\nline2" }), "data: line1\ndata: line2\n\n");
 });

@@ -6,6 +6,7 @@ import {
     NativeProtocolError,
     nonNegative,
     parseJsonEvent,
+    refusePriceSelectors,
     type NativeObservation,
     type NativeUsage,
 } from "@/lib/externalApiNativeCore";
@@ -75,9 +76,7 @@ export const prepareAnthropicMessages = (
     if (body.speed !== undefined && body.speed !== "standard") {
         throw refuse("unsupported_feature", "Only standard speed is available through Tomverse.", "speed");
     }
-    if (body.service_tier !== undefined && body.service_tier !== "standard_only") {
-        throw refuse("unsupported_feature", "service_tier is not supported through Tomverse.", "service_tier");
-    }
+    refusePriceSelectors(body);
     if (body.tools !== undefined) {
         if (!Array.isArray(body.tools)) throw refuse("invalid_request", "tools must be an array.", "tools");
         for (const tool of body.tools) {

@@ -61,6 +61,42 @@ export const isRecord = (value: unknown): value is Record<string, unknown> =>
     typeof value === "object" && value !== null && !Array.isArray(value);
 
 /**
+ * Request fields that choose a provider price (a processing tier, a regional
+ * inference surcharge). Every lib/modelPricing.ts profile is the price of a
+ * request that selects neither -- the convention every Tomverse request
+ * follows -- so a native body that sets one, to any value, is refused rather
+ * than passed on (scripts/check-processing-tier-core.mjs).
+ */
+const PRICE_SELECTOR_FIELDS = ["service_tier", "inference_geo"] as const;
+
+export const refusePriceSelectors = (body: Record<string, unknown>) => {
+    for (const field of PRICE_SELECTOR_FIELDS) {
+        if (body[field] !== undefined && body[field] !== null) {
+            throw new NativeProtocolError(
+                400,
+                "unsupported_feature",
+                `${field} is not supported through Tomverse: requests run at the standard price.`,
+                field
+            );
+        }
+    }
+};
+
+/**
+ * A client header forwarded upstream must be printable ASCII. Checked before
+ * anything is reserved: a value fetch would refuse to send would otherwise
+ * fail after the hold, as an outcome that looks unknown.
+ */
+export const checkForwardedHeaders = (headers: Record<string, string>) => {
+    for (const [name, value] of Object.entries(headers)) {
+        if (!/^[\x20-\x7e]{0,8192}$/.test(value)) {
+            throw new NativeProtocolError(400, "invalid_header", `The ${name} header is not valid.`, name);
+        }
+    }
+    return headers;
+};
+
+/**
  * Server-sent events, decoded across arbitrary chunk boundaries. Feed it text
  * from a streaming TextDecoder; it calls back once per complete event.
  */
@@ -273,18 +309,35 @@ export const publicUpstreamError = (status: number, message: unknown) => {
 export const relayedSseEvent = (event: { event: string | null; data: string }) => {
     let data = event.data;
     const parsed = parseJsonEvent(event.data);
-    if (parsed) {
-        const type = typeof parsed.type === "string" ? parsed.type : event.event;
+    const type = parsed && typeof parsed.type === "string" ? parsed.type : event.event;
+    if (parsed && (type === "error" || type === "response.failed")) {
+        // Anthropic: { type: "error", error: { type, message } }. Responses:
+        // { type: "error", code, message } or response.failed's response.error.
+        const anthropic = type === "error" && isRecord(parsed.error) ? parsed.error : null;
         const holder =
-            type === "error" && isRecord(parsed.error)
-                ? parsed.error
-                : type === "error"
-                  ? parsed
-                  : type === "response.failed" && isRecord(parsed.response) && isRecord(parsed.response.error)
-                    ? parsed.response.error
-                    : null;
-        if (holder && typeof holder.message === "string" && ACCOUNT_DETAIL.test(holder.message)) {
-            holder.message = "The model provider returned an error.";
+            anthropic ??
+            (type === "error"
+                ? parsed
+                : isRecord(parsed.response) && isRecord(parsed.response.error)
+                  ? parsed.response.error
+                  : null);
+        if (holder) {
+            const kind = String((anthropic ? holder.type : holder.code) ?? "");
+            // Only the client's own fault keeps the provider's words, and only
+            // while they do not describe Tomverse's account. Everything else --
+            // quota, billing, permission, rate and availability -- is neutral,
+            // its code included.
+            const clientFault =
+                kind === "invalid_request_error" || kind === "request_too_large" || kind.startsWith("invalid_") || kind === "context_length_exceeded";
+            const keep = clientFault && typeof holder.message === "string" && !ACCOUNT_DETAIL.test(holder.message);
+            if (!keep) {
+                holder.message = "The model provider returned an error.";
+                if (anthropic) {
+                    if (!clientFault && kind !== "overloaded_error" && kind !== "api_error") holder.type = "api_error";
+                } else if (!clientFault) {
+                    holder.code = "upstream_error";
+                }
+            }
             data = JSON.stringify(parsed);
         }
     }

@@ -403,7 +403,12 @@ Refused before dispatch, with nothing held (`lib/anthropicMessagesProtocol.ts`,
 - content the provider would fetch (image or document URLs) and Files API ids,
   which would read Tomverse's own provider account;
 - a prompt-cache TTL other than 5 minutes (the premium reserved is the
-  5-minute one), `speed` other than standard, premium `service_tier`s;
+  5-minute one), `speed` other than standard, and any `service_tier` or
+  `inference_geo` at all: every price profile is the price of a request that
+  selects neither, the convention every Tomverse request follows
+  (`scripts/check-processing-tier-core.mjs`);
+- a forwarded header value that is not printable ASCII (checked before the
+  hold, so a request fetch could not send never consumes provider budget);
 - stored or server-side state: `previous_response_id`, `conversation`,
   stored `prompt`, `background`, `item_reference`;
 - Smart Adaptive and models of another provider: a native request stays on

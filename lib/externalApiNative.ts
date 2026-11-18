@@ -23,6 +23,7 @@ import { externalApiErrorResponse, idempotentReplay, positiveInteger } from "@/l
 import { authenticateExternalApiKey, ExternalApiKeyError, type AuthenticatedExternalApiKey } from "@/lib/externalApiKeys";
 import { sha256Hex } from "@/lib/externalApiKeyCore";
 import {
+    checkForwardedHeaders,
     createSseParser,
     emptyObservation,
     relayedSseEvent,
@@ -520,6 +521,10 @@ export async function handleNativeGeneration(request: Request, spec: NativeProto
             prepared = spec.prepare(body, { apiModel: model.apiModel, maxOutputTokens: budget.maxOutputTokens });
         }
 
+        // Built and checked before anything is held: a header fetch would
+        // refuse to send must be a 400 here, not a failure after the hold.
+        const upstreamHeaders = checkForwardedHeaders(spec.upstreamHeaders(request, prepared));
+
         const clientName = request.headers.get("user-agent")?.slice(0, 80) ?? null;
         let grant: Awaited<ReturnType<typeof acquireChatAccess>>;
         try {
@@ -574,7 +579,7 @@ export async function handleNativeGeneration(request: Request, spec: NativeProto
         try {
             upstream = await nativeUpstreamFetch(spec.provider, spec.upstreamPath(request), {
                 body: prepared.upstreamBody,
-                headers: spec.upstreamHeaders(request, prepared),
+                headers: upstreamHeaders,
                 signal: controller.signal,
             });
         } catch (transportError) {
@@ -654,12 +659,13 @@ export async function handleNativeFreeCall(
         const plan = await getUserBillingPlan(key.userId);
         const entry = await resolveNativeModel(spec.protocol, plan.tier, isRecord(body) ? body.model : undefined);
         const prepared = options.prepare(body, { apiModel: entry.model.apiModel, maxOutputTokens: entry.capabilities.maxOutputTokens });
+        const upstreamHeaders = checkForwardedHeaders(spec.upstreamHeaders(request, prepared));
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort("timeout"), 30_000);
         try {
             const upstream = await nativeUpstreamFetch(spec.provider, options.upstreamPath, {
                 body: prepared.upstreamBody,
-                headers: spec.upstreamHeaders(request, prepared),
+                headers: upstreamHeaders,
                 signal: controller.signal,
             });
             const text = await upstream.text();
