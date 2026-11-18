@@ -6,6 +6,12 @@ import { pathToFileURL } from "node:url";
 
 const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path) => pathToFileURL(resolve(root, path)).href;
+// A `?real` import can hand a TypeScript module's exports under `default`
+// only (tsx's CommonJS interop, seen on CI's Node 22.23): take both forms.
+const realModule = async (path) => {
+  const { default: interop, ...named } = await import(`${mod(path)}?real`);
+  return { ...(interop && typeof interop === "object" ? interop : {}), ...named };
+};
 const attemptId = "00000000-0000-4000-8000-000000000001";
 const ideaId = "00000000-0000-4000-8000-000000000002";
 const baseSha = "a".repeat(40);
@@ -25,7 +31,7 @@ mock.module(mod("lib/amux/guard.ts"), {
   namedExports: { isAmuxSyncAuthorized: () => true },
 });
 // The real key store under another URL keeps every other export it has.
-const realKeyStore = await import(`${mod("lib/amux/ideaKeyStore.ts")}?real`);
+const realKeyStore = await realModule("lib/amux/ideaKeyStore.ts");
 mock.module(mod("lib/amux/ideaKeyStore.ts"), {
   namedExports: { ...realKeyStore,
     createAmuxContentUnitKeys: async () => keys(),

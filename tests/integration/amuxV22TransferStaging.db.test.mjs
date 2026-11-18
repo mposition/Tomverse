@@ -30,6 +30,12 @@ const skip = allowed ? undefined : "requires a dedicated loopback test database"
 
 const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path) => pathToFileURL(resolve(root, path)).href;
+// A `?real` import can hand a TypeScript module's exports under `default`
+// only (tsx's CommonJS interop, seen on CI's Node 22.23): take both forms.
+const realModule = async (path) => {
+  const { default: interop, ...named } = await import(`${mod(path)}?real`);
+  return { ...(interop && typeof interop === "object" ? interop : {}), ...named };
+};
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const MIB = 1024 * 1024;
 
@@ -55,11 +61,11 @@ mock.module(mod("lib/amux/operationalError.ts"), { namedExports: {
   },
 } });
 // The real modules under another URL, so the mocks below keep their exports.
-const realGuard = await import(`${mod("lib/amux/guard.ts")}?real`);
+const realGuard = await realModule("lib/amux/guard.ts");
 mock.module(mod("lib/amux/guard.ts"), {
   namedExports: { ...realGuard, isAmuxSyncAuthorized: () => true },
 });
-const realKeyStore = await import(`${mod("lib/amux/ideaKeyStore.ts")}?real`);
+const realKeyStore = await realModule("lib/amux/ideaKeyStore.ts");
 const unitKeys = new Map();
 const digestKey = randomBytes(32);
 const coordinate = (identity) => `${identity.ideaId}\0${identity.purpose}\0${identity.subjectId}`;

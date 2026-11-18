@@ -12,6 +12,12 @@ import { pathToFileURL } from "node:url";
 
 const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path) => pathToFileURL(resolve(root, path)).href;
+// A `?real` import can hand a TypeScript module's exports under `default`
+// only (tsx's CommonJS interop, seen on CI's Node 22.23): take both forms.
+const realModule = async (path) => {
+  const { default: interop, ...named } = await import(`${mod(path)}?real`);
+  return { ...(interop && typeof interop === "object" ? interop : {}), ...named };
+};
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const attemptId = "00000000-0000-4000-8000-000000000001";
 const instanceId = "00000000-0000-4000-8000-000000000003";
@@ -23,7 +29,7 @@ mock.module(mod("lib/amux/guard.ts"), {
 });
 let nextPut = null;
 const putCalls = [];
-const realTransfer = await import(`${mod("lib/amux/v22TransferStore.ts")}?real`);
+const realTransfer = await realModule("lib/amux/v22TransferStore.ts");
 mock.module(mod("lib/amux/v22TransferStore.ts"), { namedExports: { ...realTransfer,
   putAmuxV22TransferChunk: async (input) => {
     putCalls.push(input);
@@ -32,7 +38,7 @@ mock.module(mod("lib/amux/v22TransferStore.ts"), { namedExports: { ...realTransf
   } } });
 let nextNamed = null;
 const namedCalls = [];
-const realPaths = await import(`${mod("lib/amux/v22ChangedPathsStore.ts")}?real`);
+const realPaths = await realModule("lib/amux/v22ChangedPathsStore.ts");
 mock.module(mod("lib/amux/v22ChangedPathsStore.ts"), { namedExports: { ...realPaths,
   resolveAmuxV22NamedChangedPaths: async (id, body) => {
     namedCalls.push({ id, body });
