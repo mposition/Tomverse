@@ -522,6 +522,19 @@ extension UI; its bundled CLI also passed local compaction and resume. All 50
 requests of that key settled, none held. In Auto mode the Claude extension
 refused Bash because the fake provider returns no safety-review result.
 
-Not yet verified, each a separate step: either client with a real model (paid,
-including Claude Code's auto mode review), Cursor Chat and Agent (needs public
-HTTPS), and other operating systems.
+Real models, 2026-11-18 (approved paid run, US$10 ceiling, US$0.62 spent):
+this code on a local Windows PC with an isolated ledger and the real Anthropic
+and OpenAI APIs, every client configured only by the page's generated settings.
+Claude Code CLI 2.1.278 and the VS Code extension 2.1.327 (Claude Sonnet 5,
+Haiku 4.5 for background work) and Codex CLI 0.146.0 and the VS Code extension
+26.1111.21308 (GPT-5.6 Luna) each fixed a failing test, honoured a refused
+approval, and continued after compaction; Claude Code's auto-mode safety
+review worked through the gateway; Codex compacted locally mid-task and
+resumed; a stream dropped mid-generation settled as cancelled on both
+protocols; after revocation both returned 401 with nothing dispatched. Ledger
+input, cache read/write and output matched Claude Code's own usage report to
+the token. 57 requests, none left held.
+
+Not yet verified, each a separate step: Cursor Chat and Agent (needs public
+HTTPS), other operating systems, and a deployed environment (the run above
+called the handlers directly, not through the Next.js server).
