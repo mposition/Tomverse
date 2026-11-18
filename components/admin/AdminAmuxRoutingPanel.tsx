@@ -98,8 +98,11 @@ export type AmuxReviewDetail = {
     pr_number: number;
     base_sha: string;
     head_sha: string;
+    /** The change digest the approval binds: v2 (`v2:` + hex) since 2026-11-18. */
     diff_digest: string;
-    diff_text: string;
+    /** Null when the diff is not shown here (too large, binary or unsafe to display). */
+    diff_text: string | null;
+    diff_hidden?: "oversized" | "binary" | "unsafe_display" | null;
     html_url: string;
   } | null;
   allowed_outcomes: ReviewOutcome[];
@@ -227,7 +230,8 @@ export const isValidAmuxReviewArtifact = (value: unknown): value is NonNullable<
   (value.pr_number as number) > 0 &&
   typeof value.base_sha === "string" && /^[0-9a-f]{40}$/i.test(value.base_sha) &&
   typeof value.head_sha === "string" && /^[0-9a-f]{40}$/i.test(value.head_sha) &&
-  typeof value.diff_digest === "string" && /^[0-9a-f]{64}$/i.test(value.diff_digest);
+  typeof value.diff_digest === "string" && /^(v2:)?[0-9a-f]{64}$/i.test(value.diff_digest) &&
+  (value.diff_text === null || typeof value.diff_text === "string");
 
 const isMicrousd = (value: unknown): value is string =>
   typeof value === "string" && /^(0|[1-9][0-9]*)$/.test(value);
@@ -847,9 +851,19 @@ export function AmuxOwnerReviewView({
             <p className="mt-2 break-all font-mono text-xs text-zinc-300">{m.reviewHeadSha}: {validArtifact.head_sha}</p>
             <p className="mt-2 break-all font-mono text-xs text-zinc-300">{m.reviewDiffDigest}: {validArtifact.diff_digest}</p>
             <p className="mt-3 text-xs font-bold text-zinc-500">{m.reviewPrDiff}</p>
-            <pre dir="ltr" className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words font-mono text-xs text-zinc-300 [overflow-wrap:anywhere]">
-              {validArtifact.diff_text}
-            </pre>
+            {validArtifact.diff_text !== null ? (
+              <pre dir="ltr" className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words font-mono text-xs text-zinc-300 [overflow-wrap:anywhere]">
+                {validArtifact.diff_text}
+              </pre>
+            ) : (
+              <p className="mt-2 text-xs text-amber-200" data-testid="admin-amux-review-diff-not-shown">
+                {m.reviewDiffNotShown}{" "}
+                <a href={`https://github.com/mposition/Tomverse/pull/${validArtifact.pr_number}`} target="_blank"
+                  rel="noopener noreferrer" className="underline">
+                  #{validArtifact.pr_number}
+                </a>
+              </p>
+            )}
           </div>
         )}
       </details>

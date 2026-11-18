@@ -150,6 +150,21 @@ test("the lane's consume holds a reviewed code change only in the block list sco
   assert.equal(await consume({}), "dm_approval_not_holding", "the develop merge switch off");
 });
 
+test("the lane's consume compares in the approval's own version: v2 against the change digest, v1 against the diff", async () => {
+  const CHANGE = `v2:${"c".repeat(64)}`;
+  const consume = (over = {}) => amuxDmT2MergeConsumeAllowed(fakeTx, { prNumber: 42, headSha: HEAD, base: "develop",
+    diffDigest: null, env: ON, ...over });
+  reset(CODE_PATCH, { approvedDiffDigest: CHANGE });
+  assert.equal(await consume({ changeDigest: CHANGE }), "allowed");
+  assert.equal(await consume({ changeDigest: CHANGE, diffDigest: DIFF }), "allowed", "the v1 digest beside it is not read");
+  assert.equal(await consume({ changeDigest: `v2:${"e".repeat(64)}` }), "dm_diff_changed", "a merge base moved with develop");
+  assert.equal(await consume({ diffDigest: DIFF }), "dm_diff_changed", "a lane before v2, sending v1 alone");
+  // An approval recorded before v2 still merges on its own v1 digest, and not on v2.
+  reset(CODE_PATCH);
+  assert.equal(await consume({ changeDigest: CHANGE, diffDigest: DIFF }), "allowed");
+  assert.equal(await consume({ changeDigest: CHANGE }), "dm_diff_changed");
+});
+
 test("a reviewed code change is marked ready by the app without a person, audited first; never with the kill switch on", async () => {
   const draft = { number: 42, head: REF, headSha: HEAD, base: "develop", draft: true, fork: false, labels: [] };
   const ready = async (env, files = CODE, pullOver = {}, freshOver = {}, texts = {}) => {

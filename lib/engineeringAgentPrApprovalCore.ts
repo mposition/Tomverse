@@ -1,4 +1,5 @@
 import { ENGINEERING_AGENT_NOT_APPROVED_REASONS } from "./engineeringAgentCore.ts";
+import { type PullDigestReading, pullDigestCurrent, pullDigestVersion } from "./pullDiffDigestCore.ts";
 
 /**
  * The approval judgement of engineering-agent.md §9-10: a published pull
@@ -28,9 +29,10 @@ export type EngineeringAgentPrApprovalInput = {
   /** The head commit's required checks, or null when the list could not be read whole. */
   requiredChecks: { allPassed: boolean } | null;
   reviews: readonly EngineeringAgentObservedReview[];
+  /** `diffDigest`: the bound digest, v1 or v2 as it was bound (lib/pullDiffDigestCore.ts). */
   snapshot: { baseSha: string; diffDigest: string; recordedAt: Date; invalidatedReviewIds: readonly number[] };
-  /** Base SHA and diff digest recomputed at observation, or null when they could not be. */
-  current: { baseSha: string; diffDigest: string } | null;
+  /** Base SHA and the digests read at observation; a digest of the bound one's version not read decides nothing. */
+  current: ({ baseSha: string } & PullDigestReading) | null;
   approverIds?: readonly number[];
 };
 
@@ -64,8 +66,9 @@ export function decideEngineeringAgentPrApproval(input: EngineeringAgentPrApprov
   if (!input.requiredChecks.allPassed) return { verdict: "not_approved", reason: "required_check_failed" };
   // 6 is read before 4 and 5: a moved base or diff voids every review, and
   // an unreadable one decides nothing.
-  if (input.current === null) return { verdict: "undetermined", reason: "snapshot_unreadable" };
-  if (input.current.baseSha !== input.snapshot.baseSha || input.current.diffDigest !== input.snapshot.diffDigest) {
+  const digestNow = input.current === null ? null : pullDigestCurrent(input.snapshot.diffDigest, input.current);
+  if (input.current === null || digestNow === null) return { verdict: "undetermined", reason: "snapshot_unreadable" };
+  if (input.current.baseSha !== input.snapshot.baseSha || digestNow !== input.snapshot.diffDigest) {
     return { verdict: "not_approved", reason: "snapshot_changed" };
   }
   // 4. An authorised account, matched by numeric id, approved.
@@ -146,7 +149,8 @@ export function decideEngineeringAgentMergedPr(input: {
 export function decideEngineeringAgentDmApprovedMerge(input: {
   baseRef: string;
   headSha: string;
-  /** The merged pull request's diff digest, or null when it could not be read. */
+  /** The merged pull request's change digest (and v1 diff digest for a v1 approval); null when not read. */
+  changeDigest?: string | null;
   diffDigest: string | null;
   mergedAt: Date;
   mergedByKind: "user" | "bot" | "app" | "unknown";
@@ -159,8 +163,11 @@ export function decideEngineeringAgentDmApprovedMerge(input: {
   if (approval === null || input.baseRef !== "develop" || input.headSha !== approval.approvedHeadSha ||
       approval.decidedAt.getTime() > input.mergedAt.getTime() ||
       (input.mergedByKind !== "bot" && input.mergedByKind !== "app")) return "not_approved";
-  if (input.diffDigest === null) return "waiting";
-  if (input.diffDigest !== approval.approvedDiffDigest) return "not_approved";
+  // Compared in the approval's own version: v1 against v1, v2 against v2.
+  if (pullDigestVersion(approval.approvedDiffDigest) === null) return "not_approved";
+  const digestNow = pullDigestCurrent(approval.approvedDiffDigest, input);
+  if (digestNow === null) return "waiting";
+  if (digestNow !== approval.approvedDiffDigest) return "not_approved";
   if (input.laneMerge === "merged") return "done";
   return input.laneMerge === "pending" ? "waiting" : "not_approved";
 }

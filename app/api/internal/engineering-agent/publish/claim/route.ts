@@ -80,6 +80,8 @@ export async function POST(request: Request) {
     // The halt beside the work, so a quiet round while halted is not reported
     // as a healthy one (§12). Lookups continue while halted.
     const halt = currentEngineeringAgentHalt(await readEngineeringAgentHaltState(prisma));
+    // What this app takes (ENGINEERING_AGENT_APP_FEATURES): a publisher binds
+    // the v2 change digest only when it is named here.
     return engineeringAgentJson({ work: outcome.value, halt, appFeatures: ENGINEERING_AGENT_APP_FEATURES }, 200);
   } catch (error) {
     // A switch that refuses the claim (mode off, frozen, kill switch) says

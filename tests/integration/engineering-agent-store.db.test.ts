@@ -801,7 +801,16 @@ test("a binding records its observations once, its reviewer as a pair, and a re-
     ),
     "snapshot_invalid",
   );
+  // A digest of neither version is no binding's (lib/pullDiffDigestCore.ts).
+  await refusedWith(
+    inTx((tx) =>
+      recordEngineeringAgentBinding(tx, { runId: run.runId, prNumber, headSha: sha1("head"), verifiedHeadSha: sha1("head"),
+        snapshot: { ...snapshot, diffDigest: `v3:${sha256("diff")}` } }),
+    ),
+    "snapshot_invalid",
+  );
 
+  // Owner decision 2026-11-18: a binding made before v2 is re-bound with the v2 change digest.
   const { bindingId: current } = await inTx((tx) =>
     replaceEngineeringAgentBinding(tx, {
       previousBindingId: bindingId,
@@ -810,10 +819,12 @@ test("a binding records its observations once, its reviewer as a pair, and a re-
         prNumber,
         headSha: sha1("head 2"),
         verifiedHeadSha: sha1("head 2"),
-        snapshot: { ...snapshot, diffDigest: sha256("diff 2"), invalidatedReviewIds: [41] },
+        snapshot: { ...snapshot, diffDigest: `v2:${sha256("change 2")}`, invalidatedReviewIds: [41] },
       },
     }),
   );
+  assert.equal(((await prisma.engineeringAgentBinding.findUniqueOrThrow({ where: { id: current } })).snapshot as
+    { diffDigest: string }).diffDigest, `v2:${sha256("change 2")}`);
   const superseded = await prisma.engineeringAgentBinding.findUniqueOrThrow({ where: { id: bindingId } });
   assert.ok(superseded.supersededAt && superseded.supersededAt.getFullYear() > 2000, "the database wrote the time");
 

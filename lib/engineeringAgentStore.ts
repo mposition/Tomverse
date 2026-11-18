@@ -115,6 +115,7 @@ import {
   type WriteTransitionContext,
 } from "@/lib/engineeringAgentCore";
 import { detectSecrets } from "@/lib/engineeringAgentSecretPatterns";
+import { PULL_DIGEST_PATTERN } from "@/lib/pullDiffDigestCore";
 
 /* ------------------------------------------------------------------------- */
 /* Transactions and refusals                                                  */
@@ -2396,7 +2397,6 @@ export async function clearEngineeringAgentObservedHalt(
 
 const isoInstant = z.string().datetime({ offset: false });
 const sha1 = z.string().regex(SHA1);
-const sha256 = z.string().regex(SHA256);
 const reviewId = z.number().int().positive();
 
 /**
@@ -2407,7 +2407,8 @@ const reviewId = z.number().int().positive();
 export const engineeringAgentBindingSnapshotSchema = z
   .object({
     baseSha: sha1,
-    diffDigest: sha256,
+    // v2 for every new binding, v1 for one bound before it (lib/pullDiffDigestCore.ts).
+    diffDigest: z.string().regex(PULL_DIGEST_PATTERN),
     treeId: sha1,
     // No count of its own: the binding CHECK bounds the whole record at 1 MiB
     // (migration engineering_agent_binding_record_size, owner decision 2026-11-16).
@@ -2657,7 +2658,7 @@ const bindingObservationAudit = (input: BindingObservationInput) => ({
   ...("approvedByMerge" in input && input.approvedByMerge ? { approvedByMerge: true } : {}),
   ...("approvedByDm" in input && input.approvedByDm ? { approvedByDm: true } : {}),
   ...("mergedChange" in input && input.mergedChange && SHA1.test(input.mergedChange.headSha) &&
-    (input.mergedChange.diffDigest === null || SHA256.test(input.mergedChange.diffDigest)) ? {
+    (input.mergedChange.diffDigest === null || PULL_DIGEST_PATTERN.test(input.mergedChange.diffDigest)) ? {
     mergedHeadSha: input.mergedChange.headSha,
     mergedDiffDigest: input.mergedChange.diffDigest,
     mergedHeadVerified: input.mergedChange.headVerified === true,

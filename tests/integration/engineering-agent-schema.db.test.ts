@@ -741,6 +741,16 @@ test("a binding's JSON holds digests, enums and review ids, never free text or a
   }), /accepted_then_rolled_back/, "more than 100 invalidated reviews fit");
   await snapshotRefused(replaceWith({ snapshot: snapshot({ invalidatedReviewIds: Array.from({ length: 140_000 }, (_, i) => 1_000_000 + i) }) }),
     "a snapshot is at most 1 MiB");
+  // Owner decision 2026-11-18: a new binding holds the v2 change digest; a v1 one stays as it is.
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    await tx.engineeringAgentBinding.update({ where: { id: binding.id }, data: { supersededAt: new Date() } });
+    await tx.engineeringAgentBinding.create({ data: { ...bindingFor(run.id, prNumber),
+      snapshot: snapshot({ diffDigest: `v2:${"a".repeat(64)}` }) } });
+    throw new Error("accepted_then_rolled_back");
+  }), /accepted_then_rolled_back/, "a v2 change digest is a binding's digest");
+  for (const diffDigest of [`v3:${"a".repeat(64)}`, `V2:${"a".repeat(64)}`, `v2:${"a".repeat(63)}`, `v2:${"A".repeat(64)}`, "v2:"]) {
+    await snapshotRefused(replaceWith({ snapshot: snapshot({ diffDigest }) }), `not a digest: ${diffDigest}`);
+  }
 
   const observe = (data: Record<string, unknown>) =>
     prisma.engineeringAgentBinding.update({ where: { id: binding.id }, data });
