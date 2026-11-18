@@ -285,3 +285,106 @@ test("a model takes a request's optional features by the rules the request is va
     assert.equal(modelTakesRequestFeatures(detail, openai), true);
     assert.equal(modelTakesRequestFeatures(detail, { ...openai, provider: "anthropic" }), false);
 });
+
+// Cursor's GPT-5 Agent declares its patch tool as an OpenAI custom tool
+// (free-form input) beside ordinary function tools. Shape per the Chat
+// Completions reference, with no real tool text.
+const cursorCustomToolRound = {
+    model: "fixture",
+    stream: true,
+    messages: [
+        { role: "system", content: "You are a coding agent." },
+        { role: "user", content: "Fix sum.js" },
+        {
+            role: "assistant",
+            content: null,
+            tool_calls: [{ id: "call_patch", type: "custom", custom: { name: "apply_patch", input: "*** Begin Patch\n*** End Patch" } }],
+        },
+        { role: "tool", tool_call_id: "call_patch", content: "Done" },
+    ],
+    tools: [
+        { type: "function", function: { name: "read_file", parameters: { type: "object", properties: { path: { type: "string" } } } } },
+        {
+            type: "custom",
+            custom: {
+                name: "apply_patch",
+                description: "Apply a patch.",
+                format: { type: "grammar", grammar: { syntax: "lark", definition: "start: \"*** Begin Patch\"" } },
+            },
+        },
+        { type: "custom", custom: { name: "note", format: { type: "text" } } },
+    ],
+    tool_choice: "auto",
+};
+
+test("custom tools reach the model as one-string functions and their history converts", () => {
+    const converted = convertChatCompletionRequest(parseChatCompletionRequest(cursorCustomToolRound), model);
+    assert.deepEqual([...converted.customTools], ["apply_patch", "note"]);
+    const patch = converted.tools.find((tool) => tool.name === "apply_patch");
+    assert.deepEqual(patch.parameters.required, ["input"]);
+    assert.equal(patch.parameters.properties.input.type, "string");
+    assert.match(patch.description, /Apply a patch\./);
+    assert.match(patch.description, /lark grammar/);
+    assert.equal(converted.tools.find((tool) => tool.name === "note").description, undefined);
+    const assistant = converted.messages.find((entry) => entry.role === "assistant");
+    assert.deepEqual(assistant.content[0], {
+        type: "tool-call",
+        toolCallId: "call_patch",
+        toolName: "apply_patch",
+        input: { input: "*** Begin Patch\n*** End Patch" },
+    });
+    const toolResult = converted.messages.find((entry) => entry.role === "tool");
+    assert.equal(toolResult.content[0].toolName, "apply_patch");
+    // A custom tool_choice names a declared custom tool.
+    const choice = convertChatCompletionRequest(
+        parseChatCompletionRequest({ ...cursorCustomToolRound, tool_choice: { type: "custom", custom: { name: "apply_patch" } } }),
+        model
+    );
+    assert.deepEqual(choice.toolChoice, { type: "tool", toolName: "apply_patch" });
+    // Unknown custom fields and formats are still refused by name.
+    rejects(
+        () => parseChatCompletionRequest({ ...cursorCustomToolRound, tools: [{ type: "custom", custom: { name: "x", extra: 1 } }] }),
+        "unsupported_parameter"
+    );
+});
+
+test("a custom tool's call goes back as a custom call carrying the raw input", () => {
+    const translator = createChunkTranslator({ id: "chatcmpl-x", created: 1, model: "fixture" }, new Set(["apply_patch"]));
+    const chunks = [
+        ...translator.translate({ type: "tool-input-start", id: "c1", toolName: "apply_patch" }),
+        ...translator.translate({ type: "tool-input-delta", id: "c1", delta: '{"input":"*** Begin' }),
+        ...translator.translate({ type: "tool-input-delta", id: "c1", delta: ' Patch"}' }),
+        ...translator.translate({ type: "tool-call", toolCallId: "c1", toolName: "apply_patch", input: { input: "*** Begin Patch" } }),
+        ...translator.translate({ type: "tool-call", toolCallId: "c2", toolName: "read_file", input: { path: "a" } }),
+    ];
+    const calls = chunks.flatMap((chunk) => chunk.choices[0].delta.tool_calls ?? []);
+    assert.deepEqual(calls[0], { index: 0, id: "c1", type: "custom", custom: { name: "apply_patch", input: "" } });
+    // The JSON fragments are held back; the decoded input arrives once.
+    assert.deepEqual(calls[1], { index: 0, custom: { input: "*** Begin Patch" } });
+    assert.equal(calls[2].type, "function");
+    assert.equal(calls.filter((call) => call.index === 0).length, 2);
+    const collected = translator.collected();
+    assert.deepEqual(
+        collected.toolCalls.map(({ id, name, arguments: text, custom }) => ({ id, name, text, custom })),
+        [
+            { id: "c1", name: "apply_patch", text: "*** Begin Patch", custom: true },
+            { id: "c2", name: "read_file", text: '{"path":"a"}', custom: undefined },
+        ]
+    );
+    const completion = buildChatCompletion({
+        id: "chatcmpl-x",
+        created: 1,
+        model: "fixture",
+        text: "",
+        reasoning: "",
+        toolCalls: collected.toolCalls,
+        finishReason: "tool_calls",
+        usage: null,
+    });
+    assert.deepEqual(completion.choices[0].message.tool_calls[0], {
+        id: "c1",
+        type: "custom",
+        custom: { name: "apply_patch", input: "*** Begin Patch" },
+    });
+    assert.equal(completion.choices[0].message.tool_calls[1].type, "function");
+});

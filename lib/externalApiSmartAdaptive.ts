@@ -7,7 +7,7 @@ import type { externalApiRunnableModels } from "@/lib/externalApiCatalog";
 import { smartAdaptiveRouterEnabled } from "@/lib/externalApiCatalogCore";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { DEFAULT_MODEL_ID } from "@/lib/models";
-import { modelTakesRequestFeatures, type ChatCompletionRequest } from "@/lib/openAiChatProtocol";
+import { modelTakesRequestFeatures, toolCallText, type ChatCompletionRequest } from "@/lib/openAiChatProtocol";
 import { prisma } from "@/lib/prisma";
 
 type RunnableEntry = Awaited<ReturnType<typeof externalApiRunnableModels>>[number];
@@ -131,7 +131,7 @@ const estimatedInputTokens = (request: ChatCompletionRequest) =>
             .map((message) =>
                 [
                     textOf(message.content),
-                    ...(message.role === "assistant" ? (message.tool_calls ?? []).map((call) => call.function.arguments) : []),
+                    ...(message.role === "assistant" ? (message.tool_calls ?? []).map(toolCallText) : []),
                 ].join("\n")
             )
             .join("\n") + JSON.stringify(request.tools ?? [])

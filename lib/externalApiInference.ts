@@ -461,6 +461,7 @@ export async function handleChatCompletions(request: Request): Promise<Response>
             completionId: `chatcmpl-${requestId.slice(4)}`,
             includeUsage: options.includeUsage,
             dispose: disposeDispatch,
+            customTools: converted.customTools,
             // Smart Adaptive: the round answering these calls goes to this model.
             onToolCalls:
                 parsed.model === SMART_ADAPTIVE_MODEL_ID
@@ -665,7 +666,7 @@ export const idempotentReplay = async (
 type RunFinal = {
     text: string;
     reasoning: string;
-    toolCalls: { id: string; name: string; arguments: string; complete: boolean }[];
+    toolCalls: { id: string; name: string; arguments: string; custom?: boolean; complete: boolean }[];
     finishReason: ReturnType<typeof toOpenAiFinishReason>;
     usage: UsageView | null;
     error: { status: number; code: string; message: string } | null;
@@ -685,14 +686,18 @@ const createRun = (input: {
     completionId: string;
     includeUsage: boolean;
     dispose: () => void;
+    customTools: ReadonlySet<string>;
     /** Told each tool call's id as the call is completed, before it is sent on. */
     onToolCalls?: (ids: string[]) => void;
 }) => {
-    const translator = createChunkTranslator({
-        id: input.completionId,
-        created: input.created,
-        model: input.model.id,
-    });
+    const translator = createChunkTranslator(
+        {
+            id: input.completionId,
+            created: input.created,
+            model: input.model.id,
+        },
+        input.customTools
+    );
     let sdkFinishReason: string | undefined;
     let usage: UsageView | null = null;
     let usageFromProvider = false;
