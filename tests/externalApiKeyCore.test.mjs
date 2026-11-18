@@ -14,13 +14,12 @@ import {
     asideProviderConfig,
     externalApiEnabled,
     externalApiModelCapabilities,
-    externalApiModelIds,
     externalApiUserAllowed,
     isExternalApiServableModel,
     KEY_PLACEHOLDER,
     SMART_ADAPTIVE_MODEL_ID,
     smartAdaptiveCapabilities,
-    smartAdaptiveEnabled,
+    smartAdaptiveRouterEnabled,
     toOpenAiModelEntry,
     vscodeCustomEndpointConfig,
 } from "../lib/externalApiCatalogCore.ts";
@@ -83,22 +82,20 @@ const baseModel = {
     inputCapabilities: { image: true, nativePdf: false },
 };
 
-test("exposure needs the switch, the account, the operator list, the registry and the plan", () => {
+test("exposure needs the switch, the account, the registry and the plan", () => {
     assert.equal(externalApiEnabled({}), false);
     assert.equal(externalApiEnabled({ EXTERNAL_API_ENABLED: "TRUE" }), false);
     assert.equal(externalApiEnabled({ EXTERNAL_API_ENABLED: "true" }), true);
     assert.equal(externalApiUserAllowed({}, "u1"), false);
     assert.equal(externalApiUserAllowed({ EXTERNAL_API_ALLOWED_USER_IDS: "u2, u1" }, "u1"), true);
     assert.equal(externalApiUserAllowed({ EXTERNAL_API_ALLOWED_USER_IDS: "*" }, "anyone"), true);
-    const listed = externalApiModelIds({ EXTERNAL_API_MODEL_IDS: "fixture, fixture,other" });
-    assert.deepEqual(listed, ["fixture", "other"]);
-    assert.equal(isExternalApiServableModel(baseModel, "Pro", listed), true);
-    assert.equal(isExternalApiServableModel(baseModel, "Free", listed), false, "plan");
-    assert.equal(isExternalApiServableModel(baseModel, "Pro", []), false, "not listed");
-    assert.equal(isExternalApiServableModel({ ...baseModel, enabled: false }, "Pro", listed), false);
-    assert.equal(isExternalApiServableModel({ ...baseModel, status: "disabled" }, "Pro", listed), false);
-    assert.equal(isExternalApiServableModel({ ...baseModel, catalogDeleted: true }, "Pro", listed), false);
-    assert.equal(isExternalApiServableModel({ ...baseModel, usageClass: "deep-research" }, "Max", listed), false);
+    // The catalogue is the only list: no second, operator-kept list of ids.
+    assert.equal(isExternalApiServableModel(baseModel, "Pro"), true);
+    assert.equal(isExternalApiServableModel(baseModel, "Free"), false, "plan");
+    assert.equal(isExternalApiServableModel({ ...baseModel, enabled: false }, "Pro"), false);
+    assert.equal(isExternalApiServableModel({ ...baseModel, status: "disabled" }, "Pro"), false);
+    assert.equal(isExternalApiServableModel({ ...baseModel, catalogDeleted: true }, "Pro"), false);
+    assert.equal(isExternalApiServableModel({ ...baseModel, usageClass: "deep-research" }, "Max"), false);
 });
 
 test("client configs carry the real model facts and never a stored secret", () => {
@@ -124,16 +121,17 @@ test("client configs carry the real model facts and never a stored secret", () =
     assert.ok(!JSON.stringify(vscode).includes("tvk_"));
 });
 
-test("Smart Adaptive is off by default and promises only what every candidate meets", () => {
-    assert.equal(smartAdaptiveEnabled({}), false);
-    assert.equal(smartAdaptiveEnabled({ EXTERNAL_API_SMART_ADAPTIVE_ENABLED: "true" }), true);
+test("Smart Adaptive is offered with any model, its router call is off by default, and it advertises the most a candidate offers", () => {
+    assert.equal(smartAdaptiveRouterEnabled({}), false);
+    assert.equal(smartAdaptiveRouterEnabled({ EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED: "true" }), true);
     const a = { id: "a", name: "A", provider: "openai", tools: true, vision: true, reasoning: true, contextWindowTokens: 200_000, maxOutputTokens: 64_000, creditWeight: 1 };
     const b = { id: "b", name: "B", provider: "deepseek", tools: true, vision: false, reasoning: false, contextWindowTokens: 128_000, maxOutputTokens: 8_000, creditWeight: 3 };
-    assert.equal(smartAdaptiveCapabilities([a]), null, "one model is nothing to choose between");
+    assert.equal(smartAdaptiveCapabilities([]), null);
+    assert.equal(smartAdaptiveCapabilities([a]).id, SMART_ADAPTIVE_MODEL_ID, "a stable id even with one model");
     const smart = smartAdaptiveCapabilities([a, b]);
     assert.equal(smart.id, SMART_ADAPTIVE_MODEL_ID);
-    assert.equal(smart.contextWindowTokens, 128_000);
-    assert.equal(smart.maxOutputTokens, 8_000);
+    assert.equal(smart.contextWindowTokens, 200_000, "requests are routed only to a model they fit");
+    assert.equal(smart.maxOutputTokens, 64_000);
     assert.equal(smart.creditWeight, 3, "the most a request can cost");
     assert.equal(smart.vision, true, "images are routed to a model that reads them");
     assert.equal(vscodeCustomEndpointConfig("https://x/api/v1", [smart])[0].models[0].name, "Smart Adaptive (Tomverse)");

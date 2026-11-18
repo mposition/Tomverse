@@ -15,22 +15,8 @@ const model = {
     maxOutputTokens: 16000,
     creditWeight: 1,
 };
+const smartAdaptive = { ...model, id: "smart-adaptive", name: "Smart Adaptive", provider: "tomverse" };
 const baseUrl = "https://tomverse.app/api/v1";
-const asideConfig = (apiKey: string) => ({
-    providers: {
-        tomverse: {
-            name: "Tomverse",
-            api: "openai-completions",
-            baseUrl,
-            apiKey,
-            authHeader: true,
-            models: [{ id: model.id, name: "GPT 6 Luna (Tomverse)", reasoning: false, input: ["text", "image"], contextWindow: 216000, maxTokens: 16000 }],
-        },
-    },
-});
-const vscodeConfig = [
-    { name: "Tomverse", vendor: "customendpoint", apiKey: "${input:tomverseApiKey}", apiType: "chat-completions", models: [{ id: model.id, url: `${baseUrl}/chat/completions` }] },
-];
 const SECRET = ["tvk", "ab12cd34", "S".repeat(43)].join("_");
 
 const mockKeys = async (page: Page, options: { enabled: boolean; keys?: Array<Record<string, unknown>> }) => {
@@ -59,16 +45,15 @@ const mockKeys = async (page: Page, options: { enabled: boolean; keys?: Array<Re
                     createdAt: "2026-11-17T00:00:00.000Z",
                 };
                 keys.push(summary);
-                return route.fulfill({ status: 201, json: { key: SECRET, summary, clientConfig: { aside: asideConfig(SECRET), vscode: vscodeConfig } } });
+                return route.fulfill({ status: 201, json: { key: SECRET, summary } });
             }
             return route.fulfill({
                 json: {
                     enabled: true,
                     baseUrl,
                     limits: { maxKeys: 10, maxCreditCap: 1000000, expiryDays: [7, 30, 90, 365] },
-                    models: [model],
+                    models: [smartAdaptive, model],
                     keys,
-                    clientConfig: { aside: asideConfig("<YOUR_TOMVERSE_API_KEY>"), vscode: vscodeConfig },
                 },
             });
         }
@@ -133,8 +118,24 @@ test("API keys: create shows the secret once with a ready config, then revoke @u
 
     await expect(page.getByRole("heading", { name: "API 키" })).toBeVisible();
     await expect(page.getByTestId("external-api-models")).toContainText("GPT 6 Luna");
-    await expect(page.getByTestId("external-api-aside-config")).toContainText("<YOUR_TOMVERSE_API_KEY>");
-    await expect(page.getByTestId("external-api-vscode-config")).toContainText("customendpoint");
+    const aside = page.getByTestId("external-api-aside-config");
+    const vscode = page.getByTestId("external-api-vscode-config");
+    await expect(aside).toContainText("<YOUR_TOMVERSE_API_KEY>");
+    await expect(vscode).toContainText("customendpoint");
+    // Smart Adaptive alone by default: its id survives catalogue changes.
+    await expect(aside).toContainText('"smart-adaptive"');
+    await expect(aside).not.toContainText('"gpt-6-luna"');
+    await expect(page.getByTestId("external-api-generic-config")).toContainText("Model: smart-adaptive");
+    // Ticking a model pins it into both configurations; the last one cannot be unticked.
+    await page.getByTestId("external-api-pick-gpt-6-luna").check();
+    await expect(aside).toContainText('"gpt-6-luna"');
+    await expect(vscode).toContainText(`${baseUrl}/chat/completions`);
+    await page.getByTestId("external-api-pick-smart-adaptive").uncheck();
+    await expect(aside).not.toContainText('"smart-adaptive"');
+    await page.getByTestId("external-api-pick-gpt-6-luna").click();
+    await expect(page.getByTestId("external-api-pick-gpt-6-luna")).toBeChecked();
+    await page.getByTestId("external-api-pick-smart-adaptive").check();
+    await page.getByTestId("external-api-pick-gpt-6-luna").uncheck();
     await expect(page.getByTestId("settings-detail-nav")).toBeVisible();
 
     await page.getByTestId("external-api-name").fill("회사 노트북");

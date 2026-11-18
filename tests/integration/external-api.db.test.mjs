@@ -23,7 +23,9 @@ test("external inference API over the real shared credit ledger", { skip: !datab
         NEXTAUTH_SECRET: "external-api-local-synthetic-secret",
         ADMIN_AUDIT_INTEGRITY_KEY: "synthetic-external-api-audit",
         EXTERNAL_API_ENABLED: "true",
-        EXTERNAL_API_MODEL_IDS: MODEL_ID,
+        // Provider credentials decide what is offered; the provider itself is faked below.
+        OPENAI_API_KEY: "sk-fixture-not-a-key",
+        DEEPSEEK_API_KEY: "sk-fixture-not-a-key",
         EXTERNAL_API_ALLOWED_USER_IDS: "",
         // Every request here comes from one loopback address. The per-minute
         // request guards are their own layer; widen them so scenarios do not
@@ -33,7 +35,7 @@ test("external inference API over the real shared credit ledger", { skip: !datab
         EXTERNAL_API_REQUESTS_PER_MINUTE: "1000",
     });
     const floor = getSingleAccountCostCeiling();
-    for (const provider of ["openai", "anthropic"]) {
+    for (const provider of ["openai", "anthropic", "deepseek"]) {
         for (const period of ["day", "month"]) process.env[providerBudgetEnvName(provider, period)] = String(floor[period]);
     }
 
@@ -351,19 +353,22 @@ test("external inference API over the real shared credit ledger", { skip: !datab
         script = textScript("Hello from the fixture.");
     });
 
-    await t.test("Smart Adaptive routes among the listed models and keeps the pick through a tool loop", async () => {
+    await t.test("Smart Adaptive routes among catalogue models and keeps the pick through a tool loop", async () => {
         const userId = await newUser();
         allow(userId);
         const { key } = await issueKey(userId);
         const SECOND = "deepseek-v4-flash";
-        process.env.EXTERNAL_API_MODEL_IDS = `${MODEL_ID},${SECOND}`;
         try {
-            delete process.env.EXTERNAL_API_SMART_ADAPTIVE_ENABLED;
-            assert.equal((await call(key, body({ model: "smart-adaptive" }))).status, 404, "off by default");
-
-            process.env.EXTERNAL_API_SMART_ADAPTIVE_ENABLED = "true";
+            // Without the router switch: always offered, no router call, the default model.
             routerPick = SECOND;
             routerCalls.length = 0;
+            const plain = await call(key, body({ model: "smart-adaptive" }));
+            assert.equal(plain.status, 200);
+            assert.equal(plain.headers.get("x-tomverse-routed-model"), MODEL_ID);
+            assert.equal(plain.headers.get("x-tomverse-routed-by"), "default");
+            assert.equal(routerCalls.length, 0, "no paid router call while the switch is off");
+
+            process.env.EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED = "true";
             const question = { role: "user", content: "Run the tests and fix the failure" };
             const first = await call(key, body({ model: "smart-adaptive", messages: [question] }));
             assert.equal(first.status, 200);
@@ -373,8 +378,9 @@ test("external inference API over the real shared credit ledger", { skip: !datab
             assert.equal(routerCalls.length, 1);
             assert.equal(routerCalls[0].prompt, "Run the tests and fix the failure");
             assert.equal(routerCalls[0].conversationId, null, "no decision row, so no prompt is stored");
-            assert.deepEqual(routerCalls[0].eligibleModelIds, [MODEL_ID, SECOND]);
-            assert.ok(routerCalls[0].models.length > 2, "the router model is looked up among all runtime models");
+            assert.ok(routerCalls[0].eligibleModelIds.includes(MODEL_ID) && routerCalls[0].eligibleModelIds.includes(SECOND), "every catalogue model with a credential");
+            assert.ok(!routerCalls[0].eligibleModelIds.some((id) => id.startsWith("claude-")), "no Anthropic credential here, so no Anthropic model");
+            assert.ok(routerCalls[0].models.length > routerCalls[0].eligibleModelIds.length, "the router model is looked up among all runtime models");
             const receipt = await db.externalApiRequest.findFirst({ where: { userId }, orderBy: { createdAt: "desc" } });
             assert.equal(receipt.modelId, SECOND, "the receipt and the charge are the routed model's");
 
@@ -400,21 +406,32 @@ test("external inference API over the real shared credit ledger", { skip: !datab
             assert.equal(routerCalls.length, 2);
             assert.equal(routerCalls[1].previousAnswer, "Done.");
 
-            // An image: only models that read images are candidates; one left means no router call.
+            // An image: only models that read images are candidates.
+            routerPick = SECOND;
             const image = await call(key, body({ model: "smart-adaptive", messages: [{ role: "user", content: [{ type: "text", text: "What is this?" }, { type: "image_url", image_url: { url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==" } }] }] }));
             assert.equal(image.status, 200);
-            assert.equal(image.headers.get("x-tomverse-routed-model"), MODEL_ID);
+            assert.ok(!routerCalls.at(-1).eligibleModelIds.includes(SECOND), "a model without image input is not a candidate");
+            assert.equal(image.headers.get("x-tomverse-routed-model"), MODEL_ID, "a pick outside the candidates is not taken");
             assert.equal(image.headers.get("x-tomverse-routed-by"), "default");
-            assert.equal(routerCalls.length, 2);
 
-            // No router answer (not configured, budget, timeout): the first listed model.
+            // A requested output the default model cannot give goes to one that can.
             routerPick = null;
+            const long = await call(key, body({ model: "smart-adaptive", max_tokens: 300_000, messages: [{ role: "user", content: "Write a long report" }] }));
+            assert.equal(long.status, 200);
+            assert.notEqual(long.headers.get("x-tomverse-routed-model"), MODEL_ID);
+
+            // No router answer (not configured, budget, timeout): the default model.
             const fallback = await call(key, body({ model: "smart-adaptive", messages: [{ role: "user", content: "Something else" }] }));
             assert.equal(fallback.headers.get("x-tomverse-routed-model"), MODEL_ID);
             assert.equal(fallback.headers.get("x-tomverse-routed-by"), "default");
+
+            // A model the catalogue knows but this deployment does not offer (no
+            // credential here) says how to recover instead of a bare 404.
+            const retired = await call(key, body({ model: "claude-haiku-5-5" }));
+            assert.equal(retired.status, 404);
+            assert.equal((await retired.json()).error.code, "model_unavailable");
         } finally {
-            process.env.EXTERNAL_API_MODEL_IDS = MODEL_ID;
-            delete process.env.EXTERNAL_API_SMART_ADAPTIVE_ENABLED;
+            delete process.env.EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED;
             routerPick = null;
         }
     });

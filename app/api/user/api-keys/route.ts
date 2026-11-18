@@ -4,10 +4,6 @@ import { z } from "zod";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
 import { externalApiOfferedModels } from "@/lib/externalApiCatalog";
 import {
-    asideProviderConfig,
-    vscodeCustomEndpointConfig,
-} from "@/lib/externalApiCatalogCore";
-import {
     EXTERNAL_API_KEY_LIMITS,
     externalApiKeyExpiry,
     normalizeExternalApiCreditCap,
@@ -44,10 +40,6 @@ export async function GET(request: Request) {
                 },
                 models,
                 keys: await listExternalApiKeys(userId),
-                clientConfig: {
-                    aside: asideProviderConfig(baseUrl, models),
-                    vscode: vscodeCustomEndpointConfig(baseUrl, models),
-                },
             });
         }),
         {
@@ -62,7 +54,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-    return withKeyManagementSession(request, async ({ session, userId, plan }) => {
+    return withKeyManagementSession(request, async ({ session, userId }) => {
         try {
             await consumeApiRateLimit(request, userId, "external-api-key-create", { minute: 5, day: 50 });
             const body = await readLimitedJson(request, 8 * 1024, createSchema);
@@ -78,20 +70,11 @@ export async function POST(request: Request) {
             if (expiresAt === undefined) {
                 return managementJson(400, { error: "Choose one of the offered expiry periods.", code: "INVALID_EXPIRY" });
             }
-            // Everything the response needs is read before the key exists: the
-            // secret is shown only in this response, so a failure after the key
-            // is created would leave an active key nobody can use.
-            const baseUrl = externalApiBaseUrl(request);
-            const models = await externalApiOfferedModels(plan.tier);
             const created = await createExternalApiKey({ userId, name, creditCap, expiresAt }, { session, request });
             return managementJson(201, {
                 // Shown once. The server keeps only a digest and cannot show it again.
                 key: created.key,
                 summary: created.summary,
-                clientConfig: {
-                    aside: asideProviderConfig(baseUrl, models, created.key),
-                    vscode: vscodeCustomEndpointConfig(baseUrl, models),
-                },
             });
         } catch (error) {
             if (error instanceof ExternalApiKeyError) {

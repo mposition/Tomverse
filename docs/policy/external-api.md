@@ -31,14 +31,13 @@ All default off. Server-side; hiding UI is never the gate.
 |---|---|
 | `EXTERNAL_API_ENABLED` | Exactly `true` turns the routes on. Anything else: every `/api/v1` route answers 503 `feature_unavailable` and nothing is dispatched. |
 | `EXTERNAL_API_ALLOWED_USER_IDS` | Comma-separated user IDs allowed to manage and use keys, or `*`. Empty means nobody. |
-| `EXTERNAL_API_MODEL_IDS` | Comma-separated runtime registry model IDs exposed through the API. A model goes on this list only after its text, tool-call and (if it claims images) image behaviour has been checked through this API. Research and deep-research models are never exposed even if listed. |
 | `EXTERNAL_API_PUBLIC_BASE_URL` | Optional canonical base URL shown to users (e.g. `https://tomverse.app/api/v1`). Otherwise derived from the request host. |
 | `NEXT_PUBLIC_EXTERNAL_API_SETTINGS_VISIBLE` | Build-time. Shows the API keys row in the settings panel. `/settings/api` itself checks availability through the server. |
 | `EXTERNAL_API_REQUESTS_PER_MINUTE` / `_PER_DAY` | Per-account request-rate abuse guard, defaults 120 / 20 000. Credits, the key cap and concurrency are what bound usage; this only stops runaway clients. |
 | `EXTERNAL_API_HEARTBEAT_MS` | How often an in-flight request renews its concurrency slot and reservation, default 60 000. Runs from dispatch, including the wait for a streaming request's first part. Lowered only by tests. |
 | `EXTERNAL_API_READS_PER_MINUTE` / `_PER_DAY` | Separate per-account budget for `GET /models` and `GET /usage`, defaults 60 / 5 000. The settings read routes (key list, receipts) have a fixed 60 / 5 000; revocation has none, so it always works. |
 | `EXTERNAL_API_TIMEOUT_MS` | Server timeout for one generation, default 600 000. |
-| `EXTERNAL_API_SMART_ADAPTIVE_ENABLED` | Exactly `true` offers the `smart-adaptive` model (section 5.1) when the account has at least two listed models. Off by default: each routed request makes one call to Chat's router model, held against the provider operational budget, not the user's credits. |
+| `EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED` | Exactly `true` lets Smart Adaptive (section 5.1) ask Chat's router model which candidate answers. Off by default, because each routed request adds one router call, held against the provider operational budget rather than the user's credits. Off, `smart-adaptive` still works and every request goes to the default model. |
 
 **Kill switch.** The Admin operational pause for AI chat
 (`feature.aiChatEnabled`) stops every new external dispatch at once (503
@@ -117,6 +116,12 @@ reservation every minute so the sweep does not close a live call.
 
 Base URL `https://<host>/api/v1`. Bearer authentication only.
 
+**Which models.** The model catalogue is the only list. A model is offered when
+the runtime registry serves it to the account's plan (enabled, status enabled
+or limited, not deleted), it is not a research or deep-research model, and its
+provider has a credential on this deployment. There is no second, operator-kept
+list of ids: enabling a model in the catalogue offers it here too.
+
 | Endpoint | Purpose |
 |---|---|
 | `GET /models` | OpenAI model list of what this key's account can run now. Tomverse facts under `tomverse`: capabilities, `context_window_tokens`, `max_output_tokens`, `credits_per_request`. |
@@ -192,18 +197,22 @@ header, a retry is a new request — the server cannot tell it from a new one.
 ### 5.1 Smart Adaptive
 
 `model: "smart-adaptive"` lets Tomverse choose, per request, which of the
-account's listed models answers -- Chat's own Smart Adaptive router
+catalogue models answers -- Chat's own Smart Adaptive router
 (`pickAutoModelWithLlm`, the router model set in Admin › Routing). It is the
 cross-provider choice a single-vendor subscription cannot offer, so the
 response always says which model answered: the `model` field (OpenAI's
 convention), `x-tomverse-routed-model`, and `x-tomverse-routed-by`
-(`router`, `continued` or `default`).
+(`router`, `continued` or `default`). It is offered whenever any model is, and
+it is the id the settings page puts in a copied configuration by default:
+the id stays the same while models are added to or retired from the
+catalogue, so a customer never has to recopy it.
 
-- **Candidates:** the runnable models (`EXTERNAL_API_MODEL_IDS` ∩ registry ∩
-  plan), in the operator's order; a request with an image only among models
-  that read images. The `GET /models` entry advertises what every candidate
-  meets (smallest window and output limit, largest credits per request), so a
-  client setting built from it fits whichever model answers.
+- **Candidates:** the offered models that fit the request -- images only to a
+  model that reads them, the requested output within the model's limit, and a
+  rough input estimate plus that output within its window. The `GET /models`
+  entry advertises the most any candidate offers (largest window and output
+  limit, largest credits per request); a request beyond every candidate gets
+  the default model's ordinary limit error.
 - **Router input:** the latest user message's text and the assistant text
   before it, bounded by the router itself. Nothing is stored: the external API
   passes no conversation id, so the router writes no `AutoRouterDecision` row.
@@ -212,8 +221,13 @@ convention), `x-tomverse-routed-model`, and `x-tomverse-routed-by`
   minutes under a SHA-256 digest of the key and the messages up to that user
   message. A miss (another instance, a restart) routes again. A new user message
   is routed again.
-- **No answer** (no router model configured, provider budget refused, timeout,
-  one candidate left): the first listed candidate, `routed-by: default`.
+- **No answer** (router switch off, no router model configured, provider budget
+  refused, timeout, invalid output, one candidate left): the default model
+  (`DEFAULT_MODEL_ID`) if it fits, otherwise the first candidate in catalogue
+  order, `routed-by: default`. A pick outside the candidates is never taken.
+- **A pinned model that is no longer offered** (retired, disabled, or its
+  provider unconfigured) answers 404 `model_unavailable`, naming
+  `smart-adaptive` and the settings page, instead of a bare `model_not_found`.
 - **Charging:** the request is reserved, charged and receipted as the routed
   model; `GET /usage` shows that model's id.
 
@@ -233,8 +247,12 @@ every Chat reservation does.
 
 ## 7. Client setup
 
-`/settings/api` generates both configurations from the models the account can
-run now. The key appears only in the configuration shown right after creation.
+`/settings/api` builds the configurations in the page from the offered models:
+Smart Adaptive alone by default, plus any model the person ticks to pin it. The
+key appears only in the configuration shown right after creation. Any other app
+that takes a custom OpenAI Chat Completions endpoint needs only the three values
+the page also shows: base URL, key and model (`smart-adaptive`). A client that
+speaks only OpenAI's Responses API is not supported.
 
 - **Aside:** add a Custom Provider and paste the JSON: provider `tomverse`,
   `api: "openai-completions"`, `baseUrl`, `apiKey`, `authHeader: true`, and per
@@ -250,15 +268,14 @@ run now. The key appears only in the configuration shown right after creation.
   GitHub sign-in or Copilot plan, Copilot Business/Enterprise needs the BYOK
   policy, and BYOK in Copilot-harness sessions is behind the experimental
   `chat.agentHost.byokModels.enabled`. A model without tool calling is hidden
-  from agents; every listed model here advertises it.
+  from agents; every offered model here advertises it.
 
 Aside has been verified against this API; VS Code is in progress (section 9).
 
 ## 8. Operations
 
 **Enable for a test account (after the approvals in section 9):** apply the
-migration `20261117150000_external_api_keys`, set `EXTERNAL_API_MODEL_IDS` to
-the verified model, `EXTERNAL_API_ALLOWED_USER_IDS` to the test account,
+migration `20261117150000_external_api_keys`, set `EXTERNAL_API_ALLOWED_USER_IDS` to the test account,
 `EXTERNAL_API_ENABLED=true`, deploy, then create a key at `/settings/api`.
 
 **Observe.** Reservations: `source = 'external_api'` in `ChatCreditReservation`
@@ -292,9 +309,11 @@ see `npm run test:external-api`, `npm run test:external-api-db`, and
 
 Not yet done, each a separate step:
 
-- Choosing the first live model and confirming that offering it through an
-  external API is within the provider's terms (`EXTERNAL_API_MODEL_IDS` stays
-  empty until then).
+- Confirming that offering each configured provider's models through an
+  external API is within that provider's terms, before the API is switched on
+  in production. Every catalogue model with a credential is offered.
+- An automated per-model check through this API (text, one tool round, an image
+  where claimed): a paid run, approved separately.
 - Paid smoke tests with a test account and a spending ceiling.
 - Real Aside and VS Code acceptance runs (tool round trip, image, stop, usage,
   revocation), with versions recorded here. Aside passed locally on 2026-11-18

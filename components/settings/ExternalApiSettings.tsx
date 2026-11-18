@@ -1,18 +1,26 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Check, Copy, KeyRound } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { SettingsDetailNav } from "@/components/settings/SettingsDetailNav";
 import { useSettingsReturnProduct } from "@/components/settings/useSettingsReturnProduct";
 import { SETTINGS_HOME_PATH, SETTINGS_TAB_QUERY_PARAM, settingsHrefForProduct } from "@/lib/settingsNavigation";
+import {
+    asideProviderConfig,
+    KEY_PLACEHOLDER,
+    SMART_ADAPTIVE_MODEL_ID,
+    vscodeCustomEndpointConfig,
+    type ExternalApiModelCapabilities,
+} from "@/lib/externalApiCatalogCore";
 
 /**
  * Settings > API keys. Issues, lists, limits and revokes the account's
- * external API keys, and shows the client configuration generated from the
- * models this account can actually run. A new key's secret is held only in
- * this component's state until the person dismisses it.
+ * external API keys, and builds the client configuration from the models this
+ * account can run: Smart Adaptive alone by default, plus any model ticked. A
+ * new key's secret is held only in this component's state until the person
+ * dismisses it.
  */
 
 type KeySummary = {
@@ -30,15 +38,7 @@ type KeySummary = {
     createdAt: string;
 };
 
-type ModelSummary = {
-    id: string;
-    name: string;
-    vision: boolean;
-    tools: boolean;
-    contextWindowTokens: number;
-    maxOutputTokens: number;
-    creditWeight: number;
-};
+type ModelSummary = ExternalApiModelCapabilities;
 
 type Overview =
     | { enabled: false; keys?: KeySummary[] }
@@ -48,7 +48,6 @@ type Overview =
           limits: { maxKeys: number; maxCreditCap: number; expiryDays: number[] };
           models: ModelSummary[];
           keys: KeySummary[];
-          clientConfig: { aside: unknown; vscode: unknown };
       };
 
 type RequestRow = {
@@ -323,6 +322,19 @@ function KeyRow({
     );
 }
 
+/** The three values any OpenAI-compatible tool asks for. */
+const genericConfig = (baseUrl: string, modelId: string, apiKey: string = KEY_PLACEHOLDER) =>
+    `Base URL: ${baseUrl}
+API key: ${apiKey}
+Model: ${modelId}`;
+
+/** Smart Adaptive when offered, otherwise every model: what a first copy holds. */
+const defaultPicked = (overview: Overview): string[] => {
+    if (!overview.enabled) return [];
+    const ids = overview.models.map((model) => model.id);
+    return ids.includes(SMART_ADAPTIVE_MODEL_ID) ? [SMART_ADAPTIVE_MODEL_ID] : ids;
+};
+
 export function ExternalApiSettings() {
     const { t } = useLanguage();
     const product = useSettingsReturnProduct();
@@ -333,7 +345,10 @@ export function ExternalApiSettings() {
     const [expiry, setExpiry] = useState<string>("90");
     const [creating, setCreating] = useState(false);
     const [createError, setCreateError] = useState<string | null>(null);
-    const [created, setCreated] = useState<{ key: string; aside: unknown; vscode: unknown } | null>(null);
+    const [created, setCreated] = useState<{ key: string } | null>(null);
+    // Which offered models go into the copied configurations. Smart Adaptive
+    // alone until the person ticks more: its id survives catalogue changes.
+    const [picked, setPicked] = useState<string[] | null>(null);
 
     const [version, setVersion] = useState(0);
     const load = useCallback(() => setVersion((value) => value + 1), []);
@@ -349,6 +364,7 @@ export function ExternalApiSettings() {
                 }
                 setFailed(false);
                 setOverview(body as Overview);
+                setPicked((current) => current ?? defaultPicked(body as Overview));
             })
             .catch(() => {
                 if (!cancelled) setFailed(true);
@@ -357,6 +373,18 @@ export function ExternalApiSettings() {
             cancelled = true;
         };
     }, [version]);
+
+    const configModels = useMemo(
+        () => (overview?.enabled ? overview.models.filter((model) => picked?.includes(model.id)) : []),
+        [overview, picked]
+    );
+    const togglePicked = (id: string) =>
+        setPicked((current) => {
+            const list = current ?? [];
+            if (!list.includes(id)) return [...list, id];
+            // Keep at least one model, so a copied configuration is never empty.
+            return list.length > 1 ? list.filter((value) => value !== id) : list;
+        });
 
     const create = async () => {
         const maxCreditCap = overview?.enabled ? overview.limits.maxCreditCap : 0;
@@ -382,7 +410,7 @@ export function ExternalApiSettings() {
                 setCreateError(body?.error ?? t("externalApi.errorGeneric"));
                 return;
             }
-            setCreated({ key: body.key, aside: body.clientConfig.aside, vscode: body.clientConfig.vscode });
+            setCreated({ key: body.key });
             setName("");
             setCap("");
             load();
@@ -431,8 +459,9 @@ export function ExternalApiSettings() {
                             <h2 className="text-base font-bold">{t("externalApi.createdTitle")}</h2>
                             <p className="mt-1 text-sm text-zinc-500">{t("externalApi.createdBody")}</p>
                             <CopyBlock label="API key" value={created.key} testId="external-api-created-key" />
-                            <CopyBlock label={`${t("externalApi.asideTitle")} — ${t("externalApi.asideHint")}`} value={JSON.stringify(created.aside, null, 2)} testId="external-api-created-aside" />
-                            <CopyBlock label={`${t("externalApi.vscodeTitle")} — ${t("externalApi.vscodeHint")}`} value={JSON.stringify(created.vscode, null, 2)} testId="external-api-created-vscode" />
+                            <CopyBlock label={`${t("externalApi.asideTitle")} — ${t("externalApi.asideHint")}`} value={JSON.stringify(asideProviderConfig(overview.baseUrl, configModels, created.key), null, 2)} testId="external-api-created-aside" />
+                            <CopyBlock label={`${t("externalApi.vscodeTitle")} — ${t("externalApi.vscodeHint")}`} value={JSON.stringify(vscodeCustomEndpointConfig(overview.baseUrl, configModels), null, 2)} testId="external-api-created-vscode" />
+                            <CopyBlock label={`${t("externalApi.genericTitle")} — ${t("externalApi.genericHint")}`} value={genericConfig(overview.baseUrl, configModels[0]?.id ?? SMART_ADAPTIVE_MODEL_ID, created.key)} testId="external-api-created-generic" />
                             <button type="button" data-testid="external-api-created-done" onClick={() => setCreated(null)} className="mt-4 rounded-xl bg-zinc-900 px-4 py-2 text-sm font-semibold text-white dark:bg-zinc-100 dark:text-zinc-900">
                                 {t("externalApi.done")}
                             </button>
@@ -499,19 +528,36 @@ export function ExternalApiSettings() {
                             <ul className="mt-2 grid gap-2 text-sm" data-testid="external-api-models">
                                 {overview.models.map((model) => (
                                     <li key={model.id} className="rounded-xl bg-zinc-50 px-3 py-2 dark:bg-zinc-900">
-                                        <span className="font-semibold">{model.name}</span>{" "}
-                                        <span className="font-mono text-xs text-zinc-500">{model.id}</span>
-                                        <span className="block text-xs text-zinc-500">
-                                            {model.vision ? t("externalApi.inputTextImage") : t("externalApi.inputText")} · {t("externalApi.toolCalls")} ·{" "}
-                                            {fill(t("externalApi.creditsPerRequest"), { credits: model.creditWeight })}
-                                        </span>
+                                        <label className="flex items-start gap-3">
+                                            <input
+                                                type="checkbox"
+                                                className="mt-1"
+                                                checked={picked?.includes(model.id) ?? false}
+                                                onChange={() => togglePicked(model.id)}
+                                                aria-label={`${t("externalApi.includeInConfig")}: ${model.name}`}
+                                                data-testid={`external-api-pick-${model.id}`}
+                                            />
+                                            <span className="min-w-0">
+                                                <span className="font-semibold">{model.name}</span>{" "}
+                                                <span className="font-mono text-xs text-zinc-500">{model.id}</span>
+                                                {model.id === SMART_ADAPTIVE_MODEL_ID ? (
+                                                    <span className="block text-xs text-zinc-600 dark:text-zinc-300">{t("externalApi.smartAdaptiveHint")}</span>
+                                                ) : null}
+                                                <span className="block text-xs text-zinc-500">
+                                                    {model.vision ? t("externalApi.inputTextImage") : t("externalApi.inputText")} · {t("externalApi.toolCalls")} ·{" "}
+                                                    {fill(t("externalApi.creditsPerRequest"), { credits: model.creditWeight })}
+                                                </span>
+                                            </span>
+                                        </label>
                                     </li>
                                 ))}
                             </ul>
                         )}
                         <CopyBlock label={t("externalApi.baseUrlLabel")} value={overview.baseUrl} testId="external-api-base-url" />
-                        <CopyBlock label={`${t("externalApi.asideTitle")} — ${t("externalApi.asideHint")}`} value={JSON.stringify(overview.clientConfig.aside, null, 2)} testId="external-api-aside-config" />
-                        <CopyBlock label={`${t("externalApi.vscodeTitle")} — ${t("externalApi.vscodeHint")}`} value={JSON.stringify(overview.clientConfig.vscode, null, 2)} testId="external-api-vscode-config" />
+                        <p className="mt-3 text-xs text-zinc-500">{t("externalApi.configFromSelection")}</p>
+                        <CopyBlock label={`${t("externalApi.asideTitle")} — ${t("externalApi.asideHint")}`} value={JSON.stringify(asideProviderConfig(overview.baseUrl, configModels), null, 2)} testId="external-api-aside-config" />
+                        <CopyBlock label={`${t("externalApi.vscodeTitle")} — ${t("externalApi.vscodeHint")}`} value={JSON.stringify(vscodeCustomEndpointConfig(overview.baseUrl, configModels), null, 2)} testId="external-api-vscode-config" />
+                        <CopyBlock label={`${t("externalApi.genericTitle")} — ${t("externalApi.genericHint")}`} value={genericConfig(overview.baseUrl, configModels[0]?.id ?? SMART_ADAPTIVE_MODEL_ID)} testId="external-api-generic-config" />
                     </section>
                 </>
             ) : null}

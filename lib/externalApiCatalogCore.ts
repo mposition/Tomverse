@@ -6,11 +6,10 @@ import { canUseModelWithPlan } from "@/lib/models";
  * from them. Pure: the caller supplies the runtime registry rows, the plan and
  * the environment. See docs/policy/external-api.md.
  *
- * A model is exposed only when an operator listed it in
- * EXTERNAL_API_MODEL_IDS *and* the runtime registry currently serves it to
- * this plan. The list is the verification gate: a model goes on it after its
- * text, tool-call and (where claimed) image behaviour has been checked through
- * this API, which is what lets every listed model advertise tool calling.
+ * The model catalogue is the only list: a model the runtime registry serves
+ * to this plan is exposed, with no second list to keep in step. Client
+ * configurations carry Smart Adaptive by default, so a catalogue change never
+ * needs a customer to recopy theirs.
  */
 
 export type ExternalApiEnv = Record<string, string | undefined>;
@@ -27,16 +26,6 @@ export const externalApiUserAllowed = (env: ExternalApiEnv, userId: string) => {
     return list.includes("*") || list.includes(userId);
 };
 
-export const externalApiModelIds = (env: ExternalApiEnv) =>
-    Array.from(
-        new Set(
-            (env.EXTERNAL_API_MODEL_IDS ?? "")
-                .split(",")
-                .map((value) => value.trim())
-                .filter(Boolean)
-        )
-    );
-
 /**
  * Usage classes the stateless API can serve. Research classes depend on the
  * application's own search loop and are never exposed, even if listed.
@@ -49,12 +38,7 @@ const EXPOSABLE_USAGE_CLASSES = new Set<AiModel["usageClass"]>([
     "premium-reasoning",
 ]);
 
-export const isExternalApiServableModel = (
-    model: AiModel,
-    plan: ModelTier,
-    listed: readonly string[]
-) =>
-    listed.includes(model.id) &&
+export const isExternalApiServableModel = (model: AiModel, plan: ModelTier) =>
     model.enabled &&
     !model.catalogDeleted &&
     (model.status === "enabled" || model.status === "limited") &&
@@ -94,26 +78,29 @@ export const externalApiModelCapabilities = (
 });
 
 /**
- * Smart Adaptive: the model id that lets Tomverse's router pick, per request,
- * which of the account's listed models answers -- the same router Chat uses.
- * Default off (EXTERNAL_API_SMART_ADAPTIVE_ENABLED), and offered only when
- * there are at least two models to choose between.
+ * Smart Adaptive: the one model id a client configuration needs. Tomverse
+ * picks, per request, which catalogue model answers. The id is stable while
+ * the catalogue changes, which is why it is the default configuration.
+ *
+ * It is always offered while any model is. The paid router call that makes
+ * the pick is behind EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED (default off);
+ * without it every request goes to the default model.
  */
 export const SMART_ADAPTIVE_MODEL_ID = "smart-adaptive";
 
-export const smartAdaptiveEnabled = (env: ExternalApiEnv) =>
-    env.EXTERNAL_API_SMART_ADAPTIVE_ENABLED === "true";
+export const smartAdaptiveRouterEnabled = (env: ExternalApiEnv) =>
+    env.EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED === "true";
 
 /**
- * What a client may assume of Smart Adaptive: limits every candidate meets, so
- * a configuration built from this entry fits whichever model answers. Credits
- * are the most a request can cost; images are accepted when any candidate
- * reads them, and such a request is routed only among those.
+ * What a client may assume of Smart Adaptive: the most any candidate offers.
+ * Each request is routed only among candidates that fit it (images, input
+ * length, requested output), so the client is not held to the smallest model.
+ * Credits are the most a request can cost.
  */
 export const smartAdaptiveCapabilities = (
     candidates: readonly ExternalApiModelCapabilities[]
 ): ExternalApiModelCapabilities | null =>
-    candidates.length < 2
+    candidates.length === 0
         ? null
         : {
               id: SMART_ADAPTIVE_MODEL_ID,
@@ -122,8 +109,8 @@ export const smartAdaptiveCapabilities = (
               tools: true,
               vision: candidates.some((candidate) => candidate.vision),
               reasoning: false,
-              contextWindowTokens: Math.min(...candidates.map((candidate) => candidate.contextWindowTokens)),
-              maxOutputTokens: Math.min(...candidates.map((candidate) => candidate.maxOutputTokens)),
+              contextWindowTokens: Math.max(...candidates.map((candidate) => candidate.contextWindowTokens)),
+              maxOutputTokens: Math.max(...candidates.map((candidate) => candidate.maxOutputTokens)),
               creditWeight: Math.max(...candidates.map((candidate) => candidate.creditWeight)),
           };
 

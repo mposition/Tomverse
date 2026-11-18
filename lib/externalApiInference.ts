@@ -35,8 +35,8 @@ import {
     externalApiEnabled,
     externalApiUserAllowed,
     SMART_ADAPTIVE_MODEL_ID,
-    smartAdaptiveEnabled,
 } from "@/lib/externalApiCatalogCore";
+import { getRuntimeModel } from "@/lib/modelRegistry";
 import { routeSmartAdaptive } from "@/lib/externalApiSmartAdaptive";
 import { externalApiRunnableModels } from "@/lib/externalApiCatalog";
 import { externalApiAdmissionHook } from "@/lib/externalApiAdmission";
@@ -254,11 +254,11 @@ export async function handleChatCompletions(request: Request): Promise<Response>
 
         const plan = await getUserBillingPlan(key.userId);
         const runnable = await externalApiRunnableModels(plan.tier);
-        // Smart Adaptive: the router picks one of the runnable models, and the
+        // Smart Adaptive: Tomverse picks one of the runnable models, and the
         // response says which one answered (the `model` field and a header).
         let routedHeaders: Record<string, string> = {};
         let entry = runnable.find((candidate) => candidate.capabilities.id === parsed.model);
-        if (parsed.model === SMART_ADAPTIVE_MODEL_ID && smartAdaptiveEnabled(process.env) && runnable.length >= 2) {
+        if (parsed.model === SMART_ADAPTIVE_MODEL_ID && runnable.length > 0) {
             const routed = await routeSmartAdaptive({
                 request: parsed,
                 runnable,
@@ -270,6 +270,16 @@ export async function handleChatCompletions(request: Request): Promise<Response>
             routedHeaders = { "x-tomverse-routed-model": entry.model.id, "x-tomverse-routed-by": routed.routedBy };
         }
         if (!entry) {
+            // A model the catalogue knows but no longer offers here is most
+            // often a client configuration copied before it was retired.
+            if (parsed.model !== SMART_ADAPTIVE_MODEL_ID && (await getRuntimeModel(parsed.model))) {
+                throw new ProtocolError(
+                    404,
+                    "model_unavailable",
+                    `The model '${parsed.model}' is no longer offered to this key. Use '${SMART_ADAPTIVE_MODEL_ID}', or copy a new configuration from Tomverse Settings > API keys.`,
+                    "model"
+                );
+            }
             throw new ProtocolError(404, "model_not_found", `The model '${parsed.model}' is not available to this key.`, "model");
         }
         const { model, capabilities } = entry;

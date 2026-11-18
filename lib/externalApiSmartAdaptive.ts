@@ -1,15 +1,23 @@
 import "server-only";
 import { createHash } from "node:crypto";
 import { pickAutoModelWithLlm } from "@/lib/autoLlmRouter";
+import { estimateTextTokens } from "@/lib/chatTokenEstimate";
 import type { externalApiRunnableModels } from "@/lib/externalApiCatalog";
+import { smartAdaptiveRouterEnabled } from "@/lib/externalApiCatalogCore";
 import { getRuntimeModels } from "@/lib/modelRegistry";
+import { DEFAULT_MODEL_ID } from "@/lib/models";
 import type { ChatCompletionRequest } from "@/lib/openAiChatProtocol";
 
 type RunnableEntry = Awaited<ReturnType<typeof externalApiRunnableModels>>[number];
 
 /**
- * Smart Adaptive for the external API: Chat's own LLM router picks which of
- * the account's listed models answers a request. See docs/policy/external-api.md.
+ * Smart Adaptive for the external API: Chat's own LLM router picks which
+ * catalogue model answers a request. See docs/policy/external-api.md.
+ *
+ * Candidates are the runnable models that fit this request: images only to a
+ * model that reads them, and input plus requested output within the model's
+ * window. Without the router switch, or when the router gives no answer, the
+ * default model answers if it fits, otherwise the first candidate.
  *
  * A coding client sends every tool round as a new request, so routing each one
  * afresh would let the model change half-way through a task. A request that
@@ -42,6 +50,19 @@ const hasImage = (request: ChatCompletionRequest) =>
             message.content.some((part) => part.type === "image_url")
     );
 
+/** A rough size of the request, only to leave out models it cannot fit. */
+const estimatedInputTokens = (request: ChatCompletionRequest) =>
+    estimateTextTokens(
+        request.messages
+            .map((message) =>
+                [
+                    textOf(message.content),
+                    ...(message.role === "assistant" ? (message.tool_calls ?? []).map((call) => call.function.arguments) : []),
+                ].join("\n")
+            )
+            .join("\n") + JSON.stringify(request.tools ?? [])
+    );
+
 /** Where the latest user message is, and the turn it belongs to. */
 const latestTurn = (request: ChatCompletionRequest) => {
     const messages = request.messages;
@@ -65,6 +86,18 @@ const latestTurn = (request: ChatCompletionRequest) => {
     };
 };
 
+export const smartAdaptiveCandidates = (request: ChatCompletionRequest, runnable: readonly RunnableEntry[]) => {
+    const images = hasImage(request);
+    const output = request.max_completion_tokens ?? request.max_tokens ?? 0;
+    const input = estimatedInputTokens(request);
+    return runnable.filter(
+        ({ capabilities }) =>
+            (!images || capabilities.vision) &&
+            output <= capabilities.maxOutputTokens &&
+            input + output <= capabilities.contextWindowTokens
+    );
+};
+
 export const routeSmartAdaptive = async (input: {
     request: ChatCompletionRequest;
     runnable: readonly RunnableEntry[];
@@ -73,12 +106,15 @@ export const routeSmartAdaptive = async (input: {
     requestId: string;
     now?: number;
 }): Promise<{ entry: RunnableEntry; routedBy: "router" | "continued" | "default" }> => {
-    const images = hasImage(input.request);
-    // Operator list order, so the default is the first model the operator listed.
-    const eligible = input.runnable.filter((entry) => !images || entry.capabilities.vision);
-    const fallback = eligible[0] ?? input.runnable[0];
+    const eligible = smartAdaptiveCandidates(input.request, input.runnable);
+    // Nothing fits: the default model answers, and its own limits refuse the
+    // request with the usual error.
+    const pool = eligible.length > 0 ? eligible : input.runnable;
+    const fallback = pool.find((entry) => entry.model.id === DEFAULT_MODEL_ID) ?? pool[0];
     const turn = latestTurn(input.request);
-    if (!turn || eligible.length < 2) return { entry: fallback, routedBy: "default" };
+    if (!turn || eligible.length < 2 || !smartAdaptiveRouterEnabled(process.env)) {
+        return { entry: fallback, routedBy: "default" };
+    }
 
     const now = input.now ?? Date.now();
     const digest = createHash("sha256").update(input.keyId).update("\0").update(turn.digestSource).digest("hex");
@@ -112,6 +148,3 @@ export const routeSmartAdaptive = async (input: {
     sticky.set(digest, { modelId: entry.model.id, at: now });
     return { entry, routedBy: picked ? "router" : "default" };
 };
-
-/** Test seam: forget remembered picks. */
-export const resetSmartAdaptiveMemory = () => sticky.clear();
