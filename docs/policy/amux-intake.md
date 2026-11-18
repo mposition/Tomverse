@@ -777,7 +777,7 @@ production backlog write는 2026-09-24에 mposition이 단계 8로 승인했다.
 
 **트랜잭션.** 사람 원천의 writer를 재사용하지 않는 별도 writer가, 카드·그 Agent의 등록 기록·system audit을 한 트랜잭션으로 쓴다. 응답이 끊기면 셋을 한 번 읽는다. 셋이 같은 digest로 있으면 성공, 하나도 없으면 `outcome_unknown`(`absent`), 일부만 있으면 `outcome_unknown`(`partial`)이다. 자동 재시도는 없다. 감사 metadata는 v1과 같은 허용 값(식별자, digest, 개수, 정책 버전, 스캐너 버전)뿐이다.
 
-**스위치.** 이 원천 전용 코드 래치(출고 값 false)와 환경 값 `TOMVERSE_AMUX_INTAKE_AGENT_APPLY=enabled`, 그리고 그 Agent 정책의 운영 mode가 함께 있어야 writer가 열린다. v1의 래치와 `TOMVERSE_AMUX_INTAKE_APPLY`와는 독립이다 — 한쪽을 켜도 다른 쪽은 열리지 않는다. 그 Agent의 정지나 이 환경 값의 해제는 다음 등록부터 막는다.
+**스위치.** (이 원천의 writer와 `TOMVERSE_AMUX_INTAKE_AGENT_APPLY`는 호출하는 곳이 없어 2026-11-06에 코드에서 없앴다. 아래는 승인 당시의 설계다.) 이 원천 전용 코드 래치(출고 값 false)와 환경 값 `TOMVERSE_AMUX_INTAKE_AGENT_APPLY=enabled`, 그리고 그 Agent 정책의 운영 mode가 함께 있어야 writer가 열린다. v1의 래치와 `TOMVERSE_AMUX_INTAKE_APPLY`와는 독립이다 — 한쪽을 켜도 다른 쪽은 열리지 않는다. 그 Agent의 정지나 이 환경 값의 해제는 다음 등록부터 막는다.
 
 **이 절이 열지 않는 것.** 승격, 카드 수정, 비공개 원문의 외부 전송, `platformProductKey`, 사람 경로 규칙의 완화, 그리고 "하지 않는 것" 목록에서 위 두 항목을 뺀 나머지 전부(원격 Git push, provider 호출·외부 게시·배포, 사용자 credit, Publisher, 자율 졸업, `AmuxBoardImportApproval` 재사용 포함).
 
