@@ -1119,6 +1119,15 @@ run(
     "tests/integration/external-api.db.test.mjs"],
   "Running the external API key, reservation, cap, idempotency and failure scenarios",
 );
+// The native protocols (Claude Code Messages, Codex Responses) fake only the
+// one upstream module and run on the same ledger, key cap and receipts.
+run(
+  ["--conditions=react-server", "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
+    "--test-concurrency=1",
+    "tests/integration/external-api-native.db.test.mjs"],
+  "Running the native-protocol relay, refusal, cache, cancellation and cross-protocol cap scenarios",
+);
 // The budget suite mocks Prisma and the audit writer while exercising real
 // PostgreSQL constraints. Module mocks must be isolated from the batch above.
 run(

@@ -192,3 +192,53 @@ test("API keys: create shows the secret once with a ready config, then revoke @u
     await expect(page.getByTestId("external-api-key")).toHaveAttribute("data-key-state", "revoked");
     expect(calls).toContain("DELETE /api/user/api-keys/key_1");
 });
+
+test("API keys: Claude Code, Codex and Cursor each get their own configuration @ui-risk", async ({ page, isMobile }) => {
+    await page.setViewportSize({ width: isMobile ? 320 : 1280, height: 900 });
+    await prepareGuestPage(page, "ko");
+    const sonnet = { ...model, id: "claude-sonnet-5", name: "Claude Sonnet 5", provider: "anthropic", maxOutputTokens: 64000, protocols: ["chat_completions", "anthropic_messages"], providerModelId: "claude-sonnet-5" };
+    const haiku = { ...sonnet, id: "claude-haiku-4-5", name: "Claude Haiku 4.5", creditWeight: 0, providerModelId: "claude-haiku-4-5-20251001" };
+    const luna = { ...model, id: "gpt-5-6-luna", name: "GPT-5.6 Luna", protocols: ["chat_completions", "responses"], providerModelId: "gpt-5.6-luna" };
+    await page.route(
+        (url) => url.pathname === "/api/user/api-keys",
+        (route) =>
+            route.fulfill({
+                json: {
+                    enabled: true,
+                    baseUrl,
+                    limits: { maxKeys: 10, maxCreditCap: 1000000, expiryDays: [7, 30, 90, 365] },
+                    models: [{ ...smartAdaptive, protocols: ["chat_completions"] }, sonnet, haiku, luna],
+                    keys: [],
+                },
+            })
+    );
+    await page.goto("/settings/api");
+    const tools = page.getByTestId("external-api-coding-tools");
+    await expect(tools.getByRole("heading", { name: "코딩 도구" })).toBeVisible();
+
+    // Claude Code: the Anthropic namespace, a fixed model, never Smart Adaptive.
+    const claude = page.getByTestId("external-api-claude-code-powershell");
+    await expect(claude).toContainText('ANTHROPIC_BASE_URL = "https://tomverse.app/api/anthropic"');
+    await expect(claude).toContainText('ANTHROPIC_MODEL = "claude-sonnet-5"');
+    await expect(claude).toContainText('ANTHROPIC_DEFAULT_HAIKU_MODEL = "claude-haiku-4-5"');
+    await expect(claude).toContainText("<YOUR_TOMVERSE_API_KEY>");
+    await expect(claude).not.toContainText("smart-adaptive");
+    await expect(page.getByTestId("external-api-claude-code-vscode")).toContainText("claudeCode.environmentVariables");
+    await page.getByTestId("external-api-claude-code-model").selectOption("claude-haiku-4-5");
+    await expect(claude).toContainText('ANTHROPIC_MODEL = "claude-haiku-4-5"');
+
+    // Codex: its own provider and profile, by the provider's model id.
+    await expect(page.getByTestId("external-api-codex-provider")).toContainText('wire_api = "responses"');
+    await expect(page.getByTestId("external-api-codex-provider")).toContainText("request_max_retries = 0");
+    const profile = page.getByTestId("external-api-codex-profile");
+    await expect(profile).toContainText('model = "gpt-5.6-luna"');
+    await expect(profile).toContainText('web_search = "disabled"');
+    await expect(page.getByTestId("external-api-codex-model").locator("option")).toHaveCount(1);
+
+    // Cursor: the Chat Completions base URL with a fixed model.
+    const cursor = page.getByTestId("external-api-cursor-config");
+    await expect(cursor).toContainText(`Override OpenAI Base URL: ${baseUrl}`);
+    await expect(cursor).not.toContainText("smart-adaptive");
+    await expect(tools).toContainText("401");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+});

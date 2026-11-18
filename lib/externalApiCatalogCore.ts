@@ -1,5 +1,6 @@
 import type { AiModel, ModelTier } from "@/lib/models";
 import { canUseModelWithPlan } from "@/lib/models";
+import { protocolsForProvider, type ExternalApiProtocol } from "@/lib/externalApiProtocols";
 
 /**
  * Which models the external API exposes, and the client configuration built
@@ -55,6 +56,17 @@ export type ExternalApiModelCapabilities = {
     contextWindowTokens: number;
     maxOutputTokens: number;
     creditWeight: number;
+    /**
+     * Wire protocols that carry this model. Chat Completions for every model;
+     * the native protocols only for the provider that speaks them, so signed
+     * or encrypted model state is never translated between providers.
+     */
+    protocols: ExternalApiProtocol[];
+    /**
+     * The provider's own model id, for a client that keys behaviour on it
+     * (Codex picks its patch tool by model). Absent for Smart Adaptive.
+     */
+    providerModelId?: string;
 };
 
 export const externalApiModelCapabilities = (
@@ -75,6 +87,8 @@ export const externalApiModelCapabilities = (
     ),
     maxOutputTokens: limits.maxOutputTokens,
     creditWeight: limits.creditWeight,
+    protocols: protocolsForProvider(model.provider),
+    providerModelId: model.apiModel,
 });
 
 /**
@@ -120,6 +134,9 @@ export const smartAdaptiveCapabilities = (
                   candidates.find((candidate) => candidate.id === defaultModelId)?.maxOutputTokens ??
                   Math.min(...candidates.map((candidate) => candidate.maxOutputTokens)),
               creditWeight: Math.max(...candidates.map((candidate) => candidate.creditWeight)),
+              // Routing is a Chat Completions feature: a native request keeps
+              // the model that produced its signed or encrypted state.
+              protocols: ["chat_completions"],
           };
 
 /** OpenAI-shaped `GET /models` entry. Tomverse fields sit under `tomverse`. */
@@ -132,6 +149,7 @@ export const toOpenAiModelEntry = (model: ExternalApiModelCapabilities) => ({
         name: model.name,
         provider: model.provider,
         capabilities: { tools: model.tools, vision: model.vision, reasoning: model.reasoning },
+        protocols: model.protocols,
         context_window_tokens: model.contextWindowTokens,
         max_output_tokens: model.maxOutputTokens,
         credits_per_request: model.creditWeight,

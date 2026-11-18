@@ -9,6 +9,7 @@ import {
 import { isProviderApiKeyConfigured } from "@/lib/modelRegistryShared";
 import { DEFAULT_MODEL_ID, getModelUsageProfile, resolveModelRequestPricing, type AiModel, type ModelTier } from "@/lib/models";
 import { getRuntimeModels } from "@/lib/modelRegistry";
+import type { ExternalApiProtocol } from "@/lib/externalApiProtocols";
 
 /**
  * The models this plan can run through the external API right now, read from
@@ -42,3 +43,12 @@ export const externalApiOfferedModels = async (plan: ModelTier): Promise<Externa
     const smart = smartAdaptiveCapabilities(runnable, DEFAULT_MODEL_ID);
     return smart ? [smart, ...runnable] : runnable;
 };
+
+/** The runnable models one wire protocol carries, for its model list and settings. */
+export const externalApiProtocolModels = async (
+    plan: ModelTier,
+    protocol: ExternalApiProtocol
+): Promise<ExternalApiModelCapabilities[]> =>
+    (await externalApiRunnableModels(plan))
+        .map((entry) => entry.capabilities)
+        .filter((capabilities) => capabilities.protocols.includes(protocol));

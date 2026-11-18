@@ -162,6 +162,15 @@ export function auditProcessingTierMentions({ matchedLines, allowlist }) {
  */
 export const PROCESSING_TIER_REQUEST_ALLOWLIST = [
   {
+    file: "lib/externalApiNativeCore.ts",
+    sendsATier: false,
+    reason:
+      "The external API's native protocols (Claude Code's Anthropic Messages, Codex's Responses) pass the client's body through, so this names the price selectors only to refuse a body that sets either, to any value, before dispatch. Nothing is sent: requests keep the app-wide convention of selecting no tier, which is what every lib/modelPricing.ts profile prices (review r-20261118-064144-ba86f9).",
+    mentions: [
+      'const PRICE_SELECTOR_FIELDS = ["service_tier", "inference_geo"] as const;',
+    ],
+  },
+  {
     file: "lib/marketingLlmClientCore.ts",
     sendsATier: true,
     pricedBy: "marketing-llm-price-pins",
