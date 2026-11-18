@@ -202,7 +202,11 @@ function KeyRow({
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
-        });
+        }).catch(() => null);
+        if (!response) {
+            setError(t("externalApi.errorGeneric"));
+            return;
+        }
         const body = await readJson(response);
         if (!response.ok) {
             setError(body?.error ?? t("externalApi.errorGeneric"));
@@ -213,7 +217,11 @@ function KeyRow({
     };
     const revoke = async () => {
         if (!window.confirm(fill(t("externalApi.revokeConfirm"), { name: entry.name }))) return;
-        const response = await fetch(`/api/user/api-keys/${encodeURIComponent(entry.id)}`, { method: "DELETE" });
+        const response = await fetch(`/api/user/api-keys/${encodeURIComponent(entry.id)}`, { method: "DELETE" }).catch(() => null);
+        if (!response) {
+            setError(t("externalApi.errorGeneric"));
+            return;
+        }
         await readJson(response);
         if (!response.ok) setError(t("externalApi.errorGeneric"));
         onChanged();
@@ -378,6 +386,8 @@ export function ExternalApiSettings() {
             setName("");
             setCap("");
             load();
+        } catch {
+            setCreateError(t("externalApi.errorGeneric"));
         } finally {
             setCreating(false);
         }
