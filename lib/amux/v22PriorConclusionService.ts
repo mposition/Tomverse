@@ -23,7 +23,8 @@ import { amuxV22TaskWritesPatch } from "@/lib/amux/v22WorkerClaimCore";
 /** Prisma calls `readAmuxV22PriorConclusionRows` makes, for its caller's boundary. */
 export const AMUX_V22_PRIOR_CONCLUSION_ROWS_PRISMA_CALLS = 3;
 // Every finished prerequisite is carried (v22LocalCliFlowCore.ts).
-const SEALED = { ideaId: true, ciphertext: true, keyId: true, keyVersion: true,
+// No body: it is read in slices when the row is opened (sealedByteaRead.ts).
+const SEALED = { ideaId: true, keyId: true, keyVersion: true,
   digest: true, digestKeyId: true, bodyPurgedAt: true } as const;
 // The brief names sibling cards by the draft unit's local reference; the card
 // keeps it only through the decision that registered it.

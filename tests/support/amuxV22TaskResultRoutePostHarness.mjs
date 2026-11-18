@@ -24,8 +24,10 @@ const keys = () => ({ masterKeyId: "synthetic", masterKeyVersion: 1,
 mock.module(mod("lib/amux/guard.ts"), {
   namedExports: { isAmuxSyncAuthorized: () => true },
 });
+// The real key store under another URL keeps every other export it has.
+const realKeyStore = await import(`${mod("lib/amux/ideaKeyStore.ts")}?real`);
 mock.module(mod("lib/amux/ideaKeyStore.ts"), {
-  namedExports: {
+  namedExports: { ...realKeyStore,
     createAmuxContentUnitKeys: async () => keys(),
     loadAmuxContentUnitKeys: async () => keys(),
   },
@@ -33,17 +35,19 @@ mock.module(mod("lib/amux/ideaKeyStore.ts"), {
 mock.module(mod("lib/amux/v22TaskResultStore.ts"), {
   namedExports: {
     AmuxV22TaskResultError: class extends Error {},
-    recordAmuxV22TaskResult: async (_tx, input) => {
+    // The pure half sees what the route offers; the record half answers.
+    prepareAmuxV22TaskResultRecord: (input) => {
       received.push(input);
-      return { attemptId, sourceSha256: input.sourceSha256,
-        patchSha256: savedPatch ? input.patch?.sha256 ?? null : null,
-        duplicate: false };
+      return { ...input, dispose() {} };
     },
+    amuxV22TaskResultTransactionOptions: () => ({ maxWait: 5_000, timeout: 10_000 }),
+    recordAmuxV22TaskResult: async (_tx, prepared) => ({ attemptId,
+      sourceSha256: prepared.sourceSha256,
+      patchSha256: savedPatch ? prepared.patch?.sha256 ?? null : null,
+      duplicate: false }),
     readAmuxV22TaskPatchEvidence: async () => null,
     v22TaskResultIdeaId: (snapshot) => snapshot?.ideaId ?? null,
     v22TaskResultSha256: sha256,
-    // The route bounds the report by the store's flow-aware cap (#4004).
-    amuxV22ResultMaxBytes: () => 32 * 1024 * 1024,
   },
 });
 mock.module(mod("lib/prisma.ts"), {

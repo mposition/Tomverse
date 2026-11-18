@@ -54,6 +54,12 @@ test("no v22 task result or patch retention runs, and the route reports it disab
   assert.doesNotMatch(route, /purgeDueAmuxV22TaskResults|TASK_RESULT_RETENTION_ENV/);
   assert.match(route, /taskResults = \{ available: false, reason: "v22_task_result_retention_disabled" \}/);
   assert.equal(existsSync(new URL("../lib/amux/v22TaskResultRetention.ts", import.meta.url)), false);
+  // The chunked transfer's staging sweep runs with the content retention
+  // itself; a recorded result is never what it removes.
+  assert.match(route, /if \(v4Enabled\) await sweepAmuxV22TransferStaging\(\);/);
+  // Its counts stay out of the answer: the installed box trigger takes
+  // exactly seven fields (lib/amux/ideaLocalRetentionTrigger.mjs).
+  assert.doesNotMatch(route, /transferStaging/);
 });
 
 test("v19 read-manifest cleanup is separately default-off", () => {

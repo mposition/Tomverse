@@ -672,7 +672,11 @@ test("v22 execution routes cover their expanded DB ceilings and client transport
   for (const route of ["start", "settle"]) {
     const source = readFileSync(join(process.cwd(), "app", "api", "internal",
       "amux", "v22", "execution", route, "route.ts"), "utf8");
-    assert.match(source, /\}, AMUX_V22_EXECUTION_ROUTE_BUDGET_MS\);/);
+    // Settlement adds time in proportion to the patch and changed-path list it
+    // judges (docs/policy/amux-v22-result-transfer.md 6), nothing else.
+    assert.match(source, route === "settle" ?
+      /\}, AMUX_V22_EXECUTION_ROUTE_BUDGET_MS \+ allowanceMs\);/ :
+      /\}, AMUX_V22_EXECUTION_ROUTE_BUDGET_MS\);/);
   }
   const settle = rustSource.match(/async fn v22_execution_settle_with_receipt\([\s\S]*?\n    \}/)?.[0];
   // The base is the route's budget; the transfer adds time in proportion to

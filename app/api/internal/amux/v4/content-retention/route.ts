@@ -17,6 +17,7 @@ import { notifyDueAmuxRetentionHolds } from
   "@/lib/amux/ideaRetentionHoldNoticeService";
 import { purgeDueAmuxReadManifests } from
   "@/lib/amux/ideaTrackedCheckoutReadManifestRetention";
+import { sweepAmuxV22TransferStaging } from "@/lib/amux/v22TransferStore";
 import { purgeDueAmuxOrphanReadManifestKeys } from
   "@/lib/amux/ideaTrackedCheckoutReadManifestOrphanRetention";
 import { purgeDueAmuxSessionAnalysisResults } from
@@ -64,6 +65,13 @@ export async function POST(request: Request): Promise<Response> {
     // No v22 task result retention runs (its code was removed on 2026-11-18).
     // The field stays because the installed box trigger validates the shape.
     const taskResults = { available: false, reason: "v22_task_result_retention_disabled" };
+    // Transfer staging no commit will take (docs/policy/amux-v22-result-transfer.md
+    // 2.6) runs with the content retention itself: it removes sealed copies
+    // whose original stays on the box until the app confirms it, never a
+    // recorded result. The keys it queues stay queued while no result purge runs.
+    // Its counts stay out of the answer: the installed box trigger takes exactly
+    // these seven fields (lib/amux/ideaLocalRetentionTrigger.mjs).
+    if (v4Enabled) await sweepAmuxV22TransferStaging();
     const readManifests = v19Enabled
       ? { manifests: await purgeDueAmuxReadManifests(),
         orphanKeys: await purgeDueAmuxOrphanReadManifestKeys() }

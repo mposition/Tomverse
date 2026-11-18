@@ -50,6 +50,7 @@ PR diff digest 1 MiB다. 이 문서와 `development-agent-orchestration.md`의 "
 | GitHub API | 속도 한도, recursive tree 100,000개, PR 파일 목록 3,000개, 큰 `.diff`(406) | 후보 재구성, DM 병합 경로 검사, v1 digest |
 | Postgres 값 하나 | 1 GB | 최종 행. 첫 조각에서 `AMUX_V22_STORAGE_MAX_BYTES`로 미리 거절 |
 | V8 문자열 하나 | 약 512 MiB | 문자열로 검사하는 곳. 넘으면 결정적 409 |
+| Prisma 7의 Bytes 쓰기(base64 문자열 하나, 2.7절 실측: 300 MiB 됨, 420 MiB 거절) | V8 문자열 한도의 base64인 402,653,166바이트(약 384 MiB, `AMUX_V22_PRISMA_BYTES_WRITE_MAX_BYTES`) | 결과·patch·경로 행 INSERT. 봉인한 값이 넘으면 transaction 전에 결과는 409 `exceeds_processing`, patch는 `patchRejected`, 경로는 409 `paths_invalid` |
 | 앱 메모리(Railway plan) | 결과 크기의 약 4배 | commit route |
 | Next.js proxy 요청 본문 | 10 MiB | 요청 하나. 조각 하나는 6 MiB 안 |
 | GitHub App installation token | 1시간 | publisher 한 cycle(40분 마감 그대로) |
@@ -286,26 +287,48 @@ model AmuxV22TaskChangedPaths {
 ### 2.5 migration `20261118120000_amux_v22_result_transfer`
 
 - `AmuxV22TaskPatch_digest_check`, `AmuxV22TaskResult_digest_check`를 상한 없이(`"byteLength" >= 1`) 다시 만든다. 나머지 절은 그대로.
+- `AmuxIdeaContentKeyRetirement_purpose_check`에 `task_changed_paths`를 더한다.
 - 새 테이블 셋과 CHECK:
-  - `AmuxV22TransferPart_check`: part 값, `totalBytes >= 1`, sha256 hex64, `(part='patch') = (baseSha IS NOT NULL)`, baseSha hex40,
+  - `AmuxV22TransferPart_part_check`: part 값(`check:enum-constraints`가 `AMUX_V22_TRANSFER_PARTS`와 대조하도록 따로 둔다)
+  - `AmuxV22TransferPart_check`: `totalBytes >= 1`, sha256 hex64, `(part='patch') = (baseSha IS NOT NULL)`, baseSha hex40,
     `(part='changed_paths') = (pathCount IS NOT NULL)`, `pathCount >= 1`
-  - `AmuxV22TransferChunk_check`: `index >= 0`, `byteLength BETWEEN 1 AND 4194304`(요청 하나에 들어가는 조각 크기이고 내용 상한이 아니다), digest·digestKeyId 형식
-  - `AmuxV22TaskChangedPaths_digest_check`: digest·pathsSha256 hex64, `pathCount >= 1`, `byteLength >= 1`, `AmuxV22TaskResult`와 같은 purge 일관성 절
+  - `AmuxV22TransferChunk_check`: `index >= 0`, `byteLength BETWEEN 1 AND 4194304`(요청 하나에 들어가는 조각 크기이고 내용 상한이 아니다), keyId·keyVersion, digest·digestKeyId 형식
+  - `AmuxV22TaskChangedPaths_body_check`: `AmuxV22TaskResult`와 같은 purge 일관성 절
+  - `AmuxV22TaskChangedPaths_digest_check`: digest·pathsSha256 hex64, digestKeyId 형식, `pathCount >= 1`, `byteLength >= 2 * pathCount`(경로마다 1바이트 이상과 NUL)
 - `ALTER TABLE "AmuxV22TransferChunk" ALTER COLUMN "ciphertext" SET STORAGE EXTERNAL;`
-- CHECK 교체마다 기존 규칙대로 `baseline-check.json`을 둔다. 상한을 다시 넣는 것은 그 값을 넘는 행이 없을 때만 가능하다.
+- trigger: staging 두 테이블은 UPDATE를 받지 않는다(쓰고 지울 뿐). `AmuxV22TaskChangedPaths`는 `AmuxV22TaskResult`처럼 purge 한 번 외에는 바뀌지 않는다.
+- 이 migration은 새 테이블을 만들어 `prisma migrate diff`에 보이므로 `baseline-check.json`을 두지 않는다. sidecar는 CHECK 교체만 있는 migration의 증명이고, 그 문법 밖의 SQL 옆에 두면 guard가 migration 전체를 선언 없음으로 읽는다(`tests/migrationBaseline.test.mjs`). 상한을 다시 넣는 것은 그 값을 넘는 행이 없을 때만 가능하다.
 
 ### 2.6 보관과 정리
 
 - staging은 `app/api/internal/amux/v4/content-retention/route.ts`가 부르는 정리에 `sweepAmuxV22TransferStaging`을 더해 지운다:
   최종 행이 있음, attempt `endedAt`이 1시간 넘게 지남, `createdAt` 7일 넘게 지남 중 하나. 그 purpose에 최종 행이 없으면
-  `recordAmuxContentBodyPurge`로 unit key 은퇴를 맡긴다.
-- `AmuxV22TaskChangedPaths`는 결과와 같은 90일 규칙으로 본문을 지운다.
+  `recordAmuxContentBodyPurge`로 unit key 은퇴를 맡긴다. 이 정리는 content retention 자체의 스위치로 돈다: 지우는 것은 box가
+  확인 전까지 원본을 갖고 있는 봉인된 사본뿐이고 기록된 결과가 아니다. v22 결과 purge는 2026-11-18에 코드째 없어졌으므로 맡긴 key는
+  은퇴 대기로 남는다. 정리 결과는 retention 답에 싣지 않는다(설치된 box trigger가 답의 필드 7개를 정확히 검사한다).
+  commit이 쓰지 않은 part(역할 때문에 남기지 않은 patch 등)도 이 정리가 지운다.
+- `AmuxV22TaskChangedPaths`는 결과와 같이 본문을 지우지 않는다(v22 결과 purge가 없다).
 - `lib/accountDataExportDomains.ts`에 `amuxTaskChangedPaths`를 더한다. staging은 export 대상이 아니다.
 
 ### 2.7 큰 bytea 읽기(3-B)
 
 node-pg/Prisma가 bytea를 hex 문자열로 읽어 값의 2배 문자열이 된다. 먼저 실측하고, 큰 값을 64 MiB씩 `substring`으로 읽는
 helper를 만들어 `ciphertext`를 직접 select하는 독자들을 바꾼다. V8 문자열과 앱 메모리는 외부 한계로 받아들인다.
+
+실측(2026-11-18, 로컬 PostgreSQL 17, node-pg 8.23, Prisma 7.10 adapter-pg, 임의 바이트 1 MiB~600 MiB):
+
+| 경로 | 255 MiB | 257·300 MiB | 420 MiB | 600 MiB |
+|---|---|---|---|---|
+| node-pg 읽기(`SELECT b`) | 됨 | pg-protocol이 행을 문자열로 만들다 `ERR_STRING_TOO_LONG`. 거절된 query가 아니라 socket handler의 잡히지 않은 예외라 **프로세스가 끝난다** | 같음 | 서버가 hex 출력을 못 만듦(`invalid memory alloc request size`, 거절) |
+| Prisma 읽기(`$queryRaw`; `findUnique` select는 255 MiB까지만 확인) | 됨 | `$queryRaw` 257 MiB에서 같은 프로세스 종료 | - | - |
+| Prisma `create`(select 없음) | 됨 | 쓴 행을 되돌려 읽다 같은 프로세스 종료 | - | - |
+| Prisma `create`+`select: {attemptId}`, `createMany` | 됨 | 됨(둘 다 300 MiB) | `createMany`가 `ERR_STRING_TOO_LONG`(거절된 promise, 프로세스는 산다) | - |
+| node-pg 쓰기(Buffer 이진 parameter) | 됨 | 됨 | 됨 | 됨 |
+| 64 MiB `substring` 조각 읽기 | 됨 | 됨 | 됨 | 됨 |
+
+그래서 큰 본문은 `lib/amux/sealedByteaRead.ts`로 읽고, 큰 행의 `create`는 본문 없는 `select`를 쓰며, 봉인한 값이
+`AMUX_V22_PRISMA_BYTES_WRITE_MAX_BYTES`를 넘으면 transaction 전에 결정적으로 답한다. 시간은 이 PC의 느린 디스크에 묶인
+값이라 적지 않는다.
 
 ## 3. 하위 호환
 
