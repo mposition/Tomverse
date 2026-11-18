@@ -19,13 +19,14 @@
    지출 시작(`TOMVERSE_AMUX_V4_ANALYSIS_CLAIM_WRITE`), 비용 기준(`TOMVERSE_AMUX_V4_ANALYSIS_PRICE_WRITE`),
    새 모델 route 상한 두 값, 유료 번역(`TOMVERSE_AMUX_ADMIN_KO_TRANSLATION`), 아이디어 레인
    (`AMUX_IDEA_LANE_*`), 자동 삭제 세 스위치(`TOMVERSE_AMUX_V4_CONTENT_RETENTION`,
-   `TOMVERSE_AMUX_V19_READ_MANIFEST_RETENTION`, `TOMVERSE_AMUX_V19_SESSION_ANALYSIS_RESULT_RETENTION`)와 그
-   false 래치, box 서비스 시작 스위치(`TOMVERSE_AMUX_V4_LIVE_ANALYSIS_CLI`, `TOMVERSE_AMUX_V4_LOCAL_RETENTION`,
+   `TOMVERSE_AMUX_V19_READ_MANIFEST_RETENTION`, `TOMVERSE_AMUX_V19_SESSION_ANALYSIS_RESULT_RETENTION`),
+   box 서비스 시작 스위치(`TOMVERSE_AMUX_V4_LIVE_ANALYSIS_CLI`, `TOMVERSE_AMUX_V4_LOCAL_RETENTION`,
    `TOMVERSE_AMUX_V19_MAX_SESSION_CYCLE`, `TOMVERSE_AMUX_V19_TRACKED_CHECKOUT_CLI`), 자동 승격
    (`TOMVERSE_AMUX_BOARD_AUTO_PROMOTE`), 운영자 PC의 직접 DB 쓰기(`TOMVERSE_AMUX_INTAKE_LOCAL_APPLY`),
-   일회성 catalog import(`TOMVERSE_AMUX_BOARD_IMPORT_APPLY`와 false 래치), 구독 분석 자동 등록
+   구독 분석 자동 등록
    (`TOMVERSE_AMUX_V19_SYSTEM_REGISTRATION`), 진단 상세(`TOMVERSE_AMUX_V19_DIAGNOSTIC_DETAIL`), 모든 비밀값·
-   토큰·origin·경로 값.
+   토큰·origin·경로 값. (코드 래치가 false로 고정돼 열린 적 없던 일회성 catalog import와 v22 결과 삭제 경로는
+   2026-11-18 운영자 지시로 코드째 없앴다.)
 3. **값 표기.** 남은 스위치의 값은 `enabled` 또는 `disabled`로 적는다. 파서는 production에 이미 들어 있는 값을
    같은 뜻으로 계속 읽으며 이 결정은 파서를 바꾸지 않았다.
 4. **옛 절의 읽는 법.** 아래 옛 절이 "default-off 스위치", "route별 운영 스위치", "코드 래치"로 적은 것 중 위
@@ -777,7 +778,7 @@ production backlog write는 2026-09-24에 mposition이 단계 8로 승인했다.
 
 **트랜잭션.** 사람 원천의 writer를 재사용하지 않는 별도 writer가, 카드·그 Agent의 등록 기록·system audit을 한 트랜잭션으로 쓴다. 응답이 끊기면 셋을 한 번 읽는다. 셋이 같은 digest로 있으면 성공, 하나도 없으면 `outcome_unknown`(`absent`), 일부만 있으면 `outcome_unknown`(`partial`)이다. 자동 재시도는 없다. 감사 metadata는 v1과 같은 허용 값(식별자, digest, 개수, 정책 버전, 스캐너 버전)뿐이다.
 
-**스위치.** 이 원천 전용 코드 래치(출고 값 false)와 환경 값 `TOMVERSE_AMUX_INTAKE_AGENT_APPLY=enabled`, 그리고 그 Agent 정책의 운영 mode가 함께 있어야 writer가 열린다. v1의 래치와 `TOMVERSE_AMUX_INTAKE_APPLY`와는 독립이다 — 한쪽을 켜도 다른 쪽은 열리지 않는다. 그 Agent의 정지나 이 환경 값의 해제는 다음 등록부터 막는다.
+**스위치.** (이 원천의 writer와 `TOMVERSE_AMUX_INTAKE_AGENT_APPLY`는 호출하는 곳이 없어 2026-11-06에 코드에서 없앴다. 아래는 승인 당시의 설계다.) 이 원천 전용 코드 래치(출고 값 false)와 환경 값 `TOMVERSE_AMUX_INTAKE_AGENT_APPLY=enabled`, 그리고 그 Agent 정책의 운영 mode가 함께 있어야 writer가 열린다. v1의 래치와 `TOMVERSE_AMUX_INTAKE_APPLY`와는 독립이다 — 한쪽을 켜도 다른 쪽은 열리지 않는다. 그 Agent의 정지나 이 환경 값의 해제는 다음 등록부터 막는다.
 
 **이 절이 열지 않는 것.** 승격, 카드 수정, 비공개 원문의 외부 전송, `platformProductKey`, 사람 경로 규칙의 완화, 그리고 "하지 않는 것" 목록에서 위 두 항목을 뺀 나머지 전부(원격 Git push, provider 호출·외부 게시·배포, 사용자 credit, Publisher, 자율 졸업, `AmuxBoardImportApproval` 재사용 포함).
 

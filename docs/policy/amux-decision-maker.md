@@ -327,8 +327,8 @@ DM은 **제안을 쓰는 worker이지 승인자가 아니다.** (되돌릴 수 �
     findings는 앱이 attempt별 sealed content unit(`AmuxV52ReviewFindings`, `docs/policy/development-agent-orchestration.md`
     v52)으로 저장한 것을 근거 route가 보낼 때마다 다시 열어, `FINDINGS.md`의 실행 결과 뒤에 그 Task의 모든 reject를 새것부터
     통째로 붙인다(멈춘 Task와 검토 PR 모두. reject 수 상한도, 잘라내기도 없다). 읽을 수 없는 reject(보존 기간 만료, 키 저장소
-    불통, 저장 전 기록)는 그 수를 질문과 파일에 밝힌다. 작업 공간을 끄면(`TOMVERSE_AMUX_DM_WORKSPACE=disabled`) 같은 글이 카드
-    `context`의 `[evidence]` 블록에 통째로 실린다. 증거를 읽을 수 없을 때만 DM에 올리지 않고 사람에게 넘긴다(`evidence_unavailable`).
+    불통, 저장 전 기록)는 그 수를 질문과 파일에 밝힌다. 작업 공간은 늘 켜져 있다(`TOMVERSE_AMUX_DM_WORKSPACE`는 2026-11-16에 없앴다).
+    증거를 읽을 수 없을 때만 DM에 올리지 않고 사람에게 넘긴다(`evidence_unavailable`).
     v22 결과 검토는 patch가 없는 실행에서만 생기므로 (`amuxV22ResultReviewKind`) patch를 싣지 않는다. v22 implement
     Task의 PR은 카드가 아니라 run의 binding에 있으므로, 운영자 확인 대기 화면은 그 PR(`publication_hold`)을 "PR 없음" 대신 보인다.
     `tier_pending` 초안이 있는 동안 retry가 막히는 것은 이중 실행 방지이며, 화면은 초안을 거절하면 retry가 열린다고 알린다.

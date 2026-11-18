@@ -61,11 +61,6 @@ mock.module(mod("lib/amux/ideaAnalysisContentPurgeService.ts"), { namedExports: 
     return counts;
   },
 } });
-mock.module(mod("lib/amux/v22TaskResultRetention.ts"), { namedExports: {
-  purgeDueAmuxV22TaskResults: async () => {
-    throw new Error("v22 retention must remain disabled");
-  },
-} });
 
 let route: typeof import("../../app/api/internal/amux/v4/content-retention/route.ts");
 before(async () => { route = await import(mod(

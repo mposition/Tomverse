@@ -1,12 +1,11 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import { POST } from "../app/api/internal/amux/v4/content-retention/route.ts";
 import { AMUX_V4_CONTENT_RETENTION_AGENT_ID,
   amuxV19ReadManifestRetentionEnabled,
   amuxV4ContentRetentionEnabled,
-  amuxV22TaskResultRetentionEnabled,
   isAmuxV4ContentRetentionAuthorized } from
   "../lib/amux/ideaContentRetentionCore.ts";
 
@@ -49,14 +48,12 @@ test("retention route has a separate secret and stays closed without its environ
   }
 });
 
-test("v15 does not activate v22 task result or patch retention", () => {
-  assert.equal(amuxV22TaskResultRetentionEnabled(undefined), false);
-  assert.equal(amuxV22TaskResultRetentionEnabled("disabled"), false);
-  assert.equal(amuxV22TaskResultRetentionEnabled("enabled"), false);
+test("no v22 task result or patch retention runs, and the route reports it disabled", () => {
   const route = readFileSync(new URL(
     "../app/api/internal/amux/v4/content-retention/route.ts", import.meta.url), "utf8");
-  assert.match(route, /amuxV22TaskResultRetentionEnabled\(\s*process\.env\[AMUX_V22_TASK_RESULT_RETENTION_ENV\]\)/);
-  assert.match(route, /\? await purgeDueAmuxV22TaskResults\(\)/);
+  assert.doesNotMatch(route, /purgeDueAmuxV22TaskResults|TASK_RESULT_RETENTION_ENV/);
+  assert.match(route, /taskResults = \{ available: false, reason: "v22_task_result_retention_disabled" \}/);
+  assert.equal(existsSync(new URL("../lib/amux/v22TaskResultRetention.ts", import.meta.url)), false);
 });
 
 test("v19 read-manifest cleanup is separately default-off", () => {
