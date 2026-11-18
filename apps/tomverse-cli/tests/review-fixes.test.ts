@@ -292,3 +292,29 @@ test("a 4xx whose receipt is still held stays unresolved; a plain 4xx refusal is
         }
     );
 });
+test("a compaction refused with a 4xx whose receipt is still held stays unresolved", () =>
+    withGateway(
+        (body) => {
+            if (/Summarize this session so far/.test(lastUserText(body))) return { fault: "http", status: 400, code: "invalid_request", heldReceipt: true };
+            return toolResultsSinceUser(body).length < 3 ? { toolCalls: [{ name: "read_file", args: { path: "big.txt" } }] } : { text: "done" };
+        },
+        async (gateway) => {
+            const { runner, journal } = await makeRunner(gateway, makeRepo({ "big.txt": "가나다 const value = 1; ".repeat(200) }), { prompter: null, model: "fake-small", contextWindow: 9_000 });
+            assert.equal(await runner.runTask("Read big.txt a few times"), "unknown_outcome");
+            assert.equal(journal.unresolvedGenerations().filter((g) => g.purpose === "compact").length, 1);
+            assert.match(lastUserText(gateway.completions.at(-1)!.body), /Summarize this session so far/, "nothing was sent after it");
+        }
+    ));
+
+test("a model Smart Adaptive pinned that is no longer offered is never replaced by another", () =>
+    withGateway(
+        () => ({ text: "should not be asked" }),
+        async (gateway) => {
+            const { runner, journal } = await makeRunner(gateway, makeRepo(), { model: "smart-adaptive", prompter: null });
+            journal.state.model.pinned = "retired-model";
+            journal.state.model.pinnedFrom = "smart_adaptive_first_response";
+            assert.equal(await runner.runTask("Hi"), "error");
+            assert.equal(gateway.completions.length, 0);
+            assert.match(journal.state.lastError ?? "", /does not switch models/);
+        }
+    ));

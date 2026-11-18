@@ -180,8 +180,10 @@ export class Runner {
     model(): CatalogModel {
         const state = this.journal.state.model;
         const id = state.pinned ?? state.requested;
-        const entry = this.options.catalog.find((m) => m.id === id) ?? this.options.catalog.find((m) => m.id === state.requested);
-        if (!entry) throw new GatewayError("protocol", `The model ${id} is no longer offered to this key. Start a new session with a model from \`tomverse models\`.`);
+        const entry = this.options.catalog.find((m) => m.id === id);
+        // Never another model in its place: a pinned model that is gone (even
+        // one Smart Adaptive picked) ends the session's use of the model.
+        if (!entry) throw new GatewayError("protocol", `The model ${id} is no longer offered to this key, and the CLI does not switch models on its own. Start a new session with a model from \`tomverse models\`.`);
         return entry;
     }
 
@@ -356,6 +358,11 @@ export class Runner {
                 options.output.event({ type: "error", code: "journal_write_failed", message: error.message });
                 return this.finish("error", error.message);
             }
+            if (error instanceof GatewayError && error.kind === "protocol") {
+                options.output.info(error.message);
+                options.output.event({ type: "error", code: "model_unavailable", message: error.message });
+                return this.finish("error", error.message);
+            }
             throw error;
         }
     }
@@ -451,15 +458,7 @@ export class Runner {
         const httpStatus = record?.httpStatus ?? 0;
         if (record && httpStatus >= 400 && status && status >= 400) {
             record.error = { kind: "http", message, ...(apiCode(error) ? { code: apiCode(error)! } : {}) };
-            const refusedBeforeDispatch = httpStatus < 500 && httpStatus !== 408;
-            // Looked up either way. A 5xx or timeout can come from a proxy after
-            // the request went through, so only a final receipt closes it. A
-            // Tomverse 4xx is a refusal before dispatch, closed unless its
-            // receipt is still held (a refund that has not gone through yet).
-            await this.lookUp(record);
-            const final = record.lookup === "found" && record.receipt !== null && record.receipt !== undefined && record.receipt.status !== "held";
-            const held = record.lookup === "found" && record.receipt?.status === "held";
-            record.closed = refusedBeforeDispatch ? !held : final;
+            record.closed = await this.resolvedAfterFailure(record);
             this.journal.commit();
             options.output.info(`The API refused the request: ${message}`);
             options.output.event({ type: "error", code: apiCode(error) ?? "api_error", message, request_id: record.requestId ?? null });
@@ -483,6 +482,22 @@ export class Runner {
             return { kind: "continue" as const };
         }
         return { kind: "stop" as const, outcome: "unknown_outcome" as const, message: `The outcome of request ${record.seq} is not known.` };
+    }
+
+    /**
+     * Whether a failed request's outcome is known, after looking it up. A
+     * Tomverse 4xx (not 408) is a refusal before dispatch: known unless its
+     * receipt is still held (a refund not gone through). Anything else -- a
+     * 5xx or 408 that a proxy may send after the request went through, or no
+     * answer at all -- is known only from a final receipt. Used by every
+     * failure path, so the rule is the same for a step and a compaction.
+     */
+    async resolvedAfterFailure(record: GenerationRecord) {
+        await this.lookUp(record);
+        const status = record.httpStatus ?? 0;
+        const found = record.lookup === "found" && record.receipt;
+        if (status >= 400 && status < 500 && status !== 408) return !(found && record.receipt!.status === "held");
+        return Boolean(found && record.receipt!.status !== "held");
     }
 
     describe(error: unknown) {
@@ -670,20 +685,13 @@ export class Runner {
             journal.state.lastError = `compaction failed: ${this.describe(error)}`;
             journal.state.compactionFailedForTask = journal.state.tasks.length;
             const record = journal.state.generations.slice(attemptStart).at(-1);
-            const status = record?.httpStatus ?? 0;
-            const refused = status >= 400 && status < 500 && status !== 408;
-            if (record && !refused) {
-                // Sent, and no answer: its outcome and cost are unknown. The
-                // caller asks before any further request.
-                await this.lookUp(record);
-                if (!(record.lookup === "found" && record.receipt && record.receipt.status !== "held")) {
-                    options.output.info(this.unknownReport(record));
-                    journal.commit();
-                    return "unknown";
-                }
-                // The receipt is final: its cost is known, and the history was kept.
+            if (record && !(await this.resolvedAfterFailure(record))) {
+                // Its outcome and cost are unknown; the caller asks before any further request.
+                options.output.info(this.unknownReport(record));
+                journal.commit();
+                return "unknown";
             }
-            // Refused by the API, or never sent: nothing is unknown.
+            // Never sent, refused, or settled with a final receipt: the history was kept.
             journal.closeGenerations(journal.state.generations.slice(attemptStart));
             journal.commit();
             return "failed";
