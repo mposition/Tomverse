@@ -491,6 +491,11 @@ function ModelSearchList({
     const [query, setQuery] = useState("");
     const [expanded, setExpanded] = useState(false);
     const matching = models.filter((model) => matchesModel(model, query));
+    // Smart Adaptive's credit figure is the most a request can cost; each
+    // request is charged as the model that answers it. The cheapest model it
+    // can route to is the other end of that range.
+    const routable = models.filter((model) => model.id !== SMART_ADAPTIVE_MODEL_ID && (model.protocols?.includes("chat_completions") ?? true));
+    const smartAdaptiveFloor = routable.length ? Math.min(...routable.map((model) => model.creditWeight)) : null;
     const searching = query.trim() !== "";
     const shown = searching || expanded ? matching : matching.slice(0, MODEL_PREVIEW_COUNT);
     const hidden = matching.length - shown.length;
@@ -519,7 +524,9 @@ function ModelSearchList({
                                 ) : null}
                             </span>
                             <span className="self-start shrink-0 rounded-full border border-zinc-300 px-2 py-0.5 text-xs text-zinc-500 dark:border-zinc-700">
-                                {model.vision ? t("externalApi.inputTextImage") : t("externalApi.inputText")} · {fill(t("externalApi.creditsPerRequest"), { credits: model.creditWeight })}
+                                {model.vision ? t("externalApi.inputTextImage") : t("externalApi.inputText")} · {model.id === SMART_ADAPTIVE_MODEL_ID && smartAdaptiveFloor !== null && smartAdaptiveFloor < model.creditWeight
+                                    ? fill(t("externalApi.creditsRange"), { min: smartAdaptiveFloor, max: model.creditWeight })
+                                    : fill(t("externalApi.creditsPerRequest"), { credits: model.creditWeight })}
                             </span>
                         </span>
                     );

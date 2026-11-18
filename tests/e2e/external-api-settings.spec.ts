@@ -15,7 +15,8 @@ const model = {
     maxOutputTokens: 16000,
     creditWeight: 1,
 };
-const smartAdaptive = { ...model, id: "smart-adaptive", name: "Smart Adaptive", provider: "tomverse" };
+// Smart Adaptive's weight is the most a request can cost, so above the cheapest model.
+const smartAdaptive = { ...model, id: "smart-adaptive", name: "Smart Adaptive", provider: "tomverse", creditWeight: 4 };
 const baseUrl = "https://tomverse.app/api/v1";
 // Synthetic key shape, assembled so no line reads like a credential.
 const FIXTURE_PREFIX = ["tvk", "ab12cd34"].join("_");
@@ -183,6 +184,9 @@ test("API keys: a key is made in a dialog, shown once in another, then filled in
     await page.getByTestId("external-api-models-search").fill("luna");
     await expect(page.getByTestId("external-api-models")).toContainText("GPT 6 Luna");
     await expect(page.getByTestId("external-api-models")).not.toContainText("Smart Adaptive");
+    // Smart Adaptive shows a range: it is charged as the model that answers.
+    await page.getByTestId("external-api-models-search").fill("smart");
+    await expect(page.getByTestId("external-api-models")).toContainText("답한 모델 기준");
     await page.getByTestId("external-api-models-search").fill("zzz");
     await expect(page.getByTestId("external-api-models")).toContainText("맞는 모델이 없습니다");
 

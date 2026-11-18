@@ -200,10 +200,23 @@ const nestCustom = (value: unknown, keep: string[] = []) => {
     }
     return nested;
 };
+/**
+ * A grammar format in the flat Responses shape, `{ type: "grammar", syntax,
+ * definition }`, which Cursor sends inside its custom tools, moved under
+ * `grammar` as Chat Completions nests it. Other fields stay where they are and
+ * are refused by name.
+ */
+const nestGrammar = (definition: unknown) => {
+    if (!isRecord(definition) || definition.type !== "custom" || !isRecord(definition.custom)) return definition;
+    const format = definition.custom.format;
+    if (!isRecord(format) || format.type !== "grammar" || "grammar" in format) return definition;
+    const { syntax, definition: grammarDefinition, ...rest } = format;
+    return { ...definition, custom: { ...definition.custom, format: { ...rest, grammar: { syntax, definition: grammarDefinition } } } };
+};
 const normalizeCustomShapes = (body: unknown) => {
     if (!isRecord(body)) return body;
     const next: Record<string, unknown> = { ...body };
-    if (Array.isArray(body.tools)) next.tools = body.tools.map((definition) => nestCustom(definition));
+    if (Array.isArray(body.tools)) next.tools = body.tools.map((definition) => nestGrammar(nestCustom(definition)));
     if (body.tool_choice !== undefined) next.tool_choice = nestCustom(body.tool_choice);
     if (Array.isArray(body.messages)) {
         next.messages = body.messages.map((message) =>
