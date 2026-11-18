@@ -58,7 +58,7 @@ export const describeRequestShape = (body: unknown, headerNames: string[]) => {
     const top: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(body)) {
         if (key === "messages" || key === "tools") continue;
-        top[key] = key === "model" || key === "reasoning_effort" || key === "verbosity" || key === "service_tier" ? token(value) : isRecord(value) ? keysWithTypes(value) : scalar(value);
+        top[key] = key === "model" || key === "reasoning_effort" || key === "verbosity" ? token(value) : isRecord(value) ? keysWithTypes(value) : scalar(value);
     }
     const messages = Array.isArray(body.messages) ? body.messages : [];
     return {
