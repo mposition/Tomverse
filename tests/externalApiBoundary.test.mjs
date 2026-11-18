@@ -114,3 +114,12 @@ test("reservations record the external API as its own source, never a productKey
     assert.match(inference, /source: "external_api"/);
     assert.ok(!/productKey|conversation\.create|message\.create/i.test(inference));
 });
+
+test("the external API's model stream runs with AI SDK telemetry off", () => {
+    // With Sentry on, its AI SDK tracing-channel subscriber locks the model
+    // stream it taps, and every streamed Chat Completions reply failed with
+    // "ReadableStream is locked". Telemetry off keeps the call off that channel.
+    const source = readFileSync(new URL("../lib/externalApiInference.ts", import.meta.url), "utf8");
+    const call = source.slice(source.indexOf("streamText({"), source.indexOf("abortSignal: controller.signal"));
+    assert.match(call, /telemetry: \{ isEnabled: false \}/);
+});
