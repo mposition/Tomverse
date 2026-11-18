@@ -3923,7 +3923,7 @@ pub struct V22ExecutionProfile {
     pub review_feedback_job_id: Option<String>,
     /// Reviewer vendors the next review prefers not to use, because the same
     /// vendor rejected the Task's last two reviews (owner decision
-    /// 2026-11-15). The app sends it only once its switch is on; the review
+    /// 2026-11-15). The app sends it whenever that holds; the review
     /// server treats it as a preference.
     #[serde(default)]
     pub review_avoid_vendors: Option<Vec<String>>,

@@ -491,11 +491,29 @@ export const publisherOpensReviewDrafts = (header: string | null) =>
 export const ENGINEERING_PUBLISHER_PR_RESUME_FEATURE = "pull_request_resume";
 export const publisherResumesPullRequests = (header: string | null) =>
   publisherNames(header, ENGINEERING_PUBLISHER_PR_RESUME_FEATURE);
+/**
+ * A publisher that reads a write claim's patch in chunks from
+ * `publish/patch` (docs/policy/amux-v22-result-transfer.md §4). Its claim
+ * carries the patch's size and chunk count instead of the patch, so no patch
+ * is too large for one answer. One deployed before this feature reads the
+ * patch inline, and is never handed one past the inline bound.
+ */
+export const ENGINEERING_PUBLISHER_PATCH_CHUNKS_FEATURE = "patch_chunks";
+export const publisherReadsPatchChunks = (header: string | null) =>
+  publisherNames(header, ENGINEERING_PUBLISHER_PATCH_CHUNKS_FEATURE);
 /** Every feature this publisher names, in the header's form. */
 export const ENGINEERING_PUBLISHER_FEATURES = [
   ENGINEERING_PUBLISHER_REVIEW_DRAFT_FEATURE,
   ENGINEERING_PUBLISHER_PR_RESUME_FEATURE,
+  ENGINEERING_PUBLISHER_PATCH_CHUNKS_FEATURE,
 ].join(",");
+/**
+ * What the app can do for a publisher, named at the top of its claim answer
+ * (`appFeatures`). A publisher reads a patch in chunks only from an app that
+ * names `patch_chunks`; an app deployed before it names nothing and sends
+ * the patch inline. A publisher before it ignores the key.
+ */
+export const ENGINEERING_AGENT_APP_FEATURES = [ENGINEERING_PUBLISHER_PATCH_CHUNKS_FEATURE] as const;
 
 /**
  * The reasons a lookup gives for a branch with no pull request (§10): the one

@@ -581,6 +581,80 @@ test("a T2 decision closes its draft in the same transaction, binds to what the 
   await setState(other.id, "expired");
 });
 
+// Owner decision 2026-11-18 (docs/policy/amux-v22-result-transfer.md §4,
+// migration 20261118120100_engineering_agent_patch_bytes).
+test("a publish item's patch bytes are its patch's UTF-8, written once, and no size of ours bounds the patch", async () => {
+  const [storage] = await prisma.$queryRaw<Array<{ attstorage: string }>>`
+    SELECT a."attstorage"::text AS "attstorage" FROM pg_catalog.pg_attribute a
+    WHERE a."attrelid" = '"EngineeringAgentWorkItem"'::regclass AND a."attname" = 'patchBytes'`;
+  assert.equal(storage?.attstorage, "e", "stored EXTERNAL, so a chunk read takes only its slice");
+
+  const withBytes = (runId: string, body: string, bytes: Uint8Array<ArrayBuffer> | null) => ({
+    ...productData("publish", runId, body),
+    patchDigest: sha256(body),
+    ...(bytes === null ? {} : { patchBytes: bytes }),
+  });
+  const text = "patch é";
+  const run = await newRun();
+  // Bytes of another length, or of the same length but other content, are not the patch's.
+  await refused(
+    prisma.engineeringAgentWorkItem.create({ data: withBytes(run.id, text, Buffer.from(`${text}!`, "utf8")) }),
+    "the bytes are as long as the text",
+  );
+  // The CHECK holds the length by itself, with the guard out of the way.
+  await assert.rejects(
+    prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe("SET LOCAL session_replication_role = replica");
+      await tx.engineeringAgentWorkItem.create({
+        data: withBytes(run.id, text, Buffer.from(`${text}!`, "utf8")), select: { id: true },
+      });
+    }),
+    (error: unknown) => /patchBytes_check|23514|check constraint/i.test(String(error)),
+    "the CHECK refuses bytes of another length",
+  );
+  const sameLength = Buffer.from(text, "utf8");
+  sameLength[0] = "q".charCodeAt(0);
+  await refused(
+    prisma.engineeringAgentWorkItem.create({ data: withBytes(run.id, text, sameLength) }),
+    "the bytes are the text's",
+  );
+  const item = await prisma.engineeringAgentWorkItem.create({
+    data: withBytes(run.id, text, Buffer.from(text, "utf8")),
+    select: { id: true, patchBytes: true },
+  });
+  assert.deepEqual(Buffer.from(item.patchBytes!), Buffer.from(text, "utf8"));
+  await endRun(run.id);
+  const changed = Buffer.from(text, "utf8");
+  changed[1] = "b".charCodeAt(0);
+  for (const patchBytes of [changed, null]) {
+    await refused(
+      prisma.engineeringAgentWorkItem.update({ where: { id: item.id }, data: { patchBytes }, select: { id: true } }),
+      "the bytes never change or leave",
+    );
+  }
+  await retirePublish(item.id);
+
+  // An item opened before the bytes existed keeps none, and none can be added.
+  const legacyRun = await newRun();
+  const legacy = await prisma.engineeringAgentWorkItem.create({ data: withBytes(legacyRun.id, "patch", null), select: { id: true } });
+  await endRun(legacyRun.id);
+  await refused(
+    prisma.engineeringAgentWorkItem.update({ where: { id: legacy.id }, data: { patchBytes: Buffer.from("patch") }, select: { id: true } }),
+    "bytes are written only with the item",
+  );
+  await retirePublish(legacy.id);
+
+  // The size-only CHECK is gone: a patch past the old 4 MiB is stored.
+  const bigRun = await newRun();
+  const big = `diff --git a/x b/x\n${"+a line of a large patch\n".repeat(Math.ceil((4 * 1024 * 1024 + 4096) / 25))}`;
+  assert.ok(Buffer.byteLength(big, "utf8") > 4 * 1024 * 1024);
+  const stored = await prisma.engineeringAgentWorkItem.create({
+    data: withBytes(bigRun.id, big, Buffer.from(big, "utf8")), select: { id: true },
+  });
+  await endRun(bigRun.id);
+  await retirePublish(stored.id);
+});
+
 test("a binding records its run's published item, keeps its snapshot, and records observations and its reviewer once", async () => {
   const bare = await newRun();
   await refused(

@@ -44,18 +44,3 @@ export const AMUX_V22_LEGACY_INLINE_PATCH_MAX_BYTES = 4 * 1024 * 1024;
  */
 export const AMUX_V22_LEGACY_PATCH_ENVELOPE_MAX_BYTES =
   2 * AMUX_V22_LEGACY_INLINE_PATCH_MAX_BYTES + 1024 * 1024;
-
-/**
- * @deprecated The one patch bound before the chunked transfer. Kept only
- * while the sidecar (lib/amux/v22PatchCapture.mjs, v22OneShotSidecar.mjs) and
- * the engineering agent (lib/engineeringAgentStore.ts,
- * lib/engineeringAgentV22CandidateLoad.ts) still import it; their own changes
- * remove those imports. New code uses AMUX_V22_LEGACY_INLINE_PATCH_MAX_BYTES.
- */
-export const AMUX_V22_PATCH_MAX_BYTES = AMUX_V22_LEGACY_INLINE_PATCH_MAX_BYTES;
-
-/**
- * @deprecated The changed-path JSON bound before the chunked transfer; kept
- * only while lib/amux/v22PatchCapture.mjs still imports it.
- */
-export const AMUX_V22_CHANGED_PATHS_JSON_MAX_BYTES = AMUX_V22_LEGACY_INLINE_PATCH_MAX_BYTES;

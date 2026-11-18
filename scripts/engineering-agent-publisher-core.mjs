@@ -22,6 +22,7 @@ import { createHash, randomUUID } from "node:crypto";
 
 import {
   ENGINEERING_AGENT_COMMIT_IDENTITY,
+  ENGINEERING_PUBLISHER_PATCH_CHUNKS_FEATURE,
   expectedCommitObject,
   prBodyCarriesMarker,
   prBodyMarker,
@@ -30,6 +31,7 @@ import {
 import { detectSecrets } from "../lib/engineeringAgentSecretPatterns.ts";
 
 const sha256 = (text) => createHash("sha256").update(text, "utf8").digest("hex");
+const sha256Bytes = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const requestKey = () => randomUUID().replace(/-/g, "");
 const SHA1 = /^[0-9a-f]{40}$/;
 
@@ -142,6 +144,53 @@ export const decideLookup = ({ runId, branch, consumed, branchOid, pulls, headCo
     return { outcome: "lookup_impossible", reason: "commit_not_allowed" };
   }
   return { outcome: "lookup_found_result", pull };
+};
+
+/**
+ * The patch a write claim applies (docs/policy/amux-v22-result-transfer.md §4).
+ * A claim that carries it as text -- an app before `patch_chunks` -- is used as
+ * it is. Otherwise, from an app that names `patch_chunks`, its chunks are read
+ * from `publish/patch` in order and joined; the whole is checked for the
+ * claimed length and digest, and only then decoded as UTF-8, failing on any
+ * byte that is not. `{ text }`, or `{ refused }` for bytes that are not the
+ * patch the claim names, or `{ unavailable }` when they could not be read.
+ */
+export const readClaimedPatch = async (app, work, appFeatures) => {
+  if (typeof work.patchBody === "string") return { text: work.patchBody };
+  const total = work.patchBytes;
+  const count = work.patchChunkCount;
+  if (!Array.isArray(appFeatures) || !appFeatures.includes(ENGINEERING_PUBLISHER_PATCH_CHUNKS_FEATURE) ||
+      !Number.isSafeInteger(total) || total < 0 || !Number.isSafeInteger(count) || count < 0) {
+    return { unavailable: true };
+  }
+  const chunks = [];
+  let received = 0;
+  for (let index = 0; index < count; index += 1) {
+    const answer = await app("publish/patch", {
+      workItemId: work.workItemId,
+      fencingToken: String(work.fencingToken),
+      index,
+    });
+    const chunk = answer.json;
+    if (answer.status !== 200 || chunk?.workItemId !== work.workItemId || chunk?.index !== index ||
+        chunk?.totalBytes !== total || chunk?.chunkCount !== count || typeof chunk?.bytesBase64 !== "string") {
+      return { unavailable: true };
+    }
+    const bytes = Buffer.from(chunk.bytesBase64, "base64");
+    // Only canonical base64: anything else is not what the app wrote.
+    if (bytes.byteLength === 0 || bytes.toString("base64") !== chunk.bytesBase64) return { unavailable: true };
+    received += bytes.byteLength;
+    if (received > total) return { refused: true };
+    chunks.push(bytes);
+  }
+  const whole = Buffer.concat(chunks, received);
+  if (whole.byteLength !== total || sha256Bytes(whole) !== work.patchDigest) return { refused: true };
+  try {
+    // ignoreBOM keeps a leading BOM, so the text is these bytes exactly.
+    return { text: new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(whole) };
+  } catch {
+    return { refused: true };
+  }
 };
 
 /**
@@ -318,8 +367,13 @@ export async function runPublisherCycle(ports) {
       );
     }
 
-    // A write claim. Everything before the push can only refuse.
-    if (sha256(work.patchBody) !== work.patchDigest || detectSecrets(work.patchBody).length > 0 || titleCarriesSecret()) {
+    // A write claim. Everything before the push can only refuse. A patch the
+    // app could not hand over was never applied: the item goes back to the
+    // queue, and its next claim is judged again under a new capability (§10).
+    const claimedPatch = await readClaimedPatch(ports.app, work, claimed.json.appFeatures);
+    if (claimedPatch.unavailable) return await report("refused_before_write", { reason: "patch_read_failed" });
+    const patchText = claimedPatch.refused ? null : claimedPatch.text;
+    if (patchText === null || sha256(patchText) !== work.patchDigest || detectSecrets(patchText).length > 0 || titleCarriesSecret()) {
       return await report("revalidation_refused", { reason: "content_check_failed" });
     }
     workspace = await ports.workspace(work.baseSha);
@@ -329,7 +383,7 @@ export async function runPublisherCycle(ports) {
     }
     const message = expected.slice(expected.indexOf("\n\n") + 2);
     const built = await workspace.build({
-      patch: work.patchBody,
+      patch: patchText,
       identity: ENGINEERING_AGENT_COMMIT_IDENTITY,
       date: workspace.baseCommitterDate,
       message,

@@ -14,8 +14,9 @@
  *   digests only;
  * - the transition a result leads to is decided by lib/engineeringAgentCore.ts,
  *   never by the caller naming a target state;
- * - a patch is checked against its digest, its size and the app's own secret
- *   patterns before it is stored; a hit stores nothing;
+ * - a patch is checked against its digest and the app's own secret patterns
+ *   before it is stored; a hit stores nothing. Its size is bounded only by
+ *   what Postgres holds (docs/policy/amux-v22-result-transfer.md §4);
  * - JSON columns are parsed with strict schemas, and person identifiers never
  *   go into them: the reviewer lives in its own columns, which retention can
  *   clear, and a merge observation names only the kind of actor that merged.
@@ -47,7 +48,8 @@ import type { EngineeringAgentSystemAuditActor } from "@/lib/adminAuditSystemAct
 import type { AmuxAttachedTransaction } from "@/lib/amux/dbBoundary";
 import { lockAmuxAdmissionAndReadIncident } from "@/lib/amux/incident";
 import { isAmuxCardDisplayKey } from "@/lib/amux/cardDisplayKeyCore";
-import { AMUX_V22_PATCH_MAX_BYTES } from "@/lib/amux/v22PatchLimit";
+import { AMUX_V22_TRANSFER_CHUNK_BYTES, amuxV22TransferChunkCount } from
+  "@/lib/amux/v22TransferCore";
 import { AMUX_V22_ENGINEERING_PUBLICATION_ENV,
   amuxV22EngineeringPublicationEnabled } from
   "@/lib/amux/v22TaskExecutionCore";
@@ -773,9 +775,15 @@ export async function endEngineeringAgentRun(
 /* Work items                                                                 */
 /* ------------------------------------------------------------------------- */
 
-/** The largest patch body the table holds (the migration's CHECK): one
- * v22 patch (lib/amux/v22PatchLimit.ts; 64 KiB until 2026-11-15). */
-export const ENGINEERING_AGENT_PATCH_BODY_MAX_BYTES = AMUX_V22_PATCH_MAX_BYTES;
+/**
+ * The largest patch a write claim still carries inline, for a publisher that
+ * does not read chunks (`patch_chunks`): the 4 MiB the table held until
+ * 2026-11-18, which every such publisher can read in one answer. It bounds
+ * what a claim carries, never what the table holds
+ * (docs/policy/amux-v22-result-transfer.md §4): a larger patch waits for a
+ * publisher that reads chunks.
+ */
+export const ENGINEERING_AGENT_LEGACY_INLINE_PATCH_MAX_BYTES = 4 * 1024 * 1024;
 
 const CAUSE_KEY = /^[a-z0-9_]{1,20}:[!-~]{1,200}$/;
 const REASON = /^[a-z_]{1,64}$/;
@@ -812,13 +820,13 @@ const OPENING_ACTOR: Record<OpenWorkItemInput["kind"], EngineeringAgentSystemAud
 };
 
 /**
- * A patch is stored only if it is what its digest says, fits the column, and
- * trips none of the app's secret patterns -- the second check after the
- * runner's own (§11, "저장 전 검사"). A hit stores nothing and says only that
- * it happened. The database checks the digest again.
+ * A patch is stored only if it is what its digest says and trips none of the
+ * app's secret patterns -- the second check after the runner's own (§11,
+ * "저장 전 검사"). A hit stores nothing and says only that it happened. The
+ * database checks the digest again. No size of ours is checked: a patch is
+ * bounded only by the systems it passes through (owner decision 2026-11-18).
  */
 const admitPatch = (patchBody: string, patchDigest: string, baseSha: string) => {
-  if (Buffer.byteLength(patchBody, "utf8") > ENGINEERING_AGENT_PATCH_BODY_MAX_BYTES) refuse("patch_too_large");
   if (sha256Hex(patchBody) !== patchDigest) refuse("patch_digest_mismatch");
   if (!SHA1.test(baseSha)) refuse("base_sha_invalid");
   if (detectSecrets(patchBody).length > 0) refuse("secret_detected");
@@ -827,6 +835,9 @@ const admitPatch = (patchBody: string, patchDigest: string, baseSha: string) => 
 /**
  * Opens a work item. A draft carries the patch the owner reads, a publish item
  * the patch the publisher applies; both are admitted by `admitPatch` first.
+ * A publish item also keeps the patch's UTF-8 bytes (`patchBytes`), written
+ * once here, which the publisher reads in chunks (`publish/patch`); the text
+ * stays for every other reader.
  */
 export async function openEngineeringAgentWorkItem(
   tx: EngineeringAgentTransaction,
@@ -857,6 +868,7 @@ export async function openEngineeringAgentWorkItem(
     admitPatch(input.patchBody, input.patchDigest, input.baseSha);
     Object.assign(data, {
       patchBody: input.patchBody,
+      patchBytes: Buffer.from(input.patchBody, "utf8"),
       patchDigest: input.patchDigest,
       baseSha: input.baseSha,
       expectedTreeId: input.expectedTreeId,
@@ -886,6 +898,13 @@ type LockedWorkItem = {
   patchDigest: string | null;
   baseSha: string | null;
 };
+
+/**
+ * What a work item update reads back: its id alone. Without a select an update
+ * returns the whole row, and the patch it carries -- text and bytes, of any
+ * size -- would come back on every claim and settlement.
+ */
+const WORK_ITEM_UPDATED = { id: true } as const;
 
 const lockWorkItem = async (tx: EngineeringAgentTransaction, id: string): Promise<LockedWorkItem> => {
   const rows = await tx.$queryRaw<LockedWorkItem[]>`
@@ -1033,6 +1052,7 @@ export async function claimEngineeringAgentWorkItem(
   await tx.engineeringAgentWorkItem.update({
     where: { id: item.id },
     data: { state: "claimed", claimMode: input.mode, fencingToken, leaseExpiresAt },
+    select: WORK_ITEM_UPDATED,
   });
   if (capability) {
     // The trigger writes consumedAt; it accepts only the claim just taken.
@@ -1081,7 +1101,7 @@ export type EngineeringAgentPublishWork =
       resumePullRequest?: true;
       cardRef?: string;
     }
-  | {
+  | ({
       mode: "write";
       workItemId: string;
       runId: string;
@@ -1092,12 +1112,16 @@ export type EngineeringAgentPublishWork =
       cardKey: string | null;
       cardRef: string;
       baseSha: string;
-      patchBody: string;
       patchDigest: string;
       expectedTreeId: string;
       commitDigest: string;
       capabilityExpiresAt: Date;
-    };
+    } & (
+      /** A publisher that does not read chunks: the patch itself, at most the inline bound. */
+      | { patchBody: string }
+      /** One that does (`patch_chunks`): the patch's UTF-8 size and its chunks, read from `publish/patch`. */
+      | { patchBytes: number; patchChunkCount: number }
+    ));
 
 /**
  * The publisher's next piece of work, claimed. Lookups come first -- a claim
@@ -1106,7 +1130,7 @@ export type EngineeringAgentPublishWork =
  * returns the patch the publisher applies and the capability it must match;
  * a lookup returns only what it needs to look. Nothing to do is `null`.
  * An owner review item is written only for a publisher that opens it as a
- * draft (`reviewDrafts`) and only while its switch is on; its lookups go to
+ * draft (`reviewDrafts`); its lookups go to
  * any publisher, since a lookup writes nothing.
  *
  * An outcome nobody knows is looked at again only once its decision is no
@@ -1115,10 +1139,16 @@ export type EngineeringAgentPublishWork =
  * approved pull request resume goes only to a publisher that names it
  * (`resumePullRequests`) and only while publishing is allowed, since it opens
  * a pull request; it waits otherwise, and its claim takes the approval.
+ *
+ * A write claim for a publisher that reads chunks (`patchChunks`) carries the
+ * patch's size and chunk count, never the patch; one for any other publisher
+ * carries the patch, and so is made only for a patch within
+ * ENGINEERING_AGENT_LEGACY_INLINE_PATCH_MAX_BYTES -- a larger one waits for a
+ * publisher that reads chunks (docs/policy/amux-v22-result-transfer.md §4).
  */
 export async function claimNextEngineeringAgentPublishWork(
   tx: EngineeringAgentTransaction,
-  input: { leaseMs: number; reviewDrafts?: boolean; resumePullRequests?: boolean },
+  input: { leaseMs: number; reviewDrafts?: boolean; resumePullRequests?: boolean; patchChunks?: boolean },
 ): Promise<EngineeringAgentPublishWork | null> {
   await requireSwitch(tx, "maintenanceAllowed");
   // A claim whose lease passed -- a publisher that died, or an answer that
@@ -1145,6 +1175,7 @@ export async function claimNextEngineeringAgentPublishWork(
   // A resume opens a pull request: the same switches as a write, and a review
   // item's only for a publisher that also opens drafts.
   const resumeAllowed = publishAllowed && input.resumePullRequests === true;
+  const patchChunks = input.patchChunks === true;
   const now = await databaseNow(tx);
   // A lookup only reads: a decision that has waited its time no longer holds
   // it -- a time that doubles with each decision the item opened
@@ -1191,6 +1222,9 @@ export async function claimNextEngineeringAgentPublishWork(
         OR (
           ${publishAllowed} AND w."state" = 'queued'
           AND (${reviewWrites} OR w."causeKey" NOT LIKE ${reviewKeys})
+          -- A publisher that reads the patch inline gets only one it can read
+          -- in one answer. octet_length reads the stored size, not the body.
+          AND (${patchChunks} OR octet_length(w."patchBody") <= ${ENGINEERING_AGENT_LEGACY_INLINE_PATCH_MAX_BYTES}::integer)
           -- AMUXFLOW/B2: a card held by its own record is left out, so its
           -- oldest item never takes every other card's turn.
           AND (NOT EXISTS (
@@ -1232,14 +1266,15 @@ export async function claimNextEngineeringAgentPublishWork(
     await tx.engineeringAgentWorkItem.update({
       where: { id: candidate.id },
       data: { reason: ENGINEERING_AGENT_PR_RESUME_CLAIMED_REASON },
+      select: WORK_ITEM_UPDATED,
     });
   }
+  // The patch is read only for a write claim, and only as that claim carries it.
   const item = await tx.engineeringAgentWorkItem.findUniqueOrThrow({
     where: { id: candidate.id },
     select: {
       causeKey: true,
       runId: true,
-      patchBody: true,
       patchDigest: true,
       baseSha: true,
       expectedTreeId: true,
@@ -1287,17 +1322,82 @@ export async function claimNextEngineeringAgentPublishWork(
     where: { workItemId: candidate.id, claimFencingToken: claim.fencingToken },
     select: { commitDigest: true, expiresAt: true },
   });
-  return {
-    mode,
+  const write = {
+    mode: "write" as const,
     ...common,
     cardRef: item.run?.cardId ?? refuse("publish_item_without_run"),
     baseSha: item.baseSha ?? refuse("publish_item_without_base"),
-    patchBody: item.patchBody ?? refuse("publish_item_without_patch"),
     patchDigest: item.patchDigest ?? refuse("publish_item_without_patch"),
     expectedTreeId: item.expectedTreeId ?? refuse("publish_item_without_tree"),
     commitDigest: capability.commitDigest,
     capabilityExpiresAt: capability.expiresAt,
   };
+  if (patchChunks) {
+    // The size the database stores, without reading the body: the CHECK
+    // holds the bytes the publisher reads to the text's length.
+    const sized = await tx.$queryRaw<Array<{ bytes: number | null }>>`
+      SELECT octet_length("patchBody") AS "bytes" FROM "EngineeringAgentWorkItem" WHERE "id" = ${candidate.id}
+    `;
+    const patchBytes = sized[0]?.bytes ?? refuse("publish_item_without_patch");
+    return { ...write, patchBytes, patchChunkCount: amuxV22TransferChunkCount(patchBytes) };
+  }
+  const inline = await tx.engineeringAgentWorkItem.findUniqueOrThrow({
+    where: { id: candidate.id }, select: { patchBody: true },
+  });
+  return { ...write, patchBody: inline.patchBody ?? refuse("publish_item_without_patch") };
+}
+
+/** The bytes one `publish/patch` answer carries: one transfer chunk. */
+export const ENGINEERING_AGENT_PATCH_CHUNK_BYTES = AMUX_V22_TRANSFER_CHUNK_BYTES;
+/** The last chunk index whose 1-based start still fits SQL's integer. */
+const PATCH_CHUNK_INDEX_MAX = Math.floor((2 ** 31 - 2) / ENGINEERING_AGENT_PATCH_CHUNK_BYTES);
+
+export type EngineeringAgentPublishPatchChunk =
+  | { kind: "chunk"; workItemId: string; index: number; totalBytes: number; chunkCount: number; bytesBase64: string }
+  /** The claim is not this live write claim: another token, another state, or a lease that passed. */
+  | { kind: "claim_not_live" }
+  /** The patch has no chunk at this index. */
+  | { kind: "out_of_range" };
+
+/**
+ * One chunk of a write claim's patch, for the publisher that holds the claim
+ * (docs/policy/amux-v22-result-transfer.md §4): bytes [i*C, (i+1)*C) of the
+ * patch's UTF-8, read with `substring` so only that slice leaves storage. An
+ * item opened before `patchBytes` existed is served from its text. Read only
+ * while the claim is a live write claim with this fencing token: the patch
+ * goes to the publisher that may apply it and to no one else. It writes
+ * nothing; the last look still decides the push.
+ */
+export async function readEngineeringAgentPublishPatchChunk(
+  db: PrismaClient | Prisma.TransactionClient,
+  input: { workItemId: string; fencingToken: bigint; index: number },
+): Promise<EngineeringAgentPublishPatchChunk> {
+  // No patch Postgres holds has a chunk past this index (1 GB is 256 chunks).
+  if (!Number.isSafeInteger(input.index) || input.index < 0 || input.index > PATCH_CHUNK_INDEX_MAX) {
+    return { kind: "out_of_range" };
+  }
+  const start = input.index * ENGINEERING_AGENT_PATCH_CHUNK_BYTES;
+  const rows = await db.$queryRaw<Array<{ totalBytes: number | null; live: boolean | null; bytes: Uint8Array | null }>>`
+    SELECT octet_length(w."patchBody") AS "totalBytes",
+           w."leaseExpiresAt" > clock_timestamp() AT TIME ZONE 'UTC' AS "live",
+           CASE WHEN ${start}::integer < octet_length(w."patchBody")
+             THEN substring(COALESCE(w."patchBytes", convert_to(w."patchBody", 'UTF8'))
+                            FROM ${start + 1}::integer FOR ${ENGINEERING_AGENT_PATCH_CHUNK_BYTES}::integer)
+           END AS "bytes"
+    FROM "EngineeringAgentWorkItem" w
+    WHERE w."id" = ${input.workItemId} AND w."kind" = 'publish' AND w."state" = 'claimed'
+      AND w."claimMode" = 'write' AND w."fencingToken" = ${input.fencingToken}
+  `;
+  const row = rows[0];
+  if (!row || row.live !== true) return { kind: "claim_not_live" };
+  const totalBytes = row.totalBytes ?? 0;
+  const chunkCount = amuxV22TransferChunkCount(totalBytes);
+  if (input.index >= chunkCount || row.bytes === null) return { kind: "out_of_range" };
+  const bytes = Buffer.from(row.bytes.buffer, row.bytes.byteOffset, row.bytes.byteLength);
+  const expected = Math.min(totalBytes - start, ENGINEERING_AGENT_PATCH_CHUNK_BYTES);
+  if (bytes.byteLength !== expected) throw new Error("engineering agent patch chunk length mismatch");
+  return { kind: "chunk", workItemId: input.workItemId, index: input.index, totalBytes, chunkCount,
+    bytesBase64: bytes.toString("base64") };
 }
 
 /**
@@ -1325,6 +1425,7 @@ export async function settleEngineeringAgentWorkItem(
   await tx.engineeringAgentWorkItem.update({
     where: { id: item.id },
     data: { state: to, ...(input.reason !== undefined ? { reason: input.reason } : {}) },
+    select: WORK_ITEM_UPDATED,
   });
   let decisionItemId: string | null = null;
   // A lookup that settled the result answers every decision its unknown
@@ -1379,7 +1480,7 @@ export async function markEngineeringAgentWorkItemLeaseExpired(
   }
   const verdict = decideWriteItemTransition(kind, "claimed", "needs_lookup", { event: "lease_expired" });
   if (!verdict.allowed) refuse(verdict.reason);
-  await tx.engineeringAgentWorkItem.update({ where: { id: item.id }, data: { state: "needs_lookup" } });
+  await tx.engineeringAgentWorkItem.update({ where: { id: item.id }, data: { state: "needs_lookup" }, select: WORK_ITEM_UPDATED });
   await systemAudit(tx, "engineering-agent-observer", ENGINEERING_AGENT_AUDIT_ACTIONS.workItemLeaseExpired, "engineering_agent_work_item", item.id, {
     kind,
     fencingToken: item.fencingToken.toString(),
@@ -1414,7 +1515,8 @@ export async function expireEngineeringAgentV22LapsedPublish(
   if (live && live.expiresAt.getTime() > now.getTime()) return { expired: false };
   // The trigger allows a lapse only after expiry, and a lapsed one is never consumed.
   if (live) await tx.engineeringAgentCapability.update({ where: { id: live.id }, data: { unconsumedWorkItemId: null } });
-  await tx.engineeringAgentWorkItem.update({ where: { id: item.id }, data: { state: "expired", reason: input.reason } });
+  await tx.engineeringAgentWorkItem.update({ where: { id: item.id }, data: { state: "expired", reason: input.reason },
+    select: WORK_ITEM_UPDATED });
   await systemAudit(tx, "engineering-agent-runner", ENGINEERING_AGENT_AUDIT_ACTIONS.workItemExpired, "engineering_agent_work_item", item.id, {
     kind: "publish", reason: input.reason,
   });
@@ -1513,7 +1615,7 @@ export async function resolveEngineeringAgentV22TierPendingDraft(
     return { kept: false };
   if (!input.promote) {
     await tx.engineeringAgentWorkItem.update({ where: { id: item.id },
-      data: { reason: input.reason } });
+      data: { reason: input.reason }, select: WORK_ITEM_UPDATED });
     await systemAudit(tx, "engineering-agent-runner", ENGINEERING_AGENT_AUDIT_ACTIONS.workItemSettled, "engineering_agent_work_item", item.id, {
       kind: "t2_draft", reason: input.reason,
     });
@@ -1522,7 +1624,7 @@ export async function resolveEngineeringAgentV22TierPendingDraft(
   await requireSwitch(tx, "publishAllowed");
   await requireV22PublicationAllowed(tx, item.runId);
   await tx.engineeringAgentWorkItem.update({ where: { id: item.id },
-    data: { state: "expired", reason: ENGINEERING_AGENT_V22_PROMOTED_REASON } });
+    data: { state: "expired", reason: ENGINEERING_AGENT_V22_PROMOTED_REASON }, select: WORK_ITEM_UPDATED });
   await systemAudit(tx, "engineering-agent-runner", ENGINEERING_AGENT_AUDIT_ACTIONS.workItemExpired, "engineering_agent_work_item", item.id, {
     kind: "t2_draft", reason: ENGINEERING_AGENT_V22_PROMOTED_REASON,
     imageProofDigest: input.promote.imageProofDigest,
@@ -1584,7 +1686,7 @@ export async function decideEngineeringAgentT2Draft(
     },
     select: { id: true },
   });
-  await tx.engineeringAgentWorkItem.update({ where: { id: item.id }, data: { state: input.decision } });
+  await tx.engineeringAgentWorkItem.update({ where: { id: item.id }, data: { state: input.decision }, select: WORK_ITEM_UPDATED });
   return { approvalId: approval.id, auditLogId };
 }
 
@@ -1634,7 +1736,7 @@ export async function rejudgeEngineeringAgentV22Draft(
     tx,
   });
   await tx.engineeringAgentWorkItem.update({ where: { id: item.id },
-    data: { reason: ENGINEERING_AGENT_V22_TIER_PENDING_REASON } });
+    data: { reason: ENGINEERING_AGENT_V22_TIER_PENDING_REASON }, select: WORK_ITEM_UPDATED });
   return { auditLogId };
 }
 
@@ -1687,7 +1789,7 @@ export async function rejudgeEngineeringAgentV22DraftsAfterDeploy(
   });
   for (const draft of drafts) {
     await tx.engineeringAgentWorkItem.update({ where: { id: draft.id },
-      data: { reason: ENGINEERING_AGENT_V22_TIER_PENDING_REASON } });
+      data: { reason: ENGINEERING_AGENT_V22_TIER_PENDING_REASON }, select: WORK_ITEM_UPDATED });
     await systemAudit(tx, "engineering-agent-runner",
       ENGINEERING_AGENT_AUDIT_ACTIONS.v22DraftRejudged,
       "engineering_agent_work_item", draft.id, {
@@ -1734,7 +1836,7 @@ const lockDecisionsToAcknowledge = async (
 
 const closeDecisionsAsSeen = async (tx: EngineeringAgentTransaction, ids: string[]) => {
   for (const id of ids) {
-    await tx.engineeringAgentWorkItem.update({ where: { id }, data: { state: "acknowledged" } });
+    await tx.engineeringAgentWorkItem.update({ where: { id }, data: { state: "acknowledged" }, select: WORK_ITEM_UPDATED });
   }
 };
 
@@ -1813,6 +1915,7 @@ export async function approveEngineeringAgentPullRequestResume(
   await tx.engineeringAgentWorkItem.update({
     where: { id: publishItem.id },
     data: { reason: ENGINEERING_AGENT_PR_RESUME_APPROVED_REASON },
+    select: WORK_ITEM_UPDATED,
   });
   const auditLogId = await writeAdminAuditLog({
     session: input.session,
@@ -2078,7 +2181,7 @@ export async function resolveEngineeringAgentStateMismatch(
     await setEngineeringAgentSwitch(tx, { session: input.session, request: input.request, name: "mode", value: "off" });
   }
   if (verdict.resolves) {
-    await tx.engineeringAgentWorkItem.update({ where: { id: locked.id }, data: { state: "resolved" } });
+    await tx.engineeringAgentWorkItem.update({ where: { id: locked.id }, data: { state: "resolved" }, select: WORK_ITEM_UPDATED });
   }
   const auditLogId = await writeAdminAuditLog({
     session: input.session,

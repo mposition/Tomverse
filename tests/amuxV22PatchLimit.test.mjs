@@ -2,9 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import test from "node:test";
 
-import { AMUX_V22_CHANGED_PATHS_JSON_MAX_BYTES, AMUX_V22_FILE_MAX_BYTES,
-  AMUX_V22_GIT_STEP_TIMEOUT_MS, AMUX_V22_LEGACY_INLINE_PATCH_MAX_BYTES,
-  AMUX_V22_LEGACY_PATCH_ENVELOPE_MAX_BYTES, AMUX_V22_PATCH_MAX_BYTES } from
+import { AMUX_V22_FILE_MAX_BYTES, AMUX_V22_GIT_STEP_TIMEOUT_MS,
+  AMUX_V22_LEGACY_INLINE_PATCH_MAX_BYTES, AMUX_V22_LEGACY_PATCH_ENVELOPE_MAX_BYTES } from
   "../lib/amux/v22PatchLimit.ts";
 import { AMUX_V22_EMPTY_SHA256, AMUX_V22_PROXY_BODY_MAX_BYTES,
   AMUX_V22_STORAGE_MAX_BYTES, AMUX_V22_TRANSFER_BODY_MAX_BYTES,
@@ -35,9 +34,9 @@ test("what remains is GitHub's file limit, the proxy buffer and the old inline p
   assert.equal(AMUX_V22_LEGACY_INLINE_PATCH_MAX_BYTES, 4 * MIB);
   assert.equal(AMUX_V22_LEGACY_PATCH_ENVELOPE_MAX_BYTES,
     2 * AMUX_V22_LEGACY_INLINE_PATCH_MAX_BYTES + MIB);
-  // Deprecated names other areas still import until their own change lands.
-  assert.equal(AMUX_V22_PATCH_MAX_BYTES, AMUX_V22_LEGACY_INLINE_PATCH_MAX_BYTES);
-  assert.equal(AMUX_V22_CHANGED_PATHS_JSON_MAX_BYTES, AMUX_V22_LEGACY_INLINE_PATCH_MAX_BYTES);
+  // The names of the old single patch bound are gone with it.
+  assert.doesNotMatch(read("lib/amux/v22PatchLimit.ts"),
+    /AMUX_V22_PATCH_MAX_BYTES|AMUX_V22_CHANGED_PATHS_JSON_MAX_BYTES/);
   // Next.js buffers a body that passes proxy.ts up to 10 MiB unless
   // experimental.proxyClientMaxBodySize says otherwise: every request -- a
   // chunk, an old inline result -- must fit it.
@@ -173,4 +172,14 @@ test("the latest result and patch checks keep only a lower bound on the byte len
     assert.match(clause, /"byteLength" >= 1/, constraint);
     assert.doesNotMatch(clause, /BETWEEN|<=/, constraint);
   }
+});
+
+test("the engineering agent copy of a patch has no bound of its own", () => {
+  // Owner decision 2026-11-18 (docs/policy/amux-v22-result-transfer.md 4): its
+  // size CHECK is dropped, and 4 MiB is only what a claim still carries inline.
+  const store = read("lib/engineeringAgentStore.ts");
+  assert.doesNotMatch(store, /ENGINEERING_AGENT_PATCH_BODY_MAX_BYTES|patch_too_large|AMUX_V22_PATCH_MAX_BYTES/);
+  assert.match(store, /export const ENGINEERING_AGENT_LEGACY_INLINE_PATCH_MAX_BYTES = 4 \* 1024 \* 1024;/);
+  assert.match(read("prisma/migrations/20261118120100_engineering_agent_patch_bytes/migration.sql"),
+    /DROP CONSTRAINT "EngineeringAgentWorkItem_patchBody_check",\r?\n\s*ADD CONSTRAINT "EngineeringAgentWorkItem_patchBytes_check"/);
 });

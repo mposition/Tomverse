@@ -4,8 +4,8 @@ import { after } from "next/server";
 import { z } from "zod";
 
 import { readLimitedJson } from "@/lib/apiSecurity";
-import { ENGINEERING_PUBLISHER_FEATURES_HEADER,
-  publisherOpensReviewDrafts, publisherResumesPullRequests } from "@/lib/engineeringAgentCore";
+import { ENGINEERING_AGENT_APP_FEATURES, ENGINEERING_PUBLISHER_FEATURES_HEADER,
+  publisherOpensReviewDrafts, publisherReadsPatchChunks, publisherResumesPullRequests } from "@/lib/engineeringAgentCore";
 import {
   ENGINEERING_AGENT_PUBLISH_CLAIM_LEASE_MS,
   EngineeringAgentStoreRefusedError,
@@ -38,6 +38,13 @@ import { prisma } from "@/lib/prisma";
 // one deployed before that feature would open it as a ready pull request.
 // An approved pull request resume (§10) goes only to a publisher that names
 // `pull_request_resume`: one deployed before it would only look.
+//
+// A publisher that names `patch_chunks` gets a write claim without the patch:
+// its size and chunk count, read from publish/patch. Any other gets the patch
+// inline, and only one within the inline bound
+// (docs/policy/amux-v22-result-transfer.md §4). Every answer names what the
+// app can do (`appFeatures`), so a publisher reads chunks only from an app
+// that serves them.
 
 const requestSchema = z
   .object({
@@ -49,6 +56,7 @@ export async function POST(request: Request) {
   if (!isEngineeringAgentRouteAuthorized(request, "publisher")) return engineeringAgentUnauthorized();
   try {
     const body = await readLimitedJson(request, 1024, requestSchema);
+    const features = request.headers.get(ENGINEERING_PUBLISHER_FEATURES_HEADER);
     after(startEngineeringAgentV22TierPromotion);
     const outcome = await runIdempotentEngineeringAgentRequest({
       route: "publish/claim",
@@ -56,19 +64,23 @@ export async function POST(request: Request) {
       body,
       work: (tx) => claimNextEngineeringAgentPublishWork(tx, {
         leaseMs: ENGINEERING_AGENT_PUBLISH_CLAIM_LEASE_MS,
-        reviewDrafts: publisherOpensReviewDrafts(request.headers.get(ENGINEERING_PUBLISHER_FEATURES_HEADER)),
-        resumePullRequests: publisherResumesPullRequests(request.headers.get(ENGINEERING_PUBLISHER_FEATURES_HEADER)),
+        reviewDrafts: publisherOpensReviewDrafts(features),
+        resumePullRequests: publisherResumesPullRequests(features),
+        patchChunks: publisherReadsPatchChunks(features),
       }),
       // A publisher that loses the answer learns which item it holds; the
       // claim's lease then passes and a lookup finds the work again (§10).
       resultRef: (work) => work?.workItemId ?? null,
     });
     if (outcome.kind === "conflict") return engineeringAgentJson({ error: "request_key_reused" }, 409);
-    if (outcome.kind === "replay") return engineeringAgentJson({ replayed: true, state: outcome.state, resultRef: outcome.resultRef }, 200);
+    if (outcome.kind === "replay") {
+      return engineeringAgentJson({ replayed: true, state: outcome.state, resultRef: outcome.resultRef,
+        appFeatures: ENGINEERING_AGENT_APP_FEATURES }, 200);
+    }
     // The halt beside the work, so a quiet round while halted is not reported
     // as a healthy one (§12). Lookups continue while halted.
     const halt = currentEngineeringAgentHalt(await readEngineeringAgentHaltState(prisma));
-    return engineeringAgentJson({ work: outcome.value, halt }, 200);
+    return engineeringAgentJson({ work: outcome.value, halt, appFeatures: ENGINEERING_AGENT_APP_FEATURES }, 200);
   } catch (error) {
     // A switch that refuses the claim (mode off, frozen, kill switch) says
     // nothing about a halt, so the refusal carries it too: a quiet round is
@@ -77,7 +89,7 @@ export async function POST(request: Request) {
       const halt = await readEngineeringAgentHaltState(prisma)
         .then(currentEngineeringAgentHalt)
         .catch(() => "unknown" as const);
-      return engineeringAgentJson({ refused: error.code, halt }, 409);
+      return engineeringAgentJson({ refused: error.code, halt, appFeatures: ENGINEERING_AGENT_APP_FEATURES }, 409);
     }
     return engineeringAgentErrorResponse("publish_claim", error);
   }
