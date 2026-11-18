@@ -5,7 +5,7 @@ import { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
 import { writeAdminAuditLog, writeSystemAuditLog } from "@/lib/adminAudit";
-import { AMUX_DB_BOUNDARIES, AmuxDbBoundaryError, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
+import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import {
   latchDecisionMakerInstanceOff,
   readDecisionMakerSwitches,

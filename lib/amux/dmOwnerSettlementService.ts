@@ -421,8 +421,8 @@ async function lockUnderKillSwitch(tx: Prisma.TransactionClient, settlementId: s
  * kill switch under it, then the settlement and its card locked together. A
  * Task that moved (its status, a new run, an archive, something running) or an
  * escalation a person resolved cancels the settlement instead. retry returns
- * the Task to todo within its attempt budget (a spent budget leaves it to the
- * person); complete and close are the owner's settlement done by the system
+ * the Task to todo (an ordinary card has no attempt bound since 2026-11-18);
+ * complete and close are the owner's settlement done by the system
  * (legacyCardSystemService.ts); approve records the pull request's verified
  * head and diff digest and changes nothing else.
  *

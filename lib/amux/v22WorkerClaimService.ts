@@ -36,8 +36,8 @@ import { AMUX_V22_READ_ONLY_API_EXECUTOR_KIND } from
 import { amuxV22SafeStopFencedWorkers } from "./v22LegacySafeStopFence.ts";
 import { amuxWorkerRuntimeUsesReadOnlyApi } from "./workerRuntime.ts";
 import { amuxV22RoutesWithSettledUsage } from "./v22WorkerUsageGate.ts";
-import { AMUX_REPEATED_FAILURE_RUNS, amuxApprovedCeilingOverrun, amuxResultRetryDelayMs,
-  decideAmuxAttemptBudget } from "./executionBudgetCore.ts";
+import { AMUX_REPEATED_FAILURE_RUNS, amuxApprovedCeilingOverrun, amuxResultRetryDelayMs }
+  from "./executionBudgetCore.ts";
 import { amuxInfraRetryDelayMs } from "./infraFailureCore.ts";
 import { readAmuxAttemptBudgetFacts, readAmuxResultFailureStreak,
   recentAmuxInfraFailureWorkers } from "./infraFailureStore.ts";

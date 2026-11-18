@@ -185,14 +185,14 @@ claim의 admission으로 fence한다. 감사 체인 잠금은 마지막에 잡�
 `blocked`의 `block`은 **현재 미종결 escalation**에만 적용하고, 새 사유는 그
 escalation의 제한된 `resolution`과 감사 체인에 남긴다. 불변 결정 원장에는
 사유 원문 대신 결정 ID·대상 digest·outcome만 남긴다. 이미 `resolved`인 escalation을 다시 쓰지
-않는다. `block` 결정은 현재 escalation을 닫되, 시도 상한이 남아 복구 가능한 task에는
-**같은 트랜잭션에서 후속 미종결 escalation을 새로 연다.** 후속 건은 별도 ID·열린
+않는다. `block` 결정은 현재 escalation을 닫되, 복구 가능한 task(일반 카드는 2026-11-18부터 시도 상한이
+없다. 유료 경로는 자기 상한이 남은 task)에는 **같은 트랜잭션에서 후속 미종결 escalation을 새로 연다.** 후속 건은 별도 ID·열린
 revision·안전한 reason code를 갖고, 이전 결정과 사유는 원래 건에 남는다. 이 후속
 건을 통해 이미 blocked인 task에 사유를 더하거나 유계 `retry`를 제안할 수 있다.
 후속 보호 검토는 직전 사람의 차단 사유를 길이·제어문자 제한 후 별도 표시하며,
 그 표시값도 제안 대상 digest에 결속한다. 일반 routing GET에는 이 사유를 넣지 않는다.
-상한 5회를 소진한 task에는 후속 재시도 건을 만들지 않고 terminal blocked로 남기며,
-계속 필요하면 새 task를 발행한다. planning-review의 후속 건은 새 열린 revision 이후
+유료 경로의 시도 상한을 소진한 task에는 후속 재시도 건을 만들지 않고 terminal blocked로
+남기며, 계속 필요하면 새 task를 발행한다. planning-review의 후속 건은 새 열린 revision 이후
 기한 교정·동기화를 다시 증명해야 한다. escalation 생성 자체도 사람에게 보여 주는 raw reason 없이 ID·specialty·
 reason digest를 시스템 감사에 남긴다.
 
@@ -278,7 +278,8 @@ rate limit·본문 상한도 반례로 검증한다.
    승인 원장은 ID·digest·결정만 담으며 보유기간은 기존 Admin 감사 정책을 따른다.
 5. 외부 행위 승인은 **이번 구현 범위에서 전부 제외**한다. 도입하려면 유형별
    별도 계약·승인을 받는다.
-6. 시도 상한 5회를 소진한 `blocked` 작업은 그 task에서 종결한다. 계속할 작업은
+6. 유료 경로의 시도 상한을 소진한 `blocked` 작업은 그 task에서 종결한다(일반 카드는
+   2026-11-18부터 시도 상한이 없다). 계속할 작업은
    새 task를 발행하고, 기존 task의 시도 기록·상한·revision을 리셋하지 않는다.
 7. 승인 원장은 계정 통합 내보내기에서 제외한다. 관리자 본인의 열람 요청은
    수동 `PrivacyRequest` 심사로 처리한다(2026-09-21 승인).

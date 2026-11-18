@@ -6,7 +6,7 @@ import type { Session } from "next-auth";
 
 import { writeAdminAuditLog, writeSystemAuditLog } from "@/lib/adminAudit";
 import { isAmuxLateCommitError } from "@/lib/amux/commitDeadlineCore";
-import { AMUX_DB_BOUNDARIES, AmuxDbBoundaryError, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
+import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import { decisionMakerRetentionSweepDeps } from "@/lib/amux/decisionMakerRetentionSweep";
 import {
   DM_COMMIT_RESERVE_MS,

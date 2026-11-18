@@ -4,7 +4,7 @@ import { after, afterEach, beforeEach, mock, test } from "node:test";
 import type { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
-import { AMUX_DB_BOUNDARIES, AmuxDbBoundaryError, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
+import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import { dmBodyDigest, dmKeyPeriodOf, dmSnapshotManifestDigest } from "@/lib/amux/decisionMakerBodyCore";
 import {
   assignDecisionMakerRequestWithDigestKey,

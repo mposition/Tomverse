@@ -7,11 +7,9 @@ import { AMUX_INFRA_FAILURE_REASONS, amuxIsInfraFailureReason } from "./infraFai
  * The infrastructure failures the bound counts start after a person last
  * sent the card back with `retry` (an owner's review decision or recovery).
  * A system resolver -- the Decision Maker's settlement among them -- does not
- * start the bound over: an autonomous retry that did would let the same
- * platform failure run forever with no person seeing it, so a card that used
- * the bound goes to a person (the settlement refuses its retry,
- * dmOwnerSettlementService.ts). Earlier failures still use none of the card's
- * attempts.
+ * start the window over, so its retry keeps the backoff the failures before
+ * it earned. No count refuses that retry (owner direction 2026-11-18).
+ * Earlier failures still use none of the card's attempts.
  */
 export const AMUX_INFRA_WINDOW_RETRY_SQL = Prisma.sql`e."status" = 'resolved' AND e."resolutionOutcome" = 'retry'
   AND e."resolvedById" IS NOT NULL AND e."resolvedById" NOT LIKE 'system:%'`;
