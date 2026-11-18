@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { existsSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { deleteSession, Journal, JournalError, listSessions, SessionLockedError, sessionsDir, writeFileAtomic } from "../src/session.js";
+import { claimLock, deleteSession, Journal, JournalError, listSessions, SessionLockedError, sessionsDir, writeFileAtomic } from "../src/session.js";
 import { tempDir } from "./helpers.js";
 
 const init = (root = "/tmp/x") => ({
@@ -100,4 +100,21 @@ test("sessions delete removes the folder and its backups, not while it is open",
     deleteSession(home, journal.state.id);
     assert.equal(existsSync(join(sessionsDir(home), journal.state.id)), false);
     assert.throws(() => deleteSession(home, "../../etc"), /not a session id/);
+});
+
+test("a live process's lock is never removed, by open or by delete; a dead one's is taken over", () => {
+    const home = tempDir("home");
+    const journal = Journal.create(home, init());
+    journal.release();
+    const lock = join(sessionsDir(home), journal.state.id, "lock");
+    const live = JSON.stringify({ pid: process.pid, host: hostname(), at: "x" });
+    writeFileSync(lock, live);
+    assert.throws(() => Journal.open(home, journal.state.id), SessionLockedError);
+    assert.throws(() => deleteSession(home, journal.state.id), SessionLockedError);
+    assert.equal(readFileSync(lock, "utf8"), live, "the live lock is untouched");
+    assert.ok(existsSync(join(sessionsDir(home), journal.state.id, "session.json")));
+    writeFileSync(lock, JSON.stringify({ pid: 2 ** 30, host: hostname(), at: "x" }));
+    claimLock(lock, journal.state.id);
+    assert.equal(JSON.parse(readFileSync(lock, "utf8")).pid, process.pid);
+    assert.deepEqual(readdirSync(join(sessionsDir(home), journal.state.id)).filter((f) => f.includes(".stale-")), []);
 });

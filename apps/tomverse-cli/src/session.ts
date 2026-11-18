@@ -302,30 +302,7 @@ export class Journal {
     private acquireLock() {
         if (!this.dir) return;
         const lockPath = join(this.dir, "lock");
-        const claim = () => {
-            const fd = openSync(lockPath, "wx", 0o600);
-            writeSync(fd, JSON.stringify({ pid: process.pid, host: hostname(), at: now() }));
-            closeSync(fd);
-        };
-        try {
-            claim();
-        } catch (error) {
-            if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw new JournalError(`Cannot lock the session: ${(error as Error).message}`);
-            let holder: { pid?: number; host?: string } = {};
-            try {
-                holder = JSON.parse(readFileSync(lockPath, "utf8"));
-            } catch {
-                // unreadable lock: treated as held
-            }
-            const stale = holder.host === hostname() && typeof holder.pid === "number" && !processAlive(holder.pid);
-            if (!stale) {
-                throw new SessionLockedError(
-                    `Session ${this.state.id} is open in another tomverse process${holder.pid ? ` (pid ${holder.pid}${holder.host ? ` on ${holder.host}` : ""})` : ""}.`
-                );
-            }
-            unlinkSync(lockPath);
-            claim();
-        }
+        claimLock(lockPath, this.state.id);
         this.lockPath = lockPath;
     }
 
@@ -467,26 +444,67 @@ export const deleteSession = (home: string, id: string) => {
     if (!/^s-[0-9]{8}-[0-9]{6}-[0-9a-f]{6}$/.test(id)) throw new JournalError(`'${id}' is not a session id.`);
     const dir = join(sessionsDir(home), id);
     if (!existsSync(dir)) throw new JournalError(`No session ${id}.`);
-    const lock = join(dir, "lock");
-    if (existsSync(lock)) {
-        let holder: { pid?: number; host?: string } = {};
-        try {
-            holder = JSON.parse(readFileSync(lock, "utf8"));
-        } catch {
-            // treated as held
-        }
-        if (!(holder.host === hostname() && typeof holder.pid === "number" && !processAlive(holder.pid))) {
-            throw new SessionLockedError(`Session ${id} is open in another tomverse process.`);
-        }
-    }
-    // Take the lock ourselves before removing, so no process opens it meanwhile.
-    try {
-        if (existsSync(lock)) unlinkSync(lock);
-        const fd = openSync(lock, "wx", 0o600);
-        writeSync(fd, JSON.stringify({ pid: process.pid, host: hostname(), at: now(), deleting: true }));
-        closeSync(fd);
-    } catch {
-        throw new SessionLockedError(`Session ${id} was just opened by another tomverse process.`);
-    }
+    // Held while removing, so no process opens the session meanwhile.
+    claimLock(join(dir, "lock"), id);
     rmSync(dir, { recursive: true, force: true });
+};
+
+/**
+ * Takes a session's lock file, or throws SessionLockedError. A lock left by a
+ * process that no longer runs on this host is taken over -- but only that
+ * very lock: it is first moved aside atomically and compared with what was
+ * inspected, and put back if another process had replaced it meanwhile. A
+ * live process's lock is never removed.
+ */
+export const claimLock = (lockPath: string, id: string) => {
+    const claim = () => {
+        const fd = openSync(lockPath, "wx", 0o600);
+        writeSync(fd, JSON.stringify({ pid: process.pid, host: hostname(), at: now() }));
+        closeSync(fd);
+    };
+    const locked = (holder: { pid?: number; host?: string }) =>
+        new SessionLockedError(`Session ${id} is open in another tomverse process${holder.pid ? ` (pid ${holder.pid}${holder.host ? ` on ${holder.host}` : ""})` : ""}.`);
+    try {
+        claim();
+        return;
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw new JournalError(`Cannot lock the session: ${(error as Error).message}`);
+    }
+    let raw = "";
+    let holder: { pid?: number; host?: string } = {};
+    try {
+        raw = readFileSync(lockPath, "utf8");
+        holder = JSON.parse(raw);
+    } catch {
+        throw locked(holder);
+    }
+    const stale = holder.host === hostname() && typeof holder.pid === "number" && !processAlive(holder.pid);
+    if (!stale) throw locked(holder);
+    const aside = `${lockPath}.stale-${process.pid}-${randomBytes(4).toString("hex")}`;
+    try {
+        renameSync(lockPath, aside);
+    } catch {
+        throw locked(holder);
+    }
+    let movedRaw = "";
+    try {
+        movedRaw = readFileSync(aside, "utf8");
+    } catch {
+        // unreadable: treated as not the one inspected
+    }
+    if (movedRaw !== raw) {
+        // Another process took the lock between the look and the move: give it back.
+        try {
+            renameSync(aside, lockPath);
+        } catch {
+            // it re-created one meanwhile; leave theirs
+        }
+        throw locked(holder);
+    }
+    unlinkSync(aside);
+    try {
+        claim();
+    } catch {
+        throw locked(holder);
+    }
 };

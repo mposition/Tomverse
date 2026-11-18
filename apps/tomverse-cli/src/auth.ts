@@ -1,3 +1,5 @@
+import { StringDecoder } from "node:string_decoder";
+
 /**
  * The API key comes from TOMVERSE_API_KEY or a masked prompt, and lives only
  * in this process's memory. There is deliberately no --api-key flag (it would
@@ -48,6 +50,8 @@ export const maskedPrompt = (question: string, input: NodeJS.ReadStream, output:
         input.setRawMode(true);
         input.resume();
         let value = "";
+        // A character split across two chunks is joined, never turned into U+FFFD.
+        const decoder = new StringDecoder("utf8");
         const finish = (error?: Error) => {
             input.setRawMode(wasRaw);
             input.pause();
@@ -57,7 +61,7 @@ export const maskedPrompt = (question: string, input: NodeJS.ReadStream, output:
             else resolve(value);
         };
         const onData = (chunk: Buffer) => {
-            for (const ch of chunk.toString("utf8")) {
+            for (const ch of decoder.write(chunk)) {
                 if (ch === "\r" || ch === "\n") return finish();
                 if (ch === "\u0003") return finish(new AuthError("Cancelled."));
                 if (ch === "\u007f" || ch === "\b") value = value.slice(0, -1);

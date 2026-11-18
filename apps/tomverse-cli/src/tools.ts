@@ -236,7 +236,9 @@ export const applyPlannedPatch = (ctx: ToolContext, toolCallId: string, planned:
         }
         const changeId = `c${ctx.journal.state.changes.length + 1}-${randomBytes(3).toString("hex")}`;
         try {
-            // Last look before the write: the file must still be what was approved.
+            // Last look before the write: the path still resolves to the same place...
+            if (ctx.workspace.resolve(edit.path, "write").absolute !== edit.absolute) throw new PatchError(`${edit.path} resolves somewhere else now; it was not written.`);
+            // ...and the file must still be what was approved.
             if (currentDigest(edit.absolute) !== edit.preimage) throw new PatchError(`${edit.path} changed after it was approved; it was not written.`);
             const backup = edit.preimage ? ctx.journal.saveBackup(changeId, readFileSync(edit.absolute)) : null;
             ctx.journal.state.changes.push({

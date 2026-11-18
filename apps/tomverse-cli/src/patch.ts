@@ -1,4 +1,4 @@
-import { chmodSync, closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { sha256 } from "./session.js";
@@ -151,6 +151,14 @@ export const currentDigest = (absolute: string) => {
 /** Writes one file so a reader sees the old or the new bytes, keeping its mode. */
 export const writeFileReplacing = (absolute: string, bytes: Buffer, restoreMode?: number) => {
     mkdirSync(dirname(absolute), { recursive: true });
+    // The folder must really be where it was resolved: a link swapped into a
+    // part of the path after the check is not followed.
+    const realDir = realpathSync.native(dirname(absolute));
+    const expected = dirname(absolute);
+    const caseless = process.platform === "win32" || process.platform === "darwin";
+    if (caseless ? realDir.toLowerCase() !== expected.toLowerCase() : realDir !== expected) {
+        throw new PatchError(`The folder of ${absolute} changed (a link?); nothing was written.`);
+    }
     const tmp = join(dirname(absolute), `.${randomBytes(6).toString("hex")}.tomverse-tmp`);
     const mode = restoreMode ?? (existsSync(absolute) ? statSync(absolute).mode & 0o7777 : undefined);
     const fd = openSync(tmp, "wx", mode ?? 0o644);
