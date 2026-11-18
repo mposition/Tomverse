@@ -29,8 +29,9 @@ type RunnableEntry = Awaited<ReturnType<typeof externalApiRunnableModels>>[numbe
  * Smart Adaptive request was refused at admission in the last two minutes
  * (credits, allowance, concurrency). Otherwise the default model is taken and
  * admission refuses with its own error. An Idempotency-Key replay is answered
- * before this runs, and a concurrent duplicate of one still routing takes the
- * default model. The gate's checks run only when a router call is next.
+ * before this runs, and a concurrent duplicate of one still routing waits for
+ * that call and takes the same model. The gate's checks run only when a
+ * router call is next.
  * Without the router switch, or when the router gives no answer, the default
  * model answers if it fits, otherwise the first candidate.
  *
@@ -56,7 +57,7 @@ export const noteSmartAdaptiveRefusal = (keyId: string, now = Date.now()) => {
 };
 
 /** Idempotent requests routing now, by key and Idempotency-Key digest. */
-const routing = new Set<string>();
+const routing = new Map<string, Promise<{ entry: RunnableEntry; routedBy: "router" | "default" }>>();
 
 /** Whether the paid router call may be made for this key now. */
 export const smartAdaptiveRouterAllowed = async (
@@ -185,16 +186,22 @@ export const routeSmartAdaptive = async (input: {
     }
 
     // One router call per Idempotency-Key at a time in this process: a
-    // concurrent duplicate takes the default model, and admission answers it
-    // as the duplicate it is.
+    // concurrent duplicate waits for that call and takes the same model, so
+    // whichever of them admission lets through answered with the model the
+    // tool-loop memory records; the other gets the duplicate's receipt.
     const flight = input.idempotencyKeyDigest ? `${input.keyId}\0${input.idempotencyKeyDigest}` : null;
-    if (flight && routing.has(flight)) return { entry: fallback, routedBy: "default" };
-    if (flight) routing.add(flight);
+    const pending = flight ? routing.get(flight) : undefined;
+    if (pending) return pending;
+    const decision = (async () =>
+        (await input.routerAllowed())
+            ? routeWithRouter(input, eligible, fallback, turn, digest, now)
+            : { entry: fallback, routedBy: "default" as const })();
+    if (!flight) return decision;
+    routing.set(flight, decision);
     try {
-        if (!(await input.routerAllowed())) return { entry: fallback, routedBy: "default" };
-        return await routeWithRouter(input, eligible, fallback, turn, digest, now);
+        return await decision;
     } finally {
-        if (flight) routing.delete(flight);
+        routing.delete(flight);
     }
 };
 

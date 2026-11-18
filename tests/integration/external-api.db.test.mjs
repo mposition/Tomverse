@@ -471,16 +471,26 @@ test("external inference API over the real shared credit ledger", { skip: !datab
             assert.equal(again.status, 409, "the replay is the original's receipt");
             assert.equal(routerCalls.length, routedBefore, "a replay makes no router call");
 
-            // Concurrent duplicates of one Idempotency-Key make one router call.
+            // Concurrent duplicates of one Idempotency-Key make one router call
+            // and take the same model, so the one admitted answered with the
+            // model the tool-loop memory records; the other is its receipt.
+            routerPick = SECOND;
             routerDelayMs = 150;
             const twin = { headers: { "idempotency-key": "smart-adaptive-twins" } };
             const twinBody = body({ model: "smart-adaptive", messages: [{ role: "user", content: "Twins" }] });
             const routedBeforeTwins = routerCalls.length;
             const twins = await Promise.all([call(key, twinBody, twin), call(key, twinBody, twin)]);
-            await Promise.all(twins.map((response) => response.text()));
+            const twinBodies = await Promise.all(twins.map((response) => response.text()));
             routerDelayMs = 0;
             assert.equal(routerCalls.length, routedBeforeTwins + 1, "one router call for both twins");
-            assert.ok(twins.some((response) => response.status === 200));
+            assert.deepEqual(twins.map((response) => response.status).sort(), [200, 409]);
+            const winner = twins.findIndex((response) => response.status === 200);
+            assert.equal(twins[winner].headers.get("x-tomverse-routed-model"), SECOND, "the admitted twin took the router's pick");
+            assert.equal(JSON.parse(twinBodies[winner]).model, SECOND, "the admitted twin answered with the pick");
+            const receiptBody = JSON.parse(twinBodies[1 - winner]);
+            assert.ok(["idempotent_request_completed", "idempotent_request_in_progress"].includes(receiptBody.error.code), "the other is the winner's receipt");
+            const twinReceipt = await db.externalApiRequest.findFirst({ where: { userId, idempotencyKeyDigest: { not: null } }, orderBy: { createdAt: "desc" } });
+            assert.equal(twinReceipt.modelId, SECOND);
 
             // A key whose cap is spent gets no paid router call; admission refuses as usual.
             const capped = await issueKey(userId, { creditCap: 1 });
