@@ -4,7 +4,15 @@ import { createGroundedCitationStream } from "@/lib/groundedCitationLinks";
 import { createChatSearchObservation, type ChatSearchObservation } from "@/lib/chatSearchObservation";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { copyGeneratedArtifactForRevision, generatedArtifactCopySchema, GeneratedArtifactRevisionError } from "@/lib/generatedArtifactRevision";
-import { stepCountIs, streamText, type FilePart, type ModelMessage } from "ai";
+import {
+    stepCountIs,
+    streamText,
+    type FilePart,
+    type ModelMessage,
+    type StepResult,
+    type ToolSet,
+} from "ai";
+import { longContextToolLoopStep } from "@/lib/chatLongContextToolLoop";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { parseChatLocation } from "@tomverse/chat-core";
 import { appendChatLocationContext } from "@/lib/chatLocationPrompt";
@@ -5929,6 +5937,20 @@ async function handleChatPost(
                 log(event);
             };
         };
+        // A long-context turn's application tool loop (not MCP or Research
+        // Preview, which keep their own step budgets) shares the reserved
+        // output and input across its calls (lib/chatLongContextToolLoop.ts).
+        const longContextLoopStep =
+            combinedToolConfig &&
+            !researchPreviewExecution &&
+            !mcpConnector &&
+            Number.isFinite(toolLoopStepCap)
+                ? longContextToolLoopStep({
+                      maxOutputTokens: requestMaxOutputTokens,
+                      inputTokens: budget.inputTokens,
+                      callCap: toolLoopStepCap,
+                  })
+                : null;
         await recordDispatchStarted(dispatchRecord);
         if (hasContinuation) void recordContinuationSeedOutcome(finalContinuation.outcome);
         latency.provider();
@@ -5970,7 +5992,21 @@ async function handleChatPost(
                           }
                         : combinedToolConfig ?? {}),
                     ...searchObservation?.sdk,
-                    ...(lookupStep ? { prepareStep: lookupStep } : {}),
+                    ...(longContextLoopStep
+                        ? {
+                              // One output budget across the loop, and an
+                              // answer due on the last reserved call.
+                              prepareStep: (options: {
+                                  stepNumber: number;
+                                  steps: Array<StepResult<ToolSet>>;
+                              }) => ({
+                                  ...(lookupStep?.(options) ?? {}),
+                                  ...longContextLoopStep(options),
+                              }),
+                          }
+                        : lookupStep
+                          ? { prepareStep: lookupStep }
+                          : {}),
                     ...(mcpConnector ? {
                         maxRetries: 0,
                         stopWhen: stepCountIs(MCP_CHAT_MAX_STEPS),

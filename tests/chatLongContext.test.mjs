@@ -563,6 +563,39 @@ test("a multi-call turn's cost is the sum of each call's own cost, cache split i
 
 // Same review: the SDK's `usage` is already the sum of every step, so the
 // totals settled beside the per-call figures are the whole turn's.
+// Review r-20261118-105614-1047a3: and at runtime too -- the stream result's
+// `usage` getter returns `totalUsage`, the aggregate of every step.
+test("the installed SDK's stream result returns totalUsage as usage at runtime", () => {
+    const runtime = readFileSync(new URL("../node_modules/ai/dist/index.js", import.meta.url), "utf8");
+    const totalAt = runtime.indexOf("  get totalUsage() {\n    this.consumeStream();");
+    assert.ok(totalAt > 0);
+    const usageAt = runtime.lastIndexOf("  get usage() {", totalAt);
+    assert.match(runtime.slice(usageAt, usageAt + 60), /get usage\(\) \{\s*return this\.totalUsage;/);
+});
+
+// Same review: the steps of a long-context tool loop share one output budget
+// and the loop answers on its last reserved call.
+test("a long-context tool loop shares its output budget and answers within its calls", async () => {
+    const { longContextToolLoopStep } = await import("../lib/chatLongContextToolLoop.ts");
+    const step = longContextToolLoopStep({ maxOutputTokens: 10_000, inputTokens: 1_000_000, callCap: 4 });
+    const used = (input, output) => ({ usage: { inputTokens: input, outputTokens: output } });
+    assert.deepEqual(step({ steps: [] }), { maxOutputTokens: 10_000 });
+    assert.deepEqual(step({ steps: [used(200_000, 3_000)] }), { maxOutputTokens: 7_000 });
+    // The fourth call is the last reserved one: no more tools.
+    assert.deepEqual(
+        step({ steps: [used(200_000, 1_000), used(201_000, 1_000), used(202_000, 1_000)] }),
+        { maxOutputTokens: 7_000, toolChoice: "none" }
+    );
+    // Output spent: one token and an answer, never a negative cap.
+    assert.deepEqual(step({ steps: [used(200_000, 12_000)] }), { maxOutputTokens: 1, toolChoice: "none" });
+    // Input that would not hold another full step: this one answers.
+    const tight = longContextToolLoopStep({ maxOutputTokens: 10_000, inputTokens: 700_000, callCap: 4 });
+    assert.equal(tight({ steps: [used(300_000, 1_000)] }).toolChoice, "none");
+    const route = readFileSync(new URL("../app/api/chat/route.ts", import.meta.url), "utf8");
+    assert.match(route, /longContextToolLoopStep\(\{\s*maxOutputTokens: requestMaxOutputTokens,\s*inputTokens: budget\.inputTokens,\s*callCap: toolLoopStepCap,\s*\}\)/);
+    assert.match(route, /\.\.\.\(lookupStep\?\.\(options\) \?\? \{\}\),\s*\.\.\.longContextLoopStep\(options\),/);
+});
+
 test("the installed SDK reports usage as the sum of all steps", () => {
     const types = readFileSync(new URL("../node_modules/ai/dist/index.d.ts", import.meta.url), "utf8");
     const result = types.slice(types.indexOf("interface StreamTextResult"));
@@ -668,7 +701,8 @@ test("a long-context turn reserves every call of its tool loop, and only then", 
     const route = readFileSync(new URL("../app/api/chat/route.ts", import.meta.url), "utf8");
     assert.match(route, /longContextToolInputPasses: Math\.max\(\s*artifactToolPlan\?\.registerTool \? GENERATED_ARTIFACT_MAX_STEPS : 1,\s*appManagedSearchEnabled && webSearchCapability\.searchBackend\s*\? APP_MANAGED_SEARCH_MAX_STEPS\s*: 1\s*\)/);
     assert.match(route, /budget\.longContextSettlement && !isResearchPreview\s*\? \(budget\.providerCallPasses \?\? 1\)\s*: Number\.POSITIVE_INFINITY/);
-    assert.equal(route.match(/toolLoopStepCap\s*\)/g)?.length, 2);
+    assert.match(route, /stepCountIs\(\s*Math\.min\(APP_MANAGED_SEARCH_MAX_STEPS, toolLoopStepCap\)\s*\)/);
+    assert.match(route, /: GENERATED_ARTIFACT_MAX_STEPS,\s*toolLoopStepCap\s*\)\s*\)/);
 });
 
 test("the call count travels from the budget to every settlement path", () => {
