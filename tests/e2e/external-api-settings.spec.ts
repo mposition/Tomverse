@@ -116,69 +116,87 @@ test("API keys: an account the API was switched off for can still revoke its key
     await expect(page.getByTestId("external-api-unavailable")).toBeVisible();
     const row = page.getByTestId("external-api-key");
     await expect(row).toContainText("Old laptop");
-    await expect(row.getByRole("button", { name: "Rename" })).toHaveCount(0);
+    await row.getByTestId("external-api-key-menu").click();
+    await expect(row.getByRole("menuitem", { name: "Rename" })).toHaveCount(0);
     page.once("dialog", (dialog) => dialog.accept());
     await page.getByTestId("external-api-key-revoke").click();
     await expect(row).toHaveAttribute("data-key-state", "revoked");
     expect(calls).toContain("DELETE /api/user/api-keys/key_old");
 });
 
-test("API keys: create shows the secret once with a ready config, then revoke @ui-risk", async ({ page, isMobile }) => {
+test("API keys: a key is made in a dialog, shown once in another, then filled into one tool's setup @ui-risk", async ({ page, isMobile }) => {
     await page.setViewportSize({ width: isMobile ? 320 : 1280, height: 900 });
     await prepareGuestPage(page, "ko");
     const calls = await mockKeys(page, { enabled: true });
     await page.goto("/settings/api");
 
-    await expect(page.getByRole("heading", { name: "API 키" })).toBeVisible();
-    await expect(page.getByTestId("external-api-models")).toContainText("GPT 6 Luna");
-    const aside = page.getByTestId("external-api-aside-config");
-    const vscode = page.getByTestId("external-api-vscode-config");
-    await expect(aside).toContainText("<YOUR_TOMVERSE_API_KEY>");
-    await expect(vscode).toContainText("customendpoint");
-    // Smart Adaptive alone by default: its id survives catalogue changes.
-    await expect(aside).toContainText('"smart-adaptive"');
-    await expect(aside).not.toContainText('"gpt-6-luna"');
-    await expect(page.getByTestId("external-api-generic-config")).toContainText("Model: smart-adaptive");
-    // Ticking a model pins it into both configurations; the last one cannot be unticked.
-    await page.getByTestId("external-api-pick-gpt-6-luna").check();
-    await expect(aside).toContainText('"gpt-6-luna"');
-    await expect(vscode).toContainText(`${baseUrl}/chat/completions`);
-    await page.getByTestId("external-api-pick-smart-adaptive").uncheck();
-    await expect(aside).not.toContainText('"smart-adaptive"');
-    await page.getByTestId("external-api-pick-gpt-6-luna").click();
-    await expect(page.getByTestId("external-api-pick-gpt-6-luna")).toBeChecked();
-    await page.getByTestId("external-api-pick-smart-adaptive").check();
-    await page.getByTestId("external-api-pick-gpt-6-luna").uncheck();
+    await expect(page.getByRole("heading", { name: "API 키", exact: true })).toBeVisible();
     await expect(page.getByTestId("settings-detail-nav")).toBeVisible();
+    // Nothing tool-specific is on the page until a tool is picked.
+    await expect(page.getByTestId("external-api-tool-aside")).toHaveCount(0);
+    await expect(page.getByTestId("external-api-name")).toHaveCount(0);
 
+    await page.getByTestId("external-api-new").click();
+    const dialog = page.getByTestId("external-api-create-dialog");
+    await expect(dialog).toBeVisible();
     await page.getByTestId("external-api-name").fill("회사 노트북");
     await page.getByTestId("external-api-cap").fill("5OO");
     await page.getByTestId("external-api-create").click();
-    await expect(page.getByText("1부터 1000000 사이의 정수")).toBeVisible();
+    await expect(dialog.getByText("1부터 1000000 사이의 정수")).toBeVisible();
     expect(calls).not.toContain("POST /api/user/api-keys");
     await page.getByTestId("external-api-cap").fill("500");
     await page.getByTestId("external-api-create").click();
 
     const created = page.getByTestId("external-api-created");
     await expect(created).toBeVisible();
+    await expect(dialog).toHaveCount(0);
     await expect(page.getByTestId("external-api-created-key")).toHaveText(SECRET);
-    await expect(page.getByTestId("external-api-created-aside")).toContainText(SECRET);
-    await expect(page.getByTestId("external-api-created-vscode")).not.toContainText(SECRET);
-    await expect(page.getByTestId("external-api-key")).toHaveCount(1);
-    await expect(page.getByTestId("external-api-key")).toContainText("500");
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
-
     await page.getByTestId("external-api-created-done").click();
     await expect(created).toHaveCount(0);
-    await expect(page.getByText(SECRET)).toHaveCount(0);
+    await expect(page.getByTestId("external-api-key-filled")).toBeVisible();
 
-    // Rename and change the limit; each is one PATCH of only that field.
+    // Aside: the new key is filled in; Smart Adaptive alone by default, its id
+    // surviving catalogue changes. Ticking a model pins it; the last one stays.
+    await page.getByTestId("external-api-platform-aside").click();
+    const aside = page.getByTestId("external-api-aside-config");
+    await expect(aside).toContainText(SECRET);
+    await expect(aside).toContainText('"smart-adaptive"');
+    await expect(aside).not.toContainText('"gpt-6-luna"');
+    await page.getByTestId("external-api-pick-gpt-6-luna").check();
+    await expect(aside).toContainText('"gpt-6-luna"');
+    await page.getByTestId("external-api-pick-smart-adaptive").uncheck();
+    await expect(aside).not.toContainText('"smart-adaptive"');
+    await page.getByTestId("external-api-pick-gpt-6-luna").click();
+    await expect(page.getByTestId("external-api-pick-gpt-6-luna")).toBeChecked();
+    // VS Code stores the key itself, so it is never written into its file.
+    await page.getByTestId("external-api-platform-vscode").click();
+    await expect(page.getByTestId("external-api-tool-aside")).toHaveCount(0);
+    const vscode = page.getByTestId("external-api-vscode-config");
+    await expect(vscode).toContainText(`${baseUrl}/chat/completions`);
+    await expect(vscode).not.toContainText(SECRET);
+    await page.getByTestId("external-api-platform-other").click();
+    await expect(page.getByTestId("external-api-generic-config")).toContainText("Model: smart-adaptive");
+
+    // The allowed models are searchable.
+    await expect(page.getByRole("heading", { name: "API 허용 모델" })).toBeVisible();
+    await page.getByTestId("external-api-models-search").fill("luna");
+    await expect(page.getByTestId("external-api-models")).toContainText("GPT 6 Luna");
+    await expect(page.getByTestId("external-api-models")).not.toContainText("Smart Adaptive");
+    await page.getByTestId("external-api-models-search").fill("zzz");
+    await expect(page.getByTestId("external-api-models")).toContainText("맞는 모델이 없습니다");
+
+    // Rename and change the limit from the row's menu; each is one PATCH of only that field.
     const row = page.getByTestId("external-api-key");
-    await row.getByRole("button", { name: "이름 변경" }).click();
+    await expect(row).toHaveCount(1);
+    await expect(row).toContainText("500");
+    await row.getByTestId("external-api-key-menu").click();
+    await row.getByRole("menuitem", { name: "이름 변경" }).click();
     await row.getByRole("textbox").fill("집 데스크톱");
     await row.getByRole("button", { name: "저장" }).click();
     await expect(row).toContainText("집 데스크톱");
-    await row.getByRole("button", { name: "한도 변경" }).click();
+    await row.getByTestId("external-api-key-menu").click();
+    await row.getByRole("menuitem", { name: "한도 변경" }).click();
     // Anything but a whole number in range is refused before it is sent; it
     // can never turn into "no limit". Only an empty field clears the limit.
     for (const bad of ["abc", "   ", "1e400", "99999999999999999999", "0", "1.5"]) {
@@ -192,16 +210,19 @@ test("API keys: create shows the secret once with a ready config, then revoke @u
     expect(calls.filter((call) => call === "PATCH /api/user/api-keys/key_1")).toHaveLength(2);
 
     // Receipts: an unresolved request is shown as held, never as zero credits.
-    await row.getByRole("button", { name: "최근 요청" }).click();
+    await row.getByTestId("external-api-key-menu").click();
+    await row.getByRole("menuitem", { name: "최근 요청" }).click();
     const usage = page.getByTestId("external-api-key-usage");
     await expect(usage).toContainText("진행 중이거나 아직 확정되지 않음");
     await expect(usage).toContainText("입력 120 · 출력 30");
     await expect(usage).toContainText("req_done");
 
-    page.once("dialog", (dialog) => dialog.accept());
+    await row.getByTestId("external-api-key-menu").click();
+    page.once("dialog", (prompt) => prompt.accept());
     await page.getByTestId("external-api-key-revoke").click();
-    await expect(page.getByTestId("external-api-key")).toHaveAttribute("data-key-state", "revoked");
+    await expect(row).toHaveAttribute("data-key-state", "revoked");
     expect(calls).toContain("DELETE /api/user/api-keys/key_1");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
 });
 
 test("API keys: Claude Code, Codex and Cursor each get their own configuration @ui-risk", async ({ page, isMobile }) => {
@@ -224,21 +245,30 @@ test("API keys: Claude Code, Codex and Cursor each get their own configuration @
             })
     );
     await page.goto("/settings/api");
-    const tools = page.getByTestId("external-api-coding-tools");
-    await expect(tools.getByRole("heading", { name: "코딩 도구" })).toBeVisible();
+    const connect = page.getByTestId("external-api-connect");
+    await expect(connect.getByRole("heading", { name: "도구 연결" })).toBeVisible();
 
     // Claude Code: the Anthropic namespace, a fixed model, never Smart Adaptive.
+    await page.getByTestId("external-api-platform-claude-code").click();
     const claude = page.getByTestId("external-api-claude-code-powershell");
     await expect(claude).toContainText('ANTHROPIC_BASE_URL = "https://tomverse.app/api/anthropic"');
     await expect(claude).toContainText('ANTHROPIC_MODEL = "claude-sonnet-5"');
     await expect(claude).toContainText('ANTHROPIC_DEFAULT_HAIKU_MODEL = "claude-haiku-4-5"');
     await expect(claude).toContainText("<YOUR_TOMVERSE_API_KEY>");
     await expect(claude).not.toContainText("smart-adaptive");
-    await expect(page.getByTestId("external-api-claude-code-vscode")).toContainText("claudeCode.environmentVariables");
     await page.getByTestId("external-api-claude-code-model").selectOption("claude-haiku-4-5");
     await expect(claude).toContainText('ANTHROPIC_MODEL = "claude-haiku-4-5"');
+    // One block at a time: the other shell, then the VS Code extension.
+    await page.getByTestId("external-api-shell-posix").click();
+    await expect(claude).toHaveCount(0);
+    await expect(page.getByTestId("external-api-claude-code-posix")).toContainText("export ANTHROPIC_BASE_URL");
+    await page.getByTestId("external-api-surface-extension").click();
+    await expect(page.getByTestId("external-api-claude-code-vscode")).toContainText("claudeCode.environmentVariables");
 
     // Codex: its own provider and profile, by the provider's model id.
+    await page.getByTestId("external-api-platform-codex").click();
+    await expect(page.getByTestId("external-api-tool-claude-code")).toHaveCount(0);
+    await page.getByTestId("external-api-surface-terminal").click();
     await expect(page.getByTestId("external-api-codex-provider")).toContainText('wire_api = "responses"');
     await expect(page.getByTestId("external-api-codex-provider")).toContainText("request_max_retries = 0");
     const profile = page.getByTestId("external-api-codex-profile");
@@ -247,9 +277,12 @@ test("API keys: Claude Code, Codex and Cursor each get their own configuration @
     await expect(page.getByTestId("external-api-codex-model").locator("option")).toHaveCount(1);
 
     // Cursor: the Chat Completions base URL with a fixed model.
+    await page.getByTestId("external-api-platform-cursor").click();
     const cursor = page.getByTestId("external-api-cursor-config");
     await expect(cursor).toContainText(`Override OpenAI Base URL: ${baseUrl}`);
     await expect(cursor).not.toContainText("smart-adaptive");
-    await expect(tools).toContainText("401");
+    // The model list says which tools take each model.
+    await page.getByTestId("external-api-models-search").fill("sonnet");
+    await expect(page.getByTestId("external-api-models")).toContainText("Claude Code · Cursor");
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
 });

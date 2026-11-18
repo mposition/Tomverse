@@ -281,12 +281,16 @@ every Chat reservation does.
 
 ## 7. Client setup
 
-`/settings/api` builds the configurations in the page from the offered models:
-Smart Adaptive alone by default, plus any model the person ticks to pin it. The
-key appears only in the configuration shown right after creation. Any other app
-that takes a custom OpenAI Chat Completions endpoint needs only the three values
-the page also shows: base URL, key and model (`smart-adaptive`). Claude Code,
-Codex and Cursor have their own section on the page (section 10.4).
+`/settings/api` lists the keys, makes a key in a dialog and shows its secret once
+in a second dialog. Under "Connect a tool" the person picks one tool (Claude Code,
+Codex, Cursor, Aside, VS Code or another OpenAI-compatible app) and sees only that
+tool's setup, built from the offered models. Aside and VS Code take Smart Adaptive
+alone by default, plus any model the person ticks to pin it. The new key is filled
+into the setup until the person leaves the page; it is held only in the page's
+memory, never stored. Any other app that takes a custom OpenAI Chat Completions
+endpoint needs only three values: base URL, key and model (`smart-adaptive`). The
+models allowed through the API are listed in a searchable section. Claude Code,
+Codex and Cursor details are in section 10.4.
 
 - **Aside:** add a Custom Provider and paste the JSON: provider `tomverse`,
   `api: "openai-completions"`, `baseUrl`, `apiKey`, `authHeader: true`, and per
