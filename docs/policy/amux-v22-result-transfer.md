@@ -3,7 +3,7 @@
 운영자 지시(2026-11-18): v22 card 실행 결과에 걸린 크기 상한 가운데 우리가 만든 것은 없애고, 외부 시스템의
 한계만 남긴다. 대상은 patch 4 MiB, 한 번의 전송 32 MiB, 그보다 먼저 걸리는 Next.js proxy 10 MiB 요청 본문,
 PR diff digest 1 MiB다. 이 문서와 `development-agent-orchestration.md`의 "크기 상한 없음"·"결과 patch의 상한은
-하나다" 항목이 다르면 이 문서가 맞다. 승인 digest(5절)는 운영자 결정을 기다린다.
+하나다" 항목이 다르면 이 문서가 맞다. 승인 digest는 v2로 바꾼다(5절, 운영자 결정 2026-11-18).
 
 운영자 결정(2026-11-18, 권장안 채택):
 - 큰 bytea는 조각으로 읽어 node-pg 읽기 한계를 없앤다(3-B 단계).
@@ -336,10 +336,10 @@ helper를 만들어 `ciphertext`를 직접 select하는 독자들을 바꾼다. 
 - `ENGINEERING_AGENT_PATCH_BODY_MAX_BYTES`와 `patch_too_large`를 없앤다. `run/draft` route body 상한은 proxy 값으로.
 - publisher가 새 lib 파일을 import하면 Dockerfile COPY, workflow `paths`, `tests/engineeringAgentServices.test.mjs`를 함께 고친다.
 
-## 5. 승인 digest v2 (운영자 결정 대기)
+## 5. 승인 digest v2 (운영자 결정 2026-11-18: v2로 바꾼다)
 
-diff가 1 MiB를 넘거나 binary가 있으면 지금은 승인에 묶을 수 없어 사람에게 넘어간다. 권장안은 승인을 diff 본문 대신
-`merge base`·`head commit`·`head tree`에 묶는 것이다.
+diff가 1 MiB를 넘거나 binary가 있으면 지금은 승인에 묶을 수 없어 사람에게 넘어간다. 운영자가 v2를 골랐다("v2로 바꾸기"):
+승인을 diff 본문 대신 `merge base`·`head commit`·`head tree`에 묶는다. 새 승인은 모두 v2이고, 기존 v1 기록은 비교에만 쓴다.
 
 ```
 pullChangeDigest({ mergeBaseSha, headSha, headTreeSha }) =
