@@ -8,6 +8,7 @@ import { isSecretPath, normalizeRoot, PathError, Workspace } from "../src/worksp
 import { planPatch, PatchError } from "../src/patch.js";
 import { renderFileDiff, safeLine, safeText } from "../src/display.js";
 import { tempDir } from "./helpers.js";
+import { readInstructions } from "../src/main.js";
 
 const link = (target: string, path: string) => {
     // A junction needs no privilege on Windows; elsewhere a directory symlink.
@@ -134,4 +135,20 @@ test("terminal output cannot carry escape sequences, clipboard writes or bidi tr
     const diff = renderFileDiff("x.txt", "a\r\nb\r\n", "a\r\nc\r\n");
     assert.match(diff, /- b\n\+ c/);
     assert.ok(!diff.includes("\\u{d}"), "CRLF is not shown as control characters");
+});
+
+test("AGENTS.md is read only through the same path check: a link out of the folder is not sent", () => {
+    const root = tempDir("ws");
+    const outside = tempDir("outside");
+    writeFileSync(join(outside, "AGENTS.md"), "private notes from elsewhere");
+    writeFileSync(join(root, "README.md"), "x");
+    assert.equal(readInstructions(new Workspace(normalizeRoot(root))), null, "no AGENTS.md");
+    writeFileSync(join(root, "AGENTS.md"), "Run npm test before you finish.");
+    assert.equal(readInstructions(new Workspace(normalizeRoot(root))), "Run npm test before you finish.");
+    const linked = tempDir("ws");
+    mkdirSync(join(linked, "docs"));
+    link(outside, join(linked, "docs", "shared"));
+    // A folder link named like the file cannot smuggle the outside file in.
+    link(outside, join(linked, "AGENTS.md"));
+    assert.equal(readInstructions(new Workspace(normalizeRoot(linked))), null);
 });

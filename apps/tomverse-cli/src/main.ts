@@ -377,9 +377,17 @@ const configCommand = async (ctx: Context, args: string[]) => {
 
 // ---- sessions that talk to the model -----------------------------------------------------
 
-const readInstructions = (workspace: Workspace) => {
-    const path = join(workspace.root, "AGENTS.md");
-    if (!existsSync(path)) return null;
+export const readInstructions = (workspace: Workspace) => {
+    // Through the same real-path check as every read: an AGENTS.md that is a
+    // link out of the folder is not sent.
+    let path: string;
+    try {
+        const resolved = workspace.resolve("AGENTS.md", "read");
+        if (!resolved.exists || !statSync(resolved.absolute).isFile()) return null;
+        path = resolved.absolute;
+    } catch {
+        return null;
+    }
     const text = readFileSync(path, "utf8");
     return text.length > 32_000 ? `${text.slice(0, 32_000)}\n[AGENTS.md continues; read the file for the rest]` : text;
 };

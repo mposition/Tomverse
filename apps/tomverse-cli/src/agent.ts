@@ -107,7 +107,7 @@ export const transcriptFor = (messages: ModelMessage[], budgetChars: number) => 
             lines.push(`${message.role.toUpperCase()}: ${message.content}`);
             continue;
         }
-        for (const part of message.content as Array<Record<string, any>>) {
+        for (const part of message.content as TranscriptPart[]) {
             if (part.type === "text") lines.push(`${message.role.toUpperCase()}: ${part.text}`);
             else if (part.type === "tool-call") lines.push(`TOOL CALL ${part.toolName}: ${JSON.stringify(part.input)}`);
             else if (part.type === "tool-result") {
@@ -119,6 +119,22 @@ export const transcriptFor = (messages: ModelMessage[], budgetChars: number) => 
     let text = lines.join("\n");
     if (text.length > budgetChars) text = `[… earliest ${text.length - budgetChars} characters omitted …]\n${text.slice(-budgetChars)}`;
     return text;
+};
+
+type TranscriptPart = { type: string; text?: string; toolName?: string; input?: unknown; output?: unknown; approved?: boolean; reason?: string };
+
+/** The stream parts the loop reads, typed loosely: only these fields are used. */
+type StepPart = {
+    type: string;
+    text?: string;
+    isAutomatic?: boolean;
+    approvalId?: string;
+    toolCall?: { toolCallId: string; toolName: string; input: unknown };
+    toolName?: string;
+    toolCallId?: string;
+    output?: unknown;
+    error?: unknown;
+    finishReason?: string;
 };
 
 const SUMMARY_HEADER = "Summary of the earlier part of this session, written by the model when the context was compacted:";
@@ -360,12 +376,12 @@ export class Runner {
             onError: () => undefined,
         });
         try {
-            for await (const part of result.fullStream as AsyncIterable<Record<string, any>>) {
+            for await (const part of result.fullStream as AsyncIterable<StepPart>) {
                 if (part.type === "text-delta") {
-                    text += part.text;
-                    options.output.stream(part.text);
+                    text += part.text ?? "";
+                    options.output.stream(part.text ?? "");
                 } else if (part.type === "tool-approval-request" && !part.isAutomatic) {
-                    pending.push({ approvalId: part.approvalId, toolCallId: part.toolCall.toolCallId, toolName: part.toolCall.toolName, input: part.toolCall.input });
+                    pending.push({ approvalId: part.approvalId!, toolCallId: part.toolCall!.toolCallId, toolName: part.toolCall!.toolName, input: part.toolCall!.input });
                 } else if (part.type === "tool-result") {
                     options.output.event({ type: "tool_result", tool: part.toolName, tool_call_id: part.toolCallId, status: (part.output as { status?: string })?.status ?? null });
                 } else if (part.type === "tool-error") {
@@ -519,7 +535,11 @@ export class Runner {
         if (needUser.length && !options.prompter) {
             journal.state.pendingApprovals = pending;
             journal.commit();
-            options.output.info(`Waiting for approval of ${needUser.length} action(s). Run \`tomverse resume ${journal.state.id}\` in a terminal to review them.`);
+            options.output.info(
+                journal.persisted
+                    ? `Waiting for approval of ${needUser.length} action(s). Run \`tomverse resume ${journal.state.id}\` in a terminal to review them.`
+                    : `${needUser.length} action(s) need approval, and this --no-persist session cannot be resumed. Run the task in a terminal to approve them.`
+            );
             return "needs_approval";
         }
         const responses: Array<{ type: "tool-approval-response"; approvalId: string; approved: boolean; reason?: string }> = [];

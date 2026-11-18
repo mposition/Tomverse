@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import { z } from "zod";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
 import { externalApiOfferedModels } from "@/lib/externalApiCatalog";
+import { tomverseCliGuide } from "@/lib/externalApiCodingTools";
 import {
     EXTERNAL_API_KEY_LIMITS,
     externalApiKeyExpiry,
@@ -40,6 +41,8 @@ export async function GET(request: Request) {
                 },
                 models,
                 keys: await listExternalApiKeys(userId),
+                // Null until the Tomverse CLI package is published.
+                tomverseCli: tomverseCliGuide(process.env, baseUrl),
             });
         }),
         {

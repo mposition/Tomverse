@@ -24,6 +24,19 @@ export type CatalogModel = {
     creditsPerRequest: number;
 };
 
+type CatalogEntry = {
+    id?: unknown;
+    tomverse?: {
+        name?: unknown;
+        provider?: unknown;
+        capabilities?: { tools?: unknown; vision?: unknown; reasoning?: unknown };
+        protocols?: unknown;
+        context_window_tokens?: unknown;
+        max_output_tokens?: unknown;
+        credits_per_request?: unknown;
+    };
+};
+
 export type Receipt = {
     requestId: string;
     modelId: string;
@@ -166,7 +179,7 @@ export class Gateway {
     }
 
     async models(): Promise<CatalogModel[]> {
-        const body = await this.getJson<{ data?: Array<Record<string, any>> }>("/models");
+        const body = await this.getJson<{ data?: CatalogEntry[] }>("/models");
         if (!Array.isArray(body.data)) throw new GatewayError("protocol", "The model list has an unexpected shape.");
         return body.data.map((entry) => ({
             id: String(entry.id),
@@ -175,7 +188,7 @@ export class Gateway {
             tools: entry.tomverse?.capabilities?.tools === true,
             vision: entry.tomverse?.capabilities?.vision === true,
             reasoning: entry.tomverse?.capabilities?.reasoning === true,
-            protocols: Array.isArray(entry.tomverse?.protocols) ? entry.tomverse.protocols.map(String) : [],
+            protocols: Array.isArray(entry.tomverse?.protocols) ? (entry.tomverse.protocols as unknown[]).map(String) : [],
             contextWindowTokens: Number(entry.tomverse?.context_window_tokens ?? 0),
             maxOutputTokens: Number(entry.tomverse?.max_output_tokens ?? 0),
             creditsPerRequest: Number(entry.tomverse?.credits_per_request ?? 0),

@@ -96,7 +96,8 @@ const gate = (ctx: ToolContext, toolName: string, toolCallId: string, input: unk
                     : { status: "unknown", error: `This ${toolName} call already started once and its outcome is unknown; it was not run again. Check the files or ask the user.` },
         };
     }
-    const approval = ctx.journal.state.approvals.find((a) => a.toolCallId === toolCallId && a.toolName === toolName);
+    // The latest decision for this call counts; an older approval never outlives a later denial.
+    const approval = ctx.journal.state.approvals.findLast((a) => a.toolCallId === toolCallId && a.toolName === toolName);
     if (!approval || approval.decision !== "approved" || approval.inputDigest !== digest) {
         return { ok: false as const, result: { status: "denied", error: "Not approved by the user for this exact input." } };
     }
