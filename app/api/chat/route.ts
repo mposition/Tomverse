@@ -4519,11 +4519,16 @@ async function handleChatPost(
                     }
                 }
 
-                // An earlier file the share cannot take is not even read.
+                // An earlier file the share cannot take is not even read --
+                // but storage is still asked whether it exists, so a file it
+                // confirms gone takes the ordinary path below, which marks it
+                // unavailable and answers 410, instead of reading as merely
+                // over budget.
                 if (
                     !isLatestMessage &&
                     typeof resolved?.size === "number" &&
-                    pastAttachmentBytes + resolved.size > MAX_TOTAL_ATTACHMENT_SIZE
+                    pastAttachmentBytes + resolved.size > MAX_TOTAL_ATTACHMENT_SIZE &&
+                    (await probeR2Object(attachment.objectKey)).state !== "missing"
                 ) {
                     textAttachments.push({
                         name: attachment.name,

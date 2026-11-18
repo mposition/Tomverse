@@ -60,6 +60,15 @@ test("every surface that checks the account limits reads the shared constants", 
     }
 });
 
+// Review r-20261118-074731-88c90f: every parser that holds a whole file is
+// sized for the 50 MB limit, not the old 10 MB one.
+test("legacy Office and PDF parsing are sized for the new file limit", async () => {
+    const { DEFAULT_LEGACY_PARSE_LIMITS } = await import("../lib/legacyOffice/budget.ts");
+    assert.equal(DEFAULT_LEGACY_PARSE_LIMITS.maxBytes, 2 * CHAT_MAX_ATTACHMENT_BYTES);
+    assert.match(source("lib/mediaSecurity.ts"), /maxOldGenerationSizeMb: 512/);
+    assert.match(source("lib/officeSecurity.ts"), /maxOldGenerationSizeMb: 512/);
+});
+
 test("too many attachments names the real limit", () => {
     assert.match(source("app/api/chat/route.ts"), /at most \$\{MAX_ATTACHMENTS\} attachments/);
 });
@@ -157,6 +166,9 @@ test("earlier files have their own byte share and are left out past it", () => {
     // ...earlier ones are named to the model and left out, read or not.
     assert.match(route, /pastAttachmentBytes \+= attachmentBytes;\s*if \(pastAttachmentBytes > MAX_TOTAL_ATTACHMENT_SIZE\) \{\s*textAttachments\.push\(\{[\s\S]{0,160}PAST_ATTACHMENT_OMITTED_KIND/);
     assert.match(route, /!isLatestMessage &&\s*typeof resolved\?\.size === "number" &&\s*pastAttachmentBytes \+ resolved\.size > MAX_TOTAL_ATTACHMENT_SIZE/);
+    // Review r-20261118-074731-88c90f: left out unread, but never a lost file
+    // hidden as over budget -- storage is asked first.
+    assert.match(route, /pastAttachmentBytes \+ resolved\.size > MAX_TOTAL_ATTACHMENT_SIZE &&\s*\(await probeR2Object\(attachment\.objectKey\)\)\.state !== "missing"/);
 });
 
 // Same review: a cache hit must not hide a file storage lost.
