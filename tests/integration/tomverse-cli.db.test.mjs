@@ -252,8 +252,13 @@ test("Tomverse CLI over the real gateway and shared credit ledger", { skip: !dat
         };
         const root = repo();
         const { runner, journal } = await runnerFor(key, root, prompter);
-        assert.equal(await runner.runTask("Fix it."), "error");
-        assert.equal(journal.state.generations.at(-1).httpStatus, 401);
+        // Refused with 401, and a revoked key cannot look up its own request
+        // either: the CLI leaves it as unknown and points at Settings, never "free".
+        assert.equal(await runner.runTask("Fix it."), "unknown_outcome");
+        const last = journal.state.generations.at(-1);
+        assert.equal(last.httpStatus, 401);
+        assert.ok(!last.closed);
+        assert.match(runner.unknownReport(last), /Settings > API keys/);
         journal.release();
     });
 

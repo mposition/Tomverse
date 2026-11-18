@@ -550,7 +550,9 @@ export class Runner {
         } else if (record.lookup === "not_found") {
             lines.push("The server has no record of it yet. That does not prove it was not received or charged; it may still arrive.");
         } else {
-            lines.push("Its status could not be looked up.");
+            lines.push(
+                "Its status could not be looked up (if the key was revoked or expired, it cannot look up its own requests): it is left as unknown. Check the key's requests in Tomverse Settings > API keys."
+            );
         }
         return lines.join(" ");
     }
