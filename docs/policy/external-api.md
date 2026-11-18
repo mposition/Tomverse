@@ -193,7 +193,7 @@ with Tomverse limit details under `tomverse` where they exist.
 
 | Status | Codes |
 |---|---|
-| 400 | `invalid_json`, `invalid_request`, `unsupported_parameter`, `conflicting_parameters`, `max_tokens_too_large`, `invalid_tool`, `invalid_tool_choice`, `invalid_tool_call`, `invalid_tool_result`, `unsupported_image_url`, `unsupported_image_type`, `invalid_image`, `model_does_not_support_images`, `invalid_request_selector` (status lookup) |
+| 400 | `invalid_json`, `invalid_request`, `unsupported_parameter`, `conflicting_parameters`, `max_tokens_too_large`, `invalid_tool`, `invalid_tool_choice`, `invalid_tool_call`, `invalid_tool_result`, `unsupported_image_url`, `unsupported_image_type`, `invalid_image`, `model_does_not_support_images`, `invalid_request_selector` and `invalid_idempotency_key` (status lookup) |
 | 401 | `invalid_api_key` |
 | 403 | `account_not_enabled`, account restrictions from `assertUserOperationalAccess`, plan access |
 | 404 | `model_not_found`, `request_not_found` (status lookup) |

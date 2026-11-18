@@ -103,8 +103,10 @@ per task".
   `tomverse config set command-env NAME1,NAME2`; Tomverse variables are never
   passed. That keeps your API key out of commands; it does not hide files your
   account can read. stdin is closed; output is kept to the first and last 32 KB.
-  On timeout or cancel the whole process tree is ended and anything that
-  survived is reported.
+  On timeout or cancel the whole process tree is ended — on macOS and Linux
+  including descendants that moved to their own session — and anything that
+  survived is reported. A program that detaches itself after the command has
+  already finished is outside what the CLI can see.
 - `argv` (a program and its arguments) runs without a shell, so what you
   approve is exactly what runs. On Windows, batch programs such as `npm`/`npx`
   cannot run that way (cmd.exe would re-read the arguments); they run as a

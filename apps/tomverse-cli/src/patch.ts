@@ -117,10 +117,10 @@ export const currentDigest = (absolute: string) => {
 };
 
 /** Writes one file so a reader sees the old or the new bytes, keeping its mode. */
-export const writeFileReplacing = (absolute: string, bytes: Buffer) => {
+export const writeFileReplacing = (absolute: string, bytes: Buffer, restoreMode?: number) => {
     mkdirSync(dirname(absolute), { recursive: true });
     const tmp = join(dirname(absolute), `.${randomBytes(6).toString("hex")}.tomverse-tmp`);
-    const mode = existsSync(absolute) ? statSync(absolute).mode & 0o7777 : undefined;
+    const mode = restoreMode ?? (existsSync(absolute) ? statSync(absolute).mode & 0o7777 : undefined);
     const fd = openSync(tmp, "wx", mode ?? 0o644);
     try {
         writeSync(fd, bytes);

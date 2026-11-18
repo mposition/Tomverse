@@ -15,7 +15,8 @@ import { TEST_KEY } from "./fakeGateway.js";
 import { Journal } from "../src/session.js";
 import { Runner } from "../src/agent.js";
 import { undoChange, UndoError, viewChanges } from "../src/changes.js";
-import { renameSync, symlinkSync } from "node:fs";
+import { chmodSync, renameSync, statSync, symlinkSync } from "node:fs";
+import { planCommand, runCommand } from "../src/commands.js";
 
 const src = join(dirname(fileURLToPath(import.meta.url)), "..", "src");
 
@@ -62,7 +63,7 @@ test("an answer received but not saved before a crash is unresolved: resume neve
 test("a compaction cut off by the network stops before any further paid request", () =>
     withGateway(
         (body) => {
-            if (/Summarize this session so far/.test(lastUserText(body))) return { fault: "drop_before_headers" };
+            if (/Summarize this session so far/.test(lastUserText(body))) return { fault: "drop_unrecorded" };
             return toolResultsSinceUser(body).length < 3 ? { toolCalls: [{ name: "read_file", args: { path: "big.txt" } }] } : { text: "done" };
         },
         async (gateway) => {
@@ -70,7 +71,7 @@ test("a compaction cut off by the network stops before any further paid request"
             assert.equal(await runner.runTask("Read big.txt a few times"), "unknown_outcome");
             const compact = journal.state.generations.filter((g) => g.purpose === "compact");
             assert.equal(compact.length, 1);
-            assert.equal(compact[0]!.lookup, "found", "looked up by its recorded key");
+            assert.equal(compact[0]!.lookup, "not_found", "looked up by its recorded key; not found is not taken as free");
             assert.equal(gateway.completions.at(-1)!.body.messages.at(-1).content.includes("Summarize this session"), true, "the compaction was the last request sent");
         }
     ));
@@ -228,3 +229,66 @@ test("a file name with a newline cannot pass as another path", { skip: process.p
             assert.ok(!JSON.stringify(result).includes("leak-me"), JSON.stringify(result));
         }
     ));
+test("a 5xx after dispatch is not taken as final: looked up, left unresolved, no further paid request", () =>
+    withGateway(
+        () => ({ fault: "http", status: 502, code: "upstream_error" }),
+        async (gateway) => {
+            const { runner, journal } = await makeRunner(gateway, makeRepo(), { prompter: null });
+            assert.equal(await runner.runTask("Hi"), "unknown_outcome");
+            const [record] = journal.state.generations;
+            assert.equal(record!.httpStatus, 502);
+            assert.equal(record!.lookup, "not_found");
+            assert.equal(journal.unresolvedGenerations().length, 1);
+            assert.equal(await runner.runTask("Something else"), "unknown_outcome");
+            assert.equal(gateway.completions.length, 1);
+        }
+    ));
+
+test("cancel also ends a descendant that moved to its own session (setsid)", { skip: process.platform === "win32" && "POSIX sessions" }, async () => {
+    const dir = tempDir("tree");
+    const marker = join(dir, "survived.txt");
+    const grandchild = join(dir, "gc.cjs");
+    writeFileSync(grandchild, `setTimeout(() => require("fs").writeFileSync(${JSON.stringify(marker)}, "x"), 3000); setInterval(() => {}, 1000);\n`);
+    const parent = join(dir, "p.cjs");
+    writeFileSync(parent, `require("child_process").spawn(process.execPath, [${JSON.stringify(grandchild)}], { detached: true, stdio: "ignore" }).unref(); setInterval(() => {}, 1000);\n`);
+    const controller = new AbortController();
+    const running = runCommand(planCommand({ argv: [process.execPath, parent] }, dir, 60_000), controller.signal);
+    setTimeout(() => controller.abort(), 800);
+    const result = await running;
+    assert.equal(result.cancelled, true);
+    assert.deepEqual(result.residualProcesses, []);
+    await new Promise((r) => setTimeout(r, 3500));
+    assert.equal(existsSync(marker), false);
+});
+
+test("undo of a deleted file restores its permission bits", { skip: process.platform === "win32" && "POSIX modes" }, () =>
+    withGateway(
+        (body) => (toolResultsSinceUser(body).length ? { text: "ok" } : { toolCalls: [{ name: "apply_patch", args: { edits: [{ path: "run.sh", action: "delete" }] } }] }),
+        async (gateway) => {
+            const root = makeRepo({ "run.sh": "#!/bin/sh\necho hi\n" });
+            chmodSync(join(root, "run.sh"), 0o755);
+            const { runner, journal } = await makeRunner(gateway, root, { prompter: scriptedPrompter([true]) });
+            await runner.runTask("delete it");
+            assert.equal(existsSync(join(root, "run.sh")), false);
+            undoChange(journal, journal.state.changes[0]!.changeId);
+            assert.equal(statSync(join(root, "run.sh")).mode & 0o777, 0o755);
+        }
+    ));
+test("a 4xx whose receipt is still held stays unresolved; a plain 4xx refusal is closed", async () => {
+    await withGateway(
+        () => ({ fault: "http", status: 400, code: "invalid_request", heldReceipt: true }),
+        async (gateway) => {
+            const { runner, journal } = await makeRunner(gateway, makeRepo(), { prompter: null });
+            assert.equal(await runner.runTask("Hi"), "unknown_outcome");
+            assert.equal(journal.unresolvedGenerations().length, 1);
+        }
+    );
+    await withGateway(
+        () => ({ fault: "http", status: 400, code: "invalid_request" }),
+        async (gateway) => {
+            const { runner, journal } = await makeRunner(gateway, makeRepo(), { prompter: null });
+            assert.equal(await runner.runTask("Hi"), "error");
+            assert.deepEqual(journal.unresolvedGenerations(), []);
+        }
+    );
+});

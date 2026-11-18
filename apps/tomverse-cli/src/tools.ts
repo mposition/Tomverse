@@ -244,7 +244,7 @@ export const applyPlannedPatch = (ctx: ToolContext, toolCallId: string, planned:
                 toolCallId,
                 path: edit.path,
                 kind: edit.action,
-                preimage: { sha256: edit.preimage, backup },
+                preimage: { sha256: edit.preimage, backup, ...(edit.preimage ? { mode: statSync(edit.absolute).mode & 0o7777 } : {}) },
                 postimage: { sha256: edit.postimage },
                 state: "writing",
             });

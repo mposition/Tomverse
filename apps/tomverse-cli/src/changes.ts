@@ -71,7 +71,7 @@ export const undoChange = (journal: Journal, changeId: string) => {
         if (!change.preimage.backup) throw new UndoError(`No backup of ${change.path} was kept (a --no-persist session), so it cannot be undone.`);
         const bytes = journal.readBackup(change.preimage.backup);
         if (!bytes || sha256(bytes) !== change.preimage.sha256) throw new UndoError(`The backup of ${change.path} does not match what was there before; nothing changed.`);
-        writeFileReplacing(absolute, bytes);
+        writeFileReplacing(absolute, bytes, change.preimage.mode);
     }
     change.state = "undone";
     change.undoneAt = new Date().toISOString();

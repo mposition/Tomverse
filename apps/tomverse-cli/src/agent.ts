@@ -448,13 +448,25 @@ export class Runner {
         const gatewayError = (error as { cause?: unknown })?.cause instanceof GatewayError ? ((error as { cause: GatewayError }).cause) : error instanceof GatewayError ? error : null;
         const status = (error as { statusCode?: number })?.statusCode ?? gatewayError?.extra.status ?? record?.httpStatus;
         const message = this.describe(error);
-        if (record && (record.httpStatus ?? 0) >= 400 && status && status >= 400) {
-            // The server answered with an error: that request is settled on its side.
+        const httpStatus = record?.httpStatus ?? 0;
+        if (record && httpStatus >= 400 && status && status >= 400) {
             record.error = { kind: "http", message, ...(apiCode(error) ? { code: apiCode(error)! } : {}) };
-            record.closed = true;
+            const refusedBeforeDispatch = httpStatus < 500 && httpStatus !== 408;
+            // Looked up either way. A 5xx or timeout can come from a proxy after
+            // the request went through, so only a final receipt closes it. A
+            // Tomverse 4xx is a refusal before dispatch, closed unless its
+            // receipt is still held (a refund that has not gone through yet).
+            await this.lookUp(record);
+            const final = record.lookup === "found" && record.receipt !== null && record.receipt !== undefined && record.receipt.status !== "held";
+            const held = record.lookup === "found" && record.receipt?.status === "held";
+            record.closed = refusedBeforeDispatch ? !held : final;
             this.journal.commit();
             options.output.info(`The API refused the request: ${message}`);
             options.output.event({ type: "error", code: apiCode(error) ?? "api_error", message, request_id: record.requestId ?? null });
+            if (!record.closed) {
+                options.output.info(this.unknownReport(record));
+                return { kind: "stop" as const, outcome: "unknown_outcome" as const, message };
+            }
             return { kind: "stop" as const, outcome: "error" as const, message };
         }
         if (!record) {
@@ -658,13 +670,18 @@ export class Runner {
             journal.state.lastError = `compaction failed: ${this.describe(error)}`;
             journal.state.compactionFailedForTask = journal.state.tasks.length;
             const record = journal.state.generations.slice(attemptStart).at(-1);
-            if (record && !((record.httpStatus ?? 0) >= 400)) {
+            const status = record?.httpStatus ?? 0;
+            const refused = status >= 400 && status < 500 && status !== 408;
+            if (record && !refused) {
                 // Sent, and no answer: its outcome and cost are unknown. The
                 // caller asks before any further request.
                 await this.lookUp(record);
-                options.output.info(this.unknownReport(record));
-                journal.commit();
-                return "unknown";
+                if (!(record.lookup === "found" && record.receipt && record.receipt.status !== "held")) {
+                    options.output.info(this.unknownReport(record));
+                    journal.commit();
+                    return "unknown";
+                }
+                // The receipt is final: its cost is known, and the history was kept.
             }
             // Refused by the API, or never sent: nothing is unknown.
             journal.closeGenerations(journal.state.generations.slice(attemptStart));

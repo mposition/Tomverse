@@ -92,7 +92,8 @@ export type ChangeRecord = {
     toolCallId: string;
     path: string;
     kind: "create" | "update" | "delete";
-    preimage: { sha256: string | null; backup: string | null };
+    /** mode: the permission bits before the change (POSIX), restored by undo. */
+    preimage: { sha256: string | null; backup: string | null; mode?: number };
     postimage: { sha256: string | null };
     state: "writing" | "applied" | "failed" | "undone";
     appliedAt?: string;

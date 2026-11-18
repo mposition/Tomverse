@@ -11,8 +11,10 @@ import { randomBytes } from "node:crypto";
 
 export type ScriptedReply =
     | { text?: string; toolCalls?: Array<{ name: string; args: unknown }>; finish?: string }
-    | { fault: "http"; status: number; code: string; message?: string }
+    | { fault: "http"; status: number; code: string; message?: string; heldReceipt?: boolean }
     | { fault: "drop_before_headers" }
+    /** Dropped with no receipt yet: a lookup answers not found. */
+    | { fault: "drop_unrecorded" }
     | { fault: "drop_mid_stream"; text?: string }
     | { fault: "hang" };
 
@@ -148,7 +150,12 @@ export class FakeGateway {
                 req.socket.destroy();
                 return;
             }
+            if (reply.fault === "drop_unrecorded") {
+                req.socket.destroy();
+                return;
+            }
             if (reply.fault === "http") {
+                if (reply.heldReceipt) this.receipts.set(requestId, { requestId, idempotencyKey, status: "held", chargedCredits: null, heldCredits: credits, modelId });
                 return this.json(res, reply.status, { error: { message: reply.message ?? reply.code, code: reply.code } }, { "x-request-id": requestId });
             }
             if (reply.fault === "hang") {

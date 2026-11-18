@@ -215,21 +215,54 @@ export const killTree = async (child: ChildProcess): Promise<number[]> => {
         await new Promise((r) => setTimeout(r, 300));
         return [pid, ...descendants].filter(alive);
     }
-    try {
-        process.kill(-pid, "SIGTERM");
-    } catch {
-        // already gone
-    }
-    for (let i = 0; i < 20 && groupAlive(pid); i += 1) await new Promise((r) => setTimeout(r, 100));
-    if (groupAlive(pid)) {
+    // The group covers everything that did not leave it; a descendant that
+    // made its own session (setsid) is found through the parent links, listed
+    // before anything is signalled, while those links still exist.
+    const descendants = posixDescendants(pid);
+    const signalAll = (sig: NodeJS.Signals) => {
         try {
-            process.kill(-pid, "SIGKILL");
+            process.kill(-pid, sig);
         } catch {
-            // gone
+            // already gone
         }
-        for (let i = 0; i < 20 && groupAlive(pid); i += 1) await new Promise((r) => setTimeout(r, 50));
+        for (const d of descendants) {
+            try {
+                process.kill(d, sig);
+            } catch {
+                // gone
+            }
+        }
+    };
+    const anyAlive = () => groupAlive(pid) || descendants.some(alive);
+    signalAll("SIGTERM");
+    for (let i = 0; i < 20 && anyAlive(); i += 1) await new Promise((r) => setTimeout(r, 100));
+    if (anyAlive()) {
+        signalAll("SIGKILL");
+        for (let i = 0; i < 20 && anyAlive(); i += 1) await new Promise((r) => setTimeout(r, 50));
     }
-    return groupAlive(pid) ? [pid] : [];
+    return [...(groupAlive(pid) ? [pid] : []), ...descendants.filter(alive)];
+};
+
+/** Processes below `pid` by parent links (`ps`), including ones in other sessions. */
+const posixDescendants = (pid: number): number[] => {
+    const result = spawnSync("ps", ["-A", "-o", "pid=,ppid="], { encoding: "utf8", timeout: 10_000, env: commandEnv() });
+    if (result.status !== 0) return [];
+    const children = new Map<number, number[]>();
+    for (const line of result.stdout.split("\n")) {
+        const [p, pp] = line.trim().split(/\s+/).map(Number);
+        if (!p || pp === undefined || Number.isNaN(pp)) continue;
+        children.set(pp, [...(children.get(pp) ?? []), p]);
+    }
+    const out: number[] = [];
+    const queue = [pid];
+    while (queue.length) {
+        for (const c of children.get(queue.shift()!) ?? []) {
+            if (c === process.pid || out.includes(c)) continue;
+            out.push(c);
+            queue.push(c);
+        }
+    }
+    return out;
 };
 
 export const runCommand = (plan: CommandPlan, signal: AbortSignal, onOutput?: (stream: "stdout" | "stderr", text: string) => void, extraEnv: string[] = []) =>
