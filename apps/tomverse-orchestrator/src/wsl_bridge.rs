@@ -2859,19 +2859,25 @@ const V22_COMMIT_ROUNDS: u32 = 4;
 const V22_CHUNK_RETRY_DELAY: Duration = Duration::from_secs(1);
 #[cfg(test)]
 const V22_CHUNK_RETRY_DELAY: Duration = Duration::from_millis(5);
-/// A round that proved nothing is tried again after this long.
+/// A round that proved nothing is tried again after this long, then twice as
+/// long, and so on without end (`v22_backoff`): the transfer never gives up and
+/// never halts the bridge, and each new round commits first and reads back
+/// before it sends anything.
 #[cfg(not(test))]
 const V22_TRANSFER_RETRY_DELAY: Duration = Duration::from_secs(15);
 #[cfg(test)]
 const V22_TRANSFER_RETRY_DELAY: Duration = Duration::from_millis(0);
-/// Rounds that proved nothing in a row before the outcome is taken as unknown
-/// and the bridge stops for read-back (about ten minutes).
-const V22_TRANSFER_MAX_FAILED_ROUNDS: u32 = 40;
+/// The longest the wait between two rounds grows to.
+const V22_TRANSFER_RETRY_DELAY_MAX: Duration = Duration::from_secs(300);
 /// How long an attempt waits before it asks an old app again.
 const V22_APP_WAIT: Duration = Duration::from_secs(300);
-/// A settlement that answers "I do not hold your changed paths" is answered by
-/// committing the list again at most this many times.
-const V22_PATHS_RECOMMITS: u32 = 3;
+
+/// The wait before the `rounds`-th try again (1 for the first): `base`,
+/// doubling, never more than five minutes.
+fn v22_backoff(base: Duration, rounds: u32) -> Duration {
+    base.saturating_mul(1_u32 << rounds.saturating_sub(1).min(16))
+        .min(V22_TRANSFER_RETRY_DELAY_MAX)
+}
 
 /// Why a part's upload and commit stopped short.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3236,10 +3242,14 @@ struct V22TransferSlot {
     /// While only the list is committed again, what the result had already come to.
     keep: Option<V22TransferDone>,
     not_before: Option<std::time::Instant>,
+    /// `not_before` is the old-app wait, not a retry backoff.
+    app_waiting: bool,
+    /// Rounds that proved nothing in a row: the backoff's exponent.
     failed_rounds: u32,
     /// The next round commits first (a restart or a lost answer).
     resume: bool,
     paths_only: bool,
+    /// Times a settlement sent the list back: the backoff's exponent.
     recommits: u32,
 }
 
@@ -3254,8 +3264,6 @@ pub enum V22TransferPoll {
     AppWaiting { first: bool },
     Done(V22TransferDone),
     Reject,
-    /// Rounds that proved nothing, too many in a row: an unknown outcome.
-    GiveUp,
 }
 
 /// The transfers in flight, one task per attempt. A transfer or its commit
@@ -3297,16 +3305,20 @@ impl V22Transfers {
     }
 
     /// The settlement said the app does not hold the changed paths the bridge
-    /// had read back: commit the list again, the result as it was. `false`
-    /// after too many of those.
+    /// had read back: commit the list again, the result as it was, with no
+    /// bound on how often (the wait between tries grows by `v22_backoff`).
+    /// `false` only when there is no transfer to commit again.
     pub fn recommit_paths(&mut self, attempt_id: &str) -> bool {
         let Some(slot) = self.slots.get_mut(attempt_id) else { return false; };
-        if slot.recommits >= V22_PATHS_RECOMMITS {
-            return false;
+        slot.recommits = slot.recommits.saturating_add(1);
+        if slot.keep.is_none() {
+            slot.keep = slot.done.take();
         }
-        slot.recommits += 1;
-        slot.keep = slot.done.take();
+        slot.done = None;
         slot.paths_only = true;
+        slot.not_before = Some(std::time::Instant::now() +
+            v22_backoff(V22_TRANSFER_RETRY_DELAY, slot.recommits));
+        slot.app_waiting = false;
         true
     }
 
@@ -3336,6 +3348,10 @@ impl V22Transfers {
                         done = V22TransferDone { allowance_bytes: others + v22_paths_bytes(&done.paths),
                             paths: done.paths, ..kept };
                     }
+                    if slot.failed_rounds > 0 {
+                        eprintln!("amux wsl bridge: v22 transfer for attempt {} went through after {} round(s) that proved nothing",
+                            job.attempt_id, slot.failed_rounds);
+                    }
                     slot.paths_only = false;
                     slot.failed_rounds = 0;
                     slot.done = Some(done);
@@ -3345,20 +3361,24 @@ impl V22Transfers {
                     return V22TransferPoll::Reject;
                 },
                 Ok(V22TransferEnd::AppTooOld) => {
-                    let first = slot.not_before.is_none();
+                    let first = !slot.app_waiting;
                     // An old app takes no commit-first round: begin at the top again.
                     slot.resume = false;
+                    slot.app_waiting = true;
                     slot.not_before = Some(std::time::Instant::now() + V22_APP_WAIT);
                     return V22TransferPoll::AppWaiting { first };
                 },
                 Ok(V22TransferEnd::Retry) | Err(_) => {
-                    slot.failed_rounds += 1;
+                    slot.failed_rounds = slot.failed_rounds.saturating_add(1);
                     slot.resume = true;
-                    if slot.failed_rounds >= V22_TRANSFER_MAX_FAILED_ROUNDS {
-                        self.slots.remove(&job.attempt_id);
-                        return V22TransferPoll::GiveUp;
+                    slot.app_waiting = false;
+                    // One line when the transfer starts failing, none for each round.
+                    if slot.failed_rounds == 1 {
+                        eprintln!("amux wsl bridge warn: v22 transfer for attempt {} proved nothing this round; trying again with a growing wait, not halted",
+                            job.attempt_id);
                     }
-                    slot.not_before = Some(std::time::Instant::now() + V22_TRANSFER_RETRY_DELAY);
+                    slot.not_before = Some(std::time::Instant::now() +
+                        v22_backoff(V22_TRANSFER_RETRY_DELAY, slot.failed_rounds));
                     return V22TransferPoll::Waiting;
                 },
             }
@@ -3368,13 +3388,14 @@ impl V22Transfers {
         }
         if let Some(not_before) = slot.not_before {
             if std::time::Instant::now() < not_before {
-                return if slot.failed_rounds == 0 {
+                return if slot.app_waiting {
                     V22TransferPoll::AppWaiting { first: false }
                 } else {
                     V22TransferPoll::Waiting
                 };
             }
             slot.not_before = None;
+            slot.app_waiting = false;
         }
         job.mode = if slot.resume { V22TransferMode::CommitFirst } else { V22TransferMode::UploadAll };
         job.paths_only = slot.paths_only;
@@ -4617,7 +4638,7 @@ async fn run_bridge(mut scope: WorkerScope) -> i32 {
                                 // never wait for a transfer or a commit.
                                 let chunked = v22_result.as_ref().is_some_and(v22_uses_chunked_transfer);
                                 let mut transfer_done: Option<V22TransferDone> = None;
-                                let mut transfer_verdict: Option<Result<V22UsageRecord>> = None;
+                                let mut transfer_rejected = false;
                                 if let (true, Some(result), Some(socket)) = (chunked, v22_result.as_ref(), local.v22_socket.clone()) {
                                     let job = V22TransferJob { attempt_id: entry.delivery.attempt_id.clone(),
                                         worker: entry.delivery.worker.clone(),
@@ -4642,15 +4663,13 @@ async fn run_bridge(mut scope: WorkerScope) -> i32 {
                                             continue;
                                         },
                                         V22TransferPoll::Done(done) => transfer_done = Some(done),
-                                        V22TransferPoll::Reject => transfer_verdict = Some(Ok(V22UsageRecord::Rejected)),
-                                        V22TransferPoll::GiveUp => transfer_verdict = Some(Err(anyhow::anyhow!(
-                                            "v22 transfer outcome unknown"))),
+                                        V22TransferPoll::Reject => transfer_rejected = true,
                                     }
                                 }
                                 let result_record = if let Some(done) = &transfer_done {
                                     Ok(done.result)
-                                } else if let Some(verdict) = transfer_verdict {
-                                    verdict
+                                } else if transfer_rejected {
+                                    Ok(V22UsageRecord::Rejected)
                                 } else if outcome == "succeeded" {
                                     match v22_result.as_ref() {
                                         Some(result) => {
@@ -9361,35 +9380,53 @@ mod v22_transfer_tests {
     }
 
     #[tokio::test]
-    async fn rounds_that_prove_nothing_too_many_times_in_a_row_are_an_unknown_outcome() {
+    async fn rounds_that_prove_nothing_never_give_up_and_never_halt() {
         let run = Run::new();
         // An app that never takes a chunk: every round proves nothing.
         let app = mock_app(FakeApp { unavailable_uploads: u32::MAX, ..Default::default() });
-        let dead = app.api();
+        let api = app.api();
         let mut transfers = V22Transfers::new();
         let mut job = run.job(V22TransferMode::UploadAll);
         job.parts.changed_paths = None;
-        let mut gave_up = false;
+        let mut rounds = 0;
         for _ in 0..4000 {
             let (source, _) = run.source();
-            if transfers.poll(&dead, source, job.clone()).await == V22TransferPoll::GiveUp {
-                gave_up = true;
-                break;
-            }
+            // Always "keep waiting": there is no verdict to halt on.
+            assert_eq!(transfers.poll(&api, source, job.clone()).await, V22TransferPoll::Waiting);
+            rounds = transfers.slots.get(ATT).map_or(0, |slot| slot.failed_rounds);
+            if rounds >= 60 { break; }
             tokio::time::sleep(Duration::from_millis(2)).await;
         }
-        assert!(gave_up);
+        assert!(rounds >= 60, "{rounds}");
+        // From the second round on every round commits first.
+        let log = app.log();
+        let second = log.iter().position(|line| line == "POST result").unwrap();
+        assert!(second >= 3, "{log:?}");
+        let source = include_str!("wsl_bridge.rs");
+        let production = &source[..source.find("mod tests {").unwrap()];
+        assert!(!production.contains("GiveUp"));
+        assert!(!production.contains("V22_TRANSFER_MAX_FAILED_ROUNDS"));
     }
 
     #[test]
-    fn a_settlement_that_lost_the_paths_commits_them_again_a_few_times() {
+    fn the_wait_between_rounds_doubles_from_fifteen_seconds_to_five_minutes() {
+        let base = Duration::from_secs(15);
+        let waits: Vec<u64> = (1..=8).map(|rounds| v22_backoff(base, rounds).as_secs()).collect();
+        assert_eq!(waits, [15, 30, 60, 120, 240, 300, 300, 300]);
+        assert_eq!(v22_backoff(base, u32::MAX), Duration::from_secs(300));
+        assert_eq!(v22_backoff(Duration::ZERO, 9), Duration::ZERO);
+    }
+
+    #[test]
+    fn a_settlement_that_lost_the_paths_has_them_committed_again_without_a_bound() {
         let mut transfers = V22Transfers::new();
         assert!(!transfers.recommit_paths(ATT), "no transfer, nothing to commit again");
         transfers.slots.insert(ATT.into(), V22TransferSlot::default());
-        assert!(transfers.recommit_paths(ATT));
-        assert!(transfers.recommit_paths(ATT));
-        assert!(transfers.recommit_paths(ATT));
-        assert!(!transfers.recommit_paths(ATT));
+        for _ in 0..50 {
+            assert!(transfers.recommit_paths(ATT));
+        }
+        assert_eq!(transfers.slots[ATT].recommits, 50);
+        assert!(transfers.slots[ATT].paths_only);
         // The run loop keeps the attempt on exactly that reason and never
         // settles it unverified for it.
         let source = include_str!("wsl_bridge.rs");
@@ -9397,6 +9434,7 @@ mod v22_transfer_tests {
         let at = production.find("\"changed_paths_unrecorded\"").unwrap();
         let arm = &production[at..at + 300];
         assert!(arm.contains("transfers.recommit_paths("), "{arm}");
+        assert!(!production.contains("V22_PATHS_RECOMMITS"));
     }
 
     #[test]
