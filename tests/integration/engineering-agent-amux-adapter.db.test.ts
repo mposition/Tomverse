@@ -3,7 +3,6 @@ import { createHash, randomUUID } from "node:crypto";
 import { after, before, test } from "node:test";
 
 import {
-  AMUX_ATTACHMENT_MAX_PRISMA_CALLS,
   withAmuxRouteBudget,
 } from "@/lib/amux/dbBoundary";
 import {
@@ -306,7 +305,7 @@ const settleWithRun = (
     ENGINEERING_AGENT_AMUX_ROUTE_BUDGET_MS,
   );
 
-test("an attachment declares a bounded call budget", async () => {
+test("an attachment declares a positive whole number of calls", async () => {
   await assert.rejects(() =>
     startAmuxExecution(
       {
@@ -317,7 +316,7 @@ test("an attachment declares a bounded call budget", async () => {
         expectedRevision: 0,
       },
       {
-        prismaCalls: AMUX_ATTACHMENT_MAX_PRISMA_CALLS + 1,
+        prismaCalls: 0,
         work: async () => undefined,
       },
     ),

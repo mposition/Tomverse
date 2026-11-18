@@ -887,7 +887,6 @@ export const AMUX_DB_BOUNDARIES = {
 /**
  * - `AMUX_DB_DEADLINE_EXCEEDED`: refused before COMMIT, or at COMMIT by the
  *   commit deadline trigger (SQLSTATE AX001). Rolled back either way.
- * - `AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED`: refused before the call. Rolled back.
  * - `AMUX_DB_COMMIT_CHECK_MISSING`: the fence found no commit deadline trigger
  *   that will fire, so it refused rather than commit without the check. Rolled
  *   back.
@@ -911,7 +910,6 @@ export const AMUX_DB_BOUNDARIES = {
  */
 export type AmuxDbBoundaryErrorCode =
   | "AMUX_DB_DEADLINE_EXCEEDED"
-  | "AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED"
   | "AMUX_DB_COMMIT_CHECK_MISSING"
   | "AMUX_DB_OUTCOME_UNKNOWN"
   | "AMUX_DB_READ_BUSY"
@@ -1508,86 +1506,6 @@ export const withAmuxRouteBudget = <T>(
     work,
   );
 
-const PRISMA_MODEL_CALL_METHODS = new Set([
-  "aggregate",
-  "count",
-  "create",
-  "createMany",
-  "createManyAndReturn",
-  "delete",
-  "deleteMany",
-  "findFirst",
-  "findFirstOrThrow",
-  "findMany",
-  "findUnique",
-  "findUniqueOrThrow",
-  "groupBy",
-  "update",
-  "updateMany",
-  "updateManyAndReturn",
-  "upsert",
-]);
-const PRISMA_RAW_CALL_METHODS = new Set([
-  "executeRaw",
-  "executeRawUnsafe",
-  "queryRaw",
-  "queryRawUnsafe",
-]);
-
-const boundedTransactionClient = (
-  tx: Prisma.TransactionClient,
-  boundary: AmuxDbBoundary,
-  initialPrismaCalls: number,
-): Prisma.TransactionClient => {
-  let prismaCallCount = initialPrismaCalls;
-  const proxies = new WeakMap<object, object>();
-
-  const wrap = (value: unknown): unknown => {
-    if (
-      (typeof value !== "object" && typeof value !== "function") ||
-      value === null
-    ) {
-      return value;
-    }
-
-    const objectValue = value as object;
-    const existing = proxies.get(objectValue);
-    if (existing) return existing;
-
-    const proxy = new Proxy(objectValue, {
-      get(target, property, receiver) {
-        const member = Reflect.get(target, property, receiver);
-
-        if (
-          typeof property === "string" &&
-          typeof member === "function" &&
-          (PRISMA_MODEL_CALL_METHODS.has(property) ||
-            (property.startsWith("$") &&
-              PRISMA_RAW_CALL_METHODS.has(property.slice(1))))
-        ) {
-          return (...args: unknown[]) => {
-            prismaCallCount += 1;
-            if (prismaCallCount > boundary.prismaCallCeiling) {
-              throw new AmuxDbBoundaryError(
-                "AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED",
-                boundary.operation,
-              );
-            }
-            return Reflect.apply(member, target, args);
-          };
-        }
-
-        return wrap(member);
-      },
-    });
-
-    proxies.set(objectValue, proxy);
-    return proxy;
-  };
-
-  return wrap(tx) as Prisma.TransactionClient;
-};
-
 declare const AMUX_ATTACHED_TRANSACTION_BRAND: unique symbol;
 
 /**
@@ -1605,8 +1523,8 @@ export type AmuxAttachedTransaction = Prisma.TransactionClient & {
  * on the path where its own write succeeded, after every AMUX row it locks
  * and before the commit fence, so the adapter's rows come after AMUX's in the
  * lock order. A throw rolls the AMUX write back with it: the two are one fact
- * or neither happened. The attached calls go through the same bounded client
- * and count against the writer's ceiling, which `prismaCalls` widens.
+ * or neither happened. The attached calls run in the writer's transaction;
+ * `prismaCalls` widens the writer's planned time budget by that many calls.
  *
  * `beforeWrite`, where a writer offers it, runs after the writer's row locks
  * and before its first write, including a write on a refusal path (execution
@@ -1624,9 +1542,6 @@ export type AmuxAttachment<R> = {
   ) => Promise<void>;
 };
 
-/** Enough for an adapter's own checks, row and audit entry, and no more. */
-export const AMUX_ATTACHMENT_MAX_PRISMA_CALLS = 24;
-
 /** The writer's boundary, widened by exactly what its attachment declared. */
 export const amuxBoundaryWithAttachment = (
   boundary: AmuxDbBoundary,
@@ -1634,9 +1549,8 @@ export const amuxBoundaryWithAttachment = (
 ): AmuxDbBoundary => {
   if (attachment === undefined) return boundary;
   if (
-    !Number.isInteger(attachment.prismaCalls) ||
-    attachment.prismaCalls < 1 ||
-    attachment.prismaCalls > AMUX_ATTACHMENT_MAX_PRISMA_CALLS
+    !Number.isSafeInteger(attachment.prismaCalls) ||
+    attachment.prismaCalls < 1
   ) {
     throw new Error("AMUX attachment declares an invalid Prisma call budget");
   }
@@ -1818,7 +1732,11 @@ export async function withAmuxDbBoundary<T>(
         }
       }
 
-      const tx = boundedTransactionClient(rawTx, effectiveBoundary, 1);
+      // The declared calls size the time budget only; no count of ours
+      // refuses a call (owner direction 2026-11-18). The time budget, the
+      // database deadline and the commit fence still end the transaction
+      // inside its route.
+      const tx = rawTx;
       if (locksAdmission) {
         await lockAmuxRouteOrchestratorAdmission(tx, boundary.operation);
       }

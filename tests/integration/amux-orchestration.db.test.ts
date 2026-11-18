@@ -343,20 +343,20 @@ test("an anchored route deadline is not renewed by a later claim transaction", a
   }
 });
 
-test("AMUX Prisma-call ceiling refuses N+1 before issuing its SQL", async () => {
-  await assert.rejects(
-    withAmuxDbBoundary(
-      { operation: "ceiling_test", prismaCallCeiling: 3, isolation: "read" },
-      async (tx) => {
-        await tx.$queryRaw`SELECT 1`;
-        await tx.$queryRaw`SELECT 2`;
-        await tx.$queryRaw`SELECT 3`;
-      },
-    ),
-    (error: unknown) =>
-      error instanceof AmuxDbBoundaryError &&
-      error.code === "AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED",
+test("a transaction that makes more calls than it declared is not refused by a count", async () => {
+  // Owner direction 2026-11-18: the declared calls size the time budget only.
+  const rows = await withAmuxDbBoundary(
+    { operation: "ceiling_test", prismaCallCeiling: 3, isolation: "read" },
+    async (tx) => {
+      const values: number[] = [];
+      for (const n of [1, 2, 3, 4, 5]) {
+        const row = await tx.$queryRaw<Array<{ n: number }>>`SELECT ${n}::int AS n`;
+        values.push(row[0]!.n);
+      }
+      return values;
+    },
   );
+  assert.deepEqual(rows, [1, 2, 3, 4, 5]);
 });
 
 /** A duration as PostgreSQL shows it back from current_setting. */

@@ -587,26 +587,11 @@ test("stage S2-2b4: a decision with no outcome is read back with its binding unt
   assert.deepEqual(await unsettled(), { status: "none" });
 });
 
-test("each delivery route's boundary takes its operation, and one call fewer refuses it", async () => {
+test("each delivery route's boundary takes its operation", async () => {
   const basis = await proposed();
   await judge(basis.requestId, "confirm");
-  const shortRead = { ...AMUX_DB_BOUNDARIES.decisionMakerDeliveryCandidateRead, prismaCallCeiling: 6 };
-  await assert.rejects(
-    withAmuxDbBoundary(shortRead, (tx) => readDecisionMakerDeliveryCandidate(tx, { after: null })),
-    (error: unknown) => error instanceof AmuxDbBoundaryError && error.code === "AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED",
-  );
   assert.equal((await nextCandidate()).status, "ready");
-  const shortDecision = { ...AMUX_DB_BOUNDARIES.decisionMakerDeliveryDecision, prismaCallCeiling: 9 };
-  await assert.rejects(
-    withAmuxDbBoundary(shortDecision, (tx) => recordDecisionMakerDelivery(tx, { requestId: basis.requestId })),
-    (error: unknown) => error instanceof AmuxDbBoundaryError && error.code === "AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED",
-  );
   assert.equal((await decide(basis.requestId)).recorded, true);
-  const shortOutcome = { ...AMUX_DB_BOUNDARIES.decisionMakerDeliveryOutcome, prismaCallCeiling: 8 };
-  await assert.rejects(
-    withAmuxDbBoundary(shortOutcome, (tx) => recordDecisionMakerDeliveryOutcome(tx, { requestId: basis.requestId, outcome: "receipt" })),
-    (error: unknown) => error instanceof AmuxDbBoundaryError && error.code === "AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED",
-  );
   assert.equal((await settle(basis.requestId, "receipt")).recorded, true);
 });
 
