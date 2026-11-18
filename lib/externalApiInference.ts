@@ -41,6 +41,7 @@ import { noteSmartAdaptiveRefusal, rememberSmartAdaptiveToolCalls, routeSmartAda
 import { externalApiRunnableModels } from "@/lib/externalApiCatalog";
 import { externalApiAdmissionHook } from "@/lib/externalApiAdmission";
 import { pickRequestedModel } from "@/lib/externalApiProtocols";
+import { describeRequestShape, describeStreamFailure, requestShapeLogEnabled } from "@/lib/externalApiRequestShape";
 import { authenticateExternalApiKey, ExternalApiKeyError } from "@/lib/externalApiKeys";
 import { sha256Hex } from "@/lib/externalApiKeyCore";
 import { getModelGenerationSettings } from "@/lib/modelGenerationCompatibility";
@@ -250,6 +251,9 @@ export async function handleChatCompletions(request: Request): Promise<Response>
             body = JSON.parse(raw);
         } catch {
             throw new ProtocolError(400, "invalid_json", "The request body is not valid JSON.");
+        }
+        if (requestShapeLogEnabled(process.env)) {
+            console.log(JSON.stringify({ event: "external_api_request_shape", requestId, shape: describeRequestShape(body, [...request.headers.keys()]) }));
         }
         const parsed = parseChatCompletionRequest(body);
 
@@ -737,10 +741,33 @@ const createRun = (input: {
         emit: (chunk: unknown) => void
     ) => {
         keepAlive();
+        // EXTERNAL_API_REQUEST_SHAPE_LOG (dev only): the part types that led
+        // to a stream failure, and where it was thrown. Types only.
+        const trail = requestShapeLogEnabled(process.env) ? { startedAt: Date.now(), counts: {} as Record<string, number>, last: [] as string[] } : null;
+        const logFailure = (failure: unknown, via: string) => {
+            if (!trail) return;
+            console.log(
+                JSON.stringify({
+                    event: "external_api_stream_failure_shape",
+                    requestId: input.requestId,
+                    via,
+                    elapsedMs: Date.now() - trail.startedAt,
+                    aborted: input.controller.signal.aborted,
+                    counts: trail.counts,
+                    last: trail.last,
+                    failure: describeStreamFailure(failure),
+                })
+            );
+        };
         try {
             for await (const part of parts) {
+                if (trail) {
+                    trail.counts[part.type] = (trail.counts[part.type] ?? 0) + 1;
+                    trail.last = [...trail.last.slice(-19), part.type];
+                }
                 if (part.type === "error") {
                     streamError = part.error;
+                    logFailure(part.error, "error_part");
                     continue;
                 }
                 if (part.type === "abort") {
@@ -791,6 +818,7 @@ const createRun = (input: {
                 for (const chunk of translator.translate(part)) emit(chunk);
             }
         } catch (error) {
+            logFailure(error, "thrown");
             if (input.controller.signal.aborted) aborted = true;
             else streamError = error;
         }
