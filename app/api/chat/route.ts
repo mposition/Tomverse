@@ -5940,16 +5940,27 @@ async function handleChatPost(
         // A long-context turn's application tool loop (not MCP or Research
         // Preview, which keep their own step budgets) shares the reserved
         // output and input across its calls (lib/chatLongContextToolLoop.ts).
+        // Only where this application runs a tool loop (artifacts, its own
+        // search): a turn whose only tool is a provider-native search makes
+        // one call, and is left exactly as it was (its tool choice included).
         const longContextLoopStep =
             combinedToolConfig &&
+            (artifactToolConfig || appManagedSearchTool) &&
             !researchPreviewExecution &&
             !mcpConnector &&
             Number.isFinite(toolLoopStepCap) &&
+            toolLoopStepCap > 1 &&
             Number.isSafeInteger(modelConfig.contextWindowTokens)
                 ? longContextToolLoopStep({
                       maxOutputTokens: requestMaxOutputTokens,
                       inputTokens: budget.inputTokens,
-                      firstPromptTokens: budget.contextInputTokens ?? budget.inputTokens,
+                      // What the first call sends: the reservation-only image
+                      // allowance is reserved, never sent.
+                      firstPromptTokens: Math.max(
+                          0,
+                          (budget.contextInputTokens ?? budget.inputTokens) -
+                              reservationOnlyInputTokens
+                      ),
                       callCap: toolLoopStepCap,
                       contextWindowTokens: modelConfig.contextWindowTokens!,
                   })
@@ -6005,8 +6016,13 @@ async function handleChatPost(
                                   messages: ModelMessage[];
                               }) => ({
                                   ...(lookupStep?.(options) ?? {}),
-                                  ...longContextLoopStep(options),
+                                  ...longContextLoopStep.prepareStep(options),
                               }),
+                              // And no call once the reserved output is spent.
+                              stopWhen: [
+                                  ...[combinedToolConfig?.stopWhen ?? []].flat(),
+                                  longContextLoopStep.outputSpent,
+                              ],
                           }
                         : lookupStep
                           ? { prepareStep: lookupStep }
@@ -8461,6 +8477,21 @@ async function handleChatPost(
                                 };
                             }
                         }
+                    } else if (
+                        longContextLoopStep &&
+                        dispatched.attemptIndex === 0 &&
+                        longContextLoopStep.spent().steps > 0
+                    ) {
+                        // A long-context tool loop stopped before a call that
+                        // would not fit: the calls it already made are the
+                        // provider's real cost, recorded as such. The failed
+                        // turn's credits follow the failure rule.
+                        const spent = longContextLoopStep.spent();
+                        researchFailureUsage = {
+                            inputTokens: spent.inputTokens,
+                            outputTokens: spent.outputTokens,
+                            usageFromProvider: true,
+                        };
                     }
                     await settleSafely(
                         "failed",

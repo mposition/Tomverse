@@ -74,7 +74,12 @@ export async function buildMcpChatTools(input: {
       cumulativeInput = Math.max(cumulativeInput, steps.reduce((sum, step) => sum + (step.usage.inputTokens || 0), 0)) +
         toReservedInputTokens(estimateTokenBreakdown(JSON.stringify(messages) + instructions)) + definitionTokens;
       if (cumulativeInput > inputCeiling) throw new McpConnectorError("model_input_budget");
-      const used = steps.reduce((sum, step) => sum + (step.usage.outputTokens || 0), 0);
+      // A step whose output the provider did not report is taken to have spent
+      // the budget: counting it as zero would reopen the whole output cap on
+      // every later step (review r-20261118-113741-eaa398).
+      const used = steps.some((step) => !Number.isSafeInteger(step.usage.outputTokens))
+        ? outputCeiling
+        : steps.reduce((sum, step) => sum + step.usage.outputTokens!, 0);
       if (used >= outputCeiling) throw new McpConnectorError("model_output_limit");
       return { maxOutputTokens: outputCeiling - used, ...(steps.length === MCP_CHAT_MAX_STEPS - 1 ? { toolChoice: "none" as const } : {}) };
     },

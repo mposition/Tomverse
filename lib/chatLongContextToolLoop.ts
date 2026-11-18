@@ -46,7 +46,7 @@ export type LongContextToolLoopStep = {
 
 /** Raised before a step that would not fit; that call is never sent. */
 export class LongContextToolLoopLimitError extends Error {
-    constructor(readonly reason: "input_budget" | "context_window") {
+    constructor(readonly reason: "input_budget" | "context_window" | "output_budget") {
         super(`long-context tool loop: ${reason}`);
         this.name = "LongContextToolLoopLimitError";
     }
@@ -58,11 +58,44 @@ export const NEXT_ANSWER_ROOM_TOKENS = 4_096;
 const counted = (value: number | undefined): value is number =>
     Number.isSafeInteger(value) && value! >= 0;
 
-export const longContextToolLoopStep = (limits: LongContextToolLoopLimits) => {
-    // Per step, what this function allowed it: its prompt and its output cap.
+export type LongContextToolLoop = {
+    /** For the SDK's `prepareStep`. */
+    prepareStep: (options: {
+        steps: readonly StepUsage[];
+        messages: unknown;
+    }) => LongContextToolLoopStep;
+    /**
+     * For the SDK's `stopWhen`: the reserved output is spent, so another call
+     * could only re-send the prompt for an answer it has no room to write.
+     */
+    outputSpent: (options: { steps: readonly StepUsage[] }) => boolean;
+    /** What the finished steps used, unreported ones at their allowance. */
+    spent: () => { inputTokens: number; outputTokens: number; steps: number };
+};
+
+export const longContextToolLoopStep = (
+    limits: LongContextToolLoopLimits
+): LongContextToolLoop => {
+    // Per step, what this loop allowed it: its prompt and its output cap.
     const allowed: Array<{ prompt: number; outputCap: number }> = [];
     let firstMessagesTokens = 0;
-    return ({
+    let lastTally = { inputTokens: 0, outputTokens: 0, steps: 0 };
+    const tally = (steps: readonly StepUsage[]) => {
+        let inputTokens = 0;
+        let outputTokens = 0;
+        steps.forEach((step, index) => {
+            const granted = allowed.at(index);
+            inputTokens += counted(step.usage.inputTokens)
+                ? step.usage.inputTokens
+                : granted?.prompt ?? limits.firstPromptTokens;
+            outputTokens += counted(step.usage.outputTokens)
+                ? step.usage.outputTokens
+                : granted?.outputCap ?? limits.maxOutputTokens;
+        });
+        lastTally = { inputTokens, outputTokens, steps: steps.length };
+        return lastTally;
+    };
+    const prepareStep = ({
         steps,
         messages,
     }: {
@@ -70,20 +103,8 @@ export const longContextToolLoopStep = (limits: LongContextToolLoopLimits) => {
         messages: unknown;
     }): LongContextToolLoopStep => {
         const messagesTokens = estimatePromptTokens(JSON.stringify(messages ?? []));
-        let usedInput = 0;
-        let usedOutput = 0;
+        const { inputTokens: usedInput, outputTokens: usedOutput } = tally(steps);
         let largestGrowth = 0;
-        steps.forEach((step, index) => {
-            const granted = allowed.at(index);
-            const input = counted(step.usage.inputTokens)
-                ? step.usage.inputTokens
-                : granted?.prompt ?? limits.firstPromptTokens;
-            const output = counted(step.usage.outputTokens)
-                ? step.usage.outputTokens
-                : granted?.outputCap ?? limits.maxOutputTokens;
-            usedInput += input;
-            usedOutput += output;
-        });
         let prompt: number;
         if (steps.length === 0) {
             firstMessagesTokens = messagesTokens;
@@ -108,6 +129,11 @@ export const longContextToolLoopStep = (limits: LongContextToolLoopLimits) => {
             }
         }
         const remainingOutput = limits.maxOutputTokens - usedOutput;
+        // Never reached with nothing left to write: `outputSpent` ends the
+        // loop first. Defensive only.
+        if (steps.length > 0 && remainingOutput <= 0) {
+            throw new LongContextToolLoopLimitError("output_budget");
+        }
         const answerCap = Math.max(
             1,
             Math.min(remainingOutput, limits.contextWindowTokens - prompt)
@@ -133,5 +159,10 @@ export const longContextToolLoopStep = (limits: LongContextToolLoopLimits) => {
             maxOutputTokens: outputCap,
             ...(finalCall ? { toolChoice: "none" as const } : {}),
         };
+    };
+    return {
+        prepareStep,
+        outputSpent: ({ steps }) => tally(steps).outputTokens >= limits.maxOutputTokens,
+        spent: () => lastTally,
     };
 };
