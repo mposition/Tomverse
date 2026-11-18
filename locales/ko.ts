@@ -1,4 +1,5 @@
 import { reviewActionsCopy } from "./reviewActions";
+import { externalApiCopy } from "./externalApi";
 import { reviewHandoffCopy } from "./reviewHandoff";
 import { researchPreviewCopy } from "./researchPreview";
 import { workspaceWelcomeCopy } from "./workspaceWelcome";
@@ -9,6 +10,7 @@ import { en } from "./en";
 // it that way. It was the only complete locale with nothing enforcing it.
 export const ko = {
     reviewActions: reviewActionsCopy.ko,
+    externalApi: externalApiCopy.ko,
     reviewHandoff: reviewHandoffCopy.ko,
     journey: {
         receiptSent: "이번 시도 입력에 원문 포함: 선택 {selected}개 + 최근 {recent}개 (고유 메시지 {unique}개)",

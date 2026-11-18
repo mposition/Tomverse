@@ -2,6 +2,7 @@ import { amuxV22TaskWritesPatch } from "./v22WorkerClaimCore.ts";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { amuxCanonicalJson } from "./boardImportCore.ts";
+import { decideAmuxAttemptBudget } from "./executionBudgetCore.ts";
 import { checkV4TaskApprovedCeiling,
   type V4TaskCostCeilingReceipt } from "./v4TaskCostCeilingCore.ts";
 import { AMUX_V22_READ_ONLY_RETRY_PROTOCOL_VERSION,
@@ -34,6 +35,29 @@ export const AMUX_V22_UNKNOWN_PRIOR_HELD_MICROUSD = BigInt("3400000");
 export const AMUX_V22_READ_ONLY_RETRY_CAP_MICROUSD = BigInt("3400000");
 export const AMUX_V22_READ_ONLY_RETRY_EXPOSURE_MICROUSD = BigInt("6800000");
 export const AMUX_V22_READ_ONLY_RETRY_TASK_ATTEMPT_LIMIT = 2;
+/**
+ * The most counted attempts a card may have when its next run is a paid
+ * (risk-accepted) retry or a recovery approval for one. A paid run spends real
+ * money, so this bound stays when an ordinary card has none (owner direction
+ * 2026-11-18); it is the value the ordinary bound had until then.
+ */
+export const AMUX_V22_PAID_RETRY_ATTEMPT_LIMIT = 30;
+
+/** A paid (risk-accepted) retry's count against its bound: the claim, the
+ * start and the recovery approval all ask this. */
+export function recoveryAttemptBudget(input: {
+  historicalAttempts: number;
+  greatestAttemptNumber: number | null;
+  /** The Task's platform failures: they use none of the bound, as in
+   * priorBudget, so the approval, the claim and the start count alike. */
+  infraRows: number;
+}) {
+  // A paid run keeps a bound while an ordinary card has none.
+  return decideAmuxAttemptBudget({ historical_rows: input.historicalAttempts,
+    greatest_attempt_number: input.greatestAttemptNumber,
+    infra_rows: input.infraRows,
+    max_attempts: AMUX_V22_PAID_RETRY_ATTEMPT_LIMIT });
+}
 export const AMUX_V22_READ_ONLY_LAUNCH_SCOPE_VERSION =
   AMUX_V22_READ_ONLY_RETRY_PROTOCOL_VERSION;
 export const AMUX_V22_TASK_RECOVERY_ENABLED_ENV = "TOMVERSE_AMUX_V22_TASK_RECOVERY_ENABLED";

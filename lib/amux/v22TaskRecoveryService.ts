@@ -16,7 +16,6 @@ import { resolveV4TaskApiExecutionBasis } from "./v4TaskCostCatalogCore.ts";
 import { evaluateAmuxV4TaskReadyInTransaction, loadAmuxV4TaskReadyContext } from "./v4TaskReadyService.ts";
 import { lockAmuxResourcePolicies, evaluateLockedAmuxCostAdmission } from "./resourcePolicy.ts";
 import { amuxResourceRefs } from "./resourcePolicyCore.ts";
-import { decideAmuxAttemptBudget } from "./executionBudgetCore.ts";
 import { readAmuxAttemptBudgetFacts } from "./infraFailureStore.ts";
 import { AMUX_WORKER_RUNTIME_LEASE_MS } from "./workerRuntime.ts";
 import { recordAmuxV22RecoveryEvidenceAudit,
@@ -46,7 +45,8 @@ import { AMUX_V22_RECOVERY_HOST_SCOPE, AMUX_V22_TASK_RECOVERY_POLICY_VERSION,
   type AmuxV22RecoveryEvidenceInput, type AmuxV22SafeStopEvidenceInput,
   type AmuxV22ReadOnlyLaunchProofInput,
   type AmuxV22RecoveryRead, type AmuxV22RecoveryPreApprovalRead,
-  type AmuxV22RecoveryPreApprovalQuote } from "./v22TaskRecoveryCore.ts";
+  type AmuxV22RecoveryPreApprovalQuote,
+  recoveryAttemptBudget as recoveryAttemptBudgetCore } from "./v22TaskRecoveryCore.ts";
 import { amuxV22SafeStopFencedWorkers } from "./v22LegacySafeStopFence.ts";
 import { readAmuxAssignmentCatalogs } from "./workerAssignmentCatalog.ts";
 import { amuxV22OneShotRouteSupported, amuxV22RequiredTool,
@@ -113,6 +113,10 @@ async function auditBound(tx: Prisma.TransactionClient, auditId: string,
     row.targetId === targetId && (ownerId ? row.actorUserId === ownerId &&
       auditRowActorKind(row) === "human" : auditRowActorKind(row) === "system");
 }
+const recoveryAttemptBudgetOf = (prior: { historicalRows: number;
+  greatestAttemptNumber: number | null; infraRows: number }) =>
+  recoveryAttemptBudgetCore({ historicalAttempts: prior.historicalRows,
+    greatestAttemptNumber: prior.greatestAttemptNumber, infraRows: prior.infraRows });
 async function priorBudget(tx: Prisma.TransactionClient, taskId: string) {
   // The claim's own count (owner decision 2026-11-15): infrastructure
   // failures use none of the card's attempts. The approval still binds the
@@ -122,9 +126,7 @@ async function priorBudget(tx: Prisma.TransactionClient, taskId: string) {
   // starts that bound over for the runs after it.
   const prior = await readAmuxAttemptBudgetFacts(tx, taskId);
   const numbered = Math.max(prior.historicalRows, prior.greatestAttemptNumber ?? 0);
-  if (!decideAmuxAttemptBudget({ historical_rows: prior.historicalRows,
-    greatest_attempt_number: prior.greatestAttemptNumber, infra_rows: prior.infraRows,
-  }).allowed)
+  if (!recoveryAttemptBudgetOf(prior).allowed)
     throw new BoardImportError("attempt_budget_exhausted", 409);
   return { historicalAttempts: prior.historicalRows, nextAttemptNumber: numbered + 1,
     reserved: prior.reservedMicrousd };
@@ -2173,10 +2175,6 @@ export function amuxV22ApiModelAccessCurrent(authority: null | {
     now.getTime() - authority.launchProofRecordedAt.getTime() <= 90_000;
 }
 
-export function recoveryAttemptBudget(input: {
-  historicalAttempts: number;
-  greatestAttemptNumber: number | null;
-}) {
-  return decideAmuxAttemptBudget({ historical_rows: input.historicalAttempts,
-    greatest_attempt_number: input.greatestAttemptNumber });
-}
+// The paid retry's bound lives in the pure core so that the claim, the start
+// and this service count one way (review r-20261118-045348-47710f).
+export { recoveryAttemptBudget } from "./v22TaskRecoveryCore.ts";

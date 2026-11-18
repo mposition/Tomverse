@@ -151,8 +151,9 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
       "The server currently permits a retry from this bound review. Read the exact scope, prior evidence, attempt limit, cost status and effect before preparing the existing proposal.",
     retryScope: "Exact work scope",
     retryAttemptLimit: "Attempt limit",
-    retryAttemptLimitValue: (used: number, limit: number, remaining: number) =>
-      `${used} of ${limit} attempts used · ${remaining} remain before any new attempt`,
+    retryAttemptLimitValue: (used: number, limit: number | null, remaining: number | null) =>
+      limit === null || remaining === null ? `${used} attempts used · no limit` :
+        `${used} of ${limit} attempts used · ${remaining} remain before any new attempt`,
     retryCorrectionEvidence: "What changed",
     retryCorrectionUnavailable:
       "No separate structured correction record is connected. Verify the worker report and card history; this screen does not infer that dependencies are complete.",
@@ -212,6 +213,7 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
     attemptEndedAt: "Attempt ended",
     noAttempt: "No execution attempt",
     attemptBudget: "Attempt budget",
+    noAttemptLimit: "No limit",
     exhaustedRequiresNewTask:
       "This task has exhausted its five attempts. Blocking is terminal; continue only by issuing a new task.",
     remaining: "remaining",
@@ -483,8 +485,9 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
       "현재 기록에서는 이 작업을 다시 맡기는 선택이 허용되어 있습니다. 선택을 준비하기 전에 작업 내용·이전 실행 기록·시도 상한·비용 상태·효과를 읽으세요.",
     retryScope: "다시 맡길 작업과 완료 조건",
     retryAttemptLimit: "시도 상한",
-    retryAttemptLimitValue: (used: number, limit: number, remaining: number) =>
-      `${limit}회 중 ${used}회 사용 · 새 시도 전 잔여 ${remaining}회`,
+    retryAttemptLimitValue: (used: number, limit: number | null, remaining: number | null) =>
+      limit === null || remaining === null ? `${used}회 사용 · 상한 없음` :
+        `${limit}회 중 ${used}회 사용 · 새 시도 전 잔여 ${remaining}회`,
     retryCorrectionEvidence: "무엇이 달라졌나요?",
     retryCorrectionUnavailable:
       "무엇을 고쳤는지 보여 주는 별도 기록은 연결돼 있지 않습니다. 작업자 보고서와 카드 이력을 확인하세요. 이 화면은 선행 작업이 끝났다고 추정하지 않습니다.",
@@ -554,6 +557,7 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
     attemptEndedAt: "시도 종료 시각",
     noAttempt: "실행 시도 없음",
     attemptBudget: "시도 한도",
+    noAttemptLimit: "상한 없음",
     exhaustedRequiresNewTask:
       "이 작업은 시도 5회를 소진했습니다. 차단하면 종결되며, 계속하려면 새 task를 발행해야 합니다.",
     remaining: "잔여",

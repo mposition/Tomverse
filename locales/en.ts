@@ -1,4 +1,5 @@
 import { reviewActionsCopy } from "./reviewActions";
+import { externalApiCopy } from "./externalApi";
 import { reviewHandoffCopy } from "./reviewHandoff";
 import { researchPreviewCopy } from "./researchPreview";
 import { englishLocationBody } from "./privacyLocation";
@@ -7,6 +8,7 @@ import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 
 export const en = {
     reviewActions: reviewActionsCopy.en,
+    externalApi: externalApiCopy.en,
     reviewHandoff: reviewHandoffCopy.en,
     journey: {
         receiptSent: "Source included in this attempt: {selected} selected + {recent} recent ({unique} unique messages)",

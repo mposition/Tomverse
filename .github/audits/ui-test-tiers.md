@@ -77,6 +77,7 @@ desktop-chromium과 mobile-chromium 각 project에서 **62개 파일, 866 test**
 | `comparison-panel-controls.spec.ts` |
 | `csp-eval-free.spec.ts` |
 | `email-notification-settings.spec.ts` |
+| `external-api-settings.spec.ts` |
 | `external-import-settings.spec.ts` |
 | `feedback-modal.spec.ts` |
 | `generated-artifact-card.spec.ts` |

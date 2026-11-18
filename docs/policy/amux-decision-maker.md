@@ -218,6 +218,13 @@ approvedBy: mposition · approvedAt: 2026-10-17 · 정책 버전: 2
 1. 항상 켜져 있던 DM 경로의 스위치를 없앴다: `TOMVERSE_AMUX_DM_ROUTING`(DM route는 인증 뒤 늘 열리고, DM 전체 kill switch는 DB 값 `on`/`off`/`proposal`이 그대로 맡는다), `TOMVERSE_AMUX_DM_OWNER_SETTLEMENT`, `TOMVERSE_AMUX_V22_RESULT_REVIEW_DM`, `TOMVERSE_ENGINEERING_AGENT_T2_DM_REVIEW`.
 2. 남긴 것: DM 승인자(`TOMVERSE_AMUX_DM_APPROVER`), 병합 범위(`TOMVERSE_AMUX_DM_MERGE_SCOPE`), `TOMVERSE_AMUX_DM_T2_MERGE`(자율 에이전트의 병합 권한), box relay 시작 조건(`TOMVERSE_AMUX_DM_RELAY`), 그리고 사람 경계 용어 검사를 지키는 `TOMVERSE_AMUX_DM_TERMS_FIXED_TEXT_ONLY`. 값은 `enabled`/`disabled`로 적는다.
 
+## 0e. 운영자 지시 (2026-11-18, 대화) — transaction의 call 수 상한 없음
+
+"transaction마다 DB call 수에 상한이 있습니다"를 없애라는 지시에 따라, AMUX DB 경계는 선언한 call 수를 넘는
+호출을 더는 거절하지 않는다(`AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED`와 attachment의 24 call 상한을 없앴다).
+§9의 "12문장"과 각 경계의 선언 수는 시간 예산을 계산하는 값으로만 남는다. 트랜잭션은 여전히 DB 마감과 commit
+fence, route 마감 안에서 끝난다. 연산마다 실제 SQL 문장 수를 고정하는 테스트는 코드 구조를 보는 검사로 남긴다.
+
 ## 1. 목적과 경계
 
 AMUX worker가 운영자의 답을 요구하는 질문(로컬 AMUX board의 typed ask)을 DM이 먼저 읽고 **답의 제안**을
@@ -698,8 +705,9 @@ DM 출력은 `.strict()` 스키마 값 하나이며 종류별로 검증한다.
   계수기는 두지 않는다. 그 셋에서 유도한 12 × (200 + 100) + 200 = 3,800 ms는 **timeout 설정문이 끝난 뒤의**
   트랜잭션 예산이며, 앱이 유도한 값이고 DB 상한이 아니다. `transaction_timeout`은 걸지 않는다. CI에 PostgreSQL
   16이 있고 16에는 그 설정이 없으며, 기존 경계도 같은 이유로 걸지 않는다. route 예산은 `AMUX_ROUTE_BUDGET_MS`
-  (15초)이고, 남은 route 시간이 3,800 ms보다 짧으면 트랜잭션을 시작하지 않는다(`amuxRouteHasBudgetForMs`).
-  연결 대기도 남은 시간에서 그 예산을 뺀 만큼으로 묶는다(`amuxDbConnectionWaitMs`). DB 상한 없이 남는 구간은
+  (15초)다. 남은 route 시간이 3,800 ms보다 짧으면 트랜잭션은 거절되지 않고 남은 시간에서 연결 대기를 뺀
+  만큼을 자기 마감으로 쓴다(`amuxDbTransactionBudgetWithinRouteMs`, 2026-11-18). 그만큼도 호출 하나를 담지
+  못할 때만 시작하지 않는다. 연결 대기도 남은 시간에서 그 예산을 뺀 만큼으로 묶는다(`amuxDbConnectionWaitMs`). DB 상한 없이 남는 구간은
   `BEGIN`부터 timeout 설정문이 끝날 때까지와 COMMIT 검사 뒤의 기록·flush다.
 - worker에게 확정된 답을 전달한 결과가 불명확하면 다시 보내지 않는다. 그 요청을 `delivery_unknown`으로
   두고, **그 worker 세션을 일시 정지**(AMUX pause)한 뒤 로컬 메시지 멱등 키로 전달 영수증을 조회한다. 확정되지

@@ -1,4 +1,5 @@
 import { reviewActionsCopy } from "./reviewActions";
+import { externalApiCopy } from "./externalApi";
 import { reviewHandoffCopy } from "./reviewHandoff";
 import { researchPreviewCopy } from "./researchPreview";
 import { workspaceWelcomeCopy } from "./workspaceWelcome";
@@ -24,6 +25,7 @@ import { en } from "./en";
  */
 export const zh = {
     reviewActions: reviewActionsCopy.zh,
+    externalApi: externalApiCopy.zh,
     reviewHandoff: reviewHandoffCopy.zh,
     journey: {
         receiptSent: "本次尝试的输入包含原文：已选 {selected} 个 + 最近 {recent} 个（去重后 {unique} 条消息）",

@@ -1,4 +1,5 @@
 import { reviewActionsCopy } from "./reviewActions";
+import { externalApiCopy } from "./externalApi";
 import { reviewHandoffCopy } from "./reviewHandoff";
 import { researchPreviewCopy } from "./researchPreview";
 import { workspaceWelcomeCopy } from "./workspaceWelcome";
@@ -7,6 +8,7 @@ import { en } from "./en";
 
 export const de = {
     reviewActions: reviewActionsCopy.de,
+    externalApi: externalApiCopy.de,
     reviewHandoff: reviewHandoffCopy.de,
     journey: {
         receiptSent: "Quelle in diesem Versuch: {selected} ausgewählt + {recent} aktuell ({unique} eindeutige Nachrichten)",
