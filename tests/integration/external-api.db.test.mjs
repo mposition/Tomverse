@@ -290,6 +290,46 @@ test("external inference API over the real shared credit ledger", { skip: !datab
         script = textScript("Hello from the fixture.");
     });
 
+    await t.test("system and developer messages reach the provider where the client put them", async () => {
+        // The shape Aside (Pi openai-completions) and VS Code send: instructions
+        // first, often as developer, sometimes a later system note.
+        const userId = await newUser();
+        allow(userId);
+        const { key } = await issueKey(userId);
+        const response = await call(
+            key,
+            body({
+                messages: [
+                    { role: "developer", content: "You are a coding agent." },
+                    { role: "user", content: [{ type: "text", text: "Hi" }] },
+                    { role: "assistant", content: "Hello." },
+                    { role: "system", content: "The workspace changed." },
+                    { role: "user", content: "Continue" },
+                ],
+            })
+        );
+        assert.equal(response.status, 200);
+        assert.deepEqual(lastCalls.at(-1).prompt.map((m) => m.role), ["system", "user", "assistant", "system", "user"]);
+    });
+
+    await t.test("a request the SDK or adapter refuses before sending is a 400 that costs nothing", async () => {
+        const userId = await newUser();
+        allow(userId);
+        const { key } = await issueKey(userId);
+        const { UnsupportedFunctionalityError } = await import("ai");
+        script = () => {
+            throw new UnsupportedFunctionalityError({ functionality: "synthetic request shape" });
+        };
+        const response = await call(key, body());
+        assert.equal(response.status, 400);
+        assert.equal((await response.json()).error.code, "unsupported_request");
+        const [reservation] = await reservationsFor(userId);
+        assert.equal(reservation.outcome, "failed");
+        assert.equal(reservation.settledCredits, 0);
+        assert.equal(reservation.settledCostMicroUsd, 0n, "nothing left this process, so no provider cost");
+        script = textScript("Hello from the fixture.");
+    });
+
     await t.test("OpenAI calls never ask the provider to store the request", async () => {
         const userId = await newUser();
         allow(userId);

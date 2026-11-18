@@ -1,6 +1,16 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { APICallError, jsonSchema, stepCountIs, streamText, tool, type ModelMessage, type ToolSet } from "ai";
+import {
+    APICallError,
+    InvalidPromptError,
+    jsonSchema,
+    stepCountIs,
+    streamText,
+    tool,
+    UnsupportedFunctionalityError,
+    type ModelMessage,
+    type ToolSet,
+} from "ai";
 import { getActiveAiModel } from "@/lib/activeAiModel";
 import { getUserBillingPlan } from "@/lib/billingEntitlements";
 import { estimateImageInputTokens, readImageDimensions } from "@/lib/chatImageInputTokens";
@@ -137,12 +147,20 @@ type Outcome = "completed" | "empty" | "cancelled" | "failed";
  * may come after the provider processed the request, so its cost is
  * unknown and stays at the reservation's estimate.
  */
+/**
+ * Raised by the SDK or the provider adapter while building the request, so
+ * nothing was sent: the request shape is one this provider cannot carry.
+ */
+const refusedBeforeDispatch = (error: unknown) =>
+    InvalidPromptError.isInstance(error) || UnsupportedFunctionalityError.isInstance(error);
+
 const providerRefused = (error: unknown) =>
-    APICallError.isInstance(error) &&
+    refusedBeforeDispatch(error) ||
+    (APICallError.isInstance(error) &&
     typeof error.statusCode === "number" &&
     error.statusCode >= 400 &&
     error.statusCode < 500 &&
-    error.statusCode !== 408;
+    error.statusCode !== 408);
 
 const recordReceipt = (requestId: string, data: { finishReason?: string | null; errorCode?: string | null }) =>
     prisma.externalApiRequest
@@ -376,6 +394,9 @@ export async function handleChatCompletions(request: Request): Promise<Response>
             maxOutputTokens: budget.maxOutputTokens,
             maxRetries: 0,
             stopWhen: stepCountIs(1),
+            // System and developer messages stay where the client put them;
+            // the provider adapter decides how its API carries them.
+            allowSystemInMessages: true,
             abortSignal: controller.signal,
         });
 
@@ -615,6 +636,13 @@ const createRun = (input: {
                 status: reason === "timeout" ? 504 : 499,
                 code: reason === "timeout" ? "upstream_timeout" : "request_cancelled",
                 message: reason === "timeout" ? "The model did not finish in time." : "The request was cancelled.",
+            };
+        } else if (streamError && refusedBeforeDispatch(streamError)) {
+            outcome = "failed";
+            error = {
+                status: 400,
+                code: "unsupported_request",
+                message: "This model's provider cannot accept this request as sent. Nothing was sent or charged.",
             };
         } else if (streamError) {
             outcome = "failed";
