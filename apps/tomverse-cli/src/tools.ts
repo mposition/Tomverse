@@ -158,21 +158,30 @@ const searchTool = (ctx: ToolContext, input: { pattern: string; path?: string; r
     const matches: string[] = [];
     let truncated = false;
     if (ripgrepAvailable()) {
-        const args = ["--no-config", "--line-number", "--no-heading", "--color", "never", "--max-columns", "300", "--max-columns-preview", "--max-filesize", "1M"];
+        // --null ends each path with NUL: a path may itself contain ':'.
+        const args = ["--no-config", "--null", "--line-number", "--no-heading", "--color", "never", "--max-columns", "300", "--max-columns-preview", "--max-filesize", "1M"];
         if (!input.regex) args.push("--fixed-strings");
         if (!input.caseSensitive) args.push("--ignore-case");
         args.push("-e", input.pattern, "--", where.relative === "." ? "." : where.relative);
         const result = spawnSync("rg", args, { cwd: ctx.workspace.root, encoding: "utf8", maxBuffer: 16 * 1024 * 1024, windowsHide: true, shell: false, timeout: 30_000, env: commandEnv() });
         if (result.status !== 0 && result.status !== 1) return { status: "error", error: (result.stderr || "search failed").slice(0, 500) };
         for (const line of (result.stdout ?? "").split(/\r?\n/)) {
-            if (!line) continue;
-            const file = line.split(":")[0] ?? "";
-            if (isSecretPath(file.replace(/^\.\//, ""))) continue;
+            const end = line.indexOf("\0");
+            // No NUL: not a match line we can attribute to a path (e.g. a name with a newline).
+            if (end <= 0) continue;
+            const file = line.slice(0, end).replace(/^\.[\\/]/, "").replaceAll("\\", "/");
+            if (isSecretPath(file)) continue;
+            // The same real-path rule as read_file: a match inside a link out of the folder is dropped.
+            try {
+                ctx.workspace.resolve(file, "read");
+            } catch {
+                continue;
+            }
             if (matches.length >= max) {
                 truncated = true;
                 break;
             }
-            matches.push(line.replace(/^\.\//, ""));
+            matches.push(`${file}:${line.slice(end + 1)}`);
         }
         return { status: "ok", engine: "ripgrep", matches, truncated };
     }

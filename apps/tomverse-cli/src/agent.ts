@@ -610,6 +610,11 @@ export class Runner {
         const lastCompaction = journal.state.compactions.at(-1);
         if (!force && lastCompaction && lastCompaction.requestSeq >= journal.state.generations.length - 1) return "skipped";
         if (journal.state.pendingApprovals.length) return "skipped";
+        // A summary is a paid request too: none while an earlier outcome is unknown.
+        if (journal.unresolvedGenerations().length) {
+            if (force) options.output.info("Not compacting: an earlier request's outcome is not known yet.");
+            return "skipped";
+        }
         const cut = findCompactionCut(journal.state.messages);
         if (cut <= 0) {
             options.output.info("The history cannot be compacted at a safe point yet.");
@@ -636,7 +641,8 @@ export class Runner {
             const facts = this.recordedFacts();
             journal.state.messages = [{ role: "user", content: `${SUMMARY_HEADER}\n${summary}\n\n${facts}` }, ...tail];
             journal.state.compactions.push({ at: new Date().toISOString(), requestSeq: journal.state.generations.length, replacedMessages: cut });
-            journal.closeGenerations(journal.state.generations.filter((g) => g.purpose === "compact"));
+            // Only this attempt's request: an older unresolved one stays unresolved.
+            journal.closeGenerations(journal.state.generations.slice(attemptStart));
             journal.commit();
             options.output.event({ type: "compaction", replaced_messages: cut, kept_messages: tail.length });
             options.output.info(`Compacted ${cut} earlier messages into a summary.`);

@@ -8,7 +8,10 @@ import { FakeGateway, lastUserText, toolResultsSinceUser, type ScriptedReply } f
 import { makeRepo, makeRunner, scriptedPrompter, tempDir } from "./helpers.js";
 import { readKey } from "../src/auth.js";
 import { costLine } from "../src/main.js";
-import { normalizeRoot, PathError } from "../src/workspace.js";
+import { normalizeRoot, PathError, Workspace } from "../src/workspace.js";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, writeFileSync } from "node:fs";
+import { TEST_KEY } from "./fakeGateway.js";
 import { Journal } from "../src/session.js";
 import { Runner } from "../src/agent.js";
 
@@ -78,7 +81,7 @@ test("the key leaves the process environment as soon as it is read, so no helper
     for (const file of readdirSync(src).filter((f) => f.endsWith(".ts"))) {
         const text = readFileSync(join(src, file), "utf8");
         const calls = (text.match(/\bspawn(?:Sync)?\(/g) ?? []).length;
-        const withEnv = (text.match(/env: commandEnv\(/g) ?? []).length;
+        const withEnv = (text.match(/env: (?:commandEnv|gitEnv)\(/g) ?? []).length;
         assert.ok(withEnv >= calls, `${file}: ${calls} process start(s), ${withEnv} with the minimal environment`);
     }
 });
@@ -99,3 +102,72 @@ test("a workspace inside a credential folder is refused", () => {
     }
     assert.ok(normalizeRoot(base));
 });
+
+test("no compaction (a paid request) while an earlier outcome is unknown; a later success does not close it", () =>
+    withGateway(
+        () => ({ text: "summary" }),
+        async (gateway) => {
+            const { runner, journal } = await makeRunner(gateway, makeRepo(), { prompter: null });
+            journal.state.messages.push({ role: "user", content: "a" }, { role: "assistant", content: "b" }, { role: "user", content: "c" }, { role: "assistant", content: "d" }, { role: "user", content: "e" }, { role: "assistant", content: "f" });
+            journal.state.tasks.push({ prompt: "a", startedAt: "", requests: 0, activeMs: 0, allowance: 20, timeAllowanceMs: 900_000 });
+            const lost = journal.newGeneration("compact");
+            lost.state = "failed";
+            assert.equal(await runner.maybeCompact(true), "skipped");
+            assert.equal(gateway.completions.length, 0);
+            assert.deepEqual(journal.unresolvedGenerations().map((g) => g.seq), [lost.seq]);
+        }
+    ));
+
+test("resume with a new task does not go past an unknown outcome without a yes at a terminal", { skip: !existsSync(join(src, "..", "dist", "cli.js")) && "build first" }, () =>
+    withGateway(
+        () => ({ text: "should not be asked" }),
+        async (gateway) => {
+            const home = tempDir("home");
+            const root = makeRepo();
+            const { journal } = await makeRunner(gateway, root, { home, prompter: null });
+            journal.state.tasks.push({ prompt: "x", startedAt: "", requests: 1, activeMs: 0, allowance: 20, timeAllowanceMs: 900_000 });
+            const lost = journal.newGeneration("agent");
+            lost.state = "complete";
+            lost.httpStatus = 200;
+            journal.state.status = "running";
+            journal.commit();
+            journal.release();
+            writeFileSync(join(home, "config.json"), JSON.stringify({ endpoint: gateway.base, allowInsecureLocalhost: true, model: "fake-coder", trustedRoots: [root] }));
+            const child = spawn(process.execPath, [join(src, "..", "dist", "cli.js"), "resume", journal.state.id, "--json", "do something else"], {
+                cwd: root,
+                env: { ...process.env, TOMVERSE_HOME: home, TOMVERSE_API_KEY: TEST_KEY, TOMVERSE_ENDPOINT: "" },
+                stdio: ["ignore", "pipe", "pipe"],
+            });
+            const code = await new Promise((r) => child.on("close", r));
+            assert.equal(code, 6);
+            assert.equal(gateway.completions.length, 0, "no new paid request");
+        }
+    ));
+
+test("listing runs git without global config, and repository aliases or fsmonitor never start a program", { skip: spawnSync("git", ["--version"]).status !== 0 && "no git" }, () => {
+    const root = tempDir("ws");
+    spawnSync("git", ["init", "-q"], { cwd: root });
+    writeFileSync(join(root, "a.txt"), "x");
+    const marker = join(root, "ran.txt").replaceAll("\\", "/");
+    const program = `${process.execPath.replaceAll("\\", "/")} -e "require('fs').writeFileSync('${marker}','x')"`;
+    spawnSync("git", ["config", "alias.ls-files", `!${program}`], { cwd: root });
+    spawnSync("git", ["config", "core.fsmonitor", program], { cwd: root });
+    const listed = new Workspace(normalizeRoot(root)).listFiles(".", 100);
+    assert.equal(listed.source, "git");
+    assert.ok(listed.files.includes("a.txt"));
+    assert.equal(existsSync(marker), false, "no repository-configured program ran");
+});
+
+test("search results are attributed by the whole path, even one containing ':'", { skip: process.platform === "win32" && "':' is not allowed in Windows file names" }, () =>
+    withGateway(
+        () => ({ text: "x" }),
+        async (gateway) => {
+            const root = makeRepo();
+            mkdirSync(join(root, "project:archive"), { recursive: true });
+            writeFileSync(join(root, "project:archive", ".env"), "TOKEN=leak-me\n");
+            writeFileSync(join(root, "project:archive", "notes.txt"), "TOKEN=fine\n");
+            const { runner } = await makeRunner(gateway, root);
+            const result = await (runner.tools.search_text as any).execute({ pattern: "TOKEN" }, { toolCallId: "s1", messages: [] });
+            assert.ok(!JSON.stringify(result).includes("leak-me"), JSON.stringify(result));
+        }
+    ));

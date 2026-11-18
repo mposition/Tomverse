@@ -139,7 +139,7 @@ export class Workspace {
             const result = spawnSync(
                 "git",
                 ["-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false", "ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", start.relative === "." ? "." : start.relative],
-                { cwd: this.root, encoding: "utf8", maxBuffer: 32 * 1024 * 1024, windowsHide: true, shell: false, env: commandEnv() }
+                { cwd: this.root, encoding: "utf8", maxBuffer: 32 * 1024 * 1024, windowsHide: true, shell: false, env: gitEnv() }
             );
             if (result.status === 0) {
                 const seen = new Set<string>();
@@ -187,6 +187,22 @@ export class Workspace {
         return { files, truncated, source: "walk" };
     }
 }
+
+/**
+ * git for listing runs without approval, so it reads no global or system
+ * configuration (a user's aliases, credential helpers, pagers), and the
+ * repository's fsmonitor is off on the command line. Git ignores an alias that
+ * names a built-in command such as ls-files, and ls-files runs no hook, filter
+ * or pager; tests/review-fixes.test.ts pins both.
+ */
+export const gitEnv = () => ({
+    ...commandEnv(),
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_GLOBAL: process.platform === "win32" ? "NUL" : "/dev/null",
+    GIT_OPTIONAL_LOCKS: "0",
+    GIT_TERMINAL_PROMPT: "0",
+    GIT_PAGER: "cat",
+});
 
 let gitChecked: boolean | null = null;
 export const gitAvailable = () => {

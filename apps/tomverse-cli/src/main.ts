@@ -588,8 +588,11 @@ const resume = async (ctx: Context, args: string[], interactive: boolean) => {
             }
             const task = rest.join(" ").trim();
             if (unresolved.length || notes.length) {
-                const continueIt = prompter ? await prompter.confirm("Continue the task? The next step is a new model request.") : false;
-                if (!continueIt && !task) {
+                // Only an explicit yes at the terminal goes past an unknown outcome;
+                // a task on the command line is not one.
+                const continueIt = prompter ? await prompter.confirm("Continue? The next step is a new model request.") : false;
+                if (!continueIt) {
+                    if (!prompter) ctx.output.info("Run `tomverse resume` in a terminal to decide how to go on.");
                     outcome = unresolved.length ? "unknown_outcome" : "needs_approval";
                     await finalEvent(ctx, runner, gateway, outcome);
                     return exitFor(outcome);
