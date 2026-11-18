@@ -130,6 +130,11 @@ export class Gateway {
         private readonly fetchImpl: typeof fetch = globalThis.fetch
     ) {}
 
+    /** The key's public prefix: lookups only find requests of this key. */
+    get keyPrefix() {
+        return this.key.slice(0, 12);
+    }
+
     /** Builds a URL under the API root, refusing anything that leaves it. */
     url(path: string) {
         const url = new URL(`${this.endpoint.base}${path}`);

@@ -190,6 +190,12 @@ export const sessionCost = async (gateway: Gateway, journal: Journal) => {
     } catch {
         // fall back to one lookup per request below
     }
+    // Another key cannot see this session's requests; nothing it answers is recorded.
+    if (gateway.keyPrefix !== journal.state.keyPrefix) {
+        const unknown = generations.filter((g) => !(g.receipt && g.receipt.status !== "held")).map((g) => g.seq);
+        const charged = generations.reduce((sum, g) => sum + (g.receipt && g.receipt.status !== "held" && typeof g.receipt.chargedCredits === "number" ? g.receipt.chargedCredits : 0), 0);
+        return { requests: generations.length, charged, held: 0, unknown };
+    }
     // Every receipt /usage returned is applied first, whatever its position.
     for (const g of generations) {
         if (g.requestId && byId.has(g.requestId)) {

@@ -56,17 +56,24 @@ export const same = (a: string, b: string) => (caseInsensitive ? a.toLowerCase()
 const SECRET_DIRS = new Set([".ssh", ".aws", ".gnupg", ".git", ".tomverse"]);
 
 export const isSecretPath = (relativePath: string) => {
-    const normalized = relativePath.replaceAll("\\", "/").toLowerCase();
+    // Compatibility-folded, lower case, with invisible format characters
+    // removed, so a zero-width or look-alike character cannot hide a name.
+    const normalized = relativePath
+        .normalize("NFKC")
+        .replace(/[\u00ad\u061c\u180e\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/g, "")
+        .replaceAll("\\", "/")
+        .toLowerCase();
     const fileName = normalized.split("/").pop() ?? normalized;
     // Whole folders: Git internals (remote URLs and credential helpers live in
     // .git/config) and the CLI's own home are in this list too.
     if (normalized.split("/").some((segment) => SECRET_DIRS.has(segment))) return true;
-    if (fileName === ".env" || fileName.startsWith(".env.") || fileName === ".envrc") return true;
+    if (fileName.startsWith(".env")) return true;
     if ([".npmrc", ".netrc", ".pgpass", ".htpasswd", ".git-credentials", ".pypirc"].includes(fileName)) return true;
     for (const ext of [".pem", ".key", ".p12", ".pfx", ".keystore", ".jks", ".asc", ".ppk"]) if (fileName.endsWith(ext)) return true;
     for (const prefix of ["id_rsa", "id_ed25519", "id_dsa", "id_ecdsa"]) if (fileName.startsWith(prefix)) return true;
-    const stem = fileName.split(".")[0];
-    if (stem === "credentials" || stem === "secret" || stem === "secrets") return true;
+    // credentials*, secret* (secrets.yaml, secret-token.txt, credentials-prod.json …),
+    // erring towards leaving a file out.
+    if (fileName.startsWith("credential") || fileName.startsWith("secret")) return true;
     if (fileName.endsWith(".json") && /service[-_]account|gcp[-_]key/.test(fileName)) return true;
     return false;
 };

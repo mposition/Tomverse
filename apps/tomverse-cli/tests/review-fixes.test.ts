@@ -8,7 +8,7 @@ import { FakeGateway, lastUserText, toolResultsSinceUser, type ScriptedReply } f
 import { makeRepo, makeRunner, scriptedPrompter, tempDir } from "./helpers.js";
 import { readKey } from "../src/auth.js";
 import { costLine, sessionCost } from "../src/main.js";
-import { normalizeRoot, PathError, Workspace } from "../src/workspace.js";
+import { isSecretPath, normalizeRoot, PathError, Workspace } from "../src/workspace.js";
 import { planPatch, PatchError } from "../src/patch.js";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, writeFileSync } from "node:fs";
@@ -450,3 +450,26 @@ test("zero-width and other invisible format characters are escaped and never wri
         assert.throws(() => planPatch(new Workspace(normalizeRoot(root)), [{ path: "a.txt", action: "update", replacements: [{ old: "x", new: `y${ch}` }] }]), PatchError);
     }
 });
+test("credential files are matched by prefix, through invisible characters and look-alikes", () => {
+    for (const path of ["credentials-prod.json", "config/secret-token.txt", ".env.bak", ".env-prod", "secrets.yaml", "cred\u200bentials.json", "credentials\u2063.json", "ｓｅｃｒｅｔ.txt"]) {
+        assert.ok(isSecretPath(path), JSON.stringify(path));
+    }
+    for (const path of ["src/env.ts", "README.md", "docs/keys.md", "environment.md"]) assert.ok(!isSecretPath(path), path);
+});
+
+test("a path with a newline stays one line in the diff header", () => {
+    const header = renderFileDiff("a.txt\n+ fake added line", "x\n", "y\n").split("\n")[0]!;
+    assert.match(header, /a\.txt\\n\+ fake added line/);
+});
+
+test("another key never records a lookup for this session", () =>
+    withGateway(
+        () => ({ fault: "drop_unrecorded" }),
+        async (gateway) => {
+            const { runner, journal } = await makeRunner(gateway, makeRepo(), { prompter: null });
+            journal.state.keyPrefix = "tvk_zzzzzzzz";
+            assert.equal(await runner.runTask("Hi"), "unknown_outcome");
+            assert.equal(journal.state.generations[0]!.lookup, undefined);
+            assert.equal(gateway.requests.filter((r) => r.url.startsWith("/api/v1/requests/status")).length, 0);
+        }
+    ));

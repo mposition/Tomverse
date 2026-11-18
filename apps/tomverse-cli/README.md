@@ -80,7 +80,8 @@ per task".
   Listings skip generated folders (`node_modules`, `dist`, …) and, in a Git
   repository, ignored files. Files that can hold credentials are never read or
   written by the CLI: `.env*`, `.envrc`, `.npmrc`, `.netrc`, private keys
-  (`*.pem`, `*.key`, `id_rsa`, …), `credentials*`/`secret*` files, cloud
+  (`*.pem`, `*.key`, `id_rsa`, …), any file whose name starts with `credential` or
+  `secret` (source files with such names too — open them yourself), cloud
   service-account JSON, `.git/` internals and `.ssh`/`.aws`/`.gnupg` folders.
   Paths are checked on their real location: links and junctions that lead out
   of the folder, `..`, Windows UNC/device paths and alternate data streams are

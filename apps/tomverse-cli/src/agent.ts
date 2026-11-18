@@ -529,6 +529,9 @@ export class Runner {
     /** Looks a request up by the key recorded before it was sent. Read only. */
     async lookUp(record: GenerationRecord | undefined) {
         if (!record) return;
+        // Requests are only visible to the key that sent them: another key's
+        // "not found" says nothing, so nothing is recorded from it.
+        if (this.options.gateway.keyPrefix !== this.journal.state.keyPrefix) return;
         try {
             const found = await this.options.gateway.requestStatus(record.requestId ? { requestId: record.requestId } : { idempotencyKey: record.idempotencyKey });
             record.lookup = found.found ? "found" : "not_found";

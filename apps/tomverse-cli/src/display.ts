@@ -10,7 +10,7 @@
 // C0 controls except tab and newline, DEL, C1 controls, the Unicode bidi
 // marks and controls, the Arabic letter mark, the line/paragraph separators,
 // and the zero-width and other invisible format characters.
-const UNSAFE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060\u2066-\u206f\ufeff]/g;
+const UNSAFE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060-\u206f\ufeff]/g;
 
 export const safeText = (text: string): string =>
     text.replace(UNSAFE, (ch) => `\\u{${ch.codePointAt(0)!.toString(16)}}`);
@@ -69,7 +69,9 @@ export const renderFileDiff = (path: string, before: string | null, after: strin
         endB -= 1;
     }
     const counts = `(${endA - start} line(s) removed, ${endB - start} added)`;
-    const header = before === null ? `+++ new file ${path} ${counts}` : after === null ? `--- delete ${path} ${counts}` : `*** ${path} ${counts}`;
+    // The path is one line however it is spelled: a newline in it cannot fake a diff line.
+    const name = safeLine(path);
+    const header = before === null ? `+++ new file ${name} ${counts}` : after === null ? `--- delete ${name} ${counts}` : `*** ${name} ${counts}`;
     const lines: string[] = [header];
     const from = Math.max(0, start - 3);
     for (let i = from; i < start; i += 1) lines.push(`  ${shown(a[i], i === a.length - 1)}`);
