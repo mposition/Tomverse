@@ -213,6 +213,33 @@ test("one message may be as long as the largest model window holds", () => {
     }
 });
 
+// Review r-20261118-061355-5bf791: the long-context decision is the measured
+// input, the figure the input limit is checked against -- never the
+// reservation-only image allowance.
+test("a turn under the flat limit stays flat whatever its image allowance", () => {
+    const luna = getModel("gpt-6-luna");
+    const withImage = createChatBudget("user", luna, 115_000, { reservationOnlyInputTokens: 16_000 });
+    assert.equal(withImage.longContextSettlement, null);
+    assert.equal(withImage.usageCredits, getWeightedUsageCredits(luna, 131_000));
+    assert.ok(withImage.reservedOutputTokens < withImage.maxOutputTokens, "the typical answer is reserved");
+    assert.equal(withImage.longContextThresholdTokens, null);
+});
+
+test("one decision drives every long-context rule", () => {
+    const source = readFileSync(new URL("../lib/chatSecurity.ts", import.meta.url), "utf8");
+    assert.match(source, /const longContextTurn =\s*chatLongContextEnabled\(\) && estimatedInputTokens > chatUserMaxInputTokens\(\);/);
+    assert.match(source, /longContextTurn\s*\?\s*Math\.ceil\(tokens \* LONG_CONTEXT_TIER_ESTIMATE_MARGIN\)/);
+    assert.match(source, /requestedTotalOutputCap === undefined && !longContextTurn/);
+    assert.match(source, /const longContextCredits = longContextTurn\s*\?/);
+});
+
+test("guest import stores answers up to the chat route's own cut", () => {
+    const route = readFileSync(new URL("../app/api/conversations/import-guest/route.ts", import.meta.url), "utf8");
+    assert.match(route, /message\.role !== "assistant" \|\|\s*message\.content\.length <= CHAT_MAX_STORED_ANSWER_CHARACTERS/);
+    const chat = readFileSync(new URL("../app/api/chat/route.ts", import.meta.url), "utf8");
+    assert.match(chat, /const MAX_STORED_MESSAGE_CHARACTERS = CHAT_MAX_STORED_ANSWER_CHARACTERS;/);
+});
+
 test("settlement charges the actual cost, between the flat floor and the flat rule", () => {
     const settlement = { microUsdPerCredit: RATE, floorCredits: 9 };
     const settle = (flatSettledCredits, tokenCostMicroUsd, searchSurchargeCredits = 0, reservedCredits = flatSettledCredits) =>

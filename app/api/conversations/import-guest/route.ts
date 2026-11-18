@@ -1,5 +1,9 @@
 export const dynamic = "force-dynamic";
-import { CHAT_MAX_MESSAGE_BODY_BYTES, CHAT_MAX_MESSAGE_CHARACTERS } from "@/lib/chatRequestLimits";
+import {
+  CHAT_MAX_MESSAGE_BODY_BYTES,
+  CHAT_MAX_MESSAGE_CHARACTERS,
+  CHAT_MAX_STORED_ANSWER_CHARACTERS,
+} from "@/lib/chatRequestLimits";
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -40,7 +44,15 @@ const importMessageSchema = z
     modelId: modelIdSchema.nullable().optional(),
     createdAt: z.string().datetime(),
   })
-  .strict();
+  .strict()
+  // An answer is stored up to the chat route's own cut, a question up to
+  // what the chat accepts: the same two limits a signed-in turn is held to.
+  .refine(
+    (message) =>
+      message.role !== "assistant" ||
+      message.content.length <= CHAT_MAX_STORED_ANSWER_CHARACTERS,
+    { message: "Answer content is too long.", path: ["content"] }
+  );
 
 const importGuestConversationSchema = z
   .object({

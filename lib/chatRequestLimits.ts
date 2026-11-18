@@ -38,6 +38,9 @@ const CONTEXT_WINDOWS = (AVAILABLE_MODELS as readonly AiModel[]).map(
 export const CHAT_MAX_MESSAGE_CHARACTERS = chatMaxMessageCharacters(CONTEXT_WINDOWS);
 export const CHAT_MAX_MESSAGE_BODY_BYTES = chatRequestMaxBodyBytes(CONTEXT_WINDOWS);
 
+/** How much of one assistant answer is stored (the chat route cuts the rest). */
+export const CHAT_MAX_STORED_ANSWER_CHARACTERS = 100_000;
+
 /**
  * The server's limits, as `validateChatPayload()` applies them.
  *

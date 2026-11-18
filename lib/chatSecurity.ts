@@ -3,6 +3,7 @@ import "server-only";
 import {
     chatAccountMaxInputTokens,
     chatLongContextCostCredits,
+    chatLongContextEnabled,
     chatLongContextMicroUsdPerCredit,
     chatLongContextSettledCredits,
     chatMaxMessageCharacters,
@@ -1109,11 +1110,20 @@ export const createChatBudget = (
               })
           ) + reservationOnlyInputTokens;
     const passes = Math.max(1, Math.min(4, Math.trunc(options?.toolInputPasses ?? 1)));
-    // Above the flat limit, choose the tier with room for the estimator's
+    /*
+      One decision for every long-context rule below: the switch is on and the
+      *measured* input -- the figure the input limit itself is checked against
+      -- is past the flat limit. Not the reservation-only image allowance,
+      which is neither part of that limit nor sent to the provider: a 115k
+      turn with one image is an ordinary turn and is priced as one.
+    */
+    const longContextTurn =
+        chatLongContextEnabled() && estimatedInputTokens > chatUserMaxInputTokens();
+    // On a long-context turn, choose the tier with room for the estimator's
     // error (see LONG_CONTEXT_TIER_ESTIMATE_MARGIN). Tier choice only: the
     // reserved token counts below are the estimate itself.
     const tierPromptTokens = (tokens: number) =>
-        estimatedInputTokens > chatUserMaxInputTokens()
+        longContextTurn
             ? Math.ceil(tokens * LONG_CONTEXT_TIER_ESTIMATE_MARGIN)
             : tokens;
     let pricing = resolveModelRequestPricing(model, {
@@ -1134,12 +1144,10 @@ export const createChatBudget = (
             : pricing.maxOutputTokens;
     const reservedInputTokens =
         contextInputTokens * passes + totalOutputTokens * (passes - 1);
-    // Above the flat limit the provider-cost reservation holds the whole
+    // On a long-context turn the provider-cost reservation holds the whole
     // output ceiling too, the same worst case the credits hold, so the
     // provider budget check sees what this turn may really spend. The unused
     // part is released at settlement as it always is.
-    const longContextTurn =
-        estimatedInputTokens + reservationOnlyInputTokens > chatUserMaxInputTokens();
     const reservedOutputTokens =
         requestedTotalOutputCap === undefined && !longContextTurn
             ? pricing.reservationOutputTokens
@@ -1162,12 +1170,14 @@ export const createChatBudget = (
         model,
         estimatedInputTokens + reservationOnlyInputTokens
     );
-    const longContextCredits = chatLongContextCostCredits({
-        estimatedInputTokens: estimatedInputTokens + reservationOnlyInputTokens,
-        reservedCostMicroUsd:
-            microdollarsFor(reservedInputTokens, pricing.inputUsdPerMillionTokens) +
-            microdollarsFor(totalOutputTokens, pricing.outputUsdPerMillionTokens),
-    });
+    const longContextCredits = longContextTurn
+        ? chatLongContextCostCredits({
+              estimatedInputTokens,
+              reservedCostMicroUsd:
+                  microdollarsFor(reservedInputTokens, pricing.inputUsdPerMillionTokens) +
+                  microdollarsFor(totalOutputTokens, pricing.outputUsdPerMillionTokens),
+          })
+        : 0;
     const longContextSettlement =
         longContextCredits > 0
             ? {

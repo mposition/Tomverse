@@ -232,6 +232,7 @@ import {
     submitDeepResearchJob,
 } from "@/lib/perplexityDeepResearch";
 import { assertModelRuntimeAvailable } from "@/lib/modelAvailability";
+import { CHAT_MAX_STORED_ANSWER_CHARACTERS } from "@/lib/chatRequestLimits";
 import { OfficeTextOverflowError, parseOfficeSafely } from "@/lib/officeSecurity";
 import {
     CHAT_ATTACHMENT_PARSE_CHARACTERS,
@@ -512,7 +513,7 @@ const MAX_CONVERSATION_ATTACHMENTS = 30;
 const GUEST_MAX_CONVERSATION_ATTACHMENTS = 5;
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
 const MAX_TOTAL_ATTACHMENT_SIZE = 25 * 1024 * 1024;
-const MAX_STORED_MESSAGE_CHARACTERS = 100_000;
+const MAX_STORED_MESSAGE_CHARACTERS = CHAT_MAX_STORED_ANSWER_CHARACTERS;
 type IncomingAttachment = {
     name?: unknown;
     mediaType?: unknown;
