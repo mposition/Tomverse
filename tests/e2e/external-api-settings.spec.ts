@@ -17,7 +17,9 @@ const model = {
 };
 const smartAdaptive = { ...model, id: "smart-adaptive", name: "Smart Adaptive", provider: "tomverse" };
 const baseUrl = "https://tomverse.app/api/v1";
-const SECRET = ["tvk", "ab12cd34", "S".repeat(43)].join("_");
+// Synthetic key shape, assembled so no line reads like a credential.
+const FIXTURE_PREFIX = ["tvk", "ab12cd34"].join("_");
+const SECRET = [FIXTURE_PREFIX, "S".repeat(43)].join("_");
 
 const mockKeys = async (page: Page, options: { enabled: boolean; keys?: Array<Record<string, unknown>> }) => {
     const keys: Array<Record<string, unknown>> = options.keys ?? [];
@@ -33,7 +35,7 @@ const mockKeys = async (page: Page, options: { enabled: boolean; keys?: Array<Re
                 const summary = {
                     id: "key_1",
                     name: body.name,
-                    keyPrefix: ["tvk", "ab12cd34"].join("_"),
+                    keyPrefix: FIXTURE_PREFIX,
                     creditCap: body.creditCap,
                     committedCredits: 0,
                     heldCredits: 0,

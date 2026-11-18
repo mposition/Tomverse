@@ -740,13 +740,19 @@ const createRun = (input: {
                         | undefined;
                     if (total && Number.isSafeInteger(total.inputTokens) && Number.isSafeInteger(total.outputTokens)) {
                         usageFromProvider = true;
+                        // Cache reads and writes are read together: a write
+                        // billed as plain input would be charged at 1.0x.
+                        const cache = {
+                            cachedInputTokens: total.inputTokenDetails?.cacheReadTokens,
+                            cacheWriteInputTokens: total.inputTokenDetails?.cacheWriteTokens,
+                        };
                         usage = {
                             inputTokens: total.inputTokens,
                             outputTokens: total.outputTokens,
-                            cachedInputTokens: total.inputTokenDetails?.cacheReadTokens,
+                            cachedInputTokens: cache.cachedInputTokens,
                             reasoningTokens: total.outputTokenDetails?.reasoningTokens,
                         };
-                        cacheWriteInputTokens = total.inputTokenDetails?.cacheWriteTokens;
+                        cacheWriteInputTokens = cache.cacheWriteInputTokens;
                     }
                     continue;
                 }
