@@ -523,8 +523,47 @@ test("a multi-call turn's cost is the sum of each call's own cost, cache split i
 test("the installed SDK reports usage as the sum of all steps", () => {
     const types = readFileSync(new URL("../node_modules/ai/dist/index.d.ts", import.meta.url), "utf8");
     const result = types.slice(types.indexOf("interface StreamTextResult"));
-    const usage = result.slice(0, result.indexOf("readonly usage: PromiseLike<LanguageModelUsage>;"));
-    assert.match(usage.slice(-400), /When there are multiple steps, the usage is the sum of all step usages\./);
+    const before = result.slice(0, result.indexOf("readonly usage: PromiseLike<LanguageModelUsage>;"));
+    // The doc comment that belongs to `usage` itself: the block that ends
+    // right before the declaration, with nothing but whitespace between.
+    const end = before.lastIndexOf("*/");
+    assert.match(before.slice(end + 2), /^\s*$/);
+    const doc = before.slice(before.lastIndexOf("/**", end), end);
+    assert.match(doc, /When there are multiple steps, the usage is the sum of all step usages\./);
+});
+
+// Review r-20261118-095524-6e67a5: a partial step list never prices a turn.
+test("per-call pricing is used only when the calls account for the whole usage", () => {
+    const long = resolveModelPricing(getModel("gpt-6-luna"), { estimatedPromptTokens: 300_000 });
+    const snapshot = {
+        modelId: "gpt-6-luna",
+        inputUsdPerMillionTokens: long.inputUsdPerMillionTokens,
+        outputUsdPerMillionTokens: long.outputUsdPerMillionTokens,
+        longContextThresholdTokens: 272_000,
+        pricingVersion: long.pricingVersion,
+        costSource: long.costSource,
+        providerCallPasses: 2,
+    };
+    const calls = [
+        { inputTokens: 230_000, outputTokens: 1_000 },
+        { inputTokens: 240_000, outputTokens: 1_000 },
+    ];
+    const totals = { inputTokens: 470_000, outputTokens: 2_000 };
+    const covered = longContextSettledUsageCost(snapshot, totals, calls);
+    // A turn settled on its reservation estimate, or with an uncounted step:
+    // the totals, by the summed-input rule (kept at the reserved long rate).
+    const estimate = { inputTokens: 600_000, outputTokens: 8_000 };
+    const onTotals = longContextSettledUsageCost(snapshot, estimate, calls);
+    const expected = longContextSettledUsageCost(snapshot, estimate);
+    assert.equal(onTotals.totalCostMicroUsd, expected.totalCostMicroUsd);
+    assert.ok(onTotals.totalCostMicroUsd > covered.totalCostMicroUsd);
+    assert.equal(
+        longContextSettlementRates(snapshot, 600_000, calls).inputUsdPerMillionTokens,
+        long.inputUsdPerMillionTokens
+    );
+    // The route hands over steps only when every step was counted.
+    const route = readFileSync(new URL("../app/api/chat/route.ts", import.meta.url), "utf8");
+    assert.match(route, /!steps\.every\(\s*\(step\) => counted\(step\.usage\.inputTokens\) && counted\(step\.usage\.outputTokens\)\s*\)/);
 });
 
 // Review r-20261118-083641-09ae82: without per-step usage (an attempt replaced

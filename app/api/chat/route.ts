@@ -524,6 +524,17 @@ const providerCallUsage = async (stream: {
     try {
         const steps = await stream.steps;
         if (steps.length < 2) return undefined;
+        // All or nothing: a step without its own counts would price as zero,
+        // so the turn then settles on its totals instead.
+        const counted = (value: number | undefined) =>
+            Number.isSafeInteger(value) && value! >= 0;
+        if (
+            !steps.every(
+                (step) => counted(step.usage.inputTokens) && counted(step.usage.outputTokens)
+            )
+        ) {
+            return undefined;
+        }
         // Each call's own cache split too: calls differ in how much of their
         // prompt was cached, and the turn's cost is the sum of each call's.
         return steps.map((step) => ({

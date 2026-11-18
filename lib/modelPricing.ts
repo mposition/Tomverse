@@ -2305,12 +2305,24 @@ export type ProviderCallUsage = {
     cacheWriteInputTokens?: number;
 };
 
+/** True when the calls are two or more and add up to exactly the usage settled. */
+export const providerCallsCover = (
+    calls: readonly ProviderCallUsage[],
+    usage: { inputTokens: number; outputTokens?: number }
+) =>
+    calls.length > 1 &&
+    calls.reduce((total, call) => total + call.inputTokens, 0) === usage.inputTokens &&
+    (usage.outputTokens === undefined ||
+        calls.reduce((total, call) => total + call.outputTokens, 0) === usage.outputTokens);
+
 export const longContextSettlementRates = <T extends SettlementRates>(
     rates: T,
     actualPromptTokens: number,
     calls?: readonly ProviderCallUsage[] | null
 ): T => {
-    if (calls && calls.length > 1) return perCallSettlementRates(rates, calls);
+    if (calls && providerCallsCover(calls, { inputTokens: actualPromptTokens })) {
+        return perCallSettlementRates(rates, calls);
+    }
     const crossed = longContextSettlementTier({
         modelId: rates.modelId,
         actualPromptTokens,
@@ -2443,7 +2455,11 @@ export const longContextSettledUsageCost = (
                 ? callRates.cacheWriteUsdPerMillionTokens ?? null
                 : null,
         });
-    if (!calls || calls.length < 2) {
+    // The calls are used only when they account for the whole settled usage.
+    // Any other usage -- a turn settled on its reservation estimate, or one
+    // whose steps were not all counted -- is priced on its totals by the
+    // summed-input rule (providerCallPasses), never on a partial list.
+    if (!calls || !providerCallsCover(calls, usage)) {
         return costAt(usage, longContextSettlementRates(rates, usage.inputTokens));
     }
     const single = { ...rates, providerCallPasses: null };
