@@ -7,6 +7,7 @@
  * not offered actions that can only refuse.
  */
 import "server-only";
+import type { DailyTaskImplementation } from "@/lib/dailyProductImplementationCore";
 
 import { latestMemoryReadings, memoryScoutEnabled } from "./productResearchScoutMemory";
 import { comparisonEnabled } from "./scoutMemoryExperimentRunner";
@@ -52,6 +53,8 @@ export type ScoutConsoleSuggestion = {
   readonly evidence: string;
   readonly suggestion: string;
   readonly agentWork?: { status: "claimed" | "needs_lookup" | "pr_opened" | "failed" | "retry_ready"; prUrl?: string; reason?: string; retryable?: boolean };
+  readonly implementation?: DailyTaskImplementation;
+  readonly implementationLookupUnavailable?: boolean;
 };
 
 export type ScoutConsoleSection = "suggestions" | "runs";
@@ -121,6 +124,8 @@ export async function readScoutConsole(session: Session | null, section: ScoutCo
       evidence: row.evidence,
       suggestion: row.suggestion,
       ...(row.agentWork ? { agentWork: row.agentWork } : {}),
+      ...(row.implementation ? { implementation: row.implementation } : {}),
+      ...(row.implementationLookupUnavailable ? { implementationLookupUnavailable: true } : {}),
     })),
     completed: completed.map((row) => ({ id: row.id, title: row.title, subject: row.subject, completedAt: row.statusChangedAt?.toISOString() ?? null })),
     days: section === "runs" ? scoutDays(calls, now, SCOUT_CONSOLE_DAYS) : [],

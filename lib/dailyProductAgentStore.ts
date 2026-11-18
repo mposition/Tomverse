@@ -19,6 +19,8 @@ import { prisma } from "@/lib/prisma";
 import { DAILY_PRODUCT_AGENT_ALERT_SWITCH, DAILY_PRODUCT_AGENT_NOTICE_TARGET, dailyProductHaltNotice, dailyProductHaltSchema, type DailyProductHalt } from "@/lib/dailyProductAgentAlertCore";
 import { suggestionWorkBrief } from "@/lib/productResearchScoutIdeaText";
 import { automaticDailyRetry, DAILY_PRODUCT_AGENT_RETRY_SWITCH, dailyRetryInstruction } from "@/lib/dailyProductAgentRetryCore";
+import { readDailyImplementations } from "@/lib/dailyProductImplementation";
+import { implementationCoversTask } from "@/lib/dailyProductImplementationCore";
 
 type DailyProductClaim = Omit<ClaimedRecommendation, "cycleId" | "index">;
 
@@ -69,6 +71,11 @@ async function audit(tx: Prisma.TransactionClient, id: string, action: "claimed"
 export async function claimDailyProductTask(input: { origin: string; now?: Date }): Promise<DailyProductClaim | null> {
   if (!dailyProductAgentEnabled(process.env)) return null;
   const now = input.now ?? new Date();
+  // External reads must finish before taking the audit/budget transaction locks.
+  const implementations = await readDailyImplementations();
+  if (implementations.status !== "available") throw new Error("daily_implementation_lookup_unavailable");
+  const coveredTaskIds = new Set(Object.entries(implementations.byTask)
+    .filter(([, value]) => implementationCoversTask(value)).map(([id]) => id));
   return prisma.$transaction(async (tx) => {
     await takeAuditChainLock(tx);
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${OPTIMIZER_LOCK}))`;
@@ -87,8 +94,8 @@ export async function claimDailyProductTask(input: { origin: string; now?: Date 
     const cursor = await tx.appSetting.findUnique({ where: { key: DAILY_PRODUCT_AGENT_CURSOR }, select: { value: true } });
     for (const source of sourceOrder(cursor?.value)) {
       const task = source === "routing"
-        ? await claimRecommendationInTransaction(tx, input.origin, now, { automaticRetries: process.env[DAILY_PRODUCT_AGENT_RETRY_SWITCH] === "true" })
-        : await claimScout(tx, source, input.origin, now);
+        ? await claimRecommendationInTransaction(tx, input.origin, now, { automaticRetries: process.env[DAILY_PRODUCT_AGENT_RETRY_SWITCH] === "true", coveredTaskIds })
+        : await claimScout(tx, source, input.origin, now, coveredTaskIds);
       if (!task) continue;
       await saveSetting(tx, DAILY_PRODUCT_AGENT_CURSOR, followingSource(source));
       await saveSetting(tx, DAILY_PRODUCT_AGENT_DAY, JSON.stringify({ day, count: count + 1 }));
@@ -98,7 +105,7 @@ export async function claimDailyProductTask(input: { origin: string; now?: Date 
   });
 }
 
-async function claimScout(tx: Prisma.TransactionClient, source: Exclude<DailyProductSource, "routing">, origin: string, now: Date): Promise<DailyProductClaim | null> {
+async function claimScout(tx: Prisma.TransactionClient, source: Exclude<DailyProductSource, "routing">, origin: string, now: Date, coveredTaskIds: ReadonlySet<string>): Promise<DailyProductClaim | null> {
   // Unknown publication outcomes, corrupt records and active/expired claims remain fenced.
   const records = await tx.appSetting.findMany({ where: { key: { startsWith: `${DAILY_PRODUCT_AGENT_PREFIX}scout.` } }, select: { key: true, value: true } });
   const entries = new Map(records.map((row) => [row.key, parseDailyProductState(row.value)]));
@@ -113,6 +120,10 @@ async function claimScout(tx: Prisma.TransactionClient, source: Exclude<DailyPro
     const id = scoutIdFromAgentId(key.slice(DAILY_PRODUCT_AGENT_PREFIX.length));
     return id ? [id] : [];
   });
+  for (const id of coveredTaskIds) {
+    const scoutId = scoutIdFromAgentId(id);
+    if (scoutId) heldIds.push(scoutId);
+  }
   const memory = { startsWith: "memory.continuation." };
   const row = await tx.productResearchSuggestion.findFirst({
     where: { status: "open", amuxIdeaId: null, id: { notIn: heldIds },
