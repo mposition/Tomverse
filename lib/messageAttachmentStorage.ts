@@ -851,6 +851,51 @@ export type MessageAttachmentCleanupSweepResult = {
 };
 
 /**
+ * How long after a tombstone completes its cached text is deleted again.
+ *
+ * A turn can write an earlier file's extracted text (lib/attachmentTextCache.ts)
+ * after the conversation was deleted and its tombstone already drained: the
+ * write and the drain are not one transaction, and the turn's own re-check can
+ * fail or never run if the process stops. Every drain therefore deletes the
+ * cached text of tombstones completed within this window once more. A turn
+ * that reads an earlier file finishes in minutes; a day leaves room for any
+ * request and for a missed maintenance run. DeleteObject succeeds for a key
+ * that is already gone, so repeating it is harmless.
+ */
+export const LATE_TEXT_CACHE_SWEEP_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+const sweepLateAttachmentTextCaches = async (now: Date, limit: number) => {
+  const recent = await prisma.messageAttachmentCleanup.findMany({
+    where: {
+      completedAt: {
+        not: null,
+        gte: new Date(now.getTime() - LATE_TEXT_CACHE_SWEEP_WINDOW_MS),
+      },
+    },
+    orderBy: { completedAt: "desc" },
+    take: Math.max(limit, 500),
+    select: { id: true, objectKey: true },
+  });
+  let deleted = 0;
+  for (const item of recent) {
+    try {
+      await deleteAttachmentTextCache(item.objectKey);
+      deleted += 1;
+    } catch (error) {
+      console.error(
+        JSON.stringify({
+          event: "message_attachment_late_text_cache_failed",
+          cleanupId: item.id,
+          error: classifyStorageError(error),
+          timestamp: now.toISOString(),
+        })
+      );
+    }
+  }
+  return deleted;
+};
+
+/**
  * Drains pending tombstones.
  *
  * DeleteObject succeeds for a key that is already gone, so two overlapping
@@ -912,9 +957,22 @@ export const drainMessageAttachmentCleanupQueue = async (
     }
   }
 
+  const lateCacheDeleted = objectKeys
+    ? 0
+    : await sweepLateAttachmentTextCaches(now, limit);
+
   const exhausted = await prisma.messageAttachmentCleanup.count({
     where: { completedAt: null, attempts: { gte: CLEANUP_MAX_ATTEMPTS } },
   });
+  if (lateCacheDeleted > 0) {
+    console.info(
+      JSON.stringify({
+        event: "message_attachment_late_text_cache_swept",
+        deleted: lateCacheDeleted,
+        timestamp: now.toISOString(),
+      })
+    );
+  }
 
   if (pending.length > 0 || exhausted > 0) {
     console.info(

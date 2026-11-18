@@ -73,7 +73,7 @@ export function Composer({ researchPreview, locationIdentity = null, files: cont
   const voiceBusy = isVoiceRecorderBusy(voice.state);
   async function attach(selected: FileList | null) {
     if (disabled || offline || streaming || uploading || !selected?.length) return;
-    if (files.length + selected.length > 5) { setError(copy.fileLimit); return; }
+    if (files.length + selected.length > 10) { setError(copy.fileLimit); return; }
     const pending = Array.from(selected);
     setUpload({ file: pending[0], completed: 0, total: pending.length }); setError("");
     try {

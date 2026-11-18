@@ -120,6 +120,27 @@ test("the route caches only an account's earlier, bound file, and never the turn
     assert.ok(recheck > 0 && takeBack > recheck);
 });
 
+// Review r-20261118-045547-8baacd: a cache written after the drain, or whose
+// own re-check failed or never ran, must still be deleted -- durably.
+test("every drain deletes the cached text of recently completed tombstones again", () => {
+    const storage = source("lib/messageAttachmentStorage.ts");
+    const sweep = storage.slice(storage.indexOf("const sweepLateAttachmentTextCaches"));
+    assert.match(sweep, /completedAt: \{\s*not: null,\s*gte: new Date\(now\.getTime\(\) - LATE_TEXT_CACHE_SWEEP_WINDOW_MS\)/);
+    assert.match(sweep, /await deleteAttachmentTextCache\(item\.objectKey\)/);
+    assert.match(storage, /export const LATE_TEXT_CACHE_SWEEP_WINDOW_MS = 24 \* 60 \* 60 \* 1000;/);
+    const drain = storage.slice(storage.indexOf("export const drainMessageAttachmentCleanupQueue"));
+    assert.match(drain, /await sweepLateAttachmentTextCaches\(now, limit\)/);
+});
+
+test("the chat page, receipt recovery and stored previews follow the account limits", () => {
+    const page = source("app/(site)/(application)/chat/ChatPageClient.tsx");
+    assert.match(page, /maxAttachmentsPerMessage: CHAT_MAX_ATTACHMENTS_PER_MESSAGE,\s*maxAttachmentBytes: CHAT_MAX_ATTACHMENT_BYTES,\s*attachmentPersistence: "account"/);
+    assert.match(source("lib/chatDraftMessageConsume.ts"), /attachmentUploadIds: z\.array\(opaqueId\)\.max\(CHAT_MAX_ATTACHMENTS_PER_MESSAGE\)/);
+    assert.match(source("lib/messageAttachmentPreview.ts"), /MAX_PREVIEW_ATTACHMENT_BYTES = CHAT_MAX_ATTACHMENT_BYTES;/);
+    // The mobile app cannot import the constant; its own checks are kept equal.
+    assert.match(source("apps/mobile/src/Composer.tsx"), new RegExp(`> ${CHAT_MAX_ATTACHMENTS_PER_MESSAGE}\\) \\{ setError\\(copy\\.fileLimit\\)`));
+});
+
 test("deleting an attachment deletes its cached text with it", () => {
     const storage = source("lib/messageAttachmentStorage.ts");
     const drain = storage.slice(storage.indexOf("export const drainMessageAttachmentCleanupQueue"));
