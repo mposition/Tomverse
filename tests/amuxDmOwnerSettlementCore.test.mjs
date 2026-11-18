@@ -303,13 +303,12 @@ test("the app applies the answer as the system, through the chain writer, and a 
   assert.ok(order.every((at, index) => at > 0 && (index === 0 || at > order[index - 1])),
     "the guard: the chain lock, the kill switch, the locked claim under its request id, the one judgment");
   assert.doesNotMatch(guard, /\bUPDATE\b|\bINSERT\b/, "the guard only reads and locks");
-  // A retry stays inside the claim's own budget: counted attempts, and platform
-  // failures since a person's last retry (the settlement's retry does not reset them).
-  assert.match(service, /const facts = await readAmuxAttemptBudgetFacts\(tx, row\.taskId\);\s+if \(!decideAmuxAttemptBudget\(\{ historical_rows: facts\.historicalRows,/,
-    "a retry stays inside the attempt budget");
+  // No count of attempts or repeat of a failure stops a retry (2026-11-18): the
+  // settlement checks no budget, and the claim only waits longer between tries.
+  assert.doesNotMatch(service, /decideAmuxAttemptBudget|readAmuxAttemptBudgetFacts|attempt_budget_spent/,
+    "a retry has no attempt budget to stay inside");
   assert.match(read("lib/amux/infraFailureStore.ts"), /e\."resolvedById" NOT LIKE 'system:%'/,
     "a system resolver's retry does not start the platform bound over");
-  assert.match(service, /return handOff\("attempt_budget_spent"\)/);
   assert.match(service, /if \(decision === "approve"\) \{[\s\S]*?await record\(\{ approvedHeadSha: facts\.verifiedHeadSha, approvedDiffDigest: facts\.diffDigest \}\);[\s\S]*?return \{ applied: true, outcome: "approved" \};/,
     "an approval only records");
   assert.doesNotMatch(service.slice(service.indexOf('if (decision === "approve")'), service.indexOf('if (decision === "retry")')),

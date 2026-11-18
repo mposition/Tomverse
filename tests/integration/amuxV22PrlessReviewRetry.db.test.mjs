@@ -134,15 +134,15 @@ test("an owner retries a PR-less v22 review result back to todo", {
   });
 });
 
-test("a PR-less review retry is still refused once the attempt budget is spent", {
+test("a PR-less review retry is still refused by the proposal guard at thirty attempts", {
   skip: allowed ? undefined : "requires a dedicated loopback test database",
 }, async () => {
   await inRollback(async (tx, db) => {
     const { taskId, priorAttemptId } =
       await seedAmuxV4PortfolioRecoveryPrerequisites(db, { attemptNumber: 5 });
-    // Owner direction 2026-11-15: no fixed five; the review proposal guard
-    // stops at the runaway guard of thirty. The run's number placed there,
-    // past its insert triggers.
+    // Owner direction 2026-11-18: the app has no bound, but the review proposal
+    // guard (20261116011400) still stops at thirty until a migration replaces
+    // it. The run's number placed there, past its insert triggers.
     await tx.$executeRawUnsafe("SET LOCAL session_replication_role = replica");
     await tx.$executeRaw`UPDATE "AmuxExecutionAttempt" SET "attemptNumber" = 30
       WHERE "id" = ${priorAttemptId}`;

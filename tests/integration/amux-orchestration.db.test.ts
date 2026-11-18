@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { POST as claimPost } from "@/app/api/internal/amux/claim/route";
-import { AMUX_MAX_EXECUTION_ATTEMPTS } from "@/lib/amux/executionBudgetCore";
 import { POST as queuePost } from "@/app/api/internal/amux/queue/route";
 import { POST as routingSnapshotPost } from "@/app/api/internal/amux/routing-snapshot/route";
 import { POST as ownedQueuePost } from "@/app/api/internal/amux/owned-queue/route";
@@ -1140,7 +1139,9 @@ test("incident admission refusals keep claim and execution-start audits atomic",
   }
 });
 
-test("execution start blocks a task after the runaway guard's historical attempts without resetting the budget", async () => {
+test("execution start never blocks a task for its historical attempts and numbers the next one above them", async () => {
+  // Owner direction 2026-11-18: no count of attempts stops an ordinary card.
+  const HISTORICAL_ATTEMPTS = 30;
   const taskId = await createTodo("amux-attempt-budget");
   const worker = `amux-attempt-worker-${randomUUID()}`;
   const instanceId = randomUUID();
@@ -1152,8 +1153,7 @@ test("execution start blocks a task after the runaway guard's historical attempt
       data: { owner: worker, claimedAt: base, revision: 1 },
     });
     await prisma.amuxExecutionAttempt.createMany({
-      // No fixed count of five since 2026-11-15: the runaway guard's counted attempts.
-      data: Array.from({ length: AMUX_MAX_EXECUTION_ATTEMPTS }, (_, index) => ({
+      data: Array.from({ length: HISTORICAL_ATTEMPTS }, (_, index) => ({
         id: randomUUID(),
         taskId,
         worker,
@@ -1163,7 +1163,7 @@ test("execution start blocks a task after the runaway guard's historical attempt
         attemptNumber: index + 1,
         heartbeatAt: base,
         leaseExpiresAt: null,
-        startedAt: new Date(base.getTime() - (AMUX_MAX_EXECUTION_ATTEMPTS - index) * 1_000),
+        startedAt: new Date(base.getTime() - (HISTORICAL_ATTEMPTS - index) * 1_000),
         endedAt: base,
         outcome: "failed",
         toStatus: "todo",
@@ -1190,24 +1190,26 @@ test("execution start blocks a task after the runaway guard's historical attempt
       expectedRevision: 1,
       now: new Date(base.getTime() + 1_000),
     });
-    assert.deepEqual(started, {
-      started: false,
-      reason: "attempt_budget_exhausted",
-    });
+    if (!started.started) {
+      throw new Error(`execution did not start: ${started.reason}`);
+    }
 
-    const [task, attemptCount, escalation] = await Promise.all([
+    const [task, attempt, escalations] = await Promise.all([
       prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: taskId } }),
-      prisma.amuxExecutionAttempt.count({ where: { taskId } }),
-      prisma.amuxHumanEscalation.findFirstOrThrow({
-        where: { taskId, reason: "attempt_budget_exhausted" },
-        orderBy: { createdAt: "desc" },
-      }),
+      prisma.amuxExecutionAttempt.findUniqueOrThrow({ where: { id: started.attemptId } }),
+      prisma.amuxHumanEscalation.count({ where: { taskId } }),
     ]);
-    assert.equal(task.status, "blocked");
-    assert.equal(task.revision, 2);
-    assert.equal(attemptCount, AMUX_MAX_EXECUTION_ATTEMPTS);
-    assert.equal(escalation.status, "open");
+    assert.equal(task.status, "doing");
+    assert.equal(attempt.attemptNumber, HISTORICAL_ATTEMPTS + 1);
+    assert.equal(escalations, 0, "no escalation opens for the number of attempts");
+    const startAudit = await prisma.adminAuditLog.findFirstOrThrow({
+      where: { action: "amux.execution.started", targetId: taskId },
+      orderBy: { createdAt: "desc" },
+    });
+    assert.equal((startAudit.metadata as Record<string, unknown>).max_attempts, null,
+      "the audit names no bound, never a number or Infinity");
   } finally {
+    await prisma.amuxWorkDelivery.deleteMany({ where: { taskId } });
     await prisma.amuxHumanEscalation.deleteMany({ where: { taskId } });
     await prisma.amuxExecutionAttempt.deleteMany({ where: { taskId } });
     await prisma.amuxWorkerRuntime.deleteMany({

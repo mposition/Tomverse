@@ -28,7 +28,7 @@ import {
   type AmuxReviewOutcome,
   type AmuxReviewSubject,
 } from "@/lib/amux/reviewApprovalCore";
-import { amuxDefaultMaxAttempts, decideAmuxAttemptBudget } from "@/lib/amux/executionBudgetCore";
+import { decideAmuxAttemptBudget } from "@/lib/amux/executionBudgetCore";
 import { readAmuxAttemptBudgetFacts } from "@/lib/amux/infraFailureStore";
 import { amuxV52RejectedTwiceReviewAttemptId } from "@/lib/amux/v52ReviewRejections";
 import { normalizeAmuxUntrustedReason, openAmuxHumanEscalation, publicAmuxEscalationReasonCode } from "@/lib/amux/escalation";
@@ -381,7 +381,7 @@ export async function getAmuxReviewDetail(escalationId: string) {
     artifactForEscalation(escalationId), v4EvidenceForEscalation(escalationId),
   ]);
   const state = await prisma.$transaction((tx) => snapshot(tx, escalationId, fetchedArtifact, fetchedV4));
-  const { escalation, task, lastAttempt, used, digest, text, context, report,
+  const { escalation, task, lastAttempt, budget, used, digest, text, context, report,
     displayTruncated, displayExact, outcomes, artifact, lastAttemptResultStored,
     decisionHold, approvalBasis, unpublishedPatch, publicationHold } = state;
   // The Task's ended runs whose CLI usage is unknown and not yet accepted:
@@ -454,7 +454,10 @@ export async function getAmuxReviewDetail(escalationId: string) {
     publication_hold: publicationHold,
     // Why no decision is open at all; null while the server offers one.
     decision_hold: decisionHold,
-    retry: { used, limit: amuxDefaultMaxAttempts(), remaining: Math.max(0, amuxDefaultMaxAttempts() - used) },
+    // No bound for an ordinary card (owner direction 2026-11-18): limit and
+    // remaining are null, never a large number.
+    retry: { used, limit: budget.max_attempts,
+      remaining: budget.max_attempts === null ? null : Math.max(0, budget.max_attempts - used) },
     proposed_transitions: {
       approve: outcomes.includes("approve") ? "done" : null,
       retry: outcomes.includes("retry") ? "todo" : null,

@@ -6,8 +6,11 @@ import { mock, test } from "node:test";
 // Production 2026-11-06 to 11-07: one Task with its five attempts spent was
 // assigned 149 times. Execution start refused it every time, the unstarted
 // release requeued it, and the next tick (one assignment per tick) took it
-// again ahead of every lower-scored Task. A spent Task is now skipped by the
-// claim, the same budget execution start applies, and the next one is tried.
+// again ahead of every lower-scored Task. A Task whose attempts were spent was
+// skipped by the claim, the same budget execution start applied. Owner
+// direction 2026-11-18: no count of attempts spends a card any more, so the
+// claim skips none for it; a Task failing the same way again and again only
+// waits longer (result_retry_backoff) while the next Task is tried.
 
 const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path: string) => pathToFileURL(resolve(root, path)).href;
@@ -29,12 +32,14 @@ const approved = { approvalId: "catalog-one", catalogDigest: receipt.catalogDige
     modelId: "gpt-6-1-sol", uncachedInputMicroUsdPerMillion: 1_000_000,
     cacheReadMicroUsdPerMillion: 100_000, cacheWriteMicroUsdPerMillion: 200_000,
     outputMicroUsdPerMillion: 2_000_000 }] }, receipt };
-// Owner direction 2026-11-15: no fixed five; a Task is spent only at the
-// runaway guard of thirty (infrastructure failures left out).
+// Owner direction 2026-11-18: thirty attempts behind it spend nothing.
 const attempts: Record<string, number> = { [spentTask]: 30, [freshTask]: 0 };
 const assigned: string[] = [];
 // Tasks whose newest run ended as a platform failure a second ago.
 const backingOff = new Set<string>();
+// Tasks whose newest run failed on the card's own result, with how many runs
+// in a row failed the same way and how long ago the newest ended.
+const resultBackingOff = new Map<string, { streak: number; endedAgoMs: number }>();
 const INFRA_REASON = "infra_no_result";
 const auditMetadata: Array<Record<string, unknown>> = [];
 
@@ -62,10 +67,18 @@ const tx = {
       const used = attempts[id] ?? 0;
       // The wait starts at the third platform failure in a row (amuxInfraRetryDelayMs).
       const infra = backingOff.has(id) ? 3 : 0;
+      const result = resultBackingOff.get(id);
       return [{ rows: used, greatest: used || null, infra, infraWindow: infra,
         reserved: BigInt(used) * BigInt("3400000"),
-        lastEndedAt: infra ? new Date(now.getTime() - 1_000) : null,
-        lastEndedReason: infra ? INFRA_REASON : null }];
+        lastEndedAt: infra ? new Date(now.getTime() - 1_000) :
+          result ? new Date(now.getTime() - result.endedAgoMs) : null,
+        lastEndedReason: infra ? INFRA_REASON : result ? "reported_result" : null }];
+    }
+    // readAmuxResultFailureStreak: the newest runs the card's own result failed.
+    if (sql.includes('SELECT a."outcome", a."reason"')) {
+      const id = values.find((value) => typeof value === "string" && value in attempts) as string;
+      return Array.from({ length: resultBackingOff.get(id)?.streak ?? 0 },
+        () => ({ outcome: "failed", reason: "reported_result" }));
     }
     if (sql.includes("FROM \"AmuxExecutionAttempt\" a")) return [];
     if (sql.includes("FROM \"AmuxWorkerRuntime\"") && sql.includes("FOR UPDATE"))
@@ -155,46 +168,61 @@ mock.module(mod("lib/amux/v4TaskReadyService.ts"), { namedExports: {
 
 const service = import(mod("lib/amux/v22WorkerClaimService.ts"));
 
-test("a Task with its attempts spent is skipped and the next Task is assigned", async () => {
+test("a Task with thirty attempts behind it is assigned like any other: no count of attempts stops a card", async () => {
+  assigned.length = 0;
+  attempts[spentTask] = 30;
+  attempts[freshTask] = 0;
+  // Its reservation passes the receipt's approved ceiling: recorded on the
+  // assignment and logged, never refused (owner decision 2026-11-14).
+  const warn = mock.method(console, "warn", () => undefined);
+  let result;
+  try {
+    result = await (await service).tickV22WorkerClaim();
+  } finally { warn.mock.restore(); }
+  assert.equal(result.claimed, true);
+  assert.equal(result.claimed && result.taskId, spentTask, "the higher-scored Task is not passed over");
+  assert.ok(assigned.includes(spentTask), "it is reserved for a start that will not refuse it");
+  assert.deepEqual(auditMetadata.find((metadata) => metadata.ceilingOverrun !== undefined)?.ceilingOverrun,
+    { ceilingMicroUsd: "3400000", priorReservedMicroUsd: "102000000", projectedMicroUsd: "105400000" });
+  // A thousand attempts change nothing either.
+  assigned.length = 0;
+  attempts[spentTask] = 1_000;
+  const again = mock.method(console, "warn", () => undefined);
+  try {
+    const next = await (await service).tickV22WorkerClaim();
+    assert.equal(next.claimed && next.taskId, spentTask);
+  } finally { again.mock.restore(); }
+});
+
+test("a Task failing the same way again and again waits out a longer backoff and the next Task is assigned", async () => {
+  assigned.length = 0;
+  attempts[spentTask] = 6;
+  attempts[freshTask] = 0;
+  // Six runs in a row failed the same way (a wait of four minutes); the newest ended a second ago.
+  resultBackingOff.set(spentTask, { streak: 6, endedAgoMs: 1_000 });
   try {
     const result = await (await service).tickV22WorkerClaim();
-    assert.equal(result.claimed, true);
     assert.equal(result.claimed && result.taskId, freshTask);
-    assert.deepEqual(assigned, [freshTask], "the spent Task is never reserved");
+    assert.deepEqual(assigned, [freshTask], "the waiting Task is passed over, never blocked, and holds nothing after it");
 
-    // With only the spent Task left, the tick assigns nothing rather than a
-    // reservation execution start would refuse.
+    // The wait is over: the same Task is assigned again, however often it failed.
     assigned.length = 0;
-    attempts[freshTask] = 30;
-    const none = await (await service).tickV22WorkerClaim();
-    assert.deepEqual(none, { claimed: false, reason: "no_ready_candidate" });
-    assert.deepEqual(assigned, []);
-
-    assert.equal(auditMetadata.length, 1);
-    assert.equal(Object.hasOwn(auditMetadata[0], "ceilingOverrun"), false,
-      "the first attempt reaches the approved ceiling exactly");
-
-    // One attempt left still assigns (the thirtieth attempt is allowed). Its
-    // reservation passes the receipt's approved ceiling: recorded on the
-    // assignment and logged, never refused (owner decision 2026-11-14).
-    attempts[freshTask] = 29;
+    resultBackingOff.set(spentTask, { streak: 6, endedAgoMs: 5 * 60_000 });
     const warn = mock.method(console, "warn", () => undefined);
-    let last;
     try {
-      last = await (await service).tickV22WorkerClaim();
+      const later = await (await service).tickV22WorkerClaim();
+      assert.equal(later.claimed && later.taskId, spentTask);
     } finally { warn.mock.restore(); }
-    assert.equal(last.claimed && last.taskId, freshTask);
-    const overrun = { ceilingMicroUsd: "3400000",
-      priorReservedMicroUsd: "98600000", projectedMicroUsd: "102000000" };
-    assert.deepEqual(auditMetadata.at(-1)?.ceilingOverrun, overrun);
-    const logged = warn.mock.calls.map((call) => JSON.parse(String(call.arguments[0])))
-      .filter((line) => line.event === "v22_approved_ceiling_overrun");
-    assert.equal(logged.length, 1);
-    assert.equal(logged[0].phase, "claim");
-    assert.equal(logged[0].taskId, freshTask);
-    assert.equal(logged[0].projectedMicroUsd, overrun.projectedMicroUsd);
+    // Three runs in a row are not yet a repeat: no wait.
+    assigned.length = 0;
+    resultBackingOff.set(spentTask, { streak: 3, endedAgoMs: 1_000 });
+    const early = mock.method(console, "warn", () => undefined);
+    try {
+      const third = await (await service).tickV22WorkerClaim();
+      assert.equal(third.claimed && third.taskId, spentTask);
+    } finally { early.mock.restore(); }
   } finally {
-    // nothing to restore
+    resultBackingOff.clear();
   }
 });
 

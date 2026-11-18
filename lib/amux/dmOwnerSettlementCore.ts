@@ -142,6 +142,7 @@ export const AMUX_DM_OWNER_SETTLEMENT_REASON_TEXT: Readonly<Record<string, strin
   analysis_replan: "its investigation concluded that the work needs a new plan",
   review_server_rejected_twice: "the review server rejected the same finding again",
   // Owner decision 2026-11-15 (lib/amux/executionBudgetCore.ts, infraFailureCore.ts).
+  // Nothing opens repeated_failure since 2026-11-18; stored rows stay readable.
   repeated_failure: "its runs failed the same way three times in a row",
   infra_attempts_exhausted: "its runs kept failing on the worker host, not in its own work, since a person last sent it back",
   operational_cost_blocked: "a cost limit holds it",

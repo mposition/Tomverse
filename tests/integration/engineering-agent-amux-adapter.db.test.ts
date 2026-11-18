@@ -16,7 +16,6 @@ import {
   settleAmuxExecution,
   startAmuxExecution,
 } from "@/lib/amux/execution";
-import { AMUX_MAX_EXECUTION_ATTEMPTS } from "@/lib/amux/executionBudgetCore";
 import { recordAmuxReviewPullRequest } from "@/lib/amux/reviewPullRequest";
 import {
   heartbeatAmuxWorkerRuntime,
@@ -867,29 +866,8 @@ test("a card that reached review without asking for one is marked for review by 
   }
 });
 
-test("a run that may not start leaves no AMUX trace, even on a card AMUX would block", async () => {
+test("a run that may not start leaves no AMUX trace on its card", async () => {
   const fixture = await readyWorkerWithCard();
-  // Ended attempts up to the runaway guard spend the card's attempt budget
-  // (no fixed count of five since 2026-11-15): a start would block it.
-  for (let attemptNumber = 1; attemptNumber <= AMUX_MAX_EXECUTION_ATTEMPTS; attemptNumber += 1) {
-    await prisma.amuxExecutionAttempt.create({
-      data: {
-        id: randomUUID(),
-        taskId: fixture.taskId,
-        worker: fixture.worker,
-        workerInstanceId: fixture.instanceId,
-        workerGeneration: fixture.generation,
-        taskRevision: 0,
-        attemptNumber,
-        heartbeatAt: new Date(),
-        startedAt: new Date(),
-        endedAt: new Date(),
-        outcome: "failed",
-        toStatus: "todo",
-        endedBy: fixture.worker,
-      },
-    });
-  }
   const { workItemId: mismatchId } = await runEngineeringAgentTransaction(prisma, (tx) =>
     openEngineeringAgentWorkItem(tx, {
       kind: "state_mismatch",
@@ -909,23 +887,6 @@ test("a run that may not start leaves no AMUX trace, even on a card AMUX would b
   } finally {
     await prisma.engineeringAgentWorkItem.update({ where: { id: mismatchId }, data: { state: "resolved" } });
   }
-  // With nothing halting, AMUX's own refusal is AMUX's to record.
-  const started = await withAmuxRouteBudget(
-    () =>
-      startAmuxExecution(
-        {
-          taskId: fixture.taskId,
-          worker: fixture.worker,
-          instanceId: fixture.instanceId,
-          generation: fixture.generation,
-          expectedRevision: 1,
-        },
-        engineeringRunStartAttachment({ runId: nextRunId(), baseSha: sha1("base") }),
-      ),
-    ENGINEERING_AGENT_AMUX_ROUTE_BUDGET_MS,
-  );
-  assert.deepEqual(started, { started: false, reason: "attempt_budget_exhausted" });
-  assert.equal((await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: fixture.taskId } })).status, "blocked");
 });
 
 test("an active run whose attempt ended halts runs before anyone reports it", async () => {

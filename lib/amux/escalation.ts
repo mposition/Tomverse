@@ -57,13 +57,14 @@ const ESCALATION_REASON_CODES = new Set([
   // Owner decision 2026-11-07: the v52 review server rejected a run twice.
   "review_server_rejected_twice",
   // Owner decision 2026-11-14 (AMUXFLOW/B2): a Task behind a dependency
-  // archived without being done (lib/amux/stalledCardSweep.ts).
+  // archived without being done.
   "dependency_closed",
   // Owner decision 2026-11-15: a card that failed on the platform (never on
   // its own work) more often than lib/amux/infraFailureCore.ts allows.
   "infra_attempts_exhausted",
-  // Owner direction 2026-11-15: no fixed count; the worker's own result
-  // failed the same way three runs in a row (executionBudgetCore.ts).
+  // Owner direction 2026-11-15: the worker's own result failed the same way
+  // three runs in a row. Nothing opens it since 2026-11-18 (the claim waits
+  // longer instead, executionBudgetCore.ts); rows that carry it stay readable.
   "repeated_failure",
   "operational_cost_blocked",
   "canonical_deadline_review_required",

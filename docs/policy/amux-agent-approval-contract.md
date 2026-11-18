@@ -215,7 +215,7 @@ reason digest를 시스템 감사에 남긴다.
 모두 있어야 한다. `retry`는 task의 `owner`·`claimedAt`만 비우고 revision을
 올린다. 기존 attempt ID, worker instance/generation, delivery receipt는
 수정하지 않으며, 증가한 revision이 과거 fence를 무효화한다. `retry`는 기존 시도 기록을 지우거나
-`AMUX_MAX_EXECUTION_ATTEMPTS`를 초기화하지 않는다. 상한을 소진한 작업은 새
+호출자가 정한 시도 한도(유료 경로)를 초기화하지 않는다. 일반 카드는 2026-11-18부터 시도 한도가 없다. 상한을 소진한 작업은 새
 승인만으로 다시 실행할 수 없다. `blocked`로 종결하고 계속 필요하면 새 task를
 발행한다. 기존 task를 다시 `todo`로 바꾸거나 기록·상한을 리셋하지 않는다.
 

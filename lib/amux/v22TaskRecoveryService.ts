@@ -27,7 +27,7 @@ import { AMUX_V22_RECOVERY_HOST_SCOPE, AMUX_V22_TASK_RECOVERY_POLICY_VERSION,
   AMUX_V22_TASK_RECOVERY_ENABLED_ENV, AMUX_V22_LEGACY_SAFE_STOP_ENABLED_ENV,
   AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID, AMUX_V22_UNKNOWN_PRIOR_RISK_ATTEMPT_ID,
   AMUX_V22_UNKNOWN_PRIOR_HELD_MICROUSD, AMUX_V22_READ_ONLY_RETRY_CAP_MICROUSD,
-  AMUX_V22_READ_ONLY_RETRY_EXPOSURE_MICROUSD,
+  AMUX_V22_READ_ONLY_RETRY_EXPOSURE_MICROUSD, AMUX_V22_PAID_RETRY_ATTEMPT_LIMIT,
   AMUX_V22_READ_ONLY_API_EXECUTOR_ENABLED_ENV,
   AMUX_V22_RECOVERY_MANUAL_EVIDENCE_WINDOW_MS,
   AMUX_V22_RECOVERY_SAFE_STOP_EVIDENCE_WINDOW_MS, AMUX_V22_RECOVERY_PREAPPROVAL_TTL_MS,
@@ -124,6 +124,7 @@ async function priorBudget(tx: Prisma.TransactionClient, taskId: string) {
   const numbered = Math.max(prior.historicalRows, prior.greatestAttemptNumber ?? 0);
   if (!decideAmuxAttemptBudget({ historical_rows: prior.historicalRows,
     greatest_attempt_number: prior.greatestAttemptNumber, infra_rows: prior.infraRows,
+    max_attempts: AMUX_V22_PAID_RETRY_ATTEMPT_LIMIT,
   }).allowed)
     throw new BoardImportError("attempt_budget_exhausted", 409);
   return { historicalAttempts: prior.historicalRows, nextAttemptNumber: numbered + 1,
@@ -2177,6 +2178,8 @@ export function recoveryAttemptBudget(input: {
   historicalAttempts: number;
   greatestAttemptNumber: number | null;
 }) {
+  // A paid run keeps a bound while an ordinary card has none.
   return decideAmuxAttemptBudget({ historical_rows: input.historicalAttempts,
-    greatest_attempt_number: input.greatestAttemptNumber });
+    greatest_attempt_number: input.greatestAttemptNumber,
+    max_attempts: AMUX_V22_PAID_RETRY_ATTEMPT_LIMIT });
 }

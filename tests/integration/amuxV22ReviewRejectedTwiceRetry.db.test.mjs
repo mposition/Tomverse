@@ -224,15 +224,15 @@ test("a used-up attempt budget refuses the retry at the DB edge", {
   skip: allowed ? undefined : "requires a dedicated loopback test database",
 }, async () => {
   await inRollback(async (tx, db) => {
-    // The same budget the review snapshot reads (decideAmuxAttemptBudget):
-    // the greatest attempt number counts as attempts used.
-    // Owner direction 2026-11-15: no fixed five; the runaway guard is thirty,
-    // here and in the review proposal guard.
+    // Owner direction 2026-11-18: the app counts no bound for an ordinary card
+    // (decideAmuxAttemptBudget), but the review proposal guard (20261116011400)
+    // still refuses an owner's retry at thirty counted attempts until a
+    // migration replaces it.
     const { taskId, priorAttemptId } = await seedRejected(db, { attemptNumber: 5 });
     const { decideAmuxAttemptBudget } =
       await import("../../lib/amux/executionBudgetCore.ts");
     assert.equal(decideAmuxAttemptBudget({ historical_rows: 1,
-      greatest_attempt_number: 30 }).allowed, false);
+      greatest_attempt_number: 30 }).allowed, true);
     assert.equal(decideAmuxAttemptBudget({ historical_rows: 1,
       greatest_attempt_number: 5 }).allowed, true);
     // The settled run's number placed at the guard, past its insert triggers.

@@ -34,6 +34,13 @@ export const AMUX_V22_UNKNOWN_PRIOR_HELD_MICROUSD = BigInt("3400000");
 export const AMUX_V22_READ_ONLY_RETRY_CAP_MICROUSD = BigInt("3400000");
 export const AMUX_V22_READ_ONLY_RETRY_EXPOSURE_MICROUSD = BigInt("6800000");
 export const AMUX_V22_READ_ONLY_RETRY_TASK_ATTEMPT_LIMIT = 2;
+/**
+ * The most counted attempts a card may have when its next run is a paid
+ * (risk-accepted) retry or a recovery approval for one. A paid run spends real
+ * money, so this bound stays when an ordinary card has none (owner direction
+ * 2026-11-18); it is the value the ordinary bound had until then.
+ */
+export const AMUX_V22_PAID_RETRY_ATTEMPT_LIMIT = 30;
 export const AMUX_V22_READ_ONLY_LAUNCH_SCOPE_VERSION =
   AMUX_V22_READ_ONLY_RETRY_PROTOCOL_VERSION;
 export const AMUX_V22_TASK_RECOVERY_ENABLED_ENV = "TOMVERSE_AMUX_V22_TASK_RECOVERY_ENABLED";

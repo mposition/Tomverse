@@ -58,25 +58,6 @@ test("engineering agent: a card-scoped mismatch holds no other card; an unbound 
   assert.equal(engineeringAgentHalted({ ...scoped, unacknowledgedHalt: "unbound_app_pr" }), true);
 });
 
-test("the stalled card sweep reads only a promoted todo Task whose budget is spent", async () => {
-  const sweep = await import("../lib/amux/stalledCardSweep.ts");
-  const calls = [];
-  const tx = { $queryRaw: async (strings, ...values) => {
-    calls.push({ sql: strings.join("?").replace(/\s+/g, " "), values });
-    return [];
-  } };
-  await sweep.readAmuxStalledCards(tx, 5);
-  const { sql, values } = calls[0];
-  assert.ok(sql.includes(`w."sourceSystem" = 'admin-idea-v4' AND w."cardType" = 'task'`));
-  assert.ok(sql.includes(`w."archivedAt" IS NULL AND w."v22AssignmentId" IS NULL`));
-  assert.ok(sql.includes(`e."status" IN ('open', 'acknowledged')`), "a card already in the queue is left");
-  assert.ok(sql.includes(`w."status" = 'todo' AND w."v22ReceiptId" IS NOT NULL`),
-    "only a promoted card, which the settlement can file");
-  assert.ok(!sql.includes("backlog"), "a backlog card is not swept: the settlement cannot file it");
-  // The claim's own budget: infrastructure failures are left out and have no bound.
-  assert.ok(values.includes(30) && values.includes("attempt_budget_exhausted") && !values.includes(12));
-});
-
 test("DM merge keeps its allow list: lib code and API routes stay a person's", async () => {
   const { qaReleaseDmMergeAllowed } = await import("../lib/qaReleaseMergeLaneExclusionCore.ts");
   for (const path of ["lib/routerFailure.ts", "lib/sessionRevocationCore.ts", "lib/providerCostBudget.ts",
@@ -112,14 +93,6 @@ test("a held card is left out of the publisher's queue and refused before its ru
     "a start that names no card keeps the agent-wide halt");
   const execution = readFileSync("lib/amux/execution.ts", "utf8");
   assert.match(execution, /requireEngineeringAgentRunAdmission\(\s+engineeringAgentTransactionInAmux\(context\.attachedTransaction\),\s+\{ cardId: input\.taskId \}\)/);
-});
-
-test("the stalled card sweep runs after the tick's answer is decided", () => {
-  const route = readFileSync("app/api/internal/amux/auto-promotion/tick/route.ts", "utf8");
-  const decided = route.indexOf("const response = await claimAndPromote();");
-  const swept = route.indexOf("await sweepStalledCardsAfterTick();");
-  assert.ok(decided > 0 && swept > decided);
-  assert.ok(route.indexOf("const result = await tickV22WorkerClaim();") > swept, "the claim lives in claimAndPromote");
 });
 
 test("dependency_closed is a stored escalation reason", async () => {
