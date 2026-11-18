@@ -87,10 +87,15 @@ function CopyBlock({ label, value, testId }: { label: string; value: string; tes
                     type="button"
                     data-testid={`${testId}-copy`}
                     onClick={() => {
-                        void navigator.clipboard?.writeText(value).then(() => {
-                            setCopied(true);
-                            setTimeout(() => setCopied(false), 1500);
-                        });
+                        // A denied clipboard permission leaves the button as it was;
+                        // the value stays on screen to copy by hand.
+                        void navigator.clipboard
+                            ?.writeText(value)
+                            .then(() => {
+                                setCopied(true);
+                                setTimeout(() => setCopied(false), 1500);
+                            })
+                            .catch(() => undefined);
                     }}
                     className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
                 >

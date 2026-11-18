@@ -580,6 +580,23 @@ test("external inference API over the real shared credit ledger", { skip: !datab
         assert.equal((await reservationsFor(userId)).length, 2);
     });
 
+    await t.test("a twin of a request that used up the key cap gets its receipt, not a cap refusal", async () => {
+        const userId = await newUser();
+        allow(userId);
+        const probe = await issueKey(userId);
+        assert.equal((await call(probe.key, body())).status, 200);
+        const perRequest = (await reservationsFor(userId))[0].reservedCredits;
+        const { key } = await issueKey(userId, { creditCap: perRequest });
+        const before = dispatches;
+        const twins = await Promise.all([1, 2, 3].map(() => call(key, body(), { headers: { "idempotency-key": "cap-twin" } })));
+        const statuses = twins.map((r) => r.status).sort();
+        assert.deepEqual(statuses, [200, 409, 409]);
+        for (const response of twins.filter((r) => r.status === 409)) {
+            assert.match((await response.json()).error.code, /^idempotent_request_/);
+        }
+        assert.equal(dispatches - before, 1);
+    });
+
     await t.test("client abort mid-stream settles as cancelled and keeps the receipt", async () => {
         const userId = await newUser();
         allow(userId);

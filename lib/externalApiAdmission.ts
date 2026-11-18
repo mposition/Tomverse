@@ -77,18 +77,6 @@ export const externalApiAdmissionHook =
         if (!key || key.userId !== input.userId || externalApiKeyState(key, now) !== "active") {
             throw new ChatAccessError(401, "invalid_api_key", "A valid Tomverse API key is required.");
         }
-        if (key.creditCap !== null) {
-            const used = (await keyCreditTotals(tx, [key.id])).get(key.id)?.committed ?? 0;
-            if (used + reservation.usageCredits > key.creditCap) {
-                throw new ChatAccessError(
-                    429,
-                    "key_credit_cap_reached",
-                    "This API key has reached the credit limit set for it. Raise the limit or use another key.",
-                    undefined,
-                    { creditCap: key.creditCap, committedCredits: used }
-                );
-            }
-        }
         if (input.idempotencyKeyDigest) {
             const existing = await tx.externalApiRequest.findUnique({
                 where: {
@@ -102,7 +90,21 @@ export const externalApiAdmissionHook =
             if (existing) {
                 // A concurrent twin won the race after the pre-check; this one
                 // must not dispatch. The route turns this into the receipt.
+                // Checked before the key cap: a twin of an admitted request is
+                // that request, and gets its receipt rather than a cap refusal.
                 throw new ChatAccessError(409, "idempotency_key_in_use", "A request with this Idempotency-Key already exists.");
+            }
+        }
+        if (key.creditCap !== null) {
+            const used = (await keyCreditTotals(tx, [key.id])).get(key.id)?.committed ?? 0;
+            if (used + reservation.usageCredits > key.creditCap) {
+                throw new ChatAccessError(
+                    429,
+                    "key_credit_cap_reached",
+                    "This API key has reached the credit limit set for it. Raise the limit or use another key.",
+                    undefined,
+                    { creditCap: key.creditCap, committedCredits: used }
+                );
             }
         }
         await tx.externalApiRequest.create({
