@@ -49,6 +49,7 @@ const ownerQueueRunSql = migration("20261109200000_engineering_agent_owner_queue
 const ownerQueueWorkItemSql = migration("20261109200100_engineering_agent_owner_queue_work_item_guard");
 const uncappedRunSql = migration("20261116010200_engineering_agent_run_guard_uncapped");
 const uncappedWorkItemSql = migration("20261116010300_engineering_agent_work_item_guard_uncapped");
+const patchBytesSql = migration("20261118120100_engineering_agent_patch_bytes");
 const outcomeSql = readFileSync(
   new URL("../prisma/migrations/20261007010000_engineering_agent_private_result/migration.sql", import.meta.url),
   "utf8",
@@ -62,7 +63,8 @@ const functionBodies = (text) =>
 /** Each function as the latest migration that writes it leaves it, in migration order. */
 const latestFunctions = () => {
   const latest = new Map();
-  for (const text of [sql, promotionSql, ownerQueueRunSql, ownerQueueWorkItemSql, uncappedRunSql, uncappedWorkItemSql]) {
+  for (const text of [sql, promotionSql, ownerQueueRunSql, ownerQueueWorkItemSql, uncappedRunSql, uncappedWorkItemSql,
+    patchBytesSql]) {
     for (const [name, body] of functionBodies(text)) latest.set(name, body);
   }
   return latest;
@@ -211,6 +213,51 @@ test("the uncapped guards drop only the queue caps, from exactly the bodies they
       assert.ok(next.includes(`RAISE EXCEPTION '${kept}'`), `${name} still refuses: ${kept}`);
     assert.doesNotMatch(next, /owner queue is full/, name);
   }
+});
+
+test("the patch bytes migration adds the column and two guard rules, from exactly the body it replaces", () => {
+  // docs/policy/amux-v22-result-transfer.md §4: a publish item keeps its
+  // patch's bytes, written once; the size-only CHECK on the text goes.
+  const blocks = (text) =>
+    [...text.matchAll(/-- transitions: (\w+ \w+)\n([\s\S]*?)-- end transitions/g)].map(
+      (m) => `${m[1]} ${sorted(pairs(m[2])).join(",")}`,
+    );
+  const digest = (text) => createHash("sha256").update(text, "utf8").digest("hex");
+  const name = "engineering_agent_work_item_guard";
+  const previous = functionBodies(uncappedWorkItemSql).get(name);
+  const next = functionBodies(patchBytesSql).get(name);
+  assert.deepEqual([...functionBodies(patchBytesSql).keys()], [name], "one function per migration");
+  assert.deepEqual(blocks(next), blocks(previous), "every transition is kept");
+  const header = new RegExp(
+    `^-- baseline-check: replace-function-if-body-sha256 "${name}" "([0-9a-f]{64})" "([0-9a-f]{64})"$`, "m",
+  ).exec(patchBytesSql);
+  assert.ok(header, "the guard pins the body it replaces");
+  assert.deepEqual([header[1], header[2]], [digest(previous), digest(next)]);
+  // The new body is the old one with the two patchBytes rules and nothing else.
+  const added = [
+    /\n {8}-- The bytes beside a patch[\s\S]*?\n {8}END IF;(?=\n {8}NEW\."createdAt" := now_utc;)/,
+    /\n {4}-- Its bytes are written once[\s\S]*?\n {4}END IF;(?=\n\n {4}IF terminal THEN)/,
+  ];
+  let stripped = next;
+  for (const rule of added) {
+    assert.match(stripped, rule);
+    stripped = stripped.replace(rule, "");
+  }
+  assert.equal(stripped, previous, "only the two patchBytes rules are added");
+  assert.match(next, /NEW\."patchBytes" IS DISTINCT FROM pg_catalog\.convert_to\(NEW\."patchBody", 'UTF8'\)/);
+  assert.match(next, /IF NEW\."patchBytes" IS DISTINCT FROM OLD\."patchBytes" THEN/);
+  for (const kept of [...previous.matchAll(/RAISE EXCEPTION '([^']*)'/g)].map((m) => m[1]))
+    assert.ok(next.includes(`RAISE EXCEPTION '${kept}'`), `still refuses: ${kept}`);
+  // The column, its storage, and the CHECK that replaces the size-only one.
+  assert.match(patchBytesSql, /ALTER TABLE "EngineeringAgentWorkItem" ADD COLUMN "patchBytes" BYTEA;/);
+  assert.match(patchBytesSql, /ALTER TABLE "EngineeringAgentWorkItem" ALTER COLUMN "patchBytes" SET STORAGE EXTERNAL;/);
+  assert.match(patchBytesSql, /DROP CONSTRAINT "EngineeringAgentWorkItem_patchBody_check",/);
+  assert.equal(
+    check("EngineeringAgentWorkItem_patchBytes_check", patchBytesSql).trim(),
+    `CHECK ("patchBytes" IS NULL OR ("patchBody" IS NOT NULL AND octet_length("patchBytes") = octet_length("patchBody")))`,
+  );
+  assert.match(patchBytesSql, /RETURNS TRIGGER\nLANGUAGE plpgsql\nSET search_path = pg_catalog, pg_temp\nAS \$\$/);
+  assert.doesNotMatch(patchBytesSql, /INSERT INTO|\bUPDATE "|\bnow\(\)/i);
 });
 
 test("every string the database matches on is the string the code holds", () => {

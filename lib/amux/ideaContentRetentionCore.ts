@@ -9,12 +9,6 @@ export const AMUX_V4_CONTENT_RETENTION_SECRET_ENV =
   "TOMVERSE_AMUX_V4_CONTENT_RETENTION_SECRET";
 export const AMUX_V4_CONTENT_RETENTION_AGENT_ID = "amux-v4-intake-retention";
 
-/** The shared trigger also knows how to retire v22 task result and patch
- * bodies. v15 does not activate that distinct retention path. */
-export const AMUX_V22_TASK_RESULT_RETENTION_CODE_LATCH = false;
-export const AMUX_V22_TASK_RESULT_RETENTION_ENV =
-  "TOMVERSE_AMUX_V22_TASK_RESULT_RETENTION";
-
 /** Subscription analysis path and key cleanup uses the existing isolated
  * retention trigger, but has its own switch apart from raw-body cleanup. */
 export const AMUX_V19_READ_MANIFEST_RETENTION_ENV =
@@ -22,9 +16,6 @@ export const AMUX_V19_READ_MANIFEST_RETENTION_ENV =
 
 export const amuxV4ContentRetentionEnabled = (value: string | undefined) =>
   value === "enabled";
-
-export const amuxV22TaskResultRetentionEnabled = (value: string | undefined) =>
-  AMUX_V22_TASK_RESULT_RETENTION_CODE_LATCH && value === "enabled";
 
 export const amuxV19ReadManifestRetentionEnabled = (value: string | undefined) =>
   value === "enabled";

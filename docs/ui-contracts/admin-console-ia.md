@@ -86,7 +86,7 @@ Release = 릴리스, Safety & recovery = 안전·복구, Feature flags = 기능 
 Messaging = 메시징). `tests/adminNavigation.test.mjs` writes the whole table out
 and fails when the code and this list disagree.
 
-The Models `discovery` tab also lists the weekly new-provider research proposals (Chat, Image and Code providers Tomverse is not connected to, with cited sources; off unless `MODEL_DISCOVERY_RESEARCH_LLM_MODEL_ID` is set) in the same queue, marked "새 공급자 리서치" and excludable but never adoptable there; it is not a new tab. Image models of already-connected providers found by the same research (their model-list APIs do not return image models) appear there too, marked "이미지 모델 리서치 (연결 공급자)".
+The Models `discovery` tab also lists the weekly new-provider research proposals (Chat, Image and Code providers Tomverse is not connected to, with cited sources; off unless `MODEL_DISCOVERY_RESEARCH_LLM_MODEL_ID` is set) in the same queue, marked "새 공급자 리서치" and excludable but never adoptable there; it is not a new tab. Image models of already-connected providers found by the same research (their model-list APIs do not return image models) appear there too, marked "이미지 모델 리서치 (연결 공급자)". Above the queue, a "지난 모델 리서치" tile shows the last run that called the model: per call what was proposed and filed, and each dropped proposal with its reason (and, for a missing official citation, the URLs it did cite), so a run that rejected everything does not look like a run that found nothing.
 
 ### The 2026-11-07 restructuring
 
@@ -113,7 +113,7 @@ they were written under):
   recovery** (`/admin/amux-recovery`) holds the halts (`safety`, readable by
   every role, cleared by the owner, carrying the `amuxOrchestratorHalts`
   badge), unused reservations and claims (`reservations`, owner only) and the
-  retired AMUX tools (`legacy`, owner only: Catalog import, Source
+  retired AMUX tools (`legacy`, owner only: Source
   reconciliation, Card metadata and the three Promotion screens, each a
   closed section behind its own switch and owner check). The Promotion page is
   gone as a menu and redirects there.
@@ -421,10 +421,9 @@ switch state. It carries no badge: a switch is a setting, not work waiting for
 a person. Operations settings carries the halt
 count; a failed halt read is shown as unknown, never as zero. Legacy Execution
 `?tab=halts` and `?tab=decision-maker` links redirect to their corresponding
-settings sections and preserve the remaining query fields. Each section that still has an environment switch (the catalog import, which
-also keeps its shipped code latch, and auto-promotion) carries a chip
--- "Preview · apply off" or "Apply on", and "Behind server switch" or "Server
-switch on" for auto-promotion -- computed by `lib/adminAmuxTabStatus.ts` from
+settings sections and preserve the remaining query fields. Each section that still has an environment switch (auto-promotion; the catalog import and its chip were removed on 2026-11-18) carries a chip
+-- "Behind server switch" or "Server
+switch on" -- computed by `lib/adminAmuxTabStatus.ts` from
 the environment variable and shipped code latch that section's own route
 reads (rule 8). Intake, reconciliation, backlog metadata, recommendation and
 promotion lost their switches on 2026-11-16 and carry no chip. Cards reads "Read only" because the card list issues no

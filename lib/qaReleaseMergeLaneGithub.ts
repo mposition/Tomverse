@@ -18,7 +18,7 @@
  * (2026-10-29: one 502 held an emergency train for ten minutes).
  */
 import { createSign } from "node:crypto";
-import { PULL_DIFF_DIGEST_MAX_BYTES, pullDiffDigest } from "./pullDiffDigestCore.ts";
+import { PULL_DIFF_DIGEST_MAX_BYTES, pullDiffDigest, readPullChangeDigest } from "./pullDiffDigestCore.ts";
 
 import type { QaReleaseLanePullRequest } from "./qaReleaseMergeLaneCandidateCore.ts";
 import {
@@ -52,7 +52,7 @@ export type QaReleaseHttpRequest = {
 };
 /**
  * `bytes`: the body as it came, beside its text, for what must be digested
- * over the raw bytes (a pull request's diff, lib/pullDiffDigestCore.ts).
+ * over the raw bytes (a pull request's diff for a v1 digest, lib/pullDiffDigestCore.ts).
  */
 export type QaReleaseHttp = (request: QaReleaseHttpRequest) => Promise<{ status: number; text: string; bytes?: Uint8Array }>;
 
@@ -398,9 +398,17 @@ export function createQaReleaseGithubPorts(input: {
       };
     },
 
-    // Over the response's own bytes, as the engineering agent's read digests them: a diff whose
-    // removed lines hold bytes that are not UTF-8 must digest the same on both sides (review
-    // r-20261114-023008-48bc7e). No raw bytes, no digest.
+    // The v2 change digest of this head against develop as it stands now, read the one way every
+    // reader reads it (lib/pullDiffDigestCore.ts). Any size, binary files included.
+    async changeDigest(number, headSha): Promise<string | null> {
+      if (!Number.isSafeInteger(number) || number <= 0) return null;
+      return (await readPullChangeDigest((path) => getJson(`${REPO_PATH}${path}`), { base: "develop", headSha })).digest;
+    },
+
+    // v1, for an approval recorded before v2 only. Over the response's own bytes, as the
+    // engineering agent's read digests them: a diff whose removed lines hold bytes that are not
+    // UTF-8 must digest the same on both sides (review r-20261114-023008-48bc7e). No raw bytes,
+    // no digest.
     async diffDigest(number): Promise<string | null> {
       const response = await http({ method: "GET", url: `${QA_RELEASE_GITHUB_API}${REPO_PATH}/pulls/${number}`,
         headers: await headers("application/vnd.github.diff") });

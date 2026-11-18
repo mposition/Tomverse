@@ -21,7 +21,6 @@ export type AmuxRecoverStep = (typeof AMUX_RECOVER_STEPS)[number];
 const PRISMA_CODE = /^P\d{4}$/;
 const BOUNDARY_CODES = new Set([
   "AMUX_DB_DEADLINE_EXCEEDED",
-  "AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED",
 ]);
 const ERROR_NAME = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
 

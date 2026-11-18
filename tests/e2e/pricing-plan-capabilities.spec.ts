@@ -10,7 +10,7 @@ test("each plan exposes eligible public models and concrete attachment limits", 
     const details = page.getByTestId(`pricing-capabilities-${plan.toLowerCase()}`);
     await details.locator("summary").click();
     await expect(details).toHaveAttribute("open", "");
-    await expect(details).toContainText("5 files per message, 10 MiB per file and 25 MiB combined");
+    await expect(details).toContainText("10 files per message, 50 MiB per file and 100 MiB combined");
     await expect(details).toContainText("The app’s input limit and available output space can reduce usable context");
     for (const model of AVAILABLE_MODELS.filter((item) => item.enabled && isPubliclySelectableModel(item))) {
       if (canUseModelWithPlan(plan, model)) {

@@ -124,6 +124,26 @@ export const SHARED_STRING_ALLOWLIST = [
     locales: ["fr"],
     reason: "'{count} conversations' is identical in French.",
   },
+  {
+    key: "externalApi.asideTitle",
+    locales: "all",
+    reason: "The client's product name, matched against the app's own Custom Provider screen.",
+  },
+  {
+    key: "externalApi.vscodeTitle",
+    locales: "all",
+    reason: "The editor's product name, matched against its own Manage Language Models screen.",
+  },
+  {
+    key: "externalApi.stateActive",
+    locales: ["fr"],
+    reason: "'Active' is the French adjective for an active key (une clé active).",
+  },
+  {
+    key: "externalApi.nameLabel",
+    locales: ["de"],
+    reason: "'Name' is the German word for the field.",
+  },
 ];
 
 /** `{ "a.b": value }` for a nested locale object. */

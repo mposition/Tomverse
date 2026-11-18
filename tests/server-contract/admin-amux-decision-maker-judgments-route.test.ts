@@ -294,7 +294,7 @@ test("an unknown outcome says so, and every other failure says it was not record
   const unknown = await POST(post(CONFIRM));
   assert.equal(unknown.status, 503);
   assert.deepEqual(await unknown.json(), { error: "outcome_unknown" });
-  for (const code of ["AMUX_DB_DEADLINE_EXCEEDED", "AMUX_DB_NOT_STARTED", "AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED"]) {
+  for (const code of ["AMUX_DB_DEADLINE_EXCEEDED", "AMUX_DB_NOT_STARTED"]) {
     reset({ boundaryError: new FakeBoundaryError(code) });
     const failed = await POST(post(CONFIRM));
     assert.equal(failed.status, 503, code);

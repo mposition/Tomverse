@@ -5,7 +5,6 @@ import { after, test } from "node:test";
 import type { Session } from "next-auth";
 
 import { writeAdminAuditLog } from "@/lib/adminAudit";
-import { AMUX_MAX_EXECUTION_ATTEMPTS } from "@/lib/amux/executionBudgetCore";
 import {
   createAmuxReviewProposal,
   getAmuxReviewDetail,
@@ -30,6 +29,9 @@ const idempotencyKeyHash = "c".repeat(64);
 const reviewBaseSha = "c".repeat(40);
 const reviewHeadSha = "d".repeat(40);
 const reviewDiffDigest = "e".repeat(64);
+// The attempt count the review proposal guard refused a retry at until
+// 20261118100000_amux_review_retry_no_attempt_bound; a card past it is retried now.
+const REVIEW_PROPOSAL_GUARD_ATTEMPTS = 30;
 const fixtureTaskIds: string[] = [];
 const fixturePolicyKeys: string[] = [];
 
@@ -366,7 +368,7 @@ test("planning-review retry needs a recorded earlier revision, never an invented
   assert.equal(await prisma.amuxReviewProposal.count({ where: { escalationId: fixture.escalation.id } }), 0);
 });
 
-test("planning retry requires a valid due and cannot reset five historical attempts", async () => {
+test("planning retry requires a valid due, and thirty historical attempts do not refuse it", async () => {
   const fixture = await blockedFixture();
   await prisma.amuxWorkItem.update({
     where: { id: fixture.task.id }, data: {
@@ -389,8 +391,9 @@ test("planning retry requires a valid due and cannot reset five historical attem
   });
   const now = new Date();
   let latestAttemptId = "";
-  // The review proposal guard's runaway bound (20261116011400), not five.
-  for (let attemptNumber = 1; attemptNumber <= AMUX_MAX_EXECUTION_ATTEMPTS; attemptNumber++) {
+  // Thirty counted attempts, the guard's old bound: an owner's retry is still
+  // issued (owner direction 2026-11-18, 20261118100000_amux_review_retry_no_attempt_bound).
+  for (let attemptNumber = 1; attemptNumber <= REVIEW_PROPOSAL_GUARD_ATTEMPTS; attemptNumber++) {
     latestAttemptId = `amux-review-budget-${randomUUID()}`;
     await prisma.amuxExecutionAttempt.create({
       data: {
@@ -410,10 +413,9 @@ test("planning retry requires a valid due and cannot reset five historical attem
       },
     });
   }
-  await assert.rejects(
-    issueRetryProposal(fixture, latestAttemptId),
-    /review retry attempt budget exhausted/,
-  );
+  const proposal = await issueRetryProposal(fixture, latestAttemptId);
+  assert.equal(proposal.outcome, "retry");
+  assert.equal(proposal.attemptId, latestAttemptId);
 });
 
 test("new resolved escalations cannot omit a machine-readable outcome", async () => {
@@ -542,7 +544,14 @@ test("approve proposals bind a complete GitHub PR head and diff digest to the ta
   await assert.rejects(issueApproveProposal(fixture, { reviewHeadSha: "F".repeat(40) }));
   await assert.rejects(issueApproveProposal(fixture, { reviewBaseSha: "F".repeat(40) }));
   await assert.rejects(issueApproveProposal(fixture, { reviewDiffDigest: "F".repeat(64) }));
+  // Owner decision 2026-11-18: the v2 change digest is the binding now; only its exact form is taken.
+  for (const malformed of [`v2:${"F".repeat(64)}`, `v2:${"e".repeat(63)}`, `v3:${"e".repeat(64)}`, `V2:${"e".repeat(64)}`]) {
+    await assert.rejects(issueApproveProposal(fixture, { reviewDiffDigest: malformed }),
+      /AmuxReviewProposal_source_evidence_check/, malformed);
+  }
   assert.equal(await prisma.amuxReviewProposal.count({ where: { escalationId: fixture.escalation.id } }), 1);
+  const v2 = await issueApproveProposal(await reviewFixture(), { reviewDiffDigest: `v2:${"e".repeat(64)}` });
+  assert.equal(v2.reviewDiffDigest, `v2:${"e".repeat(64)}`);
 });
 
 test("PR-less approval remains forbidden for a legacy review task", async () => {

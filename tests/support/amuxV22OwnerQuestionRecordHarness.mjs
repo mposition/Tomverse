@@ -11,8 +11,8 @@ mock.module(mod("lib/adminAudit.ts"), {
   takeAuditChainLock: async () => {}, writeSystemAuditLog: async (entry) => { audits.push(entry); } },
 });
 
-const { recordAmuxV22TaskResult, v22TaskResultSha256 } =
-  await import(mod("lib/amux/v22TaskResultStore.ts"));
+const { prepareAmuxV22TaskResultRecord, recordAmuxV22TaskResult,
+  v22TaskResultSha256 } = await import(mod("lib/amux/v22TaskResultStore.ts"));
 const { AMUX_V22_OWNER_QUESTION_MARKER, amuxV22OwnerQuestionSha256 } =
   await import(mod("lib/amux/v22OwnerQuestionCore.ts"));
 
@@ -42,6 +42,7 @@ async function record(text, asked) {
           v22AssignmentId: "assignment-1" }];
       throw new Error(`unexpected SQL: ${sql}`);
     },
+    amuxIdeaContentKeyRetirement: { findMany: async () => [] },
     amuxV22TaskResult: { findUnique: async () => null, create: async () => {} },
     amuxV22TaskPatch: { findUnique: async () => null, create: async () => {} },
     amuxV22TaskQuestion: {
@@ -59,8 +60,8 @@ async function record(text, asked) {
     },
   };
   audits.length = 0;
-  await recordAmuxV22TaskResult(tx, { attemptId, worker: "worker-1", ideaId,
-    text, sourceSha256: v22TaskResultSha256(text), keys });
+  await recordAmuxV22TaskResult(tx, prepareAmuxV22TaskResultRecord({ attemptId,
+    worker: "worker-1", ideaId, text, sourceSha256: v22TaskResultSha256(text), keys }));
   return { created, cancelled, metadata: audits[0]?.metadata };
 }
 

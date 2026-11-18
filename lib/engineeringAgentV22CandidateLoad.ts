@@ -1,7 +1,6 @@
 import "server-only";
 
 import { classifyAmuxExecutionPath } from "@/lib/amux/executionGradeCore";
-import { AMUX_V22_PATCH_MAX_BYTES } from "@/lib/amux/v22PatchLimit";
 import { readEngineeringAgentGitBlob,
   readEngineeringAgentPinnedBaseTree } from
   "@/lib/engineeringAgentGitHubRead";
@@ -42,20 +41,20 @@ const FILE_MODES: ReadonlySet<string> = new Set(["100644", "100755", "120000"]);
  * A failure is named by a reason this builder alone writes, so a draft an
  * earlier builder kept (`base_blob_missing`, `files_invalid`, ...) can be
  * told apart and judged again (engineeringAgentV22TierPromotion):
- * `patch_over_limit` past the one patch bound, `patch_unreadable` for text
- * that is not a diff this can rebuild, `path_invalid` for a name no execution
- * path may hold, `base_mismatch` when the base lacks what the patch changes,
+ * `patch_unreadable` for text that is not a diff this can rebuild,
+ * `path_invalid` for a name no execution path may hold, `base_mismatch` when the base lacks what the patch changes,
  * `patch_mismatch` when it does not apply exactly or yields another blob,
  * `path_conflict` and `secret_detected` from the change set, `tree_invalid`
- * when the listing does not verify.
+ * when the listing does not verify. No size is refused: a patch is bounded
+ * only by the systems it passes through (owner decision 2026-11-18), and
+ * `patch_over_limit`, which a builder before it wrote past 4 MiB, is now only
+ * read, as a reason a deploy judges again.
  */
 export async function loadEngineeringAgentV22Candidate(input: {
   baseSha: string; onDevelop?: boolean; patchText: string },
 ports: Ports = livePorts): Promise<LoadedCandidate> {
   if (!/^[0-9a-f]{40}$/.test(input.baseSha))
     return { ok: false, reason: "patch_unreadable" };
-  if (Buffer.byteLength(input.patchText, "utf8") > AMUX_V22_PATCH_MAX_BYTES)
-    return { ok: false, reason: "patch_over_limit" };
   const diff = parseV22GitDiff(input.patchText);
   if (!diff.ok) return { ok: false, reason: diff.reason };
   if (diff.files.some((file) => [file.oldPath, file.newPath].some((path) =>

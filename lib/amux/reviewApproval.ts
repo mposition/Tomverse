@@ -28,7 +28,7 @@ import {
   type AmuxReviewOutcome,
   type AmuxReviewSubject,
 } from "@/lib/amux/reviewApprovalCore";
-import { amuxDefaultMaxAttempts, decideAmuxAttemptBudget } from "@/lib/amux/executionBudgetCore";
+import { decideAmuxAttemptBudget } from "@/lib/amux/executionBudgetCore";
 import { readAmuxAttemptBudgetFacts } from "@/lib/amux/infraFailureStore";
 import { amuxV52RejectedTwiceReviewAttemptId } from "@/lib/amux/v52ReviewRejections";
 import { normalizeAmuxUntrustedReason, openAmuxHumanEscalation, publicAmuxEscalationReasonCode } from "@/lib/amux/escalation";
@@ -39,6 +39,7 @@ import { evaluateLockedAmuxCostAdmission, lockAmuxResourcePolicies } from "@/lib
 import { amuxResourceRefs } from "@/lib/amux/resourcePolicyCore";
 import { ENGINEERING_AGENT_V22_TIER_PENDING_REASON } from "@/lib/engineeringAgentCore";
 import { prisma } from "@/lib/prisma";
+import { pullDigestHolds } from "@/lib/pullDiffDigestCore";
 import { amuxV22TaskUnknownUsageAttemptIds, recordAmuxV22UsageAcceptances } from "@/lib/amux/v22AttemptUsageAcceptance";
 
 export class AmuxReviewRefusal extends Error {
@@ -171,8 +172,8 @@ async function snapshot(
       orderBy: [{ taskRevision: "desc" }, { startedAt: "desc" }, { id: "desc" }],
     }),
     // The claim's own count (owner decision 2026-11-15): infrastructure
-    // failures keep their number but use none of the card's attempts, as the
-    // review proposal guard counts them (20261116011400_amux_review_retry_no_fixed_count).
+    // failures keep their number but use none of the card's attempts. The
+    // review proposal guard counts none since 20261118100000_amux_review_retry_no_attempt_bound.
     readAmuxAttemptBudgetFacts(tx, task.id),
     tx.amuxWorkDelivery.findFirst({
       where: { taskId: task.id, status: { in: ["queued", "leased"] } },
@@ -336,7 +337,8 @@ async function snapshot(
     review_pr_number: artifact?.prNumber ?? null,
     review_base_sha: artifact?.baseSha ?? null,
     review_head_sha: artifact?.headSha ?? null,
-    review_diff_digest: artifact?.diffDigest ?? null,
+    // The v2 change digest the approval binds (lib/pullDiffDigestCore.ts).
+    review_diff_digest: artifact?.changeDigest ?? null,
     ...(task.sourceSystem === "admin-idea-v4" ? { v4_evidence: {
       title_digest: task.v4TitleDigest,
       body_digest: task.v4BodyDigest,
@@ -381,7 +383,7 @@ export async function getAmuxReviewDetail(escalationId: string) {
     artifactForEscalation(escalationId), v4EvidenceForEscalation(escalationId),
   ]);
   const state = await prisma.$transaction((tx) => snapshot(tx, escalationId, fetchedArtifact, fetchedV4));
-  const { escalation, task, lastAttempt, used, digest, text, context, report,
+  const { escalation, task, lastAttempt, budget, used, digest, text, context, report,
     displayTruncated, displayExact, outcomes, artifact, lastAttemptResultStored,
     decisionHold, approvalBasis, unpublishedPatch, publicationHold } = state;
   // The Task's ended runs whose CLI usage is unknown and not yet accepted:
@@ -436,8 +438,11 @@ export async function getAmuxReviewDetail(escalationId: string) {
       pr_number: artifact.prNumber,
       base_sha: artifact.baseSha,
       head_sha: artifact.headSha,
-      diff_digest: artifact.diffDigest,
+      diff_digest: artifact.changeDigest,
+      // Null when the diff is not shown here (too large, binary or unsafe to
+      // display): the person reviews the pull request on GitHub.
       diff_text: artifact.diffText,
+      diff_hidden: artifact.diffHidden,
       html_url: artifact.htmlUrl,
     } : null,
     allowed_outcomes: outcomes,
@@ -454,7 +459,10 @@ export async function getAmuxReviewDetail(escalationId: string) {
     publication_hold: publicationHold,
     // Why no decision is open at all; null while the server offers one.
     decision_hold: decisionHold,
-    retry: { used, limit: amuxDefaultMaxAttempts(), remaining: Math.max(0, amuxDefaultMaxAttempts() - used) },
+    // No bound for an ordinary card (owner direction 2026-11-18): limit and
+    // remaining are null, never a large number.
+    retry: { used, limit: budget.max_attempts,
+      remaining: budget.max_attempts === null ? null : Math.max(0, budget.max_attempts - used) },
     proposed_transitions: {
       approve: outcomes.includes("approve") ? "done" : null,
       retry: outcomes.includes("retry") ? "todo" : null,
@@ -500,7 +508,7 @@ export async function createAmuxReviewProposal(input: {
         reviewPrNumber: input.outcome === "approve" ? state.artifact?.prNumber ?? null : null,
         reviewBaseSha: input.outcome === "approve" ? state.artifact?.baseSha ?? null : null,
         reviewHeadSha: input.outcome === "approve" ? state.artifact?.headSha ?? null : null,
-        reviewDiffDigest: input.outcome === "approve" ? state.artifact?.diffDigest ?? null : null,
+        reviewDiffDigest: input.outcome === "approve" ? state.artifact?.changeDigest ?? null : null,
         issuedAt: new Date(),
         expiresAt: new Date(Date.now() + 86_400_000),
       },
@@ -669,7 +677,9 @@ export async function resolveAmuxReview(input: {
         (proposal.reviewPrNumber !== (state.artifact?.prNumber ?? null) ||
          proposal.reviewBaseSha !== (state.artifact?.baseSha ?? null) ||
          proposal.reviewHeadSha !== (state.artifact?.headSha ?? null) ||
-         proposal.reviewDiffDigest !== (state.artifact?.diffDigest ?? null))) {
+         // In the proposal's own version: v2 now, v1 for one prepared before it.
+         (proposal.reviewDiffDigest === null ? state.artifact !== null :
+           state.artifact === null || !pullDigestHolds(proposal.reviewDiffDigest, state.artifact)))) {
       return refuse("AMUX_REVIEW_SOURCE_CHANGED");
     }
     const target = amuxReviewTargetStatus(

@@ -28,7 +28,7 @@ import { inspectV52TaskCatalogGrades } from "./v4TaskCostCatalogCore.ts";
 import { amuxTaskRoutePrice } from "./v4TaskCostAutoCatalogCore.ts";
 import { amuxV22ApiModelAccessCurrent, readAmuxV22RecoveryAuthority } from
   "./v22TaskRecoveryService.ts";
-import { amuxV22RecoveryAddedRouteConsented, amuxV22RecoveryCost, amuxV22RecoveryStartAllowed,
+import { AMUX_V22_PAID_RETRY_ATTEMPT_LIMIT, recoveryAttemptBudget, amuxV22RecoveryAddedRouteConsented, amuxV22RecoveryCost, amuxV22RecoveryStartAllowed,
   amuxV22ReadOnlyRetryRouteCost,
   currentAmuxV22ReadOnlyApiExecutionFrame } from "./v22TaskRecoveryCore.ts";
 import { AMUX_V22_READ_ONLY_API_EXECUTOR_KIND } from
@@ -36,9 +36,11 @@ import { AMUX_V22_READ_ONLY_API_EXECUTOR_KIND } from
 import { amuxV22SafeStopFencedWorkers } from "./v22LegacySafeStopFence.ts";
 import { amuxWorkerRuntimeUsesReadOnlyApi } from "./workerRuntime.ts";
 import { amuxV22RoutesWithSettledUsage } from "./v22WorkerUsageGate.ts";
-import { amuxApprovedCeilingOverrun, decideAmuxAttemptBudget } from "./executionBudgetCore.ts";
+import { AMUX_REPEATED_FAILURE_RUNS, amuxApprovedCeilingOverrun, amuxResultRetryDelayMs }
+  from "./executionBudgetCore.ts";
 import { amuxInfraRetryDelayMs } from "./infraFailureCore.ts";
-import { readAmuxAttemptBudgetFacts, recentAmuxInfraFailureWorkers } from "./infraFailureStore.ts";
+import { readAmuxAttemptBudgetFacts, readAmuxResultFailureStreak,
+  recentAmuxInfraFailureWorkers } from "./infraFailureStore.ts";
 import { type AmuxWorkerCircuit, amuxWorkerCircuitAdmits } from "./workerCircuitCore.ts";
 import { readAmuxWorkerCircuits, reportOpenAmuxWorkerCircuits } from "./workerHealthStore.ts";
 import { AMUX_CARD_WAIT_MAX_ROUTES, type AmuxCardWaitDetail } from "./cardWaitReasonCore.ts";
@@ -191,13 +193,8 @@ async function claimCandidate(taskId: string, assignmentId: string,
       // card's attempts (owner decision 2026-11-15, infraFailureCore.ts).
       const prior = await readAmuxAttemptBudgetFacts(tx, taskId);
       const priorReserved = prior.reservedMicrousd;
-      const attemptBudget = decideAmuxAttemptBudget({ historical_rows: prior.historicalRows,
-        greatest_attempt_number: prior.greatestAttemptNumber, infra_rows: prior.infraRows });
-      if (!attemptBudget.allowed) {
-        throw new AmuxClaimSkipError("attempt_budget_exhausted", {
-          limit: attemptBudget.exhausted_limit, attemptsUsed: attemptBudget.attempts_used,
-          maxAttempts: attemptBudget.max_attempts });
-      }
+      // An ordinary card has no bound (owner direction 2026-11-18); only a paid
+      // retry's own bound is checked, once its recovery is read below.
       // A card whose newest run was a platform failure waits before a worker
       // takes it again (infraFailureCore.ts amuxInfraRetryDelayMs); it is never
       // parked for a person.
@@ -206,6 +203,17 @@ async function claimCandidate(taskId: string, assignmentId: string,
           now.getTime() - prior.lastEndedAt.getTime() < infraWaitMs) {
         throw new AmuxClaimSkipError("infra_retry_backoff", {
           attemptsUsed: prior.infraWindowRows });
+      }
+      // The same failure of the worker's own result, again and again, also
+      // waits longer each time and never stops the card or goes to a person
+      // (owner direction 2026-11-18, executionBudgetCore.ts amuxResultRetryDelayMs).
+      if (prior.historicalRows > AMUX_REPEATED_FAILURE_RUNS && !prior.lastEndedIsInfra &&
+          prior.lastEndedAt) {
+        const { streak } = await readAmuxResultFailureStreak(tx, taskId);
+        const resultWaitMs = amuxResultRetryDelayMs(streak);
+        if (resultWaitMs > 0 && now.getTime() - prior.lastEndedAt.getTime() < resultWaitMs) {
+          throw new AmuxClaimSkipError("result_retry_backoff", { attemptsUsed: streak });
+        }
       }
       const lane = await currentLane(tx, taskId);
       // Orchestration policy version 35, section 3: the variables while R2c is
@@ -254,6 +262,15 @@ async function claimCandidate(taskId: string, assignmentId: string,
         card.taskRole, card.executionGrade);
       const recovery = await readAmuxV22RecoveryAuthority(tx, taskId, card.revision,
         null, now);
+      // A paid retry keeps its own bound, the same one its start and its
+      // approval apply: platform failures use none of it.
+      if (recovery?.riskAcceptanceId && !recoveryAttemptBudget({
+        historicalAttempts: prior.historicalRows,
+        greatestAttemptNumber: prior.greatestAttemptNumber,
+        infraRows: prior.infraRows }).allowed) {
+        throw new AmuxClaimSkipError("attempt_budget_exhausted", {
+          limit: "attempts", maxAttempts: AMUX_V22_PAID_RETRY_ATTEMPT_LIMIT });
+      }
       // A v39 retry is bound to the receipt its launch check recorded; recompute
       // that receipt as of the check so its time-stamped digest matches (v47).
       const recoveryApproved = recovery?.costAsOf ?
@@ -585,8 +602,9 @@ const SKIPPED_CODES = new Set(["not_unassigned_todo", "task_not_ready",
   "cost_reconfirmation_required", "lane_unbound", "recovery_approval_changed",
   "role_unavailable", "worker_quarantined",
   // One card waiting out its platform-failure backoff never holds the rest
-  // (review r-20261116-184542-69dcb8).
-  "infra_retry_backoff"]);
+  // (review r-20261116-184542-69dcb8). So does one waiting out a repeated
+  // result failure (owner direction 2026-11-18).
+  "infra_retry_backoff", "result_retry_backoff"]);
 
 /**
  * One admitted tick assigns every ready Task it can, one transaction each, up

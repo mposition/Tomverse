@@ -3,6 +3,7 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 
 import { ENGINEERING_AGENT_V22_REVIEW_CAUSE_PREFIX } from "@/lib/engineeringAgentCore";
+import { PULL_DIGEST_PATTERN } from "@/lib/pullDiffDigestCore";
 import { AMUX_OWNER_QUEUE_DM_REQUESTED_ACTION, AMUX_OWNER_QUEUE_DM_RESENT_ACTION } from "./ownerQueueDmRequestCore.ts";
 import { amuxV22KeptResultPublicationEnabled } from "./v22KeptResultCore.ts";
 import { amuxV22KeptResultExistsSql, amuxV22ReviewAttemptLateralSql } from "./v22KeptResultRead.ts";
@@ -144,7 +145,7 @@ export async function readAmuxDmOwnerSettlementApprovalFacts(tx: Prisma.Transact
       AND b."state" = 'open' AND b."supersededAt" IS NULL`;
   const row = rows[0];
   if (!row || !/^[0-9a-f]{40}$/.test(row.verifiedHeadSha) ||
-      !row.diffDigest || !/^[0-9a-f]{64}$/.test(row.diffDigest)) return null;
+      !row.diffDigest || !PULL_DIGEST_PATTERN.test(row.diffDigest)) return null;
   return { verifiedHeadSha: row.verifiedHeadSha, diffDigest: row.diffDigest, patchBody: row.patchBody };
 }
 

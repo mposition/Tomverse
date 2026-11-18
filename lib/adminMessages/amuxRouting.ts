@@ -151,8 +151,9 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
       "The server currently permits a retry from this bound review. Read the exact scope, prior evidence, attempt limit, cost status and effect before preparing the existing proposal.",
     retryScope: "Exact work scope",
     retryAttemptLimit: "Attempt limit",
-    retryAttemptLimitValue: (used: number, limit: number, remaining: number) =>
-      `${used} of ${limit} attempts used · ${remaining} remain before any new attempt`,
+    retryAttemptLimitValue: (used: number, limit: number | null, remaining: number | null) =>
+      limit === null || remaining === null ? `${used} attempts used · no limit` :
+        `${used} of ${limit} attempts used · ${remaining} remain before any new attempt`,
     retryCorrectionEvidence: "What changed",
     retryCorrectionUnavailable:
       "No separate structured correction record is connected. Verify the worker report and card history; this screen does not infer that dependencies are complete.",
@@ -212,6 +213,7 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
     attemptEndedAt: "Attempt ended",
     noAttempt: "No execution attempt",
     attemptBudget: "Attempt budget",
+    noAttemptLimit: "No limit",
     exhaustedRequiresNewTask:
       "This task has exhausted its five attempts. Blocking is terminal; continue only by issuing a new task.",
     remaining: "remaining",
@@ -237,10 +239,12 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
     lastAttemptReason: "Last attempt reason",
     previousBlockReason: "Previous human block reason",
     reviewPrDiff: "PR diff (read-only review content)",
+    reviewDiffNotShown:
+      "The diff is not shown here: it is too large, binary, or has characters that could hide or reorder it. Review the pull request on GitHub; an approval binds its merge base, head and tree.",
     reviewPr: "GitHub review PR",
     reviewBaseSha: "Base SHA",
     reviewHeadSha: "Head SHA",
-    reviewDiffDigest: "Diff SHA-256",
+    reviewDiffDigest: "Change digest",
     reviewResultSha256: "Worker result SHA-256",
     reviewContentMissing:
       "No review subject with a verifiable digest is available. Decision proposals are unavailable.",
@@ -483,8 +487,9 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
       "현재 기록에서는 이 작업을 다시 맡기는 선택이 허용되어 있습니다. 선택을 준비하기 전에 작업 내용·이전 실행 기록·시도 상한·비용 상태·효과를 읽으세요.",
     retryScope: "다시 맡길 작업과 완료 조건",
     retryAttemptLimit: "시도 상한",
-    retryAttemptLimitValue: (used: number, limit: number, remaining: number) =>
-      `${limit}회 중 ${used}회 사용 · 새 시도 전 잔여 ${remaining}회`,
+    retryAttemptLimitValue: (used: number, limit: number | null, remaining: number | null) =>
+      limit === null || remaining === null ? `${used}회 사용 · 상한 없음` :
+        `${limit}회 중 ${used}회 사용 · 새 시도 전 잔여 ${remaining}회`,
     retryCorrectionEvidence: "무엇이 달라졌나요?",
     retryCorrectionUnavailable:
       "무엇을 고쳤는지 보여 주는 별도 기록은 연결돼 있지 않습니다. 작업자 보고서와 카드 이력을 확인하세요. 이 화면은 선행 작업이 끝났다고 추정하지 않습니다.",
@@ -554,6 +559,7 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
     attemptEndedAt: "시도 종료 시각",
     noAttempt: "실행 시도 없음",
     attemptBudget: "시도 한도",
+    noAttemptLimit: "상한 없음",
     exhaustedRequiresNewTask:
       "이 작업은 시도 5회를 소진했습니다. 차단하면 종결되며, 계속하려면 새 task를 발행해야 합니다.",
     remaining: "잔여",
@@ -578,10 +584,12 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
     lastAttemptReason: "마지막 시도 사유",
     previousBlockReason: "이전 사람 차단 사유",
     reviewPrDiff: "PR diff(읽기 전용 검토 내용)",
+    reviewDiffNotShown:
+      "diff를 여기에 보이지 않습니다. 너무 크거나 binary이거나, 내용을 숨기거나 순서를 바꿀 수 있는 문자가 있습니다. GitHub에서 PR을 검토하세요. 승인은 merge base·head·tree에 묶입니다.",
     reviewPr: "GitHub 검토 PR",
     reviewBaseSha: "Base SHA",
     reviewHeadSha: "Head SHA",
-    reviewDiffDigest: "Diff SHA-256",
+    reviewDiffDigest: "변경 digest",
     reviewResultSha256: "Worker 결과 SHA-256",
     reviewContentMissing:
       "검증 가능한 digest를 가진 검토 대상이 없습니다. 결정 제안을 만들 수 없습니다.",

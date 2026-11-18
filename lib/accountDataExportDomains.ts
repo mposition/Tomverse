@@ -973,6 +973,12 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "unverified",
   },
   {
+    domain: "amuxTaskChangedPaths",
+    publicName: "amux_v22_task_changed_paths",
+    prismaModel: "AmuxV22TaskChangedPaths",
+    state: "unverified",
+  },
+  {
     domain: "amuxReviewFindings",
     publicName: "amux_v52_review_findings",
     prismaModel: "AmuxV52ReviewFindings",
@@ -1344,6 +1350,23 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "excluded",
     exclusionReason:
       "A sixty-second handshake row that lets a signed-in browser hand the native app one exchange. It holds two digests -- of the grant secret and of the PKCE verifier -- an expiry and a consumed-at, and no content the user wrote. A completed sign-in consumes it and the sweep deletes it, so an export run at any ordinary moment would find nothing to include.",
+  },
+  // --- external inference API (docs/policy/external-api.md) ---------------
+  {
+    domain: "externalApiKey",
+    publicName: "api_keys",
+    prismaModel: "ExternalApiKey",
+    state: "included_filtered",
+    withheldReason:
+      "Each API key the person issued: its name, public prefix, optional credit limit, and when it was created, last used, expires and was revoked. Withheld: the SHA-256 digest of the secret, which is the value the server checks a key against. The secret itself is never stored, so it cannot be exported.",
+  },
+  {
+    domain: "externalApiRequest",
+    publicName: "api_requests",
+    prismaModel: "ExternalApiRequest",
+    state: "included_filtered",
+    withheldReason:
+      "One row per API request: which key and model, whether it streamed, the client's user agent, how it finished and when. Withheld: the digests of the request body and of the Idempotency-Key header, which are duplicate-detection values, and the internal reservation link. No prompt, output, tool argument or image is stored to export; credits are in the credit usage domains.",
   },
   {
     domain: "amuxBoardImportApproval",

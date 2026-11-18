@@ -186,11 +186,19 @@ const ENGLISH_STRING_CEILING = {
   // copy is translated; the headings are allowlisted with their brand reason.
   // These ceilings reflect the measured totals after localized Research copy
   // overrides the English fallback, rather than counting the fallback itself.
-  zh: 11,
-  fr: 44,
-  de: 32,
-  es: 23,
-  pt: 20,
+  //
+  // +2 zh, fr, de, es and pt on 2026-11-18 from Settings > API keys: the two
+  // client headings are product names, "Aside" and "VS Code", which no locale
+  // translates and which the reader matches against the app itself. Korean's
+  // count did not move because its "Base URL" label became "기본 URL" in the
+  // same change. +1 fr for the key state "Active" (the French adjective for an
+  // active key) and +1 de for the "Name" field label, both the ordinary word.
+  // The rest of the page is translated in all six.
+  zh: 13,
+  fr: 47,
+  de: 35,
+  es: 25,
+  pt: 22,
 };
 
 test("every supported language is in the dictionary map", () => {

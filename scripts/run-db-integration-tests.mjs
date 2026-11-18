@@ -449,7 +449,6 @@ run(
     // during 2026-11. It found, on its first run, that the observer's two
     // mismatch cause keys were longer than the store admits.
     "tests/integration/amux-card-lifecycle-e2e.db.test.ts",
-    "tests/integration/amux-stalled-card-sweep.db.test.ts",
     // Owner decision 2026-11-15: a worker's platform failure spends no card
     // attempt, the next claim prefers another worker, a worker failing again
     // and again is quarantined until its usage reads again, and why a card
@@ -1093,6 +1092,16 @@ run(
     "tests/integration/amux-v19-plan-refusal.db.test.ts"],
   "Running the v19 plan-refusal scenarios after the fresh-scope suites"
 );
+// The v22 chunked result transfer (docs/policy/amux-v22-result-transfer.md):
+// upload, commit and readback routes against a seeded live attempt, sliced
+// reads of sealed bodies, and the staging sweep. Its Prisma, guard and key
+// store mocks stay in their own process.
+run(
+  ["--conditions=react-server", "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
+    "--test-concurrency=1", "tests/integration/amuxV22TransferStaging.db.test.mjs"],
+  "Running the v22 chunked result transfer, sliced read and staging sweep scenarios",
+);
 // Native pass redemption uses real promotion/entitlement rows with mocked
 // authentication and email/provider seams. Keep those mocks in their own process.
 run(
@@ -1109,6 +1118,25 @@ run(
     "--test-concurrency=1",
     "tests/integration/code-managed-execution.db.test.mjs"],
   "Running the managed Code reservation, settlement, reconciliation, and timezone scenarios",
+);
+// The external inference API fakes only the model provider and exercises the
+// real shared credit ledger, key cap and revocation race. Own process for its
+// module mocks.
+run(
+  ["--conditions=react-server", "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
+    "--test-concurrency=1",
+    "tests/integration/external-api.db.test.mjs"],
+  "Running the external API key, reservation, cap, idempotency and failure scenarios",
+);
+// The native protocols (Claude Code Messages, Codex Responses) fake only the
+// one upstream module and run on the same ledger, key cap and receipts.
+run(
+  ["--conditions=react-server", "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
+    "--test-concurrency=1",
+    "tests/integration/external-api-native.db.test.mjs"],
+  "Running the native-protocol relay, refusal, cache, cancellation and cross-protocol cap scenarios",
 );
 // The budget suite mocks Prisma and the audit writer while exercising real
 // PostgreSQL constraints. Module mocks must be isolated from the batch above.

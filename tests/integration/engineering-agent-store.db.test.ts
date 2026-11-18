@@ -12,6 +12,8 @@ import { unknownOutcomeDecisionCauseKey } from "@/lib/engineeringAgentCore";
 const OWNER_QUEUE_LEGACY_LIMITS = { pr: 8, decision: 8 } as const;
 import {
   ENGINEERING_AGENT_AUDIT_ACTIONS,
+  ENGINEERING_AGENT_LEGACY_INLINE_PATCH_MAX_BYTES,
+  ENGINEERING_AGENT_PATCH_CHUNK_BYTES,
   EngineeringAgentStoreRefusedError,
   acceptEngineeringAgentRequest,
   acknowledgeEngineeringAgentDecision,
@@ -22,6 +24,7 @@ import {
   recordEngineeringAgentObservedHalt,
   readEngineeringAgentKnownPublishes,
   readEngineeringAgentHaltState,
+  readEngineeringAgentPublishPatchChunk,
   claimEngineeringAgentWorkItem,
   claimNextEngineeringAgentPublishWork,
   decideEngineeringAgentT2Draft,
@@ -798,7 +801,16 @@ test("a binding records its observations once, its reviewer as a pair, and a re-
     ),
     "snapshot_invalid",
   );
+  // A digest of neither version is no binding's (lib/pullDiffDigestCore.ts).
+  await refusedWith(
+    inTx((tx) =>
+      recordEngineeringAgentBinding(tx, { runId: run.runId, prNumber, headSha: sha1("head"), verifiedHeadSha: sha1("head"),
+        snapshot: { ...snapshot, diffDigest: `v3:${sha256("diff")}` } }),
+    ),
+    "snapshot_invalid",
+  );
 
+  // Owner decision 2026-11-18: a binding made before v2 is re-bound with the v2 change digest.
   const { bindingId: current } = await inTx((tx) =>
     replaceEngineeringAgentBinding(tx, {
       previousBindingId: bindingId,
@@ -807,10 +819,12 @@ test("a binding records its observations once, its reviewer as a pair, and a re-
         prNumber,
         headSha: sha1("head 2"),
         verifiedHeadSha: sha1("head 2"),
-        snapshot: { ...snapshot, diffDigest: sha256("diff 2"), invalidatedReviewIds: [41] },
+        snapshot: { ...snapshot, diffDigest: `v2:${sha256("change 2")}`, invalidatedReviewIds: [41] },
       },
     }),
   );
+  assert.equal(((await prisma.engineeringAgentBinding.findUniqueOrThrow({ where: { id: current } })).snapshot as
+    { diffDigest: string }).diffDigest, `v2:${sha256("change 2")}`);
   const superseded = await prisma.engineeringAgentBinding.findUniqueOrThrow({ where: { id: bindingId } });
   assert.ok(superseded.supersededAt && superseded.supersededAt.getFullYear() > 2000, "the database wrote the time");
 
@@ -1015,6 +1029,7 @@ test("the publisher claims its next work, and the last look can only refuse", as
   const work = await inTx((tx) => claimNextEngineeringAgentPublishWork(tx, { leaseMs: 60_000 }));
   assert.ok(work && work.mode === "write", "a queued item with a live capability is claimed to write");
   assert.equal(work.workItemId, workItemId);
+  assert.ok("patchBody" in work, "a publisher that does not read chunks gets the patch inline");
   assert.equal(work.patchBody, "patch");
   assert.equal(work.commitDigest, issued.commitDigest);
   assert.equal(work.branch, `agent/engineering/${run.runId}`);
@@ -1045,6 +1060,115 @@ test("the publisher claims its next work, and the last look can only refuse", as
     if (previous) await prisma.appSetting.create({ data: { key: incidentKey, value: previous.value } });
   }
   const bound = await settleAndBind(workItemId, work.fencingToken, run.runId);
+  await retireBinding(bound.bindingId);
+});
+
+// docs/policy/amux-v22-result-transfer.md §4: no size of ours bounds a patch;
+// a publisher that reads chunks is claimed without it and reads it in parts.
+test("a large patch goes only to a publisher that reads chunks, without the patch, and only its live claim reads them", async () => {
+  const run = await startRun();
+  const line = "+a line of a large patch, past the inline bound\n";
+  const patchBody = `diff --git a/big.txt b/big.txt\n${line.repeat(Math.ceil((ENGINEERING_AGENT_LEGACY_INLINE_PATCH_MAX_BYTES + 512 * 1024) / line.length))}+é\n`;
+  const patchDigest = sha256(patchBody);
+  const total = Buffer.byteLength(patchBody, "utf8");
+  assert.ok(total > ENGINEERING_AGENT_LEGACY_INLINE_PATCH_MAX_BYTES && total < 2 * ENGINEERING_AGENT_PATCH_CHUNK_BYTES);
+  const { workItemId } = await inTx((tx) =>
+    openEngineeringAgentWorkItem(tx, {
+      kind: "publish",
+      causeKey: `publish:${run.runId}:chunks`,
+      runId: run.runId,
+      patchBody,
+      patchDigest,
+      baseSha: sha1("base"),
+      expectedTreeId: sha1("tree"),
+    }),
+  );
+  const stored = await prisma.engineeringAgentWorkItem.findUniqueOrThrow({ where: { id: workItemId }, select: { patchBytes: true } });
+  assert.ok(stored.patchBytes && Buffer.from(stored.patchBytes).equals(Buffer.from(patchBody, "utf8")), "the bytes are written with the item");
+  const issue = () => inTx((tx) => issueEngineeringAgentCapability(tx, {
+    workItemId,
+    capability: { baseSha: sha1("base"), patchDigest, expectedTreeId: sha1("tree"), commit: commitFields(run.runId, run.cardId) },
+  }));
+  await issue();
+  await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, amuxAttemptId: run.amuxAttemptId, outcome: "t1_queued", halt: "none" }));
+
+  // A publisher that reads the patch inline is never handed one it could not read.
+  assert.equal(await inTx((tx) => claimNextEngineeringAgentPublishWork(tx, { leaseMs: 60_000 })), null);
+  assert.equal((await prisma.engineeringAgentWorkItem.findUniqueOrThrow({ where: { id: workItemId }, select: { state: true } })).state, "queued");
+
+  const work = await inTx((tx) => claimNextEngineeringAgentPublishWork(tx, { leaseMs: 60_000, patchChunks: true }));
+  assert.ok(work && work.mode === "write" && work.workItemId === workItemId);
+  assert.ok(!("patchBody" in work), "the claim carries no patch");
+  assert.ok("patchBytes" in work);
+  assert.deepEqual([work.patchBytes, work.patchChunkCount, work.patchDigest], [total, 2, patchDigest]);
+
+  const read = (index: number, fencingToken = work.fencingToken) =>
+    readEngineeringAgentPublishPatchChunk(prisma, { workItemId, fencingToken, index });
+  const parts: Buffer[] = [];
+  for (let index = 0; index < work.patchChunkCount; index += 1) {
+    const chunk = await read(index);
+    assert.ok(chunk.kind === "chunk", `chunk ${index}`);
+    assert.deepEqual([chunk.workItemId, chunk.index, chunk.totalBytes, chunk.chunkCount], [workItemId, index, total, 2]);
+    parts.push(Buffer.from(chunk.bytesBase64, "base64"));
+  }
+  assert.deepEqual(parts.map((part) => part.byteLength), [ENGINEERING_AGENT_PATCH_CHUNK_BYTES, total - ENGINEERING_AGENT_PATCH_CHUNK_BYTES],
+    "full chunks, the last one the rest");
+  assert.equal(createHash("sha256").update(Buffer.concat(parts)).digest("hex"), patchDigest);
+  assert.deepEqual(await read(2), { kind: "out_of_range" }, "past the last chunk");
+  assert.deepEqual(await read(10_000), { kind: "out_of_range" });
+  assert.deepEqual(await read(0, work.fencingToken + BigInt(1)), { kind: "claim_not_live" }, "another token reads nothing");
+
+  // Back to the queue: no claim, nothing read. A new claim whose lease passed reads nothing either.
+  await inTx((tx) => settleEngineeringAgentWorkItem(tx, { workItemId, fencingToken: work.fencingToken, outcome: "refused_before_write", reason: "patch_read_failed" }));
+  assert.deepEqual(await read(0), { kind: "claim_not_live" }, "a settled claim reads nothing");
+  await issue();
+  const short = await inTx((tx) => claimNextEngineeringAgentPublishWork(tx, { leaseMs: 1_000, patchChunks: true }));
+  assert.ok(short && short.mode === "write" && short.workItemId === workItemId);
+  assert.equal((await read(0, short.fencingToken)).kind, "chunk");
+  await new Promise((resolve) => setTimeout(resolve, 1_500));
+  assert.deepEqual(await read(0, short.fencingToken), { kind: "claim_not_live" }, "a lease that passed reads nothing");
+  const lookup = await inTx((tx) => claimNextEngineeringAgentPublishWork(tx, { leaseMs: 60_000, patchChunks: true }));
+  assert.ok(lookup && lookup.mode === "lookup" && lookup.workItemId === workItemId);
+  assert.ok(!("patchBody" in lookup) && !("patchBytes" in lookup), "a lookup carries no patch");
+  assert.deepEqual(await read(0, lookup.fencingToken), { kind: "claim_not_live" }, "a lookup claim reads nothing");
+  await inTx((tx) => settleEngineeringAgentWorkItem(tx, { workItemId, fencingToken: lookup.fencingToken, outcome: "lookup_no_prior_write" }));
+  await issue();
+  const again = await inTx((tx) => claimEngineeringAgentWorkItem(tx, { workItemId, mode: "write", leaseMs: 60_000 }));
+  const bound = await settleAndBind(workItemId, again.fencingToken, run.runId);
+  await retireBinding(bound.bindingId);
+});
+
+test("an item opened before its bytes existed is read in chunks from its text, and inline by any publisher", async () => {
+  const run = await startRun();
+  const patchBody = "diff --git a/x b/x\n+é\n";
+  const patchDigest = sha256(patchBody);
+  // As an app before migration 20261118120100 wrote it: the text alone.
+  const workItemId = randomUUID();
+  await prisma.engineeringAgentWorkItem.create({
+    data: { id: workItemId, kind: "publish", state: "queued", causeKey: `publish:${run.runId}:legacy`, runId: run.runId,
+      patchBody, patchDigest, baseSha: sha1("base"), expectedTreeId: sha1("tree") },
+    select: { id: true },
+  });
+  const issue = () => inTx((tx) => issueEngineeringAgentCapability(tx, {
+    workItemId,
+    capability: { baseSha: sha1("base"), patchDigest, expectedTreeId: sha1("tree"), commit: commitFields(run.runId, run.cardId) },
+  }));
+  await issue();
+  await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, amuxAttemptId: run.amuxAttemptId, outcome: "t1_queued", halt: "none" }));
+  const work = await inTx((tx) => claimNextEngineeringAgentPublishWork(tx, { leaseMs: 60_000, patchChunks: true }));
+  assert.ok(work && work.mode === "write" && work.workItemId === workItemId && "patchBytes" in work);
+  assert.deepEqual([work.patchBytes, work.patchChunkCount], [Buffer.byteLength(patchBody, "utf8"), 1]);
+  const chunk = await readEngineeringAgentPublishPatchChunk(prisma, { workItemId, fencingToken: work.fencingToken, index: 0 });
+  assert.ok(chunk.kind === "chunk");
+  assert.equal(Buffer.from(chunk.bytesBase64, "base64").toString("utf8"), patchBody);
+  // A small patch still goes inline to a publisher that does not read chunks.
+  await inTx((tx) => settleEngineeringAgentWorkItem(tx, { workItemId, fencingToken: work.fencingToken, outcome: "refused_before_write", reason: "patch_read_failed" }));
+  await issue();
+  const inline = await inTx((tx) => claimNextEngineeringAgentPublishWork(tx, { leaseMs: 60_000 }));
+  assert.ok(inline && inline.mode === "write" && inline.workItemId === workItemId && "patchBody" in inline);
+  assert.equal(inline.patchBody, patchBody);
+  assert.ok(!("patchBytes" in inline));
+  const bound = await settleAndBind(workItemId, inline.fencingToken, run.runId);
   await retireBinding(bound.bindingId);
 });
 

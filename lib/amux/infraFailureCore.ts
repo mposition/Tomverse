@@ -92,9 +92,12 @@ export type AmuxSidecarFailureReport = {
 
 /**
  * Sidecar failures that mean the worker did the card's work: they count.
- * `stalled` is the local CLI flow's stop of a run that showed no sign of life
- * for the stall window (lib/amux/v22LocalCliFlowCore.ts), the worker's own run as
- * the old deadline was. The flow's other stop reasons are not the worker's
+ * `stalled` was the local CLI flow's stop of a run that showed no sign of life
+ * for three hours, the worker's own run as the old deadline was. The flow no
+ * longer stops a quiet run (owner decision 2026-11-18); attempts that already
+ * ended that way keep the reason and still count
+ * (AMUX_V22_RETIRED_STOP_REASONS, lib/amux/v22LocalCliFlowCore.ts). The flow's
+ * other stop reasons are not the worker's
  * doing and stay infrastructure (an unknown code below): `operator_stop` (a
  * person stopped it) and `transcript_write_failed` (the sidecar could not
  * write its record).

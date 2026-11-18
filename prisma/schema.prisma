@@ -135,6 +135,7 @@ model User {
   modelMigrationRecords                ModelMigrationRecord[]
   mobileDevices                        MobileDevice[]
   mobileTokenFamilies                  MobileTokenFamily[]
+  externalApiKeys                      ExternalApiKey[]
   mobileLoginGrants                    MobileLoginGrant[]
   mobileAuthEvents                     MobileAuthEvent[]
   quotaScopes                          QuotaScope[]
@@ -845,6 +846,11 @@ model MessageAttachment {
   /// tool needs the second one to know what it has covered.
   availabilityCheckedAt DateTime?
 
+  /// The text an earlier turn extracted from this file, reused by later turns
+  /// (lib/attachmentTextCache.ts). Deleted with this row, in the same
+  /// transaction, by the cascade.
+  textCache MessageAttachmentTextCache?
+
   createdAt DateTime @default(now())
 
   @@unique([messageId, ordinal])
@@ -852,6 +858,28 @@ model MessageAttachment {
   @@index([userId, createdAt])
   @@index([unavailableAt])
   @@index([sourceArtifactId])
+}
+
+/// The text a model-independent extractor read out of one bound account
+/// attachment (PDF text or OCR, Office, legacy Office, plain text), kept so a
+/// later turn does not read and parse the file again
+/// (docs/policy/user-attachment-persistence.md section 7.1).
+///
+/// A row of its own, cascaded from MessageAttachment, rather than an object
+/// next to the file: deleting the attachment -- a conversation, a bulk or an
+/// account deletion -- removes this text in the same transaction, so it can
+/// never outlive the file whatever order a turn and a deletion run in.
+model MessageAttachmentTextCache {
+  attachmentId String            @id
+  attachment   MessageAttachment @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
+
+  /// ATTACHMENT_TEXT_CACHE_VERSION when written; a row of another version is
+  /// never read.
+  version Int
+  /// [{ kind, text }], what the extractor produced, in order.
+  entries Json
+
+  createdAt DateTime @default(now())
 }
 
 /// A finalised upload that has not been bound to a message yet.
@@ -1890,6 +1918,7 @@ model ChatCreditReservation {
   settlementAttempt      ChatAttemptUsage?  @relation("ReservationSettlementAttempt", fields: [id, settlementAttemptIndex], references: [reservationId, attemptIndex], onDelete: NoAction, onUpdate: NoAction, map: "ChatCreditReservation_settlementAttempt_fkey")
   attemptUsage           ChatAttemptUsage[]
   researchPreviewRun     ResearchPreviewRun?
+  externalApiRequest     ExternalApiRequest?
 
   @@index([status, expiresAt])
   @@index([userId, createdAt])
@@ -1897,6 +1926,63 @@ model ChatCreditReservation {
   @@unique([subjectKey, clientTurnId])
   @@index([providerRequestId])
   @@index([providerResponseId])
+}
+
+/// A key the account holder issued for the external inference API (/api/v1).
+/// The secret is shown once, at creation; only its SHA-256 digest is stored.
+/// It authorises inference, the account's own runnable model list and this
+/// key's own usage -- nothing else (docs/policy/external-api.md).
+model ExternalApiKey {
+  id           String    @id @default(cuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name         String
+  /// Public, non-secret identifier shown in lists and receipts.
+  keyPrefix    String    @unique
+  secretDigest String    @unique
+  /// Optional lifetime credit ceiling the account holder chose for this key.
+  /// Counted from the shared reservations: settled, held and unresolved.
+  creditCap    Int?
+  expiresAt    DateTime?
+  revokedAt    DateTime?
+  lastUsedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  requests     ExternalApiRequest[]
+
+  @@index([userId, createdAt])
+}
+
+/// One external inference request: the content-free link between a key and
+/// the shared ChatCreditReservation that holds and settles its credits. Every
+/// amount lives on the reservation; this row stores no prompt, output, tool
+/// argument, image or key material.
+model ExternalApiRequest {
+  id                   String                @id
+  keyId                String
+  key                  ExternalApiKey        @relation(fields: [keyId], references: [id], onDelete: Cascade)
+  userId               String
+  reservationId        String                @unique
+  reservation          ChatCreditReservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  /// SHA-256 of the client's Idempotency-Key header, when it sent one.
+  idempotencyKeyDigest String?
+  /// SHA-256 of the raw request body bytes, to tell a retry from a reuse; a
+  /// re-serialised body with reordered keys counts as a different request.
+  requestDigest        String
+  clientName           String?
+  modelId              String
+  stream               Boolean
+  /// Wire protocol: chat_completions, anthropic_messages or responses. Rows
+  /// written before the column existed are Chat Completions.
+  protocol             String                @default("chat_completions")
+  finishReason         String?
+  errorCode            String?
+  createdAt            DateTime              @default(now())
+  completedAt          DateTime?
+
+  @@unique([keyId, idempotencyKeyDigest])
+  @@index([userId, createdAt])
+  @@index([keyId, createdAt])
 }
 
 /// A default-off, owner-scoped Research Preview execution that can survive a
@@ -8042,6 +8128,7 @@ model AmuxWorkItem {
   executionAttempts AmuxExecutionAttempt[]
   v22TaskResults    AmuxV22TaskResult[]
   v22TaskPatches    AmuxV22TaskPatch[]
+  v22TaskChangedPaths AmuxV22TaskChangedPaths[]
   v22OwnerQuestions AmuxV22TaskQuestion[]
   v22ResultReviews  AmuxV22ResultReview[]
   dmOwnerSettlements AmuxDmOwnerSettlement[]
@@ -8164,6 +8251,8 @@ model AmuxExecutionAttempt {
   cliUsageEvents    AmuxCliUsageEvent[]
   v22TaskResult     AmuxV22TaskResult?
   v22TaskPatch      AmuxV22TaskPatch?
+  v22TaskChangedPaths AmuxV22TaskChangedPaths?
+  v22TransferParts  AmuxV22TransferPart[]
   v22OwnerQuestion  AmuxV22TaskQuestion?
   v22ResultReview   AmuxV22ResultReview?
   dmOwnerSettlements AmuxDmOwnerSettlement[]
@@ -8449,6 +8538,80 @@ model AmuxV22TaskPatch {
   @@index([ideaId, bodyPurgedAt])
 }
 
+/// One part of a v22 run's result (result | patch | changed_paths) while it
+/// arrives from the box in chunks (docs/policy/amux-v22-result-transfer.md,
+/// owner decision 2026-11-18). Staging only: the commit that records the part
+/// deletes it, and the content retention tick sweeps what no commit took.
+/// Not export data: every chunk is sealed under the part's own unit key.
+model AmuxV22TransferPart {
+  attemptId  String
+  /// result | patch | changed_paths (AMUX_V22_TRANSFER_PARTS, lib/amux/v22TransferCore.ts).
+  part       String
+  taskId     String
+  ideaId     String
+  worker     String
+  totalBytes Int
+  sha256     String
+  /// The patch's base commit; patch only.
+  baseSha    String?
+  /// How many paths the list holds; changed_paths only.
+  pathCount  Int?
+  createdAt  DateTime @default(now())
+  chunks     AmuxV22TransferChunk[]
+  attempt    AmuxExecutionAttempt @relation(fields: [attemptId, taskId], references: [id, taskId], onDelete: Restrict, onUpdate: Restrict)
+
+  @@id([attemptId, part])
+  @@index([createdAt])
+}
+
+/// One sealed chunk of an AmuxV22TransferPart: at most what one request
+/// carries (AMUX_V22_TRANSFER_CHUNK_BYTES), never a bound on the content.
+model AmuxV22TransferChunk {
+  attemptId   String
+  part        String
+  index       Int
+  byteLength  Int
+  ciphertext  Bytes
+  keyId       String
+  keyVersion  Int
+  /// HMAC of the chunk's plain bytes under the part's digest key.
+  digest      String
+  digestKeyId String
+  createdAt   DateTime @default(now())
+  transfer    AmuxV22TransferPart @relation(fields: [attemptId, part], references: [attemptId, part], onDelete: Cascade, onUpdate: Restrict)
+
+  @@id([attemptId, part, index])
+}
+
+/// One encrypted changed-path list per v22 attempt (purpose
+/// `task_changed_paths`), recorded apart from the result because a failed run
+/// with no result still settles with its paths. Settlement and the v52 review
+/// record name it by digest. Like the result, its body is not purged: the v22
+/// task result retention was removed on 2026-11-18.
+model AmuxV22TaskChangedPaths {
+  attemptId    String    @id
+  taskId       String
+  ideaId       String
+  ciphertext   Bytes?
+  keyId        String?
+  keyVersion   Int?
+  digest       String
+  digestKeyId  String
+  /// sha256 of the encodeAmuxV22ChangedPaths bytes.
+  pathsSha256  String
+  pathCount    Int
+  byteLength   Int
+  createdAt    DateTime  @default(now())
+  bodyPurgedAt DateTime?
+
+  attempt AmuxExecutionAttempt @relation(fields: [attemptId, taskId], references: [id, taskId], onDelete: Restrict, onUpdate: Restrict)
+  task    AmuxWorkItem         @relation(fields: [taskId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  idea    AmuxIdeaSubmission   @relation(fields: [ideaId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([attemptId, taskId])
+  @@index([ideaId, bodyPurgedAt])
+}
+
 /// One immutable review-server verdict for a v52 implement attempt. The row is
 /// the content-free binding; a reject's findings are the attempt's sealed
 /// AmuxV52ReviewFindings body (owner decision 2026-11-15).
@@ -8484,9 +8647,9 @@ model AmuxV52ReviewRecord {
 /// transaction as the review record (owner decision 2026-11-15): the
 /// reviewers, each one's reason, and per finding its severity, summary, file
 /// and line. Untrusted text for people, the Decision Maker and the next
-/// attempt's prompt, never authority. Kept until 90 days after the Task ends,
-/// as the attempt's result; the purge clears the body and queues the key's
-/// deletion (lib/amux/v22TaskResultRetention.ts).
+/// attempt's prompt, never authority. No retention purge runs on it (the v22
+/// task result retention code was removed on 2026-11-18); `bodyPurgedAt` marks
+/// a body that was cleared.
 model AmuxV52ReviewFindings {
   attemptId    String    @id
   taskId       String
@@ -10067,6 +10230,10 @@ model EngineeringAgentWorkItem {
   causeKey       String    @unique
   runId          String?
   patchBody      String?
+  /// A publish item's patch as UTF-8 bytes, written once with the item
+  /// (migration 20261118120100: STORAGE EXTERNAL, so the publisher's chunk
+  /// reads take only their slice). Null on items opened before it.
+  patchBytes     Bytes?
   patchDigest    String?
   baseSha        String?
   expectedTreeId String?
@@ -10363,6 +10530,7 @@ model AmuxIdeaSubmission {
   updatedAt           DateTime  @updatedAt
   v22TaskResults      AmuxV22TaskResult[]
   v22TaskPatches      AmuxV22TaskPatch[]
+  v22TaskChangedPaths AmuxV22TaskChangedPaths[]
   v52ReviewFindings   AmuxV52ReviewFindings[]
   laneAttempts        AmuxIdeaLaneAttempt[]
   cardCloseQuestions  AmuxIdeaCardCloseQuestion[]

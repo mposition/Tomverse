@@ -271,21 +271,40 @@ export async function generateConversationTitle(
 }
 
 /**
+ * The interim title a client gives a new conversation: the first prompt cut to
+ * 30 characters (ChatPageClient's create paths). Derived again here so the
+ * compare-and-set below does not depend on the client still knowing the exact
+ * string -- the Auto first-send path lost it and sent "New chat" instead, so
+ * every generated title was silently discarded.
+ */
+export function interimTitleFromFirstMessage(content: string): string | null {
+  const interim = content.trim().slice(0, 30).trim();
+  return interim.length > 0 ? interim : null;
+}
+
+/**
  * Compare-and-set write: only applies when the stored title still matches
- * what the caller expected when generation started, so a manual rename that
- * happened in the meantime is never clobbered.
+ * what the caller expected when generation started -- or the interim title
+ * derived from the first message -- so a manual rename that happened in the
+ * meantime is never clobbered.
  */
 export async function applyGeneratedTitle(args: {
   conversationId: string;
   userId: string;
   expectedTitle: string;
+  interimTitle?: string | null;
   newTitle: string;
 }): Promise<{ updated: boolean }> {
+  const expectedTitles = [
+    ...new Set([args.expectedTitle, args.interimTitle].filter(
+      (title): title is string => Boolean(title)
+    )),
+  ];
   const result = await prisma.conversation.updateMany({
     where: {
       id: args.conversationId,
       userId: args.userId,
-      title: args.expectedTitle,
+      title: { in: expectedTitles },
     },
     data: { title: args.newTitle },
   });

@@ -98,8 +98,11 @@ export type AmuxReviewDetail = {
     pr_number: number;
     base_sha: string;
     head_sha: string;
+    /** The change digest the approval binds: v2 (`v2:` + hex) since 2026-11-18. */
     diff_digest: string;
-    diff_text: string;
+    /** Null when the diff is not shown here (too large, binary or unsafe to display). */
+    diff_text: string | null;
+    diff_hidden?: "oversized" | "binary" | "unsafe_display" | null;
     html_url: string;
   } | null;
   allowed_outcomes: ReviewOutcome[];
@@ -115,7 +118,7 @@ export type AmuxReviewDetail = {
   publication_hold?: { state: "pr_open" | "pending"; pr_number: number | null } | null;
   /** Why the server offers no decision at all; null while it offers one. */
   decision_hold?: string | null;
-  retry: { used: number; limit: number; remaining: number };
+  retry: { used: number; limit: number | null; remaining: number | null };
   proposed_transitions: Partial<Record<ReviewOutcome, string>>;
 };
 type ReviewDetail = AmuxReviewDetail;
@@ -227,7 +230,8 @@ export const isValidAmuxReviewArtifact = (value: unknown): value is NonNullable<
   (value.pr_number as number) > 0 &&
   typeof value.base_sha === "string" && /^[0-9a-f]{40}$/i.test(value.base_sha) &&
   typeof value.head_sha === "string" && /^[0-9a-f]{40}$/i.test(value.head_sha) &&
-  typeof value.diff_digest === "string" && /^[0-9a-f]{64}$/i.test(value.diff_digest);
+  typeof value.diff_digest === "string" && /^(v2:)?[0-9a-f]{64}$/i.test(value.diff_digest) &&
+  (value.diff_text === null || typeof value.diff_text === "string");
 
 const isMicrousd = (value: unknown): value is string =>
   typeof value === "string" && /^(0|[1-9][0-9]*)$/.test(value);
@@ -824,7 +828,7 @@ export function AmuxOwnerReviewView({
           <dt className="text-zinc-500">{m.dueParseState}</dt><dd className="break-words font-mono text-zinc-300">{review.task.due_parse_state}</dd>
           <dt className="text-zinc-500">{m.lastAttempt}</dt><dd className="break-all font-mono text-zinc-300">{review.last_attempt?.id ?? m.noAttempt}</dd>
           <dt className="text-zinc-500">{m.lastAttemptState}</dt><dd className="break-words font-mono text-zinc-300">{review.last_attempt ? `${review.last_attempt.outcome} → ${review.last_attempt.to_status}` : "—"}</dd>
-          <dt className="text-zinc-500">{m.attemptBudget}</dt><dd className="text-zinc-300">{number(review.retry.used)} / {number(review.retry.limit)} · {m.remaining} {number(review.retry.remaining)}</dd>
+          <dt className="text-zinc-500">{m.attemptBudget}</dt><dd className="text-zinc-300">{number(review.retry.used)} / {review.retry.limit === null ? m.noAttemptLimit : number(review.retry.limit)}{review.retry.remaining !== null && <> · {m.remaining} {number(review.retry.remaining)}</>}</dd>
           <dt className="text-zinc-500">{m.serverAllowedOutcomes}</dt><dd className="break-words font-mono text-zinc-300">{review.allowed_outcomes.join(", ") || "—"}</dd>
           {review.review_content && <><dt className="text-zinc-500">{m.subjectDigest}</dt><dd className="break-all font-mono text-zinc-300">{review.review_content.digest}</dd></>}
           {review.review_context.result_sha256 && <><dt className="text-zinc-500">{m.reviewResultSha256}</dt><dd className="break-all font-mono text-zinc-300">{review.review_context.result_sha256}</dd></>}
@@ -847,9 +851,19 @@ export function AmuxOwnerReviewView({
             <p className="mt-2 break-all font-mono text-xs text-zinc-300">{m.reviewHeadSha}: {validArtifact.head_sha}</p>
             <p className="mt-2 break-all font-mono text-xs text-zinc-300">{m.reviewDiffDigest}: {validArtifact.diff_digest}</p>
             <p className="mt-3 text-xs font-bold text-zinc-500">{m.reviewPrDiff}</p>
-            <pre dir="ltr" className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words font-mono text-xs text-zinc-300 [overflow-wrap:anywhere]">
-              {validArtifact.diff_text}
-            </pre>
+            {validArtifact.diff_text !== null ? (
+              <pre dir="ltr" className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words font-mono text-xs text-zinc-300 [overflow-wrap:anywhere]">
+                {validArtifact.diff_text}
+              </pre>
+            ) : (
+              <p className="mt-2 text-xs text-amber-200" data-testid="admin-amux-review-diff-not-shown">
+                {m.reviewDiffNotShown}{" "}
+                <a href={`https://github.com/mposition/Tomverse/pull/${validArtifact.pr_number}`} target="_blank"
+                  rel="noopener noreferrer" className="underline">
+                  #{validArtifact.pr_number}
+                </a>
+              </p>
+            )}
           </div>
         )}
       </details>
@@ -1696,7 +1710,7 @@ export function AmuxOwnerReviewDetail({ controller, reviewReturnPath, showClose 
                         <dt>{m.transition}</dt><dd>{proposal.source_status} → {proposal.target_status}</dd>
                         <dt>{m.expiry}</dt><dd>{date(proposal.expires_at)}</dd>
                         <dt>{m.subjectDigest}</dt><dd className="break-all font-mono">{proposal.subject_digest}</dd>
-                        <dt>{m.attemptBudget}</dt><dd>{number(review.retry.remaining)} {m.remaining}</dd>
+                        <dt>{m.attemptBudget}</dt><dd>{review.retry.remaining === null ? m.noAttemptLimit : `${number(review.retry.remaining)} ${m.remaining}`}</dd>
                       </dl>
                       <div className="mt-3 flex flex-wrap gap-2">
                         <button

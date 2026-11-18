@@ -2751,6 +2751,29 @@ domains:
       Its expiry and key retirement do not by themselves decide account
       deletion or unified export; a public develop PR needs separate consent.
 
+  - domain: amuxTaskChangedPaths
+    prismaModel: AmuxV22TaskChangedPaths
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-v22-result-transfer.md 2.3 and 2.6, v22 Task changed-path list account deletion and export gate
+    subjectReference:
+      kind: parent_row
+      parentColumn: ideaId
+      parentModel: AmuxIdeaSubmission
+    inUnifiedExport: unverified
+    note: >-
+      The paths a v22 run changed, encrypted and tied to an operator idea by
+      ideaId; settlement names them by digest. The body expires with the
+      attempt's result, 90 days after the Task ends, and the purge queues the
+      key's deletion. That expiry does not by itself decide account deletion
+      or unified export. The chunked transfer's staging tables hold sealed
+      chunks only until the commit or the retention sweep and are not
+      registered.
+
   - domain: amuxReviewFindings
     prismaModel: AmuxV52ReviewFindings
     userLinkageRole: actor
@@ -4176,6 +4199,36 @@ domains:
       takeover path is email and the collateral is correspondingly larger.
       The `id` is a server-issued random value, so it identifies the device to
       Tomverse and to nothing else.
+
+  - domain: externalApiKey
+    prismaModel: ExternalApiKey
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+    note: >-
+      A key the person issued for the external inference API
+      (docs/policy/external-api.md): name, public prefix, optional credit cap,
+      expiry, revocation and last use. Only a SHA-256 digest of the secret is
+      stored, and the export withholds it.
+
+  - domain: externalApiRequest
+    prismaModel: ExternalApiRequest
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+    note: >-
+      The content-free link from one API request to its key and to the shared
+      ChatCreditReservation. Removed with the key, which is removed with the
+      account; the reservation row stays detached like every Chat reservation.
+      Holds no prompt, output, tool argument or image.
 
   - domain: mobileTokenFamily
     prismaModel: MobileTokenFamily

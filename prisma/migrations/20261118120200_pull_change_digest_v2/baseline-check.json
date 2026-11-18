@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "migrationSqlSha256": "9e976c0403c5d51da92a3f3a030c3243d8032681c8e8779e5a51b9b865654527",
+  "replacedChecks": [
+    {
+      "table": "EngineeringAgentBinding",
+      "constraint": "EngineeringAgentBinding_snapshot_check",
+      "previousDefinitionSha256": "db30f5d2cb2324a1ce5aa2e92daa6d65feb513454949b901a4b16cd0babdcc79"
+    },
+    {
+      "table": "AmuxDmOwnerSettlement",
+      "constraint": "AmuxDmOwnerSettlement_shape_check",
+      "previousDefinitionSha256": "71791f5355c493da3f54f8ba9efe33946a20daeb134625a66dc55caea5902e85"
+    },
+    {
+      "table": "AmuxReviewProposal",
+      "constraint": "AmuxReviewProposal_source_evidence_check",
+      "previousDefinitionSha256": "e51122e939ca891961d2cb734decb871c5465acabae75106639ef8c21feb29d3"
+    }
+  ]
+}

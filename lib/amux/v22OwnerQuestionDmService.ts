@@ -118,7 +118,7 @@ export async function readAmuxV22QuestionSyncRows(tx: Prisma.TransactionClient,
   now: Date) {
   const pending = await tx.$queryRaw<PendingRow[]>`
     SELECT q."id" AS "questionId", q."taskId", q."attemptId", q."worker",
-      q."sequence", r."ideaId", r."ciphertext", r."keyId", r."keyVersion",
+      q."sequence", r."ideaId", r."keyId", r."keyVersion",
       r."digest", r."digestKeyId", r."sourceSha256", r."bodyPurgedAt",
       g."provider", w."displayKey", w."title" AS "cardTitle", w."sourceSystem",
       w."sourceSnapshot", w."v4TitleCiphertext", w."v4TitleKeyId",

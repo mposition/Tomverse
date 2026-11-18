@@ -322,11 +322,18 @@ export type GuestAutoPreholdConversion = Readonly<{
     creditEntries: readonly GuestAutoHeldCreditEntry[];
 }>;
 
+/**
+ * Which product a reservation belongs to. `external_api` is a stateless
+ * /api/v1 inference request: no Conversation, no Message, and no productKey.
+ */
+export const CHAT_RESERVATION_SOURCES = ["chat", "comparison_review", "external_api"] as const;
+export type ChatReservationSource = (typeof CHAT_RESERVATION_SOURCES)[number];
+
 export type ChatUsageReservation = {
     reservationId: string;
     userId?: string;
     traceId: string;
-    source: "chat" | "comparison_review";
+    source: ChatReservationSource;
     modelId: string;
     provider: AiModel["provider"];
     entries: ReservationEntry[];
@@ -422,7 +429,7 @@ const durableReservationPayloadSchema = z
         reservationId: z.string().min(1).max(100),
         userId: z.string().min(1).max(100).optional(),
         traceId: z.string().min(1).max(120),
-        source: z.enum(["chat", "comparison_review"]),
+        source: z.enum(CHAT_RESERVATION_SOURCES),
         modelId: z.string().min(1).max(160),
         provider: z.string().min(1).max(80),
         entries: z.array(
@@ -2506,7 +2513,18 @@ export const acquireChatAccess = async (
     budget: ChatBudget,
     options?: {
         traceId?: string;
-        source?: "chat" | "comparison_review";
+        source?: ChatReservationSource;
+        /**
+         * Runs inside the reservation transaction, after the credit account
+         * lock and the reservation row. A throw refuses the request and rolls
+         * the hold back. The external API binds its key here and enforces the
+         * key's own credit cap (lib/externalApiAdmission.ts). It must not take
+         * a lock the credit account lock does not already order.
+         */
+        withinReservationTransaction?: (
+            tx: Prisma.TransactionClient,
+            reservation: { reservationId: string; usageCredits: number }
+        ) => Promise<void>;
         /** Tool names enabled for this turn, recorded on the limit decision. */
         enabledTools?: string[];
         /**
@@ -4036,6 +4054,17 @@ export const acquireChatAccess = async (
                     addOnReservedCredits,
                     expiresAt: reservationExpiresAt,
                 },
+            });
+        }
+        if (options?.withinReservationTransaction) {
+            // Last, so it sees the row it is binding to, and inside the same
+            // transaction, so a refusal here rolls the whole hold back. It runs
+            // with the credit account lock already held: every request of one
+            // account is serialised through that lock, which is what makes a
+            // per-key check here safe against concurrent requests.
+            await options.withinReservationTransaction(tx, {
+                reservationId,
+                usageCredits: budget.usageCredits,
             });
         }
     });
@@ -5768,6 +5797,15 @@ export const reconcileExpiredChatCreditReservations = async (
                     reconciled: true,
                     reason: "reservation_expired",
                     resolveTurnUsage: async (tx) => {
+                              // An expired external API reservation was admitted
+                              // and then lost its process: the provider may have
+                              // run. The user is refunded as for any failure, but
+                              // the provider side keeps the reservation's own
+                              // estimate rather than a cost of zero
+                              // (docs/policy/external-api.md section 4).
+                              if (reservation.source === "external_api") {
+                                  return { turnUsage: { outcome: "failed", usageFromProvider: false } };
+                              }
                               const researchUsage = await researchPreviewSettlementForExpiry(tx, reservation.reservationId, now);
                               if (researchUsage) { researchHandoff = true; return { turnUsage: researchUsage }; }
                               if (!isDeepResearchReservation(row.modelId)) return null;
@@ -6174,7 +6212,9 @@ export const validateChatPayload = (body: unknown) => {
         const ids = payload.acknowledgedUnavailableAttachmentIds;
         if (
             !Array.isArray(ids) ||
-            ids.length > 50 ||
+            // Every file one request can carry (100 messages of 10), since one
+            // refusal names every lost file a long conversation holds.
+            ids.length > 1_000 ||
             ids.some(
                 (id) =>
                     typeof id !== "string" ||

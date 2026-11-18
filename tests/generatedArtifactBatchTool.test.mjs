@@ -158,11 +158,30 @@ test("the presentation tool spreads finance and schedule instead of packing one 
   assert.doesNotMatch(description, /compact finance and execution slide/);
 });
 
+test("the presentation tool derives break-even from fixed costs and the variable cost ratio", () => {
+  // A deck once reported break-even revenue as the total costs at the stated
+  // revenue instead of fixed costs over the contribution margin ratio.
+  const description = buildGeneratedArtifactToolConfig(collector()).tools[
+    ARTIFACT_TOOL_NAMES.presentation
+  ].description;
+  assert.match(description, /variable costs .* and fixed costs/);
+  assert.match(description, /fixed costs \/ \(1 - variable cost ratio\) rather than reusing total costs/);
+  assert.match(description, /show the cost assumptions and that formula on the break-even slide/);
+});
+
 test("document headings describe the full schedule and respect the requested time span", () => {
   const description = buildGeneratedArtifactToolConfig(collector()).tools[ARTIFACT_TOOL_NAMES.document].description;
   assert.match(description, /Match every heading and table caption to the full time span/);
   assert.match(description, /first-day, first-week and first-month rows/);
   assert.match(description, /if the user asks for only the first week, keep the rows within that week/);
+});
+
+test("document tables name change units and index bases", () => {
+  const description = buildGeneratedArtifactToolConfig(collector()).tools[ARTIFACT_TOOL_NAMES.document].description;
+  assert.match(description, /Name every numeric column's unit in its header/);
+  assert.match(description, /percent change \(%\) or a point change \(%p\)/);
+  assert.match(description, /write changes with their sign/);
+  assert.match(description, /For an index, state its base period and base value/);
 });
 
 /* -------------------------------------------------------------------------- */

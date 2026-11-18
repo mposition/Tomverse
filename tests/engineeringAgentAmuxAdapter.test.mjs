@@ -4,7 +4,6 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
-  AMUX_ATTACHMENT_MAX_PRISMA_CALLS,
   AMUX_DB_BOUNDARIES,
   AMUX_DB_COMMIT_RESERVE_MS,
   AMUX_DB_IDLE_GAP_PLANNING_MS,
@@ -32,7 +31,8 @@ import {
   isRunId,
   parseSettingInstant,
 } from "../lib/engineeringAgentCore.ts";
-import { ENGINEERING_AGENT_PATCH_BODY_MAX_BYTES } from "../lib/engineeringAgentStore.ts";
+import { ENGINEERING_AGENT_LEGACY_INLINE_PATCH_MAX_BYTES,
+  ENGINEERING_AGENT_PATCH_CHUNK_BYTES } from "../lib/engineeringAgentStore.ts";
 import {
   ENGINEERING_AGENT_RESPONSE_MAX_BYTES,
   requireSendableResult,
@@ -162,7 +162,7 @@ test("each attached writer fits the adapter routes' budget, as the AMUX routes' 
     engineeringRunEndAttachment({ runId: "1", outcome: "t2_draft", halt: "none" }),
     engineeringPublishResultAttachment({ workItemId: "x", fencingToken: 1n, outcome: "confirmed", pullRequest: null }),
   ]) {
-    assert.ok(attachment.prismaCalls <= AMUX_ATTACHMENT_MAX_PRISMA_CALLS);
+    assert.ok(Number.isSafeInteger(attachment.prismaCalls) && attachment.prismaCalls >= 1);
   }
 });
 
@@ -220,10 +220,15 @@ test("a stored instant is exactly what toISOString writes, or no record", () => 
 });
 
 test("the response ceiling holds the widest claim, and a result that cannot be sent is refused before commit", () => {
-  // JSON writes each control character as six bytes.
-  const worstPatch = "\u0001".repeat(ENGINEERING_AGENT_PATCH_BODY_MAX_BYTES);
-  assert.equal(JSON.stringify(worstPatch).length, ENGINEERING_AGENT_PATCH_BODY_MAX_BYTES * 6 + 2);
-  assert.ok(ENGINEERING_AGENT_RESPONSE_MAX_BYTES >= ENGINEERING_AGENT_PATCH_BODY_MAX_BYTES * 6 + 16 * 1024);
+  // JSON writes each control character as six bytes. A claim carries a patch
+  // inline only up to the inline bound; a larger one is read in chunks.
+  const worstPatch = "\u0001".repeat(ENGINEERING_AGENT_LEGACY_INLINE_PATCH_MAX_BYTES);
+  assert.equal(JSON.stringify(worstPatch).length, ENGINEERING_AGENT_LEGACY_INLINE_PATCH_MAX_BYTES * 6 + 2);
+  assert.ok(ENGINEERING_AGENT_RESPONSE_MAX_BYTES >= ENGINEERING_AGENT_LEGACY_INLINE_PATCH_MAX_BYTES * 6 + 16 * 1024);
+  // One chunk answer: a full chunk in base64 and its envelope.
+  const chunk = { workItemId: "00000000-0000-4000-8000-000000000000", index: 0, totalBytes: 2 ** 30, chunkCount: 256,
+    bytesBase64: Buffer.alloc(ENGINEERING_AGENT_PATCH_CHUNK_BYTES).toString("base64") };
+  assert.doesNotThrow(() => requireSendableResult(chunk));
   const claim = {
     mode: "write",
     workItemId: "00000000-0000-4000-8000-000000000000",

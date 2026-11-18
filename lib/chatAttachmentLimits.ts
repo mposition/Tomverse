@@ -38,3 +38,16 @@ export const PAST_ATTACHMENT_OMITTED_TEXT =
   "This file was attached to an earlier message and is not included in this turn: " +
   "the earlier files in this conversation already fill the room set aside for them. " +
   "If the answer needs it, say so and ask the user to attach it again.";
+
+/**
+ * What a signed-in account may attach (operator decision 2026-11-18, after a
+ * comparison with Claude.ai, Gemini, Perplexity and ChatGPT). Was 5 files of
+ * 10 MB and 25 MB a request. Guests keep their own, smaller limits.
+ *
+ * The request total still bounds what one turn reads into memory: an earlier
+ * message's file whose text is already cached (lib/attachmentTextCache.ts) is
+ * not read again and does not count towards it.
+ */
+export const CHAT_MAX_ATTACHMENTS_PER_MESSAGE = 10;
+export const CHAT_MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
+export const CHAT_MAX_TOTAL_ATTACHMENT_BYTES = 100 * 1024 * 1024;

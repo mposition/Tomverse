@@ -39,8 +39,11 @@ Anthropic이 Tomverse의 direct API 트래픽에서 prompt cache hit rate가 낮
 | `provider_probe` | X | 최소 prefix 미달 + probe에 parameter 추가는 두 번 장애로 기록됨 |
 | `provider_verification` | X | 고정된 짧은 일회성 요청 |
 | `memory_extraction` | X | 대화당 1회, 매번 다른 transcript |
+| `external_api_messages` | **O** (client marker) | Claude Code가 자기 marker를 붙여 system·tools·history를 매 turn 재전송 — §2.4 |
 
 ## 2.2 1차 출시 범위는 `chat_turn` 하나입니다
+
+(2026-11-18 추가: Tomverse가 marker를 붙이는 경로는 여전히 `chat_turn` 하나입니다. client가 marker를 보내는 `external_api_messages`는 §2.4입니다.)
 
 처음 작성 시 `true`였던 네 경로가 지금 `false`입니다. **prefix가 나빠서가
 아니라, 경로 하나에 세 부분이 필요한데 두 경로에만 배선돼 있었기 때문**입니다.
@@ -80,6 +83,24 @@ Anthropic이 Tomverse의 direct API 트래픽에서 prompt cache hit rate가 낮
 
 `tests/anthropicPromptCachingWiring.test.mjs`가 `caches: true`인 경로에 셋 중
 하나라도 없으면 실패합니다. gap이 조용히 다시 열릴 수 없습니다.
+
+## 2.4 외부 API의 Anthropic Messages — marker는 client가 붙입니다
+
+`external_api_messages`(docs/policy/external-api.md 10절)는 Claude Code가 보낸
+`cache_control`을 그대로 provider에 전달합니다. prefix 추측이 아니라 client가 직접
+breakpoint를 둔 요청이고, marker를 지우면 매 turn이 uncached로 청구됩니다. 세 부분은
+이 경로에도 그대로 적용됩니다.
+
+1. budget — marker가 있는 요청만 `promptCachePath: "external_api_messages"`로 5분
+   write premium을 dispatch 전에 예약 (`lib/externalApiNative.ts`)
+2. request — Tomverse는 marker를 추가하지 않고 client marker를 전달하며, TTL이 5분이
+   아니면 dispatch 전에 거절 (`lib/anthropicMessagesProtocol.ts`). 따라서
+   `getModelGenerationSettings` 호출 대신 이 파일이 wiring 테스트의 request 부분입니다
+3. settlement — provider가 보고한 `cache_creation_input_tokens`를 write로,
+   `cache_read_input_tokens`를 read로 정산
+
+server tool(웹 검색 등)은 이 경로에서 dispatch 전에 거절되므로 §2.3의 반복 write 문제는
+생기지 않습니다.
 
 ## 2.3 native web search turn은 예약이 안전하지 않습니다
 

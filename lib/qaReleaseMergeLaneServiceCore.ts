@@ -121,8 +121,13 @@ export type QaReleaseMergeLanePorts = {
   app: {
     readState: () => Promise<QaReleaseLaneState>;
     issue: (pullRequest: { pullRequestNumber: number; headSha: string }) => Promise<{ issued: true; attemptId: string } | { issued: false; reason: string }>;
-    /** `diffDigest`: for a Decision Maker approved pull request, its diff's digest read right before (lib/pullDiffDigestCore.ts). */
-    consume: (request: { attemptId: string; pullRequestNumber: number; headSha: string; base: string; diffDigest?: string }) => Promise<{ consumed: boolean; reason?: string }>;
+    /**
+     * For a Decision Maker approved pull request, the digests read right before
+     * (lib/pullDiffDigestCore.ts): `changeDigest` (v2), and `diffDigest` (v1)
+     * when the diff could be read, for an approval recorded before v2.
+     */
+    consume: (request: { attemptId: string; pullRequestNumber: number; headSha: string; base: string; diffDigest?: string;
+      changeDigest?: string }) => Promise<{ consumed: boolean; reason?: string }>;
     report: (attemptId: string, report: QaReleaseMergeReport) => Promise<{ recorded: boolean; reason?: string }>;
     /** The lane's own latch release; the app decides whether every cause was read again and closed. */
     release: () => Promise<{ released: boolean; reason?: string }>;
@@ -132,7 +137,9 @@ export type QaReleaseMergeLanePorts = {
     /** The item 3 inputs for one pull request; the changed-file list is read to its last page. */
     exclusionInputs: (pull: QaReleaseLanePullRequest) => Promise<QaReleaseExclusionInput>;
     readPull: (number: number) => Promise<QaReleasePullRead | null>;
-    /** The digest of the pull request's diff as GitHub serves it now (lib/pullDiffDigestCore.ts); null when it cannot be read whole. */
+    /** The v2 change digest of the pull request at this head against develop now (lib/pullDiffDigestCore.ts). */
+    changeDigest: (number: number, headSha: string) => Promise<string | null>;
+    /** The v1 digest of its diff as GitHub serves it now, for an approval recorded before v2; null when not read whole. */
     diffDigest: (number: number) => Promise<string | null>;
     /** The merge API with `sha` pinned to the head; never a merge without it. */
     merge: (number: number, headSha: string) => Promise<QaReleaseMergeCall>;
@@ -571,18 +578,23 @@ async function startNextAttempt(
   if (freshDeployments === null || developBroken(freshDeployments) || qaReleaseHoldingDeployments(freshDeployments).length > 0) return abandon();
   if (decideQaReleaseServiceStart("mergeLane", env) !== "run") return abandon();
 
-  // A Decision Maker approved pull request: its diff as GitHub serves it now,
-  // read right before the consume, which lets it merge only at the approved
-  // digest (review r-20261114-021949-8dbd49: a merge base that moved with
-  // develop changes the diff at the same head). Unread, it is not merged.
+  // A Decision Maker approved pull request: its change digest (merge base,
+  // head and tree) as GitHub has it now, read right before the consume, which
+  // lets it merge only at the approved digest (review r-20261114-021949-8dbd49:
+  // a merge base that moved with develop changes it at the same head). Unread,
+  // it is not merged. The v1 diff digest rides along when the diff can be
+  // read, for an approval recorded before v2; the app compares the one the
+  // approval names.
+  let changeDigest: string | null = null;
   let diffDigest: string | null = null;
   if (qaReleaseDmApprovedPull(state, pick)) {
+    changeDigest = await ports.github.changeDigest(pick.number, pick.headRefOid).catch(() => null);
+    if (changeDigest === null) return abandon();
     diffDigest = await ports.github.diffDigest(pick.number).catch(() => null);
-    if (diffDigest === null) return abandon();
   }
   const consumed = await ports.app
     .consume({ attemptId, pullRequestNumber: pick.number, headSha: pick.headRefOid, base: "develop",
-      ...(diffDigest !== null ? { diffDigest } : {}) })
+      ...(changeDigest !== null ? { changeDigest } : {}), ...(diffDigest !== null ? { diffDigest } : {}) })
     .catch(() => null);
   if (consumed === null) return { exitCode: 1, outcome: "state_unknown" };
   if (!consumed.consumed) return abandon();

@@ -6,7 +6,6 @@ import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { AmuxAnalysisClaimResolutionPanel } from "@/components/admin/AmuxAnalysisClaimResolutionPanel";
 import { AmuxBacklogMetadataPanel } from "@/components/admin/AmuxBacklogMetadataPanel";
 import { AmuxBoardAutoPromotionPanel } from "@/components/admin/AmuxBoardAutoPromotionPanel";
-import { AmuxBoardImportPanel } from "@/components/admin/AmuxBoardImportPanel";
 import { AmuxBoardPromotionPanel } from "@/components/admin/AmuxBoardPromotionPanel";
 import { AmuxBoardRecommendationPanel } from "@/components/admin/AmuxBoardRecommendationPanel";
 import { AmuxCardDisplayKeyBackfillPanel } from "@/components/admin/AmuxCardDisplayKeyBackfillPanel";
@@ -36,7 +35,6 @@ const TABS = adminNavItemTabs("amux-recovery");
 
 /** The retired tools, in the order their old pages listed them. */
 const LEGACY_SECTIONS = [
-  "import",
   "reconciliation",
   "metadata",
   "recommendation",
@@ -45,7 +43,7 @@ const LEGACY_SECTIONS = [
 ] as const;
 
 /** The retired tools that still have an environment switch (and so carry a chip). */
-const SWITCHED_LEGACY_SECTIONS = ["import", "auto-promotion"] as const;
+const SWITCHED_LEGACY_SECTIONS = ["auto-promotion"] as const;
 
 /**
  * Safety & recovery: execution halts, unused reservations and claims, and the
@@ -53,8 +51,8 @@ const SWITCHED_LEGACY_SECTIONS = ["import", "auto-promotion"] as const;
  *
  * Execution safety was a section of Operations settings and keeps its panel,
  * its role rules and its step-up return exactly as they were: every admin role
- * reads it, the owner alone clears a halt. Legacy tools gathers the Catalog
- * import, Source reconciliation and Card metadata screens (once Backlog tabs)
+ * reads it, the owner alone clears a halt. Legacy tools gathers the
+ * Source reconciliation and Card metadata screens (once Backlog tabs)
  * and the three Promotion screens (once their own page); each is the panel it
  * was, behind the same switch and the same owner check, so retiring
  * them from the menu neither deletes data nor grants execution.
@@ -100,7 +98,6 @@ export default async function AdminAmuxRecoveryPage({
     if (!isOwner) notFound();
     const chips = amuxTabChips(legacyStatuses, m.status);
     const panels = {
-      import: <AmuxBoardImportPanel />,
       reconciliation: <AmuxReconciliationPanel />,
       metadata: <AmuxBacklogMetadataPanel />,
       recommendation: <AmuxBoardRecommendationPanel />,

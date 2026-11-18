@@ -6,6 +6,8 @@ import { pathToFileURL } from "node:url";
 const mod = (path) => pathToFileURL(resolve(import.meta.dirname, "../..", path)).href;
 const NOW = new Date("2026-11-13T00:00:00.000Z");
 const settings = new Map();
+let implementations = { status: "available", byTask: {}, byUrl: {} };
+mock.module(mod("lib/dailyProductImplementation.ts"), { namedExports: { readDailyImplementations: async () => implementations } });
 let suggestions = [], router = [], audits = [], notices = [], rejectAudit = false;
 let tail = Promise.resolve();
 const tx = {
@@ -49,7 +51,7 @@ const oldAlerts = process.env.DAILY_PRODUCT_AGENT_ALERTS_ENABLED;
 const oldRetries = process.env.DAILY_PRODUCT_AGENT_RETRIES_ENABLED;
 test.beforeEach(() => { delete process.env.DAILY_PRODUCT_AGENT_RETRIES_ENABLED; });
 test.after(() => { if (oldRetries === undefined) delete process.env.DAILY_PRODUCT_AGENT_RETRIES_ENABLED; else process.env.DAILY_PRODUCT_AGENT_RETRIES_ENABLED = oldRetries; });
-test.beforeEach(() => { settings.clear(); suggestions = []; router = []; audits = []; notices = []; rejectAudit = false; process.env.DAILY_PRODUCT_AGENT_ENABLED = "true"; process.env.DAILY_PRODUCT_AGENT_ALERTS_ENABLED = "true"; });
+test.beforeEach(() => { implementations = { status: "available", byTask: {}, byUrl: {} }; settings.clear(); suggestions = []; router = []; audits = []; notices = []; rejectAudit = false; process.env.DAILY_PRODUCT_AGENT_ENABLED = "true"; process.env.DAILY_PRODUCT_AGENT_ALERTS_ENABLED = "true"; });
 test.after(() => { if (oldSwitch === undefined) delete process.env.DAILY_PRODUCT_AGENT_ENABLED; else process.env.DAILY_PRODUCT_AGENT_ENABLED = oldSwitch; });
 test.after(() => { if (oldAlerts === undefined) delete process.env.DAILY_PRODUCT_AGENT_ALERTS_ENABLED; else process.env.DAILY_PRODUCT_AGENT_ALERTS_ENABLED = oldAlerts; });
 const halt = { runId: "11111111-2222-4333-8444-555555555555", reason: "publish_unknown", attempted: 9, prOpened: 1, lastPrUrl: "https://github.com/mposition/Tomverse/pull/1" };
@@ -87,6 +89,33 @@ const row = (id, subject = "home.en", age = 0) => ({ id, subject, status: "open"
   createdAt: new Date(NOW.getTime() + age), title: `Improve ${id}`, evidence: "Synthetic evidence", suggestion: "Fix and verify", area: "copy", severity: "low" });
 const claim = () => claimDailyProductTask({ origin: "https://app.example.test", now: NOW });
 
+test("linked open/merged implementations skip duplicate work, preserve failed history and continue to the next task", async () => {
+  suggestions = [row("one", "home.en", -1), row("two")];
+  const first = await claim();
+  await recordDailyProductResult({ id: first.id, claimId: first.claimId, outcome: "failed", reason: "tests" }, NOW);
+  const prior = settings.get(dailyProductAgentKey(first.id));
+  implementations.byTask["scout.one"] = { prUrl: "https://github.com/mposition/Tomverse/pull/4041", state: "merged" };
+  process.env.DAILY_PRODUCT_AGENT_RETRIES_ENABLED = "true";
+  const next = await claimDailyProductTask({ origin: "https://app.example.test", now: new Date("2026-11-13T23:00:00Z") });
+  assert.equal(next.id, "scout.two");
+  assert.equal(settings.get(dailyProductAgentKey(first.id)), prior);
+  assert.equal(JSON.parse(settings.get(DAILY_PRODUCT_AGENT_DAY)).count, 1);
+  const display = (await listSuggestions("open")).find(row => row.id === "one");
+  assert.equal(display.agentWork.status, "failed");
+  assert.equal(display.agentWork.retryable, false);
+  assert.equal(display.implementation.state, "merged");
+  assert.ok(suggestions.every(row => row.status === "open"));
+});
+
+test("an unavailable PR lookup fails before claiming, counting or auditing rather than pretending the queue is empty", async () => {
+  suggestions = [row("one")];
+  implementations.status = "unavailable";
+  await assert.rejects(claim(), /daily_implementation_lookup_unavailable/);
+  assert.equal(settings.size, 0);
+  assert.equal(audits.length, 0);
+  assert.equal((await listSuggestions("open"))[0].implementationLookupUnavailable, true);
+});
+
 test("bounded automatic retries consume the shared daily cap and fence old results", async () => {
   suggestions = [row("one")];
   const first = await claim();
@@ -95,7 +124,7 @@ test("bounded automatic retries consume the shared daily cap and fence old resul
   const retry = (now = later) => claimDailyProductTask({ origin: "https://app.example.test", now });
   assert.equal(await retry(), null);
   process.env.DAILY_PRODUCT_AGENT_RETRIES_ENABLED = "true";
-  assert.equal(await retry(new Date(later.getTime() - 1)), null);
+  assert.equal(await retry(new Date("2026-11-13T13:59:59Z")), null);
   settings.set(DAILY_PRODUCT_AGENT_DAY, JSON.stringify({ day: "2026-11-14", count: 23 }));
   const second = await retry();
   assert.notEqual(second.claimId, first.claimId);

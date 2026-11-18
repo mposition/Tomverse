@@ -84,8 +84,9 @@ approvedBy: mposition · approvedAt: 2026-10-17 · 정책 버전: 2
    `approve`는 적용하지 않고 승인 사실만 기록한다. 카드는 스위치 없이 늘 올린다
    (`TOMVERSE_AMUX_DM_OWNER_SETTLEMENT`는 2026-11-16에 없앴다). 가격·크레딧·migration·삭제·인증·감사
    체인 경로와 병합 레인 게이트 파일, main 병합과 배포는 사람에게 남는다. S2(`TOMVERSE_AMUX_DM_T2_MERGE=enabled`, 기본
-   꺼짐): 기록된 `approve`를 쓸 때마다 binding이 열려 있고 head·diff digest가 승인 때와 같고 base가 develop이고 Task가
-   review인지 다시 읽는다. 자동 병합은 **변경이 모두 병합 범위 안에 있을 때만** 한다(운영자 결정 2026-11-15, "내부 개발용
+   꺼짐): 기록된 `approve`를 쓸 때마다 binding이 열려 있고 head·변경 digest가 승인 때와 같고 base가 develop이고 Task가
+   review인지 다시 읽는다. 변경 digest는 v2(merge base·head commit·head tree, `lib/pullDiffDigestCore.ts`, 운영자 결정
+   2026-11-18)이고, 그 전에 기록된 v1(diff 바이트의 SHA-256) 승인은 v1으로 비교한다. 크기와 binary로 승인을 사람에게 넘기지 않는다. 자동 병합은 **변경이 모두 병합 범위 안에 있을 때만** 한다(운영자 결정 2026-11-15, "내부 개발용
    Flow입니다. 제한을 줄 이유가 없습니다. 로컬 CLI처럼 편리한 Flow였으면 합니다."; 전체 목록은 `docs/policy/qa-release-agent.md`
    8절 3항). 앱 서비스의 `TOMVERSE_AMUX_DM_MERGE_SCOPE`가 정확히 `blocklist`일 때는 **차단 목록**이다(기본 꺼짐, 운영자 결정 2026-11-16): 엔지니어링 에이전트 권한 manifest의 product 경로이고 정책 테스트가 아니며 레인 게이트 파일,
    되돌릴 수 없는 경로(`QA_RELEASE_DM_MERGE_BLOCK_PATTERNS`·`QA_RELEASE_DM_MERGE_BLOCKLIST_SCOPE_PATTERNS`), 차단 이름 조각
@@ -103,7 +104,7 @@ approvedBy: mposition · approvedAt: 2026-10-17 · 정책 버전: 2
    하나라도 밖이면 사람에게 남는다. 스위치가
    켜져 있으면 승인을 기록하는 순간 patch를 판정해, 범위 밖의 경로나 줄이 있거나 경로를 읽지 못하면 승인 대신
    handoff(`outside_dm_merge_allowlist`·`paths_unreadable`)를 남긴다. 앱은 CI 입장 round가
-   한 번 돌 때마다 승인된 검토 초안 하나를 GitHub에서 다시 읽어(CI 입장 App으로 단계·head, 엔지니어링 읽기 토큰으로 diff와
+   한 번 돌 때마다 승인된 검토 초안 하나를 GitHub에서 다시 읽어(CI 입장 App으로 단계·head, 엔지니어링 읽기 토큰으로 변경 digest와
    파일 목록) 대기열의 draft가 runner를 기다리지 않고 그 CI가 통째로 들어갈 때만, 해시 체인 감사를 먼저 남기고 ready로
    바꾼다. 쓰기 결과를 모르면 그 round에 다시 쓰지 않고 다음 round가 PR을 읽고 판단한다. **DM ready는
    사람 ready와 같다**: PR은 CI 입장 대기열 밖에 있고 아무것도 예약하지 않으며, 그 CI는 다른 workflow로 계산된다. 대기열에
@@ -112,8 +113,8 @@ approvedBy: mposition · approvedAt: 2026-10-17 · 정책 버전: 2
    **fork PR은 제외한다**: CI 입장 App과 엔지니어링 읽기 토큰이 보여 주는 head 저장소가 base 저장소와 다르면 ready로 바꾸지
    않고 레인 목록에도 싣지 않는다. 사람이 `ci:hold`를 붙인 PR도 ready로 바꾸지 않는다(목록에서든 쓰기 직전의 다시 읽기에서든,
    CI 입장 줄과 같은 규칙). 앱은 레인의 상태
-   읽기마다 가장 오래 확인하지 않은 승인 **한 건**만 골라 방문을 기록하고, 그 PR의 현재 diff와 파일 목록을 GitHub에서 다시 읽어
-   digest가 `approvedDiffDigest`와 같고 파일과 저장된 patch가 모두 병합 범위 안일 때만 싣는다(읽지 못하거나 다르면 싣지 않고, 그 승인은 차례를
+   읽기마다 가장 오래 확인하지 않은 승인 **한 건**만 골라 방문을 기록하고, 그 PR의 현재 변경 digest와 파일 목록을 GitHub에서 다시 읽어
+   digest가 `approvedDiffDigest`와 (그 승인의 버전으로) 같고 파일과 저장된 patch가 모두 병합 범위 안일 때만 싣는다(읽지 못하거나 다르면 싣지 않고, 그 승인은 차례를
    쓴 것으로 본다). 레인은 승인된 head를 `sha`로 고정해 병합한다. 병합 레인은 앱이 넘긴 목록의 PR만
    `agent` 브랜치 제외의 예외로 받고(`docs/policy/qa-release-agent.md` 8절 3항), observer는 그 레인의 병합을 두 번째 승인
    근거(`dm_approval`, `docs/policy/engineering-agent.md` §9-10)로 판정한다. **대상은 develop뿐이고 main은 제외다.** S3(구현 완료):
@@ -218,6 +219,13 @@ approvedBy: mposition · approvedAt: 2026-10-17 · 정책 버전: 2
 1. 항상 켜져 있던 DM 경로의 스위치를 없앴다: `TOMVERSE_AMUX_DM_ROUTING`(DM route는 인증 뒤 늘 열리고, DM 전체 kill switch는 DB 값 `on`/`off`/`proposal`이 그대로 맡는다), `TOMVERSE_AMUX_DM_OWNER_SETTLEMENT`, `TOMVERSE_AMUX_V22_RESULT_REVIEW_DM`, `TOMVERSE_ENGINEERING_AGENT_T2_DM_REVIEW`.
 2. 남긴 것: DM 승인자(`TOMVERSE_AMUX_DM_APPROVER`), 병합 범위(`TOMVERSE_AMUX_DM_MERGE_SCOPE`), `TOMVERSE_AMUX_DM_T2_MERGE`(자율 에이전트의 병합 권한), box relay 시작 조건(`TOMVERSE_AMUX_DM_RELAY`), 그리고 사람 경계 용어 검사를 지키는 `TOMVERSE_AMUX_DM_TERMS_FIXED_TEXT_ONLY`. 값은 `enabled`/`disabled`로 적는다.
 
+## 0e. 운영자 지시 (2026-11-18, 대화) — transaction의 call 수 상한 없음
+
+"transaction마다 DB call 수에 상한이 있습니다"를 없애라는 지시에 따라, AMUX DB 경계는 선언한 call 수를 넘는
+호출을 더는 거절하지 않는다(`AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED`와 attachment의 24 call 상한을 없앴다).
+§9의 "12문장"과 각 경계의 선언 수는 시간 예산을 계산하는 값으로만 남는다. 트랜잭션은 여전히 DB 마감과 commit
+fence, route 마감 안에서 끝난다. 연산마다 실제 SQL 문장 수를 고정하는 테스트는 코드 구조를 보는 검사로 남긴다.
+
 ## 1. 목적과 경계
 
 AMUX worker가 운영자의 답을 요구하는 질문(로컬 AMUX board의 typed ask)을 DM이 먼저 읽고 **답의 제안**을
@@ -320,8 +328,8 @@ DM은 **제안을 쓰는 worker이지 승인자가 아니다.** (되돌릴 수 �
     findings는 앱이 attempt별 sealed content unit(`AmuxV52ReviewFindings`, `docs/policy/development-agent-orchestration.md`
     v52)으로 저장한 것을 근거 route가 보낼 때마다 다시 열어, `FINDINGS.md`의 실행 결과 뒤에 그 Task의 모든 reject를 새것부터
     통째로 붙인다(멈춘 Task와 검토 PR 모두. reject 수 상한도, 잘라내기도 없다). 읽을 수 없는 reject(보존 기간 만료, 키 저장소
-    불통, 저장 전 기록)는 그 수를 질문과 파일에 밝힌다. 작업 공간을 끄면(`TOMVERSE_AMUX_DM_WORKSPACE=disabled`) 같은 글이 카드
-    `context`의 `[evidence]` 블록에 통째로 실린다. 증거를 읽을 수 없을 때만 DM에 올리지 않고 사람에게 넘긴다(`evidence_unavailable`).
+    불통, 저장 전 기록)는 그 수를 질문과 파일에 밝힌다. 작업 공간은 늘 켜져 있다(`TOMVERSE_AMUX_DM_WORKSPACE`는 2026-11-16에 없앴다).
+    증거를 읽을 수 없을 때만 DM에 올리지 않고 사람에게 넘긴다(`evidence_unavailable`).
     v22 결과 검토는 patch가 없는 실행에서만 생기므로 (`amuxV22ResultReviewKind`) patch를 싣지 않는다. v22 implement
     Task의 PR은 카드가 아니라 run의 binding에 있으므로, 운영자 확인 대기 화면은 그 PR(`publication_hold`)을 "PR 없음" 대신 보인다.
     `tier_pending` 초안이 있는 동안 retry가 막히는 것은 이중 실행 방지이며, 화면은 초안을 거절하면 retry가 열린다고 알린다.
@@ -698,8 +706,9 @@ DM 출력은 `.strict()` 스키마 값 하나이며 종류별로 검증한다.
   계수기는 두지 않는다. 그 셋에서 유도한 12 × (200 + 100) + 200 = 3,800 ms는 **timeout 설정문이 끝난 뒤의**
   트랜잭션 예산이며, 앱이 유도한 값이고 DB 상한이 아니다. `transaction_timeout`은 걸지 않는다. CI에 PostgreSQL
   16이 있고 16에는 그 설정이 없으며, 기존 경계도 같은 이유로 걸지 않는다. route 예산은 `AMUX_ROUTE_BUDGET_MS`
-  (15초)이고, 남은 route 시간이 3,800 ms보다 짧으면 트랜잭션을 시작하지 않는다(`amuxRouteHasBudgetForMs`).
-  연결 대기도 남은 시간에서 그 예산을 뺀 만큼으로 묶는다(`amuxDbConnectionWaitMs`). DB 상한 없이 남는 구간은
+  (15초)다. 남은 route 시간이 3,800 ms보다 짧으면 트랜잭션은 거절되지 않고 남은 시간에서 연결 대기를 뺀
+  만큼을 자기 마감으로 쓴다(`amuxDbTransactionBudgetWithinRouteMs`, 2026-11-18). 그만큼도 호출 하나를 담지
+  못할 때만 시작하지 않는다. 연결 대기도 남은 시간에서 그 예산을 뺀 만큼으로 묶는다(`amuxDbConnectionWaitMs`). DB 상한 없이 남는 구간은
   `BEGIN`부터 timeout 설정문이 끝날 때까지와 COMMIT 검사 뒤의 기록·flush다.
 - worker에게 확정된 답을 전달한 결과가 불명확하면 다시 보내지 않는다. 그 요청을 `delivery_unknown`으로
   두고, **그 worker 세션을 일시 정지**(AMUX pause)한 뒤 로컬 메시지 멱등 키로 전달 영수증을 조회한다. 확정되지

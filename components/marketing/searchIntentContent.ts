@@ -1023,7 +1023,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
           "body": "Limits apply where attachments are available for your account or guest session.",
           "bullets": [
             "Guest: 1 supported file per message, up to 5 MiB per file and 5 MiB total.",
-            "Signed-in account with attachment access: up to 5 files per message, 10 MiB per file and 25 MiB total."
+            "Signed-in account with attachment access: up to 10 files per message, 50 MiB per file and 100 MiB total."
           ]
         },
         {
@@ -1058,7 +1058,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
         },
         {
           "title": "보안 경계",
-          "body": "첨부가 제공되는 게스트 체험에서는 지원 이미지·읽을 수 있는 문서 1개를 최대 5MiB까지 보낼 수 있습니다. 첨부 권한이 있는 로그인 계정은 메시지당 최대 5개, 각 10MiB, 합계 25MiB까지 사용할 수 있습니다. Google Drive 연결에는 로그인이 필요합니다. 필요한 파일 내용은 선택한 AI 제공자가 처리하므로 업로드 권한이 있는 자료만 사용하세요."
+          "body": "첨부가 제공되는 게스트 체험에서는 지원 이미지·읽을 수 있는 문서 1개를 최대 5MiB까지 보낼 수 있습니다. 첨부 권한이 있는 로그인 계정은 메시지당 최대 10개, 각 50MiB, 합계 100MiB까지 사용할 수 있습니다. Google Drive 연결에는 로그인이 필요합니다. 필요한 파일 내용은 선택한 AI 제공자가 처리하므로 업로드 권한이 있는 자료만 사용하세요."
         },
         {
           "title": "보관과 공급자 처리",
@@ -1092,7 +1092,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
         },
         {
           "title": "安全边界",
-          "body": "在提供访客附件的体验中，可发送一个不超过 5 MiB 的支持图片或可读文档。拥有附件权限的登录账户每条消息最多五个文件，每个 10 MiB，总计 25 MiB。连接 Google Drive 需要登录。所选 AI 提供商会处理必要文件内容，请只上传有权使用的资料。"
+          "body": "在提供访客附件的体验中，可发送一个不超过 5 MiB 的支持图片或可读文档。拥有附件权限的登录账户每条消息最多十个文件，每个 50 MiB，总计 100 MiB。连接 Google Drive 需要登录。所选 AI 提供商会处理必要文件内容，请只上传有权使用的资料。"
         },
         {
           "title": "保留与提供商处理",
@@ -1126,7 +1126,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
         },
         {
           "title": "安全邊界",
-          "body": "在提供訪客附件的體驗中，可以傳送一個不超過 5 MiB 的支援圖片或可讀取的文件。擁有附件權限的登入帳戶每則訊息最多可附五個檔案，每個 10 MiB，總計 25 MiB。連接 Google Drive 需要登入。所選的 AI 供應商會處理必要的檔案內容，請只上傳您有權使用的資料。"
+          "body": "在提供訪客附件的體驗中，可以傳送一個不超過 5 MiB 的支援圖片或可讀取的文件。擁有附件權限的登入帳戶每則訊息最多可附十個檔案，每個 50 MiB，總計 100 MiB。連接 Google Drive 需要登入。所選的 AI 供應商會處理必要的檔案內容，請只上傳您有權使用的資料。"
         },
         {
           "title": "保留與供應商處理",
@@ -1160,7 +1160,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
         },
         {
           "title": "Limites de sécurité",
-          "body": "Lorsque les pièces jointes sont proposées aux visiteurs, vous pouvez envoyer une image prise en charge ou un document lisible de 5 Mio maximum. Les comptes connectés autorisés peuvent envoyer cinq fichiers par message, 10 Mio chacun et 25 Mio au total. Google Drive nécessite une connexion. Les fournisseurs d’IA choisis traitent le contenu nécessaire ; utilisez uniquement des documents que vous êtes autorisé à transmettre."
+          "body": "Lorsque les pièces jointes sont proposées aux visiteurs, vous pouvez envoyer une image prise en charge ou un document lisible de 5 Mio maximum. Les comptes connectés autorisés peuvent envoyer dix fichiers par message, 50 Mio chacun et 100 Mio au total. Google Drive nécessite une connexion. Les fournisseurs d’IA choisis traitent le contenu nécessaire ; utilisez uniquement des documents que vous êtes autorisé à transmettre."
         },
         {
           "title": "Conservation",
@@ -1194,7 +1194,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
         },
         {
           "title": "Sicherheitsgrenzen",
-          "body": "Wenn Gastanhänge angeboten werden, ist ein unterstütztes Bild oder lesbares Dokument bis 5 MiB möglich. Angemeldete Konten mit Anhangzugriff können fünf Dateien pro Nachricht senden, je 10 MiB und insgesamt 25 MiB. Google Drive erfordert eine Anmeldung. Die gewählten KI-Anbieter verarbeiten nötige Dateiinhalte; laden Sie nur erlaubte Materialien hoch."
+          "body": "Wenn Gastanhänge angeboten werden, ist ein unterstütztes Bild oder lesbares Dokument bis 5 MiB möglich. Angemeldete Konten mit Anhangzugriff können zehn Dateien pro Nachricht senden, je 50 MiB und insgesamt 100 MiB. Google Drive erfordert eine Anmeldung. Die gewählten KI-Anbieter verarbeiten nötige Dateiinhalte; laden Sie nur erlaubte Materialien hoch."
         },
         {
           "title": "Aufbewahrung",
@@ -1228,7 +1228,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
         },
         {
           "title": "Límites de seguridad",
-          "body": "Cuando se ofrecen adjuntos a visitantes, puedes enviar una imagen compatible o un documento legible de hasta 5 MiB. Las cuentas con sesión y permiso para adjuntar pueden enviar cinco archivos por mensaje, de 10 MiB cada uno y 25 MiB en total. Google Drive requiere iniciar sesión. Los proveedores elegidos procesan el contenido necesario; sube solo material que tengas permiso para usar."
+          "body": "Cuando se ofrecen adjuntos a visitantes, puedes enviar una imagen compatible o un documento legible de hasta 5 MiB. Las cuentas con sesión y permiso para adjuntar pueden enviar diez archivos por mensaje, de 50 MiB cada uno y 100 MiB en total. Google Drive requiere iniciar sesión. Los proveedores elegidos procesan el contenido necesario; sube solo material que tengas permiso para usar."
         },
         {
           "title": "Retención",
@@ -1262,7 +1262,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
         },
         {
           "title": "Limites de segurança",
-          "body": "Quando anexos são oferecidos a visitantes, você pode enviar uma imagem compatível ou um documento legível de até 5 MiB. Contas conectadas com acesso a anexos podem enviar cinco arquivos por mensagem, 10 MiB por arquivo e 25 MiB no total. O Google Drive exige login. Os provedores de IA escolhidos processam o conteúdo necessário; envie apenas materiais que você tem permissão para usar."
+          "body": "Quando anexos são oferecidos a visitantes, você pode enviar uma imagem compatível ou um documento legível de até 5 MiB. Contas conectadas com acesso a anexos podem enviar dez arquivos por mensagem, 50 MiB por arquivo e 100 MiB no total. O Google Drive exige login. Os provedores de IA escolhidos processam o conteúdo necessário; envie apenas materiais que você tem permissão para usar."
         },
         {
           "title": "Retenção",

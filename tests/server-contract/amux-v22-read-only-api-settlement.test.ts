@@ -378,12 +378,12 @@ for (const outcome of ["succeeded", "failed"] as const) {
     });
 }
 
-test("other Tasks keep the global settlement budget of thirty", async () => {
-  // Owner direction 2026-11-15: no fixed five; the runaway guard of thirty
-  // (executionBudgetCore.ts) is the global bound.
+test("other Tasks have no settlement budget: a failed run goes back to todo however many came before", async () => {
+  // Owner direction 2026-11-18: neither five nor the runaway guard of thirty
+  // (removed) stops a card; only the paid retry's own bound above does.
   const cases = [[4, "todo", null], [4, "todo", "approval-other"],
     [5, "todo", null], [29, "todo", null],
-    [30, "blocked", null]] as const;
+    [30, "todo", null], [400, "todo", null]] as const;
   for (const [attemptNumber, expectedStatus, approvalId] of cases)
     await (async () => {
     world = makeWorld("failed");
@@ -410,8 +410,7 @@ test("other Tasks keep the global settlement budget of thirty", async () => {
     assert.equal(result.settled, true);
     assert.equal(world.taskUpdateData?.status, expectedStatus);
     assert.equal(world.attemptUpdateData?.toStatus, expectedStatus);
-    assert.equal(world.attemptUpdateData?.reason,
-      expectedStatus === "blocked" ? "attempt_budget_exhausted" : "reported_result");
+    assert.equal(world.attemptUpdateData?.reason, "reported_result");
   })();
 });
 
@@ -762,10 +761,10 @@ test("v52 review unknown asks for the review again by running the Task again", a
   }
 });
 
-test("v52 contract touch on the final attempt blocks for human recovery", async () => {
+test("v52 contract touch at the thirtieth attempt escalates like any other: no count blocks it", async () => {
   world = makeWorld("failed");
   world.taskId = "00000000-0000-4000-8000-000000000099";
-  // The final attempt is the runaway guard since 2026-11-15.
+  // The runaway guard of thirty is gone since 2026-11-18.
   world.attemptNumber = 30;
   world.recoveryApprovalId = null;
   world.gradeGuard = true;
@@ -788,10 +787,10 @@ test("v52 contract touch on the final attempt blocks for human recovery", async 
     changedPaths: ["lib/amux/execution.ts"],
   });
   assert.deepEqual(result, { settled: true, taskRevision: 6 });
-  assert.equal(world.taskUpdateData?.status, "blocked");
-  assert.equal(world.taskUpdateData?.executionGrade, undefined);
-  assert.equal(world.attemptUpdateData?.reason, "attempt_budget_exhausted");
-  assert.equal(world.gradeEscalationAudits.length, 0);
+  assert.equal(world.taskUpdateData?.status, "todo");
+  assert.equal(world.taskUpdateData?.executionGrade, "frontier");
+  assert.equal(world.attemptUpdateData?.reason, "contract_path_touched");
+  assert.equal(world.gradeEscalationAudits.length, 1);
 });
 
 test("v52 missing inventory blocks even a successful execution", async () => {

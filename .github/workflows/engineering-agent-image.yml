@@ -23,6 +23,7 @@ on:
       - docker/engineering-agent.Dockerfile
       - lib/engineeringAgentCore.ts
       - lib/engineeringAgentSecretPatterns.ts
+      - lib/pullDiffDigestCore.ts
       - scripts/engineering-agent-runner.mjs
       - scripts/engineering-agent-runner-core.mjs
       - scripts/engineering-agent-publisher.mjs

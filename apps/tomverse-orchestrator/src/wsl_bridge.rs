@@ -15,11 +15,15 @@
  * without an exact A14 usage receipt their result is only blocked.
  */
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
+
+use crate::tomverse_api::V22UsageRecord;
 
 #[derive(Debug)]
 struct V52ReviewFeedbackUnavailable;
@@ -727,6 +731,87 @@ pub struct V22SidecarResult {
     pub review_base_sha: Option<String>,
     pub review_touches_contract: Option<bool>,
     pub review_ref: Option<String>,
+    /// What the sidecar holds of each part of the run's result (`readback_v2`);
+    /// `None` for an old sidecar's answer, which carries the bodies inline.
+    pub parts: Option<V22TransferParts>,
+}
+
+/// One part of a run's result as `readback_v2` describes it: its size and
+/// digest, and whether its pending file is still on the box.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V22TransferPart {
+    pub bytes: u64,
+    pub sha256: String,
+    pub pending: bool,
+    /// The patch's base commit (a patch only).
+    pub base_sha: Option<String>,
+    /// How many paths the list holds (the changed-path list only).
+    pub count: Option<u64>,
+}
+
+/// The parts a terminal names. A part the run did not produce is absent.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct V22TransferParts {
+    pub result: Option<V22TransferPart>,
+    pub patch: Option<V22TransferPart>,
+    pub changed_paths: Option<V22TransferPart>,
+}
+
+fn v22_lower_hex(value: &str, len: usize) -> bool {
+    value.len() == len && value.bytes().all(|byte| byte.is_ascii_hexdigit() &&
+        !byte.is_ascii_uppercase())
+}
+
+/// `parts` of a `readback_v2` answer:
+/// `{"result":{"bytes","sha256","pending"},"patch":{"bytes","sha256","baseSha","pending"},
+/// "changed_paths":{"bytes","sha256","count","pending"}}`, each part only when
+/// the terminal names it.
+fn parse_v22_transfer_parts(value: &serde_json::Value) -> Result<V22TransferParts> {
+    let object = value.as_object().context("invalid v22 sidecar parts")?;
+    if object.keys().any(|key| !matches!(key.as_str(), "result" | "patch" | "changed_paths")) {
+        bail!("invalid v22 sidecar parts");
+    }
+    let read = |name: &str| -> Result<Option<V22TransferPart>> {
+        let Some(item) = object.get(name).filter(|item| !item.is_null()) else {
+            return Ok(None);
+        };
+        let bytes = item.get("bytes").and_then(|v| v.as_u64());
+        let sha256 = item.get("sha256").and_then(|v| v.as_str());
+        let pending = item.get("pending").and_then(|v| v.as_bool());
+        let base_sha = item.get("baseSha").and_then(|v| v.as_str());
+        let count = item.get("count").and_then(|v| v.as_u64());
+        let (Some(bytes), Some(sha256), Some(pending)) = (bytes, sha256, pending) else {
+            bail!("invalid v22 sidecar part");
+        };
+        let named_ok = match name {
+            "patch" => base_sha.is_some_and(|sha| v22_lower_hex(sha, 40)) && count.is_none(),
+            "changed_paths" => count.is_some() && base_sha.is_none(),
+            _ => base_sha.is_none() && count.is_none(),
+        };
+        // A list with no paths is no bytes and no file; every other part has bytes.
+        let sized_ok = if name == "changed_paths" && count == Some(0) {
+            bytes == 0 && sha256 == crate::tomverse_api::V22_EMPTY_SHA256 && !pending
+        } else {
+            // A terminal from before the sizes were written, whose pending file
+            // is already confirmed, names 0 bytes with nothing pending: the size
+            // is unknown, and such a part is only ever read back.
+            bytes >= 1 || !pending
+        };
+        if !named_ok || !sized_ok || !v22_lower_hex(sha256, 64) {
+            bail!("invalid v22 sidecar part");
+        }
+        Ok(Some(V22TransferPart { bytes, sha256: sha256.to_owned(), pending,
+            base_sha: base_sha.map(str::to_owned), count }))
+    };
+    Ok(V22TransferParts { result: read("result")?, patch: read("patch")?,
+        changed_paths: read("changed_paths")? })
+}
+
+/// Does this answer take the chunked transfer? It does when the sidecar
+/// described its parts, unless the terminal is one of 2026-11-15's before that
+/// (its publish-files digest): those keep the old read-back by digest.
+fn v22_uses_chunked_transfer(result: &V22SidecarResult) -> bool {
+    result.parts.is_some() && result.publish_files_digest.is_none()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -783,7 +868,7 @@ pub trait LocalAmux {
             publish_files: None, publish_files_digest: None,
             changed_paths: None, review_commit_sha: None,
             review_base_sha: None, review_touches_contract: None,
-            review_ref: None })
+            review_ref: None, parts: None })
     }
 
     async fn confirm_v22_result(&mut self, _attempt_id: &str, _sha256: &str) -> Result<()> {
@@ -791,6 +876,10 @@ pub trait LocalAmux {
     }
 
     async fn confirm_v22_patch(&mut self, _attempt_id: &str, _sha256: &str) -> Result<()> {
+        Ok(())
+    }
+
+    async fn confirm_v22_changed_paths(&mut self, _attempt_id: &str, _sha256: &str) -> Result<()> {
         Ok(())
     }
 }
@@ -2213,7 +2302,7 @@ mod health_tests {
             patch_body: None, patch_base_sha: None, patch_digest: None,
             publish_files: None, publish_files_digest: None, changed_paths: None,
             review_commit_sha: None, review_base_sha: None,
-            review_touches_contract: None, review_ref: None };
+            review_touches_contract: None, review_ref: None, parts: None };
         assert_eq!(v22_unverified_failure(Some(&result(V22SidecarState::OutcomeUnknown,
             Some(report.clone())))), report);
         assert_eq!(v22_unverified_failure(Some(&result(V22SidecarState::Succeeded, None))).code,
@@ -2309,12 +2398,204 @@ async fn v22_sidecar_protocol(_socket_path: &str, _worker: &str) -> Result<Optio
     Ok(None)
 }
 
+/// Reads one sidecar answer (`readback`, `readback_v2`, `confirm_*`) into the
+/// shape the bridge acts on. Pure: the socket exchange is `v22_sidecar_exchange`.
+fn parse_v22_sidecar_value(value: &serde_json::Value, attempt_id: &str) -> Result<V22SidecarResult> {
+    if value.get("attemptId").and_then(|item| item.as_str()) != Some(attempt_id) {
+        bail!("v22 sidecar attempt mismatch");
+    }
+    let state = match value.get("kind").and_then(|item| item.as_str()) {
+        Some("in_progress") => V22SidecarState::InProgress,
+        Some("succeeded") => V22SidecarState::Succeeded,
+        Some("failed") => V22SidecarState::Failed,
+        Some("outcome_unknown") => V22SidecarState::OutcomeUnknown,
+        Some("busy") => V22SidecarState::Busy,
+        Some("not_found") => V22SidecarState::NotFound,
+        Some("confirmed") => V22SidecarState::Confirmed,
+        _ => bail!("invalid v22 sidecar result"),
+    };
+    let receipt = value.get("usageReceipt").filter(|v| !v.is_null()).cloned();
+    let digest = value.get("usageReceiptDigest").and_then(|v| v.as_str());
+    let api_execution_receipt = value.get("apiExecutionReceipt")
+        .filter(|v| !v.is_null()).cloned();
+    // `readback_v2` describes the parts it holds instead of carrying them
+    // (docs/policy/amux-v22-result-transfer.md 1.4). A terminal field that
+    // the answer also names must agree with the part's own.
+    let parts = value.get("parts").filter(|v| !v.is_null())
+        .map(parse_v22_transfer_parts).transpose()?;
+    if parts.is_some() && !matches!(state, V22SidecarState::Succeeded |
+        V22SidecarState::Failed | V22SidecarState::OutcomeUnknown) {
+        bail!("invalid v22 sidecar parts envelope");
+    }
+    let part_result_sha = parts.as_ref().and_then(|p| p.result.as_ref())
+        .map(|part| part.sha256.as_str());
+    let part_patch = parts.as_ref().and_then(|p| p.patch.as_ref());
+    let result_text = value.get("resultText").and_then(|v| v.as_str());
+    let result_sha256 = value.get("resultSha256").and_then(|v| v.as_str());
+    let patch_body = value.get("patchBody").and_then(|v| v.as_str());
+    let patch_base_sha = value.get("patchBaseSha").and_then(|v| v.as_str());
+    let patch_digest = value.get("patchDigest").and_then(|v| v.as_str());
+    if result_sha256.zip(part_result_sha).is_some_and(|(top, part)| top != part) ||
+        patch_digest.zip(part_patch.map(|p| p.sha256.as_str())).is_some_and(|(top, part)| top != part) ||
+        patch_base_sha.zip(part_patch.and_then(|p| p.base_sha.as_deref()))
+            .is_some_and(|(top, part)| top != part) {
+        bail!("v22 sidecar part disagrees with its terminal");
+    }
+    let result_sha256 = result_sha256.or(part_result_sha);
+    let patch_digest = patch_digest.or(part_patch.map(|p| p.sha256.as_str()));
+    let patch_base_sha = patch_base_sha.or(part_patch.and_then(|p| p.base_sha.as_deref()));
+    let publish_files = value.get("publishFiles").filter(|v| !v.is_null());
+    let publish_files_digest = value.get("publishFilesDigest")
+        .and_then(|v| v.as_str());
+    let changed_paths = value.get("changedPaths").map(|paths| {
+        paths.as_array().context("invalid changed paths")?.iter().map(|path|
+            path.as_str().map(str::to_owned)
+                .context("invalid changed path")
+        ).collect::<Result<Vec<String>>>()
+    }).transpose()?;
+    let review_commit_sha = value.get("reviewCommitSha").and_then(|v| v.as_str());
+    let review_base_sha = value.get("reviewBaseSha").and_then(|v| v.as_str());
+    let review_touches_contract = value.get("reviewTouchesContract").and_then(|v| v.as_bool());
+    let review_ref = value.get("reviewRef").and_then(|v| v.as_str());
+    if review_commit_sha.is_some() != review_base_sha.is_some() ||
+        review_commit_sha.is_some() != review_touches_contract.is_some() ||
+        review_commit_sha.is_some() != review_ref.is_some() ||
+        review_ref.is_some_and(|path| path != format!(
+            "refs/amux-v52-review/{attempt_id}")) ||
+        review_commit_sha.is_some_and(|sha| sha.len() != 40 ||
+            !sha.bytes().all(|byte| byte.is_ascii_hexdigit())) ||
+        review_base_sha.is_some_and(|sha| sha.len() != 40 ||
+            !sha.bytes().all(|byte| byte.is_ascii_hexdigit())) ||
+        review_base_sha.is_some() && review_base_sha != patch_base_sha ||
+        review_commit_sha.is_some() && state != V22SidecarState::Succeeded {
+        bail!("invalid v52 review commit envelope");
+    }
+    let read_only_retry = match value.get("readOnlyRetry") {
+        None => None,
+        Some(item) => {
+            let object = item.as_object().context("invalid read-only retry echo")?;
+            let api = object.get("executorKind").and_then(|v| v.as_str()) ==
+                Some("read_only_api_retry_v1");
+            let expected: &[&str] = if api { &["apiExecutionFrameDigest",
+                "executorKind", "launchBindingId", "launcherConfigDigest",
+                "launchProofDigest", "launchScopeDigest", "version"] } else {
+                &["launchBindingId", "launchProofDigest", "launchScopeDigest", "version"]
+            };
+            if object.len() != expected.len() ||
+                expected.iter().any(|key| !object.contains_key(*key)) {
+                bail!("invalid read-only retry echo");
+            }
+            let version = object.get("version").and_then(|v| v.as_i64());
+            let launch_binding_id = object.get("launchBindingId")
+                .and_then(|v| v.as_str());
+            let launch_proof_digest = object.get("launchProofDigest")
+                .and_then(|v| v.as_str());
+            let launch_scope_digest = object.get("launchScopeDigest")
+                .and_then(|v| v.as_str());
+            let launcher_config_digest = object.get("launcherConfigDigest")
+                .and_then(|v| v.as_str());
+            let api_execution_frame_digest = object.get("apiExecutionFrameDigest")
+                .and_then(|v| v.as_str());
+            if version != Some(1) ||
+                launch_binding_id.is_none_or(|id| Uuid::parse_str(id).is_err()) ||
+                launch_proof_digest.is_none_or(|digest| !v22_digest(digest)) ||
+                launch_scope_digest.is_none_or(|digest| !v22_digest(digest)) ||
+                api && (launcher_config_digest.is_none_or(|digest| !v22_digest(digest)) ||
+                    api_execution_frame_digest.is_none_or(|digest| !v22_digest(digest))) {
+                bail!("invalid read-only retry echo");
+            }
+            Some(V22ReadOnlyRetryEcho {
+                version: 1,
+                launch_binding_id: launch_binding_id.unwrap().to_owned(),
+                launch_proof_digest: launch_proof_digest.unwrap().to_owned(),
+                launch_scope_digest: launch_scope_digest.unwrap().to_owned(),
+                executor_kind: api.then(|| "read_only_api_retry_v1".to_owned()),
+                launcher_config_digest: launcher_config_digest.map(str::to_owned),
+                api_execution_frame_digest: api_execution_frame_digest.map(str::to_owned),
+                api_execution_receipt: api_execution_receipt.clone(),
+            })
+        },
+    };
+    let api_retry = read_only_retry.as_ref().and_then(|echo|
+        echo.executor_kind.as_deref()) == Some("read_only_api_retry_v1");
+    if receipt.is_some() != digest.is_some() ||
+        digest.is_some_and(|v| v.len() != 64 || !v.bytes().all(|b|
+            b.is_ascii_hexdigit())) ||
+        receipt.is_some() && !matches!(state,
+            V22SidecarState::Succeeded | V22SidecarState::Failed) {
+        bail!("invalid v22 sidecar usage receipt envelope");
+    }
+    if api_retry && (receipt.is_some() || digest.is_some() ||
+        api_execution_receipt.as_ref().is_none_or(|receipt|
+            !matches!(state, V22SidecarState::Succeeded | V22SidecarState::Failed) ||
+            receipt.get("version").and_then(|v| v.as_i64()) != Some(1) ||
+            receipt.get("executorKind").and_then(|v| v.as_str()) !=
+                Some("read_only_api_retry_v1") ||
+            receipt.get("attemptId").and_then(|v| v.as_str()) != Some(attempt_id) ||
+            receipt.get("invocationId").and_then(|v| v.as_str()) != Some(attempt_id) ||
+            receipt.get("usageComplete").and_then(|v| v.as_bool()) != Some(true) ||
+            receipt.get("digest").and_then(|v| v.as_str()).is_none_or(|v| !v22_digest(v)))) ||
+        !api_retry && api_execution_receipt.is_some() {
+        bail!("invalid v22 sidecar API receipt envelope");
+    }
+    if result_text.is_some_and(|text| text.is_empty() ||
+        text.len() > crate::tomverse_api::v22_result_max_bytes() || text.contains('\0')) ||
+        result_sha256.is_some_and(|digest| digest.len() != 64 ||
+            !digest.bytes().all(|byte| byte.is_ascii_hexdigit())) ||
+        result_text.is_some() && result_sha256.is_none() ||
+        result_text.is_some() && state != V22SidecarState::Succeeded {
+        bail!("invalid v22 sidecar result envelope");
+    }
+    if patch_body.is_some_and(|body| body.is_empty() ||
+        body.len() > crate::tomverse_api::V22_LEGACY_INLINE_PATCH_MAX_BYTES || body.contains('\0') ||
+        !body.starts_with("diff --git ")) ||
+        patch_base_sha.is_some_and(|sha| sha.len() != 40 ||
+            !sha.bytes().all(|byte| byte.is_ascii_hexdigit())) ||
+        patch_digest.is_some_and(|sha| sha.len() != 64 ||
+            !sha.bytes().all(|byte| byte.is_ascii_hexdigit())) ||
+        patch_base_sha.is_some() != patch_digest.is_some() ||
+        patch_body.is_some() && patch_digest.is_none() ||
+        patch_digest.is_some() && state != V22SidecarState::Succeeded ||
+        publish_files.is_some_and(|files| patch_body.is_none() ||
+            files.as_array().is_none_or(|rows| rows.is_empty() ||
+                rows.len() > 5)) ||
+        publish_files.is_some() && publish_files_digest.is_none() ||
+        publish_files_digest.is_some() && patch_digest.is_none() ||
+        publish_files_digest.is_some_and(|sha| sha.len() != 64 ||
+            !sha.bytes().all(|byte| byte.is_ascii_hexdigit())) {
+        bail!("invalid v22 sidecar patch envelope");
+    }
+    // A terminal without a verified result names its failure; the app
+    // reads it to keep an infrastructure failure off the card's attempts.
+    let failure = matches!(state, V22SidecarState::Failed | V22SidecarState::OutcomeUnknown)
+        .then(|| V22FailureReport::from_sidecar(&value)).flatten();
+    Ok(V22SidecarResult { state, failure, read_only_retry,
+        api_execution_receipt, usage_receipt: receipt,
+        usage_receipt_digest: digest.map(str::to_owned),
+        result_text: result_text.map(str::to_owned),
+        result_sha256: result_sha256.map(str::to_owned),
+        patch_body: patch_body.map(str::to_owned),
+        patch_base_sha: patch_base_sha.map(str::to_owned),
+        patch_digest: patch_digest.map(str::to_owned),
+        publish_files: publish_files.cloned(),
+        publish_files_digest: publish_files_digest.map(str::to_owned),
+        changed_paths,
+        review_commit_sha: review_commit_sha.map(str::to_owned),
+        review_base_sha: review_base_sha.map(str::to_owned),
+        review_touches_contract,
+        review_ref: review_ref.map(str::to_owned), parts })
+}
+
+/// One request over the sidecar's unix socket: a JSON line out, one JSON value
+/// back, the answer bounded by `response_limit` and the exchange by five
+/// seconds (the sidecar receives a request for at most five too).
 #[cfg(unix)]
-async fn v22_sidecar_call(
+async fn v22_sidecar_exchange(
     socket_path: &str,
     payload: serde_json::Value,
     attempt_id: &str,
-) -> Result<V22SidecarResult> {
+    response_limit: usize,
+) -> Result<serde_json::Value> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::UnixStream;
 
@@ -2323,14 +2604,9 @@ async fn v22_sidecar_call(
     }
     let mut request = serde_json::to_vec(&payload)?;
     request.push(b'\n');
-    // The prompt carries its context files and a report may run to the
-    // transport backstop; both bounds stay memory backstops only.
-    let backstop = crate::tomverse_api::V22_TRANSPORT_MAX_BYTES;
+    // The prompt carries its context files; its bound stays a memory backstop.
     // JSON escaping can at most double the prompt (the sidecar's same bound).
     let request_limit = 2 * crate::tomverse_api::v22_delivery_prompt_max_bytes() + 64 * 1024;
-    // An answer carries the report (up to the backstop, at most doubled by
-    // JSON escaping) beside the patch envelope (`V22_PATCH_ENVELOPE_MAX_BYTES`).
-    let response_limit = 2 * backstop + crate::tomverse_api::V22_PATCH_ENVELOPE_MAX_BYTES;
     if request.len() > request_limit {
         bail!("v22 sidecar request exceeds limit");
     }
@@ -2339,177 +2615,801 @@ async fn v22_sidecar_call(
         stream.write_all(&request).await?;
         stream.shutdown().await?;
         let mut response = Vec::new();
-        let limit = response_limit;
-        stream.take(limit as u64 + 1).read_to_end(&mut response).await?;
-        if response.len() > limit {
+        stream.take(response_limit as u64 + 1).read_to_end(&mut response).await?;
+        if response.len() > response_limit {
             bail!("v22 sidecar response exceeds limit");
         }
-        let value: serde_json::Value = serde_json::from_slice(&response)?;
-        if value.get("attemptId").and_then(|item| item.as_str()) != Some(attempt_id) {
-            bail!("v22 sidecar attempt mismatch");
-        }
-        let state = match value.get("kind").and_then(|item| item.as_str()) {
-            Some("in_progress") => V22SidecarState::InProgress,
-            Some("succeeded") => V22SidecarState::Succeeded,
-            Some("failed") => V22SidecarState::Failed,
-            Some("outcome_unknown") => V22SidecarState::OutcomeUnknown,
-            Some("busy") => V22SidecarState::Busy,
-            Some("not_found") => V22SidecarState::NotFound,
-            Some("confirmed") => V22SidecarState::Confirmed,
-            _ => bail!("invalid v22 sidecar result"),
-        };
-        let receipt = value.get("usageReceipt").filter(|v| !v.is_null()).cloned();
-        let digest = value.get("usageReceiptDigest").and_then(|v| v.as_str());
-        let api_execution_receipt = value.get("apiExecutionReceipt")
-            .filter(|v| !v.is_null()).cloned();
-        let result_text = value.get("resultText").and_then(|v| v.as_str());
-        let result_sha256 = value.get("resultSha256").and_then(|v| v.as_str());
-        let patch_body = value.get("patchBody").and_then(|v| v.as_str());
-        let patch_base_sha = value.get("patchBaseSha").and_then(|v| v.as_str());
-        let patch_digest = value.get("patchDigest").and_then(|v| v.as_str());
-        let publish_files = value.get("publishFiles").filter(|v| !v.is_null());
-        let publish_files_digest = value.get("publishFilesDigest")
-            .and_then(|v| v.as_str());
-        let changed_paths = value.get("changedPaths").map(|paths| {
-            paths.as_array().context("invalid changed paths")?.iter().map(|path|
-                path.as_str().map(str::to_owned)
-                    .context("invalid changed path")
-            ).collect::<Result<Vec<String>>>()
-        }).transpose()?;
-        let review_commit_sha = value.get("reviewCommitSha").and_then(|v| v.as_str());
-        let review_base_sha = value.get("reviewBaseSha").and_then(|v| v.as_str());
-        let review_touches_contract = value.get("reviewTouchesContract").and_then(|v| v.as_bool());
-        let review_ref = value.get("reviewRef").and_then(|v| v.as_str());
-        if review_commit_sha.is_some() != review_base_sha.is_some() ||
-            review_commit_sha.is_some() != review_touches_contract.is_some() ||
-            review_commit_sha.is_some() != review_ref.is_some() ||
-            review_ref.is_some_and(|path| path != format!(
-                "refs/amux-v52-review/{attempt_id}")) ||
-            review_commit_sha.is_some_and(|sha| sha.len() != 40 ||
-                !sha.bytes().all(|byte| byte.is_ascii_hexdigit())) ||
-            review_base_sha.is_some_and(|sha| sha.len() != 40 ||
-                !sha.bytes().all(|byte| byte.is_ascii_hexdigit())) ||
-            review_base_sha.is_some() && review_base_sha != patch_base_sha ||
-            review_commit_sha.is_some() && state != V22SidecarState::Succeeded {
-            bail!("invalid v52 review commit envelope");
-        }
-        let read_only_retry = match value.get("readOnlyRetry") {
-            None => None,
-            Some(item) => {
-                let object = item.as_object().context("invalid read-only retry echo")?;
-                let api = object.get("executorKind").and_then(|v| v.as_str()) ==
-                    Some("read_only_api_retry_v1");
-                let expected: &[&str] = if api { &["apiExecutionFrameDigest",
-                    "executorKind", "launchBindingId", "launcherConfigDigest",
-                    "launchProofDigest", "launchScopeDigest", "version"] } else {
-                    &["launchBindingId", "launchProofDigest", "launchScopeDigest", "version"]
-                };
-                if object.len() != expected.len() ||
-                    expected.iter().any(|key| !object.contains_key(*key)) {
-                    bail!("invalid read-only retry echo");
-                }
-                let version = object.get("version").and_then(|v| v.as_i64());
-                let launch_binding_id = object.get("launchBindingId")
-                    .and_then(|v| v.as_str());
-                let launch_proof_digest = object.get("launchProofDigest")
-                    .and_then(|v| v.as_str());
-                let launch_scope_digest = object.get("launchScopeDigest")
-                    .and_then(|v| v.as_str());
-                let launcher_config_digest = object.get("launcherConfigDigest")
-                    .and_then(|v| v.as_str());
-                let api_execution_frame_digest = object.get("apiExecutionFrameDigest")
-                    .and_then(|v| v.as_str());
-                if version != Some(1) ||
-                    launch_binding_id.is_none_or(|id| Uuid::parse_str(id).is_err()) ||
-                    launch_proof_digest.is_none_or(|digest| !v22_digest(digest)) ||
-                    launch_scope_digest.is_none_or(|digest| !v22_digest(digest)) ||
-                    api && (launcher_config_digest.is_none_or(|digest| !v22_digest(digest)) ||
-                        api_execution_frame_digest.is_none_or(|digest| !v22_digest(digest))) {
-                    bail!("invalid read-only retry echo");
-                }
-                Some(V22ReadOnlyRetryEcho {
-                    version: 1,
-                    launch_binding_id: launch_binding_id.unwrap().to_owned(),
-                    launch_proof_digest: launch_proof_digest.unwrap().to_owned(),
-                    launch_scope_digest: launch_scope_digest.unwrap().to_owned(),
-                    executor_kind: api.then(|| "read_only_api_retry_v1".to_owned()),
-                    launcher_config_digest: launcher_config_digest.map(str::to_owned),
-                    api_execution_frame_digest: api_execution_frame_digest.map(str::to_owned),
-                    api_execution_receipt: api_execution_receipt.clone(),
-                })
-            },
-        };
-        let api_retry = read_only_retry.as_ref().and_then(|echo|
-            echo.executor_kind.as_deref()) == Some("read_only_api_retry_v1");
-        if receipt.is_some() != digest.is_some() ||
-            digest.is_some_and(|v| v.len() != 64 || !v.bytes().all(|b|
-                b.is_ascii_hexdigit())) ||
-            receipt.is_some() && !matches!(state,
-                V22SidecarState::Succeeded | V22SidecarState::Failed) {
-            bail!("invalid v22 sidecar usage receipt envelope");
-        }
-        if api_retry && (receipt.is_some() || digest.is_some() ||
-            api_execution_receipt.as_ref().is_none_or(|receipt|
-                !matches!(state, V22SidecarState::Succeeded | V22SidecarState::Failed) ||
-                receipt.get("version").and_then(|v| v.as_i64()) != Some(1) ||
-                receipt.get("executorKind").and_then(|v| v.as_str()) !=
-                    Some("read_only_api_retry_v1") ||
-                receipt.get("attemptId").and_then(|v| v.as_str()) != Some(attempt_id) ||
-                receipt.get("invocationId").and_then(|v| v.as_str()) != Some(attempt_id) ||
-                receipt.get("usageComplete").and_then(|v| v.as_bool()) != Some(true) ||
-                receipt.get("digest").and_then(|v| v.as_str()).is_none_or(|v| !v22_digest(v)))) ||
-            !api_retry && api_execution_receipt.is_some() {
-            bail!("invalid v22 sidecar API receipt envelope");
-        }
-        if result_text.is_some_and(|text| text.is_empty() ||
-            text.len() > crate::tomverse_api::v22_result_max_bytes() || text.contains('\0')) ||
-            result_sha256.is_some_and(|digest| digest.len() != 64 ||
-                !digest.bytes().all(|byte| byte.is_ascii_hexdigit())) ||
-            result_text.is_some() && result_sha256.is_none() ||
-            result_text.is_some() && state != V22SidecarState::Succeeded {
-            bail!("invalid v22 sidecar result envelope");
-        }
-        if patch_body.is_some_and(|body| body.is_empty() ||
-            body.len() > crate::tomverse_api::V22_PATCH_MAX_BYTES || body.contains('\0') ||
-            !body.starts_with("diff --git ")) ||
-            patch_base_sha.is_some_and(|sha| sha.len() != 40 ||
-                !sha.bytes().all(|byte| byte.is_ascii_hexdigit())) ||
-            patch_digest.is_some_and(|sha| sha.len() != 64 ||
-                !sha.bytes().all(|byte| byte.is_ascii_hexdigit())) ||
-            patch_base_sha.is_some() != patch_digest.is_some() ||
-            patch_body.is_some() && patch_digest.is_none() ||
-            patch_digest.is_some() && state != V22SidecarState::Succeeded ||
-            publish_files.is_some_and(|files| patch_body.is_none() ||
-                files.as_array().is_none_or(|rows| rows.is_empty() ||
-                    rows.len() > 5)) ||
-            publish_files.is_some() && publish_files_digest.is_none() ||
-            publish_files_digest.is_some() && patch_digest.is_none() ||
-            publish_files_digest.is_some_and(|sha| sha.len() != 64 ||
-                !sha.bytes().all(|byte| byte.is_ascii_hexdigit())) {
-            bail!("invalid v22 sidecar patch envelope");
-        }
-        // A terminal without a verified result names its failure; the app
-        // reads it to keep an infrastructure failure off the card's attempts.
-        let failure = matches!(state, V22SidecarState::Failed | V22SidecarState::OutcomeUnknown)
-            .then(|| V22FailureReport::from_sidecar(&value)).flatten();
-        Ok(V22SidecarResult { state, failure, read_only_retry,
-            api_execution_receipt, usage_receipt: receipt,
-            usage_receipt_digest: digest.map(str::to_owned),
-            result_text: result_text.map(str::to_owned),
-            result_sha256: result_sha256.map(str::to_owned),
-            patch_body: patch_body.map(str::to_owned),
-            patch_base_sha: patch_base_sha.map(str::to_owned),
-            patch_digest: patch_digest.map(str::to_owned),
-            publish_files: publish_files.cloned(),
-            publish_files_digest: publish_files_digest.map(str::to_owned),
-            changed_paths,
-            review_commit_sha: review_commit_sha.map(str::to_owned),
-            review_base_sha: review_base_sha.map(str::to_owned),
-            review_touches_contract,
-            review_ref: review_ref.map(str::to_owned) })
+        Ok(serde_json::from_slice::<serde_json::Value>(&response)?)
     };
     tokio::time::timeout(Duration::from_secs(5), operation)
         .await.context("v22 sidecar transport timed out")?
+}
+
+#[cfg(not(unix))]
+async fn v22_sidecar_exchange(
+    _socket_path: &str,
+    _payload: serde_json::Value,
+    _attempt_id: &str,
+    _response_limit: usize,
+) -> Result<serde_json::Value> {
+    bail!("v22 sidecar requires Ubuntu")
+}
+
+/// The old sidecar ops (`readback`, `confirm_*`): an answer carries the report
+/// (up to the transport backstop, at most doubled by JSON escaping) beside one
+/// inline patch envelope (`V22_LEGACY_PATCH_ENVELOPE_MAX_BYTES`).
+async fn v22_sidecar_call(
+    socket_path: &str,
+    payload: serde_json::Value,
+    attempt_id: &str,
+) -> Result<V22SidecarResult> {
+    let limit = 2 * crate::tomverse_api::V22_TRANSPORT_MAX_BYTES +
+        crate::tomverse_api::V22_LEGACY_PATCH_ENVELOPE_MAX_BYTES;
+    let value = v22_sidecar_exchange(socket_path, payload, attempt_id, limit).await?;
+    parse_v22_sidecar_value(&value, attempt_id)
+}
+
+/// `readback_v2`: the terminal and what it holds of each part, never the
+/// bodies, so the answer is small (1 MiB). `None` is an old sidecar's
+/// `{"kind":"refused"}`: it does not know the op.
+async fn v22_sidecar_readback_v2(
+    socket_path: &str,
+    attempt_id: &str,
+) -> Result<Option<V22SidecarResult>> {
+    let value = v22_sidecar_exchange(socket_path, v22_readback_v2_payload(attempt_id),
+        attempt_id, V22_READBACK_V2_MAX_BYTES).await?;
+    v22_readback_v2_from_value(&value, attempt_id)
+}
+
+/// The sidecar's answer to `readback_v2`; an old sidecar's `refused` is `None`.
+fn v22_readback_v2_from_value(
+    value: &serde_json::Value,
+    attempt_id: &str,
+) -> Result<Option<V22SidecarResult>> {
+    if value.get("kind").and_then(|item| item.as_str()) == Some("refused") {
+        return Ok(None);
+    }
+    parse_v22_sidecar_value(value, attempt_id).map(Some)
+}
+
+/// What one `readback_v2` answer can hold: a terminal and part descriptions.
+const V22_READBACK_V2_MAX_BYTES: usize = 1024 * 1024;
+
+/// The exact keys of the new sidecar ops (docs/policy/amux-v22-result-transfer.md 1.4).
+fn v22_readback_v2_payload(attempt_id: &str) -> serde_json::Value {
+    serde_json::json!({ "op": "readback_v2", "attemptId": attempt_id })
+}
+
+fn v22_read_pending_payload(attempt_id: &str, part: &str, index: u64) -> serde_json::Value {
+    serde_json::json!({ "op": "read_pending", "attemptId": attempt_id,
+        "part": part, "index": index })
+}
+
+fn v22_confirm_changed_paths_payload(attempt_id: &str, sha256: &str) -> serde_json::Value {
+    serde_json::json!({ "op": "confirm_changed_paths", "attemptId": attempt_id,
+        "sha256": sha256 })
+}
+
+// ---------------------------------------------------------------------------
+// The v22 result transfer in parts (docs/policy/amux-v22-result-transfer.md
+// 1.5, owner direction 2026-11-18: no size bound of ours on a run's result,
+// patch or changed-path list). A part travels as fixed-size chunks read from
+// the sidecar's pending files, and is committed once the app holds them all.
+// ---------------------------------------------------------------------------
+
+/// What `read_pending` gave back for one chunk.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum V22PendingRead {
+    Chunk(Vec<u8>),
+    /// The pending file is gone (confirmed or erased since the read-back).
+    NotFound,
+}
+
+/// Where a transfer reads its chunks: the sidecar's `read_pending`. A trait so
+/// a transfer runs against a stand-in sidecar in tests.
+pub trait V22PendingSource: Send + Sync + 'static {
+    fn read_chunk(&self, part: &str, index: u64, total_bytes: u64)
+        -> impl std::future::Future<Output = Result<V22PendingRead>> + Send;
+}
+
+/// The one-shot sidecar's unix socket, for one attempt.
+pub struct SidecarPendingSource {
+    socket: String,
+    attempt_id: String,
+}
+
+impl SidecarPendingSource {
+    pub fn new(socket: &str, attempt_id: &str) -> Self {
+        Self { socket: socket.to_owned(), attempt_id: attempt_id.to_owned() }
+    }
+}
+
+/// A `read_pending` answer carries one base64 chunk (4 MiB) and a short envelope.
+const V22_READ_PENDING_MAX_BYTES: usize =
+    crate::tomverse_api::V22_TRANSFER_CHUNK_BYTES.div_ceil(3) * 4 + 64 * 1024;
+
+impl V22PendingSource for SidecarPendingSource {
+    async fn read_chunk(&self, part: &str, index: u64, total_bytes: u64) -> Result<V22PendingRead> {
+        let value = v22_sidecar_exchange(&self.socket,
+            v22_read_pending_payload(&self.attempt_id, part, index),
+            &self.attempt_id, V22_READ_PENDING_MAX_BYTES).await?;
+        parse_v22_pending_chunk(&value, &self.attempt_id, part, index, total_bytes)
+    }
+}
+
+/// `{"kind":"pending_chunk","attemptId","part","index","totalBytes","bytesBase64"}`,
+/// the range being `v22_transfer_chunk_range`; `{"kind":"not_found","attemptId"}`
+/// when the file is gone. Anything else, a `refused` included, is an error.
+fn parse_v22_pending_chunk(
+    value: &serde_json::Value,
+    attempt_id: &str,
+    part: &str,
+    index: u64,
+    total_bytes: u64,
+) -> Result<V22PendingRead> {
+    use base64::Engine;
+    let kind = value.get("kind").and_then(|item| item.as_str());
+    if kind == Some("refused") {
+        bail!("v22 sidecar refused read_pending");
+    }
+    if value.get("attemptId").and_then(|item| item.as_str()) != Some(attempt_id) {
+        bail!("v22 sidecar attempt mismatch");
+    }
+    match kind {
+        Some("not_found") => Ok(V22PendingRead::NotFound),
+        Some("pending_chunk") => {
+            let (start, end) = crate::tomverse_api::v22_transfer_chunk_range(total_bytes, index)
+                .context("v22 pending chunk outside its part")?;
+            if value.get("part").and_then(|item| item.as_str()) != Some(part) ||
+                value.get("index").and_then(|item| item.as_u64()) != Some(index) ||
+                value.get("totalBytes").and_then(|item| item.as_u64()) != Some(total_bytes) {
+                bail!("invalid v22 pending chunk envelope");
+            }
+            let encoded = value.get("bytesBase64").and_then(|item| item.as_str())
+                .context("invalid v22 pending chunk bytes")?;
+            let bytes = base64::engine::general_purpose::STANDARD.decode(encoded)
+                .context("invalid v22 pending chunk base64")?;
+            if bytes.len() as u64 != end - start {
+                bail!("v22 pending chunk length mismatch");
+            }
+            Ok(V22PendingRead::Chunk(bytes))
+        },
+        _ => bail!("invalid v22 pending chunk answer"),
+    }
+}
+
+/// What the changed-path list came to once the transfer ran.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum V22PathsState {
+    /// The terminal names no list (`changedPathsReason`): settle without one.
+    NotNamed,
+    /// The run changed nothing: settle with the empty list's digest.
+    Empty,
+    /// The app holds exactly this list.
+    Recorded { sha256: String, count: u64, bytes: u64 },
+    /// The list could not be recorded (it exceeds what the app can hold, or the
+    /// app has no record of a list the box already confirmed): settle without.
+    Skipped,
+}
+
+/// What a finished transfer proved. The sidecar's pending files are confirmed
+/// only for what this says the app holds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V22TransferDone {
+    /// The app's record of the result: `Recorded`, or `PrivateOnly` when it
+    /// refused the patch. A run that did not succeed has no result to record.
+    pub result: V22UsageRecord,
+    /// The patch is durably recorded: `confirm_patch` may follow.
+    pub patch_confirmable: bool,
+    pub paths: V22PathsState,
+    /// The patch and path bytes the app now opens for a settlement, which adds
+    /// time in proportion (`v22_size_allowance`).
+    pub allowance_bytes: u64,
+}
+
+/// How a transfer round ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum V22TransferEnd {
+    Done(V22TransferDone),
+    /// The result cannot be recorded: settle unverified, the box keeps it.
+    Reject,
+    /// 404 from the app: it predates the transfer. Nothing was written.
+    AppTooOld,
+    /// Nothing was proven either way; a new round reads back first.
+    Retry,
+}
+
+/// Where a round starts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum V22TransferMode {
+    /// The first round: send every chunk, then commit.
+    UploadAll,
+    /// After a lost answer or a restart: commit first and send only what the
+    /// app says is missing (`upload_incomplete`).
+    CommitFirst,
+}
+
+#[derive(Debug, Clone)]
+pub struct V22TransferJob {
+    pub attempt_id: String,
+    pub worker: String,
+    pub parts: V22TransferParts,
+    /// The result and its patch travel only for a run that succeeded; the
+    /// changed paths travel for any run that names them.
+    pub outcome_succeeded: bool,
+    pub mode: V22TransferMode,
+    /// Only the list's commit again: the app answered a settlement that it
+    /// does not hold the list the bridge had read back.
+    pub paths_only: bool,
+}
+
+impl V22TransferJob {
+    /// A run with nothing to send needs no task: a failed run with no list.
+    fn needs_task(&self) -> bool {
+        self.outcome_succeeded ||
+            self.parts.changed_paths.as_ref().is_some_and(|part| part.count != Some(0))
+    }
+}
+
+/// How often a chunk is sent again after an answer that was no verdict.
+const V22_CHUNK_SEND_TRIES: u32 = 3;
+/// The most a round goes around "upload what is missing, commit again".
+const V22_COMMIT_ROUNDS: u32 = 4;
+#[cfg(not(test))]
+const V22_CHUNK_RETRY_DELAY: Duration = Duration::from_secs(1);
+#[cfg(test)]
+const V22_CHUNK_RETRY_DELAY: Duration = Duration::from_millis(5);
+/// A round that proved nothing is tried again after this long, then twice as
+/// long, and so on without end (`v22_backoff`): the transfer never gives up and
+/// never halts the bridge, and each new round commits first and reads back
+/// before it sends anything.
+#[cfg(not(test))]
+const V22_TRANSFER_RETRY_DELAY: Duration = Duration::from_secs(15);
+#[cfg(test)]
+const V22_TRANSFER_RETRY_DELAY: Duration = Duration::from_millis(0);
+/// The longest the wait between two rounds grows to.
+const V22_TRANSFER_RETRY_DELAY_MAX: Duration = Duration::from_secs(300);
+/// How long an attempt waits before it asks an old app again.
+const V22_APP_WAIT: Duration = Duration::from_secs(300);
+
+/// The wait before the `rounds`-th try again (1 for the first): `base`,
+/// doubling, never more than five minutes.
+fn v22_backoff(base: Duration, rounds: u32) -> Duration {
+    base.saturating_mul(1_u32 << rounds.saturating_sub(1).min(16))
+        .min(V22_TRANSFER_RETRY_DELAY_MAX)
+}
+
+/// Why a part's upload and commit stopped short.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum V22Stop {
+    Reject,
+    AppTooOld,
+    Retry,
+    /// The list cannot be recorded: settle without it.
+    Skip,
+}
+
+impl V22Stop {
+    fn end(self) -> V22TransferEnd {
+        match self {
+            V22Stop::Reject | V22Stop::Skip => V22TransferEnd::Reject,
+            V22Stop::AppTooOld => V22TransferEnd::AppTooOld,
+            V22Stop::Retry => V22TransferEnd::Retry,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum V22UploadStep {
+    Done,
+    AlreadyRecorded,
+    ExceedsStorage,
+    Stop(V22Stop),
+}
+
+/// Sends the chunks `indexes` of one part. A chunk whose answer was lost is
+/// sent again, the same chunk, up to `V22_CHUNK_SEND_TRIES` times: a chunk is
+/// idempotent.
+async fn v22_upload_indexes<S: V22PendingSource>(
+    api: &crate::tomverse_api::TomverseApi,
+    source: &S,
+    attempt_id: &str,
+    worker: &str,
+    name: &str,
+    part: &V22TransferPart,
+    indexes: &[u64],
+) -> V22UploadStep {
+    use base64::Engine;
+    for &index in indexes {
+        let Some((start, end)) = crate::tomverse_api::v22_transfer_chunk_range(part.bytes, index) else {
+            return V22UploadStep::Stop(V22Stop::Retry);
+        };
+        let bytes = match source.read_chunk(name, index, part.bytes).await {
+            Ok(V22PendingRead::Chunk(bytes)) if bytes.len() as u64 == end - start => bytes,
+            // The pending file is gone or unreadable: the next round reads the
+            // sidecar back first and goes the way it says.
+            _ => return V22UploadStep::Stop(V22Stop::Retry),
+        };
+        let chunk_sha256 = hex::encode(Sha256::digest(&bytes));
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        drop(bytes);
+        let chunk = crate::tomverse_api::V22UploadChunk {
+            part: name, total_bytes: part.bytes, sha256: &part.sha256,
+            base_sha: part.base_sha.as_deref(), count: part.count, index,
+            chunk_sha256: &chunk_sha256, bytes_base64: &encoded,
+        };
+        let mut tries = 0;
+        loop {
+            match api.v22_transfer_upload(attempt_id, worker, &chunk).await {
+                Ok(crate::tomverse_api::V22UploadAnswer::Stored) => break,
+                Ok(crate::tomverse_api::V22UploadAnswer::AlreadyRecorded) =>
+                    return V22UploadStep::AlreadyRecorded,
+                Ok(crate::tomverse_api::V22UploadAnswer::ExceedsStorage) =>
+                    return V22UploadStep::ExceedsStorage,
+                Ok(crate::tomverse_api::V22UploadAnswer::Reject) | Err(_) =>
+                    return V22UploadStep::Stop(V22Stop::Reject),
+                Ok(crate::tomverse_api::V22UploadAnswer::AppTooOld) =>
+                    return V22UploadStep::Stop(V22Stop::AppTooOld),
+                Ok(crate::tomverse_api::V22UploadAnswer::Unknown) => {
+                    tries += 1;
+                    if tries >= V22_CHUNK_SEND_TRIES {
+                        return V22UploadStep::Stop(V22Stop::Retry);
+                    }
+                    tokio::time::sleep(V22_CHUNK_RETRY_DELAY).await;
+                },
+            }
+        }
+    }
+    V22UploadStep::Done
+}
+
+/// What a part's upload and commit left: the commit's verdict on the patch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct V22Committed {
+    private_only: bool,
+    patch_dropped: bool,
+}
+
+/// The part(s) one commit covers.
+#[derive(Clone, Copy)]
+enum V22CommitTarget<'a> {
+    ResultAndPatch { result: &'a V22TransferPart, patch: Option<&'a V22TransferPart> },
+    ChangedPaths { part: &'a V22TransferPart },
+}
+
+fn v22_patch_description(part: &V22TransferPart) -> Option<crate::tomverse_api::V22PatchDescription<'_>> {
+    Some(crate::tomverse_api::V22PatchDescription {
+        sha256: &part.sha256, base_sha: part.base_sha.as_deref()?, bytes: part.bytes })
+}
+
+/// Sends what the app lacks and commits (docs/policy/amux-v22-result-transfer.md
+/// 1.5-3 and 1.5-7): `UploadAll` sends every chunk first, `CommitFirst`
+/// commits first and sends only the chunks `upload_incomplete` names. A commit
+/// whose digest the app found different is sent once more from the start; a
+/// second mismatch is a refusal. A patch the app cannot hold is dropped from
+/// the commit, a result it cannot hold is a refusal, and a list it cannot hold
+/// is skipped.
+async fn v22_upload_and_commit<S: V22PendingSource>(
+    api: &crate::tomverse_api::TomverseApi,
+    source: &S,
+    job: &V22TransferJob,
+    target: V22CommitTarget<'_>,
+) -> std::result::Result<V22Committed, V22Stop> {
+    let mut parts: Vec<(&'static str, &V22TransferPart)> = match target {
+        V22CommitTarget::ResultAndPatch { result, patch } => {
+            let mut parts = vec![("result", result)];
+            parts.extend(patch.map(|patch| ("patch", patch)));
+            parts
+        },
+        V22CommitTarget::ChangedPaths { part } => vec![("changed_paths", part)],
+    };
+    let all = |part: &V22TransferPart| -> Vec<u64> {
+        (0..crate::tomverse_api::v22_transfer_chunk_count(part.bytes)).collect()
+    };
+    let mut todo: BTreeMap<&'static str, Vec<u64>> = BTreeMap::new();
+    if job.mode == V22TransferMode::UploadAll {
+        for (name, part) in &parts {
+            todo.insert(*name, all(part));
+        }
+    }
+    let mut mismatched: Vec<String> = Vec::new();
+    let mut patch_dropped = false;
+    for _ in 0..V22_COMMIT_ROUNDS {
+        for (name, part) in parts.clone() {
+            let indexes = todo.remove(name).unwrap_or_default();
+            if indexes.is_empty() {
+                continue;
+            }
+            match v22_upload_indexes(api, source, &job.attempt_id, &job.worker,
+                name, part, &indexes).await {
+                V22UploadStep::Done => {},
+                // The app already holds the final row: commit, then read back.
+                V22UploadStep::AlreadyRecorded => { todo.clear(); break; },
+                V22UploadStep::ExceedsStorage => match name {
+                    "patch" => {
+                        patch_dropped = true;
+                        parts.retain(|(kept, _)| *kept != "patch");
+                        todo.remove("patch");
+                    },
+                    "changed_paths" => return Err(V22Stop::Skip),
+                    _ => return Err(V22Stop::Reject),
+                },
+                V22UploadStep::Stop(stop) => return Err(stop),
+            }
+        }
+        let answer = match target {
+            V22CommitTarget::ResultAndPatch { result, patch } => {
+                let patch = patch.filter(|_| !patch_dropped).and_then(v22_patch_description);
+                api.v22_result_commit_once(&job.attempt_id, &job.worker,
+                    &result.sha256, result.bytes, patch).await
+            },
+            V22CommitTarget::ChangedPaths { part } =>
+                api.v22_changed_paths_commit_once(&job.attempt_id, &job.worker,
+                    &part.sha256, part.count.unwrap_or(0), part.bytes).await,
+        };
+        match answer {
+            Ok(crate::tomverse_api::V22CommitAnswer::Recorded { private_only }) =>
+                return Ok(V22Committed { private_only, patch_dropped }),
+            Ok(crate::tomverse_api::V22CommitAnswer::Incomplete(missing)) => {
+                let wanted = [("result", missing.result), ("patch", missing.patch),
+                    ("changed_paths", missing.changed_paths)];
+                let mut any = false;
+                for (name, indexes) in wanted {
+                    if indexes.is_empty() || !parts.iter().any(|(kept, _)| *kept == name) {
+                        continue;
+                    }
+                    any = true;
+                    todo.insert(name, indexes);
+                }
+                if !any {
+                    return Err(V22Stop::Retry);
+                }
+            },
+            Ok(crate::tomverse_api::V22CommitAnswer::DigestMismatch(name)) => {
+                if mismatched.contains(&name) {
+                    return Err(V22Stop::Reject);
+                }
+                let Some((kept, part)) = parts.iter().find(|(kept, _)| *kept == name) else {
+                    return Err(V22Stop::Reject);
+                };
+                // The app cleared that part: send every chunk of it again.
+                todo.insert(*kept, all(part));
+                mismatched.push(name);
+            },
+            Ok(crate::tomverse_api::V22CommitAnswer::ExceedsProcessing) =>
+                return Err(match target {
+                    V22CommitTarget::ChangedPaths { .. } => V22Stop::Skip,
+                    V22CommitTarget::ResultAndPatch { .. } => V22Stop::Reject,
+                }),
+            Ok(crate::tomverse_api::V22CommitAnswer::Reject) => return Err(V22Stop::Reject),
+            Ok(crate::tomverse_api::V22CommitAnswer::AppTooOld) => return Err(V22Stop::AppTooOld),
+            Ok(crate::tomverse_api::V22CommitAnswer::Unknown) | Err(_) => return Err(V22Stop::Retry),
+        }
+    }
+    Err(V22Stop::Retry)
+}
+
+/// The app's record of a result, read back against what the sidecar named:
+/// the digests, the sizes and, when there is one, the patch.
+async fn v22_result_readback(
+    api: &crate::tomverse_api::TomverseApi,
+    attempt_id: &str,
+    result: &V22TransferPart,
+    patch: Option<&V22TransferPart>,
+) -> Result<V22UsageRecord> {
+    // A size of 0 is "unknown" (see `parse_v22_transfer_parts`): not held to.
+    let known = |bytes: u64| (bytes > 0).then_some(bytes);
+    api.v22_task_result_readback_sized(attempt_id, &result.sha256,
+        patch.and_then(|part| part.base_sha.as_deref().map(|base| (part.sha256.as_str(), base))),
+        None, known(result.bytes), patch.and_then(|part| known(part.bytes))).await
+}
+
+/// The run's result and patch, to the point where the app's read-back holds
+/// exactly what the sidecar named.
+async fn v22_transfer_result_and_patch<S: V22PendingSource>(
+    api: &crate::tomverse_api::TomverseApi,
+    source: &S,
+    job: &V22TransferJob,
+) -> std::result::Result<(V22UsageRecord, bool, u64), V22TransferEnd> {
+    // A succeeded run with no result part has nothing to record.
+    let Some(result) = job.parts.result.as_ref() else {
+        return Err(V22TransferEnd::Reject);
+    };
+    let patch = job.parts.patch.as_ref();
+    // A part the box no longer holds was confirmed against a record the app
+    // holds: read it back. All still pending: send it.
+    if !(result.pending && patch.is_none_or(|part| part.pending)) {
+        return match v22_result_readback(api, &job.attempt_id, result, patch).await {
+            Ok(V22UsageRecord::Recorded) =>
+                Ok((V22UsageRecord::Recorded, patch.is_some(), patch.map_or(0, |part| part.bytes))),
+            Ok(V22UsageRecord::PrivateOnly) => Ok((V22UsageRecord::PrivateOnly, false, 0)),
+            Ok(V22UsageRecord::Rejected) => Err(V22TransferEnd::Reject),
+            Err(_) => Err(V22TransferEnd::Retry),
+        };
+    }
+    let committed = v22_upload_and_commit(api, source, job,
+        V22CommitTarget::ResultAndPatch { result, patch }).await.map_err(V22Stop::end)?;
+    if committed.private_only {
+        return Ok((V22UsageRecord::PrivateOnly, false, 0));
+    }
+    // A commit's answer is not proof: read it back before anything is erased.
+    let held_patch = patch.filter(|_| !committed.patch_dropped);
+    match v22_result_readback(api, &job.attempt_id, result, held_patch).await {
+        Ok(V22UsageRecord::Recorded) => Ok((V22UsageRecord::Recorded, held_patch.is_some(),
+            held_patch.map_or(0, |part| part.bytes))),
+        Ok(V22UsageRecord::PrivateOnly) => Ok((V22UsageRecord::PrivateOnly, false, 0)),
+        _ => Err(V22TransferEnd::Retry),
+    }
+}
+
+/// The run's changed-path list, to the point where the app holds exactly it.
+async fn v22_transfer_changed_paths<S: V22PendingSource>(
+    api: &crate::tomverse_api::TomverseApi,
+    source: &S,
+    job: &V22TransferJob,
+) -> std::result::Result<V22PathsState, V22TransferEnd> {
+    let Some(part) = job.parts.changed_paths.as_ref() else {
+        return Ok(V22PathsState::NotNamed);
+    };
+    let count = part.count.unwrap_or(0);
+    if count == 0 {
+        return Ok(V22PathsState::Empty);
+    }
+    let recorded = || V22PathsState::Recorded { sha256: part.sha256.clone(), count, bytes: part.bytes };
+    let readback = || api.v22_changed_paths_readback(&job.attempt_id, &part.sha256, count, part.bytes);
+    if !part.pending {
+        // The box confirmed this list against the app's record. A settlement
+        // that found the record missing commits it once more.
+        if job.paths_only {
+            match api.v22_changed_paths_commit_once(&job.attempt_id, &job.worker,
+                &part.sha256, count, part.bytes).await {
+                Ok(crate::tomverse_api::V22CommitAnswer::Recorded { .. }) => {},
+                Ok(crate::tomverse_api::V22CommitAnswer::AppTooOld) =>
+                    return Err(V22TransferEnd::AppTooOld),
+                Ok(crate::tomverse_api::V22CommitAnswer::Unknown) | Err(_) =>
+                    return Err(V22TransferEnd::Retry),
+                // Nothing staged any more and no pending file to send again.
+                Ok(_) => return Ok(V22PathsState::Skipped),
+            }
+        }
+        return match readback().await {
+            Ok(true) => Ok(recorded()),
+            Ok(false) => Ok(V22PathsState::Skipped),
+            Err(_) => Err(V22TransferEnd::Retry),
+        };
+    }
+    match v22_upload_and_commit(api, source, job, V22CommitTarget::ChangedPaths { part }).await {
+        Ok(_) => match readback().await {
+            Ok(true) => Ok(recorded()),
+            _ => Err(V22TransferEnd::Retry),
+        },
+        Err(V22Stop::Skip) => Ok(V22PathsState::Skipped),
+        Err(stop) => Err(stop.end()),
+    }
+}
+
+/// One round of the transfer: everything the run's terminal names, sent and
+/// read back. It never settles and never erases the box's copies; the run
+/// loop does that from what this returns.
+pub async fn run_v22_transfer<S: V22PendingSource>(
+    api: &crate::tomverse_api::TomverseApi,
+    source: &S,
+    job: &V22TransferJob,
+) -> V22TransferEnd {
+    let mut done = V22TransferDone { result: V22UsageRecord::Recorded,
+        patch_confirmable: false, paths: V22PathsState::NotNamed, allowance_bytes: 0 };
+    if job.outcome_succeeded && !job.paths_only {
+        match v22_transfer_result_and_patch(api, source, job).await {
+            Ok((record, patch_confirmable, patch_bytes)) => {
+                done.result = record;
+                done.patch_confirmable = patch_confirmable;
+                done.allowance_bytes += patch_bytes;
+            },
+            Err(end) => return end,
+        }
+    }
+    match v22_transfer_changed_paths(api, source, job).await {
+        Ok(paths) => {
+            done.allowance_bytes += v22_paths_bytes(&paths);
+            done.paths = paths;
+        },
+        Err(end) => return end,
+    }
+    V22TransferEnd::Done(done)
+}
+
+/// The path bytes a settlement opens, when the app holds the list.
+fn v22_paths_bytes(paths: &V22PathsState) -> u64 {
+    match paths {
+        V22PathsState::Recorded { bytes, .. } => *bytes,
+        _ => 0,
+    }
+}
+
+/// A run with nothing to send: no task, no round trip.
+fn v22_trivial_transfer(job: &V22TransferJob) -> V22TransferDone {
+    V22TransferDone { result: V22UsageRecord::Recorded, patch_confirmable: false,
+        paths: match job.parts.changed_paths.as_ref() {
+            Some(part) if part.count == Some(0) => V22PathsState::Empty,
+            _ => V22PathsState::NotNamed,
+        }, allowance_bytes: 0 }
+}
+
+#[derive(Default)]
+struct V22TransferSlot {
+    handle: Option<tokio::task::JoinHandle<V22TransferEnd>>,
+    done: Option<V22TransferDone>,
+    /// While only the list is committed again, what the result had already come to.
+    keep: Option<V22TransferDone>,
+    not_before: Option<std::time::Instant>,
+    /// `not_before` is the old-app wait, not a retry backoff.
+    app_waiting: bool,
+    /// Rounds that proved nothing in a row: the backoff's exponent.
+    failed_rounds: u32,
+    /// The next round commits first (a restart or a lost answer).
+    resume: bool,
+    paths_only: bool,
+    /// Times a settlement sent the list back: the backoff's exponent.
+    recommits: u32,
+}
+
+/// What `V22Transfers::poll` tells the run loop.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum V22TransferPoll {
+    /// A task is sending, or the next round waits its turn: keep the attempt,
+    /// heartbeat it, look again next tick.
+    Waiting,
+    /// The app answered 404: it predates the transfer. The attempt is neither
+    /// settled nor halted; `first` is the one tick to say so.
+    AppWaiting { first: bool },
+    Done(V22TransferDone),
+    Reject,
+}
+
+/// The transfers in flight, one task per attempt. A transfer or its commit
+/// runs for as long as the result is large, so it never runs inside the run
+/// loop's tick: the loop only asks whether the task has finished, and its
+/// heartbeats go out on time (the execution lease is 180 seconds).
+pub struct V22Transfers {
+    slots: HashMap<String, V22TransferSlot>,
+    wake: Arc<tokio::sync::Notify>,
+}
+
+impl V22Transfers {
+    pub fn new() -> Self {
+        Self { slots: HashMap::new(), wake: Arc::new(tokio::sync::Notify::new()) }
+    }
+
+    /// Notified whenever a transfer task ends, so the run loop need not wait
+    /// out its tick to settle.
+    pub fn wake(&self) -> Arc<tokio::sync::Notify> {
+        self.wake.clone()
+    }
+
+    /// Does any task still run?
+    pub fn busy(&self) -> bool {
+        self.slots.values().any(|slot| slot.handle.as_ref().is_some_and(|handle| !handle.is_finished()))
+    }
+
+    /// Drops what is not an attempt the loop still holds.
+    pub fn retain(&mut self, attempts: &HashSet<String>) {
+        self.slots.retain(|attempt, slot| {
+            let keep = attempts.contains(attempt);
+            if !keep {
+                if let Some(handle) = slot.handle.take() {
+                    handle.abort();
+                }
+            }
+            keep
+        });
+    }
+
+    /// The settlement said the app does not hold the changed paths the bridge
+    /// had read back: commit the list again, the result as it was, with no
+    /// bound on how often (the wait between tries grows by `v22_backoff`).
+    /// `false` only when there is no transfer to commit again.
+    pub fn recommit_paths(&mut self, attempt_id: &str) -> bool {
+        let Some(slot) = self.slots.get_mut(attempt_id) else { return false; };
+        slot.recommits = slot.recommits.saturating_add(1);
+        if slot.keep.is_none() {
+            slot.keep = slot.done.take();
+        }
+        slot.done = None;
+        slot.paths_only = true;
+        slot.not_before = Some(std::time::Instant::now() +
+            v22_backoff(V22_TRANSFER_RETRY_DELAY, slot.recommits));
+        slot.app_waiting = false;
+        true
+    }
+
+    pub async fn poll<S: V22PendingSource>(
+        &mut self,
+        api: &crate::tomverse_api::TomverseApi,
+        source: S,
+        mut job: V22TransferJob,
+    ) -> V22TransferPoll {
+        if job.outcome_succeeded && job.parts.result.is_none() {
+            return V22TransferPoll::Reject;
+        }
+        if !job.needs_task() {
+            return V22TransferPoll::Done(v22_trivial_transfer(&job));
+        }
+        let slot = self.slots.entry(job.attempt_id.clone()).or_default();
+        if let Some(handle) = slot.handle.as_ref() {
+            if !handle.is_finished() {
+                return V22TransferPoll::Waiting;
+            }
+            let ended = slot.handle.take().expect("handle was just read").await;
+            match ended {
+                Ok(V22TransferEnd::Done(mut done)) => {
+                    if let Some(kept) = slot.keep.take() {
+                        // A list committed again: the result stays what it was.
+                        let others = kept.allowance_bytes - v22_paths_bytes(&kept.paths);
+                        done = V22TransferDone { allowance_bytes: others + v22_paths_bytes(&done.paths),
+                            paths: done.paths, ..kept };
+                    }
+                    if slot.failed_rounds > 0 {
+                        eprintln!("amux wsl bridge: v22 transfer for attempt {} went through after {} round(s) that proved nothing",
+                            job.attempt_id, slot.failed_rounds);
+                    }
+                    slot.paths_only = false;
+                    slot.failed_rounds = 0;
+                    slot.done = Some(done);
+                },
+                Ok(V22TransferEnd::Reject) => {
+                    self.slots.remove(&job.attempt_id);
+                    return V22TransferPoll::Reject;
+                },
+                Ok(V22TransferEnd::AppTooOld) => {
+                    let first = !slot.app_waiting;
+                    // An old app takes no commit-first round: begin at the top again.
+                    slot.resume = false;
+                    slot.app_waiting = true;
+                    slot.not_before = Some(std::time::Instant::now() + V22_APP_WAIT);
+                    return V22TransferPoll::AppWaiting { first };
+                },
+                Ok(V22TransferEnd::Retry) | Err(_) => {
+                    slot.failed_rounds = slot.failed_rounds.saturating_add(1);
+                    slot.resume = true;
+                    slot.app_waiting = false;
+                    // One line when the transfer starts failing, none for each round.
+                    if slot.failed_rounds == 1 {
+                        eprintln!("amux wsl bridge warn: v22 transfer for attempt {} proved nothing this round; trying again with a growing wait, not halted",
+                            job.attempt_id);
+                    }
+                    slot.not_before = Some(std::time::Instant::now() +
+                        v22_backoff(V22_TRANSFER_RETRY_DELAY, slot.failed_rounds));
+                    return V22TransferPoll::Waiting;
+                },
+            }
+        }
+        if let Some(done) = slot.done.as_ref() {
+            return V22TransferPoll::Done(done.clone());
+        }
+        if let Some(not_before) = slot.not_before {
+            if std::time::Instant::now() < not_before {
+                return if slot.app_waiting {
+                    V22TransferPoll::AppWaiting { first: false }
+                } else {
+                    V22TransferPoll::Waiting
+                };
+            }
+            slot.not_before = None;
+            slot.app_waiting = false;
+        }
+        job.mode = if slot.resume { V22TransferMode::CommitFirst } else { V22TransferMode::UploadAll };
+        job.paths_only = slot.paths_only;
+        let api = api.clone();
+        let wake = self.wake.clone();
+        slot.handle = Some(tokio::spawn(async move {
+            let end = run_v22_transfer(&api, &source, &job).await;
+            wake.notify_one();
+            end
+        }));
+        // Rounds after the first start by committing, whatever ends this one.
+        slot.resume = true;
+        V22TransferPoll::Waiting
+    }
 }
 
 const V22_READ_ONLY_RETRY_TASK_ID: &str = "c48886b9-86f8-4631-8db8-c0b288a707af";
@@ -2845,15 +3745,6 @@ fn v22_read_only_retry_echo_matches(delivery: &PulledDelivery,
     }
 }
 
-#[cfg(not(unix))]
-async fn v22_sidecar_call(
-    _socket_path: &str,
-    _payload: serde_json::Value,
-    _attempt_id: &str,
-) -> Result<V22SidecarResult> {
-    bail!("v22 sidecar requires Ubuntu")
-}
-
 /// Content-free identity from the authenticated delivery and this registered
 /// bridge session. A recovery queue can never manufacture this local binding.
 fn v22_recovery_binding(delivery: &PulledDelivery, instance_id: &str,
@@ -2990,17 +3881,33 @@ impl LocalAmux for HttpLocal {
     }
 
     async fn readback_v22(&mut self, attempt_id: &str) -> Result<V22SidecarState> {
-        let socket = self.v22_socket.as_deref().context("v22 sidecar is disabled")?;
-        Ok(v22_sidecar_call(socket, serde_json::json!({
-            "op": "readback", "attemptId": attempt_id,
-        }), attempt_id).await?.state)
+        Ok(self.readback_v22_result(attempt_id).await?.state)
     }
 
+    /// `readback_v2` first: the answer carries no body, only what each part
+    /// holds. An old sidecar refuses the op, and that one is read as before,
+    /// with its bodies inline and its old limits.
     async fn readback_v22_result(&mut self, attempt_id: &str) -> Result<V22SidecarResult> {
         let socket = self.v22_socket.as_deref().context("v22 sidecar is disabled")?;
+        if let Some(result) = v22_sidecar_readback_v2(socket, attempt_id).await? {
+            return Ok(result);
+        }
         v22_sidecar_call(socket, serde_json::json!({
             "op": "readback", "attemptId": attempt_id,
         }), attempt_id).await
+    }
+
+    async fn confirm_v22_changed_paths(&mut self, attempt_id: &str, sha256: &str) -> Result<()> {
+        let socket = self.v22_socket.as_deref().context("v22 sidecar is disabled")?;
+        if !v22_lower_hex(sha256, 64) {
+            bail!("invalid v22 changed-path digest");
+        }
+        let answer = v22_sidecar_call(socket,
+            v22_confirm_changed_paths_payload(attempt_id, sha256), attempt_id).await?;
+        if answer.state != V22SidecarState::Confirmed {
+            bail!("v22 sidecar changed paths not confirmed");
+        }
+        Ok(())
     }
 
     async fn send(&mut self, path: &str, body: &LocalDispatchBody) -> Result<SendReply> {
@@ -3268,6 +4175,10 @@ async fn run_bridge(mut scope: WorkerScope) -> i32 {
     let mut undelivered_started: Vec<StartedExecution> = Vec::new();
     let mut quota_checked: BTreeMap<String, std::time::Instant> = BTreeMap::new();
     let mut protocol_by_worker: BTreeMap<String, Option<String>> = BTreeMap::new();
+    // The v22 results being sent in chunks, one task per attempt: a transfer or
+    // a commit takes as long as the result is large and never runs in a tick.
+    let mut transfers = V22Transfers::new();
+    let transfer_wake = transfers.wake();
 
     loop {
         // Version 35, section 4: read the session list every round. A session
@@ -3415,6 +4326,9 @@ async fn run_bridge(mut scope: WorkerScope) -> i32 {
             }
         }
         pending = still_pending;
+        // A transfer belongs to an attempt this process still holds.
+        transfers.retain(&pending.iter()
+            .map(|entry| entry.delivery.attempt_id.clone()).collect());
 
         // Renew active attempts first. The dedicated API worker never enters
         // the CLI quota path. It may make the fixed provider GET only after
@@ -3701,7 +4615,45 @@ async fn run_bridge(mut scope: WorkerScope) -> i32 {
                                 }
                             });
                             if let Some((receipt, digest, _api_receipt, outcome)) = verified {
-                                let result_record = if outcome == "succeeded" {
+                                // The chunked transfer (docs/policy/amux-v22-result-transfer.md 1.5): the
+                                // sidecar described its parts, so they go to the app as chunks by a task of
+                                // their own. This tick only asks whether it has finished; its heartbeats
+                                // never wait for a transfer or a commit.
+                                let chunked = v22_result.as_ref().is_some_and(v22_uses_chunked_transfer);
+                                let mut transfer_done: Option<V22TransferDone> = None;
+                                let mut transfer_rejected = false;
+                                if let (true, Some(result), Some(socket)) = (chunked, v22_result.as_ref(), local.v22_socket.clone()) {
+                                    let job = V22TransferJob { attempt_id: entry.delivery.attempt_id.clone(),
+                                        worker: entry.delivery.worker.clone(),
+                                        parts: result.parts.clone().unwrap_or_default(),
+                                        outcome_succeeded: outcome == "succeeded",
+                                        mode: V22TransferMode::UploadAll, paths_only: false };
+                                    match transfers.poll(&api, SidecarPendingSource::new(&socket,
+                                        &entry.delivery.attempt_id), job).await {
+                                        V22TransferPoll::Waiting => {
+                                            still_running.push(entry);
+                                            continue;
+                                        },
+                                        V22TransferPoll::AppWaiting { first } => {
+                                            // An app from before the transfer cannot take this result: it is
+                                            // neither settled nor erased, and nothing halts (rolling the app
+                                            // back rolls the box back with it).
+                                            if first {
+                                                eprintln!("amux wsl bridge warn: the app does not take chunked v22 results yet; attempt {} waits unsettled, not halted",
+                                                    entry.delivery.attempt_id);
+                                            }
+                                            still_running.push(entry);
+                                            continue;
+                                        },
+                                        V22TransferPoll::Done(done) => transfer_done = Some(done),
+                                        V22TransferPoll::Reject => transfer_rejected = true,
+                                    }
+                                }
+                                let result_record = if let Some(done) = &transfer_done {
+                                    Ok(done.result)
+                                } else if transfer_rejected {
+                                    Ok(V22UsageRecord::Rejected)
+                                } else if outcome == "succeeded" {
                                     match v22_result.as_ref() {
                                         Some(result) => {
                                             let sha256 = result.result_sha256.as_deref();
@@ -3742,7 +4694,7 @@ async fn run_bridge(mut scope: WorkerScope) -> i32 {
                                 // Read it back before deleting the sidecar's only copy.
                                 let result_record = match result_record {
                                     Ok(crate::tomverse_api::V22UsageRecord::Recorded)
-                                        if outcome == "succeeded" => {
+                                        if outcome == "succeeded" && transfer_done.is_none() => {
                                         match v22_result.as_ref().and_then(|result|
                                             result.result_sha256.as_deref()) {
                                             Some(sha256) => api.v22_task_result_readback(
@@ -3760,7 +4712,26 @@ async fn run_bridge(mut scope: WorkerScope) -> i32 {
                                 };
                                 match result_record {
                                     Ok(crate::tomverse_api::V22UsageRecord::Recorded) => {
-                                        if outcome == "succeeded" {
+                                        // The box erases what the app was proven to hold, and only that.
+                                        if let (Some(done), Some(parts)) = (&transfer_done,
+                                            v22_result.as_ref().and_then(|result| result.parts.as_ref())) {
+                                            if outcome == "succeeded" {
+                                                if let Some(part) = parts.result.as_ref().filter(|part| part.pending) {
+                                                    let _ = local.confirm_v22_result(
+                                                        &entry.delivery.attempt_id, &part.sha256).await;
+                                                }
+                                                if let Some(part) = parts.patch.as_ref().filter(|part|
+                                                    part.pending && done.patch_confirmable) {
+                                                    let _ = local.confirm_v22_patch(
+                                                        &entry.delivery.attempt_id, &part.sha256).await;
+                                                }
+                                            }
+                                            if let (Some(part), V22PathsState::Recorded { .. }) =
+                                                (parts.changed_paths.as_ref().filter(|part| part.pending), &done.paths) {
+                                                let _ = local.confirm_v22_changed_paths(
+                                                    &entry.delivery.attempt_id, &part.sha256).await;
+                                            }
+                                        } else if outcome == "succeeded" {
                                             if let Some(sha256) = v22_result.as_ref().and_then(
                                                 |result| result.result_sha256.as_deref()) {
                                                 let _ = local.confirm_v22_result(
@@ -3772,6 +4743,29 @@ async fn run_bridge(mut scope: WorkerScope) -> i32 {
                                                     &entry.delivery.attempt_id, digest).await;
                                             }
                                         }
+                                        // How the settlement and the review record name the changed paths: by
+                                        // digest when the app already holds the list, else the inline list.
+                                        let empty_list: [String; 0] = [];
+                                        let empty_digest = crate::tomverse_api::V22ChangedPathsRef::Digest {
+                                            sha256: crate::tomverse_api::V22_EMPTY_SHA256, count: 0 };
+                                        let (review_paths, settle_paths, settle_allowance) = match (&transfer_done,
+                                            v22_result.as_ref()) {
+                                            (Some(done), _) => {
+                                                let named = match &done.paths {
+                                                    V22PathsState::Recorded { sha256, count, .. } =>
+                                                        Some(crate::tomverse_api::V22ChangedPathsRef::Digest {
+                                                            sha256, count: *count }),
+                                                    V22PathsState::Empty => Some(empty_digest),
+                                                    V22PathsState::NotNamed | V22PathsState::Skipped => None,
+                                                };
+                                                (named.unwrap_or(empty_digest), named, done.allowance_bytes)
+                                            },
+                                            (None, Some(result)) => (crate::tomverse_api::V22ChangedPathsRef::List(
+                                                result.changed_paths.as_deref().unwrap_or(&empty_list)),
+                                                result.changed_paths.as_deref().map(
+                                                    crate::tomverse_api::V22ChangedPathsRef::List), 0),
+                                            (None, None) => (crate::tomverse_api::V22ChangedPathsRef::List(&empty_list), None, 0),
+                                        };
                                         let usage_record = match (receipt, digest, api_retry) {
                                             (Some(receipt), Some(digest), false) =>
                                                 api.v22_cli_usage_record_once(
@@ -3877,7 +4871,7 @@ async fn run_bridge(mut scope: WorkerScope) -> i32 {
                                                         };
                                                         match api.v52_review_record(&entry.delivery,
                                                             &session.instance_id, session.generation,
-                                                            result.changed_paths.as_deref().unwrap_or(&[]),
+                                                            review_paths, settle_allowance,
                                                             &evidence, findings_summary.as_deref()).await {
                                                             Ok(answer) if answer.recorded => {},
                                                             Ok(_) => review_unverified = true,
@@ -3911,15 +4905,26 @@ async fn run_bridge(mut scope: WorkerScope) -> i32 {
                                                         &entry.delivery, &session.instance_id,
                                                         session.generation, outcome,
                                                         settlement_retry_echo,
-                                                        v22_result.as_ref().and_then(|result|
-                                                            result.changed_paths.as_deref())).await
+                                                        settle_paths, settle_allowance).await
                                                 } else {
                                                     api.v22_execution_settle_verified(
                                                         &entry.delivery, &session.instance_id,
                                                         session.generation, outcome,
-                                                        settlement_retry_echo).await
+                                                        settlement_retry_echo,
+                                                        settle_allowance).await
                                                 };
                                                 if api_retry { answer } else { match answer {
+                                                    // The app does not hold the changed paths this
+                                                    // bridge read back: commit the list again and
+                                                    // settle next tick (never unverified for this).
+                                                    Ok(ref refused) if !refused.settled &&
+                                                        transfer_done.is_some() &&
+                                                        refused.reason.as_deref() ==
+                                                            Some("changed_paths_unrecorded") &&
+                                                        transfers.recommit_paths(&entry.delivery.attempt_id) => {
+                                                        still_running.push(entry);
+                                                        continue;
+                                                    },
                                                     Ok(ref refused) if !refused.settled &&
                                                         matches!(refused.reason.as_deref(),
                                                             Some("usage_unverified" | "result_unverified" |
@@ -4059,6 +5064,8 @@ async fn run_bridge(mut scope: WorkerScope) -> i32 {
                 }
             }
             _ = tokio::time::sleep(Duration::from_secs(30)) => {}
+            // A finished transfer is settled now, not at the next tick.
+            _ = transfer_wake.notified() => {}
         }
     }
 }
@@ -4516,6 +5523,7 @@ mod tests {
             review_base_sha: Some("c".repeat(40)),
             review_touches_contract: Some(true),
             review_ref: Some(format!("refs/amux-v52-review/{ATTEMPT_ID}")),
+            parts: None,
         };
         // A lower grade's contract change is kept and reviewed like a
         // frontier change before settlement.
@@ -4551,7 +5559,7 @@ AMUX_OWNER_QUESTION: {\"question\":\"Which?\",\"unblocks\":\"u\",\"options\":[{\
             publish_files_digest: Some("d".repeat(64)),
             changed_paths: None,
             review_commit_sha: None, review_base_sha: None,
-            review_touches_contract: None, review_ref: None,
+            review_touches_contract: None, review_ref: None, parts: None,
         };
         assert_eq!(v22_result_transfer(&result), V22ResultTransfer::Write);
         result.patch_body = None;
@@ -7304,5 +8312,868 @@ Done.",
         ] {
             assert!(!v22_result_asks_owner(text), "{text}");
         }
+    }
+}
+
+/// The v22 result transfer in parts (docs/policy/amux-v22-result-transfer.md):
+/// the new sidecar ops' wire, the sidecar answer's parts, and the transfer run
+/// against a stand-in app and a stand-in sidecar.
+#[cfg(test)]
+mod v22_transfer_tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::Mutex;
+
+    use base64::Engine;
+
+    const ATT: &str = "4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e6f";
+    const CHUNK: usize = crate::tomverse_api::V22_TRANSFER_CHUNK_BYTES;
+    const UPLOAD: &str = "/api/internal/amux/v22/execution/upload";
+    const RESULT: &str = "/api/internal/amux/v22/execution/result";
+    const PATHS: &str = "/api/internal/amux/v22/execution/changed-paths";
+
+    fn sha(bytes: &[u8]) -> String {
+        hex::encode(Sha256::digest(bytes))
+    }
+
+    // ---- the stand-in app --------------------------------------------------
+
+    #[derive(Debug, Clone)]
+    struct Request {
+        method: String,
+        target: String,
+        body: serde_json::Value,
+    }
+
+    impl Request {
+        fn path(&self) -> &str {
+            self.target.split('?').next().unwrap_or("")
+        }
+    }
+
+    /// What the stand-in app is told to do wrong, and what it holds.
+    #[derive(Default)]
+    struct FakeApp {
+        /// (part, index) -> the chunk's sha256, as staged.
+        staged: BTreeMap<(String, u64), String>,
+        /// The final result row: the commit body.
+        result: Option<serde_json::Value>,
+        patch_stored: bool,
+        paths: Option<serde_json::Value>,
+        lose_upload_reply: Option<(String, u64)>,
+        lose_commit_reply: bool,
+        commit_delay: Option<Duration>,
+        /// Every upload is answered with this status and error.
+        upload_forced: Option<(u16, &'static str)>,
+        /// The next this-many uploads are answered 503 (nothing stored).
+        unavailable_uploads: u32,
+        /// A patch upload is answered `exceeds_storage`.
+        patch_exceeds: bool,
+        /// How many commits are answered `upload_digest_mismatch` for the result.
+        result_mismatches: u32,
+        /// Reported sizes in the read-back (None: the real ones).
+        reported_result_bytes: Option<u64>,
+    }
+
+    fn chunk_indexes(bytes: u64) -> Vec<u64> {
+        (0..crate::tomverse_api::v22_transfer_chunk_count(bytes)).collect()
+    }
+
+    impl FakeApp {
+        fn missing(&self, part: &str, bytes: u64) -> Vec<u64> {
+            chunk_indexes(bytes).into_iter()
+                .filter(|index| !self.staged.contains_key(&(part.to_owned(), *index))).collect()
+        }
+
+        fn handle(&mut self, request: &Request) -> Option<(u16, String)> {
+            let body = &request.body;
+            match (request.method.as_str(), request.path()) {
+                ("POST", UPLOAD) => {
+                    if let Some((status, error)) = self.upload_forced {
+                        return Some((status, serde_json::json!({"error": error}).to_string()));
+                    }
+                    if self.unavailable_uploads > 0 {
+                        self.unavailable_uploads -= 1;
+                        return Some((503, r#"{"error":"outcome_unknown"}"#.into()));
+                    }
+                    let part = body["part"].as_str().unwrap().to_owned();
+                    let index = body["index"].as_u64().unwrap();
+                    if self.patch_exceeds && part == "patch" {
+                        return Some((409, r#"{"error":"exceeds_storage"}"#.into()));
+                    }
+                    let decoded = base64::engine::general_purpose::STANDARD
+                        .decode(body["bytesBase64"].as_str().unwrap()).unwrap();
+                    if sha(&decoded) != body["chunkSha256"].as_str().unwrap() {
+                        return Some((400, r#"{"error":"Invalid request."}"#.into()));
+                    }
+                    let duplicate = self.staged.insert((part.clone(), index),
+                        body["chunkSha256"].as_str().unwrap().to_owned()).is_some();
+                    let chunk_count = crate::tomverse_api::v22_transfer_chunk_count(
+                        body["totalBytes"].as_u64().unwrap());
+                    let reply = serde_json::json!({"attemptId": ATT, "part": part,
+                        "index": index, "duplicate": duplicate,
+                        "received": self.staged.len(), "chunkCount": chunk_count});
+                    if self.lose_upload_reply == Some((part, index)) {
+                        self.lose_upload_reply = None;
+                        return None;
+                    }
+                    Some((200, reply.to_string()))
+                },
+                ("POST", RESULT) => {
+                    if let Some(delay) = self.commit_delay {
+                        std::thread::sleep(delay);
+                    }
+                    if self.result_mismatches > 0 {
+                        self.result_mismatches -= 1;
+                        self.staged.retain(|(part, _), _| part != "result");
+                        return Some((409,
+                            r#"{"error":"upload_digest_mismatch","part":"result"}"#.into()));
+                    }
+                    let result_missing = self.missing("result", body["resultBytes"].as_u64().unwrap());
+                    let patch_missing = body.get("patch").map_or(Vec::new(), |patch|
+                        self.missing("patch", patch["bytes"].as_u64().unwrap()));
+                    if !result_missing.is_empty() || !patch_missing.is_empty() {
+                        let mut missing = serde_json::Map::new();
+                        if !result_missing.is_empty() { missing.insert("result".into(), result_missing.into()); }
+                        if !patch_missing.is_empty() { missing.insert("patch".into(), patch_missing.into()); }
+                        return Some((409, serde_json::json!({"error": "upload_incomplete",
+                            "missing": missing}).to_string()));
+                    }
+                    let duplicate = self.result.as_ref() == Some(body);
+                    self.result = Some(body.clone());
+                    self.patch_stored = body.get("patch").is_some();
+                    self.staged.clear();
+                    let reply = serde_json::json!({"attemptId": ATT,
+                        "sourceSha256": body["sourceSha256"],
+                        "patchSha256": body.pointer("/patch/sha256").cloned().unwrap_or(serde_json::Value::Null),
+                        "filesDigest": null, "patchRejected": false, "duplicate": duplicate});
+                    if self.lose_commit_reply {
+                        self.lose_commit_reply = false;
+                        return None;
+                    }
+                    Some((200, reply.to_string()))
+                },
+                ("GET", RESULT) => Some((200, match &self.result {
+                    None => r#"{"status":"absent"}"#.to_owned(),
+                    Some(commit) => serde_json::json!({"status": "recorded", "attemptId": ATT,
+                        "sourceSha256": commit["sourceSha256"], "bodyAvailable": true,
+                        "resultBytes": self.reported_result_bytes.unwrap_or(
+                            commit["resultBytes"].as_u64().unwrap()),
+                        "patch": commit.get("patch").map(|patch| serde_json::json!({
+                            "sha256": patch["sha256"], "baseSha": patch["baseSha"],
+                            "bytes": patch["bytes"], "bodyAvailable": true,
+                            "filesDigest": null})).unwrap_or(serde_json::Value::Null),
+                    }).to_string(),
+                })),
+                ("POST", PATHS) => {
+                    let missing = self.missing("changed_paths", body["bytes"].as_u64().unwrap());
+                    if !missing.is_empty() {
+                        return Some((409, serde_json::json!({"error": "upload_incomplete",
+                            "missing": {"changed_paths": missing}}).to_string()));
+                    }
+                    self.paths = Some(body.clone());
+                    self.staged.retain(|(part, _), _| part != "changed_paths");
+                    Some((200, serde_json::json!({"attemptId": ATT, "sha256": body["sha256"],
+                        "count": body["count"], "duplicate": false}).to_string()))
+                },
+                ("GET", PATHS) => Some((200, match &self.paths {
+                    None => r#"{"status":"absent"}"#.to_owned(),
+                    Some(commit) => serde_json::json!({"status": "recorded", "attemptId": ATT,
+                        "sha256": commit["sha256"], "count": commit["count"],
+                        "bytes": commit["bytes"], "bodyAvailable": true}).to_string(),
+                })),
+                _ => Some((404, "{}".into())),
+            }
+        }
+    }
+
+    struct MockApp {
+        base: String,
+        address: String,
+        requests: Arc<Mutex<Vec<Request>>>,
+        stop: Arc<AtomicBool>,
+        thread: Option<std::thread::JoinHandle<()>>,
+    }
+
+    fn read_request(stream: &mut std::net::TcpStream) -> Option<Request> {
+        stream.set_read_timeout(Some(Duration::from_secs(10))).ok()?;
+        let mut buffer = Vec::new();
+        let head_end = loop {
+            let mut chunk = [0_u8; 8192];
+            let count = stream.read(&mut chunk).ok()?;
+            if count == 0 { return None; }
+            buffer.extend_from_slice(&chunk[..count]);
+            if let Some(at) = buffer.windows(4).position(|bytes| bytes == b"\r\n\r\n") {
+                break at + 4;
+            }
+        };
+        let head = String::from_utf8_lossy(&buffer[..head_end]).to_string();
+        let mut first = head.lines().next()?.split(' ');
+        let (method, target) = (first.next()?.to_owned(), first.next()?.to_owned());
+        let length: usize = head.lines().find_map(|line| line.to_ascii_lowercase()
+            .strip_prefix("content-length:").map(|value| value.trim().parse().unwrap_or(0)))
+            .unwrap_or(0);
+        while buffer.len() - head_end < length {
+            let mut chunk = [0_u8; 65536];
+            let count = stream.read(&mut chunk).ok()?;
+            if count == 0 { return None; }
+            buffer.extend_from_slice(&chunk[..count]);
+        }
+        let body = serde_json::from_slice(&buffer[head_end..head_end + length])
+            .unwrap_or(serde_json::Value::Null);
+        Some(Request { method, target, body })
+    }
+
+    fn mock_app(app: FakeApp) -> MockApp {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let app = Arc::new(Mutex::new(app));
+        let stop = Arc::new(AtomicBool::new(false));
+        let thread = {
+            let (requests, app, stop) = (requests.clone(), app.clone(), stop.clone());
+            std::thread::spawn(move || {
+                for stream in listener.incoming() {
+                    if stop.load(Ordering::SeqCst) { return; }
+                    let Ok(mut stream) = stream else { continue; };
+                    let Some(request) = read_request(&mut stream) else { continue; };
+                    let answer = app.lock().unwrap().handle(&request);
+                    // The log keeps a chunk's size, not its bytes.
+                    let mut logged = request.clone();
+                    if let Some(bytes) = logged.body.get_mut("bytesBase64") {
+                        *bytes = serde_json::json!(bytes.as_str().map_or(0, str::len));
+                    }
+                    requests.lock().unwrap().push(logged);
+                    let Some((status, body)) = answer else { continue; };
+                    let _ = write!(stream, "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len());
+                }
+            })
+        };
+        MockApp { base: format!("http://{address}"), address, requests, stop,
+            thread: Some(thread) }
+    }
+
+    impl Drop for MockApp {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::SeqCst);
+            let _ = std::net::TcpStream::connect(&self.address);
+            if let Some(thread) = self.thread.take() { let _ = thread.join(); }
+        }
+    }
+
+    impl MockApp {
+        fn api(&self) -> crate::tomverse_api::TomverseApi {
+            crate::tomverse_api::TomverseApi::for_test_with_timeouts(
+                self.base.clone(), Duration::from_millis(500), Duration::from_secs(20))
+        }
+
+        /// "METHOD /path[ part index]" per request, in order.
+        fn log(&self) -> Vec<String> {
+            self.requests.lock().unwrap().iter().map(|request| {
+                let path = request.path().rsplit('/').next().unwrap_or("").to_owned();
+                match (request.method.as_str(), path.as_str()) {
+                    ("POST", "upload") => format!("POST upload {} {}",
+                        request.body["part"].as_str().unwrap(), request.body["index"]),
+                    (method, path) => format!("{method} {path}"),
+                }
+            }).collect()
+        }
+    }
+
+    // ---- the stand-in sidecar ----------------------------------------------
+
+    struct MemorySource {
+        parts: BTreeMap<String, Vec<u8>>,
+        reads: Arc<Mutex<Vec<(String, u64)>>>,
+        gone: bool,
+    }
+
+    impl V22PendingSource for MemorySource {
+        async fn read_chunk(&self, part: &str, index: u64, total_bytes: u64) -> Result<V22PendingRead> {
+            self.reads.lock().unwrap().push((part.to_owned(), index));
+            if self.gone { return Ok(V22PendingRead::NotFound); }
+            let bytes = self.parts.get(part).context("no such part")?;
+            assert_eq!(bytes.len() as u64, total_bytes);
+            let (start, end) = crate::tomverse_api::v22_transfer_chunk_range(total_bytes, index)
+                .context("outside")?;
+            Ok(V22PendingRead::Chunk(bytes[start as usize..end as usize].to_vec()))
+        }
+    }
+
+    struct Run {
+        result: Vec<u8>,
+        patch: Vec<u8>,
+        paths: Vec<u8>,
+    }
+
+    impl Run {
+        /// A result of two chunks, a patch of one, a list of two paths.
+        fn new() -> Self {
+            let mut result = vec![b'r'; CHUNK + 100];
+            result[7] = b'x';
+            Self { result,
+                patch: b"diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-a\n+b\n".to_vec(),
+                paths: b"lib/a.ts\0app/b.tsx\0".to_vec() }
+        }
+
+        fn parts(&self, pending: bool) -> V22TransferParts {
+            V22TransferParts {
+                result: Some(V22TransferPart { bytes: self.result.len() as u64,
+                    sha256: sha(&self.result), pending, base_sha: None, count: None }),
+                patch: Some(V22TransferPart { bytes: self.patch.len() as u64,
+                    sha256: sha(&self.patch), pending, base_sha: Some("a".repeat(40)),
+                    count: None }),
+                changed_paths: Some(V22TransferPart { bytes: self.paths.len() as u64,
+                    sha256: sha(&self.paths), pending, base_sha: None, count: Some(2) }),
+            }
+        }
+
+        fn source(&self) -> (MemorySource, Arc<Mutex<Vec<(String, u64)>>>) {
+            let reads = Arc::new(Mutex::new(Vec::new()));
+            (MemorySource { parts: BTreeMap::from([
+                ("result".to_owned(), self.result.clone()),
+                ("patch".to_owned(), self.patch.clone()),
+                ("changed_paths".to_owned(), self.paths.clone())]),
+                reads: reads.clone(), gone: false }, reads)
+        }
+
+        fn job(&self, mode: V22TransferMode) -> V22TransferJob {
+            V22TransferJob { attempt_id: ATT.into(), worker: "claude-impl".into(),
+                parts: self.parts(true), outcome_succeeded: true, mode, paths_only: false }
+        }
+    }
+
+    fn done(end: V22TransferEnd) -> V22TransferDone {
+        match end {
+            V22TransferEnd::Done(done) => done,
+            other => panic!("expected a finished transfer, got {other:?}"),
+        }
+    }
+
+    // ---- wire and parts ------------------------------------------------------
+
+    #[test]
+    fn the_new_sidecar_ops_carry_exactly_the_designed_keys() {
+        let keys = |value: serde_json::Value| -> Vec<String> {
+            let mut keys: Vec<String> = value.as_object().unwrap().keys().cloned().collect();
+            keys.sort();
+            keys
+        };
+        assert_eq!(v22_readback_v2_payload(ATT),
+            serde_json::json!({"op": "readback_v2", "attemptId": ATT}));
+        assert_eq!(keys(v22_read_pending_payload(ATT, "patch", 3)),
+            ["attemptId", "index", "op", "part"]);
+        assert_eq!(v22_read_pending_payload(ATT, "patch", 3),
+            serde_json::json!({"op": "read_pending", "attemptId": ATT, "part": "patch", "index": 3}));
+        assert_eq!(v22_confirm_changed_paths_payload(ATT, &"c".repeat(64)),
+            serde_json::json!({"op": "confirm_changed_paths", "attemptId": ATT,
+                "sha256": "c".repeat(64)}));
+    }
+
+    fn terminal_with_parts(parts: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({"kind": "succeeded", "attemptId": ATT,
+            "resultSha256": "a".repeat(64), "patchDigest": "b".repeat(64),
+            "patchBaseSha": "c".repeat(40), "parts": parts})
+    }
+
+    fn sample_parts() -> serde_json::Value {
+        serde_json::json!({
+            "result": {"bytes": 10, "sha256": "a".repeat(64), "pending": true},
+            "patch": {"bytes": 20, "sha256": "b".repeat(64), "baseSha": "c".repeat(40), "pending": false},
+            "changed_paths": {"bytes": 30, "sha256": "d".repeat(64), "count": 2, "pending": true},
+        })
+    }
+
+    #[test]
+    fn a_readback_v2_answer_describes_its_parts_and_carries_no_body() {
+        let result = parse_v22_sidecar_value(&terminal_with_parts(sample_parts()), ATT).unwrap();
+        let parts = result.parts.clone().unwrap();
+        assert_eq!(parts.result.as_ref().map(|part| (part.bytes, part.pending)), Some((10, true)));
+        assert_eq!(parts.patch.as_ref().and_then(|part| part.base_sha.as_deref()),
+            Some("c".repeat(40).as_str()));
+        assert_eq!(parts.changed_paths.as_ref().and_then(|part| part.count), Some(2));
+        assert!(result.result_text.is_none() && result.patch_body.is_none() &&
+            result.changed_paths.is_none());
+        assert!(v22_uses_chunked_transfer(&result));
+        // A terminal from before 2026-11-15 keeps the read-back by digest.
+        let mut old = terminal_with_parts(sample_parts());
+        old["publishFilesDigest"] = serde_json::json!("e".repeat(64));
+        assert!(!v22_uses_chunked_transfer(&parse_v22_sidecar_value(&old, ATT).unwrap()));
+        // An old sidecar's answer has no parts and takes the inline path.
+        let inline = serde_json::json!({"kind": "succeeded", "attemptId": ATT});
+        assert!(parse_v22_sidecar_value(&inline, ATT).unwrap().parts.is_none());
+    }
+
+    #[test]
+    fn a_part_must_agree_with_its_terminal_and_with_the_contract() {
+        let mut other = terminal_with_parts(sample_parts());
+        other["resultSha256"] = serde_json::json!("f".repeat(64));
+        assert!(parse_v22_sidecar_value(&other, ATT).is_err());
+        let mut other = terminal_with_parts(sample_parts());
+        other["patchBaseSha"] = serde_json::json!("f".repeat(40));
+        assert!(parse_v22_sidecar_value(&other, ATT).is_err());
+        // Unknown part, zero-byte result, a patch with no base.
+        for bad in [
+            serde_json::json!({"extra": {"bytes": 1, "sha256": "a".repeat(64), "pending": true}}),
+            serde_json::json!({"result": {"bytes": 0, "sha256": "a".repeat(64), "pending": true}}),
+            serde_json::json!({"patch": {"bytes": 5, "sha256": "b".repeat(64), "pending": true}}),
+            serde_json::json!({"changed_paths": {"bytes": 5, "sha256": "d".repeat(64), "pending": true}}),
+        ] {
+            assert!(parse_v22_transfer_parts(&bad).is_err(), "{bad}");
+        }
+        // Parts only mean something on a terminal.
+        let running = serde_json::json!({"kind": "in_progress", "attemptId": ATT,
+            "parts": sample_parts()});
+        assert!(parse_v22_sidecar_value(&running, ATT).is_err());
+    }
+
+    #[test]
+    fn a_part_of_unknown_size_is_only_read_back() {
+        // An old terminal with no size and nothing pending (the sidecar's 0).
+        let parts = serde_json::json!({
+            "result": {"bytes": 0, "sha256": "a".repeat(64), "pending": false},
+            "patch": {"bytes": 0, "sha256": "b".repeat(64), "baseSha": "c".repeat(40), "pending": false},
+        });
+        let parsed = parse_v22_transfer_parts(&parts).unwrap();
+        assert!(!parsed.result.as_ref().unwrap().pending);
+        // A pending part always has its bytes.
+        assert!(parse_v22_transfer_parts(&serde_json::json!({
+            "result": {"bytes": 0, "sha256": "a".repeat(64), "pending": true}})).is_err());
+    }
+
+    #[tokio::test]
+    async fn an_unknown_size_is_not_held_against_the_apps_record() {
+        let run = Run::new();
+        let app = mock_app(FakeApp::default());
+        let (source, _) = run.source();
+        done(run_v22_transfer(&app.api(), &source, &run.job(V22TransferMode::UploadAll)).await);
+        let mut job = run.job(V22TransferMode::UploadAll);
+        job.parts = run.parts(false);
+        job.parts.result.as_mut().unwrap().bytes = 0;
+        job.parts.patch.as_mut().unwrap().bytes = 0;
+        let finished = done(run_v22_transfer(&app.api(), &source, &job).await);
+        assert_eq!(finished.result, V22UsageRecord::Recorded);
+        assert!(finished.patch_confirmable);
+    }
+
+    #[test]
+    fn an_empty_path_list_is_the_empty_digest_with_no_file() {
+        let parts = serde_json::json!({"changed_paths": {"bytes": 0,
+            "sha256": crate::tomverse_api::V22_EMPTY_SHA256, "count": 0, "pending": false}});
+        let parsed = parse_v22_transfer_parts(&parts).unwrap();
+        assert_eq!(parsed.changed_paths.as_ref().and_then(|part| part.count), Some(0));
+        for bad in [
+            serde_json::json!({"changed_paths": {"bytes": 0, "sha256": "d".repeat(64),
+                "count": 0, "pending": false}}),
+            serde_json::json!({"changed_paths": {"bytes": 0,
+                "sha256": crate::tomverse_api::V22_EMPTY_SHA256, "count": 0, "pending": true}}),
+            serde_json::json!({"changed_paths": {"bytes": 3,
+                "sha256": crate::tomverse_api::V22_EMPTY_SHA256, "count": 0, "pending": false}}),
+        ] {
+            assert!(parse_v22_transfer_parts(&bad).is_err(), "{bad}");
+        }
+        // Nothing to send: no task, no request.
+        let job = V22TransferJob { attempt_id: ATT.into(), worker: "w".into(),
+            parts: parsed, outcome_succeeded: false, mode: V22TransferMode::UploadAll,
+            paths_only: false };
+        assert!(!job.needs_task());
+        assert_eq!(v22_trivial_transfer(&job).paths, V22PathsState::Empty);
+    }
+
+    #[test]
+    fn a_pending_chunk_answer_is_checked_against_its_range() {
+        use base64::Engine;
+        let total = CHUNK as u64 + 3;
+        let encode = |bytes: &[u8]| base64::engine::general_purpose::STANDARD.encode(bytes);
+        let answer = |index: u64, bytes: &[u8]| serde_json::json!({"kind": "pending_chunk",
+            "attemptId": ATT, "part": "result", "index": index, "totalBytes": total,
+            "bytesBase64": encode(bytes)});
+        assert_eq!(parse_v22_pending_chunk(&answer(1, b"abc"), ATT, "result", 1, total).unwrap(),
+            V22PendingRead::Chunk(b"abc".to_vec()));
+        // The last chunk is its remainder, not a full chunk; a wrong length,
+        // index, part or digest-less answer is an error.
+        assert!(parse_v22_pending_chunk(&answer(1, b"ab"), ATT, "result", 1, total).is_err());
+        assert!(parse_v22_pending_chunk(&answer(1, b"abc"), ATT, "result", 0, total).is_err());
+        assert!(parse_v22_pending_chunk(&answer(1, b"abc"), ATT, "patch", 1, total).is_err());
+        assert!(parse_v22_pending_chunk(&answer(2, b"abc"), ATT, "result", 2, total).is_err());
+        assert!(parse_v22_pending_chunk(&serde_json::json!({"kind": "refused"}),
+            ATT, "result", 0, total).is_err());
+        assert_eq!(parse_v22_pending_chunk(&serde_json::json!({"kind": "not_found",
+            "attemptId": ATT}), ATT, "result", 0, total).unwrap(), V22PendingRead::NotFound);
+        let mut loose = answer(1, b"abc");
+        loose["bytesBase64"] = serde_json::json!("YWJj\n");
+        assert!(parse_v22_pending_chunk(&loose, ATT, "result", 1, total).is_err());
+    }
+
+    #[test]
+    fn an_old_sidecar_refuses_the_new_op_and_is_read_the_old_way() {
+        let refused = serde_json::json!({"kind": "refused"});
+        assert_eq!(v22_readback_v2_from_value(&refused, ATT).unwrap().map(|r| r.state), None);
+        let new = v22_readback_v2_from_value(&terminal_with_parts(sample_parts()), ATT).unwrap();
+        assert!(new.unwrap().parts.is_some());
+        // The old answer path keeps its own, old, bound for an inline patch.
+        let source = include_str!("wsl_bridge.rs");
+        let production = &source[..source.find("mod tests {").unwrap()];
+        assert!(production.contains("V22_LEGACY_INLINE_PATCH_MAX_BYTES"));
+        assert!(production.contains("V22_LEGACY_PATCH_ENVELOPE_MAX_BYTES"));
+    }
+
+    // ---- the transfer ----------------------------------------------------------
+
+    #[tokio::test]
+    async fn a_result_of_two_chunks_uploads_each_then_commits_and_reads_back() {
+        let run = Run::new();
+        let app = mock_app(FakeApp::default());
+        let (source, reads) = run.source();
+        let end = run_v22_transfer(&app.api(), &source, &run.job(V22TransferMode::UploadAll)).await;
+        let finished = done(end);
+        assert_eq!(finished.result, V22UsageRecord::Recorded);
+        assert!(finished.patch_confirmable);
+        assert_eq!(finished.paths, V22PathsState::Recorded { sha256: sha(&run.paths),
+            count: 2, bytes: run.paths.len() as u64 });
+        assert_eq!(finished.allowance_bytes, (run.patch.len() + run.paths.len()) as u64);
+        assert_eq!(app.log(), ["POST upload result 0", "POST upload result 1",
+            "POST upload patch 0", "POST result", "GET result",
+            "POST upload changed_paths 0", "POST changed-paths", "GET changed-paths"]);
+        assert_eq!(reads.lock().unwrap().len(), 4);
+        // The upload body has the designed keys: baseSha only for a patch,
+        // count only for the list.
+        let requests = app.requests.lock().unwrap();
+        let keys = |at: usize| { let mut keys: Vec<String> = requests[at].body.as_object()
+            .unwrap().keys().cloned().collect(); keys.sort(); keys };
+        let common = ["attemptId", "bytesBase64", "chunkSha256", "index", "part", "sha256",
+            "totalBytes", "worker"];
+        let with = |extra: &str| -> Vec<String> {
+            let mut all: Vec<String> = common.iter().map(|key| key.to_string()).collect();
+            all.push(extra.to_owned());
+            all.sort();
+            all
+        };
+        assert_eq!(keys(0), common);
+        assert_eq!(keys(2), with("baseSha"));
+        assert_eq!(keys(5), with("count"));
+        assert_eq!(requests[0].body["totalBytes"], run.result.len());
+        assert_eq!(requests[0].body["sha256"], sha(&run.result));
+        let commit = &requests[3].body;
+        assert_eq!(commit, &serde_json::json!({"attemptId": ATT, "worker": "claude-impl",
+            "transfer": "chunked_v1", "sourceSha256": sha(&run.result),
+            "resultBytes": run.result.len(),
+            "patch": {"sha256": sha(&run.patch), "baseSha": "a".repeat(40),
+                "bytes": run.patch.len()}}));
+        assert_eq!(requests[6].body, serde_json::json!({"attemptId": ATT, "worker": "claude-impl",
+            "transfer": "chunked_v1", "sha256": sha(&run.paths), "count": 2,
+            "bytes": run.paths.len()}));
+    }
+
+    #[tokio::test]
+    async fn a_chunk_whose_answer_was_lost_is_sent_again() {
+        let run = Run::new();
+        let app = mock_app(FakeApp { lose_upload_reply: Some(("result".into(), 1)),
+            ..Default::default() });
+        let (source, _) = run.source();
+        let finished = done(run_v22_transfer(&app.api(), &source,
+            &run.job(V22TransferMode::UploadAll)).await);
+        assert_eq!(finished.result, V22UsageRecord::Recorded);
+        let sent = app.log().iter().filter(|line| *line == "POST upload result 1").count();
+        assert_eq!(sent, 2, "{:?}", app.log());
+    }
+
+    #[tokio::test]
+    async fn a_commit_whose_answer_was_lost_is_read_back_not_resent() {
+        let run = Run::new();
+        let app = mock_app(FakeApp { lose_commit_reply: true, ..Default::default() });
+        let (source, _) = run.source();
+        let finished = done(run_v22_transfer(&app.api(), &source,
+            &run.job(V22TransferMode::UploadAll)).await);
+        assert_eq!(finished.result, V22UsageRecord::Recorded);
+        let log = app.log();
+        assert_eq!(log.iter().filter(|line| *line == "POST result").count(), 1, "{log:?}");
+        assert!(log.iter().filter(|line| *line == "GET result").count() >= 1);
+    }
+
+    #[tokio::test]
+    async fn after_a_restart_the_commit_goes_first_and_only_missing_chunks_are_sent() {
+        let run = Run::new();
+        let mut fake = FakeApp::default();
+        // The app already has chunk 0 of the result and the whole patch.
+        fake.staged.insert(("result".into(), 0), "x".into());
+        fake.staged.insert(("patch".into(), 0), "x".into());
+        let app = mock_app(fake);
+        let (source, reads) = run.source();
+        let mut job = run.job(V22TransferMode::CommitFirst);
+        job.parts.changed_paths = None;
+        let finished = done(run_v22_transfer(&app.api(), &source, &job).await);
+        assert_eq!(finished.result, V22UsageRecord::Recorded);
+        assert_eq!(app.log(), ["POST result", "POST upload result 1", "POST result", "GET result"]);
+        assert_eq!(*reads.lock().unwrap(), [("result".to_owned(), 1)]);
+    }
+
+    #[tokio::test]
+    async fn a_digest_the_app_found_different_is_sent_once_more_and_then_refused() {
+        let run = Run::new();
+        let app = mock_app(FakeApp { result_mismatches: 1, ..Default::default() });
+        let (source, _) = run.source();
+        let mut job = run.job(V22TransferMode::UploadAll);
+        job.parts.changed_paths = None;
+        let finished = done(run_v22_transfer(&app.api(), &source, &job).await);
+        assert_eq!(finished.result, V22UsageRecord::Recorded);
+        assert_eq!(app.log().iter().filter(|line| line.starts_with("POST upload result")).count(), 4);
+
+        let app = mock_app(FakeApp { result_mismatches: 2, ..Default::default() });
+        assert_eq!(run_v22_transfer(&app.api(), &source, &job).await, V22TransferEnd::Reject);
+    }
+
+    #[tokio::test]
+    async fn a_patch_the_app_cannot_hold_is_left_out_but_a_result_it_cannot_hold_is_refused() {
+        let run = Run::new();
+        let app = mock_app(FakeApp { patch_exceeds: true, ..Default::default() });
+        let (source, _) = run.source();
+        let mut job = run.job(V22TransferMode::UploadAll);
+        job.parts.changed_paths = None;
+        let finished = done(run_v22_transfer(&app.api(), &source, &job).await);
+        assert_eq!(finished.result, V22UsageRecord::Recorded);
+        // No confirm_patch: the patch stays on the box.
+        assert!(!finished.patch_confirmable);
+        assert!(app.requests.lock().unwrap().iter().all(|request| request.path() != RESULT ||
+            request.method == "GET" || request.body.get("patch").is_none()));
+
+        let app = mock_app(FakeApp { upload_forced: Some((409, "exceeds_storage")),
+            ..Default::default() });
+        assert_eq!(run_v22_transfer(&app.api(), &source, &job).await, V22TransferEnd::Reject);
+
+        // A list it cannot hold is settled without.
+        let app = mock_app(FakeApp { upload_forced: Some((409, "exceeds_storage")),
+            ..Default::default() });
+        let mut paths_job = run.job(V22TransferMode::UploadAll);
+        paths_job.outcome_succeeded = false;
+        let finished = done(run_v22_transfer(&app.api(), &source, &paths_job).await);
+        assert_eq!(finished.paths, V22PathsState::Skipped);
+    }
+
+    #[tokio::test]
+    async fn an_app_from_before_the_transfer_is_waited_on_not_settled() {
+        let run = Run::new();
+        let app = mock_app(FakeApp { upload_forced: Some((404, "not found")),
+            ..Default::default() });
+        let (source, _) = run.source();
+        let api = app.api();
+        assert_eq!(run_v22_transfer(&api, &source, &run.job(V22TransferMode::UploadAll)).await,
+            V22TransferEnd::AppTooOld);
+        // Through the run loop's slot: said once, then it waits without asking.
+        let mut transfers = V22Transfers::new();
+        let first = {
+            let (source, _) = run.source();
+            transfers.poll(&api, source, run.job(V22TransferMode::UploadAll)).await
+        };
+        assert_eq!(first, V22TransferPoll::Waiting);
+        let mut seen = Vec::new();
+        for _ in 0..200 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            let (source, _) = run.source();
+            let polled = transfers.poll(&api, source, run.job(V22TransferMode::UploadAll)).await;
+            if polled != V22TransferPoll::Waiting { seen.push(polled); break; }
+        }
+        assert_eq!(seen, [V22TransferPoll::AppWaiting { first: true }]);
+        let before = app.requests.lock().unwrap().len();
+        let (source, _) = run.source();
+        assert_eq!(transfers.poll(&api, source, run.job(V22TransferMode::UploadAll)).await,
+            V22TransferPoll::AppWaiting { first: false });
+        assert_eq!(app.requests.lock().unwrap().len(), before);
+    }
+
+    #[tokio::test]
+    async fn a_result_the_app_read_back_with_another_size_is_not_recorded() {
+        let run = Run::new();
+        let app = mock_app(FakeApp { reported_result_bytes: Some(5), ..Default::default() });
+        let (source, _) = run.source();
+        let mut job = run.job(V22TransferMode::UploadAll);
+        job.parts.changed_paths = None;
+        assert_eq!(run_v22_transfer(&app.api(), &source, &job).await, V22TransferEnd::Retry);
+    }
+
+    #[tokio::test]
+    async fn a_part_the_box_no_longer_holds_is_read_back_instead_of_sent() {
+        let run = Run::new();
+        let app = mock_app(FakeApp::default());
+        // The app has nothing: a result confirmed earlier and absent now is a refusal.
+        let (source, reads) = run.source();
+        let mut job = run.job(V22TransferMode::UploadAll);
+        job.parts = run.parts(false);
+        assert_eq!(run_v22_transfer(&app.api(), &source, &job).await, V22TransferEnd::Reject);
+        assert_eq!(app.log(), ["GET result"]);
+        assert!(reads.lock().unwrap().is_empty());
+        // With the record in place, it is recorded and the list read back too.
+        let (source, _) = run.source();
+        let upload_job = run.job(V22TransferMode::UploadAll);
+        done(run_v22_transfer(&app.api(), &source, &upload_job).await);
+        let finished = done(run_v22_transfer(&app.api(), &source, &job).await);
+        assert_eq!(finished.result, V22UsageRecord::Recorded);
+        assert!(matches!(finished.paths, V22PathsState::Recorded { .. }));
+    }
+
+    #[tokio::test]
+    async fn the_sidecar_losing_a_pending_file_ends_the_round_to_read_back_again() {
+        let run = Run::new();
+        let app = mock_app(FakeApp::default());
+        let (mut source, _) = run.source();
+        source.gone = true;
+        assert_eq!(run_v22_transfer(&app.api(), &source, &run.job(V22TransferMode::UploadAll)).await,
+            V22TransferEnd::Retry);
+    }
+
+    #[tokio::test]
+    async fn a_big_commit_never_holds_up_the_run_loops_heartbeats() {
+        let run = Run::new();
+        let app = mock_app(FakeApp { commit_delay: Some(Duration::from_millis(600)),
+            ..Default::default() });
+        let api = app.api();
+        let ticks = Arc::new(AtomicUsize::new(0));
+        let ticker = {
+            let ticks = ticks.clone();
+            tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                    ticks.fetch_add(1, Ordering::SeqCst);
+                }
+            })
+        };
+        let mut transfers = V22Transfers::new();
+        let mut finished = None;
+        let mut longest_poll = Duration::ZERO;
+        let started = Instant::now();
+        let mut job = run.job(V22TransferMode::UploadAll);
+        job.parts.changed_paths = None;
+        while finished.is_none() && started.elapsed() < Duration::from_secs(60) {
+            let (source, _) = run.source();
+            let before = Instant::now();
+            let polled = transfers.poll(&api, source, job.clone()).await;
+            longest_poll = longest_poll.max(before.elapsed());
+            if let V22TransferPoll::Done(done) = polled { finished = Some(done); }
+            // One tick of the run loop: heartbeats go out, then it looks again.
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        ticker.abort();
+        assert_eq!(finished.map(|done| done.result), Some(V22UsageRecord::Recorded));
+        // The commit alone took 600 ms: the loop kept ticking through it and no
+        // look at the transfer waited for it.
+        assert!(ticks.load(Ordering::SeqCst) >= 30, "{}", ticks.load(Ordering::SeqCst));
+        assert!(longest_poll < Duration::from_millis(250), "{longest_poll:?}");
+        // The run loop only asks; it never runs a transfer itself.
+        let source = include_str!("wsl_bridge.rs");
+        let production = &source[..source.find("mod tests {").unwrap()];
+        let run_loop = &production[production.find("async fn run_bridge(").unwrap()..];
+        assert!(run_loop.contains("transfers.poll(&api"));
+        assert!(!run_loop.contains("run_v22_transfer("));
+        assert!(run_loop.contains("transfer_wake.notified()"));
+        assert!(production.contains("tokio::spawn(async move {\n            let end = run_v22_transfer("));
+    }
+
+    #[tokio::test]
+    async fn a_round_that_proved_nothing_is_followed_by_one_that_commits_first() {
+        let run = Run::new();
+        // The first three uploads (one chunk, three tries) get no answer worth
+        // the name: the round proves nothing, and the next one starts from the app.
+        let app = mock_app(FakeApp { unavailable_uploads: 3, ..Default::default() });
+        let api = app.api();
+        let mut transfers = V22Transfers::new();
+        let mut job = run.job(V22TransferMode::UploadAll);
+        job.parts.changed_paths = None;
+        let mut state = None;
+        for _ in 0..500 {
+            let (source, _) = run.source();
+            if let V22TransferPoll::Done(done) = transfers.poll(&api, source, job.clone()).await {
+                state = Some(done);
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(state.map(|done| done.result), Some(V22UsageRecord::Recorded));
+        let log = app.log();
+        assert_eq!(&log[..4], ["POST upload result 0", "POST upload result 0",
+            "POST upload result 0", "POST result"], "{log:?}");
+        assert_eq!(log.iter().filter(|line| *line == "POST result").count(), 2, "{log:?}");
+    }
+
+    #[tokio::test]
+    async fn rounds_that_prove_nothing_never_give_up_and_never_halt() {
+        let run = Run::new();
+        // An app that never takes a chunk: every round proves nothing.
+        let app = mock_app(FakeApp { unavailable_uploads: u32::MAX, ..Default::default() });
+        let api = app.api();
+        let mut transfers = V22Transfers::new();
+        let mut job = run.job(V22TransferMode::UploadAll);
+        job.parts.changed_paths = None;
+        let mut rounds = 0;
+        for _ in 0..4000 {
+            let (source, _) = run.source();
+            // Always "keep waiting": there is no verdict to halt on.
+            assert_eq!(transfers.poll(&api, source, job.clone()).await, V22TransferPoll::Waiting);
+            rounds = transfers.slots.get(ATT).map_or(0, |slot| slot.failed_rounds);
+            if rounds >= 60 { break; }
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+        assert!(rounds >= 60, "{rounds}");
+        // From the second round on every round commits first.
+        let log = app.log();
+        let second = log.iter().position(|line| line == "POST result").unwrap();
+        assert!(second >= 3, "{log:?}");
+        let source = include_str!("wsl_bridge.rs");
+        let production = &source[..source.find("mod tests {").unwrap()];
+        assert!(!production.contains("GiveUp"));
+        assert!(!production.contains("V22_TRANSFER_MAX_FAILED_ROUNDS"));
+    }
+
+    #[test]
+    fn the_wait_between_rounds_doubles_from_fifteen_seconds_to_five_minutes() {
+        let base = Duration::from_secs(15);
+        let waits: Vec<u64> = (1..=8).map(|rounds| v22_backoff(base, rounds).as_secs()).collect();
+        assert_eq!(waits, [15, 30, 60, 120, 240, 300, 300, 300]);
+        assert_eq!(v22_backoff(base, u32::MAX), Duration::from_secs(300));
+        assert_eq!(v22_backoff(Duration::ZERO, 9), Duration::ZERO);
+    }
+
+    #[test]
+    fn a_settlement_that_lost_the_paths_has_them_committed_again_without_a_bound() {
+        let mut transfers = V22Transfers::new();
+        assert!(!transfers.recommit_paths(ATT), "no transfer, nothing to commit again");
+        transfers.slots.insert(ATT.into(), V22TransferSlot::default());
+        for _ in 0..50 {
+            assert!(transfers.recommit_paths(ATT));
+        }
+        assert_eq!(transfers.slots[ATT].recommits, 50);
+        assert!(transfers.slots[ATT].paths_only);
+        // The run loop keeps the attempt on exactly that reason and never
+        // settles it unverified for it.
+        let source = include_str!("wsl_bridge.rs");
+        let production = &source[..source.find("mod tests {").unwrap()];
+        let at = production.find("\"changed_paths_unrecorded\"").unwrap();
+        let arm = &production[at..at + 300];
+        assert!(arm.contains("transfers.recommit_paths("), "{arm}");
+        assert!(!production.contains("V22_PATHS_RECOMMITS"));
+    }
+
+    #[test]
+    fn the_shared_transfer_values_are_the_ones_the_ts_core_states() {
+        use crate::tomverse_api::*;
+        assert_eq!(V22_TRANSFER_CHUNK_BYTES, 4 * 1024 * 1024);
+        assert_eq!(V22_TRANSFER_BODY_MAX_BYTES, 6 * 1024 * 1024);
+        assert_eq!(V22_EMPTY_SHA256, sha(b""));
+        assert_eq!(V22_LEGACY_INLINE_PATCH_MAX_BYTES, 4 * 1024 * 1024);
+        assert_eq!(V22_LEGACY_PATCH_ENVELOPE_MAX_BYTES, 9 * 1024 * 1024);
+        // One second per chunk's worth of bytes, none for none.
+        assert_eq!(v22_size_allowance(0), Duration::ZERO);
+        assert_eq!(v22_size_allowance(1), Duration::from_secs(1));
+        assert_eq!(v22_size_allowance(V22_TRANSFER_CHUNK_BYTES as u64), Duration::from_secs(1));
+        assert_eq!(v22_size_allowance(V22_TRANSFER_CHUNK_BYTES as u64 + 1), Duration::from_secs(2));
+        assert_eq!(v22_transfer_chunk_count(0), 0);
+        assert_eq!(v22_transfer_chunk_range(V22_TRANSFER_CHUNK_BYTES as u64 + 3, 1),
+            Some((V22_TRANSFER_CHUNK_BYTES as u64, V22_TRANSFER_CHUNK_BYTES as u64 + 3)));
+        assert_eq!(v22_transfer_chunk_range(10, 1), None);
+        // A chunk request fits the proxy's 10 MiB with room to spare.
+        assert!(V22_TRANSFER_BODY_MAX_BYTES < 10 * 1024 * 1024);
+        assert!(V22_READ_PENDING_MAX_BYTES > V22_TRANSFER_CHUNK_BYTES.div_ceil(3) * 4);
     }
 }

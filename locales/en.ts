@@ -1,4 +1,5 @@
 import { reviewActionsCopy } from "./reviewActions";
+import { externalApiCopy } from "./externalApi";
 import { reviewHandoffCopy } from "./reviewHandoff";
 import { researchPreviewCopy } from "./researchPreview";
 import { englishLocationBody } from "./privacyLocation";
@@ -7,6 +8,7 @@ import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 
 export const en = {
     reviewActions: reviewActionsCopy.en,
+    externalApi: externalApiCopy.en,
     reviewHandoff: reviewHandoffCopy.en,
     journey: {
         receiptSent: "Source included in this attempt: {selected} selected + {recent} recent ({unique} unique messages)",
@@ -435,8 +437,9 @@ export const en = {
         removeAttachment: "Remove attachment",
         dropFilesHere: "Drop files to attach",
         dropFilesDescription: "Images, PDFs, text, and office files are supported.",
-        attachmentCountError: "You can attach up to 5 files.",
-        attachmentSizeError: "Each file must be 10 MB or smaller.",
+        attachmentCountError: "You can attach up to 10 files.",
+        attachmentSizeError: "Each file must be 50 MB or smaller.",
+        attachmentTotalSizeError: "Files in one message can total up to 100 MB.",
         attachmentTypeError: "This file type is not supported.",
         attachmentTypeMismatch: "The file's extension does not match its actual format.",
         attachmentEncodingUnreadable: "The file's character encoding could not be read.",
@@ -559,7 +562,7 @@ export const en = {
         addAndTools: "Add and tools",
         attachSourceSubtitle: "From your device or Google Drive",
         attachSourceTitle: "Add a file",
-        attachLimitsSummary: "Images, PDFs, text, code, ZIP and Office documents · up to 5 · 10 MB each",
+        attachLimitsSummary: "Images, PDFs, text, code, ZIP and Office documents · up to 10 · 50 MB each",
         backToMenu: "Back to the menu",
         openChatMenu: "Open chat menu",
         uploadFromComputer: "Choose from your computer",
@@ -747,7 +750,7 @@ export const en = {
         favoriteModels: "Favorites",
         recentModels: "Recent",
         attachmentGuideTitle: "Supported attachments",
-        attachmentGuideBody: "Images, PDFs, text, Office files, and Google Drive files are supported. Up to 5 files, 10 MB each.",
+        attachmentGuideBody: "Images, PDFs, text, Office files, and Google Drive files are supported. Up to 10 files, 50 MB each.",
         imageUnsupportedSelected: "These selected models cannot read images:",
         markdownImageBlocked: "External image not loaded for privacy",
         removeImageUnsupportedModels: "Remove incompatible models",

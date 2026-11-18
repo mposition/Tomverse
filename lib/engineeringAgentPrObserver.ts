@@ -8,6 +8,7 @@ import { completeAmuxV22ReviewOnObservedMerge } from "@/lib/amux/reviewMergeObse
 import {
   EngineeringAgentGitHubReadError,
   readEngineeringAgentPullObservation,
+  type EngineeringAgentPullDigestOptions,
   type EngineeringAgentPullObservation,
 } from "@/lib/engineeringAgentGitHubRead";
 import {
@@ -21,6 +22,7 @@ import {
   runEngineeringAgentTransaction,
 } from "@/lib/engineeringAgentStore";
 import { prisma } from "@/lib/prisma";
+import { pullDigestCurrent, pullDigestHolds, pullDigestVersion } from "@/lib/pullDiffDigestCore";
 
 /**
  * The approval observer (engineering-agent.md §9-10, version 5 item 1). Each
@@ -74,7 +76,8 @@ export type EngineeringAgentPrObserverOutcome =
   | "pr_file_state_mismatch";
 
 type Ports = {
-  read: (prNumber: number) => Promise<EngineeringAgentPullObservation>;
+  /** `legacyDiff`: the binding was bound before v2, so its v1 diff digest is read too (lib/pullDiffDigestCore.ts). */
+  read: (prNumber: number, options?: EngineeringAgentPullDigestOptions) => Promise<EngineeringAgentPullObservation>;
   now: () => Date;
   /**
    * The Decision Maker's approval of a merged binding's pull request and the
@@ -88,7 +91,7 @@ type Ports = {
 };
 
 const livePorts: Ports = {
-  read: (prNumber) => readEngineeringAgentPullObservation(prNumber),
+  read: (prNumber, options) => readEngineeringAgentPullObservation(prNumber, {}, options),
   now: () => new Date(),
   dmMerge: (input) => readAmuxDmT2MergeEvidence(input),
 };
@@ -128,8 +131,11 @@ export async function observeEngineeringAgentPullRequests(
   const results: EngineeringAgentPrObservation[] = [];
   for await (const binding of watchedBindings()) {
     let pull: EngineeringAgentPullObservation;
+    // A binding made before v2 is compared in v1, so only then is the diff read
+    // (a Decision Maker approval names its binding's own digest).
+    const boundDigest = (binding.snapshot as { diffDigest?: unknown } | null)?.diffDigest;
     try {
-      pull = await ports.read(binding.prNumber);
+      pull = await ports.read(binding.prNumber, { legacyDiff: pullDigestVersion(boundDigest) === 1 });
     } catch (error) {
       if (!(error instanceof EngineeringAgentGitHubReadError)) throw error;
       // The code only (never upstream text): a round that cannot read decides
@@ -155,7 +161,7 @@ export async function observeEngineeringAgentPullRequests(
         requiredChecks: pull.requiredChecks,
         reviews: pull.reviews,
         snapshot: { ...snapshot, recordedAt: binding.createdAt },
-        current: pull.diffDigest === null ? null : { baseSha: pull.baseSha, diffDigest: pull.diffDigest },
+        current: { baseSha: pull.baseSha, changeDigest: pull.changeDigest, diffDigest: pull.diffDigest },
       });
       if (verdict.verdict !== "approved") {
         results.push({ bindingId: binding.id, outcome: "waiting" });
@@ -182,15 +188,14 @@ export async function observeEngineeringAgentPullRequests(
 
     const approvedBeforeMerge = approval?.verdict === "approved" && typeof approval.observedAt === "string" &&
       new Date(approval.observedAt).getTime() <= pull.mergedAt!.getTime();
-    // The merged head is the verified commit, or a later head whose pull
-    // request diff is still the verified one: develop merged into the branch
-    // (GitHub's "Update branch", or a session bringing it up to date) moves the
-    // head without changing what the pull request changes. A diff that differs
-    // in any byte, or that could not be read, is not verified (#3828,
-    // 2026-11-13).
+    // The merged head is the verified commit, or its change is still the
+    // bound one. A v1 binding compares the diff, so develop merged into the
+    // branch (GitHub's "Update branch") that moved the head without changing
+    // the diff still counts (#3828, 2026-11-13); a v2 binding names the head
+    // commit itself, so a moved head is never the bound change. Anything that
+    // differs, or could not be read, is not verified.
     const bound = engineeringAgentBindingSnapshotSchema.safeParse(binding.snapshot);
-    const sameChange = pull.diffDigest !== null && bound.success &&
-      pull.diffDigest === bound.data.diffDigest;
+    const sameChange = bound.success && pullDigestHolds(bound.data.diffDigest, pull);
     const headVerified = pull.headSha === binding.verifiedHeadSha || sameChange;
     // Owner decision 2026-11-15: an approver's develop merge approves the diff
     // it merged, a moved head included (the CI auto-fix's develop merge on
@@ -215,7 +220,8 @@ export async function observeEngineeringAgentPullRequests(
         continue;
       }
       const dm = decideEngineeringAgentDmApprovedMerge({ baseRef: pull.baseRef, headSha: pull.headSha,
-        diffDigest: pull.diffDigest, mergedAt: pull.mergedAt!, mergedByKind: pull.mergedByKind,
+        changeDigest: pull.changeDigest, diffDigest: pull.diffDigest, mergedAt: pull.mergedAt!,
+        mergedByKind: pull.mergedByKind,
         approval: facts, laneMerge: facts?.laneMerge ?? null });
       if (dm === "waiting") {
         results.push({ bindingId: binding.id, outcome: "waiting" });
@@ -238,7 +244,9 @@ export async function observeEngineeringAgentPullRequests(
     const mergeRecord = { bindingId: binding.id, kind: "merge" as const, observation: mergeObservation,
       ...(approvedByMerge ? { approvedByMerge: true as const } : {}),
       ...(dmSettlementId !== null ? { approvedByDm: true as const } : {}),
-      mergedChange: { headSha: pull.headSha, diffDigest: pull.diffDigest, headVerified } };
+      // The merged change's digest in the binding's own version: what was compared.
+      mergedChange: { headSha: pull.headSha, headVerified, diffDigest: bound.success ?
+        pullDigestCurrent(bound.data.diffDigest, pull) : pull.changeDigest } };
 
     if (merge === "done") {
       const cardId = binding.run?.cardId ?? null;

@@ -13,13 +13,19 @@ import {
   qaReleaseDmMergeAllowed, qaReleaseMergeLaneExcludingFiles,
 } from "../lib/qaReleaseMergeLaneExclusionCore.ts";
 import { qaReleaseDmApprovedPull, runQaReleaseMergeLaneRound } from "../lib/qaReleaseMergeLaneServiceCore.ts";
+import { pullChangeDigest } from "../lib/pullDiffDigestCore.ts";
 
 // Owner decision 2026-11-13: "develop 병합 권한은 DM에게 승인합니다. main은 안됩니다."
 // The pure judgements of the Decision Maker's develop merge.
 
 const HEAD = "a".repeat(40);
 const OTHER = "f".repeat(40);
+/** A v1 digest, as approvals recorded before 2026-11-18 hold. */
 const DIFF = "d".repeat(64);
+const TREE = "c".repeat(40);
+/** The v2 change digest every new approval holds (owner decision 2026-11-18). */
+const CHANGE = pullChangeDigest({ mergeBaseSha: "b".repeat(40), headSha: HEAD, headTreeSha: TREE });
+const MOVED_CHANGE = pullChangeDigest({ mergeBaseSha: "e".repeat(40), headSha: HEAD, headTreeSha: TREE });
 const REF = "agent/engineering/700000001";
 
 test("the switch is off unless set to exactly enabled", () => {
@@ -141,6 +147,25 @@ test("a pull request read fresh is marked ready only as the Decision Maker appro
     pull: pull({ head: "claude/to-develop/x" }), change: change({ headRef: "claude/to-develop/x" }) }).verdict, "skip");
 });
 
+test("a v2 approval holds on the v2 change digest only, a v1 approval on its diff digest only", () => {
+  const v2Approved = { prNumber: 42, headRef: REF, approvedHeadSha: HEAD, approvedDiffDigest: CHANGE };
+  const change = (over = {}) => ({ state: "open", baseRef: "develop", headRef: REF, headSha: HEAD,
+    changeDigest: CHANGE, diffDigest: null, crossRepository: false, changedFiles: ["components/X.tsx"], ...over });
+  assert.deepEqual(amuxDmT2MergeChangeVerdict({ approved: v2Approved, change: change() }), { holds: true });
+  // develop absorbed part of the branch: the merge base moved, the head did not.
+  assert.deepEqual(amuxDmT2MergeChangeVerdict({ approved: v2Approved, change: change({ changeDigest: MOVED_CHANGE }) }),
+    { holds: false, reason: "diff_changed" });
+  assert.deepEqual(amuxDmT2MergeChangeVerdict({ approved: v2Approved, change: change({ changeDigest: null, diffDigest: DIFF }) }),
+    { holds: false, reason: "diff_unreadable" }, "a v1 reading never stands in for v2");
+  // A v1 approval recorded before v2 still holds on the v1 reading, and is not judged by v2.
+  const v1Approved = { ...v2Approved, approvedDiffDigest: DIFF };
+  assert.deepEqual(amuxDmT2MergeChangeVerdict({ approved: v1Approved, change: change({ diffDigest: DIFF }) }), { holds: true });
+  assert.deepEqual(amuxDmT2MergeChangeVerdict({ approved: v1Approved, change: change() }),
+    { holds: false, reason: "diff_unreadable" });
+  assert.deepEqual(amuxDmT2MergeChangeVerdict({ approved: { ...v2Approved, approvedDiffDigest: "x" }, change: change() }),
+    { holds: false, reason: "head_moved" }, "an approval digest of neither version holds nothing");
+});
+
 test("the observer's second basis: the lane's own merge of exactly the approved change, into develop", () => {
   const mergedAt = new Date("2026-11-13T10:00:00Z");
   const approval = { approvedHeadSha: HEAD, approvedDiffDigest: DIFF, decidedAt: new Date("2026-11-13T09:00:00Z") };
@@ -255,6 +280,11 @@ test("a lane round merges a reported engineering pull request and leaves an unre
         listOpenDevelopPulls: async () => [pull],
         exclusionInputs: async (p) => inputs({ headBranch: p.headRefName }),
         readPull: async () => pull,
+        changeDigest: async (number, headSha) => {
+          order.push("change");
+          assert.deepEqual([number, headSha], [42, HEAD]);
+          return "changeDigest" in answers ? answers.changeDigest : CHANGE;
+        },
         diffDigest: async () => { order.push("diff"); return "diffDigest" in answers ? answers.diffDigest : DIFF; },
         merge: async (number, headSha) => { order.push("merge"); merges.push([number, headSha]); return { result: "merged", sha: "9".repeat(40) }; },
         onDevelop: async () => true,
@@ -275,13 +305,20 @@ test("a lane round merges a reported engineering pull request and leaves an unre
   const merged = await run({ dmApproved: [{ number: 42, headSha: HEAD, headRef: REF }] },
     { issue: { issued: true, attemptId: "att-1" }, consume: { consumed: true } });
   assert.deepEqual(merged.merges, [[42, HEAD]]);
-  // Review r-20261114-021949-8dbd49: the diff as GitHub serves it now is read right before the consume and carried in it.
-  assert.deepEqual(merged.order, ["diff", "consume", "merge"]);
+  // Review r-20261114-021949-8dbd49: the change as GitHub has it now is read right before the consume and carried
+  // in it -- the v2 change digest, and the v1 diff digest beside it for an approval recorded before v2.
+  assert.deepEqual(merged.order, ["change", "diff", "consume", "merge"]);
+  assert.equal(merged.consumes[0].changeDigest, CHANGE);
   assert.equal(merged.consumes[0].diffDigest, DIFF);
-  // Its diff unread: no consume, no merge.
+  // Its change unread: no consume, no merge.
   const unread = await run({ dmApproved: [{ number: 42, headSha: HEAD, headRef: REF }] },
+    { issue: { issued: true, attemptId: "att-1" }, consume: { consumed: true }, changeDigest: null });
+  assert.deepEqual([unread.order, unread.merges], [["change"], []]);
+  // A diff too large or binary to read in v1 no longer stops it: the consume carries the change digest alone.
+  const bigDiff = await run({ dmApproved: [{ number: 42, headSha: HEAD, headRef: REF }] },
     { issue: { issued: true, attemptId: "att-1" }, consume: { consumed: true }, diffDigest: null });
-  assert.deepEqual([unread.order, unread.merges], [["diff"], []]);
+  assert.deepEqual(bigDiff.order, ["change", "diff", "consume", "merge"]);
+  assert.deepEqual([bigDiff.consumes[0].changeDigest, "diffDigest" in bigDiff.consumes[0]], [CHANGE, false]);
   // The app refuses the consume (its Decision Maker approval no longer holds): never merged without it.
   const refused = await run({ dmApproved: [{ number: 42, headSha: HEAD, headRef: REF }] },
     { issue: { issued: true, attemptId: "att-1" }, consume: { consumed: false, reason: "dm_approval_not_holding" } });
@@ -305,7 +342,7 @@ test("a Decision Maker ready is a person's: while an earlier one's CI has not sh
   assert.equal(amuxDmT2MergeReadyInFlight({ readies: [], running: new Set(), nowMs: NOW }), false);
 });
 
-test("the engineering agent and the merge lane digest a diff with one function", async () => {
+test("every reader reads the change digest with one function", async () => {
   const { readFileSync } = await import("node:fs");
   const { createHash } = await import("node:crypto");
   const { pullDiffDigest, PULL_DIFF_DIGEST_MAX_BYTES } = await import("../lib/pullDiffDigestCore.ts");
@@ -313,10 +350,31 @@ test("the engineering agent and the merge lane digest a diff with one function",
   assert.equal(pullDiffDigest(diff), createHash("sha256").update(Buffer.from(diff, "utf8")).digest("hex"));
   assert.equal(pullDiffDigest(Buffer.from(diff, "utf8")), pullDiffDigest(diff), "the bytes and their text agree");
   assert.equal(PULL_DIFF_DIGEST_MAX_BYTES, 1024 * 1024);
-  for (const file of ["lib/engineeringAgentGitHubRead.ts", "lib/qaReleaseMergeLaneGithub.ts"]) {
+  for (const file of ["lib/engineeringAgentGitHubRead.ts", "lib/qaReleaseMergeLaneGithub.ts", "lib/amux/reviewGitHub.ts",
+    "scripts/engineering-agent-publisher.mjs"]) {
     const source = readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
-    assert.match(source, /import \{ PULL_DIFF_DIGEST_MAX_BYTES, pullDiffDigest \} from "\.\/pullDiffDigestCore\.ts";/, file);
+    assert.match(source,
+      /import \{[^}]*\breadPullChangeDigest\b[^}]*\} from\s+"(?:\.\/|\.\.\/lib\/|@\/lib\/)pullDiffDigestCore(?:\.ts)?";/, file);
+    assert.doesNotMatch(source, /createHash\("sha256"\)\.update\(diffBytes\)/, `${file} digests no diff of its own`);
   }
+});
+
+test("the merge lane reads the v2 change digest: merge base from compare, tree from the head commit", async () => {
+  const { createQaReleaseGithubPorts } = await import("../lib/qaReleaseMergeLaneGithub.ts");
+  const requests = [];
+  const answers = {
+    [`/repos/mposition/Tomverse/compare/develop...${HEAD}?per_page=1&page=1`]:
+      { status: "ahead", merge_base_commit: { sha: "b".repeat(40) } },
+    [`/repos/mposition/Tomverse/git/commits/${HEAD}`]: { sha: HEAD, tree: { sha: TREE } },
+  };
+  const lane = createQaReleaseGithubPorts({ token: async () => "t", http: async (request) => {
+    requests.push(request);
+    const path = request.url.replace("https://api.github.com", "");
+    return path in answers ? { status: 200, text: JSON.stringify(answers[path]) } : { status: 404, text: "{}" };
+  } });
+  assert.equal(await lane.changeDigest(42, HEAD), CHANGE);
+  assert.deepEqual(requests.map((request) => request.method), ["GET", "GET"]);
+  await assert.rejects(lane.changeDigest(42, OTHER));
 });
 
 test("a diff with bytes that are not UTF-8 digests the same in the engineering read and in the merge lane", async () => {
@@ -358,10 +416,20 @@ test("a diff with bytes that are not UTF-8 digests the same in the engineering r
     if (path.startsWith("/pulls/42/files")) {
       return new Response(JSON.stringify([{ filename: "components/X.tsx", status: "modified" }]), { status: 200 });
     }
+    if (path === `/compare/develop...${HEAD_SHA}?per_page=1&page=1`) {
+      return new Response(JSON.stringify({ status: "ahead", merge_base_commit: { sha: BASE_SHA } }), { status: 200 });
+    }
+    if (path === `/git/commits/${HEAD_SHA}`) {
+      return new Response(JSON.stringify({ sha: HEAD_SHA, tree: { sha: TREE } }), { status: 200 });
+    }
     return new Response("{}", { status: 404 });
   };
-  const change = await readEngineeringAgentPullChange(42, { env: { [ENGINEERING_AGENT_GITHUB_READ_TOKEN_ENV]: "t" }, fetchImpl });
+  const deps = { env: { [ENGINEERING_AGENT_GITHUB_READ_TOKEN_ENV]: "t" }, fetchImpl };
+  // The v1 diff is read only for an approval recorded before v2.
+  const change = await readEngineeringAgentPullChange(42, deps, { legacyDiff: true });
   assert.equal(change.diffDigest, expected);
+  assert.equal(change.changeDigest, pullChangeDigest({ mergeBaseSha: BASE_SHA, headSha: HEAD_SHA, headTreeSha: TREE }));
+  assert.equal((await readEngineeringAgentPullChange(42, deps)).diffDigest, null);
   assert.equal(change.crossRepository, false);
   assert.deepEqual(change.changedFiles, ["components/X.tsx"]);
 });

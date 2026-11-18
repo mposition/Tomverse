@@ -257,6 +257,15 @@ const PATH_CALL_SITES = {
   provider_probe: { budget: [], request: [], settlement: [] },
   provider_verification: { budget: [], request: [], settlement: [] },
   memory_extraction: { budget: [], request: [], settlement: [] },
+  // The client sends the marker (Claude Code): the request part is the file
+  // that passes the client's cache_control through and checks its TTL, not a
+  // getModelGenerationSettings call.
+  external_api_messages: {
+    budget: ["lib/externalApiNative.ts"],
+    request: [],
+    clientMarkers: ["lib/anthropicMessagesProtocol.ts"],
+    settlement: ["lib/externalApiNative.ts"],
+  },
 };
 
 /**
@@ -286,6 +295,14 @@ test("every caching path is wired for budget, request and settlement", () => {
     const sites = PATH_CALL_SITES[path];
     assert.ok(sites, `${path} has no entry in PATH_CALL_SITES`);
     for (const part of ["budget", "request", "settlement"]) {
+      if (part === "request" && sites.clientMarkers?.length) {
+        for (const file of sites.clientMarkers) {
+          const source = sourceOf(file);
+          assert.match(source, /cache_control/, `${file} must read the client marker`);
+          assert.match(source, /"5m"/, `${file} must refuse any TTL but the reserved 5 minutes`);
+        }
+        continue;
+      }
       assert.ok(
         sites[part].length > 0,
         `${path} caches but names no ${part} call site. All three are needed: the budget authorises the write premium, the request carries the marker, and settlement bills the write. Two of three fails silently.`
@@ -388,7 +405,7 @@ test("no path is wired for the budget without also being wired for the request",
   for (const [path, sites] of Object.entries(PATH_CALL_SITES)) {
     if (sites.budget.length === 0) continue;
     assert.ok(
-      sites.request.length > 0,
+      sites.request.length > 0 || sites.clientMarkers?.length > 0,
       `${path} names a budget call site and no request site`
     );
   }
@@ -446,7 +463,9 @@ test("the first launch scope is chat_turn alone", () => {
   const caching = Object.entries(ANTHROPIC_PROMPT_CACHE_PATHS)
     .filter(([, policy]) => policy.caches)
     .map(([path]) => path);
-  assert.deepEqual(caching, ["chat_turn"]);
+  // external_api_messages is the one addition, and a different kind: the
+  // client (Claude Code) places the markers; Tomverse reserves and bills them.
+  assert.deepEqual(caching, ["chat_turn", "external_api_messages"]);
 });
 
 test("a searching turn is a different path, and it does not cache", () => {

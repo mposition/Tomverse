@@ -9,7 +9,6 @@ import { closeLifecycleHarness, fixtureCommitted, lifecycle, queryAdapter, witho
   "./helpers/amuxLifecycleHarness";
 import { seedAmuxV4PortfolioRecoveryPrerequisites } from "./helpers/amuxV4PortfolioSeedFixture.mjs";
 import { amuxContentUnitKeyId } from "@/lib/amux/ideaKeyStore";
-import { AMUX_MAX_EXECUTION_ATTEMPTS } from "@/lib/amux/executionBudgetCore";
 
 // The AMUX owner queue through the Decision Maker (owner decision 2026-11-13),
 // on PostgreSQL with every migration trigger on: a stopped v22 Task is filed
@@ -634,7 +633,7 @@ test("a review pull request's approval is recorded with its verified head and di
   });
 });
 
-test("a Task that moved, a resolved escalation or a spent budget never takes the Decision Maker's answer", async () => {
+test("a Task that moved or a resolved escalation never takes the Decision Maker's answer; no count of attempts refuses its retry", async () => {
   await lifecycle(async (tx) => {
     const card = await stoppedTask(tx);
     await sync();
@@ -657,16 +656,14 @@ test("a Task that moved, a resolved escalation or a spent budget never takes the
     assert.equal(row?.cancelReason, "escalation_resolved");
   });
   await lifecycle(async (tx) => {
-    // Its one run is placed as the runaway guard's last counted attempt (no
-    // fixed count stops a card since 2026-11-15; the DM's retry follows the
-    // claim's own budget rule).
+    // Its one run is numbered thirty, the count that used to hand the retry
+    // off: no count of attempts stops a card since 2026-11-18.
     const card = await stoppedTask(tx, { afterSettlement: (inner, taskId) => withoutTriggers(inner,
-      () => inner.$executeRaw`UPDATE "AmuxExecutionAttempt" SET "attemptNumber" = ${AMUX_MAX_EXECUTION_ATTEMPTS}
+      () => inner.$executeRaw`UPDATE "AmuxExecutionAttempt" SET "attemptNumber" = 30
         WHERE "taskId" = ${taskId}`) });
     await sync();
-    assert.deepEqual(await apply(card.settlementId, { decision: "retry" }), { applied: false, outcome: "handed_off" });
-    assert.equal((await settlementRow(tx, card.settlementId))?.handoffReason, "attempt_budget_spent");
-    assert.equal((await taskRow(tx, card.taskId)).status, "blocked");
+    assert.deepEqual(await apply(card.settlementId, { decision: "retry" }), { applied: true, outcome: "todo" });
+    assert.equal((await taskRow(tx, card.taskId)).status, "todo");
   });
   await lifecycle(async (tx) => {
     const card = await stoppedTask(tx);
@@ -718,6 +715,18 @@ test("the table refuses what the lifecycle does not allow", async () => {
     assert.equal(await refusedBy("AmuxDmOwnerSettlement_shape_check", () => tx.$executeRaw`
       UPDATE "AmuxDmOwnerSettlement" SET "id" = ${randomUUID()} WHERE "id" = ${card.settlementId}`), true,
       "a version 4 id is not a settlement's");
+    // Owner decision 2026-11-18: an approval names the v2 change digest, or a v1 one recorded
+    // before it; nothing else. (CHECKs are tested by name order: the shape before the state.)
+    for (const digest of [`v3:${"a".repeat(64)}`, `v2:${"a".repeat(63)}`, `V2:${"a".repeat(64)}`, "a".repeat(63)]) {
+      assert.equal(await refusedBy("AmuxDmOwnerSettlement_shape_check", () => tx.$executeRaw`
+        UPDATE "AmuxDmOwnerSettlement" SET "approvedHeadSha" = ${"a".repeat(40)}, "approvedDiffDigest" = ${digest}
+        WHERE "id" = ${card.settlementId}`), true, `not an approval digest: ${digest}`);
+    }
+    for (const digest of [`v2:${"a".repeat(64)}`, "a".repeat(64)]) {
+      assert.equal(await refusedBy("AmuxDmOwnerSettlement_shape_check", () => tx.$executeRaw`
+        UPDATE "AmuxDmOwnerSettlement" SET "approvedHeadSha" = ${"a".repeat(40)}, "approvedDiffDigest" = ${digest}
+        WHERE "id" = ${card.settlementId}`), false, `an approval digest: ${digest} (the open state still refuses it)`);
+    }
     assert.equal(await refusedBy("AmuxDmOwnerSettlement_escalationId_key", () => tx.$executeRaw`
       INSERT INTO "AmuxDmOwnerSettlement" ("id", "taskId", "escalationId", "kind", "taskStatus", "updatedAt")
       VALUES (${"00000000-0000-8000-8000-000000000001"}, ${card.taskId}, ${card.escalationId}, 'stopped',

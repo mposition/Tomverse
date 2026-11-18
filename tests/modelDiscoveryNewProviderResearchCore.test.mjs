@@ -212,6 +212,9 @@ test("connected-provider image models are accepted only from a connected provide
     rejected.map((item) => item.reason),
     ["no_official_citation", "not_connected_provider", "known_model"]
   );
+  // The rejection keeps what was cited, so the operator sees which host failed.
+  assert.deepEqual(rejected[0].citedUrls, ["https://fal.ai/models/minimax/image-01"]);
+  assert.equal(rejected[1].citedUrls, undefined);
   assert.equal(connectedProviderId("Zhipu AI", providers), "zhipu");
   assert.equal(connectedProviderId("Hailuo (MiniMax)", providers), "minimax");
   assert.equal(connectedProviderId("Cohere", providers), null);
@@ -296,4 +299,34 @@ test("research calls run one at a time and a failure logs its HTTP status, never
   });
   assert.deepEqual(researchFailureFacts(apiError), { error: "AI_APICallError", statusCode: 429, retryable: true });
   assert.deepEqual(researchFailureFacts("nope"), { error: "unknown", statusCode: null, retryable: null });
+});
+
+// 2026-11-16: the connected-image call answered, nothing was filed, and no
+// reason was kept anywhere. The last run is now stored for the Admin tab.
+test("the last research run is stored bounded and read back, and a bad row reads as none", async () => {
+  const { newProviderResearchRunRecord, parseNewProviderResearchRunRecord } = await import(
+    "../lib/modelDiscoveryNewProviderResearchCore.ts"
+  );
+  const rejection = (index) => ({
+    providerName: "minimax",
+    apiModelId: `model-${index}`,
+    reason: "no_official_citation",
+    citedUrls: ["https://www.minimax.io/news"],
+  });
+  const record = newProviderResearchRunRecord({
+    week: "2026-W47",
+    ranAt: "2026-11-16T00:05:16.000Z",
+    modelId: "perplexity/sonar-pro",
+    calls: [
+      { product: "chat", ok: true, proposed: 0, accepted: 0, rejected: [] },
+      { product: "connected_image", ok: true, proposed: 30, accepted: 0, rejected: Array.from({ length: 30 }, (_, i) => rejection(i)) },
+    ],
+    created: [],
+  });
+  assert.equal(record.calls[1].rejected.length, 20);
+  assert.deepEqual(record.calls[1].rejected[0].citedUrls, ["https://www.minimax.io/news"]);
+  assert.deepEqual(parseNewProviderResearchRunRecord(JSON.stringify(record)), record);
+  assert.equal(parseNewProviderResearchRunRecord(null), null);
+  assert.equal(parseNewProviderResearchRunRecord("not json"), null);
+  assert.equal(parseNewProviderResearchRunRecord(JSON.stringify({ week: "2026-W47" })), null);
 });

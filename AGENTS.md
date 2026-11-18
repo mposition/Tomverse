@@ -108,6 +108,7 @@ Report implemented and tested behavior separately from documentation, review, me
 | Conversation.productKey | `docs/policy/conversation-product-key.md` |
 | Chat concurrency and identity namespace | `docs/policy/chat-concurrency-and-identity.md` |
 | Code managed-path credits, guardrail and concurrency | `docs/policy/code-task-cost-guardrails.md`, `docs/policy/code-concurrency.md`, `docs/policy/credit-and-cost-limits.md` |
+| External inference API (/api/v1, API keys) | `docs/policy/external-api.md`, `docs/policy/credit-and-cost-limits.md` |
 | 프로모션 할인과 통화 | `docs/policy/promotion-discount-currency.md` |
 | 가격 카탈로그 default는 fixture가 아닙니다 | `docs/policy/promotion-discount-currency.md` |
 | Plan change (Pro <-> Max) | `docs/policy/plan-change.md` |
@@ -123,6 +124,7 @@ Report implemented and tested behavior separately from documentation, review, me
 | 엔지니어링 Agent | `docs/policy/engineering-agent.md` |
 | AMUX Decision Maker | `docs/policy/amux-decision-maker.md`, `docs/ops/amux/decision-maker-s0.md` |
 | AMUX 카드 표시 번호 | `docs/policy/amux-card-display-key.md`, `docs/policy/amux-intake.md` |
+| AMUX 실행 구조(worker = 서버의 코딩 에이전트 CLI, 기존 v22 로컬 CLI 흐름, 질문은 DM, 다음 card는 점수) — 실행 방식을 바꾸거나 제안하기 전에 | `docs/policy/amux-worker-lanes.md` |
 | AI Review (교차검토) 품질과 M5 | `docs/policy/ai-review-m5-quality-contract.md`, `docs/ui-contracts/ai-review-evidence-chain.md` |
 | Mobile chat composer invariant | `docs/ui-contracts/mobile-chat-composer.md` |
 | Mobile sidebar drawer invariant | `docs/ui-contracts/mobile-sidebar-drawer.md` |
