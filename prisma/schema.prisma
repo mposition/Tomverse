@@ -2077,6 +2077,9 @@ model ExternalApiRequest {
   clientName           String?
   modelId              String
   stream               Boolean
+  /// Wire protocol: chat_completions, anthropic_messages or responses. Rows
+  /// written before the column existed are Chat Completions.
+  protocol             String                @default("chat_completions")
   finishReason         String?
   errorCode            String?
   createdAt            DateTime              @default(now())
