@@ -95,6 +95,17 @@ test("API keys: the page says so when the API is not offered to the account", as
     await expect(page.getByTestId("external-api-create")).toHaveCount(0);
 });
 
+test("API keys: a signed-out visitor is asked to sign in, not told the load failed", async ({ page }) => {
+    await prepareGuestPage(page, "en");
+    await page.route("**/api/user/api-keys", (route) => route.fulfill({ status: 401, json: { error: "Sign in required." } }));
+    await page.goto("/settings/api");
+    const signIn = page.getByTestId("external-api-signin");
+    await expect(signIn).toBeVisible();
+    await expect(signIn.getByRole("link")).toHaveAttribute("href", "/auth/signin?callbackUrl=%2Fsettings%2Fapi");
+    await expect(page.getByText("Your keys could not be loaded. Try again.")).toHaveCount(0);
+    await expect(page.getByTestId("external-api-create")).toHaveCount(0);
+});
+
 test("API keys: an account the API was switched off for can still revoke its keys", async ({ page }) => {
     await prepareGuestPage(page, "en");
     const calls = await mockKeys(page, {

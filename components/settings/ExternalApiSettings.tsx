@@ -459,6 +459,7 @@ export function ExternalApiSettings() {
     const product = useSettingsReturnProduct();
     const [overview, setOverview] = useState<Overview | null>(null);
     const [failed, setFailed] = useState(false);
+    const [signedOut, setSignedOut] = useState(false);
     const [name, setName] = useState("");
     const [cap, setCap] = useState("");
     const [expiry, setExpiry] = useState<string>("90");
@@ -477,6 +478,9 @@ export function ExternalApiSettings() {
             .then(async (response) => {
                 const body = await readJson(response);
                 if (cancelled) return;
+                // The list is the session probe: no session is a sign-in
+                // prompt, not a load failure.
+                setSignedOut(response.status === 401);
                 if (!response.ok || !body) {
                     setFailed(true);
                     return;
@@ -550,7 +554,18 @@ export function ExternalApiSettings() {
             <p className="mt-2 text-sm leading-6 text-zinc-500 dark:text-zinc-400">{t("externalApi.intro")}</p>
             <p className="mt-2 text-sm leading-6 text-zinc-500 dark:text-zinc-400">{t("externalApi.shareWarning")}</p>
 
-            {failed && !overview ? <p className="mt-8 text-sm text-zinc-600 dark:text-zinc-300">{t("externalApi.loadFailed")}</p> : null}
+            {signedOut ? (
+                <section className="mt-8 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950/60" data-testid="external-api-signin">
+                    <p className="text-sm text-zinc-600 dark:text-zinc-300">{t("externalApi.signInRequired")}</p>
+                    <Link
+                        href={`/auth/signin?callbackUrl=${encodeURIComponent("/settings/api")}`}
+                        className="mt-3 inline-flex rounded-xl bg-zinc-900 px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
+                    >
+                        {t("auth.login")}
+                    </Link>
+                </section>
+            ) : null}
+            {failed && !overview && !signedOut ? <p className="mt-8 text-sm text-zinc-600 dark:text-zinc-300">{t("externalApi.loadFailed")}</p> : null}
             {!failed && !overview ? <p className="mt-8 text-sm text-zinc-500">{t("externalApi.loading")}</p> : null}
             {overview && !overview.enabled ? (
                 <>
