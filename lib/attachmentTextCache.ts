@@ -118,12 +118,21 @@ export const readAttachmentTextCache = async (
 
 export const writeAttachmentTextCache = async (
   objectKey: string,
-  entries: readonly CachedAttachmentText[]
+  entries: readonly CachedAttachmentText[],
+  options?: { abortSignal?: AbortSignal }
 ) => {
   const body = Buffer.from(serializeCachedAttachmentText(entries), "utf8");
   if (body.byteLength > MAX_CACHE_BYTES) return;
-  await writeR2Object(attachmentTextCacheKey(objectKey), body, CONTENT_TYPE);
+  await writeR2Object(attachmentTextCacheKey(objectKey), body, CONTENT_TYPE, options);
 };
+
+/**
+ * How long the cache PUT may run, and how long the lock is held. The PUT is
+ * aborted far inside the lock, so it can never still be running -- and land --
+ * after the lock has gone.
+ */
+export const ATTACHMENT_TEXT_CACHE_PUT_TIMEOUT_MS = 15_000;
+export const ATTACHMENT_TEXT_CACHE_LOCK_TIMEOUT_MS = 60_000;
 
 /**
  * Writes the cache only while its attachment row exists, and holds that row
@@ -156,11 +165,28 @@ export const writeBoundAttachmentTextCache = (input: {
         WHERE "id" = ${input.attachmentId} AND "objectKey" = ${input.objectKey}
         FOR KEY SHARE`;
       if (rows.length === 0) return false;
-      await writeAttachmentTextCache(input.objectKey, input.entries);
+      try {
+        await writeAttachmentTextCache(input.objectKey, input.entries, {
+          abortSignal: AbortSignal.timeout(ATTACHMENT_TEXT_CACHE_PUT_TIMEOUT_MS),
+        });
+      } catch (error) {
+        // An aborted or failed PUT has an unknown outcome. It is taken back
+        // out while the lock is still held, before anything can delete the
+        // row, and then the failure is reported.
+        await deleteAttachmentTextCache(input.objectKey).catch(() => undefined);
+        throw error;
+      }
+      // Proves the transaction -- and so the lock -- outlived the PUT. A
+      // transaction that has already timed out fails here, and the caller
+      // takes the text back out.
+      await tx.$queryRaw`SELECT 1`;
       return true;
     },
-    { timeout: 30_000 }
-  );
+    { timeout: ATTACHMENT_TEXT_CACHE_LOCK_TIMEOUT_MS }
+  ).catch(async (error) => {
+    await deleteAttachmentTextCache(input.objectKey).catch(() => undefined);
+    throw error;
+  });
 
 /**
  * Deletes the cached text of every version, so bumping the version never

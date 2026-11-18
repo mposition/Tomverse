@@ -155,10 +155,40 @@ test("the cache is written only while its attachment row is held", () => {
     assert.match(writer, /FROM "MessageAttachment"\s*WHERE "id" = \$\{input\.attachmentId\} AND "objectKey" = \$\{input\.objectKey\}\s*FOR KEY SHARE/);
     const lock = writer.indexOf("FOR KEY SHARE");
     const gone = writer.indexOf("if (rows.length === 0) return false;");
-    const write = writer.indexOf("await writeAttachmentTextCache(input.objectKey, input.entries);");
+    const write = writer.indexOf("await writeAttachmentTextCache(input.objectKey, input.entries, {");
     assert.ok(lock > 0 && gone > lock && write > gone, "lock, then check, then write -- inside one transaction");
     // No time window to fall out of any more.
     assert.doesNotMatch(source("lib/messageAttachmentStorage.ts"), /sweepLateAttachmentTextCaches|LATE_TEXT_CACHE/);
+});
+
+// Review r-20261118-064254-d277bc, blocker: a PUT still running when the lock
+// times out could land after the deletion it was ordered against.
+test("the PUT ends well inside the lock, and an unknown outcome is taken back out", async () => {
+    const { ATTACHMENT_TEXT_CACHE_PUT_TIMEOUT_MS, ATTACHMENT_TEXT_CACHE_LOCK_TIMEOUT_MS } = await import("../lib/attachmentTextCache.ts");
+    assert.ok(ATTACHMENT_TEXT_CACHE_PUT_TIMEOUT_MS * 3 <= ATTACHMENT_TEXT_CACHE_LOCK_TIMEOUT_MS);
+    const cache = source("lib/attachmentTextCache.ts");
+    const writer = cache.slice(cache.indexOf("export const writeBoundAttachmentTextCache"));
+    assert.match(writer, /abortSignal: AbortSignal\.timeout\(ATTACHMENT_TEXT_CACHE_PUT_TIMEOUT_MS\)/);
+    assert.match(writer, /\{ timeout: ATTACHMENT_TEXT_CACHE_LOCK_TIMEOUT_MS \}/);
+    // A failed PUT is deleted while the lock is still held...
+    const put = writer.indexOf("await writeAttachmentTextCache(");
+    const inLockDelete = writer.indexOf("await deleteAttachmentTextCache(input.objectKey)", put);
+    const alive = writer.indexOf("await tx.$queryRaw`SELECT 1`");
+    assert.ok(put > 0 && inLockDelete > put && alive > inLockDelete);
+    // ...and a transaction that did not survive the PUT deletes it after.
+    assert.match(writer.slice(alive), /\)\.catch\(async \(error\) => \{\s*await deleteAttachmentTextCache\(input\.objectKey\)/);
+    assert.match(source("lib/r2.ts"), /options\?\.abortSignal \? \{ abortSignal: options\.abortSignal \} : \{\}/);
+});
+
+// Same review: earlier files must never stop a new message from being sent.
+test("earlier files have their own byte share and are left out past it", () => {
+    const route = source("app/api/chat/route.ts");
+    assert.match(route, /let pastAttachmentBytes = 0;/);
+    // The turn's own files still answer 413 past the request total...
+    assert.match(route, /if \(isLatestMessage\) \{\s*totalAttachmentBytes \+= attachmentBytes;\s*if \(totalAttachmentBytes > MAX_TOTAL_ATTACHMENT_SIZE\) \{\s*throw new ChatAccessError\(\s*413,/);
+    // ...earlier ones are named to the model and left out, read or not.
+    assert.match(route, /pastAttachmentBytes \+= attachmentBytes;\s*if \(pastAttachmentBytes > MAX_TOTAL_ATTACHMENT_SIZE\) \{\s*textAttachments\.push\(\{[\s\S]{0,160}PAST_ATTACHMENT_OMITTED_KIND/);
+    assert.match(route, /!isLatestMessage &&\s*typeof resolved\?\.size === "number" &&\s*pastAttachmentBytes \+ resolved\.size > MAX_TOTAL_ATTACHMENT_SIZE/);
 });
 
 test("reading the cache never deletes it", () => {

@@ -3336,6 +3336,11 @@ async function handleChatPost(
         }
         let estimatedInputTokens = 0;
         let totalAttachmentBytes = 0;
+        // Earlier messages' files read whole have a byte share of their own, the
+        // same size as the turn's: past it they are named to the model and left
+        // out, as past the token share, so a conversation's history can never
+        // stop a new message from being sent.
+        let pastAttachmentBytes = 0;
         let totalExtractedCharacters = 0;
         // Earlier messages' files share half the input allowance; past it they
         // are left out of the turn rather than failing it. See
@@ -4514,6 +4519,20 @@ async function handleChatPost(
                     }
                 }
 
+                // An earlier file the share cannot take is not even read.
+                if (
+                    !isLatestMessage &&
+                    typeof resolved?.size === "number" &&
+                    pastAttachmentBytes + resolved.size > MAX_TOTAL_ATTACHMENT_SIZE
+                ) {
+                    textAttachments.push({
+                        name: attachment.name,
+                        kind: PAST_ATTACHMENT_OMITTED_KIND,
+                        text: PAST_ATTACHMENT_OMITTED_TEXT,
+                    });
+                    continue;
+                }
+
                 let attachmentBuffer: Buffer;
                 try {
                     attachmentBuffer = await readR2Object(attachment.objectKey, {
@@ -4659,13 +4678,25 @@ async function handleChatPost(
                         }
                     );
                 }
-                totalAttachmentBytes += attachmentBytes;
-                if (totalAttachmentBytes > MAX_TOTAL_ATTACHMENT_SIZE) {
-                    throw new ChatAccessError(
-                        413,
-                        "ATTACHMENT_TOTAL_TOO_LARGE",
-                        "Attachments exceed the total request size limit."
-                    );
+                if (isLatestMessage) {
+                    totalAttachmentBytes += attachmentBytes;
+                    if (totalAttachmentBytes > MAX_TOTAL_ATTACHMENT_SIZE) {
+                        throw new ChatAccessError(
+                            413,
+                            "ATTACHMENT_TOTAL_TOO_LARGE",
+                            "Attachments exceed the total request size limit."
+                        );
+                    }
+                } else {
+                    pastAttachmentBytes += attachmentBytes;
+                    if (pastAttachmentBytes > MAX_TOTAL_ATTACHMENT_SIZE) {
+                        textAttachments.push({
+                            name: attachment.name,
+                            kind: PAST_ATTACHMENT_OMITTED_KIND,
+                            text: PAST_ATTACHMENT_OMITTED_TEXT,
+                        });
+                        continue;
+                    }
                 }
 
                 if (format.category !== "archive") {
