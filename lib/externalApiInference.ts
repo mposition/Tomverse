@@ -34,7 +34,10 @@ import { ApiSecurityError, consumeApiRateLimit, readLimitedText } from "@/lib/ap
 import {
     externalApiEnabled,
     externalApiUserAllowed,
+    SMART_ADAPTIVE_MODEL_ID,
+    smartAdaptiveEnabled,
 } from "@/lib/externalApiCatalogCore";
+import { routeSmartAdaptive } from "@/lib/externalApiSmartAdaptive";
 import { externalApiRunnableModels } from "@/lib/externalApiCatalog";
 import { externalApiAdmissionHook } from "@/lib/externalApiAdmission";
 import { authenticateExternalApiKey, ExternalApiKeyError } from "@/lib/externalApiKeys";
@@ -251,7 +254,21 @@ export async function handleChatCompletions(request: Request): Promise<Response>
 
         const plan = await getUserBillingPlan(key.userId);
         const runnable = await externalApiRunnableModels(plan.tier);
-        const entry = runnable.find((candidate) => candidate.capabilities.id === parsed.model);
+        // Smart Adaptive: the router picks one of the runnable models, and the
+        // response says which one answered (the `model` field and a header).
+        let routedHeaders: Record<string, string> = {};
+        let entry = runnable.find((candidate) => candidate.capabilities.id === parsed.model);
+        if (parsed.model === SMART_ADAPTIVE_MODEL_ID && smartAdaptiveEnabled(process.env) && runnable.length >= 2) {
+            const routed = await routeSmartAdaptive({
+                request: parsed,
+                runnable,
+                keyId: key.keyId,
+                userId: key.userId,
+                requestId,
+            });
+            entry = routed.entry;
+            routedHeaders = { "x-tomverse-routed-model": entry.model.id, "x-tomverse-routed-by": routed.routedBy };
+        }
         if (!entry) {
             throw new ProtocolError(404, "model_not_found", `The model '${parsed.model}' is not available to this key.`, "model");
         }
@@ -288,9 +305,10 @@ export async function handleChatCompletions(request: Request): Promise<Response>
             : (["temperature", "top_p", "frequency_penalty", "presence_penalty"] as const).filter(
                   (param) => parsed[param] != null
               );
-        const ignoredHeader: Record<string, string> = ignoredParameters.length
-            ? { "x-tomverse-ignored-parameters": ignoredParameters.join(", ") }
-            : {};
+        const infoHeaders: Record<string, string> = {
+            ...routedHeaders,
+            ...(ignoredParameters.length ? { "x-tomverse-ignored-parameters": ignoredParameters.join(", ") } : {}),
+        };
         // The API is stateless, and OpenAI's Responses API stores requests by
         // default -- so every OpenAI call says store: false explicitly,
         // whatever the client sent.
@@ -514,7 +532,7 @@ export async function handleChatCompletions(request: Request): Promise<Response>
                     Connection: "keep-alive",
                     "X-Accel-Buffering": "no",
                     "x-request-id": requestId,
-                    ...ignoredHeader,
+                    ...infoHeaders,
                 },
             });
         }
@@ -538,7 +556,7 @@ export async function handleChatCompletions(request: Request): Promise<Response>
                 usage: final.usage,
                 tomverse: { request_id: requestId },
             }),
-            { headers: { ...NO_STORE, "x-request-id": requestId, ...ignoredHeader } }
+            { headers: { ...NO_STORE, "x-request-id": requestId, ...infoHeaders } }
         );
     } catch (error) {
         // Reached only before the provider was called: anything later is

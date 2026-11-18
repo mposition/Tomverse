@@ -4,6 +4,8 @@ import {
     externalApiModelCapabilities,
     externalApiModelIds,
     isExternalApiServableModel,
+    smartAdaptiveCapabilities,
+    smartAdaptiveEnabled,
     type ExternalApiModelCapabilities,
 } from "@/lib/externalApiCatalogCore";
 import { getModelUsageProfile, resolveModelRequestPricing, type AiModel, type ModelTier } from "@/lib/models";
@@ -30,4 +32,15 @@ export const externalApiRunnableModels = async (
                 creditWeight: getModelUsageProfile(model).credits,
             }),
         }));
+};
+
+/**
+ * What `GET /models` and the settings page offer: the runnable models, plus
+ * Smart Adaptive first when it is switched on and has two models to choose
+ * between.
+ */
+export const externalApiOfferedModels = async (plan: ModelTier): Promise<ExternalApiModelCapabilities[]> => {
+    const runnable = (await externalApiRunnableModels(plan)).map((entry) => entry.capabilities);
+    const smart = smartAdaptiveEnabled(process.env) ? smartAdaptiveCapabilities(runnable) : null;
+    return smart ? [smart, ...runnable] : runnable;
 };

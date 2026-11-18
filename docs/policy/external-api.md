@@ -38,6 +38,7 @@ All default off. Server-side; hiding UI is never the gate.
 | `EXTERNAL_API_HEARTBEAT_MS` | How often an in-flight request renews its concurrency slot and reservation, default 60 000. Runs from dispatch, including the wait for a streaming request's first part. Lowered only by tests. |
 | `EXTERNAL_API_READS_PER_MINUTE` / `_PER_DAY` | Separate per-account budget for `GET /models` and `GET /usage`, defaults 60 / 5 000. The settings read routes (key list, receipts) have a fixed 60 / 5 000; revocation has none, so it always works. |
 | `EXTERNAL_API_TIMEOUT_MS` | Server timeout for one generation, default 600 000. |
+| `EXTERNAL_API_SMART_ADAPTIVE_ENABLED` | Exactly `true` offers the `smart-adaptive` model (section 5.1) when the account has at least two listed models. Off by default: each routed request makes one call to Chat's router model, held against the provider operational budget, not the user's credits. |
 
 **Kill switch.** The Admin operational pause for AI chat
 (`feature.aiChatEnabled`) stops every new external dispatch at once (503
@@ -188,6 +189,34 @@ the original answer cannot be replayed. A different body under the same
 Idempotency-Key is 422. Concurrent twins dispatch exactly once. Without the
 header, a retry is a new request — the server cannot tell it from a new one.
 
+### 5.1 Smart Adaptive
+
+`model: "smart-adaptive"` lets Tomverse choose, per request, which of the
+account's listed models answers -- Chat's own Smart Adaptive router
+(`pickAutoModelWithLlm`, the router model set in Admin › Routing). It is the
+cross-provider choice a single-vendor subscription cannot offer, so the
+response always says which model answered: the `model` field (OpenAI's
+convention), `x-tomverse-routed-model`, and `x-tomverse-routed-by`
+(`router`, `continued` or `default`).
+
+- **Candidates:** the runnable models (`EXTERNAL_API_MODEL_IDS` ∩ registry ∩
+  plan), in the operator's order; a request with an image only among models
+  that read images. The `GET /models` entry advertises what every candidate
+  meets (smallest window and output limit, largest credits per request), so a
+  client setting built from it fits whichever model answers.
+- **Router input:** the latest user message's text and the assistant text
+  before it, bounded by the router itself. Nothing is stored: the external API
+  passes no conversation id, so the router writes no `AutoRouterDecision` row.
+- **Tool loops:** a request that only carries tool results back keeps the model
+  picked for the user message it continues, remembered in process for ten
+  minutes under a SHA-256 digest of the key and the messages up to that user
+  message. A miss (another instance, a restart) routes again. A new user message
+  is routed again.
+- **No answer** (no router model configured, provider budget refused, timeout,
+  one candidate left): the first listed candidate, `routed-by: default`.
+- **Charging:** the request is reserved, charged and receipted as the routed
+  model; `GET /usage` shows that model's id.
+
 ## 6. Data
 
 `ExternalApiKey`: name, prefix, digest, cap, expiry, revocation, last use.
@@ -223,7 +252,7 @@ run now. The key appears only in the configuration shown right after creation.
   `chat.agentHost.byokModels.enabled`. A model without tool calling is hidden
   from agents; every listed model here advertises it.
 
-Neither client has been verified against this API yet; section 9.
+Aside has been verified against this API; VS Code is in progress (section 9).
 
 ## 8. Operations
 
@@ -268,5 +297,8 @@ Not yet done, each a separate step:
   empty until then).
 - Paid smoke tests with a test account and a spending ceiling.
 - Real Aside and VS Code acceptance runs (tool round trip, image, stop, usage,
-  revocation), with versions recorded here.
+  revocation), with versions recorded here. Aside passed locally on 2026-11-18
+  against a production build and a real OpenAI model (pi/1.4.1); VS Code is in
+  progress.
+- A live Smart Adaptive run (it adds a paid router call per routed request).
 - Production migration, merge and deployment.

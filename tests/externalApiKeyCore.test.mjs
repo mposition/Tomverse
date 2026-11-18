@@ -18,6 +18,9 @@ import {
     externalApiUserAllowed,
     isExternalApiServableModel,
     KEY_PLACEHOLDER,
+    SMART_ADAPTIVE_MODEL_ID,
+    smartAdaptiveCapabilities,
+    smartAdaptiveEnabled,
     toOpenAiModelEntry,
     vscodeCustomEndpointConfig,
 } from "../lib/externalApiCatalogCore.ts";
@@ -119,4 +122,19 @@ test("client configs carry the real model facts and never a stored secret", () =
     assert.equal(vscode[0].models[0].url, "https://tomverse.app/api/v1/chat/completions");
     assert.equal(vscode[0].models[0].maxInputTokens + vscode[0].models[0].maxOutputTokens, caps.contextWindowTokens);
     assert.ok(!JSON.stringify(vscode).includes("tvk_"));
+});
+
+test("Smart Adaptive is off by default and promises only what every candidate meets", () => {
+    assert.equal(smartAdaptiveEnabled({}), false);
+    assert.equal(smartAdaptiveEnabled({ EXTERNAL_API_SMART_ADAPTIVE_ENABLED: "true" }), true);
+    const a = { id: "a", name: "A", provider: "openai", tools: true, vision: true, reasoning: true, contextWindowTokens: 200_000, maxOutputTokens: 64_000, creditWeight: 1 };
+    const b = { id: "b", name: "B", provider: "deepseek", tools: true, vision: false, reasoning: false, contextWindowTokens: 128_000, maxOutputTokens: 8_000, creditWeight: 3 };
+    assert.equal(smartAdaptiveCapabilities([a]), null, "one model is nothing to choose between");
+    const smart = smartAdaptiveCapabilities([a, b]);
+    assert.equal(smart.id, SMART_ADAPTIVE_MODEL_ID);
+    assert.equal(smart.contextWindowTokens, 128_000);
+    assert.equal(smart.maxOutputTokens, 8_000);
+    assert.equal(smart.creditWeight, 3, "the most a request can cost");
+    assert.equal(smart.vision, true, "images are routed to a model that reads them");
+    assert.equal(vscodeCustomEndpointConfig("https://x/api/v1", [smart])[0].models[0].name, "Smart Adaptive (Tomverse)");
 });

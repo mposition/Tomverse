@@ -88,6 +88,19 @@ test("external inference API over the real shared credit ledger", { skip: !datab
         },
     });
 
+    // Smart Adaptive's router. Chat's LLM router is a paid call; here it answers
+    // what the test says and records what it was asked.
+    const routerCalls = [];
+    let routerPick = null;
+    mock.module(mod("lib/autoLlmRouter.ts"), {
+        namedExports: {
+            pickAutoModelWithLlm: async (input) => {
+                routerCalls.push(input);
+                return routerPick ? { modelId: routerPick, rewrite: null } : null;
+            },
+        },
+    });
+
     const { handleChatCompletions } = await import(mod("lib/externalApiInference.ts"));
     const keys = await import(mod("lib/externalApiKeys.ts"));
 
@@ -336,6 +349,73 @@ test("external inference API over the real shared credit ledger", { skip: !datab
         const second = (await reservationsFor(userId)).at(-1);
         assert.equal(second.settledCostMicroUsd, 0n);
         script = textScript("Hello from the fixture.");
+    });
+
+    await t.test("Smart Adaptive routes among the listed models and keeps the pick through a tool loop", async () => {
+        const userId = await newUser();
+        allow(userId);
+        const { key } = await issueKey(userId);
+        const SECOND = "deepseek-v4-flash";
+        process.env.EXTERNAL_API_MODEL_IDS = `${MODEL_ID},${SECOND}`;
+        try {
+            delete process.env.EXTERNAL_API_SMART_ADAPTIVE_ENABLED;
+            assert.equal((await call(key, body({ model: "smart-adaptive" }))).status, 404, "off by default");
+
+            process.env.EXTERNAL_API_SMART_ADAPTIVE_ENABLED = "true";
+            routerPick = SECOND;
+            routerCalls.length = 0;
+            const question = { role: "user", content: "Run the tests and fix the failure" };
+            const first = await call(key, body({ model: "smart-adaptive", messages: [question] }));
+            assert.equal(first.status, 200);
+            assert.equal(first.headers.get("x-tomverse-routed-model"), SECOND);
+            assert.equal(first.headers.get("x-tomverse-routed-by"), "router");
+            assert.equal((await first.json()).model, SECOND, "the response names the model that answered");
+            assert.equal(routerCalls.length, 1);
+            assert.equal(routerCalls[0].prompt, "Run the tests and fix the failure");
+            assert.equal(routerCalls[0].conversationId, null, "no decision row, so no prompt is stored");
+            assert.deepEqual(routerCalls[0].eligibleModelIds, [MODEL_ID, SECOND]);
+            const receipt = await db.externalApiRequest.findFirst({ where: { userId }, orderBy: { createdAt: "desc" } });
+            assert.equal(receipt.modelId, SECOND, "the receipt and the charge are the routed model's");
+
+            // The tool round continues the same user message: same model, no router call.
+            routerPick = MODEL_ID;
+            const round = await call(key, body({
+                model: "smart-adaptive",
+                messages: [
+                    question,
+                    { role: "assistant", content: null, tool_calls: [{ id: "call_1", type: "function", function: { name: "run", arguments: "{}" } }] },
+                    { role: "tool", tool_call_id: "call_1", content: "1 failing" },
+                ],
+                tools: [{ type: "function", function: { name: "run", parameters: { type: "object", properties: {} } } }],
+            }));
+            assert.equal(round.status, 200);
+            assert.equal(round.headers.get("x-tomverse-routed-model"), SECOND);
+            assert.equal(round.headers.get("x-tomverse-routed-by"), "continued");
+            assert.equal(routerCalls.length, 1);
+
+            // A new user message is routed again.
+            const next = await call(key, body({ model: "smart-adaptive", messages: [question, { role: "assistant", content: "Done." }, { role: "user", content: "Thanks, now summarise" }] }));
+            assert.equal(next.headers.get("x-tomverse-routed-model"), MODEL_ID);
+            assert.equal(routerCalls.length, 2);
+            assert.equal(routerCalls[1].previousAnswer, "Done.");
+
+            // An image: only models that read images are candidates; one left means no router call.
+            const image = await call(key, body({ model: "smart-adaptive", messages: [{ role: "user", content: [{ type: "text", text: "What is this?" }, { type: "image_url", image_url: { url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==" } }] }] }));
+            assert.equal(image.status, 200);
+            assert.equal(image.headers.get("x-tomverse-routed-model"), MODEL_ID);
+            assert.equal(image.headers.get("x-tomverse-routed-by"), "default");
+            assert.equal(routerCalls.length, 2);
+
+            // No router answer (not configured, budget, timeout): the first listed model.
+            routerPick = null;
+            const fallback = await call(key, body({ model: "smart-adaptive", messages: [{ role: "user", content: "Something else" }] }));
+            assert.equal(fallback.headers.get("x-tomverse-routed-model"), MODEL_ID);
+            assert.equal(fallback.headers.get("x-tomverse-routed-by"), "default");
+        } finally {
+            process.env.EXTERNAL_API_MODEL_IDS = MODEL_ID;
+            delete process.env.EXTERNAL_API_SMART_ADAPTIVE_ENABLED;
+            routerPick = null;
+        }
     });
 
     await t.test("sampling parameters a model does not take are left out and named, not refused", async () => {

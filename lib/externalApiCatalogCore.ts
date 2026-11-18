@@ -93,6 +93,40 @@ export const externalApiModelCapabilities = (
     creditWeight: limits.creditWeight,
 });
 
+/**
+ * Smart Adaptive: the model id that lets Tomverse's router pick, per request,
+ * which of the account's listed models answers -- the same router Chat uses.
+ * Default off (EXTERNAL_API_SMART_ADAPTIVE_ENABLED), and offered only when
+ * there are at least two models to choose between.
+ */
+export const SMART_ADAPTIVE_MODEL_ID = "smart-adaptive";
+
+export const smartAdaptiveEnabled = (env: ExternalApiEnv) =>
+    env.EXTERNAL_API_SMART_ADAPTIVE_ENABLED === "true";
+
+/**
+ * What a client may assume of Smart Adaptive: limits every candidate meets, so
+ * a configuration built from this entry fits whichever model answers. Credits
+ * are the most a request can cost; images are accepted when any candidate
+ * reads them, and such a request is routed only among those.
+ */
+export const smartAdaptiveCapabilities = (
+    candidates: readonly ExternalApiModelCapabilities[]
+): ExternalApiModelCapabilities | null =>
+    candidates.length < 2
+        ? null
+        : {
+              id: SMART_ADAPTIVE_MODEL_ID,
+              name: "Smart Adaptive",
+              provider: "tomverse",
+              tools: true,
+              vision: candidates.some((candidate) => candidate.vision),
+              reasoning: false,
+              contextWindowTokens: Math.min(...candidates.map((candidate) => candidate.contextWindowTokens)),
+              maxOutputTokens: Math.min(...candidates.map((candidate) => candidate.maxOutputTokens)),
+              creditWeight: Math.max(...candidates.map((candidate) => candidate.creditWeight)),
+          };
+
 /** OpenAI-shaped `GET /models` entry. Tomverse fields sit under `tomverse`. */
 export const toOpenAiModelEntry = (model: ExternalApiModelCapabilities) => ({
     id: model.id,

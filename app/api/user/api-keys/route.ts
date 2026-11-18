@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { z } from "zod";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
-import { externalApiRunnableModels } from "@/lib/externalApiCatalog";
+import { externalApiOfferedModels } from "@/lib/externalApiCatalog";
 import {
     asideProviderConfig,
     vscodeCustomEndpointConfig,
@@ -33,7 +33,7 @@ export async function GET(request: Request) {
         request,
         async ({ userId, plan }) => withManagementReadLimit(request, userId, async () => {
             const baseUrl = externalApiBaseUrl(request);
-            const models = (await externalApiRunnableModels(plan.tier)).map((entry) => entry.capabilities);
+            const models = await externalApiOfferedModels(plan.tier);
             return managementJson(200, {
                 enabled: true,
                 baseUrl,
@@ -82,7 +82,7 @@ export async function POST(request: Request) {
             // secret is shown only in this response, so a failure after the key
             // is created would leave an active key nobody can use.
             const baseUrl = externalApiBaseUrl(request);
-            const models = (await externalApiRunnableModels(plan.tier)).map((entry) => entry.capabilities);
+            const models = await externalApiOfferedModels(plan.tier);
             const created = await createExternalApiKey({ userId, name, creditCap, expiresAt }, { session, request });
             return managementJson(201, {
                 // Shown once. The server keeps only a digest and cannot show it again.
