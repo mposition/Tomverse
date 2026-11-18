@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { workspaceWelcomeCopy } from "../../locales/workspaceWelcome";
 import { expectNoHorizontalOverflow } from "./support/app-fixtures";
 import { setRootFontSize } from "./support/chat-state-fixtures";
 
@@ -1027,6 +1028,53 @@ test.describe("purchase modal accessibility", { tag: "@ui-risk" }, () => {
       const box = await page.getByTestId(testId).boundingBox();
       expect(box, `${testId} has no box`).not.toBeNull();
       expect(box!.height, `${testId} height`).toBeGreaterThanOrEqual(44);
+    }
+  });
+});
+
+test.describe("starter context on pricing", { tag: "@ui-risk" }, () => {
+  test("shows the translated starter label and image generation for every plan in every language", async ({
+    page,
+  }) => {
+    await preparePricingPage(page, { plan: null });
+    const starterLabels: Record<string, string> = {
+      en: workspaceWelcomeCopy.en.starter.cards.compareImageModels.label,
+      ko: workspaceWelcomeCopy.ko.starter.cards.compareImageModels.label,
+      zh: workspaceWelcomeCopy.zh.starter.cards.compareImageModels.label,
+      "zh-Hant": workspaceWelcomeCopy["zh-Hant"].starter.cards.compareImageModels.label,
+      fr: workspaceWelcomeCopy.fr.starter.cards.compareImageModels.label,
+      de: workspaceWelcomeCopy.de.starter.cards.compareImageModels.label,
+      es: workspaceWelcomeCopy.es.starter.cards.compareImageModels.label,
+      pt: workspaceWelcomeCopy.pt.starter.cards.compareImageModels.label,
+    };
+
+    const imageWords: Record<string, RegExp> = {
+      en: /image/i,
+      ko: /이미지/,
+      zh: /图像|圖片/,
+      "zh-Hant": /圖像|圖片/,
+      fr: /image/i,
+      de: /bild/i,
+      es: /imagen/i,
+      pt: /imagem/i,
+    };
+
+    for (const [language, imageWord] of Object.entries(imageWords)) {
+      await gotoPricing(page, `?lang=${encodeURIComponent(language)}&starter=compare-image-models`);
+
+      const notice = page.getByTestId("pricing-starter-notice");
+      await expect(notice).toBeVisible();
+      await expect(notice).toContainText(starterLabels[language]);
+      await expect(notice).not.toContainText("chatStarter.cards");
+
+      for (const planId of ["free", "pro", "max"]) {
+        const imageFeature = page
+          .getByTestId(`pricing-plan-card-${planId}`)
+          .locator("ul li span")
+          .filter({ hasText: imageWord })
+          .first();
+        await expect(imageFeature, `${language} ${planId} image feature`).toBeVisible();
+      }
     }
   });
 });
