@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
     ATTACHMENT_TEXT_CACHE_CATEGORIES,
-    ATTACHMENT_TEXT_CACHE_VERSION,
     attachmentTextCacheEnabled,
     parseCachedAttachmentEntries,
 } from "../lib/attachmentTextCache.ts";
