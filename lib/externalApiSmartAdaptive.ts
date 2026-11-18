@@ -29,8 +29,10 @@ type RunnableEntry = Awaited<ReturnType<typeof externalApiRunnableModels>>[numbe
  * Smart Adaptive request was refused at admission in the last two minutes
  * (credits, allowance, concurrency). Otherwise the default model is taken and
  * admission refuses with its own error. An Idempotency-Key replay is answered
- * before this runs. Without the router switch, or when the router gives no answer, the
- * default model answers if it fits, otherwise the first candidate.
+ * before this runs, and a concurrent duplicate of one still routing takes the
+ * default model. The gate's checks run only when a router call is next.
+ * Without the router switch, or when the router gives no answer, the default
+ * model answers if it fits, otherwise the first candidate.
  *
  * A coding client sends every tool round as a new request, so routing each one
  * afresh would let the model change half-way through a task. A request that
@@ -52,6 +54,9 @@ export const noteSmartAdaptiveRefusal = (keyId: string, now = Date.now()) => {
     if (refused.size >= STICKY_MAX) refused.delete(refused.keys().next().value as string);
     refused.set(keyId, now);
 };
+
+/** Idempotent requests routing now, by key and Idempotency-Key digest. */
+const routing = new Set<string>();
 
 /** Whether the paid router call may be made for this key now. */
 export const smartAdaptiveRouterAllowed = async (
@@ -152,8 +157,10 @@ export const routeSmartAdaptive = async (input: {
     keyId: string;
     userId: string;
     requestId: string;
-    /** From `smartAdaptiveRouterAllowed`: false makes no router call. */
-    routerAllowed: boolean;
+    /** Asked only when a router call is next; false makes none (see smartAdaptiveRouterAllowed). */
+    routerAllowed: () => Promise<boolean>;
+    /** The request's Idempotency-Key digest, when it has one. */
+    idempotencyKeyDigest?: string | null;
     now?: number;
 }): Promise<{ entry: RunnableEntry; routedBy: "router" | "continued" | "default" }> => {
     const eligible = smartAdaptiveCandidates(input.request, input.runnable);
@@ -162,10 +169,11 @@ export const routeSmartAdaptive = async (input: {
     const pool = eligible.length > 0 ? eligible : input.runnable;
     const fallback = pool.find((entry) => entry.model.id === DEFAULT_MODEL_ID) ?? pool[0];
     const turn = latestTurn(input.request);
-    if (!turn || eligible.length < 2 || !input.routerAllowed) {
-        return { entry: fallback, routedBy: "default" };
-    }
+    if (!turn || eligible.length < 2) return { entry: fallback, routedBy: "default" };
 
+    // A tool round keeps its remembered pick before the router gate is asked:
+    // a gate closed for a while (a refusal two minutes ago) must not hand a
+    // running task to another model.
     const now = input.now ?? Date.now();
     const digest = createHash("sha256").update(input.keyId).update("\0").update(turn.digestSource).digest("hex");
     const remembered = sticky.get(digest);
@@ -176,6 +184,28 @@ export const routeSmartAdaptive = async (input: {
         sticky.delete(digest);
     }
 
+    // One router call per Idempotency-Key at a time in this process: a
+    // concurrent duplicate takes the default model, and admission answers it
+    // as the duplicate it is.
+    const flight = input.idempotencyKeyDigest ? `${input.keyId}\0${input.idempotencyKeyDigest}` : null;
+    if (flight && routing.has(flight)) return { entry: fallback, routedBy: "default" };
+    if (flight) routing.add(flight);
+    try {
+        if (!(await input.routerAllowed())) return { entry: fallback, routedBy: "default" };
+        return await routeWithRouter(input, eligible, fallback, turn, digest, now);
+    } finally {
+        if (flight) routing.delete(flight);
+    }
+};
+
+const routeWithRouter = async (
+    input: { userId: string; requestId: string },
+    eligible: readonly RunnableEntry[],
+    fallback: RunnableEntry,
+    turn: NonNullable<ReturnType<typeof latestTurn>>,
+    digest: string,
+    now: number
+): Promise<{ entry: RunnableEntry; routedBy: "router" | "default" }> => {
     const pick = await pickAutoModelWithLlm({
         prompt: turn.prompt,
         previousAnswer: turn.previousAnswer,

@@ -94,10 +94,12 @@ test("external inference API over the real shared credit ledger", { skip: !datab
     // what the test says and records what it was asked.
     const routerCalls = [];
     let routerPick = null;
+    let routerDelayMs = 0;
     mock.module(mod("lib/autoLlmRouter.ts"), {
         namedExports: {
             pickAutoModelWithLlm: async (input) => {
                 routerCalls.push(input);
+                if (routerDelayMs) await new Promise((r) => setTimeout(r, routerDelayMs));
                 return routerPick ? { modelId: routerPick, rewrite: null } : null;
             },
         },
@@ -400,6 +402,24 @@ test("external inference API over the real shared credit ledger", { skip: !datab
             assert.equal(round.headers.get("x-tomverse-routed-by"), "continued");
             assert.equal(routerCalls.length, 1);
 
+            // The router gate closed (here: its switch) does not hand a running
+            // tool loop to another model.
+            delete process.env.EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED;
+            const gated = await call(key, body({
+                model: "smart-adaptive",
+                messages: [
+                    question,
+                    { role: "assistant", content: null, tool_calls: [{ id: "call_1", type: "function", function: { name: "run", arguments: "{}" } }] },
+                    { role: "tool", tool_call_id: "call_1", content: "1 failing" },
+                    { role: "assistant", content: null, tool_calls: [{ id: "call_2", type: "function", function: { name: "run", arguments: "{}" } }] },
+                    { role: "tool", tool_call_id: "call_2", content: "0 failing" },
+                ],
+                tools: [{ type: "function", function: { name: "run", parameters: { type: "object", properties: {} } } }],
+            }));
+            assert.equal(gated.headers.get("x-tomverse-routed-model"), SECOND);
+            assert.equal(gated.headers.get("x-tomverse-routed-by"), "continued");
+            process.env.EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED = "true";
+
             // A new user message is routed again.
             const next = await call(key, body({ model: "smart-adaptive", messages: [question, { role: "assistant", content: "Done." }, { role: "user", content: "Thanks, now summarise" }] }));
             assert.equal(next.headers.get("x-tomverse-routed-model"), MODEL_ID);
@@ -451,6 +471,17 @@ test("external inference API over the real shared credit ledger", { skip: !datab
             assert.equal(again.status, 409, "the replay is the original's receipt");
             assert.equal(routerCalls.length, routedBefore, "a replay makes no router call");
 
+            // Concurrent duplicates of one Idempotency-Key make one router call.
+            routerDelayMs = 150;
+            const twin = { headers: { "idempotency-key": "smart-adaptive-twins" } };
+            const twinBody = body({ model: "smart-adaptive", messages: [{ role: "user", content: "Twins" }] });
+            const routedBeforeTwins = routerCalls.length;
+            const twins = await Promise.all([call(key, twinBody, twin), call(key, twinBody, twin)]);
+            await Promise.all(twins.map((response) => response.text()));
+            routerDelayMs = 0;
+            assert.equal(routerCalls.length, routedBeforeTwins + 1, "one router call for both twins");
+            assert.ok(twins.some((response) => response.status === 200));
+
             // A key whose cap is spent gets no paid router call; admission refuses as usual.
             const capped = await issueKey(userId, { creditCap: 1 });
             assert.equal((await call(capped.key, body({ model: "smart-adaptive", messages: [{ role: "user", content: "First" }] }))).status, 200);
@@ -467,6 +498,7 @@ test("external inference API over the real shared credit ledger", { skip: !datab
         } finally {
             delete process.env.EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED;
             routerPick = null;
+            routerDelayMs = 0;
         }
     });
 
