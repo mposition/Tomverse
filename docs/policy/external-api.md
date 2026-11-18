@@ -272,7 +272,7 @@ speaks only OpenAI's Responses API is not supported.
   `chat.agentHost.byokModels.enabled`. A model without tool calling is hidden
   from agents; every offered model here advertises it.
 
-Aside has been verified against this API; VS Code is in progress (section 9).
+Both clients have been verified against this API (section 9).
 
 ## 8. Operations
 
@@ -318,8 +318,12 @@ Not yet done, each a separate step:
   where claimed): a paid run, approved separately.
 - Paid smoke tests with a test account and a spending ceiling.
 - Real Aside and VS Code acceptance runs (tool round trip, image, stop, usage,
-  revocation), with versions recorded here. Aside passed locally on 2026-11-18
-  against a production build and a real OpenAI model (pi/1.4.1); VS Code is in
-  progress.
-- A live Smart Adaptive run (it adds a paid router call per routed request).
+  revocation). Done locally on 2026-11-18 against a production build and real
+  providers: Aside pi/1.4.1 and VS Code with GitHub Copilot Chat 0.74.0
+  (Custom Endpoint), both through `smart-adaptive` with the router on
+  (OpenAI and DeepSeek candidates). Still open in VS Code: refusing a tool
+  approval and stopping mid-answer.
+- The router's 200-token output limit counts reasoning, and twice cut the
+  router's answer off on a request carrying a previous answer (`invalid`, the
+  default model then answered). Shared with Chat's Smart Adaptive.
 - Production migration, merge and deployment.
