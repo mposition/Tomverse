@@ -243,6 +243,26 @@ test("an unsent image allowance does not push a short-tier prompt onto the long 
     assert.equal(withAllowance.inputUsdPerMillionTokens, sentOnly.inputUsdPerMillionTokens);
 });
 
+// Review r-20261118-071721-860078: a caller that names its own output cap
+// (Research Preview) keeps it, so its admission check still matches.
+test("an explicit output cap is not shrunk to the window room", () => {
+    const luna = getModel("gpt-6-luna");
+    const capped = createChatBudget("user", luna, luna.contextWindowTokens - 1_000, { totalOutputTokenCap: 4_096 });
+    assert.equal(capped.maxOutputTokens, 4_096);
+});
+
+test("the attempt ledger keeps the settled rates and the price's own source", () => {
+    const ledger = readFileSync(new URL("../lib/chatAttemptCostLedger.ts", import.meta.url), "utf8");
+    assert.match(ledger, /pricingSnapshot: \{\s*\.\.\.longContextSettlementRates\(attempt\.price, attempt\.inputTokens\),\s*reservationCostSource: attempt\.price\.costSource \?\? null,/);
+});
+
+test("the public credit guide says long turns are charged by actual cost", () => {
+    const pricing = readFileSync(new URL("../components/marketing/PricingPageContent.tsx", import.meta.url), "utf8");
+    const bodies = [...pricing.matchAll(/longContextBody: "([^"]+)"/g)].map((match) => match[1]);
+    assert.equal(bodies.length, 8);
+    for (const body of bodies) assert.match(body, /128[,. ]000/, body);
+});
+
 test("one decision drives every long-context rule", () => {
     const source = readFileSync(new URL("../lib/chatSecurity.ts", import.meta.url), "utf8");
     assert.match(source, /const longContextTurn =\s*chatLongContextEnabled\(\) && estimatedInputTokens > chatUserMaxInputTokens\(\);/);

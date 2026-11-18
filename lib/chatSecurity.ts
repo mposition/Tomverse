@@ -1146,8 +1146,12 @@ export const createChatBudget = (
     // On a long-context turn the answer can only use the room the window
     // leaves after the input -- the same room the route later fits the request
     // to -- so that is what is reserved, not the model's whole output ceiling.
+    // A caller that names its own output cap (Research Preview) keeps it: its
+    // admission is checked against that exact figure, and the window check
+    // after the budget still refuses a request that does not fit.
     const windowRoom =
         longContextTurn &&
+        requestedTotalOutputCap === undefined &&
         Number.isSafeInteger(model.contextWindowTokens) &&
         model.contextWindowTokens! > 0
             ? Math.max(0, model.contextWindowTokens! - contextInputTokens)

@@ -252,8 +252,13 @@ export const recordAttemptCost = async (
                 usageSource: attemptUsageSource(attempt),
                 costSource: attempt.costSource,
                 rollupDate: day,
+                // The rates this attempt was settled at -- a crossed
+                // long-context tier included -- with the price's own source
+                // kept beside the usage source it would otherwise overwrite,
+                // as the reservation snapshot keeps reservationCostSource.
                 pricingSnapshot: {
-                    ...attempt.price,
+                    ...longContextSettlementRates(attempt.price, attempt.inputTokens),
+                    reservationCostSource: attempt.price.costSource ?? null,
                     costSource: attempt.costSource,
                     ...(snapshot ?? {}),
                 } as Prisma.InputJsonValue,
