@@ -35,6 +35,7 @@ All default off. Server-side; hiding UI is never the gate.
 | `EXTERNAL_API_PUBLIC_BASE_URL` | Optional canonical base URL shown to users (e.g. `https://tomverse.app/api/v1`). Otherwise derived from the request host. |
 | `NEXT_PUBLIC_EXTERNAL_API_SETTINGS_VISIBLE` | Build-time. Shows the API keys row in the settings panel. `/settings/api` itself checks availability through the server. |
 | `EXTERNAL_API_REQUESTS_PER_MINUTE` / `_PER_DAY` | Per-account request-rate abuse guard, defaults 120 / 20 000. Credits, the key cap and concurrency are what bound usage; this only stops runaway clients. |
+| `EXTERNAL_API_HEARTBEAT_MS` | How often an in-flight request renews its concurrency slot and reservation, default 60 000. Runs from dispatch, including the wait for a streaming request's first part. Lowered only by tests. |
 | `EXTERNAL_API_READS_PER_MINUTE` / `_PER_DAY` | Separate per-account budget for `GET /models` and `GET /usage`, defaults 60 / 5 000. The settings read routes (key list, receipts) have a fixed 60 / 5 000; revocation has none, so it always works. |
 | `EXTERNAL_API_TIMEOUT_MS` | Server timeout for one generation, default 600 000. |
 

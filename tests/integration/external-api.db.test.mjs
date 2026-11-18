@@ -681,6 +681,38 @@ test("external inference API over the real shared credit ledger", { skip: !datab
         assert.equal(dispatches - before, 1);
     });
 
+    await t.test("a slow first token keeps the reservation alive before the stream starts", async () => {
+        const userId = await newUser();
+        allow(userId);
+        const { key } = await issueKey(userId);
+        process.env.EXTERNAL_API_HEARTBEAT_MS = "40";
+        let observed = null;
+        try {
+            script = () => ({
+                stream: new ReadableStream({
+                    async start(controller) {
+                        // Pretend the reservation is about to expire, then think
+                        // for a while before the first part arrives.
+                        const [held] = await db.chatCreditReservation.findMany({ where: { userId, status: "reserved" } });
+                        await db.chatCreditReservation.update({ where: { id: held.id }, data: { expiresAt: new Date(Date.now() + 1_000) } });
+                        await new Promise((r) => setTimeout(r, 400));
+                        observed = (await db.chatCreditReservation.findUnique({ where: { id: held.id } })).expiresAt;
+                        for (const part of [{ type: "stream-start", warnings: [] }, { type: "text-start", id: "t" }, { type: "text-delta", id: "t", delta: "late" }, { type: "text-end", id: "t" }, finish("stop")]) {
+                            controller.enqueue(part);
+                        }
+                        controller.close();
+                    },
+                }),
+            });
+            const streamed = await readSse(await call(key, body({ stream: true })));
+            assert.equal(streamed.events.at(-1), "[DONE]");
+        } finally {
+            delete process.env.EXTERNAL_API_HEARTBEAT_MS;
+            script = textScript("Hello from the fixture.");
+        }
+        assert.ok(observed.getTime() > Date.now() + 60_000, "the heartbeat extended the hold while waiting for the first part");
+    });
+
     await t.test("client abort mid-stream settles as cancelled and keeps the receipt", async () => {
         const userId = await newUser();
         allow(userId);

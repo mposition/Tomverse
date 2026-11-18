@@ -451,6 +451,10 @@ export async function handleChatCompletions(request: Request): Promise<Response>
             // The HTTP status is decided after the first real stream part, so a
             // request the SDK or adapter refused before sending gets a 400 like
             // the non-streaming path, not a 200 with an error event.
+            // The wait for the first part can be long (a model that thinks
+            // before it streams); the slot and the reservation are kept alive
+            // through it, exactly as during the stream itself.
+            run.keepAlive();
             const peeked = await peekFirstPart(result.fullStream as AsyncIterable<StreamPart>);
             if (peeked.refusedBeforeDispatch) {
                 await run.consume(peeked.replay, () => undefined);
@@ -637,18 +641,27 @@ const createRun = (input: {
     let streamError: unknown = null;
     let aborted = false;
     let final: RunFinal | null = null;
+    let heartbeat: ReturnType<typeof setInterval> | null = null;
+
+    /**
+     * Keeps the concurrency slot and the reservation alive while the request
+     * is with the provider. Started once the dispatch has begun -- by the
+     * streaming path before it waits for the first part, otherwise by
+     * consume -- and always cleared by consume, which every dispatched path
+     * reaches, so no interval outlives its reservation.
+     */
+    const keepAlive = () => {
+        heartbeat ??= setInterval(() => {
+            void heartbeatChatAccess(input.leaseId).catch(() => undefined);
+            void extendChatReservationExpiry(input.reservation.reservationId, 300).catch(() => undefined);
+        }, positiveInteger(process.env.EXTERNAL_API_HEARTBEAT_MS, 60_000));
+    };
 
     const consume = async (
         parts: AsyncIterable<{ type: string; [key: string]: unknown }>,
         emit: (chunk: unknown) => void
     ) => {
-        // Started here, not when the run is created, so a dispatch that never
-        // began cannot leave an interval extending a reservation nobody owns.
-        // Cleared on every path out of this function, below.
-        const heartbeat = setInterval(() => {
-            void heartbeatChatAccess(input.leaseId).catch(() => undefined);
-            void extendChatReservationExpiry(input.reservation.reservationId, 300).catch(() => undefined);
-        }, 60_000);
+        keepAlive();
         try {
             for await (const part of parts) {
                 if (part.type === "error") {
@@ -695,7 +708,8 @@ const createRun = (input: {
             if (input.controller.signal.aborted) aborted = true;
             else streamError = error;
         }
-        clearInterval(heartbeat);
+        if (heartbeat) clearInterval(heartbeat);
+        heartbeat = null;
         if (input.controller.signal.aborted) aborted = true;
 
         const collected = translator.collected();
@@ -814,6 +828,7 @@ const createRun = (input: {
     };
 
     return {
+        keepAlive,
         consume,
         final: (): RunFinal => {
             if (!final) throw new Error("External API run read before it finished.");
