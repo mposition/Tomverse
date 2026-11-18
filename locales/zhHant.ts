@@ -1,4 +1,5 @@
 import { reviewActionsCopy } from "./reviewActions";
+import { externalApiCopy } from "./externalApi";
 import { reviewHandoffCopy } from "./reviewHandoff";
 import { researchPreviewCopy } from "./researchPreview";
 import { workspaceWelcomeCopy } from "./workspaceWelcome";
@@ -15,6 +16,7 @@ import { en } from "./en";
  */
 export const zhHant = {
     reviewActions: reviewActionsCopy.zhHant,
+    externalApi: externalApiCopy.zhHant,
     reviewHandoff: reviewHandoffCopy.zhHant,
     journey: {
         receiptSent: "本次嘗試的輸入包含原文：已選 {selected} 個 + 最近 {recent} 個（去重後 {unique} 則訊息）",

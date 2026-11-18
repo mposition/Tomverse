@@ -244,7 +244,8 @@ test("combined routing returns both decisions in one reserved call and preserves
     assert.equal(result?.modelId, routerOutput.modelId);
     assert.equal(decision?.image, true);
     assert.equal(routerRequests.length, 1);
-    assert.equal(routerRequests[0].maxOutputTokens, 600);
+    // One ceiling whatever the call combines.
+    assert.equal(routerRequests[0].maxOutputTokens, require(resolve(ROOT, "lib/autoLlmRouterCore.ts")).AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS);
     const { autoLlmRouterWorstCaseMicroUsd } = require(resolve(ROOT, "lib/autoLlmRouterCore.ts"));
     const { resolveModelPricing } = require(resolve(ROOT, "lib/modelPricing.ts"));
     const { AVAILABLE_MODELS } = require(resolve(ROOT, "lib/models.ts"));
@@ -406,9 +407,10 @@ test("router failures preserve known usage and log content-free causes without r
     session: null, traceId: "trace-call", cycleId: "cycle-call", decisionId: "decision-call", source: "routing_optimizer" as const,
   };
   const cases = [
-    { name: "JSON parsing failure", result: () => { throw parseError; }, outcome: "invalid", failure: "output_parse", failureKind: "output_parse", usage, detail: { finishReason: "length", outputChars: secret.length } },
+    // Cut off at the ceiling: its own code, so a tight ceiling shows as itself.
+    { name: "JSON parsing failure", result: () => { throw parseError; }, outcome: "invalid", failure: "output_truncated", failureKind: "output_parse", usage, detail: { finishReason: "length", outputChars: secret.length } },
     { name: "schema validation failure", result: () => { throw schemaError; }, outcome: "invalid", failure: "output_schema", failureKind: "output_validation", usage },
-    { name: "output getter failure", result: () => ({ usage, finishReason: "length", get output() { throw parseError; } }), outcome: "invalid", failure: "output_parse", failureKind: "output_parse", usage },
+    { name: "output getter failure", result: () => ({ usage, finishReason: "length", get output() { throw parseError; } }), outcome: "invalid", failure: "output_truncated", failureKind: "output_parse", usage },
     { name: "empty output getter", result: () => ({ usage, finishReason: "stop", get output() { throw new NoOutputGeneratedError(); } }), outcome: "invalid", failure: "empty_output", failureKind: "output_missing", usage },
     { name: "ineligible model", result: () => ({ usage, finishReason: "stop", output: { modelId: secret } }), outcome: "invalid", failure: "invalid_pick", failureKind: "invalid_output", usage, detail: { modelIdPresent: true, modelIdEligible: false } },
     { name: "invalid file intent", result: () => ({ usage, output: { modelId: "gpt-5-6-luna", requiresFileGeneration: "yes" } }), outcome: "invalid", failure: "invalid_pick", failureKind: "invalid_output", usage, detail: { modelIdEligible: true, fileIntentType: "string" } },
@@ -636,7 +638,8 @@ test("router search preparation uses one priced call and malformed suggestions p
       generateRouterResult = () => ({ output: { ...routerOutput, requiresFileGeneration: false, searchQueries: queries, simpleLookup: queries.length === 2 ? true : "true" }, usage: { inputTokens: 100, outputTokens: 30 } });
       const result = await pick(undefined, { searchPlan: true });
       assert.equal(routerRequests.length, 1);
-      assert.equal(routerRequests[0].maxOutputTokens, 440);
+      // One ceiling whatever the call combines.
+      assert.equal(routerRequests[0].maxOutputTokens, require(resolve(ROOT, "lib/autoLlmRouterCore.ts")).AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS);
       assert.match(String(routerRequests[0].system), /searchQueries/);
       assert.equal(result?.requiresFileGeneration, false);
       assert.equal(result?.modelId, routerOutput.modelId);
@@ -653,7 +656,7 @@ test("router search preparation uses one priced call and malformed suggestions p
     routerRequests.length = 0;
     const result = await pick();
     assert.equal(result?.searchQueries, undefined);
-    assert.equal(routerRequests[0].maxOutputTokens, 200);
+    assert.equal(routerRequests[0].maxOutputTokens, require(resolve(ROOT, "lib/autoLlmRouterCore.ts")).AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS);
     assert.doesNotMatch(String(routerRequests[0].system), /searchQueries/);
   } finally { generateRouterResult = original; }
 });

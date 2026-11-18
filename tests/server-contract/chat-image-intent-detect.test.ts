@@ -218,7 +218,7 @@ test("a follow-up sees the previous image and comes back with its rewrite", asyn
     edit: false,
   });
   // Room to write the whole new prompt, and the budget hold sized to it.
-  assert.equal(calls[0].maxOutputTokens, 2_500);
+  assert.equal(calls[0].maxOutputTokens, 8_192, "the shared routing-call ceiling (lib/routingCallLimits.ts)");
   assert.match(calls[0].prompt, /Previous image:\n간단한 고양이 아이콘 그려줘\n\nMessage:\n더 파랗게 해줘$/);
 });
 
@@ -236,7 +236,7 @@ test("without a recent image answer, no rewrite is taken", async () => {
   });
   assert.equal(decision.image && decision.prompt, null);
   assert.doesNotMatch(calls[0].prompt, /Previous image/);
-  assert.equal(calls[0].maxOutputTokens, 400);
+  assert.equal(calls[0].maxOutputTokens, 8_192, "the shared routing-call ceiling (lib/routingCallLimits.ts)");
 });
 
 const turnImage = async (plan: { tier: string } | null) => {

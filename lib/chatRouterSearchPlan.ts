@@ -2,7 +2,6 @@ import { APP_MANAGED_SEARCH_LIMITS, validateSearchQuery } from "./webSearchBacke
 
 // Leave at least three of the existing five searches for dependent follow-ups.
 export const ROUTER_SEARCH_MAX_QUERIES = 2;
-export const ROUTER_SEARCH_OUTPUT_TOKENS = 240;
 export const routerSearchQueriesSchema = {
   type: "array" as const,
   maxItems: ROUTER_SEARCH_MAX_QUERIES,

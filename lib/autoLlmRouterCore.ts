@@ -15,6 +15,7 @@
  */
 
 import { turnCarriesAttachments } from "@/lib/autoDispatchPreflight";
+import { ROUTING_CALL_MAX_OUTPUT_TOKENS } from "@/lib/routingCallLimits";
 import { getModelUsageCredits, modelSupportsImageInput, type AiModel } from "@/lib/models";
 import { getArtifactToolSupport, planGeneratedArtifactTool } from "@/lib/generatedArtifactToolPolicy";
 import { getWebSearchCapability, nativeSearchIsDispatchable } from "@/lib/webSearchCapability";
@@ -90,8 +91,8 @@ export const autoLlmRouterSession = (
     return topic || recentPicks.length > 0 ? { topic, recentPicks } : null;
 };
 
-/** One id and one short sentence; the cap bounds a model that rambles. */
-export const AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS = 200;
+/** See lib/routingCallLimits.ts: a ceiling for the cost hold, not a size target. */
+export const AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS = ROUTING_CALL_MAX_OUTPUT_TOKENS;
 
 /**
  * Past this the turn proceeds on the deterministic choice. The optimizer cycle
@@ -389,8 +390,6 @@ export const autoLlmRouterDecisionVersion = (input: {
 export const AUTO_LLM_ROUTER_REWRITE_SOURCE_MAX_CHARS = 1_500;
 /** A rewrite longer than this is dropped rather than cut. */
 export const AUTO_LLM_ROUTER_REWRITE_MAX_CHARS = 1_500;
-/** The call's budget when a rewrite is asked for: the rewrite itself needs room. */
-export const AUTO_LLM_ROUTER_REWRITE_MAX_OUTPUT_TOKENS = 900;
 export const AUTO_LLM_ROUTER_REWRITE_TIMEOUT_MS = AUTO_LLM_ROUTER_TIMEOUT_MS;
 
 /**

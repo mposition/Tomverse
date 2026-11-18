@@ -19,6 +19,8 @@
     "dev:mcp-github": "node --conditions=react-server --import tsx scripts/mcp-github-app-setup.ts --dev",
     "test:code-managed": "node --conditions=react-server --experimental-test-module-mocks --no-warnings=ExperimentalWarning --import tsx --test --test-concurrency=1 tests/codeManagedCore.test.mjs tests/server-contract/code-managed-provider.test.mjs tests/server-contract/code-managed-route.test.mjs tests/server-contract/code-managed-reconciliation-route.test.mjs",
     "test:code-managed-db": "node --conditions=react-server --experimental-test-module-mocks --no-warnings=ExperimentalWarning --import tsx --test --test-concurrency=1 tests/integration/code-managed-execution.db.test.mjs",
+    "test:external-api": "node --conditions=react-server --import tsx --test --test-concurrency=1 tests/externalApiProtocol.test.mjs tests/externalApiKeyCore.test.mjs tests/externalApiBoundary.test.mjs",
+    "test:external-api-db": "node --conditions=react-server --experimental-test-module-mocks --no-warnings=ExperimentalWarning --import tsx --test --test-concurrency=1 tests/integration/external-api.db.test.mjs",
     "dev": "next dev --webpack",
     "predev": "node scripts/generate-build-info.mjs",
     "prebuild": "node scripts/check-native-swc.mjs && node scripts/generate-build-info.mjs",
