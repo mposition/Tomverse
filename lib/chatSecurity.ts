@@ -117,7 +117,6 @@ import {
     type AddOnCreditReservationEntry,
 } from "@/lib/creditLedger";
 import { lockCreditAccount, offsetCreditDebt } from "@/lib/creditDebt";
-import { calculateProviderUsageCost } from "@/lib/providerUsageCost";
 import {
     anthropicPromptCacheApplies,
     ANTHROPIC_PROMPT_CACHE_TTL,
@@ -125,7 +124,7 @@ import {
 } from "@/lib/anthropicPromptCaching";
 import {
     getModelPricingProfile,
-    longContextSettlementRates,
+    longContextSettledUsageCost,
     type ProviderCallUsage,
     type ResolvedModelPricing,
 } from "@/lib/modelPricing";
@@ -4704,8 +4703,10 @@ export const settleChatUsage = async (
             searchExecuted: usage.searchExecuted,
         });
         // A prompt that arrived in another long-context tier than its
-        // reservation priced is settled at that tier's rate, up or down.
-        const settledRates = longContextSettlementRates(
+        // reservation priced is settled at that tier's rate, up or down --
+        // and a multi-step turn each call at its own (longContextSettledUsageCost).
+        // The reservation's own snapshot, not rates this rule already moved.
+        const snapshotRates = (
             {
                 modelId: canonical.modelId,
                 inputUsdPerMillionTokens: canonical.inputUsdPerMillionTokens,
@@ -4718,27 +4719,25 @@ export const settleChatUsage = async (
                 pricingVersion: canonical.pricingVersion ?? null,
                 costSource: canonical.costSource ?? null,
                 providerCallPasses: canonical.providerCallPasses ?? null,
-            },
-            actualInput,
-            usage.providerCalls
+            }
         );
-        const tokenCostBreakdown = calculateProviderUsageCost({
+        const settledUsage = {
             inputTokens: actualInput,
             cachedInputTokens: actualCachedInput,
             cacheWriteInputTokens: actualCacheWriteInput,
             outputTokens: actualOutput,
-            inputUsdPerMillionTokens: settledRates.inputUsdPerMillionTokens,
-            outputUsdPerMillionTokens: settledRates.outputUsdPerMillionTokens,
-            cachedInputPriceMultiplier: settledRates.cachedInputPriceMultiplier,
-            // From the reservation's own snapshot, not from today's registry:
-            // this settles a request that was priced when it was reserved, and
-            // re-reading the rate here would apply a later price change
-            // retroactively. Null on a reservation taken before this column
-            // existed, which prices its writes at nothing -- correct, because
-            // such a turn sent no cache marker and wrote no cache entry.
-            cacheWriteUsdPerMillionTokens:
-                settledRates.cacheWriteUsdPerMillionTokens ?? null,
-        });
+        };
+        // From the reservation's own snapshot, not from today's registry: this
+        // settles a request that was priced when it was reserved, and
+        // re-reading the rate here would apply a later price change
+        // retroactively. A null write rate (a reservation taken before that
+        // column existed) prices writes at nothing -- correct, because such a
+        // turn sent no cache marker and wrote no cache entry.
+        const tokenCostBreakdown = longContextSettledUsageCost(
+            snapshotRates,
+            settledUsage,
+            usage.providerCalls
+        );
         /*
           A long-context turn is charged its actual token cost, never above the
           flat rule's result and never below its flat-weighted credits. Priced
@@ -4746,24 +4745,13 @@ export const settleChatUsage = async (
           without the cache-write premium: written tokens count at the plain
           input rate, as everywhere else credits are concerned.
         */
-        const creditRates = billedAttempt
-            ? longContextSettlementRates(
-                  billedAttempt.price,
-                  billedAttempt.inputTokens,
-                  billedAttempt.providerCalls
-              )
-            : settledRates;
         const creditCost = canonical.longContextSettlement
-            ? calculateProviderUsageCost({
-                  inputTokens: actualInput,
-                  cachedInputTokens: actualCachedInput,
-                  cacheWriteInputTokens: 0,
-                  outputTokens: actualOutput,
-                  inputUsdPerMillionTokens: creditRates.inputUsdPerMillionTokens,
-                  outputUsdPerMillionTokens: creditRates.outputUsdPerMillionTokens,
-                  cachedInputPriceMultiplier: creditRates.cachedInputPriceMultiplier,
-                  cacheWriteUsdPerMillionTokens: null,
-              }).totalCostMicroUsd
+            ? longContextSettledUsageCost(
+                  billedAttempt ? billedAttempt.price : snapshotRates,
+                  settledUsage,
+                  usage.providerCalls,
+                  { pricedCacheWrites: false }
+              ).totalCostMicroUsd
             : 0;
         const actualCredits = chatLongContextSettledCredits({
             settlement: canonical.longContextSettlement,

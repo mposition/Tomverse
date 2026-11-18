@@ -14,7 +14,8 @@ import {
     CHAT_MAX_MESSAGE_CHARACTERS,
     CHAT_MAX_STORED_ANSWER_CHARACTERS,
 } from "../lib/chatRequestLimits.ts";
-import { longContextSettlementRates, resolveModelPricing } from "../lib/modelPricing.ts";
+import { longContextSettledUsageCost, longContextSettlementRates, resolveModelPricing } from "../lib/modelPricing.ts";
+import { calculateProviderUsageCost } from "../lib/providerUsageCost.ts";
 import { AVAILABLE_MODELS, getModel, getWeightedUsageCredits } from "../lib/models.ts";
 import {
     CHAT_ATTACHMENT_CHARACTERS_PER_CONTEXT_TOKEN,
@@ -463,11 +464,67 @@ test("the per-step usage reaches every settlement path", () => {
     assert.match(route, /providerCalls: usage\?\.providerCalls,\s*outcome,/);
     assert.match(route, /inputTokens: settledInputTokens,\s*providerCalls: usage\?\.providerCalls,/);
     const security = read("lib/chatSecurity.ts");
-    assert.match(security, /actualInput,\s*usage\.providerCalls\s*\)/);
+    // Provider cost and credits alike are the sum of the calls.
+    assert.match(security, /const tokenCostBreakdown = longContextSettledUsageCost\(\s*snapshotRates,\s*settledUsage,\s*usage\.providerCalls\s*\);/);
+    assert.match(security, /longContextSettledUsageCost\(\s*billedAttempt \? billedAttempt\.price : snapshotRates,\s*settledUsage,\s*usage\.providerCalls,\s*\{ pricedCacheWrites: false \}\s*\)/);
     assert.match(security, /providerCalls: billedAttempt\.providerCalls,/);
     assert.match(security, /inputTokens: actualInput,\s*providerCalls: usage\.providerCalls,/);
-    assert.match(read("lib/chatMultiAttemptSettlement.ts"), /attempt\.inputTokens,\s*attempt\.providerCalls\s*\)/);
-    assert.equal(read("lib/chatAttemptCostLedger.ts").match(/attempt\.providerCalls/g)?.length, 2);
+    assert.match(read("lib/chatMultiAttemptSettlement.ts"), /longContextSettledUsageCost\(\s*attempt\.price,\s*attempt,\s*attempt\.providerCalls\s*\)/);
+    assert.match(read("lib/chatAttemptCostLedger.ts"), /longContextSettledUsageCost\(attempt\.price, attempt, attempt\.providerCalls\)/);
+    // Each step's own cache split travels with it.
+    assert.match(route, /cachedInputTokens: Math\.max\(0, step\.usage\.inputTokenDetails\?\.cacheReadTokens \?\? 0\)/);
+});
+
+// Review r-20261118-092832-51f594: calls differ in how much was cached, so the
+// turn's cost is the sum of each call's own cost -- never averaged rates.
+test("a multi-call turn's cost is the sum of each call's own cost, cache split included", () => {
+    const short = resolveModelPricing(getModel("gpt-6-luna"), { estimatedPromptTokens: 1_000 });
+    const long = resolveModelPricing(getModel("gpt-6-luna"), { estimatedPromptTokens: 300_000 });
+    const snapshot = {
+        modelId: "gpt-6-luna",
+        inputUsdPerMillionTokens: long.inputUsdPerMillionTokens,
+        outputUsdPerMillionTokens: long.outputUsdPerMillionTokens,
+        cachedInputPriceMultiplier: long.cachedInputPriceMultiplier,
+        cacheWriteUsdPerMillionTokens: long.cacheWriteUsdPerMillionTokens,
+        longContextThresholdTokens: 272_000,
+        pricingVersion: long.pricingVersion,
+        costSource: long.costSource,
+        providerCallPasses: 2,
+    };
+    // A short call mostly cached, then a long one not cached at all.
+    const calls = [
+        { inputTokens: 200_000, cachedInputTokens: 180_000, cacheWriteInputTokens: 0, outputTokens: 1_000 },
+        { inputTokens: 300_000, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 2_000 },
+    ];
+    const at = (tier, call) => calculateProviderUsageCost({
+        ...call,
+        inputUsdPerMillionTokens: tier.inputUsdPerMillionTokens,
+        outputUsdPerMillionTokens: tier.outputUsdPerMillionTokens,
+        cachedInputPriceMultiplier: tier.cachedInputPriceMultiplier,
+        cacheWriteUsdPerMillionTokens: tier.cacheWriteUsdPerMillionTokens ?? null,
+    }).totalCostMicroUsd;
+    const expected = at(short, calls[0]) + at(long, calls[1]);
+    const totals = { inputTokens: 500_000, cachedInputTokens: 180_000, cacheWriteInputTokens: 0, outputTokens: 3_000 };
+    const settled = longContextSettledUsageCost(snapshot, totals, calls);
+    assert.equal(settled.totalCostMicroUsd, expected);
+    assert.equal(settled.cachedInputTokens, 180_000);
+    // One call: the one-call rule, on the totals.
+    const one = longContextSettledUsageCost({ ...snapshot, providerCallPasses: null }, calls[0]);
+    assert.equal(one.totalCostMicroUsd, at(short, calls[0]));
+    // The credit view counts written tokens as plain input.
+    const written = [{ ...calls[0], cachedInputTokens: 0, cacheWriteInputTokens: 50_000 }, calls[1]];
+    const credit = longContextSettledUsageCost(snapshot, totals, written, { pricedCacheWrites: false });
+    assert.equal(credit.cacheWriteInputCostMicroUsd, 0);
+    assert.equal(credit.totalCostMicroUsd, at(short, { ...written[0], cacheWriteInputTokens: 0 }) + at(long, calls[1]));
+});
+
+// Same review: the SDK's `usage` is already the sum of every step, so the
+// totals settled beside the per-call figures are the whole turn's.
+test("the installed SDK reports usage as the sum of all steps", () => {
+    const types = readFileSync(new URL("../node_modules/ai/dist/index.d.ts", import.meta.url), "utf8");
+    const result = types.slice(types.indexOf("interface StreamTextResult"));
+    const usage = result.slice(0, result.indexOf("readonly usage: PromiseLike<LanguageModelUsage>;"));
+    assert.match(usage.slice(-400), /When there are multiple steps, the usage is the sum of all step usages\./);
 });
 
 // Review r-20261118-083641-09ae82: without per-step usage (an attempt replaced
@@ -603,9 +660,9 @@ test("a flat or fallback price is settled exactly as reserved", () => {
 
 test("every settlement path applies the same long-context rule", () => {
     const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
-    assert.match(read("lib/chatSecurity.ts"), /longContextSettlementRates\(/);
-    assert.match(read("lib/chatMultiAttemptSettlement.ts"), /longContextSettlementRates\(\s*attempt\.price,\s*attempt\.inputTokens,\s*attempt\.providerCalls\s*\)/);
-    assert.match(read("lib/chatAttemptCostLedger.ts"), /longContextSettlementRates\(/);
+    assert.match(read("lib/chatSecurity.ts"), /longContextSettledUsageCost\(/);
+    assert.match(read("lib/chatMultiAttemptSettlement.ts"), /longContextSettledUsageCost\(/);
+    assert.match(read("lib/chatAttemptCostLedger.ts"), /longContextSettledUsageCost\(/);
     assert.match(
         read("app/api/chat/route.ts"),
         /longContextThresholdTokens: budget\.longContextThresholdTokens,\s*costSource: budget\.costSource \?\? null,\s*\} satisfies AttemptPriceSnapshot/

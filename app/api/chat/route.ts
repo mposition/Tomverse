@@ -509,15 +509,31 @@ import {
  */
 const providerCallUsage = async (stream: {
     steps: PromiseLike<
-        ReadonlyArray<{ usage: { inputTokens?: number; outputTokens?: number } }>
+        ReadonlyArray<{
+            usage: {
+                inputTokens?: number;
+                outputTokens?: number;
+                inputTokenDetails?: {
+                    cacheReadTokens?: number;
+                    cacheWriteTokens?: number;
+                };
+            };
+        }>
     >;
 }): Promise<ProviderCallUsage[] | undefined> => {
     try {
         const steps = await stream.steps;
         if (steps.length < 2) return undefined;
+        // Each call's own cache split too: calls differ in how much of their
+        // prompt was cached, and the turn's cost is the sum of each call's.
         return steps.map((step) => ({
             inputTokens: Math.max(0, step.usage.inputTokens ?? 0),
             outputTokens: Math.max(0, step.usage.outputTokens ?? 0),
+            cachedInputTokens: Math.max(0, step.usage.inputTokenDetails?.cacheReadTokens ?? 0),
+            cacheWriteInputTokens: Math.max(
+                0,
+                step.usage.inputTokenDetails?.cacheWriteTokens ?? 0
+            ),
         }));
     } catch {
         return undefined;

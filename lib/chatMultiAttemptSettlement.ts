@@ -34,8 +34,7 @@
  * split can be argued about in a test rather than in a billing incident.
  */
 
-import { calculateProviderUsageCost } from "@/lib/providerUsageCost";
-import { longContextSettlementRates, type ProviderCallUsage } from "@/lib/modelPricing";
+import { longContextSettledUsageCost, type ProviderCallUsage } from "@/lib/modelPricing";
 import type { AiModel } from "@/lib/models";
 
 /** Bump when an allocation rule changes, so a settled row can be attributed. */
@@ -155,23 +154,13 @@ export const priceAttempt = (
     priceOne(attempt);
 
 const priceOne = (attempt: AttemptUsage): { costMicroUsd: number; costSource: PricedAttempt["costSource"] } => {
-    // The same long-context rule as single-attempt settlement: the rate of
-    // the tier the attempt's prompt actually fell in.
-    const price = longContextSettlementRates(
+    // The same long-context rule as single-attempt settlement: each call at
+    // the tier its own prompt fell in.
+    const tokenCost = longContextSettledUsageCost(
         attempt.price,
-        attempt.inputTokens,
+        attempt,
         attempt.providerCalls
     );
-    const tokenCost = calculateProviderUsageCost({
-        inputTokens: attempt.inputTokens,
-        cachedInputTokens: attempt.cachedInputTokens,
-        cacheWriteInputTokens: attempt.cacheWriteInputTokens,
-        outputTokens: attempt.outputTokens,
-        inputUsdPerMillionTokens: price.inputUsdPerMillionTokens,
-        outputUsdPerMillionTokens: price.outputUsdPerMillionTokens,
-        cachedInputPriceMultiplier: price.cachedInputPriceMultiplier,
-        cacheWriteUsdPerMillionTokens: price.cacheWriteUsdPerMillionTokens,
-    });
     const reported = attempt.providerReportedCostMicroUsd;
     const base =
         typeof reported === "number" && Number.isFinite(reported) && reported >= 0

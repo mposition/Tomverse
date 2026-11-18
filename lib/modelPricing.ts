@@ -30,6 +30,10 @@
 //      existing UsageBucket is never recomputed when this table changes.
 
 import type { AiProvider, AiModel, ModelUsageClass } from "@/lib/models";
+import {
+    calculateProviderUsageCost,
+    type ProviderUsageCostBreakdown,
+} from "@/lib/providerUsageCost";
 
 export type ModelPricingRouting = "direct_provider_api" | "relay";
 
@@ -2294,7 +2298,12 @@ type SettlementRates = {
  * turn (`providerCallPasses` > 1) can only be lowered, as its total is a sum
  * of prompts and says nothing about any one call.
  */
-export type ProviderCallUsage = { inputTokens: number; outputTokens: number };
+export type ProviderCallUsage = {
+    inputTokens: number;
+    outputTokens: number;
+    cachedInputTokens?: number;
+    cacheWriteInputTokens?: number;
+};
 
 export const longContextSettlementRates = <T extends SettlementRates>(
     rates: T,
@@ -2386,5 +2395,81 @@ const perCallSettlementRates = <T extends SettlementRates>(
             ? { cachedInputPriceMultiplier: cachedMultiplierWeight / inputTokens }
             : {}),
         longContextThresholdTokens: threshold,
+    };
+};
+
+/**
+ * The provider cost of a settled usage, priced at the long-context tier its
+ * prompt fell in -- and for a multi-step turn, each call at its own tier with
+ * its own cache split, summed (reviews r-20261118-090529-1f7c7f and
+ * r-20261118-092832-51f594). Rates averaged over a turn cannot give that sum:
+ * calls differ in how much of their input was cached, and a cached-input
+ * multiplier is capped at 1. `rates` is the reservation's own snapshot, not
+ * rates this rule already moved.
+ *
+ * `pricedCacheWrites: false` is the credit view: written tokens count as plain
+ * input, as everywhere else credits are concerned.
+ */
+export const longContextSettledUsageCost = (
+    rates: SettlementRates & { cachedInputPriceMultiplier?: number },
+    usage: {
+        inputTokens: number;
+        cachedInputTokens?: number;
+        cacheWriteInputTokens?: number;
+        outputTokens: number;
+    },
+    calls?: readonly ProviderCallUsage[] | null,
+    options?: { pricedCacheWrites?: boolean }
+): ProviderUsageCostBreakdown => {
+    const priced = options?.pricedCacheWrites !== false;
+    const costAt = (
+        tokens: {
+            inputTokens: number;
+            cachedInputTokens?: number;
+            cacheWriteInputTokens?: number;
+            outputTokens: number;
+        },
+        callRates: SettlementRates & { cachedInputPriceMultiplier?: number }
+    ) =>
+        calculateProviderUsageCost({
+            inputTokens: tokens.inputTokens,
+            cachedInputTokens: tokens.cachedInputTokens,
+            cacheWriteInputTokens: priced ? tokens.cacheWriteInputTokens : 0,
+            outputTokens: tokens.outputTokens,
+            inputUsdPerMillionTokens: callRates.inputUsdPerMillionTokens,
+            outputUsdPerMillionTokens: callRates.outputUsdPerMillionTokens,
+            cachedInputPriceMultiplier: callRates.cachedInputPriceMultiplier,
+            cacheWriteUsdPerMillionTokens: priced
+                ? callRates.cacheWriteUsdPerMillionTokens ?? null
+                : null,
+        });
+    if (!calls || calls.length < 2) {
+        return costAt(usage, longContextSettlementRates(rates, usage.inputTokens));
+    }
+    const single = { ...rates, providerCallPasses: null };
+    const parts = calls.map((call) =>
+        costAt(call, longContextSettlementRates(single, call.inputTokens))
+    );
+    const sum = (pick: (part: ProviderUsageCostBreakdown) => number) =>
+        parts.reduce((total, part) => total + pick(part), 0);
+    // The rates reported beside the sum are the token-weighted ones, for the
+    // record only: the cost is the sum of the calls, not these times totals.
+    const shown = longContextSettlementRates(rates, usage.inputTokens, calls);
+    return {
+        inputTokens: sum((part) => part.inputTokens),
+        uncachedInputTokens: sum((part) => part.uncachedInputTokens),
+        cachedInputTokens: sum((part) => part.cachedInputTokens),
+        cacheWriteInputTokens: sum((part) => part.cacheWriteInputTokens),
+        outputTokens: sum((part) => part.outputTokens),
+        inputUsdPerMillionTokens: shown.inputUsdPerMillionTokens,
+        outputUsdPerMillionTokens: shown.outputUsdPerMillionTokens,
+        cachedInputPriceMultiplier: Math.min(1, shown.cachedInputPriceMultiplier ?? 1),
+        cacheWriteUsdPerMillionTokens: priced ? shown.cacheWriteUsdPerMillionTokens ?? null : null,
+        uncachedInputCostMicroUsd: sum((part) => part.uncachedInputCostMicroUsd),
+        cachedInputCostMicroUsd: sum((part) => part.cachedInputCostMicroUsd),
+        cacheWriteInputCostMicroUsd: sum((part) => part.cacheWriteInputCostMicroUsd),
+        outputCostMicroUsd: sum((part) => part.outputCostMicroUsd),
+        unpricedCacheWriteTokens: sum((part) => part.unpricedCacheWriteTokens),
+        totalCostMicroUsd: sum((part) => part.totalCostMicroUsd),
     };
 };
