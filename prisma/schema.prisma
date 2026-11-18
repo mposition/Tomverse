@@ -8620,9 +8620,9 @@ model AmuxV52ReviewRecord {
 /// transaction as the review record (owner decision 2026-11-15): the
 /// reviewers, each one's reason, and per finding its severity, summary, file
 /// and line. Untrusted text for people, the Decision Maker and the next
-/// attempt's prompt, never authority. Kept until 90 days after the Task ends,
-/// as the attempt's result; the purge clears the body and queues the key's
-/// deletion (lib/amux/v22TaskResultRetention.ts).
+/// attempt's prompt, never authority. No retention purge runs on it (the v22
+/// task result retention code was removed on 2026-11-18); `bodyPurgedAt` marks
+/// a body that was cleared.
 model AmuxV52ReviewFindings {
   attemptId    String    @id
   taskId       String

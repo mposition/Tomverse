@@ -3,11 +3,6 @@ import {
   AUTO_PROMOTION_CODE_LATCH,
   autoPromotionApplyPermitted,
 } from "@/lib/amux/autoPromotionCore";
-import {
-  BOARD_IMPORT_APPLY_CODE_LATCH,
-  BOARD_IMPORT_APPLY_ENV,
-  boardImportApplyPermitted,
-} from "@/lib/amux/boardImportCore";
 
 /**
  * The status chip on each AMUX section tab.
@@ -25,10 +20,6 @@ import {
  */
 
 export type AmuxTabStatus =
-  /** A preview screen whose apply switch is closed. */
-  | "preview_apply_off"
-  /** A preview screen whose apply switch is open. */
-  | "apply_on"
   /** Auto-promotion while its server switch is closed. */
   | "behind_server_switch"
   /** Auto-promotion while its server switch is open. */
@@ -41,17 +32,10 @@ type Environment = Readonly<Record<string, string | undefined>>;
 /**
  * Whether each gated section's writes are open, keyed by tab id. Intake,
  * reconciliation, backlog metadata, recommendation and promotion have no
- * switch since 2026-11-16, so they carry no chip.
- *
- * `import` stays closed whatever the environment says, because its code
- * latch ships false -- and that is what its route would answer too.
+ * switch since 2026-11-16, and the catalog import (whose code latch never
+ * opened) was removed on 2026-11-18, so none of them carries a chip.
  */
 export const AMUX_TAB_SWITCHES = {
-  import: (env: Environment) =>
-    boardImportApplyPermitted({
-      envValue: env[BOARD_IMPORT_APPLY_ENV],
-      codeLatch: BOARD_IMPORT_APPLY_CODE_LATCH,
-    }),
   "auto-promotion": (env: Environment) =>
     autoPromotionApplyPermitted({
       envValue: env[AUTO_PROMOTION_APPLY_ENV],
@@ -66,11 +50,7 @@ export const amuxSwitchedTabStatus = (
   tab: AmuxSwitchedTab,
   env: Environment = process.env
 ): AmuxTabStatus => {
-  const open = AMUX_TAB_SWITCHES[tab](env);
-  if (tab === "auto-promotion") {
-    return open ? "server_switch_on" : "behind_server_switch";
-  }
-  return open ? "apply_on" : "preview_apply_off";
+  return AMUX_TAB_SWITCHES[tab](env) ? "server_switch_on" : "behind_server_switch";
 };
 
 /** Chips for every tab in `tabs` that has a switch. */
@@ -82,7 +62,7 @@ export const amuxSwitchedTabStatuses = (
 
 /** A status that says writes are open, drawn so it is not read past. */
 export const amuxTabStatusIsOpen = (status: AmuxTabStatus) =>
-  status === "apply_on" || status === "server_switch_on";
+  status === "server_switch_on";
 
 /** Statuses keyed by tab id, turned into the tab strip's chips. */
 export const amuxTabChips = (

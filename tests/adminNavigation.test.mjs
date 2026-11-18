@@ -1161,13 +1161,12 @@ test("legacy execution controls retain their exact section and query", () => {
   assert.doesNotMatch(settingsPage, /AmuxOrchestratorHaltsPanel/);
   const backlogPage = readPage("amux-backlog");
   assert.ok(backlogPage.includes("ADMIN_AMUX_BACKLOG_LEGACY_TABS[requestedTab]"));
-  assert.doesNotMatch(backlogPage, /AmuxBoardImportPanel|AmuxReconciliationPanel|AmuxBacklogMetadataPanel/);
+  assert.doesNotMatch(backlogPage, /AmuxReconciliationPanel|AmuxBacklogMetadataPanel/);
 });
 
 test("the legacy tools tab holds every panel the retired pages held, each behind its own switch", () => {
   const page = readPage("amux-recovery");
   for (const panel of [
-    "AmuxBoardImportPanel",
     "AmuxReconciliationPanel",
     "AmuxBacklogMetadataPanel",
     "AmuxBoardRecommendationPanel",
@@ -1178,12 +1177,11 @@ test("the legacy tools tab holds every panel the retired pages held, each behind
   }
   assert.match(
     page,
-    /const LEGACY_SECTIONS = \[\s*"import",\s*"reconciliation",\s*"metadata",\s*"recommendation",\s*"promotion",\s*"auto-promotion",\s*\] as const;/
+    /const LEGACY_SECTIONS = \[\s*"reconciliation",\s*"metadata",\s*"recommendation",\s*"promotion",\s*"auto-promotion",\s*\] as const;/
   );
   assert.ok(page.includes("amuxSwitchedTabStatuses(SWITCHED_LEGACY_SECTIONS)"));
   // Each panel's step-up returns to the tab, not to a retired address.
   for (const file of [
-    "AmuxBoardImportPanel",
     "AmuxReconciliationPanel",
     "AmuxBacklogMetadataPanel",
     "AmuxBoardRecommendationPanel",

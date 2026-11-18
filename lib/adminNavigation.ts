@@ -901,8 +901,6 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
       "claim",
       "claim resolution",
       "legacy",
-      "catalog import",
-      "board import",
       "reconciliation",
       "source revision",
       "metadata",
@@ -927,7 +925,7 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
       {
         id: "legacy",
         label: "Legacy tools",
-        description: "Catalog import, source reconciliation, card metadata and card promotion",
+        description: "Source reconciliation, card metadata and card promotion",
         viewRoles: ["owner"],
       },
     ],

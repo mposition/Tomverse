@@ -146,7 +146,7 @@ approvedBy: mposition · approvedAt: 2026-10-18 · 정책 버전: 55
 | 54 | 2026-10-18 mposition | R2d 코드 래치 `AMUX_WORKER_SESSION_LIST_LATCH`를 켜 bridge가 유도 카탈로그의 세션 목록과 `TOMVERSE_AMUX_WSL_SESSIONS`의 교집합만 등록·배정하게 한다. 운영자가 두 경로의 bridge 바이너리를 main `d6c99aa1f` 빌드로 교체하며, 관측은 래치 배포와 교체가 모두 끝난 뒤 3일이다. 2026-10-18 기준으로 바뀌는 배정은 없다. |
 | 55 | 2026-10-18 mposition | worker 목록을 Admin 등록부 하나에서 관리한다. `TOMVERSE_AMUX_WSL_SESSIONS`를 옮기지 않고 없애며, bridge는 통합하지 않고 worker마다 하나(새 템플릿 `tomverse-amux-bridge@`, `--worker %i`)로 둔다. 담당과 종류(`session`·`v22`)는 새 읽기 전용 route `bridge-scope`가 등록부·능력에서 정한다. 장애 복구는 2026-10-14의 자동 재시작이 맡는다. 단계는 S1~S4이고 승인 자체로 아무것도 켜지 않는다. |
 | 55 (버전 유지) | 2026-11-16 mposition | 운영자 결정(대화, 버전 증가 없음): 카드 실행·코드 검토 등급·공용 AMUX의 환경 변수 스위치와 코드 래치를 정리한다. 카드 실행의 켜짐 스위치(`TOMVERSE_AMUX_V22_TASK_EXECUTION`, `WORKER_CLAIM`, `AUTO_PROMOTE`, `PROMOTION_FLOW`, `MULTI_PROVIDER`, `NON_CLAUDE_QUOTA_GATE`, `DELIVERY_BASE_SHA`, `TASK_RESULT_WRITE`, `LOCAL_CLI_FLOW`, `READ_BACK_PROCEED`, `TOMVERSE_AMUX_BRIDGE_READ_BACK_PROCEED`, `GRADUATION_EXCEPTION`, `TOMVERSE_AMUX_EXECUTION_GRADE`, `TOMVERSE_AMUX_V52_REJECT_RETRY_IN_BUDGET`, `V52_REVIEW_AVOID_VENDORS`, `TOMVERSE_AMUX_EXECUTION_API_ENABLED`, `INFRA_FAILURE_ROUTING`, `STALLED_CARD_SWEEP`, `CLI_USAGE_WRITE`)와 그 코드 래치, 결과를 쓰지 않던 `OUTCOME_WRITE` 경로를 없애고 코드는 늘 켜진 동작으로 동작한다. 남기는 것은 실제 돈이 나가는 경로(읽기 전용 API executor), 외부 게시(`V22_ENGINEERING_PUBLICATION`), 데이터 삭제(`CLI_USAGE_RETENTION`, `TASK_RESULT_RETENTION`), box 서비스를 켜는 스위치(orchestrator `ENABLED`·`EXECUTE`·`CLAIM`, `WSL_BRIDGE`, `CLI_MONITOR`, 복구 controller·checker), 에이전트 권한(`AGENT_APPROVAL_ENABLED`), 자격증명이다. 남는 스위치의 값은 `enabled`/`disabled`로 적고, 파서는 production의 기존 값(`1`, `true`)도 같은 뜻으로 읽는다. 새 스위치를 만들지 않고 migration을 만들지 않는다. |
-| 56 (버전 유지) | 2026-11-18 mposition | 운영자 결정(대화, 버전 증가 없음): 앱 코드가 읽는데 production 앱 서비스에 값이 없는 `TOMVERSE_AMUX_*`·`ENGINEERING_AGENT_*` 이름 65개를 하나씩 판정했다. 값이 없을 때 켜지는 앱 스위치는 남아 있지 않았다(모두 `enabled`일 때만 열린다). 남은 것은 돈·삭제·외부·권한 경계, 운영자가 남기라 한 것, box와 별도 service의 설정, 오류 코드 상수다. 코드에서 더 없앨 스위치는 없었고, 이미 없앤 스위치를 현재형으로 적던 문장만 고쳤다. Railway에 남은 `TOMVERSE_AMUX_STALLED_CARD_SWEEP`은 코드가 읽지 않는다. |
+| 56 (버전 유지) | 2026-11-18 mposition | 운영자 결정(대화, 버전 증가 없음): 앱 코드가 읽는데 production 앱 서비스에 값이 없는 `TOMVERSE_AMUX_*`·`ENGINEERING_AGENT_*` 이름 65개를 하나씩 판정했다. 값이 없을 때 켜지는 앱 스위치는 남아 있지 않았다(모두 `enabled`일 때만 열린다). 남은 것은 돈·삭제·외부·권한 경계, 운영자가 남기라 한 것, box와 별도 service의 설정, 오류 코드 상수다. 값이 없을 때 켜지는 스위치는 없었다. 이어서 같은 날 운영자 지시로, 코드 래치가 false로 고정돼 환경 변수를 켜도 열리지 않던 두 기능의 코드를 없앴다. 2026-09-23에 한 번 쓰고 끝난 Workboard catalog import(route, service, Admin 화면, `TOMVERSE_AMUX_BOARD_IMPORT_APPLY`와 `BOARD_IMPORT_APPLY_CODE_LATCH`)와, 열린 적 없는 v22 Task 결과·patch·review findings 본문 삭제 경로(`TOMVERSE_AMUX_V22_TASK_RESULT_RETENTION`, `AMUX_V22_TASK_RESULT_RETENTION_CODE_LATCH`, `v22TaskResultRetention`)다. 표와 migration은 그대로다(`AmuxBoardImportApproval`, `bodyPurgedAt` 열). 이미 없앤 스위치를 현재형으로 적던 문장도 고쳤다. Railway에 남은 `TOMVERSE_AMUX_STALLED_CARD_SWEEP`은 코드가 읽지 않는다. |
 
 v1 행은 역사적 승인 기록으로 남는다. v2는 이 표의 행과 상태 줄이 공개 저장소 파일에 함께 기록되어야 저장소상 효력을 가진다. 개별 Agent의 승인 정책을 이 문서의 승인으로 간주하지 않는다.
 
@@ -331,6 +331,8 @@ status와 dispatch readiness가 모두 변하지 않을 때만 telemetry 예외�
 호출, 사용자 크레딧 사용, 자동 승격·삭제를 승인하지 않는다.
 
 ## Workboard catalog import
+
+> 2026-11-18 운영자 지시로 2026-09-23에 한 번 쓰고 끝난 이 import의 코드(route, service, Admin 화면, 적용 스위치와 코드 래치)를 없앴다. 아래는 설계 이력이다. `AmuxBoardImportApproval` 표와 기존 행, 감사 기록, 옛 주소 `/admin/amux-board-import`의 redirect는 그대로다.
 
 Catalog import는 Agent 실행 권한을 부여하지 않는 별도 Admin 동작이다. 아래
 정본 설명은 **최초 import 당시의 역사적 상태**다: source board가 제품 작업의
@@ -2994,7 +2996,7 @@ Task의 `taskRole`, 예상 경로(`expectedPaths`), intake의 등급 제안뿐�
     옆에 AMUX의 다른 본문과 같은 **암호화된 content unit**(`AmuxV52ReviewFindings`, 목적 `review_findings`,
     attempt마다 외부 key)으로 같은 트랜잭션에 저장한다. 지적 개수와 길이에는 한도를 두지 않고(봉인 단위
     1 MB를 넘을 때만 덜 심각한 지적부터 빼고 `omitted`로 센다), 감사에는 본문이 아니라 digest와 개수만 남는다.
-    보존은 그 attempt의 result와 같다(Task가 끝난 뒤 90일, 지나면 본문을 비우고 key 삭제를 대기열에 올린다).
+    보존 삭제는 그 attempt의 result와 같게 설계했으나(Task가 끝난 뒤 90일, 지나면 본문을 비우고 key 삭제를 대기열에 올린다), 그 삭제 경로는 한 번도 열린 적이 없어 2026-11-18 운영자 지시로 코드를 없앴다. 지금은 자동 삭제가 없다.
     저장은 신호일 뿐 판정을 바꾸지 않으며, key 저장소가 닿지 않으면 판정만 기록한다.
   - **읽는 곳.** Admin 카드의 실행 이력과 운영자 확인 대기(지적별 심각도·검토자·파일·줄), Decision Maker
     작업 공간의 `evidence/FINDINGS.md`(그 Task의 모든 reject를 통째로, `docs/policy/amux-decision-maker.md` 11항),
