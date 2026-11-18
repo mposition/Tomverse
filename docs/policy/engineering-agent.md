@@ -170,7 +170,7 @@ branch 이름은 등급을 정하지 못한다.
 
 | 등급 | 에이전트가 하는 것 | 되돌릴 수 있는 근거 |
 |---|---|---|
-| **T2 초안** | branch를 push하지 않는다. patch와 제안을 **본 앱 테이블**에 제출하고 결정 항목 하나를 만든다 | 저장소 상태가 변하지 않는다. patch는 비공개 DB에만, 크기 상한과 두 번의 secret 검사 뒤에 저장된다 |
+| **T2 초안** | branch를 push하지 않는다. patch와 제안을 **본 앱 테이블**에 제출하고 결정 항목 하나를 만든다 | 저장소 상태가 변하지 않는다. patch는 비공개 DB에만, digest 확인과 두 번의 secret 검사 뒤에 저장된다(우리 쪽 크기 상한은 없다, §11 "게시 쪽 patch") |
 | **T1 PR** | 전용 branch를 push하고 `develop` 대상 PR을 연다. auto-merge 없음 | 병합은 사람이 한다. push와 PR은 공개되어 회수되지 않으므로, 공개 입력에서만 파생된 변경 또는 §2.1의 별도 공개 동의를 받은 v22 구현 Task의 검증된 패치에 한해 §13의 조건을 통과해야 한다. 동의가 있어도 아이디어 원문·실행 brief는 공개하지 않는다 |
 | 무인 병합 | **이 정책에서 부여하지 않는다** | — |
 
@@ -721,19 +721,19 @@ Publisher의 push 전 검사가 모두 그 바이트를 풀어 검사한다(새 
 tier gate의 `unsupported_tree_change` finding으로 T2가 된다. binary·symlink·실행 파일·삭제도
 §4의 규칙대로 tier 판정을 받는다(symlink는 T2, binary와 실행 파일은 2026-11-16부터 그 자체로 T2가 아니다).
 
-**크기 상한(2026-11-15 운영자 결정).** 우리 쪽 크기·개수 상한은 두지 않고, patch가 지나는
+**크기 상한(2026-11-15 운영자 결정, patch는 2026-11-18에 다시).** 우리 쪽 크기·개수 상한은 두지 않고, patch가 지나는
 시스템의 한계만 둔다(`lib/amux/v22PatchLimit.ts`). 파일 하나는 GitHub의 100 MiB다(push
-거부선이자 blob API 한도). patch 하나는 4 MiB다. 정산 요청은 `proxy.ts`를 지나고, Next.js는
+거부선이자 blob API 한도). patch 하나에는 2026-11-18부터 우리 쪽 상한이 없다(아래
+"게시 쪽 patch" 문단, `docs/policy/amux-v22-result-transfer.md`). 그 전에는 4 MiB였다: 정산 요청이 `proxy.ts`를 지나고, Next.js는
 proxy를 지나는 요청 본문을 10 MB까지 버퍼한다(`proxyClientMaxBodySize`, 기본값 유지: 올리면
 모든 공개 경로가 더 큰 본문을 메모리에 받는다). JSON escape로 두 배가 된 patch와 Task 결과가
-그 안에 들어가야 한다. 예전의 64 KiB patch 증거, 파일 20개·200 KiB·합계 2 MiB 후보 한도,
+그 안에 들어가야 했다. 예전의 64 KiB patch 증거, 파일 20개·200 KiB·합계 2 MiB 후보 한도,
 blob 읽기 200 KiB 기본값·2 MiB 상한, tree 20,000 항목, 바뀐 blob 50개·2 MiB, tier 분석의
 파일당 2 MiB·합계 128 MiB·GitHub 추가 읽기 1,000개는 모두 없앴다(GitHub이 거절한 읽기는
 판정이 아니라 다음 회차의 재시도다). blob은 base64 JSON 대신 원본(raw media type)으로,
 상한 안에서 흘려 읽고 hash를 검증한다. tree는 GitHub이 잘리지 않았다고 답한 목록(최대
 100,000 항목)만 받는다. DB의 두 CHECK(`AmuxV22TaskPatch_digest_check`의 `byteLength`,
-`EngineeringAgentWorkItem_patchBody_check`)는 4 MiB로 넓혔다. box sidecar와 bridge도 같은
-값을 쓴다. tier gate의 T1 한도(`PUSH_LIMITS`: 파일 5개·300줄·파일 200 KiB)는 patch 크기
+`EngineeringAgentWorkItem_patchBody_check`)는 그날 4 MiB로 넓혔고, 뒤의 것은 2026-11-18에 지웠다. tier gate의 T1 한도(`PUSH_LIMITS`: 파일 5개·300줄·파일 200 KiB)는 patch 크기
 상한이 아니었다. 그 T1 한도와 확장자 목록도 같은 날 없앴다(§9-5). sidecar는 patch 본문 옆에
 파일 바이트를 더 보내지 않고, v52 정산은 저장된 파일 대신 patch 본문이 적는 모든 경로(이름
 변경의 양쪽 포함)를 실행 inventory와 대조한다. 게시 서비스의 cycle은 40분(claim lease 45분
@@ -742,6 +742,26 @@ blob 읽기 200 KiB 기본값·2 MiB 상한, tree 20,000 항목, 바뀐 blob 50�
 목록 3,000개(GitHub API 자체의 한계), 그리고 Decision Maker 병합 gate·QA 병합 lane·AMUX 검토와
 함께 쓰는 PR diff binding 1 MiB(`PULL_DIFF_DIGEST_MAX_BYTES`, 다른 에이전트의 병합 근거라 이
 결정 밖이다). 1 MiB를 넘는 diff의 PR도 열리지만 자동 binding 없이 사람이 맡는다.
+
+**게시 쪽 patch(2026-11-18 운영자 결정).** 규약은 `docs/policy/amux-v22-result-transfer.md` 4절이다.
+본 앱은 patch를 크기로 거절하지 않는다(`patch_too_large`와 후보 재구성의 `patch_over_limit`은
+없앴고, 옛 초안의 `patch_over_limit`은 배포 뒤 다시 판정할 사유로 읽기만 한다).
+publish 항목은 열 때 patch의 UTF-8 바이트를 `patchBytes`(BYTEA, STORAGE EXTERNAL)에 한 번
+쓰고, 텍스트(`patchBody`)는 다른 독자를 위해 그대로 둔다. CHECK
+`EngineeringAgentWorkItem_patchBytes_check`가 두 길이를 같게, work item guard가 insert 때 바이트를
+텍스트의 UTF-8과 같게 붙잡고 그 뒤로는 바꾸지 못하게 한다(migration
+`20261118120100_engineering_agent_patch_bytes`). 기능은 claim 요청 헤더
+`x-engineering-publisher-features`의 `patch_chunks`와 claim 답 최상위의 `"appFeatures":["patch_chunks"]`로
+맞춘다. `patch_chunks`를 밝힌 게시 서비스의 쓰기 claim은 patch 대신 `patchBytes`(바이트 수)와
+`patchChunkCount`를 싣고, 게시 서비스는 `POST /api/internal/engineering-agent/publish/patch`에서 4 MiB
+조각을 순서대로 받아 붙인 뒤 길이와 `sha256 == patchDigest`를 확인하고 UTF-8(fatal)로 푼다. 그
+route는 state `claimed`·claimMode `write`·같은 fencing token·lease가 남은 claim에만 답하고(아니면 409
+`claim_not_live`), `patchBytes`가 없는 옛 항목은 텍스트를 잘라 준다. 조각이 claim과 다르면
+`revalidation_refused`(`content_check_failed`), 조각을 받지 못하면 `refused_before_write`
+(`patch_read_failed`, 새 capability로 다시 판정)다. 그 뒤의 secret 검사·적용·tree 확인은 그대로다.
+`patch_chunks`를 밝히지 않은 게시 서비스는 patch를 inline으로 받고, 4 MiB
+(`ENGINEERING_AGENT_LEGACY_INLINE_PATCH_MAX_BYTES`)를 넘는 항목은 받지 않는다. runner의 `run/draft`
+요청 본문 상한은 proxy의 10 MiB(`AMUX_V22_PROXY_BODY_MAX_BYTES`)다.
 
 **저장된 patch에서 변경 바이트 재구성(2026-11-10 도입, 2026-11-15 확장).** 앱은 같은 고정
 base commit에서 GitHub로 읽은 기존 blob에 patch를 **메모리 안에서 정확히** 적용해 변경
@@ -857,8 +877,8 @@ Admin › 엔지니어링 Agent 대기열의 "다시 판정"으로도 `tier_pend
   어떤 쓰기로도 표시할 수 없으므로(위 문단), v22 `implement` Task에서는 이 조치도 번호를 바인딩이
   보유한 것으로 기록하고 불일치를 닫으며, 바인딩이 보유하지 않는 v4 카드는 `review_not_required`로
   거절한다.
-- patch 본문은 크기 상한과 **두 번의 secret 검사**(초안 측 1회, 본 앱 저장 전 1회)를
-  통과해야 저장된다. 탐지되면 저장하지 않는다. 본 앱은 patch를 텍스트로만 저장·표시한다.
+- patch 본문은 digest 확인과 **두 번의 secret 검사**(초안 측 1회, 본 앱 저장 전 1회)를
+  통과해야 저장된다(크기로는 거절하지 않는다, 2026-11-18). 탐지되면 저장하지 않는다. 본 앱은 patch를 텍스트로만 저장·표시한다.
   결정 후 보존 기간이 지나면 **본문만 지우고 digest와 결정 기록은 남긴다.** 등록 제안은
   본문을 저장하지 않고 digest만 둔다.
 - 에이전트의 외부 텍스트·patch 본문을 AMUX의 자유 텍스트 컬럼에 넣지 않는다. AMUX

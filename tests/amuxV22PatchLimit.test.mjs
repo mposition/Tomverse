@@ -55,13 +55,18 @@ test("the settlement route, the evidence and both database checks hold one patch
   assert.match(route, /readLimitedJson\(request, AMUX_V22_PATCH_ENVELOPE_MAX_BYTES \+\s+2 \* AMUX_V22_TRANSPORT_MAX_BYTES, bodySchema\)/);
   assert.match(read("lib/amux/v22PatchEvidence.ts"),
     /const MAX_PATCH_BYTES = AMUX_V22_PATCH_MAX_BYTES;/);
-  assert.match(read("lib/engineeringAgentStore.ts"),
-    /export const ENGINEERING_AGENT_PATCH_BODY_MAX_BYTES = AMUX_V22_PATCH_MAX_BYTES;/);
+  // The engineering agent's copy has no bound of its own (owner decision
+  // 2026-11-18, docs/policy/amux-v22-result-transfer.md §4): its size CHECK is
+  // dropped, and 4 MiB is only what a claim still carries inline.
+  const store = read("lib/engineeringAgentStore.ts");
+  assert.doesNotMatch(store, /ENGINEERING_AGENT_PATCH_BODY_MAX_BYTES|patch_too_large|AMUX_V22_PATCH_MAX_BYTES/);
+  assert.match(store, /export const ENGINEERING_AGENT_LEGACY_INLINE_PATCH_MAX_BYTES = 4 \* 1024 \* 1024;/);
+  assert.match(read("prisma/migrations/20261118120100_engineering_agent_patch_bytes/migration.sql"),
+    /DROP CONSTRAINT "EngineeringAgentWorkItem_patchBody_check",\n\s*ADD CONSTRAINT "EngineeringAgentWorkItem_patchBytes_check"/);
   // The latest migration that defines each check states the bound.
   const migrations = readdirSync("prisma/migrations", { withFileTypes: true })
     .filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
-  for (const constraint of ["AmuxV22TaskPatch_digest_check",
-    "EngineeringAgentWorkItem_patchBody_check"]) {
+  for (const constraint of ["AmuxV22TaskPatch_digest_check"]) {
     const latest = migrations.filter((name) =>
       read(`prisma/migrations/${name}/migration.sql`)
         .includes(`ADD CONSTRAINT "${constraint}"`) ||

@@ -10203,6 +10203,10 @@ model EngineeringAgentWorkItem {
   causeKey       String    @unique
   runId          String?
   patchBody      String?
+  /// A publish item's patch as UTF-8 bytes, written once with the item
+  /// (migration 20261118120100: STORAGE EXTERNAL, so the publisher's chunk
+  /// reads take only their slice). Null on items opened before it.
+  patchBytes     Bytes?
   patchDigest    String?
   baseSha        String?
   expectedTreeId String?

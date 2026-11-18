@@ -31,7 +31,8 @@ import {
   isRunId,
   parseSettingInstant,
 } from "../lib/engineeringAgentCore.ts";
-import { ENGINEERING_AGENT_PATCH_BODY_MAX_BYTES } from "../lib/engineeringAgentStore.ts";
+import { ENGINEERING_AGENT_LEGACY_INLINE_PATCH_MAX_BYTES,
+  ENGINEERING_AGENT_PATCH_CHUNK_BYTES } from "../lib/engineeringAgentStore.ts";
 import {
   ENGINEERING_AGENT_RESPONSE_MAX_BYTES,
   requireSendableResult,
@@ -219,10 +220,15 @@ test("a stored instant is exactly what toISOString writes, or no record", () => 
 });
 
 test("the response ceiling holds the widest claim, and a result that cannot be sent is refused before commit", () => {
-  // JSON writes each control character as six bytes.
-  const worstPatch = "\u0001".repeat(ENGINEERING_AGENT_PATCH_BODY_MAX_BYTES);
-  assert.equal(JSON.stringify(worstPatch).length, ENGINEERING_AGENT_PATCH_BODY_MAX_BYTES * 6 + 2);
-  assert.ok(ENGINEERING_AGENT_RESPONSE_MAX_BYTES >= ENGINEERING_AGENT_PATCH_BODY_MAX_BYTES * 6 + 16 * 1024);
+  // JSON writes each control character as six bytes. A claim carries a patch
+  // inline only up to the inline bound; a larger one is read in chunks.
+  const worstPatch = "\u0001".repeat(ENGINEERING_AGENT_LEGACY_INLINE_PATCH_MAX_BYTES);
+  assert.equal(JSON.stringify(worstPatch).length, ENGINEERING_AGENT_LEGACY_INLINE_PATCH_MAX_BYTES * 6 + 2);
+  assert.ok(ENGINEERING_AGENT_RESPONSE_MAX_BYTES >= ENGINEERING_AGENT_LEGACY_INLINE_PATCH_MAX_BYTES * 6 + 16 * 1024);
+  // One chunk answer: a full chunk in base64 and its envelope.
+  const chunk = { workItemId: "00000000-0000-4000-8000-000000000000", index: 0, totalBytes: 2 ** 30, chunkCount: 256,
+    bytesBase64: Buffer.alloc(ENGINEERING_AGENT_PATCH_CHUNK_BYTES).toString("base64") };
+  assert.doesNotThrow(() => requireSendableResult(chunk));
   const claim = {
     mode: "write",
     workItemId: "00000000-0000-4000-8000-000000000000",
