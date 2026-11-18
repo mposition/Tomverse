@@ -674,7 +674,7 @@ const createRun = (input: {
     completionId: string;
     includeUsage: boolean;
     dispose: () => void;
-    /** Told the ids of the tool calls the answer completed, if it made any. */
+    /** Told each tool call's id as the call is completed, before it is sent on. */
     onToolCalls?: (ids: string[]) => void;
 }) => {
     const translator = createChunkTranslator({
@@ -749,6 +749,11 @@ const createRun = (input: {
                         cacheWriteInputTokens = total.inputTokenDetails?.cacheWriteTokens;
                     }
                     continue;
+                }
+                // Remembered before the call reaches the client: a client can
+                // run the tool and send its round as soon as it sees the call.
+                if (part.type === "tool-call" && typeof part.toolCallId === "string") {
+                    input.onToolCalls?.([part.toolCallId]);
                 }
                 for (const chunk of translator.translate(part)) emit(chunk);
             }
@@ -873,8 +878,6 @@ const createRun = (input: {
             ]);
         }
         final = { ...collected, finishReason, usage, error };
-        const completedCalls = collected.toolCalls.filter((call) => call.complete).map((call) => call.id);
-        if (!error && completedCalls.length) input.onToolCalls?.(completedCalls);
     };
 
     return {

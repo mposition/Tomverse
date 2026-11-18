@@ -438,6 +438,43 @@ test("external inference API over the real shared credit ledger", { skip: !datab
             assert.equal(gated.headers.get("x-tomverse-routed-by"), "continued");
             process.env.EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED = "true";
 
+            // Streaming: the round sent the moment the client sees the call
+            // finish (before settlement) still goes to the model that made it.
+            routerPick = SECOND;
+            script = (options) => streamOf([
+                { type: "stream-start", warnings: [] },
+                { type: "tool-input-start", id: "call_stream", toolName: "run" },
+                { type: "tool-input-delta", id: "call_stream", delta: "{}" },
+                { type: "tool-input-end", id: "call_stream" },
+                { type: "tool-call", toolCallId: "call_stream", toolName: "run", input: "{}" },
+                finish("tool-calls", usage(200, 12)),
+            ], { delayMs: 30, signal: options.abortSignal });
+            const streamed = await call(key, body({ model: "smart-adaptive", stream: true, messages: [{ role: "user", content: "Stream a tool call" }], tools: runTool }));
+            assert.equal(streamed.headers.get("x-tomverse-routed-model"), SECOND);
+            const reader = streamed.body.getReader();
+            const decoder = new TextDecoder();
+            let seen = "";
+            while (!seen.includes('"finish_reason":"tool_calls"')) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                seen += decoder.decode(value, { stream: true });
+            }
+            routerPick = MODEL_ID;
+            script = textScript("Ran it.");
+            const quick = await call(key, body({
+                model: "smart-adaptive",
+                messages: [
+                    { role: "user", content: "Stream a tool call" },
+                    { role: "assistant", content: null, tool_calls: [{ id: "call_stream", type: "function", function: { name: "run", arguments: "{}" } }] },
+                    { role: "tool", tool_call_id: "call_stream", content: "ok" },
+                ],
+                tools: runTool,
+            }));
+            await reader.cancel().catch(() => undefined);
+            assert.equal(quick.headers.get("x-tomverse-routed-by"), "continued", "remembered before the call reached the client");
+            assert.equal(quick.headers.get("x-tomverse-routed-model"), SECOND);
+            routerCalls.pop();
+
             // A tool result for a call this API never answered with routes afresh.
             const stranger = await call(key, body({
                 model: "smart-adaptive",

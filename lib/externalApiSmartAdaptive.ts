@@ -208,6 +208,8 @@ export const routeSmartAdaptive = async (input: {
         if (!remembered || now - remembered.at >= STICKY_MS) continue;
         const entry = eligible.find((candidate) => candidate.model.id === remembered.modelId);
         if (entry) return { entry, routedBy: "continued" };
+        // No longer a candidate (retired, or this round needs what it lacks).
+        sticky.delete(callKey(input.keyId, id));
     }
 
     // One router call per Idempotency-Key at a time in this process: a
