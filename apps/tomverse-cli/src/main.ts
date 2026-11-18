@@ -574,7 +574,11 @@ const resume = async (ctx: Context, args: string[], interactive: boolean) => {
         if (!same(root, state.workspace.root)) throw new UsageError(`The session's folder now resolves to ${root}; not resuming.`);
         const { endpoint, key, gateway } = await connect(ctx);
         if (endpoint.origin !== state.endpointOrigin) throw new UsageError(`This session used ${state.endpointOrigin}; the endpoint is now ${endpoint.origin}. Not resuming.`);
-        if (state.keyPrefix !== keyPrefix(key)) ctx.output.info(`This session was started with key ${state.keyPrefix}; you are using ${keyPrefix(key)}. Its earlier requests can only be looked up with the first key.`);
+        // A session's requests can only be looked up with the key that sent
+        // them, so a session stays on one key.
+        if (state.keyPrefix !== keyPrefix(key)) {
+            throw new UsageError(`This session belongs to key ${state.keyPrefix}; you are using ${keyPrefix(key)}. Resume it with that key, or start a new session.`);
+        }
         const catalog = toolModels(await gateway.models());
         const modelId = state.model.pinned ?? state.model.requested;
         if (!catalog.some((m) => m.id === modelId)) {

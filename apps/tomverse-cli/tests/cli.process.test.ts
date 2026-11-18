@@ -175,3 +175,19 @@ test("doctor and models make no model request; usage --session sums only this se
         await gateway.stop();
     }
 });
+
+test("a session is resumed only with the key that started it", async () => {
+    const gateway = await new FakeGateway({ script: () => ({ text: "x" }) }).start();
+    try {
+        const { home, root, env } = setup(gateway);
+        const first = jsonl((await run(["exec", "--json", "--read-only", "hi"], { cwd: root, home, env })).stdout);
+        const before = gateway.completions.length;
+        const otherKey = `tvk_zzzzzzzz_${"Q".repeat(43)}`;
+        const resumed = await run(["resume", first[0].session_id, "--json", "again"], { cwd: root, home, env: { TOMVERSE_API_KEY: otherKey } });
+        assert.equal(resumed.code, 2);
+        assert.match(resumed.stderr, /belongs to key tvk_abcdefgh/);
+        assert.equal(gateway.completions.length, before);
+    } finally {
+        await gateway.stop();
+    }
+});
