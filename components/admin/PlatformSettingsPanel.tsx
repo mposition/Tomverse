@@ -80,6 +80,7 @@ type AdminAppSettingsResponse = {
   assistantProfilesEnabled?: boolean;
   assistantKnowledgeEnabled?: boolean;
   chatStarterEnabled?: boolean;
+  helpAssistantEnabled?: boolean;
   memoryExtractionEnabled?: boolean;
   memoryInjectionEnabled?: boolean;
   memoryApprovedPairCount?: number;
@@ -136,6 +137,11 @@ type Props = {
    */
   chatStarterEnabled: boolean;
   /**
+   * Help Centre question box (lib/helpAssistantAccess.ts): a platform-paid
+   * model call per answer, approved by the owner 2026-11-18. Default-off.
+   */
+  helpAssistantEnabled?: boolean;
+  /**
    * Release B (account memory), reported and never edited here. Enabling
    * either one is the import/memory policy §12.4 human procedure, so this
    * screen has no control for them -- and `/api/admin/app-settings` refuses a
@@ -174,6 +180,7 @@ export function PlatformSettingsPanel({
   assistantProfilesEnabled: initialAssistantProfilesEnabled,
   assistantKnowledgeEnabled: initialAssistantKnowledgeEnabled,
   chatStarterEnabled: initialChatStarterEnabled,
+  helpAssistantEnabled: initialHelpAssistantEnabled = false,
   memoryExtractionEnabled: initialMemoryExtractionEnabled,
   memoryInjectionEnabled: initialMemoryInjectionEnabled,
   memoryApprovedPairCount: initialMemoryApprovedPairCount,
@@ -348,6 +355,9 @@ export function PlatformSettingsPanel({
   const [chatStarterEnabled, setChatStarterEnabled] = useState(
     initialChatStarterEnabled
   );
+  const [helpAssistantEnabled, setHelpAssistantEnabled] = useState(
+    initialHelpAssistantEnabled
+  );
   // One state object rather than three: they are read together and are only
   // ever meaningful together, and no control writes any of them.
   const [memoryStatus, setMemoryStatus] = useState<MemoryReleaseStatus>({
@@ -483,6 +493,7 @@ export function PlatformSettingsPanel({
         data.assistantKnowledgeEnabled,
         data.chatStarterEnabled
       );
+      if (typeof data.helpAssistantEnabled === "boolean") setHelpAssistantEnabled(data.helpAssistantEnabled);
       applyMemoryStatus(data);
       if (data.guestLead) setStoredGuestLead(data.guestLead.stored);
       dispatchAppToast(m.toast.reloaded, "success");
@@ -515,6 +526,7 @@ export function PlatformSettingsPanel({
             current.assistantProfilesEnabled,
             current.assistantKnowledgeEnabled,
             current.chatStarterEnabled,
+            current.helpAssistantEnabled,
           ].every((value) => typeof value === "boolean");
         if (!readable) {
           dispatchAppToast(m.toast.notSaved, "error");
@@ -536,6 +548,7 @@ export function PlatformSettingsPanel({
             assistantProfilesEnabled,
             assistantKnowledgeEnabled,
             chatStarterEnabled,
+            helpAssistantEnabled,
           }
         : {
             imageGenerationEnabled: current.imageGenerationEnabled,
@@ -544,6 +557,7 @@ export function PlatformSettingsPanel({
             assistantProfilesEnabled: current.assistantProfilesEnabled,
             assistantKnowledgeEnabled: current.assistantKnowledgeEnabled,
             chatStarterEnabled: current.chatStarterEnabled,
+            helpAssistantEnabled: current.helpAssistantEnabled,
           };
       const response = await adminFetch("/api/admin/app-settings", {
         method: "PATCH",
@@ -598,6 +612,7 @@ export function PlatformSettingsPanel({
         data.assistantKnowledgeEnabled,
         data.chatStarterEnabled
       );
+      if (typeof data.helpAssistantEnabled === "boolean") setHelpAssistantEnabled(data.helpAssistantEnabled);
       applyMemoryStatus(data);
       dispatchAppToast(m.toast.saved, "success");
     } catch {
@@ -893,6 +908,7 @@ export function PlatformSettingsPanel({
 
   const flagRows = [
     { testId: "admin-chat-starter-flag", copy: m.switches.items.chatStarter, enabled: chatStarterEnabled, set: setChatStarterEnabled, waiting: false },
+    { testId: "admin-help-assistant-flag", copy: m.switches.items.helpAssistant, enabled: helpAssistantEnabled, set: setHelpAssistantEnabled, waiting: false },
     { testId: "admin-image-generation-flag", copy: m.switches.items.imageGeneration, enabled: imageGenerationEnabled, set: setImageGenerationEnabled, waiting: false },
     { testId: "admin-external-import-flag", copy: m.switches.items.externalImport, enabled: externalImportEnabled, set: setExternalImportEnabled, waiting: false },
     { testId: "admin-external-continuation-flag", copy: m.switches.items.externalContinuation, enabled: externalContinuationEnabled, set: setExternalContinuationEnabled, waiting: false },

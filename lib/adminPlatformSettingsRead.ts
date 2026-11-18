@@ -11,6 +11,7 @@ import {
   isMemoryExtractionEnabled,
   isMemoryInjectionEnabled,
 } from "@/lib/appSettings";
+import { isHelpAssistantEnabled } from "@/lib/helpAssistantSettings";
 import { injectableExtractionPairs } from "@/lib/memoryInjectionGate";
 import { readGuestLeadFacts } from "@/lib/guestLeadFacts";
 
@@ -64,6 +65,7 @@ export async function readPlatformSettingsPanelProps() {
     assistantProfilesEnabled,
     assistantKnowledgeEnabled,
     chatStarterEnabled,
+    helpAssistantEnabled: await isHelpAssistantEnabled(),
     assistantPackageImportEnabled,
     memoryExtractionEnabled,
     memoryInjectionEnabled,

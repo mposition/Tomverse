@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
-import { MarketingInfoPage } from "@/components/marketing/MarketingInfoPage";
-import { infoPages } from "@/components/marketing/marketingInfoContent";
+import { HelpCentreHub } from "@/components/help/HelpCentreHub";
 import { LocalizedPublicPage } from "@/components/marketing/LocalizedPublicPage";
+import { helpCentreCopy } from "@/lib/helpCentre/copy";
+import { marketingLocaleFor } from "@/lib/marketingLocale";
 import { localizedPublicPageMetadata, publicMarketingLocaleParams, type LocalizedPublicPageProps } from "@/lib/publicMarketingMetadata";
 
 export const dynamic = "force-static";
@@ -15,6 +16,11 @@ export async function generateMetadata(props: LocalizedPublicPageProps): Promise
   return localizedPublicPageMetadata(props, "/support/help-centre");
 }
 
-export default function Page({ params }: LocalizedPublicPageProps) {
-  return <LocalizedPublicPage params={params} path="/support/help-centre"><MarketingInfoPage content={infoPages.helpCentre} /></LocalizedPublicPage>;
+export default async function Page({ params }: LocalizedPublicPageProps) {
+  const lang = marketingLocaleFor((await params).locale) ?? "en";
+  return (
+    <LocalizedPublicPage params={params} path="/support/help-centre">
+      <HelpCentreHub lang={lang} copy={helpCentreCopy(lang)} />
+    </LocalizedPublicPage>
+  );
 }
