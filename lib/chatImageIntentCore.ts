@@ -1,4 +1,5 @@
 import type { ImageModelProfile } from "@/lib/imageModelRegistry";
+import { ROUTING_CALL_MAX_OUTPUT_TOKENS } from "@/lib/routingCallLimits";
 import {
     IMAGE_EDIT_SOURCE_MEDIA_TYPES,
     IMAGE_QUALITY_BY_PRESET,
@@ -23,10 +24,12 @@ import {
 export const CHAT_IMAGE_INTENT_MAX_PROMPT_CHARS = 2_000;
 
 /**
- * One small JSON object plus room for reasoning: an OpenAI reasoning model
- * counts its reasoning against this, and a ceiling it hits returns no object.
+ * The shared routing-call ceiling (lib/routingCallLimits.ts), for a plain
+ * decision and for a follow-up that also writes the whole new prompt: an
+ * OpenAI reasoning model counts its reasoning against it, and a ceiling it hits
+ * returns no object.
  */
-export const CHAT_IMAGE_INTENT_MAX_OUTPUT_TOKENS = 400;
+export const CHAT_IMAGE_INTENT_MAX_OUTPUT_TOKENS = ROUTING_CALL_MAX_OUTPUT_TOKENS;
 
 /**
  * The send waits on this call, so a slow answer reads as "not an image".
@@ -41,12 +44,8 @@ export const CHAT_IMAGE_INTENT_TIMEOUT_MS = 8_000;
 
 /**
  * A follow-up ("make it bluer") writes the whole new prompt as well as the
- * decision, so it gets room for up to CHAT_IMAGE_INTENT_MAX_REWRITE_CHARS of
- * any script (a Korean character can be more than one token) plus reasoning,
- * and the time to write it. Used only when a previous image is shown; the
- * worst-case budget hold is taken at this ceiling then.
+ * decision, so it gets the time to write it.
  */
-export const CHAT_IMAGE_INTENT_FOLLOW_UP_MAX_OUTPUT_TOKENS = 2_500;
 export const CHAT_IMAGE_INTENT_FOLLOW_UP_TIMEOUT_MS = 12_000;
 
 /** The composer's wait: the longest server deadline plus the round trip. */

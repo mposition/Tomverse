@@ -1,7 +1,7 @@
 import "server-only";
 import { CHAT_LOCATION_INTENT_PROMPT } from "./chatLocationIntentPrompt";
 import { routerLocationDigest, type RouterLocationContinuation, type RouterLocationPick } from "./chatRouterLocationContinuation";
-import { parseRouterSearchQueries, routerSearchInstructions, routerSearchQueriesSchema, ROUTER_SEARCH_OUTPUT_TOKENS } from "./chatRouterSearchPlan";
+import { parseRouterSearchQueries, routerSearchInstructions, routerSearchQueriesSchema } from "./chatRouterSearchPlan";
 
 import {
     APICallError, generateText, JSONParseError, jsonSchema,
@@ -26,7 +26,6 @@ import { getProviderCostBudget } from "@/lib/providerCostBudget";
 import {
     AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS,
     AUTO_LLM_ROUTER_MAX_PROMPT_CHARS,
-    AUTO_LLM_ROUTER_REWRITE_MAX_OUTPUT_TOKENS,
     AUTO_LLM_ROUTER_REWRITE_SOURCE_MAX_CHARS,
     AUTO_LLM_ROUTER_REWRITE_TIMEOUT_MS,
     AUTO_LLM_ROUTER_SESSION_PICKS,
@@ -153,10 +152,9 @@ export const routerRequest = (input: AutoLlmRouterCallInput) => {
                 : imageIntent.prompt
         ) : "") + (authored && authored !== input.prompt.slice(0, AUTO_LLM_ROUTER_MAX_PROMPT_CHARS)
             ? "\n\n" + JSON.stringify({ authoredMessage: authored }) : ""),
-        maxOutputTokens: (rewrite
-            ? AUTO_LLM_ROUTER_REWRITE_MAX_OUTPUT_TOKENS
-            : AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS) + (imageIntent?.maxOutputTokens ?? 0) + (input.searchPlan ? ROUTER_SEARCH_OUTPUT_TOKENS : 0) +
-            (authored ? 16 : 0),
+        // One ceiling whatever the call combines (image decision, search plan,
+        // rewrite): it sizes the cost hold, and a tight one cut answers off.
+        maxOutputTokens: AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS,
         schema: imageIntent ? {
             ...schema,
             properties: { ...schema.properties, imageIntent: {
@@ -313,7 +311,10 @@ async function callPreparedAutoLlmRouter(
             stage = "output";
         }
         const failure = autoLlmRouterFailureDetail(error, abortSignal?.aborted === true);
+        // A cut-off answer has its own code, so an output ceiling that is too
+        // tight shows up in the logs as itself rather than as a malformed answer.
         const failureCode = failure.kind === "timeout" ? "timeout"
+            : structured && finishReason === "length" ? "output_truncated"
             : structured ? (JSONParseError.isInstance(error.cause) ? "output_parse"
                 : TypeValidationError.isInstance(error.cause) ? "output_schema" : "output_invalid")
             : empty ? "empty_output"

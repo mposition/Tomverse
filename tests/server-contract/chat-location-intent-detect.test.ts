@@ -13,7 +13,7 @@ let held = true; let fail = false; let calls = 0; let holds = 0;
 let output: unknown = { requiresLocation: true };
 const settlements: number[] = [];
 mock.module("ai", { namedExports: { ...ai, generateText: async (input: { maxRetries: number; maxOutputTokens: number; prompt: string }) => {
-  calls++; assert.equal(input.maxRetries, 0); assert.equal(input.maxOutputTokens, 400);
+  calls++; assert.equal(input.maxRetries, 0); assert.equal(input.maxOutputTokens, 8_192);
   assert.equal(JSON.parse(input.prompt).userMessage, "지금 제가 있는 위치가 어디인가요?");
   if (fail) throw Error("unknown provider outcome");
   return { output, usage: { inputTokens: 30, outputTokens: 10 } };

@@ -428,3 +428,17 @@ test("a model billed per request beyond tokens is never the router", async () =>
   const tokenOnly = AVAILABLE_MODELS.find((model) => model.provider === "openai");
   assert.equal(autoLlmRouterModelAllowed(tokenOnly), true);
 });
+
+test("the router output cap leaves room for the kept reason and topic in any script plus reasoning", async () => {
+  const core = await import("../lib/autoLlmRouterCore.ts");
+  // 200 cut the router off mid-reason on follow-up turns; the cap now covers
+  // the kept reason and topic at a token per character, with room to spare.
+  assert.ok(core.AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS >= core.AUTO_LLM_ROUTER_MAX_REASON_CHARS + core.AUTO_LLM_ROUTER_MAX_TOPIC_CHARS + 128);
+  assert.equal(core.AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS, 8_192, "the shared routing-call ceiling");
+  // The worst-case hold grows with it, so the provider budget still bounds the call.
+  const hold = core.autoLlmRouterWorstCaseMicroUsd({
+    system: "", prompt: "", maxOutputTokens: core.AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS,
+    inputUsdPerMillionTokens: 0.1, outputUsdPerMillionTokens: 0.5,
+  });
+  assert.equal(hold, Math.ceil(8_192 * 0.5));
+});
