@@ -18,7 +18,7 @@ test("two-reviewer explanation reports quote evidence without promising provider
 
 test("public information and guides have complete localized bodies rather than English fallback", () => {
   const tables = {
-    ...Object.fromEntries(["about", "faq", "safety", "helpCentre"].map(key => [key, infoPages[key]])),
+    ...Object.fromEntries(["about", "faq", "safety"].map(key => [key, infoPages[key]])),
     ...focusedSafetyPages,
     ...searchIntentPages,
     workspace: chatWorkspaceGuideContent,

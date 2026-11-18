@@ -1,9 +1,9 @@
-import { MarketingInfoPage } from "@/components/marketing/MarketingInfoPage";
-import { infoPages } from "@/components/marketing/marketingInfoContent";
-import { publicMarketingPageMetadata } from "@/lib/publicMarketingMetadata";
+import { HelpCentreHub } from "@/components/help/HelpCentreHub";
+import { helpCentreCopy } from "@/lib/helpCentre/copy";
+import { helpHubMetadata } from "@/lib/helpCentre/metadata";
 
-export const metadata = publicMarketingPageMetadata("/support/help-centre");
+export const metadata = helpHubMetadata("en", false);
 
 export default function HelpCentrePage() {
-  return <MarketingInfoPage content={infoPages.helpCentre} />;
+  return <HelpCentreHub lang="en" copy={helpCentreCopy("en")} />;
 }
