@@ -1,3 +1,4 @@
+import { CHAT_MAX_MESSAGE_BODY_BYTES, CHAT_MAX_MESSAGE_CHARACTERS } from "@/lib/chatRequestLimits";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 ﻿import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -120,7 +121,7 @@ const saveMessagesSchema = z
   )
   .refine(
     (body) => body.messages.every((message) =>
-      (body.draftConsume ? message.content : message.content.trim()).length <= 50_000
+      (body.draftConsume ? message.content : message.content.trim()).length <= CHAT_MAX_MESSAGE_CHARACTERS
     ),
     { message: "Message content is too long.", path: ["messages"] }
   )
@@ -178,7 +179,7 @@ export async function POST(
         return conversationLockedResponse();
       }
 
-    const body = await readLimitedJson(req, 160 * 1024, saveMessagesSchema);
+    const body = await readLimitedJson(req, CHAT_MAX_MESSAGE_BODY_BYTES, saveMessagesSchema);
     const messageMappings = body.messages.map((message) => ({
       requestId: message.clientRequestId,
       messageId: scopedMessageId(conversationId, message.clientRequestId),

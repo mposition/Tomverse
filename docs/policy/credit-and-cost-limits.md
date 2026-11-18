@@ -102,6 +102,12 @@ guardrail = 크레딧 수 × COST_PER_CREDIT_CEILING_MICRO_USD × GUARDRAIL_HEAD
   (`chatRequestMaxBodyBytes`), 첨부 파싱 예산은 같은 창 × 5자입니다. 본문 상한이
   Next.js proxy의 10 MB 버퍼를 넘지 않는지는 `tests/chatRequestLimits.test.mjs`가
   확인합니다.
+- **메시지 하나의 길이도 같습니다.** 고정 50,000자 대신 가장 큰 문맥 창 × 5자
+  (`CHAT_MAX_MESSAGE_CHARACTERS`)입니다. 채팅 요청, 메시지 저장, 저장 확인(receipt),
+  초안, preflight·availability·context가 같은 글자 수 상한과 같은 본문 상한
+  (`CHAT_MAX_MESSAGE_BODY_BYTES`)을 씁니다. 그래서 채팅 요청이 받은 메시지를 저장 경로가
+  거절하지 않습니다. 게스트 대화 가져오기의 50,000자와 어시스턴트 답변 저장 상한
+  (100,000자)은 그대로입니다.
 
 ### Gemini 3.5 Flash-Lite를 standard 1크레딧으로 채택하는 예외
 

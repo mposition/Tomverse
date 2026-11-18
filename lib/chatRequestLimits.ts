@@ -20,9 +20,23 @@
 
 import {
     CHAT_REQUEST_ENVELOPE_BYTES,
+    chatMaxMessageCharacters,
     chatRequestMaxBodyBytes,
 } from "@/lib/chatInputLimits";
 import { AVAILABLE_MODELS, type AiModel } from "@/lib/models";
+
+const CONTEXT_WINDOWS = (AVAILABLE_MODELS as readonly AiModel[]).map(
+    (model) => model.contextWindowTokens
+);
+
+/**
+ * One message's longest text, and the largest body any route that carries a
+ * message may read -- shared by the chat request, message saving, receipt
+ * recovery, drafts and preflight, so a message the chat request accepts is
+ * never refused by the route that stores it.
+ */
+export const CHAT_MAX_MESSAGE_CHARACTERS = chatMaxMessageCharacters(CONTEXT_WINDOWS);
+export const CHAT_MAX_MESSAGE_BODY_BYTES = chatRequestMaxBodyBytes(CONTEXT_WINDOWS);
 
 /**
  * The server's limits, as `validateChatPayload()` applies them.
@@ -43,11 +57,7 @@ import { AVAILABLE_MODELS, type AiModel } from "@/lib/models";
  */
 export const CHAT_REQUEST_TRANSCRIPT_LIMITS = {
     maxMessages: 100,
-    maxBodyBytes: chatRequestMaxBodyBytes(
-        (AVAILABLE_MODELS as readonly AiModel[]).map(
-            (model) => model.contextWindowTokens
-        )
-    ),
+    maxBodyBytes: CHAT_MAX_MESSAGE_BODY_BYTES,
 } as const;
 
 type TranscriptLimits = {

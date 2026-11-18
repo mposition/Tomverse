@@ -7324,6 +7324,10 @@ async function handleChatPost(
                         ? ANTHROPIC_PROMPT_CACHE_TTL
                         : null,
                 pricingVersion: plan.budget.pricingVersion ?? null,
+                // Same as the primary's snapshot: the long-context settlement
+                // rule needs both to decide whether a crossed tier is corrected.
+                longContextThresholdTokens: plan.budget.longContextThresholdTokens,
+                costSource: plan.budget.costSource ?? null,
             };
             durableCheckpointWriter?.setAttribution(
                 dispatched.modelId,

@@ -5,6 +5,7 @@ import {
     chatLongContextCostCredits,
     chatLongContextMicroUsdPerCredit,
     chatLongContextSettledCredits,
+    chatMaxMessageCharacters,
     chatRequestMaxBodyBytes,
     chatUserMaxInputTokens,
     type ChatLongContextSettlement,
@@ -179,14 +180,15 @@ import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 const GUEST_COOKIE_NAME = "tomverse_guest";
 const GUEST_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
 
+const CHAT_CONTEXT_WINDOWS = (AVAILABLE_MODELS as readonly AiModel[]).map(
+    (model) => model.contextWindowTokens
+);
+
 export const CHAT_REQUEST_LIMITS = {
-    maxBodyBytes: chatRequestMaxBodyBytes(
-        (AVAILABLE_MODELS as readonly AiModel[]).map(
-            (model) => model.contextWindowTokens
-        )
-    ),
+    maxBodyBytes: chatRequestMaxBodyBytes(CHAT_CONTEXT_WINDOWS),
     maxMessages: 100,
-    maxMessageCharacters: 50_000,
+    // Sized from the largest model window, not a fixed 50,000 (2026-11-18).
+    maxMessageCharacters: chatMaxMessageCharacters(CHAT_CONTEXT_WINDOWS),
 } as const;
 
 export type AccessKind = "user" | "guest";
@@ -1132,8 +1134,14 @@ export const createChatBudget = (
             : pricing.maxOutputTokens;
     const reservedInputTokens =
         contextInputTokens * passes + totalOutputTokens * (passes - 1);
+    // Above the flat limit the provider-cost reservation holds the whole
+    // output ceiling too, the same worst case the credits hold, so the
+    // provider budget check sees what this turn may really spend. The unused
+    // part is released at settlement as it always is.
+    const longContextTurn =
+        estimatedInputTokens + reservationOnlyInputTokens > chatUserMaxInputTokens();
     const reservedOutputTokens =
-        requestedTotalOutputCap === undefined
+        requestedTotalOutputCap === undefined && !longContextTurn
             ? pricing.reservationOutputTokens
             : totalOutputTokens;
     const cacheWritePremiumMicroUsd = promptCacheWriteReservedPremiumMicroUsd({
@@ -4968,6 +4976,9 @@ export const settleChatUsage = async (
                           promptCacheTtl:
                               canonical.promptCacheTtl ?? null,
                           pricingVersion: canonical.pricingVersion ?? null,
+                          longContextThresholdTokens:
+                              canonical.longContextThresholdTokens ?? null,
+                          costSource: canonical.costSource ?? null,
                       },
                       inputTokens: actualInput,
                       cachedInputTokens: actualCachedInput,

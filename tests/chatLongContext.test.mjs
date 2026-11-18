@@ -8,7 +8,8 @@ import {
     chatLongContextSettledCredits,
 } from "../lib/chatInputLimits.ts";
 import { readFileSync } from "node:fs";
-import { accountChatMaxInputTokens, createChatBudget } from "../lib/chatSecurity.ts";
+import { CHAT_REQUEST_LIMITS, accountChatMaxInputTokens, createChatBudget } from "../lib/chatSecurity.ts";
+import { CHAT_MAX_MESSAGE_BODY_BYTES, CHAT_MAX_MESSAGE_CHARACTERS } from "../lib/chatRequestLimits.ts";
 import { longContextSettlementRates, resolveModelPricing } from "../lib/modelPricing.ts";
 import { AVAILABLE_MODELS, getModel, getWeightedUsageCredits } from "../lib/models.ts";
 import {
@@ -147,13 +148,66 @@ test("a long Anthropic turn is not charged its cache-write premium as credits", 
 test("a long turn reserves the whole output ceiling and carries its settlement terms", () => {
     const luna = getModel("gpt-6-luna");
     const budget = createChatBudget("user", luna, 200_000);
-    assert.ok(budget.maxOutputTokens > budget.reservedOutputTokens);
+    const typical = resolveModelPricing(luna, { estimatedPromptTokens: 200_000 }).reservationOutputTokens;
+    assert.ok(budget.maxOutputTokens > typical, "the ceiling, not the typical answer, is held");
     assert.equal(budget.usageCredits, Math.ceil(tokenCostMicroUsd(budget) / RATE));
     assert.deepEqual(budget.longContextSettlement, {
         microUsdPerCredit: RATE,
         floorCredits: getWeightedUsageCredits(luna, 200_000),
     });
     assert.equal(createChatBudget("user", luna, FLAT).longContextSettlement, null);
+});
+
+// Review r-20261118-052526-cb5f06: the provider budget saw only the typical
+// output while the credits held the ceiling.
+test("a long turn's provider-cost reservation holds the whole output ceiling too", () => {
+    const luna = getModel("gpt-6-luna");
+    const long = createChatBudget("user", luna, 200_000);
+    assert.equal(long.reservedOutputTokens, long.maxOutputTokens);
+    const flat = createChatBudget("user", luna, FLAT);
+    assert.ok(flat.reservedOutputTokens < flat.maxOutputTokens, "a flat turn reserves as before");
+});
+
+test("every attempt snapshot carries what the long-context rule needs", () => {
+    const route = readFileSync(new URL("../app/api/chat/route.ts", import.meta.url), "utf8");
+    // The fallback replaces the primary's price; it carries its own tier facts.
+    assert.match(
+        route,
+        /pricingVersion: plan\.budget\.pricingVersion \?\? null,[\s\S]{0,300}longContextThresholdTokens: plan\.budget\.longContextThresholdTokens,\s*costSource: plan\.budget\.costSource \?\? null,/
+    );
+    const security = readFileSync(new URL("../lib/chatSecurity.ts", import.meta.url), "utf8");
+    const single = security.slice(security.indexOf("const singleAttempt: LedgerAttempt | null ="));
+    assert.match(single.slice(0, 1500), /longContextThresholdTokens:\s*canonical\.longContextThresholdTokens \?\? null,\s*costSource: canonical\.costSource \?\? null,/);
+});
+
+test("one message may be as long as the largest model window holds", () => {
+    const largest = Math.max(...AVAILABLE_MODELS.map((model) => model.contextWindowTokens ?? 0));
+    assert.ok(CHAT_REQUEST_LIMITS.maxMessageCharacters >= largest * 5);
+    assert.equal(CHAT_MAX_MESSAGE_CHARACTERS, CHAT_REQUEST_LIMITS.maxMessageCharacters);
+    assert.equal(CHAT_MAX_MESSAGE_BODY_BYTES, CHAT_REQUEST_LIMITS.maxBodyBytes);
+    const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
+    for (const path of [
+        "app/api/chat/preflight/route.ts",
+        "app/api/chat/availability/route.ts",
+        "app/api/chat/context/route.ts",
+        "app/api/conversations/[conversationId]/messages/route.ts",
+        "lib/chatComposerDraftCore.ts",
+        "lib/chatDraftMessageConsume.ts",
+    ]) {
+        const text = read(path);
+        assert.match(text, /CHAT_MAX_MESSAGE_CHARACTERS/, path);
+        assert.doesNotMatch(text, /\b50_000\b/, path);
+    }
+    for (const path of [
+        "app/api/chat/preflight/route.ts",
+        "app/api/chat/availability/route.ts",
+        "app/api/chat/context/route.ts",
+        "app/api/conversations/[conversationId]/messages/route.ts",
+        "app/api/conversations/[conversationId]/messages/receipt/route.ts",
+        "app/api/products/chat/drafts/[scopeKey]/route.ts",
+    ]) {
+        assert.match(read(path), /readLimitedJson\([\s\S]{0,40}CHAT_MAX_MESSAGE_BODY_BYTES/, path);
+    }
 });
 
 test("settlement charges the actual cost, between the flat floor and the flat rule", () => {

@@ -115,6 +115,25 @@ export const chatRequestMaxBodyBytes = (
 };
 
 /**
+ * How long one message's text may be (operator decision 2026-11-18; it was a
+ * fixed 50,000 characters). Sized from the largest compiled context window, so
+ * it never refuses a message some model could hold: five characters a token is
+ * above English text and far above Korean. In practice the request body limit
+ * and the model's own input limit come first.
+ */
+export const CHAT_MESSAGE_CHARACTERS_PER_CONTEXT_TOKEN = 5;
+
+export const chatMaxMessageCharacters = (
+  contextWindows: readonly (number | null | undefined)[]
+) => {
+  let largest = 0;
+  for (const window of contextWindows) {
+    if (Number.isSafeInteger(window) && window && window > largest) largest = window;
+  }
+  return Math.max(50_000, largest * CHAT_MESSAGE_CHARACTERS_PER_CONTEXT_TOKEN);
+};
+
+/**
  * What a long-context reservation carries to settlement: the credit value it
  * was reserved at and the flat-weighted credits it may never settle below.
  */

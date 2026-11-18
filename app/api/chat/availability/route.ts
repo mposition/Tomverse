@@ -1,4 +1,5 @@
 export const dynamic = "force-dynamic";
+import { CHAT_MAX_MESSAGE_BODY_BYTES, CHAT_MAX_MESSAGE_CHARACTERS } from "@/lib/chatRequestLimits";
 
 import { randomUUID } from "node:crypto";
 import { getServerSession } from "next-auth/next";
@@ -55,7 +56,7 @@ import { futureResetAt } from "@/lib/chatLimitDecisionCore";
 const availabilitySchema = z
     .object({
         modelIds: z.array(z.string().min(1).max(100)).min(1).max(3),
-        prompt: z.string().max(50_000).optional(),
+        prompt: z.string().max(CHAT_MAX_MESSAGE_CHARACTERS).optional(),
         webSearchMode: z.enum(WEB_SEARCH_MODES).optional(),
         attachments: z
             .array(
@@ -115,7 +116,7 @@ export async function POST(request: Request) {
         );
         const payload = await readLimitedJson(
             request,
-            64 * 1024,
+            CHAT_MAX_MESSAGE_BODY_BYTES,
             availabilitySchema
         );
         const uniqueModelIds = Array.from(new Set(payload.modelIds));
