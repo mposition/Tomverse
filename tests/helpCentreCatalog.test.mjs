@@ -5,7 +5,7 @@ import { HELP_CATEGORIES, HELP_GUIDES } from "../lib/helpCentre/catalog.ts";
 import { HELP_COPY } from "../lib/helpCentre/copy/index.ts";
 import { HELP_CATEGORY_IDS } from "../lib/helpCentre/types.ts";
 import { helpAttachmentFormats } from "../lib/helpCentre/attachmentFormats.ts";
-import { chatAttachmentExtensionsByGroup } from "../lib/chatAttachmentFormats.ts";
+import { CHAT_ATTACHMENT_FORMATS, chatAttachmentExtensionsByGroup } from "../lib/chatAttachmentFormats.ts";
 import { GUEST_MAX_ATTACHMENTS_PER_MESSAGE, GUEST_MAX_ATTACHMENT_BYTES } from "../lib/guestAttachmentPolicy.ts";
 import { helpAssistantCorpus } from "../lib/helpAssistantCore.ts";
 
@@ -55,12 +55,16 @@ test("every screenshot a step names was captured, with a measured highlight", ()
 test("the attachment format list comes from CHAT_ATTACHMENT_FORMATS, and guide copy never lists extensions", () => {
   const derived = helpAttachmentFormats();
   const signedIn = chatAttachmentExtensionsByGroup();
-  const guest = new Set(Object.values(chatAttachmentExtensionsByGroup({ guest: true })).flat());
-  assert.deepEqual(
-    derived.groups,
-    Object.entries(signedIn).filter(([, extensions]) => extensions.length).map(([group, extensions]) => ({ group, extensions }))
-  );
-  assert.deepEqual(derived.signedInOnly, Object.values(signedIn).flat().filter((extension) => !guest.has(extension)));
+  const shown = new Set(derived.groups.flatMap((entry) => entry.entries));
+  for (const format of CHAT_ATTACHMENT_FORMATS) {
+    for (const extension of format.extensions) assert.ok(shown.has(`.${extension}`), `.${extension} missing from the list`);
+    for (const name of format.filenames ?? []) assert.ok(shown.has(name), `${name} missing from the list`);
+    const entries = [...format.extensions.map((extension) => `.${extension}`), ...(format.filenames ?? [])];
+    for (const entry of entries) {
+      assert.equal(derived.signedInOnly.includes(entry), !format.guestAllowed && !CHAT_ATTACHMENT_FORMATS.some((other) => other.guestAllowed && [...other.extensions.map((e) => `.${e}`), ...(other.filenames ?? [])].includes(entry)), `${entry} guest flag`);
+    }
+  }
+  assert.ok(shown.size === new Set(CHAT_ATTACHMENT_FORMATS.flatMap((format) => [...format.extensions.map((e) => `.${e}`), ...(format.filenames ?? [])])).size, "nothing extra is listed");
   assert.equal(derived.guestFiles, GUEST_MAX_ATTACHMENTS_PER_MESSAGE);
   assert.equal(derived.guestMegabytes, GUEST_MAX_ATTACHMENT_BYTES / (1024 * 1024));
   const extensions = Object.values(signedIn).flat();

@@ -52,7 +52,6 @@ export function HelpCentreHub({ lang, copy }: { lang: Language; copy: HelpLocale
   };
   const askSuggestion = (text: string) => {
     if (canAsk) void conversation.ask(text);
-    else setQuery(text);
   };
 
   return (
@@ -140,7 +139,9 @@ export function HelpCentreHub({ lang, copy }: { lang: Language; copy: HelpLocale
             <p className="mt-3 text-sm text-zinc-500">{ui.searchEmpty}</p>
           ) : null}
 
-          {conversation.exchanges.length === 0 ? (
+          {/* Example questions only where they can be asked: as a search they
+              would match nothing, since search needs every word in a guide. */}
+          {canAsk && conversation.exchanges.length === 0 ? (
             <div className="mt-5 flex flex-wrap justify-center gap-2">
               {ui.suggestions.map((suggestion) => (
                 <button key={suggestion} type="button" onClick={() => askSuggestion(suggestion)} className="min-h-10 rounded-full border border-zinc-200 bg-zinc-50 px-4 text-sm text-zinc-700 hover:border-blue-400 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">

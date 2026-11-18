@@ -31,14 +31,14 @@ function AttachmentFormatList({ ui }: { ui: HelpLocaleCopy["ui"] }) {
         {formats.groups.map((entry) => (
           <div key={entry.group} className="sm:flex sm:gap-3">
             <dt className="shrink-0 font-semibold sm:w-56">{ui.formatGroups[entry.group]}</dt>
-            <dd className="text-zinc-600 [overflow-wrap:anywhere] dark:text-zinc-400">{entry.extensions.map((extension) => `.${extension}`).join(", ")}</dd>
+            <dd className="text-zinc-600 [overflow-wrap:anywhere] dark:text-zinc-400">{entry.entries.join(", ")}</dd>
           </div>
         ))}
       </dl>
       <p className="mt-3 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
         {fill(ui.formatsGuestLimits, { files: formats.guestFiles, mb: formats.guestMegabytes })}
         {formats.signedInOnly.length > 0
-          ? ` ${fill(ui.formatsSignedInOnly, { list: formats.signedInOnly.map((extension) => `.${extension}`).join(", ") })}`
+          ? ` ${fill(ui.formatsSignedInOnly, { list: formats.signedInOnly.join(", ") })}`
           : null}
       </p>
     </section>

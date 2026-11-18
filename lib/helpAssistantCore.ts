@@ -51,13 +51,13 @@ export type HelpAssistantAnswer =
 function attachmentFormatText(copy: HelpLocaleCopy): string {
   const formats = helpAttachmentFormats();
   const groups = formats.groups
-    .map((entry) => `  ${copy.ui.formatGroups[entry.group]}: ${entry.extensions.map((extension) => `.${extension}`).join(", ")}`)
+    .map((entry) => `  ${copy.ui.formatGroups[entry.group]}: ${entry.entries.join(", ")}`)
     .join("\n");
   const guest = copy.ui.formatsGuestLimits
     .replace("{files}", String(formats.guestFiles))
     .replace("{mb}", String(formats.guestMegabytes));
   const only = formats.signedInOnly.length
-    ? ` ${copy.ui.formatsSignedInOnly.replace("{list}", formats.signedInOnly.map((extension) => `.${extension}`).join(", "))}`
+    ? ` ${copy.ui.formatsSignedInOnly.replace("{list}", formats.signedInOnly.join(", "))}`
     : "";
   return `  ${copy.ui.formatsTitle}:\n${groups}\n  ${guest}${only}`;
 }
