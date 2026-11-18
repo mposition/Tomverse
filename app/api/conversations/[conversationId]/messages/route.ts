@@ -1,3 +1,4 @@
+import { CHAT_MAX_ATTACHMENTS_PER_MESSAGE } from "@/lib/chatAttachmentLimits";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 ﻿import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -82,7 +83,7 @@ const userMessageSchema = z
     content: z.string(),
     status: z.literal("normal").optional().default("normal"),
     modelId: modelIdSchema.optional(),
-    attachmentUploadIds: z.array(attachmentUploadIdSchema).max(5).optional(),
+    attachmentUploadIds: z.array(attachmentUploadIdSchema).max(CHAT_MAX_ATTACHMENTS_PER_MESSAGE).optional(),
     attachmentReferences: savedMessageAttachmentReferencesSchema.optional(),
   })
   .strict()

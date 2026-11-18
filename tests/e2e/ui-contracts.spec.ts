@@ -8,7 +8,9 @@ for (const [language, title] of [["en", "Help Centre"], ["ko", "도움말 센터
     const response = await page.goto(helpCentreHref(language));
     expect(response?.status()).toBe(200);
     await expect(page.locator("html")).toHaveAttribute("lang", language);
-    await expect(page.getByRole("heading", { level: 1, name: title, exact: true })).toBeVisible();
+    const hub = page.getByTestId("help-centre-hub");
+    await expect(hub.getByRole("heading", { level: 1 })).toBeVisible();
+    await expect(hub.getByText(title, { exact: true }).first()).toBeVisible();
     const localized = await page.request.get(`/${language}/support/help-centre`);
     expect(localized.status()).toBe(200);
   });

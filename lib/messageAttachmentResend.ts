@@ -1,4 +1,5 @@
 import "server-only";
+import { CHAT_MAX_ATTACHMENTS_PER_MESSAGE } from "@/lib/chatAttachmentLimits";
 
 import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
@@ -14,7 +15,7 @@ export const savedMessageAttachmentReferenceSchema = z.union([
   z.object({ uploadId: opaqueId }).strict(),
   z.object({ attachmentId: opaqueId }).strict(),
 ]);
-export const savedMessageAttachmentReferencesSchema = z.array(savedMessageAttachmentReferenceSchema).max(5)
+export const savedMessageAttachmentReferencesSchema = z.array(savedMessageAttachmentReferenceSchema).max(CHAT_MAX_ATTACHMENTS_PER_MESSAGE)
   .refine((refs) => new Set(refs.map((ref) => "attachmentId" in ref ? `attachment:${ref.attachmentId}` : `upload:${ref.uploadId}`)).size === refs.length,
     "Each attachment handle may occur only once per saved message.");
 export type SavedMessageAttachmentReference = z.infer<typeof savedMessageAttachmentReferenceSchema>;

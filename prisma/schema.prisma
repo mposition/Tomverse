@@ -846,6 +846,11 @@ model MessageAttachment {
   /// tool needs the second one to know what it has covered.
   availabilityCheckedAt DateTime?
 
+  /// The text an earlier turn extracted from this file, reused by later turns
+  /// (lib/attachmentTextCache.ts). Deleted with this row, in the same
+  /// transaction, by the cascade.
+  textCache MessageAttachmentTextCache?
+
   createdAt DateTime @default(now())
 
   @@unique([messageId, ordinal])
@@ -853,6 +858,28 @@ model MessageAttachment {
   @@index([userId, createdAt])
   @@index([unavailableAt])
   @@index([sourceArtifactId])
+}
+
+/// The text a model-independent extractor read out of one bound account
+/// attachment (PDF text or OCR, Office, legacy Office, plain text), kept so a
+/// later turn does not read and parse the file again
+/// (docs/policy/user-attachment-persistence.md section 7.1).
+///
+/// A row of its own, cascaded from MessageAttachment, rather than an object
+/// next to the file: deleting the attachment -- a conversation, a bulk or an
+/// account deletion -- removes this text in the same transaction, so it can
+/// never outlive the file whatever order a turn and a deletion run in.
+model MessageAttachmentTextCache {
+  attachmentId String            @id
+  attachment   MessageAttachment @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
+
+  /// ATTACHMENT_TEXT_CACHE_VERSION when written; a row of another version is
+  /// never read.
+  version Int
+  /// [{ kind, text }], what the extractor produced, in order.
+  entries Json
+
+  createdAt DateTime @default(now())
 }
 
 /// A finalised upload that has not been bound to a message yet.

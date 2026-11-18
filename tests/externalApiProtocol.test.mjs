@@ -388,3 +388,30 @@ test("a custom tool's call goes back as a custom call carrying the raw input", (
     });
     assert.equal(completion.choices[0].message.tool_calls[1].type, "function");
 });
+
+test("Cursor's flat custom tool shape is read as the nested Chat Completions one", () => {
+    const flat = {
+        ...cursorCustomToolRound,
+        messages: [
+            { role: "user", content: "Fix sum.js" },
+            { role: "assistant", content: null, tool_calls: [{ id: "call_patch", type: "custom", name: "apply_patch", input: "*** Begin Patch\n*** End Patch" }] },
+            { role: "tool", tool_call_id: "call_patch", content: "Done" },
+        ],
+        tools: [
+            { type: "function", function: { name: "read_file", parameters: { type: "object", properties: {} } } },
+            // Cursor flattens the grammar too: { type: "grammar", syntax, definition }.
+            { type: "custom", name: "apply_patch", description: "Apply a patch.", format: { type: "grammar", syntax: "lark", definition: "start: \"x\"" } },
+            { type: "custom", name: "note", format: { type: "grammar", grammar: { syntax: "regex", definition: "^ok$" } } },
+        ],
+        tool_choice: { type: "custom", name: "apply_patch" },
+    };
+    const converted = convertChatCompletionRequest(parseChatCompletionRequest(flat), model);
+    assert.deepEqual([...converted.customTools], ["apply_patch", "note"]);
+    assert.match(converted.tools[1].description, /lark grammar/);
+    assert.match(converted.tools[1].description, /start: "x"/);
+    assert.match(converted.tools[2].description, /regex grammar/);
+    assert.deepEqual(converted.toolChoice, { type: "tool", toolName: "apply_patch" });
+    assert.deepEqual(converted.messages[1].content[0].input, { input: "*** Begin Patch\n*** End Patch" });
+    // An unknown field on the flat shape is still refused by name.
+    rejects(() => parseChatCompletionRequest({ ...flat, tools: [{ type: "custom", name: "x", defer_loading: true }] }), "unsupported_parameter");
+});

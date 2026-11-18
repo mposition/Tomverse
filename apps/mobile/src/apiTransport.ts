@@ -497,7 +497,7 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       if (!result || typeof result.uploadId !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(result.uploadId) ||
           typeof result.name !== "string" || !result.name || result.name.length > 255 ||
           typeof result.mediaType !== "string" || result.mediaType.length > 200 ||
-          !Number.isSafeInteger(result.size) || result.size <= 0 || result.size > 10 * 1024 * 1024) throw Error("ARTIFACT_REVISION_RECEIPT_INVALID");
+          !Number.isSafeInteger(result.size) || result.size <= 0 || result.size > 50 * 1024 * 1024) throw Error("ARTIFACT_REVISION_RECEIPT_INVALID");
       return { uploadId: result.uploadId, name: result.name, mediaType: result.mediaType, size: result.size,
         ...(["workbook", "workbook-values"].includes(result.revisionMode ?? "") ? { revisionMode: result.revisionMode } : {}) };
     },

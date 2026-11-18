@@ -19,3 +19,22 @@ export const protocolsForProvider = (provider: string): ExternalApiProtocol[] =>
         .filter(([, owner]) => owner === provider)
         .map(([protocol]) => protocol as ExternalApiProtocol)),
 ];
+
+/**
+ * The model a request names: a Tomverse model id, or else the provider's own
+ * model id when exactly one offered model uses it. A coding tool's built-in
+ * model list (Cursor's, with the OpenAI base URL overridden) sends a provider
+ * id rather than a Tomverse one, so a model Tomverse offers then works without
+ * a custom model. Never a different model: a name no offered model uses is
+ * not found, rather than answered by something else and charged as it.
+ */
+export const pickRequestedModel = <Entry extends { model: { id: string; apiModel: string } }>(
+    entries: readonly Entry[],
+    requested: string
+): { entry: Entry } | { ambiguous: Entry[] } | null => {
+    const byId = entries.find((entry) => entry.model.id === requested);
+    if (byId) return { entry: byId };
+    const byApiModel = entries.filter((entry) => entry.model.apiModel === requested);
+    if (byApiModel.length === 1) return { entry: byApiModel[0] };
+    return byApiModel.length > 1 ? { ambiguous: byApiModel } : null;
+};

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { CHAT_MAX_ATTACHMENTS_PER_MESSAGE } from "../lib/chatAttachmentLimits.ts";
 import { clearDeviceDrafts, writeDeviceDraft } from "../packages/chat-core/src/deviceDraft.ts";
 import { appendNativeRevisionDraft, readNativeDraftFiles, writeNativeDraftFiles, readNativeRevisionDraft, writeNativeRevisionDraft } from "../apps/mobile/src/nativeRevisionDraft.ts";
 import { createApiTransport } from "../apps/mobile/src/apiTransport.ts";
@@ -21,7 +22,7 @@ test("native revision prepends one visible request to the latest draft without r
 });
 test("native count, normalized same-name and text limits preserve the exact original draft", () => {
   for (const [draft, reason] of [
-    [{ text: "Keep", files: Array.from({ length: 5 }, (_, index) => file(`${index}.txt`, `upload-${index}`)) }, "count"],
+    [{ text: "Keep", files: Array.from({ length: CHAT_MAX_ATTACHMENTS_PER_MESSAGE }, (_, index) => file(`${index}.txt`, `upload-${index}`)) }, "count"],
     [{ text: "Keep", files: [file("SOURCE.TXT", "other-input")] }, "name"],
     [{ text: "x".repeat(40000), files: [] }, "text"],
   ]) {

@@ -3,6 +3,7 @@ import test, { beforeEach, mock } from "node:test";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
+import { CHAT_MAX_ATTACHMENT_BYTES } from "../../lib/chatAttachmentLimits.ts";
 
 process.env.E2E_DISABLE_DATABASE = "true";
 process.env.DATABASE_URL ||= "postgresql://e2e:e2e@127.0.0.1:1/e2e?connect_timeout=1";
@@ -69,7 +70,7 @@ test("exact import action reuses the existing auth, rate, byte quota and opaque 
   assert.equal(copies[0].artifactId, "exact-past-artifact");
   assert.equal(copies[0].conversationId, "current-conversation");
   assert.equal(copies[0].userId, "owner");
-  assert.equal(copies[0].maxBytes, 10 * 1024 * 1024);
+  assert.equal(copies[0].maxBytes, CHAT_MAX_ATTACHMENT_BYTES);
   assert.equal(networkCalls, 0);
 });
 for (const refusal of ["auth", "operations", "plan", "rate", "quota"] as const) {

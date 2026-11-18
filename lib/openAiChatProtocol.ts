@@ -181,8 +181,55 @@ const requestSchema = z
 
 export type ChatCompletionRequest = z.infer<typeof requestSchema>;
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+    typeof value === "object" && value !== null && !Array.isArray(value);
+/**
+ * `{ type: "custom", name, … }` → `{ type: "custom", custom: { name, … } }`.
+ * Cursor sends custom tools, tool choices and calls in the flat Responses-API
+ * shape on Chat Completions. Everything but `type` (and a call's `id`) moves
+ * under `custom`, so an unknown field is still refused there by name.
+ */
+const nestCustom = (value: unknown, keep: string[] = []) => {
+    if (!isRecord(value) || value.type !== "custom" || "custom" in value) return value;
+    const custom: Record<string, unknown> = {};
+    const nested: Record<string, unknown> = { type: "custom", custom };
+    for (const [key, entry] of Object.entries(value)) {
+        if (key === "type") continue;
+        if (keep.includes(key)) nested[key] = entry;
+        else custom[key] = entry;
+    }
+    return nested;
+};
+/**
+ * A grammar format in the flat Responses shape, `{ type: "grammar", syntax,
+ * definition }`, which Cursor sends inside its custom tools, moved under
+ * `grammar` as Chat Completions nests it. Other fields stay where they are and
+ * are refused by name.
+ */
+const nestGrammar = (definition: unknown) => {
+    if (!isRecord(definition) || definition.type !== "custom" || !isRecord(definition.custom)) return definition;
+    const format = definition.custom.format;
+    if (!isRecord(format) || format.type !== "grammar" || "grammar" in format) return definition;
+    const { syntax, definition: grammarDefinition, ...rest } = format;
+    return { ...definition, custom: { ...definition.custom, format: { ...rest, grammar: { syntax, definition: grammarDefinition } } } };
+};
+const normalizeCustomShapes = (body: unknown) => {
+    if (!isRecord(body)) return body;
+    const next: Record<string, unknown> = { ...body };
+    if (Array.isArray(body.tools)) next.tools = body.tools.map((definition) => nestGrammar(nestCustom(definition)));
+    if (body.tool_choice !== undefined) next.tool_choice = nestCustom(body.tool_choice);
+    if (Array.isArray(body.messages)) {
+        next.messages = body.messages.map((message) =>
+            isRecord(message) && Array.isArray(message.tool_calls)
+                ? { ...message, tool_calls: message.tool_calls.map((call) => nestCustom(call, ["id"])) }
+                : message
+        );
+    }
+    return next;
+};
+
 export const parseChatCompletionRequest = (body: unknown): ChatCompletionRequest => {
-    const parsed = requestSchema.safeParse(body);
+    const parsed = requestSchema.safeParse(normalizeCustomShapes(body));
     if (parsed.success) return parsed.data;
     const issue = parsed.error.issues[0];
     if (issue?.code === "unrecognized_keys") {
