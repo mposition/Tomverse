@@ -2565,10 +2565,12 @@ const checks = [
         source.includes('tomverse:guest-quick-start') &&
         source.includes("consentPromptReady") &&
         source.includes("GUEST_QUICK_START_ACTIVE_KEY") &&
-        // UI-P1-02 also moved the fixed-fallback notice from a bottom-center
-        // full-width bar to a bottom-right corner toast, narrowing its
-        // viewport-relative width cap accordingly.
-        source.includes("calc(100vw-1.5rem)") &&
+        // Owner decision 2026-11-16: outside chat and sign-in the notice is a
+        // slim full-width bar fixed to the bottom, with an X that hides it for
+        // the session, and the page reserves its height as bottom padding.
+        source.includes("fixed inset-x-0 bottom-0") &&
+        source.includes('data-testid="analytics-consent-dismiss"') &&
+        source.includes("body.style.paddingBottom") &&
         // STG-F001 replaced the rigid grid-cols layout with flex-wrap (so long
         // translated labels wrap instead of overflowing). UI-P2-01 additionally
         // dropped the viewport-keyed `sm:flex-nowrap`, which re-introduced
@@ -2587,7 +2589,8 @@ const checks = [
         buttonClass.includes("min-h-11") &&
         buttonClass.includes("rounded-lg") &&
         buttonClassUsages === 1 &&
-        consentDecisions === 2 &&
+        // Two decisions in the in-flow card (chat, sign-in) and two in the bar.
+        consentDecisions === 4 &&
         // The component has to stay at module scope: defined inside the
         // provider it would be a new type on every render, remounting both
         // buttons (and dropping focus) whenever the notice re-renders.

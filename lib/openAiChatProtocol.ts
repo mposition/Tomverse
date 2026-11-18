@@ -63,11 +63,22 @@ const STRICT_TOOL_PROVIDERS = new Set(["openai", "mistral", "moonshot"]);
 const IMAGE_DETAIL_PROVIDERS = new Set(["openai"]);
 
 const textContent = z.union([z.string(), z.array(textPart)]);
-const toolCall = z.strictObject({
-    id: z.string().min(1).max(200),
-    type: z.literal("function"),
-    function: z.strictObject({ name: z.string().min(1), arguments: z.string() }),
-});
+const toolCall = z.discriminatedUnion("type", [
+    z.strictObject({
+        id: z.string().min(1).max(200),
+        type: z.literal("function"),
+        function: z.strictObject({ name: z.string().min(1), arguments: z.string() }),
+    }),
+    // A custom (free-form input) tool's call, as a client echoes it back.
+    z.strictObject({
+        id: z.string().min(1).max(200),
+        type: z.literal("custom"),
+        custom: z.strictObject({ name: z.string().min(1), input: z.string() }),
+    }),
+]);
+type ToolCallWire = z.infer<typeof toolCall>;
+/** The text a call carries: a function's JSON arguments or a custom tool's input. */
+export const toolCallText = (call: ToolCallWire) => (call.type === "custom" ? call.custom.input : call.function.arguments);
 
 const message = z.discriminatedUnion("role", [
     // No `name` on any message: the providers behind this API have no
@@ -95,15 +106,38 @@ const message = z.discriminatedUnion("role", [
     }),
 ]);
 
-const toolDefinition = z.strictObject({
-    type: z.literal("function"),
-    function: z.strictObject({
-        name: z.string(),
-        description: z.string().max(8_000).optional(),
-        parameters: z.record(z.string(), z.unknown()).optional(),
-        strict: z.boolean().nullable().optional(),
+const toolDefinition = z.discriminatedUnion("type", [
+    z.strictObject({
+        type: z.literal("function"),
+        function: z.strictObject({
+            name: z.string(),
+            description: z.string().max(8_000).optional(),
+            parameters: z.record(z.string(), z.unknown()).optional(),
+            strict: z.boolean().nullable().optional(),
+        }),
     }),
-});
+    // OpenAI's custom tools take one free-form string (Cursor's GPT-5 Agent
+    // sends one). Every provider behind this API takes JSON tools only, so it
+    // reaches the model as a function with a single `input` string, the
+    // grammar written into the description, and goes back to the client as a
+    // custom call. The grammar is described to the model, not enforced.
+    z.strictObject({
+        type: z.literal("custom"),
+        custom: z.strictObject({
+            name: z.string(),
+            description: z.string().max(8_000).optional(),
+            format: z
+                .discriminatedUnion("type", [
+                    z.strictObject({ type: z.literal("text") }),
+                    z.strictObject({
+                        type: z.literal("grammar"),
+                        grammar: z.strictObject({ definition: z.string().max(32_000), syntax: z.enum(["lark", "regex"]) }),
+                    }),
+                ])
+                .optional(),
+        }),
+    }),
+]);
 
 /**
  * Every field the API understands, at every level -- messages, tool calls,
@@ -124,6 +158,7 @@ const requestSchema = z
             .union([
                 z.enum(["none", "auto", "required"]),
                 z.strictObject({ type: z.literal("function"), function: z.strictObject({ name: z.string() }) }),
+                z.strictObject({ type: z.literal("custom"), custom: z.strictObject({ name: z.string() }) }),
             ])
             .optional(),
         parallel_tool_calls: z.boolean().optional(),
@@ -252,7 +287,7 @@ const joinText = (content: string | { text: string }[] | null | undefined) =>
  * the request succeeds.
  */
 export const modelTakesRequestFeatures = (request: ChatCompletionRequest, model: ModelCapabilityView) => {
-    const strict = (request.tools ?? []).some((definition) => definition.function.strict === true);
+    const strict = (request.tools ?? []).some((definition) => definition.type === "function" && definition.function.strict === true);
     const detail = request.messages.some(
         (message) =>
             message.role === "user" &&
@@ -334,6 +369,8 @@ export type ConvertedRequest = {
     textSegments: string[];
     images: DecodedImage[];
     tools: { name: string; description?: string; parameters: Record<string, unknown>; strict?: boolean }[];
+    /** Tools the client declared as custom: their calls go back as custom calls. */
+    customTools: Set<string>;
     toolChoice:
         | "none"
         | "auto"
@@ -351,15 +388,40 @@ export const convertChatCompletionRequest = (
     const toolNamesById = new Map<string, string>();
     const messages: SdkMessage[] = [];
 
+    const customTools = new Set<string>();
     const tools = (request.tools ?? []).map((definition, index) => {
-        const name = definition.function.name;
+        const name = definition.type === "custom" ? definition.custom.name : definition.function.name;
         if (!TOOL_NAME_PATTERN.test(name)) {
             throw new ProtocolError(
                 400,
                 "invalid_tool",
                 "Tool names must be 1-64 letters, digits, underscores or hyphens.",
-                `tools.${index}.function.name`
+                `tools.${index}.${definition.type}.name`
             );
+        }
+        if (definition.type === "custom") {
+            customTools.add(name);
+            const format = definition.custom.format;
+            const description = [
+                definition.custom.description ?? "",
+                format?.type === "grammar"
+                    ? `The input must match this ${format.grammar.syntax} grammar:\n${format.grammar.definition}`
+                    : "",
+            ]
+                .filter(Boolean)
+                .join("\n\n");
+            const parameters = {
+                type: "object",
+                properties: { input: { type: "string", description: "The tool's complete input, as free-form text." } },
+                required: ["input"],
+                additionalProperties: false,
+            };
+            const schemaText = JSON.stringify(parameters);
+            if (Buffer.byteLength(description, "utf8") > PROTOCOL_LIMITS.maxToolSchemaBytes) {
+                throw new ProtocolError(413, "tool_schema_too_large", "A tool schema is larger than 64 KB.", `tools.${index}`);
+            }
+            textSegments.push(name, description, schemaText);
+            return { name, description: description || undefined, parameters, strict: undefined };
         }
         const parameters = definition.function.parameters ?? { type: "object", properties: {} };
         const schemaText = JSON.stringify(parameters);
@@ -397,7 +459,7 @@ export const convertChatCompletionRequest = (
                 throw new ProtocolError(400, "invalid_tool_choice", "tool_choice=required needs at least one tool.", "tool_choice");
             }
         } else {
-            const toolName = request.tool_choice.function.name;
+            const toolName = request.tool_choice.type === "custom" ? request.tool_choice.custom.name : request.tool_choice.function.name;
             if (!tools.some((tool) => tool.name === toolName)) {
                 throw new ProtocolError(400, "invalid_tool_choice", `tool_choice names an undefined tool '${toolName}'.`, "tool_choice");
             }
@@ -465,6 +527,12 @@ export const convertChatCompletionRequest = (
                     parts.push({ type: "text", text });
                 }
                 (entry.tool_calls ?? []).forEach((call, callIndex) => {
+                    if (call.type === "custom") {
+                        textSegments.push(call.custom.name, call.custom.input);
+                        toolNamesById.set(call.id, call.custom.name);
+                        parts.push({ type: "tool-call", toolCallId: call.id, toolName: call.custom.name, input: { input: call.custom.input } });
+                        return;
+                    }
                     let input: unknown;
                     try {
                         input = call.function.arguments.trim() ? JSON.parse(call.function.arguments) : {};
@@ -514,7 +582,7 @@ export const convertChatCompletionRequest = (
     if (!messages.some((entry) => entry.role !== "system")) {
         throw new ProtocolError(400, "invalid_request", "At least one non-system message is required.", "messages");
     }
-    return { messages, textSegments, images, tools, toolChoice };
+    return { messages, textSegments, images, tools, customTools, toolChoice };
 };
 
 /* ------------------------------------------------------------ responses -- */
@@ -557,7 +625,27 @@ export const toOpenAiUsage = (usage: UsageView | null) => {
     };
 };
 
-export type CollectedToolCall = { id: string; name: string; arguments: string };
+/**
+ * One call the model made. `arguments` is a function's JSON arguments, or a
+ * custom tool's raw input when `custom` is set.
+ */
+export type CollectedToolCall = { id: string; name: string; arguments: string; custom?: boolean };
+
+/** A custom tool's input from the `{ input }` object its function form took. */
+const customInputOf = (input: unknown) => {
+    const value = typeof input === "string" ? safeJson(input) : input;
+    if (value && typeof value === "object" && typeof (value as { input?: unknown }).input === "string") {
+        return (value as { input: string }).input;
+    }
+    return typeof input === "string" ? input : JSON.stringify(input ?? {});
+};
+const safeJson = (text: string): unknown => {
+    try {
+        return JSON.parse(text);
+    } catch {
+        return undefined;
+    }
+};
 
 export const buildChatCompletion = (input: {
     id: string;
@@ -585,11 +673,11 @@ export const buildChatCompletion = (input: {
                 ...(input.reasoning ? { reasoning_content: input.reasoning } : {}),
                 ...(input.toolCalls.length
                     ? {
-                          tool_calls: input.toolCalls.map((call) => ({
-                              id: call.id,
-                              type: "function" as const,
-                              function: { name: call.name, arguments: call.arguments },
-                          })),
+                          tool_calls: input.toolCalls.map((call) =>
+                              call.custom
+                                  ? { id: call.id, type: "custom" as const, custom: { name: call.name, input: call.arguments } }
+                                  : { id: call.id, type: "function" as const, function: { name: call.name, arguments: call.arguments } }
+                          ),
                       }
                     : {}),
             },
@@ -641,7 +729,15 @@ export const openAiError = (
  * Stateful: OpenAI numbers tool calls 0..n by first appearance and sends the
  * id and name only on a call's first fragment. The SDK keys them by id.
  */
-export const createChunkTranslator = (base: { id: string; created: number; model: string }) => {
+export const createChunkTranslator = (
+    base: { id: string; created: number; model: string },
+    /**
+     * Custom tools (see `toolDefinition`). Their function-form JSON fragments
+     * are held back and the decoded input is sent once, when the call is
+     * complete: a prefix of `{"input":"…` is not a prefix of the input.
+     */
+    customTools: ReadonlySet<string> = new Set()
+) => {
     let roleSent = false;
     const toolIndexById = new Map<string, number>();
     const argumentsById = new Map<string, string>();
@@ -662,13 +758,12 @@ export const createChunkTranslator = (base: { id: string; created: number; model
         toolIndexById.set(id, index);
         namesById.set(id, name);
         argumentsById.set(id, "");
-        return buildChunk(
-            base,
-            withRole({
-                tool_calls: [{ index, id, type: "function", function: { name, arguments: "" } }],
-            })
-        );
+        const call = customTools.has(name)
+            ? { index, id, type: "custom", custom: { name, input: "" } }
+            : { index, id, type: "function", function: { name, arguments: "" } };
+        return buildChunk(base, withRole({ tool_calls: [call] }));
     };
+    const isCustom = (id: string) => customTools.has(namesById.get(id) ?? "");
 
     return {
         /** Returns the chunks this part produces, possibly none. */
@@ -694,7 +789,7 @@ export const createChunkTranslator = (base: { id: string; created: number; model
                     const id = String(part.id);
                     const index = toolIndexById.get(id);
                     const delta = String(part.delta ?? "");
-                    if (index === undefined || !delta) return [];
+                    if (index === undefined || !delta || isCustom(id)) return [];
                     argumentsById.set(id, (argumentsById.get(id) ?? "") + delta);
                     return [buildChunk(base, { tool_calls: [{ index, function: { arguments: delta } }] })];
                 }
@@ -711,6 +806,14 @@ export const createChunkTranslator = (base: { id: string; created: number; model
                     const chunks: unknown[] = [];
                     const started = startTool(id, name);
                     if (started) chunks.push(started);
+                    if (isCustom(id)) {
+                        const input = customInputOf(part.input);
+                        argumentsById.set(id, input);
+                        if (input) {
+                            chunks.push(buildChunk(base, { tool_calls: [{ index: toolIndexById.get(id), custom: { input } }] }));
+                        }
+                        return chunks;
+                    }
                     const sent = argumentsById.get(id) ?? "";
                     if (complete.startsWith(sent) && complete.length > sent.length) {
                         const rest = complete.slice(sent.length);
@@ -744,6 +847,7 @@ export const createChunkTranslator = (base: { id: string; created: number; model
                         id,
                         name: namesById.get(id) ?? "",
                         arguments: argumentsById.get(id) ?? "",
+                        ...(isCustom(id) ? { custom: true } : {}),
                         /** False when the provider started the call and never finished it. */
                         complete: completedIds.has(id),
                     })),

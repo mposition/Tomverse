@@ -59,7 +59,7 @@ d.style.colorScheme=(t==="dark"||(t==="system"&&matchMedia("(prefers-color-schem
 export function ThemeBootstrap({ nonce }: { nonce?: string }) {
   return (
     <script
-      // Mirrors MarketingConsentReservation: React warns when a component
+      // React warns when a component
       // renders a <script>, and on a client-side navigation the tag is
       // inserted through the DOM where it would never execute anyway.
       // Rendering it as inert data on the client keeps both honest -- it runs

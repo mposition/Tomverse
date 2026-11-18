@@ -145,8 +145,12 @@ list of ids: enabling a model in the catalogue offers it here too.
 base64 `data:` URLs of PNG, JPEG, WebP or GIF up to 8 MB each, 16 per request;
 `detail` `low`/`high` is forwarded to OpenAI and refused for other providers),
 `stream`, `stream_options.include_usage`, `tools` (function tools, up to 128,
-64 KB per schema; `strict: true` only for providers whose adapter forwards it: OpenAI, Mistral, Moonshot), `tool_choice` (`none`, `auto`, `required`, or a named
-function), `parallel_tool_calls: true`, `max_tokens`, `max_completion_tokens`,
+64 KB per schema; `strict: true` only for providers whose adapter forwards it: OpenAI, Mistral, Moonshot;
+and custom tools, free-form input with an optional `text` or `grammar` format, which Cursor's GPT Agent
+sends -- every provider here takes JSON tools only, so a custom tool reaches the model as a function with one
+`input` string and its grammar in the description, described rather than enforced, and its calls go back as
+`custom` calls, streamed as one input fragment when the call completes), `tool_choice` (`none`, `auto`,
+`required`, or a named function or custom tool), `parallel_tool_calls: true`, `max_tokens`, `max_completion_tokens`,
 `temperature`, `top_p`, `frequency_penalty`, `presence_penalty` (forwarded where the
 model accepts a temperature, including models registered with reasoning `none`;
 for a model that takes none of them they are left out of the call and named in

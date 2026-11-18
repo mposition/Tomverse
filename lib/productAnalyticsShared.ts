@@ -762,10 +762,6 @@ export const normalizeAnalyticsPlan = (value: unknown) =>
       ? "Guest"
       : "Free";
 
-// The stored consent decision's key. It lives here rather than in
-// `productAnalyticsClient` because that module is `"use client"`, and the
-// pre-paint reservation script (see MarketingConsentReservation) is rendered by
-// a Server Component that has to embed this exact string. One source of truth
-// keeps the script and the reader from drifting apart -- a mismatch would
-// silently reserve space for visitors who have already decided.
+// The stored consent decision's key, shared by the client reader and the
+// storage listener so the two cannot drift apart.
 export const ANALYTICS_CONSENT_STORAGE_KEY = "tomverse_analytics_consent_v1";
