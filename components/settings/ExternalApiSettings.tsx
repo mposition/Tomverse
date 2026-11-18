@@ -170,8 +170,9 @@ function KeyUsage({ keyId }: { keyId: string }) {
  * so a stray paste or an overflowing number can never clear a limit.
  */
 const parseCapDraft = (draft: string, max: number): { ok: true; value: number | null } | { ok: false } => {
+    // Only a truly empty field clears the limit; whitespace alone is a mistake.
+    if (draft === "") return { ok: true, value: null };
     const trimmed = draft.trim();
-    if (trimmed === "") return { ok: true, value: null };
     if (!/^[0-9]+$/.test(trimmed)) return { ok: false };
     const value = Number(trimmed);
     return Number.isSafeInteger(value) && value >= 1 && value <= max ? { ok: true, value } : { ok: false };

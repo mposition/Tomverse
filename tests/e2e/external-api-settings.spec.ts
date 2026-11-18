@@ -167,7 +167,7 @@ test("API keys: create shows the secret once with a ready config, then revoke @u
     await row.getByRole("button", { name: "한도 변경" }).click();
     // Anything but a whole number in range is refused before it is sent; it
     // can never turn into "no limit". Only an empty field clears the limit.
-    for (const bad of ["abc", "1e400", "99999999999999999999", "0", "1.5"]) {
+    for (const bad of ["abc", "   ", "1e400", "99999999999999999999", "0", "1.5"]) {
         await row.getByRole("textbox").fill(bad);
         await row.getByRole("button", { name: "저장" }).click();
         await expect(row).toContainText("1부터 1000000 사이의 정수");
