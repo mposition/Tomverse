@@ -487,6 +487,14 @@ export async function handleChatCompletions(request: Request): Promise<Response>
             // The SDK's default onError logs the raw error object, and provider
             // errors can carry request and response bodies. Content-free only.
             onError: logStreamErrorWithoutContent({ traceId: requestId, modelId: model.id }),
+            // Off for this call: Sentry's AI SDK tracing-channel subscriber
+            // takes a reader on the model's stream and swaps in a tapped copy
+            // on an object the SDK does not read back, so the SDK then pipes
+            // the locked original and every streamed reply fails with
+            // "ReadableStream is locked" (seen from Cursor on dev, reproduced
+            // locally with Sentry on). With telemetry off the SDK skips the
+            // channel; Sentry still reports errors, only the AI spans go.
+            telemetry: { isEnabled: false },
             model: getActiveAiModel(model),
             messages: converted.messages as ModelMessage[],
             ...(converted.tools.length ? { tools } : {}),
