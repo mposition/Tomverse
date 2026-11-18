@@ -865,19 +865,36 @@ export type MessageAttachmentCleanupSweepResult = {
 export const LATE_TEXT_CACHE_SWEEP_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 /**
- * Every tombstone completed inside the window, page by page -- not the newest
- * N, which would leave older ones in the window unchecked on a busy day.
+ * Time one maintenance run may spend on the sweep, so it never crowds out the
+ * work that follows it in the same route.
  */
-const sweepLateAttachmentTextCaches = async (now: Date, pageSize: number) => {
+export const LATE_TEXT_CACHE_SWEEP_BUDGET_MS = 60 * 1000;
+
+/**
+ * Every tombstone completed inside the window, newest first, page by page.
+ *
+ * Newest first because a late cache write follows its drain by minutes: the
+ * tombstones that matter most are the most recent ones, and a run stopped by
+ * its time budget has already covered them. Each tombstone is covered by
+ * every run for a whole day, so one that a run did not reach was reached by
+ * the earlier runs, when it was among the newest.
+ */
+const sweepLateAttachmentTextCaches = async (
+  now: Date,
+  pageSize: number,
+  budgetMs = LATE_TEXT_CACHE_SWEEP_BUDGET_MS
+) => {
   const since = new Date(now.getTime() - LATE_TEXT_CACHE_SWEEP_WINDOW_MS);
+  const deadline = Date.now() + budgetMs;
   const take = Math.max(1, pageSize);
   let cursor: string | null = null;
   let deleted = 0;
   for (;;) {
+    if (Date.now() > deadline) return deleted;
     const page: Array<{ id: string; objectKey: string }> =
       await prisma.messageAttachmentCleanup.findMany({
         where: { completedAt: { not: null, gte: since } },
-        orderBy: { id: "asc" },
+        orderBy: [{ completedAt: "desc" }, { id: "desc" }],
         take,
         ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
         select: { id: true, objectKey: true },

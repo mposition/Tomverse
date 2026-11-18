@@ -510,11 +510,12 @@ import {
 } from "@/lib/chatAttachmentErrorCopy";
 
 const MAX_ATTACHMENTS = CHAT_MAX_ATTACHMENTS_PER_MESSAGE;
-// Every request resends the full conversation history (including past
-// attachments, which get re-fetched from R2 and re-parsed on every turn), so
-// this is a generous safety ceiling on total reprocessing cost, not a
-// per-message limit — see MAX_ATTACHMENTS for the per-send cap.
-const MAX_CONVERSATION_ATTACHMENTS = 30;
+// Every request resends the full conversation history, so this bounds how many
+// earlier files one turn walks. Raised from 30 with the 10-file message limit
+// (2026-11-18): an earlier file whose text is cached (lib/attachmentTextCache.ts)
+// is one small read, not a fetch and re-parse, and the byte total still bounds
+// whatever is read whole. See MAX_ATTACHMENTS for the per-send cap.
+const MAX_CONVERSATION_ATTACHMENTS = 100;
 // Guests resend their whole local history on every turn too, so this bounds
 // how much ephemeral storage one guest chat can force the server to re-read.
 // Far below the account ceiling on purpose: a guest chat is a trial, not an

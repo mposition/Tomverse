@@ -1367,7 +1367,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
       {
         "id": "files-and-drive",
         "title": "7. Fichiers et Google Drive",
-        "description": "Lorsque les pièces jointes sont proposées aux visiteurs, vous pouvez envoyer une image prise en charge ou un document lisible de 5 Mio maximum. Les comptes connectés autorisés peuvent envoyer cinq fichiers par message, 10 Mio chacun et 25 Mio au total. Google Drive nécessite une connexion. Les fournisseurs d’IA choisis traitent le contenu nécessaire ; utilisez uniquement des documents que vous êtes autorisé à transmettre.",
+        "description": "Lorsque les pièces jointes sont proposées aux visiteurs, vous pouvez envoyer une image prise en charge ou un document lisible de 5 Mio maximum. Les comptes connectés autorisés peuvent envoyer dix fichiers par message, 50 Mio chacun et 100 Mio au total. Google Drive nécessite une connexion. Les fournisseurs d’IA choisis traitent le contenu nécessaire ; utilisez uniquement des documents que vous êtes autorisé à transmettre.",
         "items": [
           {
             "term": "Pris en charge",

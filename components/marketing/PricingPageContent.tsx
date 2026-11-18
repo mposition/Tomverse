@@ -736,7 +736,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
       rows: [
         { label: "模型访问", free: "精选模型", pro: "所有可用模型 · 适用 Pro 用量限制", max: "所有可用模型 · 最高月额度" },
         { label: "多模型比较", free: "最多 3 个模型", pro: "最多 3 个模型", max: "最多 3 个模型" },
-        { label: "文件附件", free: "图片、PDF、Office、Drive", pro: "图片、PDF、Office、Drive", max: "更高的文件和上下文限制" },
+        { label: "文件附件", free: "图片、PDF、Office、Drive", pro: "图片、PDF、Office、Drive", max: "图片、PDF、Office、Drive" },
         { label: "对话分享", free: "分享和下载", pro: "分享和下载", max: "分享和下载" },
         { label: "AI 积分", free: "每月 300", pro: "每月 3,000", max: "每月 10,000" },
       ],
@@ -751,7 +751,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
     plans: [
       { name: "Free", eyebrow: "适合开始使用", price: "$0", period: "每月", description: "每月 300 AI 积分，适合轻量日常使用和体验高级模型。", cta: "免费开始", href: REVIEW_SIGN_IN_HREF, usage: "每月 300 AI 积分", features: ["使用精选模型","精选高费用模型每月最多 30 次响应","比较最多 3 个模型","已保存的对话记录","登录后可附加文件、分享和下载","从轻量日常提问开始","在开放使用时创建 AI 图像"] },
       { name: "Pro", eyebrow: "日常生产力", price: "$15", period: "每月", description: "每月 3,000 AI 积分，适合日常多模型比较。", cta: "升级到 Pro", href: REVIEW_WORKSPACE_PATH, highlighted: true, badge: "推荐", usage: "每月 3,000 AI 积分", features: ["使用所有可用模型","每月积分按各模型的积分消耗扣除","并排比较最多 3 个模型","附加文件和 Google Drive 文件","分享和下载对话","在开放使用时创建 AI 图像"] },
-      { name: "Max", eyebrow: "高强度 AI 工作流", price: "$25", period: "每月", description: "每月 10,000 AI 积分，适合高强度高级模型和长文档工作。", cta: "升级到 Max", href: REVIEW_WORKSPACE_PATH, usage: "每月 10,000 AI 积分", features: ["使用所有可用模型","Standard 模型无每日限制","Premium 用量受每月积分及公平使用政策约束","更高的附件和上下文限制","适合经常使用高级模型和处理长文档","在开放使用时创建 AI 图像"] },
+      { name: "Max", eyebrow: "高强度 AI 工作流", price: "$25", period: "每月", description: "每月 10,000 AI 积分，适合高强度高级模型和长文档工作。", cta: "升级到 Max", href: REVIEW_WORKSPACE_PATH, usage: "每月 10,000 AI 积分", features: ["使用所有可用模型","Standard 模型无每日限制","Premium 用量受每月积分及公平使用政策约束","附件开启时：每条消息 10 个文件 · 每个 50 MiB · 合计 100 MiB","适合经常使用高级模型和处理长文档","在开放使用时创建 AI 图像"] },
     ],
   },
   "zh-Hant": {
@@ -771,7 +771,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
       rows: [
         { label: "模型存取", free: "精選模型", pro: "所有可用模型 · 適用 Pro 用量限制", max: "所有可用模型 · 最高月額度" },
         { label: "多模型比較", free: "最多 3 個模型", pro: "最多 3 個模型", max: "最多 3 個模型" },
-        { label: "檔案附件", free: "圖片、PDF、Office、Drive", pro: "圖片、PDF、Office、Drive", max: "更高的檔案和上下文限制" },
+        { label: "檔案附件", free: "圖片、PDF、Office、Drive", pro: "圖片、PDF、Office、Drive", max: "圖片、PDF、Office、Drive" },
         { label: "對話分享", free: "分享和下載", pro: "分享和下載", max: "分享和下載" },
         { label: "AI 點數", free: "每月 300", pro: "每月 3,000", max: "每月 10,000" },
       ],
@@ -786,7 +786,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
     plans: [
       { name: "Free", eyebrow: "適合開始使用", price: "$0", period: "每月", description: "每月 300 AI 點數，適合輕量的日常使用與體驗進階模型。", cta: "免費開始", href: REVIEW_SIGN_IN_HREF, usage: "每月 300 AI 點數", features: ["使用精選模型","精選高費用模型每月最多 30 次回應","比較最多 3 個模型","已保存的對話紀錄","登入後可附加檔案、分享和下載","從輕量的日常提問開始","開放使用時建立 AI 圖像"] },
       { name: "Pro", eyebrow: "日常生產力", price: "$15", period: "每月", description: "每月 3,000 AI 點數，適合日常的多模型比較。", cta: "升級到 Pro", href: REVIEW_WORKSPACE_PATH, highlighted: true, badge: "推薦", usage: "每月 3,000 AI 點數", features: ["使用所有可用模型","每月點數依各模型的點數消耗扣除","並排比較最多 3 個模型","附加檔案和 Google Drive 檔案","分享和下載對話","開放使用時建立 AI 圖像"] },
-      { name: "Max", eyebrow: "高強度 AI 工作流程", price: "$25", period: "每月", description: "每月 10,000 AI 點數，適合高強度的進階模型和長文件工作。", cta: "升級到 Max", href: REVIEW_WORKSPACE_PATH, usage: "每月 10,000 AI 點數", features: ["使用所有可用模型","Standard 模型沒有每日限制","Premium 用量受每月點數及公平使用政策約束","更高的附件和上下文限制","適合經常使用進階模型和處理長文件","開放使用時建立 AI 圖像"] },
+      { name: "Max", eyebrow: "高強度 AI 工作流程", price: "$25", period: "每月", description: "每月 10,000 AI 點數，適合高強度的進階模型和長文件工作。", cta: "升級到 Max", href: REVIEW_WORKSPACE_PATH, usage: "每月 10,000 AI 點數", features: ["使用所有可用模型","Standard 模型沒有每日限制","Premium 用量受每月點數及公平使用政策約束","附件開啟時：每則訊息 10 個檔案 · 每個 50 MiB · 合計 100 MiB","適合經常使用進階模型和處理長文件","開放使用時建立 AI 圖像"] },
     ],
   },
   fr: {
@@ -806,7 +806,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
       rows: [
         { label: "Accès aux modèles", free: "Sélection de modèles", pro: "Tous les modèles disponibles · limites Pro", max: "Tous les modèles disponibles · enveloppe mensuelle la plus élevée" },
         { label: "Comparaison multi-modèles", free: "Jusqu'à 3 modèles", pro: "Jusqu'à 3 modèles", max: "Jusqu'à 3 modèles" },
-        { label: "Pièces jointes", free: "Images, PDF, Office, Drive", pro: "Images, PDF, Office, Drive", max: "Limites de fichiers et de contexte plus élevées" },
+        { label: "Pièces jointes", free: "Images, PDF, Office, Drive", pro: "Images, PDF, Office, Drive", max: "Images, PDF, Office, Drive" },
         { label: "Partage de conversations", free: "Partage et téléchargement", pro: "Partage et téléchargement", max: "Partage et téléchargement" },
         { label: "Crédits IA", free: "300/mois", pro: "3 000/mois", max: "10 000/mois" },
       ],
@@ -821,7 +821,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
     plans: [
       { name: "Free", eyebrow: "Pour commencer", price: "$0", period: "par mois", description: "300 crédits IA mensuels pour un usage quotidien léger et l'essai de modèles avancés.", cta: "Commencer gratuitement", href: REVIEW_SIGN_IN_HREF, usage: "300 crédits IA par mois", features: ["Accès à une sélection de modèles","Jusqu’à 30 réponses par mois avec certains modèles à coût élevé","Comparez jusqu’à 3 modèles","Historique des conversations enregistrées","Fichiers, partage et téléchargements après connexion","Pour commencer avec des questions du quotidien","Créer des images IA lorsque la fonction est disponible"] },
       { name: "Pro", eyebrow: "Productivité quotidienne", price: "$15", period: "par mois", description: "3 000 crédits IA mensuels pour les comparaisons multi-modèles quotidiennes.", cta: "Passer à Pro", href: REVIEW_WORKSPACE_PATH, highlighted: true, badge: "Recommandé", usage: "3 000 crédits IA par mois", features: ["Accès à tous les modèles disponibles","Crédits mensuels consommés selon le coût de chaque modèle","Comparez jusqu’à 3 modèles côte à côte","Pièces jointes et fichiers Google Drive","Partage et téléchargement des conversations","Créer des images IA lorsque la fonction est disponible"] },
-      { name: "Max", eyebrow: "Workflows IA intensifs", price: "$25", period: "par mois", description: "10 000 crédits IA mensuels pour les modèles avancés et les longs documents.", cta: "Passer à Max", href: REVIEW_WORKSPACE_PATH, usage: "10 000 crédits IA par mois", features: ["Accès à tous les modèles disponibles","Pas de limite quotidienne pour les modèles Standard","Usage Premium soumis aux crédits mensuels et à la politique d’usage équitable","Limites de pièces jointes et de contexte plus élevées","Pour l’usage fréquent de modèles avancés et de longs documents","Créer des images IA lorsque la fonction est disponible"] },
+      { name: "Max", eyebrow: "Workflows IA intensifs", price: "$25", period: "par mois", description: "10 000 crédits IA mensuels pour les modèles avancés et les longs documents.", cta: "Passer à Max", href: REVIEW_WORKSPACE_PATH, usage: "10 000 crédits IA par mois", features: ["Accès à tous les modèles disponibles","Pas de limite quotidienne pour les modèles Standard","Usage Premium soumis aux crédits mensuels et à la politique d’usage équitable","Si les pièces jointes sont activées : 10 fichiers par message · 50 Mio chacun · 100 Mio au total","Pour l’usage fréquent de modèles avancés et de longs documents","Créer des images IA lorsque la fonction est disponible"] },
     ],
   },
   de: {
@@ -841,7 +841,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
       rows: [
         { label: "Modellzugriff", free: "Ausgewählte Modelle", pro: "Alle verfügbaren Modelle · Pro-Nutzungslimits", max: "Alle verfügbaren Modelle · größtes Monatskontingent" },
         { label: "Multi-Modell-Vergleich", free: "Bis zu 3 Modelle", pro: "Bis zu 3 Modelle", max: "Bis zu 3 Modelle" },
-        { label: "Dateianhänge", free: "Bilder, PDFs, Office, Drive", pro: "Bilder, PDFs, Office, Drive", max: "Höhere Datei- und Kontextlimits" },
+        { label: "Dateianhänge", free: "Bilder, PDFs, Office, Drive", pro: "Bilder, PDFs, Office, Drive", max: "Bilder, PDFs, Office, Drive" },
         { label: "Unterhaltungen teilen", free: "Teilen und herunterladen", pro: "Teilen und herunterladen", max: "Teilen und Herunterladen" },
         { label: "KI-Credits", free: "300/Monat", pro: "3.000/Monat", max: "10.000/Monat" },
       ],
@@ -856,7 +856,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
     plans: [
       { name: "Free", eyebrow: "Für den Einstieg", price: "$0", period: "pro Monat", description: "300 monatliche KI-Credits für leichte Alltagsnutzung und zum Testen fortgeschrittener Modelle.", cta: "Kostenlos starten", href: REVIEW_SIGN_IN_HREF, usage: "300 KI-Credits pro Monat", features: ["Zugriff auf ausgewählte Modelle","Bis zu 30 Antworten ausgewählter kostenintensiver Modelle pro Monat","Bis zu 3 Modelle vergleichen","Gespeicherter Gesprächsverlauf","Dateianhänge, Teilen und Downloads nach Anmeldung","Einstieg mit einfachen Alltagsfragen","KI-Bilder erstellen, sofern verfügbar"] },
       { name: "Pro", eyebrow: "Tägliche Produktivität", price: "$15", period: "pro Monat", description: "3.000 monatliche KI-Credits für alltägliche Multi-Modell-Vergleiche.", cta: "Auf Pro upgraden", href: REVIEW_WORKSPACE_PATH, highlighted: true, badge: "Empfohlen", usage: "3.000 KI-Credits pro Monat", features: ["Zugriff auf alle verfügbaren Modelle","Monatliche Credits nach dem Verbrauch des jeweiligen Modells","Bis zu 3 Modelle nebeneinander vergleichen","Dateianhänge und Google-Drive-Dateien","Gespräche teilen und herunterladen","KI-Bilder erstellen, sofern verfügbar"] },
-      { name: "Max", eyebrow: "Intensive KI-Workflows", price: "$25", period: "pro Monat", description: "10.000 monatliche KI-Credits für intensive Arbeit mit fortgeschrittenen Modellen und langen Dokumenten.", cta: "Auf Max upgraden", href: REVIEW_WORKSPACE_PATH, usage: "10.000 KI-Credits pro Monat", features: ["Zugriff auf alle verfügbaren Modelle","Kein Tageslimit für Standard-Modelle","Premium-Nutzung unterliegt Monats-Credits und der Fair-Use-Richtlinie","Höhere Anhang- und Kontextlimits","Für häufige Arbeit mit fortgeschrittenen Modellen und langen Dokumenten","KI-Bilder erstellen, sofern verfügbar"] },
+      { name: "Max", eyebrow: "Intensive KI-Workflows", price: "$25", period: "pro Monat", description: "10.000 monatliche KI-Credits für intensive Arbeit mit fortgeschrittenen Modellen und langen Dokumenten.", cta: "Auf Max upgraden", href: REVIEW_WORKSPACE_PATH, usage: "10.000 KI-Credits pro Monat", features: ["Zugriff auf alle verfügbaren Modelle","Kein Tageslimit für Standard-Modelle","Premium-Nutzung unterliegt Monats-Credits und der Fair-Use-Richtlinie","Wenn Anhänge aktiviert sind: 10 Dateien pro Nachricht · je 50 MiB · insgesamt 100 MiB","Für häufige Arbeit mit fortgeschrittenen Modellen und langen Dokumenten","KI-Bilder erstellen, sofern verfügbar"] },
     ],
   },
   es: {
@@ -876,7 +876,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
       rows: [
         { label: "Acceso a modelos", free: "Modelos seleccionados", pro: "Todos los modelos disponibles · límites de Pro", max: "Todos los modelos disponibles · mayor asignación mensual" },
         { label: "Comparación multi-modelo", free: "Hasta 3 modelos", pro: "Hasta 3 modelos", max: "Hasta 3 modelos" },
-        { label: "Archivos adjuntos", free: "Imágenes, PDF, Office, Drive", pro: "Imágenes, PDF, Office, Drive", max: "Límites superiores de archivos y contexto" },
+        { label: "Archivos adjuntos", free: "Imágenes, PDF, Office, Drive", pro: "Imágenes, PDF, Office, Drive", max: "Imágenes, PDF, Office, Drive" },
         { label: "Compartir conversaciones", free: "Compartir y descargar", pro: "Compartir y descargar", max: "Compartir y descargar" },
         { label: "Créditos de IA", free: "300/mes", pro: "3.000/mes", max: "10.000/mes" },
       ],
@@ -891,7 +891,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
     plans: [
       { name: "Free", eyebrow: "Para empezar", price: "$0", period: "al mes", description: "300 créditos de IA al mes para uso diario ligero y probar modelos avanzados.", cta: "Empezar gratis", href: REVIEW_SIGN_IN_HREF, usage: "300 créditos de IA al mes", features: ["Acceso a modelos seleccionados","Hasta 30 respuestas mensuales de determinados modelos de mayor coste","Compara hasta 3 modelos","Historial de conversaciones guardadas","Archivos, compartir y descargas tras iniciar sesión","Empieza con preguntas cotidianas sencillas","Crear imágenes con IA cuando esté disponible"] },
       { name: "Pro", eyebrow: "Productividad diaria", price: "$15", period: "al mes", description: "3.000 créditos de IA al mes para comparaciones multimodelo cotidianas.", cta: "Actualizar a Pro", href: REVIEW_WORKSPACE_PATH, highlighted: true, badge: "Recomendado", usage: "3.000 créditos de IA al mes", features: ["Acceso a todos los modelos disponibles","Créditos mensuales según el consumo de cada modelo","Compara hasta 3 modelos lado a lado","Archivos adjuntos y archivos de Google Drive","Comparte y descarga conversaciones","Crear imágenes con IA cuando esté disponible"] },
-      { name: "Max", eyebrow: "Flujos intensivos de IA", price: "$25", period: "al mes", description: "10.000 créditos de IA al mes para trabajo intensivo con modelos avanzados y documentos largos.", cta: "Actualizar a Max", href: REVIEW_WORKSPACE_PATH, usage: "10.000 créditos de IA al mes", features: ["Acceso a todos los modelos disponibles","Sin límite diario en modelos Standard","Uso Premium sujeto a créditos mensuales y a la política de uso justo","Límites superiores de adjuntos y contexto","Para el uso frecuente de modelos avanzados y documentos largos","Crear imágenes con IA cuando esté disponible"] },
+      { name: "Max", eyebrow: "Flujos intensivos de IA", price: "$25", period: "al mes", description: "10.000 créditos de IA al mes para trabajo intensivo con modelos avanzados y documentos largos.", cta: "Actualizar a Max", href: REVIEW_WORKSPACE_PATH, usage: "10.000 créditos de IA al mes", features: ["Acceso a todos los modelos disponibles","Sin límite diario en modelos Standard","Uso Premium sujeto a créditos mensuales y a la política de uso justo","Con adjuntos habilitados: 10 archivos por mensaje · 50 MiB cada uno · 100 MiB en total","Para el uso frecuente de modelos avanzados y documentos largos","Crear imágenes con IA cuando esté disponible"] },
     ],
   },
   pt: {
@@ -911,7 +911,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
       rows: [
         { label: "Acesso a modelos", free: "Modelos selecionados", pro: "Todos os modelos disponíveis · limites do Pro", max: "Todos os modelos disponíveis · maior franquia mensal" },
         { label: "Comparação multi-modelo", free: "Até 3 modelos", pro: "Até 3 modelos", max: "Até 3 modelos" },
-        { label: "Anexos", free: "Imagens, PDFs, Office, Drive", pro: "Imagens, PDFs, Office, Drive", max: "Limites maiores de arquivos e contexto" },
+        { label: "Anexos", free: "Imagens, PDFs, Office, Drive", pro: "Imagens, PDFs, Office, Drive", max: "Imagens, PDFs, Office, Drive" },
         { label: "Compartilhar conversas", free: "Compartilhar e baixar", pro: "Compartilhar e baixar", max: "Compartilhar e baixar" },
         { label: "Créditos de IA", free: "300/mês", pro: "3.000/mês", max: "10.000/mês" },
       ],
@@ -926,7 +926,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
     plans: [
       { name: "Free", eyebrow: "Para começar", price: "$0", period: "por mês", description: "300 créditos de IA por mês para uso diário leve e para testar modelos avançados.", cta: "Começar grátis", href: REVIEW_SIGN_IN_HREF, usage: "300 créditos de IA por mês", features: ["Acesso a modelos selecionados","Até 30 respostas mensais de modelos selecionados de maior custo","Compare até 3 modelos","Histórico de conversas salvas","Anexos, compartilhamento e downloads após o login","Comece com perguntas simples do dia a dia","Criar imagens com IA quando estiver disponível"] },
       { name: "Pro", eyebrow: "Produtividade diária", price: "$15", period: "por mês", description: "3.000 créditos de IA por mês para comparações multimodelo cotidianas.", cta: "Atualizar para Pro", href: REVIEW_WORKSPACE_PATH, highlighted: true, badge: "Recomendado", usage: "3.000 créditos de IA por mês", features: ["Acesso a todos os modelos disponíveis","Créditos mensais conforme o consumo de cada modelo","Compare até 3 modelos lado a lado","Anexos e arquivos do Google Drive","Compartilhe e baixe conversas","Criar imagens com IA quando estiver disponível"] },
-      { name: "Max", eyebrow: "Fluxos intensivos de IA", price: "$25", period: "por mês", description: "10.000 créditos de IA por mês para trabalho intensivo com modelos avançados e documentos longos.", cta: "Atualizar para Max", href: REVIEW_WORKSPACE_PATH, usage: "10.000 créditos de IA por mês", features: ["Acesso a todos os modelos disponíveis","Sem limite diário em modelos Standard","Uso Premium sujeito aos créditos mensais e à Política de Uso Justo","Limites maiores de anexos e contexto","Para uso frequente de modelos avançados e documentos longos","Criar imagens com IA quando estiver disponível"] },
+      { name: "Max", eyebrow: "Fluxos intensivos de IA", price: "$25", period: "por mês", description: "10.000 créditos de IA por mês para trabalho intensivo com modelos avançados e documentos longos.", cta: "Atualizar para Max", href: REVIEW_WORKSPACE_PATH, usage: "10.000 créditos de IA por mês", features: ["Acesso a todos os modelos disponíveis","Sem limite diário em modelos Standard","Uso Premium sujeito aos créditos mensais e à Política de Uso Justo","Com anexos ativados: 10 arquivos por mensagem · 50 MiB cada · 100 MiB no total","Para uso frequente de modelos avançados e documentos longos","Criar imagens com IA quando estiver disponível"] },
     ],
   },
 };

@@ -237,7 +237,7 @@ const runOfficeWorker = async <T>(
         },
         transferList: [transferableBuffer],
         resourceLimits: {
-            maxOldGenerationSizeMb: 256,
+            maxOldGenerationSizeMb: 512,
             maxYoungGenerationSizeMb: 32,
             stackSizeMb: 4,
         },

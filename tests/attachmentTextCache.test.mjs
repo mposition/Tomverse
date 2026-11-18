@@ -83,6 +83,18 @@ test("too many attachments names the real limit", () => {
     assert.match(source("app/api/chat/route.ts"), /at most \$\{MAX_ATTACHMENTS\} attachments/);
 });
 
+test("a conversation holds well over three full messages of files", () => {
+    const limit = Number(/const MAX_CONVERSATION_ATTACHMENTS = (\d+);/.exec(source("app/api/chat/route.ts"))?.[1]);
+    assert.ok(limit >= CHAT_MAX_ATTACHMENTS_PER_MESSAGE * 10, `${limit}`);
+});
+
+test("no pricing language claims Max has higher file limits", () => {
+    const pricing = source("components/marketing/PricingPageContent.tsx");
+    for (const claim of ["更高的文件", "更高的檔案", "更高的附件", "plus élevées", "Höhere Datei", "Höhere Anhang", "superiores de", "maiores de"]) {
+        assert.ok(!pricing.includes(claim), claim);
+    }
+});
+
 test("what is written is read back exactly, and anything else is a miss", () => {
     const entries = [{ kind: "PDF file", text: "line one\nline two" }, { kind: "file", text: "한국어" }];
     assert.deepEqual(parseCachedAttachmentText(serializeCachedAttachmentText(entries)), entries);
@@ -143,9 +155,13 @@ test("every drain deletes the cached text of recently completed tombstones again
     assert.match(sweep, /const since = new Date\(now\.getTime\(\) - LATE_TEXT_CACHE_SWEEP_WINDOW_MS\)/);
     assert.match(sweep, /completedAt: \{ not: null, gte: since \}/);
     assert.match(sweep, /await deleteAttachmentTextCache\(item\.objectKey\)/);
-    // Every completion in the window, page by page -- never only the newest N.
+    // Every completion in the window, page by page -- never only the newest N
+    // -- newest first, within a time budget so a stopped run has already
+    // covered the tombstones a late write can follow.
     assert.match(sweep, /cursor: \{ id: cursor \}, skip: 1/);
     assert.match(sweep, /if \(page\.length < take \|\| !last\) return deleted;/);
+    assert.match(sweep, /orderBy: \[\{ completedAt: "desc" \}, \{ id: "desc" \}\]/);
+    assert.match(sweep, /if \(Date\.now\(\) > deadline\) return deleted;/);
     assert.match(storage, /export const LATE_TEXT_CACHE_SWEEP_WINDOW_MS = 24 \* 60 \* 60 \* 1000;/);
     const drain = storage.slice(storage.indexOf("export const drainMessageAttachmentCleanupQueue"));
     assert.match(drain, /await sweepLateAttachmentTextCaches\(now, limit\)/);

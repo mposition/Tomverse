@@ -134,16 +134,16 @@ test("Native files added during preparation preserve ten inputs and clean only t
   await expect(page.getByRole("alert")).toContainText("up to 10 files"); await expect(input(page)).toHaveValue("Keep this draft");
   await expect(page.locator(".attachments li")).toHaveCount(10); expect((await read(page)).removed).toHaveLength(1);
 });
-test("Native uploads completing after a prepared revision cannot exceed five or delete the prepared input", async ({ page }) => {
+test("Native uploads completing after a prepared revision cannot exceed ten or delete the prepared input", async ({ page }) => {
   await open(page); await fixture(page, { hold: true, uploadHold: true }); await input(page).fill("Keep this draft");
   await cards(page).first().getByTestId("native-artifact-revise").click(); await expect.poll(async () => (await read(page)).calls.length).toBe(1);
-  await page.getByTestId("file-picker").setInputFiles(Array.from({ length: 5 }, (_, index) => ({ name: `notes-${index}.txt`, mimeType: "text/plain", buffer: Buffer.from("notes") })));
+  await page.getByTestId("file-picker").setInputFiles(Array.from({ length: 10 }, (_, index) => ({ name: `notes-${index}.txt`, mimeType: "text/plain", buffer: Buffer.from("notes") })));
   await expect.poll(async () => (await read(page)).uploadStarted).toBe(true);
   await release(page); await expect(page.locator(".attachments li")).toHaveCount(1);
   const preparedId = await page.evaluate(() => JSON.parse(localStorage.getItem("tomverse-device-draft:synthetic-demo:source-chat:files")!).files[0].uploadId);
   await fixture(page, { uploadHold: false }); await page.evaluate(() => (window as unknown as { artifactRevisionFixture: Fixture }).artifactRevisionFixture.releaseUpload!());
-  await expect(page.locator(".attachments li")).toHaveCount(5);
-  await expect(page.getByRole("alert")).toContainText(/5/);
+  await expect(page.locator(".attachments li")).toHaveCount(10);
+  await expect(page.getByRole("alert")).toContainText(/10/);
   await expect(page.getByRole("button", { name: "Remove attachment: report.md", exact: true })).toBeVisible();
   await expect(input(page)).toHaveValue(/Keep this draft/);
   expect((await read(page)).removed).toHaveLength(1); expect((await read(page)).removed).not.toContain(preparedId);
