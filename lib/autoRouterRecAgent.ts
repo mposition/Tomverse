@@ -92,7 +92,7 @@ export async function claimNextRecommendation(input: {
 
 /** Caller holds the audit and optimizer locks, also shared with the daily agent. */
 export async function claimRecommendationInTransaction(
-    tx: Prisma.TransactionClient, origin: string, now: Date, options: { automaticRetries?: boolean } = {}
+    tx: Prisma.TransactionClient, origin: string, now: Date, options: { automaticRetries?: boolean; coveredTaskIds?: ReadonlySet<string> } = {}
 ): Promise<ClaimedRecommendation | null> {
         if (!(await readRecAgentEnabled(tx))) return null;
         const cycles = await tx.autoRouterOptimizerCycle.findMany({
@@ -103,10 +103,11 @@ export async function claimRecommendationInTransaction(
         });
         const next = nextClaimableRecommendation(
             cycles.map((cycle) => ({ ...cycle, createdAt: cycle.createdAt.toISOString() })),
-            now.getTime()
+            now.getTime(), options.coveredTaskIds
         ) ?? (options.automaticRetries ? [...cycles].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()).flatMap((cycle) => {
             const entries = recommendationStatusEntries(cycle.summary);
             return actionableRecommendations(cycle.summary, now.getTime()).filter((item) => item.kind === "code" &&
+                !options.coveredTaskIds?.has(recommendationId(cycle.id, item.index)) &&
                 automaticDailyRetry(entries.get(item.index), now.getTime(), true))
                 .map((item) => ({ ...item, cycleId: cycle.id, createdAt: cycle.createdAt.toISOString() }));
         })[0] : null);

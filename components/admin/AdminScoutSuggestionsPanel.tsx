@@ -23,6 +23,7 @@ import { AdminCopyWorkBriefButton } from "@/components/admin/AdminCopyWorkBriefB
 import { ScoutMemoryComparison } from "./ScoutMemoryComparison";
 import { ScoutAgentAside } from "@/components/admin/ScoutAgentAside";
 import { AdminStatusChip } from "@/components/admin/ui/AdminStatusChip";
+import { DailyImplementationEvidence } from "@/components/admin/DailyImplementationEvidence";
 import { adminProductResearchScoutMessages } from "@/lib/adminMessages/productResearchScout";
 import type { ScoutDaySummary } from "@/lib/productResearchScoutCore";
 import type { ScoutConsoleSuggestion, ScoutConsoleView } from "@/lib/productResearchScoutConsoleRead";
@@ -231,6 +232,7 @@ export function AdminScoutSuggestionsPanel({
             </div>
             <h4 className="mt-1.5 text-sm font-semibold text-zinc-50">{suggestion.title}</h4>
             <p className="mt-1 text-sm text-zinc-400">{suggestion.suggestion}</p>
+            <DailyImplementationEvidence implementation={suggestion.implementation} unavailable={suggestion.implementationLookupUnavailable} />
             {suggestion.agentWork ? (
               <p className="mt-2 text-xs text-zinc-300" data-testid="scout-agent-work">
                 {m.agentWork[suggestion.agentWork.status]}

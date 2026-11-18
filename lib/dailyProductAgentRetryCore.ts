@@ -1,7 +1,8 @@
 /** Owner request 2026-11-15: bounded retries of known pre-publication failures. */
 export const DAILY_PRODUCT_AGENT_RETRY_SWITCH = "DAILY_PRODUCT_AGENT_RETRIES_ENABLED";
 export const DAILY_PRODUCT_AGENT_MAX_ATTEMPTS = 3;
-export const DAILY_PRODUCT_AGENT_RETRY_DELAY_MS = 24 * 60 * 60_000;
+const BRISBANE_OFFSET_MS = 10 * 60 * 60_000;
+const brisbaneDay = (timestamp: number) => Math.floor((timestamp + BRISBANE_OFFSET_MS) / 86_400_000);
 
 export function automaticDailyRetry(entry: {
   status: string; reason?: string; at: string; finishedAt?: string; leaseUntil?: string;
@@ -14,7 +15,9 @@ export function automaticDailyRetry(entry: {
   if (!Number.isSafeInteger(attempts) || attempts < 1 || attempts >= DAILY_PRODUCT_AGENT_MAX_ATTEMPTS) return false;
   // Legacy Scout records have no completion time. Waiting past their lease is conservative.
   const last = Date.parse(entry.finishedAt ?? entry.leaseUntil ?? entry.at);
-  return Number.isFinite(last) && now - last >= DAILY_PRODUCT_AGENT_RETRY_DELAY_MS;
+  // A job finishing after 09:00 must remain eligible for tomorrow's 09:00
+  // batch. Calendar days also prevent repeated attempts within one batch/day.
+  return Number.isFinite(last) && Number.isFinite(now) && now >= last && brisbaneDay(now) > brisbaneDay(last);
 }
 
 export function dailyRetryInstruction(attempts: number, reason?: string): string {

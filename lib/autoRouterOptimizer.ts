@@ -3,6 +3,9 @@ import { observeOptimizerCost, optimizerCostFields } from "@/lib/autoOptimizerCo
 import { readResponseLatencyEvidence } from "@/lib/responseLatencyStore";
 import { readChatPresearchLatency } from "@/lib/chatPresearchLatency";
 import { readSmartAdaptiveDaily } from "@/lib/dailyProductAgentSmartAdaptive";
+import { readDailyImplementations } from "@/lib/dailyProductImplementation";
+import { taskImplementation, type DailyTaskImplementation } from "@/lib/dailyProductImplementationCore";
+import { actionableRecommendations, recommendationStatusEntries } from "@/lib/autoRouterRecommendationsCore";
 
 import { generateText, jsonSchema, Output } from "ai";
 import type { JSONSchema7 } from "@ai-sdk/provider";
@@ -1063,6 +1066,8 @@ export async function rollBackAutoRouterGuidance(
 }
 
 export type OptimizerCycleView = {
+    implementations?: Record<number, DailyTaskImplementation>;
+    implementationLookupUnavailable?: boolean;
     id: string;
     createdAt: string;
     finishedAt: string | null;
@@ -1108,6 +1113,7 @@ export async function readAutoRouterOptimizerState() {
         }),
         readSmartAdaptiveDaily().catch(() => null),
     ]);
+    const implementations = await readDailyImplementations();
     return {
         optimizerModelId,
         smartAdaptiveDaily,
@@ -1119,6 +1125,11 @@ export async function readAutoRouterOptimizerState() {
         },
         cycles: cycles.map(({ cases, ...cycle }): OptimizerCycleView => ({
             ...cycle,
+            implementations: Object.fromEntries(actionableRecommendations(cycle.summary).flatMap((item) => {
+                const evidence = taskImplementation(implementations, `${cycle.id}:${item.index}`, recommendationStatusEntries(cycle.summary).get(item.index)?.prUrl);
+                return evidence ? [[item.index, evidence]] : [];
+            })),
+            implementationLookupUnavailable: implementations.status === "unavailable",
             ...optimizerCycleView(cycle, now),
             promotionEligibility: optimizerPromotionEligibility(cycle),
             syntheticCases: syntheticCaseViews(cases),

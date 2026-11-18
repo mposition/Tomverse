@@ -6685,6 +6685,21 @@ export function ChatPageClient({
     // string without re-deriving it from state that may not have committed
     // yet (setConversations is async).
     let justCreatedTitle: string | null = null;
+    // A conversation the Auto selection created for this draft is already the
+    // current one, so the branches below never set `justCreatedTitle`, and the
+    // pending record is cleared when the Message saves -- before the
+    // first-turn tracking reads it. Without this the generate-title request
+    // carried "New chat" and its compare-and-set never matched.
+    {
+      const preparedForThisSend = pendingCreatedChatRef.current;
+      if (
+        activeChatId &&
+        preparedForThisSend?.id === activeChatId &&
+        preparedForThisSend.identityKey === identityKey
+      ) {
+        justCreatedTitle = preparedForThisSend.title;
+      }
+    }
     // What this send will name. Ordinarily the screen's own selection, but a
     // create can come back with a different one (see the profile branch
     // below), and the rest of this function runs in the same closure -- a
@@ -7747,7 +7762,7 @@ export function ChatPageClient({
   const triggerTitleGeneration = useCallback(
     async (chatId: string, interimTitle: string, firstPromptText: string) => {
       try {
-        let result: { updated?: boolean; title?: string } | null = null;
+        let result: { updated?: boolean; title?: string; interimTitle?: string } | null = null;
         if (isGuestMode) {
           const sendRequest = (turnstileToken?: string) =>
             fetch("/api/chat/conversation-title", {
@@ -7787,11 +7802,16 @@ export function ChatPageClient({
         // (not just at request time) so a manual rename that lands while
         // this request was in flight is never clobbered -- mirrors the
         // server's own expectedTitle compare-and-set for the logged-in path.
+        // The server also accepts the interim title it derives from the first
+        // message, which is what the sidebar row holds when this send's own
+        // interim value was lost.
         if (result?.updated && typeof result.title === "string") {
           const finalTitle = result.title;
+          const serverInterimTitle = result.interimTitle;
           setConversations((prev) =>
             prev.map((item) =>
-              item.id === chatId && item.title === interimTitle
+              item.id === chatId &&
+              (item.title === interimTitle || item.title === serverInterimTitle)
                 ? { ...item, title: finalTitle }
                 : item
             )
@@ -8598,7 +8618,7 @@ export function ChatPageClient({
         capturedDraft.text.trim() ||
         capturedDraft.attachments[0]?.name ||
         t("sidebar.newChat")
-      ).slice(0, 30);
+      ).slice(0, 30).trim() || t("sidebar.newChat");
       let createdModels = [...capturedModels];
       let createdDisabled = [...capturedDisabled];
       try {

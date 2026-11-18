@@ -4,6 +4,8 @@ import { formatAestDateTime } from "@/lib/adminUiCore";
 import { Check, Copy, Loader2, RotateCcw, Send, X } from "lucide-react";
 import { AdminApiFailureNotice } from "@/components/admin/AdminApiFailureNotice";
 import { AdminCopyWorkBriefButton } from "@/components/admin/AdminCopyWorkBriefButton";
+import { DailyImplementationEvidence } from "@/components/admin/DailyImplementationEvidence";
+import { implementationCoversTask, type DailyTaskImplementation } from "@/lib/dailyProductImplementationCore";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import type { AdminApiFailure } from "@/lib/adminApiOutcome";
 import { adminAutoRouterOptimizerMessages } from "@/lib/adminMessages/autoRouterOptimizer";
@@ -20,7 +22,8 @@ import {
 } from "@/lib/autoRouterRecommendationsCore";
 
 /** The part of an optimizer cycle these controls read. */
-export type RecommendationCycle = { id: string; createdAt: string; summary: unknown };
+export type RecommendationCycle = { id: string; createdAt: string; summary: unknown;
+  implementations?: Record<number, DailyTaskImplementation>; implementationLookupUnavailable?: boolean };
 
 export type DailyRoutingObservation = {
   asOf: string;
@@ -83,9 +86,12 @@ export function RecommendationControls({
   const sending = sendState?.sendingKey === key;
   const refused = sendState?.failure?.key === key ? sendState.failure.failure : null;
   const daily = dailyRecommendationEvidence(cycle.summary, item.index);
+  const implementation = cycle.implementations?.[item.index];
+  const covered = implementationCoversTask(implementation);
 
   return (
     <div className="mt-1" data-testid="admin-auto-router-recommendation-controls">
+      <DailyImplementationEvidence implementation={implementation} unavailable={cycle.implementationLookupUnavailable} />
       {daily ? (
         <details className="mb-2 text-xs text-zinc-300" data-testid="admin-auto-router-daily-evidence">
           <summary className="w-fit cursor-pointer font-medium text-blue-300">{m.dailyEvidence}</summary>
@@ -143,11 +149,11 @@ export function RecommendationControls({
             </button>
           </>
         ) : null}
-        {item.status === "done" ||
+        {!covered && (item.status === "done" ||
         item.status === "dismissed" ||
         item.status === "failed" ||
         item.status === "sending_to_amux" ||
-        item.status === "needs_lookup" ? (
+        item.status === "needs_lookup") ? (
           <button
             type="button"
             onClick={() => onSetStatus(cycle.id, item.index, "open")}

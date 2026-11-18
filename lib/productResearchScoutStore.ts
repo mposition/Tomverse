@@ -10,6 +10,8 @@ import type { Session } from "next-auth";
 import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { DAILY_PRODUCT_AGENT_PREFIX, canHandOffDailyProductTask, dailyProductAgentKey, dailyProductDisplayState, parseDailyProductState, scoutAgentId } from "@/lib/dailyProductAgentCore";
 import { prisma } from "@/lib/prisma";
+import { readDailyImplementations } from "@/lib/dailyProductImplementation";
+import { implementationCoversTask, taskImplementation, type DailyTaskImplementation } from "@/lib/dailyProductImplementationCore";
 import {
   SCOUT_EXISTING_TITLES_MAX,
   type ScoutSubjectKind,
@@ -38,6 +40,8 @@ export type StoredSuggestion = {
   readonly amuxIdeaId: string | null;
   readonly modelId: string | null;
   readonly agentWork?: { status: "claimed" | "needs_lookup" | "pr_opened" | "failed" | "retry_ready"; prUrl?: string; reason?: string; retryable?: boolean };
+  readonly implementation?: DailyTaskImplementation;
+  readonly implementationLookupUnavailable?: boolean;
 };
 
 /**
@@ -133,10 +137,14 @@ export async function listSuggestions(status: SuggestionStatus): Promise<StoredS
     ? await prisma.appSetting.findMany({ where: { key: { in: rows.flatMap((row) => [dailyProductAgentKey(scoutAgentId(row.id)), `${DAILY_PRODUCT_AGENT_PREFIX}amux.${row.id}`]) } }, select: { key: true, value: true } })
     : [];
   const work = new Map(agentRows.map((row) => [row.key, row.value]));
+  const implementations = rows.length ? await readDailyImplementations() : null;
   const visible: StoredSuggestion[] = rows.map((row) => {
     const value = work.get(dailyProductAgentKey(scoutAgentId(row.id)));
-    return value === undefined ? row : { ...row, agentWork: { ...dailyProductDisplayState(value, Date.now()),
-      ...(work.has(`${DAILY_PRODUCT_AGENT_PREFIX}amux.${row.id}`) ? { retryable: false } : {}) } };
+    const agentWork = value === undefined ? undefined : dailyProductDisplayState(value, Date.now());
+    const implementation = implementations ? taskImplementation(implementations, scoutAgentId(row.id), agentWork && "prUrl" in agentWork ? agentWork.prUrl : undefined) : undefined;
+    return { ...row, implementation, implementationLookupUnavailable: implementations?.status === "unavailable",
+      ...(agentWork ? { agentWork: { ...agentWork,
+        ...(implementationCoversTask(implementation) || work.has(`${DAILY_PRODUCT_AGENT_PREFIX}amux.${row.id}`) ? { retryable: false } : {}) } } : {}) };
   });
   const rank = { high: 0, medium: 1, low: 2 } as Record<string, number>;
   return visible.sort((a, b) => (rank[a.severity] ?? 3) - (rank[b.severity] ?? 3));

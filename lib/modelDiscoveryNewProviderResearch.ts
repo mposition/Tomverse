@@ -29,6 +29,7 @@ import { loadCodingCatalog } from "@/lib/modelCatalog";
 import { OFFICIAL_SOURCE_HOSTS, isOfficialSourceUrl } from "@/lib/modelCatalogCore";
 import {
   CONNECTED_IMAGE_RESEARCH_SYSTEM,
+  NEW_PROVIDER_RESEARCH_LAST_SETTING_KEY,
   NEW_PROVIDER_RESEARCH_PRODUCTS,
   NEW_PROVIDER_RESEARCH_SCHEMA,
   NEW_PROVIDER_RESEARCH_SYSTEM,
@@ -37,6 +38,7 @@ import {
   connectedImageResearchPrompt,
   brisbaneIsoWeek,
   newProviderResearchPrompt,
+  newProviderResearchRunRecord,
   type AcceptedNewProviderCandidate,
   type NewProviderResearchProduct,
   type NewProviderResearchRejection,
@@ -308,8 +310,8 @@ export async function runNewProviderModelResearch(
     }
   }
   const created = await recordNewProviderResearchWorkItems({ candidates: accepted, modelId: model.id, now });
-  return {
-    status: "ran",
+  const summary = {
+    status: "ran" as const,
     week,
     modelId: model.id,
     products: results.map((result) => ({
@@ -328,4 +330,34 @@ export async function runNewProviderModelResearch(
     },
     created,
   };
+  await recordLastRun(summary, now);
+  return summary;
 }
+
+/**
+ * Keeps what this run proposed and why each proposal was dropped: logged, and
+ * stored for the Admin discovery tab. A failed write costs only the record.
+ */
+const recordLastRun = async (summary: Extract<NewProviderResearchSummary, { status: "ran" }>, now: Date) => {
+  const record = newProviderResearchRunRecord({
+    week: summary.week,
+    ranAt: now.toISOString(),
+    modelId: summary.modelId,
+    calls: [
+      ...summary.products,
+      ...(summary.connectedImage.enabled ? [{ product: "connected_image" as const, ...summary.connectedImage }] : []),
+    ].map(({ product, ok, proposed, accepted, rejected }) => ({ product, ok, proposed, accepted, rejected })),
+    created: summary.created,
+  });
+  console.info(JSON.stringify({ event: "model_discovery_research_summary", ...record }));
+  const value = JSON.stringify(record);
+  try {
+    await prisma.appSetting.upsert({
+      where: { key: NEW_PROVIDER_RESEARCH_LAST_SETTING_KEY },
+      create: { key: NEW_PROVIDER_RESEARCH_LAST_SETTING_KEY, value },
+      update: { value },
+    });
+  } catch (error) {
+    console.error(JSON.stringify({ event: "model_discovery_research_record_failed", ...researchFailureFacts(error) }));
+  }
+};

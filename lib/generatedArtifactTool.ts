@@ -318,7 +318,11 @@ const HANDLERS: Record<AuthoredArtifactKind, KindHandler> = {
       "for only the first week, keep the rows within that week. For PDF amount or numeric " +
       "table columns, set pdfNumberColumns to their zero-based indices and supply " +
       "numeric cells as numbers for grouped, right-aligned display. Keep identifiers " +
-      "and exact authored strings as strings. For PDF tables, set " +
+      "and exact authored strings as strings. Name every numeric column's unit " +
+      "in its header -- for a change column, whether it is a percent change (%) " +
+      "or a point change (%p) -- and write changes with their sign (+3, -1). " +
+      "For an index, state its base period and base value (for example " +
+      "2024 Q1 = 100) in a paragraph below the table. For PDF tables, set " +
       "pdfColumnWeights to match the content: give description columns more " +
       "space than short item labels and amounts (for example [1, 4, 1]). An image " +
       "block places a picture from a file attached to this message -- a photo, " +
@@ -344,6 +348,10 @@ const HANDLERS: Record<AuthoredArtifactKind, KindHandler> = {
       "per line ending in the total or key figure, and the schedule as a short " +
       "timeline ('Week 1-2: milestone'), each on its own slide when the deck has " +
       "room; never pack them into one long sentence. " +
+      "Split costs into variable costs (a share of revenue, such as materials) " +
+      "and fixed costs, compute break-even revenue as fixed costs / (1 - " +
+      "variable cost ratio) rather than reusing total costs, and show the cost " +
+      "assumptions and that formula on the break-even slide. " +
       "Label hypothetical figures as illustrative assumptions, keep their " +
       "arithmetic consistent and never present them as the user's actual figures. " +
       "Never write file bytes, base64 or a download link yourself.",

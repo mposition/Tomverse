@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { ApiSecurityError } from "@/lib/apiSecurity";
 import { getUserBillingPlan } from "@/lib/billingEntitlements";
 import { getChatCreditAllocation } from "@/lib/chatCreditAllocation";
-import { getUserChatUsageKey, incrementUsageBucket, readUsageBucketCount, usagePeriodStart } from "@/lib/chatSecurity";
+import { dailyPlanCreditBucketLimit, getUserChatUsageKey, incrementUsageBucket, readUsageBucketCount, usagePeriodStart } from "@/lib/chatSecurity";
 import { reserveAddOnCredits, settleAddOnCredits, type AddOnCreditReservationEntry } from "@/lib/creditLedger";
 import { getUserDayWindow } from "@/lib/userDailyUsage";
 import { lockCreditAccount, offsetCreditDebt } from "@/lib/creditDebt";
@@ -91,7 +91,8 @@ async function reserveFunding(tx: Prisma.TransactionClient, input: { userId: str
   const allocation = getChatCreditAllocation({ requiredCredits: price.credits, monthlyPlanCreditsRemaining: Math.max(0, plan.monthlyMessageLimit - monthlyUsed), dailyPlanCreditsRemaining: plan.dailyMessageLimit > 0 ? Math.max(0, plan.dailyMessageLimit - dailyUsed) : null, purchasedCreditsRemaining: purchased._sum.remainingCredits ?? 0 });
   if (allocation.balanceInsufficient) throw new ApiSecurityError(402, "CREDIT_BALANCE_INSUFFICIENT", "Not enough credits for voice.");
   if (allocation.dailyPlanGuardrailBlocked) throw new ApiSecurityError(429, "PLAN_DAILY_CREDIT_LIMIT_REACHED", "Daily plan credits are exhausted.");
-  for (const bucket of [{ period: "day", start: day.start, limit: plan.dailyMessageLimit }, { period: "month", start: monthStart, limit: plan.monthlyMessageLimit }]) {
+  // The day bucket is recorded even without a daily limit: it is also the "used today" counter.
+  for (const bucket of [{ period: "day", start: day.start, limit: dailyPlanCreditBucketLimit(plan.dailyMessageLimit) }, { period: "month", start: monthStart, limit: plan.monthlyMessageLimit }]) {
     if (allocation.planReservedCredits && bucket.limit > 0 && !(await incrementUsageBucket(tx, subjectKey, bucket.period, bucket.start, bucket.limit, allocation.planReservedCredits))) throw new ApiSecurityError(409, "CONCURRENT_RESERVATION_CONFLICT", "Another request is reserving credits. Try again.");
   }
   const addOnEntries = allocation.addOnCreditsRequired ? await reserveAddOnCredits(tx, {
@@ -103,7 +104,7 @@ async function reserveFunding(tx: Prisma.TransactionClient, input: { userId: str
   for (const window of [{ period: "provider-cost-day", start: providerDay, limit: providerLimits.day }, { period: "provider-cost-month", start: monthStart, limit: providerLimits.month }]) {
     if (!await incrementUsageBucket(tx, providerBucketKey("openai"), window.period, window.start, window.limit, price.costMicroUsd)) throw new ApiSecurityError(503, "PROVIDER_BUDGET_EXHAUSTED", "Voice is temporarily unavailable.");
   }
-  return { startSeconds: from, endSeconds: to, planCredits: allocation.planReservedCredits, createdAt: now.toISOString(), dayStart: day.start.toISOString(), dayReserved: plan.dailyMessageLimit > 0, monthStart: monthStart.toISOString(), addOnEntries, budgets: snapshotVoiceBudgets(budgets), providerCostHold: { dayStart: providerDay.toISOString(), monthStart: monthStart.toISOString(), amount: price.costMicroUsd } };
+  return { startSeconds: from, endSeconds: to, planCredits: allocation.planReservedCredits, createdAt: now.toISOString(), dayStart: day.start.toISOString(), dayReserved: true, monthStart: monthStart.toISOString(), addOnEntries, budgets: snapshotVoiceBudgets(budgets), providerCostHold: { dayStart: providerDay.toISOString(), monthStart: monthStart.toISOString(), amount: price.costMicroUsd } };
 }
 
 /** Holds only the next funded window before a paid call. Legacy rows remain readable. */
