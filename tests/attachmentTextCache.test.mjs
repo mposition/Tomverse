@@ -204,7 +204,8 @@ test("past the conversation's file count the oldest earlier files are left out, 
 });
 
 // Review r-20261118-084640-df1e0e: a file left out by count is still a file
-// whose loss is refused (policy §11.4), never silently skipped.
+// whose loss is refused (docs/policy/user-attachment-persistence.md §11.4),
+// never silently skipped.
 test("a file left out by count is still checked for loss first", () => {
     const route = source("app/api/chat/route.ts");
     // Asked of storage before the loop, in parallel batches.
