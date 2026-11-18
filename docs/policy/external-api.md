@@ -323,7 +323,9 @@ Not yet done, each a separate step:
   (Custom Endpoint), both through `smart-adaptive` with the router on
   (OpenAI and DeepSeek candidates). Still open in VS Code: refusing a tool
   approval and stopping mid-answer.
-- The router's 200-token output limit counts reasoning, and twice cut the
+- The router's former 200-token output limit counted reasoning and twice cut the
   router's answer off on a request carrying a previous answer (`invalid`, the
-  default model then answered). Shared with Chat's Smart Adaptive.
+  default model then answered). Raised to 644 (reason and topic at a token per
+  character, JSON and reasoning headroom); shared with Chat's Smart Adaptive.
+  Not yet re-run live.
 - Production migration, merge and deployment.

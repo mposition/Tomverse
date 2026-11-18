@@ -276,7 +276,8 @@ test("combined routing returns both decisions in one reserved call and preserves
     assert.equal(result?.modelId, routerOutput.modelId);
     assert.equal(decision?.image, true);
     assert.equal(routerRequests.length, 1);
-    assert.equal(routerRequests[0].maxOutputTokens, 600);
+    // The router's own cap plus the image decision's 400.
+    assert.equal(routerRequests[0].maxOutputTokens, require(resolve(ROOT, "lib/autoLlmRouterCore.ts")).AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS + 400);
     const { autoLlmRouterWorstCaseMicroUsd } = require(resolve(ROOT, "lib/autoLlmRouterCore.ts"));
     const { resolveModelPricing } = require(resolve(ROOT, "lib/modelPricing.ts"));
     const { AVAILABLE_MODELS } = require(resolve(ROOT, "lib/models.ts"));
@@ -686,7 +687,8 @@ test("router search preparation uses one priced call and malformed suggestions p
       generateRouterResult = () => ({ output: { ...routerOutput, requiresFileGeneration: false, searchQueries: queries, simpleLookup: queries.length === 2 ? true : "true" }, usage: { inputTokens: 100, outputTokens: 30 } });
       const result = await pick(undefined, false, { searchPlan: true });
       assert.equal(routerRequests.length, 1);
-      assert.equal(routerRequests[0].maxOutputTokens, 440);
+      // The router's own cap plus the search plan's 240.
+      assert.equal(routerRequests[0].maxOutputTokens, require(resolve(ROOT, "lib/autoLlmRouterCore.ts")).AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS + 240);
       assert.match(String(routerRequests[0].system), /searchQueries/);
       assert.equal(result?.requiresFileGeneration, false);
       assert.equal(result?.modelId, routerOutput.modelId);
@@ -703,7 +705,7 @@ test("router search preparation uses one priced call and malformed suggestions p
     routerRequests.length = 0;
     const result = await pick();
     assert.equal(result?.searchQueries, undefined);
-    assert.equal(routerRequests[0].maxOutputTokens, 200);
+    assert.equal(routerRequests[0].maxOutputTokens, require(resolve(ROOT, "lib/autoLlmRouterCore.ts")).AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS);
     assert.doesNotMatch(String(routerRequests[0].system), /searchQueries/);
   } finally { generateRouterResult = original; }
 });
