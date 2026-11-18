@@ -260,9 +260,11 @@ export class Journal {
         };
         if (home === null) return new Journal(state, null, io);
         const dir = join(sessionsDir(home), id);
+        const sessionsCreated = !existsSync(sessionsDir(home));
         mkdirSync(join(dir, "backups"), { recursive: true, mode: 0o700 });
         if (process.platform !== "win32") {
-            chmodSync(sessionsDir(home), 0o700);
+            // The sessions folder only when the CLI created it; each session's own folder always.
+            if (sessionsCreated) chmodSync(sessionsDir(home), 0o700);
             chmodSync(dir, 0o700);
             chmodSync(join(dir, "backups"), 0o700);
         }
@@ -475,7 +477,9 @@ export const claimLock = (lockPath: string, id: string) => {
     };
     const mine = () => JSON.stringify({ pid: process.pid, host: hostname(), at: now() });
     const locked = (holder: { pid?: number; host?: string }, extra = "") =>
-        new SessionLockedError(`Session ${id} is open in another tomverse process${holder.pid ? ` (pid ${holder.pid}${holder.host ? ` on ${holder.host}` : ""})` : ""}.${extra}`);
+        new SessionLockedError(
+            `Session ${id} is open in another tomverse process${holder.pid ? ` (pid ${holder.pid}${holder.host ? ` on ${holder.host}` : ""})` : ""}.${extra || ` If no tomverse process is using it (a reused process id can look alive), delete ${lockPath}.`}`
+        );
     try {
         createExclusive(lockPath, mine());
         return;

@@ -53,7 +53,7 @@ export const maskedPrompt = (question: string, input: NodeJS.ReadStream, output:
         // A character split across two chunks is joined, never turned into U+FFFD.
         const decoder = new StringDecoder("utf8");
         const finish = (error?: Error) => {
-            input.setRawMode(wasRaw);
+            input.setRawMode(wasRaw ?? false);
             input.pause();
             input.off("data", onData);
             output.write("\n");

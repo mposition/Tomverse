@@ -31,7 +31,9 @@ export const ensureHome = (env: NodeJS.ProcessEnv = process.env) => {
     const home = tomverseHome(env);
     const created = !existsSync(home);
     mkdirSync(home, { recursive: true, mode: 0o700 });
-    if (process.platform !== "win32") chmodSync(home, 0o700);
+    // Only a folder the CLI just created is made private; an existing one keeps
+    // its permissions (the session folders inside are private either way).
+    if (created && process.platform !== "win32") chmodSync(home, 0o700);
     return { home, created };
 };
 

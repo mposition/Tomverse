@@ -557,3 +557,18 @@ test("listing does not walk into a junction or link to a folder outside", () => 
     symlinkSync(outside, join(root, "j"), process.platform === "win32" ? "junction" : "dir");
     assert.deepEqual(new Workspace(normalizeRoot(root), []).listFiles(".", 100).files, ["here.txt"]);
 });
+test("an existing TOMVERSE_HOME keeps its permissions; only folders the CLI creates are made private", { skip: process.platform === "win32" && "POSIX modes" }, async () => {
+    const { ensureHome } = await import("../src/config.js");
+    const shared = tempDir("shared");
+    chmodSync(shared, 0o755);
+    ensureHome({ TOMVERSE_HOME: shared });
+    assert.equal(statSync(shared).mode & 0o777, 0o755);
+    const fresh = join(tempDir("parent"), "new-home");
+    ensureHome({ TOMVERSE_HOME: fresh });
+    assert.equal(statSync(fresh).mode & 0o777, 0o700);
+});
+
+test("on POSIX an argv program is resolved to the absolute path the approval shows", { skip: process.platform === "win32" && "POSIX PATH lookup" }, () => {
+    const plan = planCommand({ argv: ["node", "-e", "1"] }, tempDir("cmd"), 10_000);
+    assert.ok(plan.file.startsWith("/"), plan.file);
+});

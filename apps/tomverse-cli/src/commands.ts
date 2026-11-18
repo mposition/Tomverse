@@ -1,5 +1,5 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { existsSync } from "node:fs";
+import { accessSync, constants as fsConstants, existsSync, statSync } from "node:fs";
 import { basename, delimiter, extname, isAbsolute, join } from "node:path";
 
 /**
@@ -128,6 +128,18 @@ export const planCommand = (input: CommandInput, cwd: string, defaultTimeoutMs: 
                 );
             }
             if (resolved) file = resolved;
+        } else if (!file.includes("/")) {
+            // Resolved here too, so the approval shows (and binds) the exact program.
+            const dirs = (env.PATH ?? "").split(delimiter).filter(Boolean);
+            const hit = dirs.map((dir) => join(dir, file)).find((candidate) => {
+                try {
+                    accessSync(candidate, fsConstants.X_OK);
+                    return statSync(candidate).isFile();
+                } catch {
+                    return false;
+                }
+            });
+            if (hit) file = hit;
         }
         return { mode: "argv", file, args: argv.slice(1), display: argv.map(quoteForDisplay).join(" "), shell: null, cwd, timeoutMs, envNames };
     }
