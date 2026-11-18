@@ -20,6 +20,8 @@ import {
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { adminFetch } from "@/lib/adminFetch";
+import type { NewProviderResearchRunRecord } from "@/lib/modelDiscoveryNewProviderResearchCore";
+import { AdminModelDiscoveryResearchRun } from "@/components/admin/AdminModelDiscoveryResearchRun";
 
 type ReviewPriority =
   | "recommended"
@@ -102,6 +104,7 @@ type QueueResponse = {
   items: ModelWorkItemRow[];
   total: number;
   truncated: boolean;
+  lastResearch?: NewProviderResearchRunRecord | null;
 };
 
 type ModelFamilyGroup = {
@@ -262,6 +265,7 @@ export function AdminModelDiscoveryPanel() {
   const [rows, setRows] = useState<ModelWorkItemRow[]>([]);
   const [total, setTotal] = useState(0);
   const [truncated, setTruncated] = useState(false);
+  const [lastResearch, setLastResearch] = useState<NewProviderResearchRunRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -317,6 +321,7 @@ export function AdminModelDiscoveryPanel() {
       setRows(data.items);
       setTotal(data.total);
       setTruncated(data.truncated);
+      setLastResearch(data.lastResearch ?? null);
       setFailed(false);
     } catch {
       if (current()) setFailed(true);
@@ -1073,6 +1078,8 @@ export function AdminModelDiscoveryPanel() {
         {failed ? (
           <AdminStateBlock kind="error" title={m.failed} onRetry={() => void load()} />
         ) : null}
+
+        {!loading && !failed ? <AdminModelDiscoveryResearchRun run={lastResearch} /> : null}
 
         {truncated ? (
           <AdminStateBlock kind="empty" title={board.truncatedTitle} detail={m.truncated} />

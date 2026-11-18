@@ -207,6 +207,65 @@ export type NewProviderResearchRejection = {
     | "duplicate"
     | "not_connected_provider"
     | "no_official_citation";
+  /**
+   * On `no_official_citation`: the public URLs the answer did cite, so the
+   * operator can see which host fell outside OFFICIAL_SOURCE_HOSTS.
+   */
+  citedUrls?: string[];
+};
+
+/**
+ * What the last run that called the model leaves for the Admin discovery tab
+ * (AppSetting, one row): without it a run that rejected everything looks the
+ * same as a run that found nothing (2026-11-16: the connected-image call
+ * answered, nothing was filed, and no reason was kept anywhere).
+ */
+export const NEW_PROVIDER_RESEARCH_LAST_SETTING_KEY = "modelDiscovery.newProviderResearchLast";
+const LAST_RUN_MAX_REJECTIONS = 20;
+
+export type NewProviderResearchRunRecord = {
+  week: string;
+  ranAt: string;
+  modelId: string;
+  calls: Array<{
+    product: NewProviderResearchProduct | "connected_image";
+    ok: boolean;
+    proposed: number;
+    accepted: number;
+    rejected: NewProviderResearchRejection[];
+  }>;
+  created: Array<{ provider: string; apiModel: string; product: NewProviderResearchProduct }>;
+};
+
+/** The stored record, bounded so one verbose answer cannot grow the row. */
+export const newProviderResearchRunRecord = (input: NewProviderResearchRunRecord): NewProviderResearchRunRecord => ({
+  ...input,
+  calls: input.calls.map((call) => ({
+    ...call,
+    rejected: call.rejected.slice(0, LAST_RUN_MAX_REJECTIONS),
+  })),
+});
+
+/** The stored record read back, or null for a missing or malformed row. */
+export const parseNewProviderResearchRunRecord = (
+  value: string | null | undefined
+): NewProviderResearchRunRecord | null => {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as Partial<NewProviderResearchRunRecord>;
+    if (typeof parsed.week !== "string" || typeof parsed.ranAt !== "string" || !Array.isArray(parsed.calls)) {
+      return null;
+    }
+    return {
+      week: parsed.week,
+      ranAt: parsed.ranAt,
+      modelId: typeof parsed.modelId === "string" ? parsed.modelId : "",
+      calls: parsed.calls,
+      created: Array.isArray(parsed.created) ? parsed.created : [],
+    };
+  } catch {
+    return null;
+  }
 };
 
 export type AcceptedNewProviderCandidate = NewProviderResearchCandidate & {
@@ -383,16 +442,17 @@ export const acceptConnectedImageCandidates = (input: {
       rejected.push({ ...label, reason: "not_connected_provider" });
       continue;
     }
-    candidate.citations = Array.from(
+    const cited = Array.from(
       new Set(
         (Array.isArray(value.citations) ? value.citations : [])
           .slice(0, NEW_PROVIDER_RESEARCH_MAX_CITATIONS)
           .map((url) => publicCitationUrl(url as string))
-          .filter((url): url is string => url !== null && input.isOfficial(provider, url))
+          .filter((url): url is string => url !== null)
       )
     );
+    candidate.citations = cited.filter((url) => input.isOfficial(provider, url));
     if (candidate.citations.length === 0) {
-      rejected.push({ ...label, reason: "no_official_citation" });
+      rejected.push({ ...label, reason: "no_official_citation", citedUrls: cited });
       continue;
     }
     const key = modelIdKey(candidate.apiModelId);
