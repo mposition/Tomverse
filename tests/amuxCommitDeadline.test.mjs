@@ -380,6 +380,10 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   "20261116011500_amux_v22_attempt_number_bound",
   "20261116011600_amux_v22_recovery_attempt_bound",
   "20261116011700_amux_v22_recovery_approval_attempt_bound",
+  // Owner direction 2026-11-18: the review proposal guard drops its bound of
+  // thirty attempts; no commit-deadline marker, classifier or deferred trigger
+  // changes.
+  "20261118100000_amux_review_retry_no_attempt_bound",
   // Owner decision 2026-11-15: the Decision Maker body store's caps grow, a CHECK
   // and one number of the body guard; no commit-deadline marker, classifier or
   // deferred trigger changes.

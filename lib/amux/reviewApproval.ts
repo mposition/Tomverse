@@ -171,8 +171,8 @@ async function snapshot(
       orderBy: [{ taskRevision: "desc" }, { startedAt: "desc" }, { id: "desc" }],
     }),
     // The claim's own count (owner decision 2026-11-15): infrastructure
-    // failures keep their number but use none of the card's attempts, as the
-    // review proposal guard counts them (20261116011400_amux_review_retry_no_fixed_count).
+    // failures keep their number but use none of the card's attempts. The
+    // review proposal guard counts none since 20261118100000_amux_review_retry_no_attempt_bound.
     readAmuxAttemptBudgetFacts(tx, task.id),
     tx.amuxWorkDelivery.findFirst({
       where: { taskId: task.id, status: { in: ["queued", "leased"] } },

@@ -25,18 +25,22 @@ import {
   amuxWorkerCircuitWaitMs,
 } from "../lib/amux/workerCircuitCore.ts";
 
-test("the review proposal guard counts attempts as the app does", async () => {
+test("the review proposal guard counts no attempts, as the app does", async () => {
   const { readFile } = await import("node:fs/promises");
+  // Owner direction 2026-11-18: an ordinary card has no attempt bound, and
+  // the guard's thirty is gone with it (20261118100000_amux_review_retry_no_attempt_bound).
   const sql = await readFile(new URL(
+    "../prisma/migrations/20261118100000_amux_review_retry_no_attempt_bound/migration.sql", import.meta.url), "utf8");
+  assert.match(sql, /CREATE OR REPLACE FUNCTION amux_review_proposal_issue_guard\(\)/);
+  const body = sql.slice(sql.indexOf("$$"), sql.lastIndexOf("$$"));
+  assert.ok(body.length > 100);
+  assert.doesNotMatch(body, /attempts_used|attempt budget exhausted/);
+  // The reasons it counted before are still the app's infrastructure reasons.
+  const before = await readFile(new URL(
     "../prisma/migrations/20261116011400_amux_review_retry_no_fixed_count/migration.sql", import.meta.url), "utf8");
-  const listed = sql.match(/"reason" IN \(([^)]*)\)/)?.[1] ?? "";
+  const listed = before.match(/"reason" IN \(([^)]*)\)/)?.[1] ?? "";
   assert.deepEqual([...listed.matchAll(/'([a-z_]+)'/g)].map((match) => match[1]).sort(),
     [...AMUX_INFRA_FAILURE_REASONS].sort());
-  // This guard still holds the old bound of thirty for an owner's retry
-  // proposal; the app's own count has none since 2026-11-18, so the guard
-  // needs a migration before an ordinary card past thirty attempts can be
-  // retried by a person.
-  assert.match(sql, /IF attempts_used >= 30 THEN/);
   // Platform failures have no count, so the attempt-number guards hold no
   // upper bound either (20261116130200, 20261116130300, 20261116130400).
   for (const [file, pattern] of [
