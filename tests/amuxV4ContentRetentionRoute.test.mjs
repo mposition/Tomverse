@@ -57,6 +57,9 @@ test("v15 does not activate v22 task result or patch retention", () => {
     "../app/api/internal/amux/v4/content-retention/route.ts", import.meta.url), "utf8");
   assert.match(route, /amuxV22TaskResultRetentionEnabled\(\s*process\.env\[AMUX_V22_TASK_RESULT_RETENTION_ENV\]\)/);
   assert.match(route, /\? await purgeDueAmuxV22TaskResults\(\)/);
+  // The chunked transfer's staging sweep runs with the content retention
+  // itself; a recorded result is never what it removes.
+  assert.match(route, /const transferStaging = v4Enabled \? await sweepAmuxV22TransferStaging\(\)/);
 });
 
 test("v19 read-manifest cleanup is separately default-off", () => {

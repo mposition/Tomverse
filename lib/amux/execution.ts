@@ -1386,6 +1386,16 @@ async function recordAmuxV52ReviewWithFindings(
     });
 }
 
+/**
+ * The 409 reason of a v22 settlement or v52 review record whose changed-path
+ * digest names no recorded list (docs/policy/amux-v22-result-transfer.md 1.6
+ * 5): the list is not the attempt's, does not match the digest or count, or
+ * its body is gone. The routes answer it before this module runs; the bridge
+ * commits the list again and sends the same request on its next tick, and
+ * never settles unverified for it.
+ */
+export const AMUX_V22_CHANGED_PATHS_UNRECORDED = "changed_paths_unrecorded" as const;
+
 /** Calls the v22 settlement adds to `executionSettle` (reasons at the use
  * below). With them the planned worst case is larger than the v22 execution
  * route, which runs it inside what the route has left

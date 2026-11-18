@@ -58,6 +58,8 @@ const tx = {
 mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {
   amuxIdeaContentKeyRetirement: { findMany: async () => [] },
   amuxV22TaskResult: { findMany: async () => [{ attemptId }] },
+  // The changed-path lists purge on their own pass (none due here).
+  amuxV22TaskChangedPaths: { findMany: async () => [] },
   $queryRaw: async () => [{ now: new Date("2026-11-15T00:00:00.000Z") }],
   $transaction: async (work: (client: unknown) => Promise<unknown>) => work(tx),
 } } });

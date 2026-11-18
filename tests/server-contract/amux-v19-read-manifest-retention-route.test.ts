@@ -61,6 +61,15 @@ mock.module(mod("lib/amux/ideaAnalysisContentPurgeService.ts"), { namedExports: 
     return counts;
   },
 } });
+// The chunked transfer's staging sweep runs with the v4 content retention
+// itself (docs/policy/amux-v22-result-transfer.md 2.6).
+const swept = { partsSwept: 0, keysQueued: 0, scanned: 0 };
+mock.module(mod("lib/amux/v22TransferStore.ts"), { namedExports: {
+  sweepAmuxV22TransferStaging: async () => {
+    calls.push("transfer-staging");
+    return swept;
+  },
+} });
 mock.module(mod("lib/amux/v22TaskResultRetention.ts"), { namedExports: {
   purgeDueAmuxV22TaskResults: async () => {
     throw new Error("v22 retention must remain disabled");
@@ -103,11 +112,11 @@ test("retention tick runs separately enabled v19 manifest and orphan-key cleanup
   const response = await route.POST(request());
   assert.equal(response.status, 200);
   assert.deepEqual(calls, ["holds", "cancellation", "raw", "analysis",
-    "read-manifests", "orphan-keys"]);
+    "transfer-staging", "read-manifests", "orphan-keys"]);
   assert.deepEqual(await response.json(), {
     holdNotices: { sent: 0, scanned: 0, batchLimit: 8 },
     cancellation: { cancelled: 0, scanned: 0, batchLimit: 8 },
-    raw: counts, analysis: counts,
+    raw: counts, analysis: counts, transferStaging: swept,
     taskResults: { available: false, reason: "v22_task_result_retention_disabled" },
     readManifests: { manifests: counts, orphanKeys: counts },
     sessionResults: { available: false,
@@ -121,7 +130,7 @@ test("session result retention has an independent default-off switch", async () 
   const response = await route.POST(request());
   assert.equal(response.status, 200);
   assert.deepEqual(calls, ["holds", "cancellation", "raw", "analysis",
-    "read-manifests", "orphan-keys", "session-results",
+    "transfer-staging", "read-manifests", "orphan-keys", "session-results",
     "orphan-session-result-keys"]);
   assert.deepEqual((await response.json()).sessionResults, {
     results: counts,
@@ -135,7 +144,7 @@ test("unknown manifest key outcome halts the tick without exposing key details",
   const response = await route.POST(request());
   assert.equal(response.status, 503);
   assert.deepEqual(calls, ["holds", "cancellation", "raw", "analysis",
-    "read-manifests"]);
+    "transfer-staging", "read-manifests"]);
   assert.deepEqual(await response.json(), {
     error: "content_retention_outcome_unknown", retry: false,
   });
@@ -146,7 +155,8 @@ test("v4 retention alone does not enable v19 path and key cleanup", async () => 
   delete process.env.TOMVERSE_AMUX_V19_READ_MANIFEST_RETENTION;
   const response = await route.POST(request());
   assert.equal(response.status, 200);
-  assert.deepEqual(calls, ["holds", "cancellation", "raw", "analysis"]);
+  assert.deepEqual(calls, ["holds", "cancellation", "raw", "analysis",
+    "transfer-staging"]);
   assert.deepEqual((await response.json()).readManifests,
     { available: false, reason: "v19_read_manifest_retention_disabled" });
 });

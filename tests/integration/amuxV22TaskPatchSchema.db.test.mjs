@@ -12,7 +12,7 @@ const allowed = (() => {
     /(?:^|[_-])(?:test|testing|ci|e2e)(?:[_-]|$)/i.test(databaseName);
 })();
 
-test("v22 encrypted patch candidate is bounded and bound to one Task result", {
+test("v22 encrypted patch candidate has no upper size bound and is bound to one Task result", {
   skip: allowed ? undefined : "requires a dedicated loopback test database",
 }, async () => {
   const client = new pg.Client({ connectionString: databaseUrl });
@@ -40,8 +40,12 @@ test("v22 encrypted patch candidate is bounded and bound to one Task result", {
     await reject([...ids, null, null, null, digest, digest,
       "b".repeat(40), 1], "23514", "AmuxV22TaskPatch_body_check");
     await reject([...ids, Buffer.from("x"), "synthetic", 1,
-      digest, digest, "b".repeat(40), 4_194_305], "23514",
+      digest, digest, "b".repeat(40), 0], "23514",
     "AmuxV22TaskPatch_digest_check");
+    // Past the old 4 MiB bound only the missing result row refuses it
+    // (owner decision 2026-11-18, 20261118120000_amux_v22_result_transfer).
+    await reject([...ids, Buffer.from("x"), "synthetic", 1,
+      digest, digest, "b".repeat(40), 4_194_305], "23503");
     await reject([...ids, Buffer.from("x"), "synthetic", 1,
       digest, digest, "b".repeat(40), 1], "23503");
     const trigger = await client.query(`SELECT count(*)::int AS count

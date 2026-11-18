@@ -57,7 +57,7 @@ export async function readAmuxV22ResultReviewSyncRows(tx: Prisma.TransactionClie
       w."v4BodyCiphertext" AS "bodyCiphertext", w."v4BodyKeyId" AS "bodyKeyId",
       w."v4BodyKeyVersion" AS "bodyKeyVersion", w."v4BodyDigest" AS "bodyDigest",
       w."v4BodyDigestKeyId" AS "bodyDigestKeyId",
-      r."ideaId", r."ciphertext", r."keyId", r."keyVersion", r."digest",
+      r."ideaId", r."keyId", r."keyVersion", r."digest",
       r."digestKeyId", r."sourceSha256", r."bodyPurgedAt"
     FROM "AmuxV22ResultReview" v
     JOIN "AmuxWorkItem" w ON w."id" = v."taskId"

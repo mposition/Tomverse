@@ -67,7 +67,7 @@ type PendingSettlement = SealedTitle & {
   role: string | null; grade: string | null;
   bodyCiphertext: Uint8Array | null; bodyKeyId: string | null; bodyKeyVersion: number | null;
   bodyDigest: string | null; bodyDigestKeyId: string | null;
-  hasResult: boolean; resultIdeaId: string | null; ciphertext: Uint8Array | null; keyId: string | null;
+  hasResult: boolean; resultIdeaId: string | null; keyId: string | null;
   keyVersion: number | null; digest: string | null; digestKeyId: string | null;
   sourceSha256: string | null; bodyPurgedAt: Date | null; rejections: number;
 };
@@ -130,7 +130,7 @@ export async function readAmuxDmOwnerSettlementSyncRows(tx: Prisma.TransactionCl
       w."v4BodyCiphertext" AS "bodyCiphertext", w."v4BodyKeyId" AS "bodyKeyId",
       w."v4BodyKeyVersion" AS "bodyKeyVersion", w."v4BodyDigest" AS "bodyDigest",
       w."v4BodyDigestKeyId" AS "bodyDigestKeyId",
-      r."attemptId" IS NOT NULL AS "hasResult", r."ideaId" AS "resultIdeaId", r."ciphertext",
+      r."attemptId" IS NOT NULL AS "hasResult", r."ideaId" AS "resultIdeaId",
       r."keyId", r."keyVersion", r."digest", r."digestKeyId", r."sourceSha256", r."bodyPurgedAt",
       (SELECT count(*)::int FROM "AmuxV52ReviewRecord" v
         WHERE v."taskId" = s."taskId" AND v."verdict" = 'reject') AS "rejections"
@@ -207,7 +207,7 @@ export async function openAmuxDmOwnerSettlementCards(rows: Awaited<ReturnType<
       if (readable && row.hasResult) {
         const text = row.attemptId && row.resultIdeaId && row.digest && row.digestKeyId &&
           row.sourceSha256 ? await openAmuxV22TaskResultRow(row.attemptId, { ideaId: row.resultIdeaId,
-            ciphertext: row.ciphertext, keyId: row.keyId, keyVersion: row.keyVersion,
+            keyId: row.keyId, keyVersion: row.keyVersion,
             digest: row.digest, digestKeyId: row.digestKeyId, bodyPurgedAt: row.bodyPurgedAt,
             sourceSha256: row.sourceSha256 }) : null;
         // A result that was kept and is gone or unreadable now is missing evidence.

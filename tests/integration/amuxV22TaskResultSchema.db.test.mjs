@@ -12,7 +12,7 @@ const allowed = (() => {
     /(?:^|[_-])(?:test|testing|ci|e2e)(?:[_-]|$)/i.test(databaseName);
 })();
 
-test("v22 encrypted Task result DB refuses incomplete, oversized, and unbound rows", {
+test("v22 encrypted Task result DB refuses incomplete, empty, and unbound rows", {
   skip: allowed ? undefined : "requires a dedicated loopback test database",
 }, async () => {
   const client = new pg.Client({ connectionString: databaseUrl });
@@ -38,10 +38,12 @@ test("v22 encrypted Task result DB refuses incomplete, oversized, and unbound ro
     await client.query("SET LOCAL statement_timeout = '5s'");
     await reject([...ids, null, null, null, digest, digest, 1], "23514",
       "AmuxV22TaskResult_body_check");
-    // One byte past the v22 transport backstop (32 MiB,
-    // 20261116011100_amux_v22_task_result_report_size); it was 64 KiB.
     await reject([...ids, Buffer.from("x"), "synthetic", 1,
-      digest, digest, 33_554_433], "23514", "AmuxV22TaskResult_digest_check");
+      digest, digest, 0], "23514", "AmuxV22TaskResult_digest_check");
+    // Past the old 32 MiB bound only the unbound attempt refuses it (owner
+    // decision 2026-11-18, 20261118120000_amux_v22_result_transfer).
+    await reject([...ids, Buffer.from("x"), "synthetic", 1,
+      digest, digest, 33_554_433], "23503");
     await reject([...ids, Buffer.from("x"), "synthetic", 1,
       digest, digest, 1], "23503");
     const trigger = await client.query(`SELECT count(*)::int AS count

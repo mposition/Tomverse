@@ -21,6 +21,7 @@ import { purgeDueAmuxReadManifests } from
   "@/lib/amux/ideaTrackedCheckoutReadManifestRetention";
 import { purgeDueAmuxV22TaskResults } from
   "@/lib/amux/v22TaskResultRetention";
+import { sweepAmuxV22TransferStaging } from "@/lib/amux/v22TransferStore";
 import { purgeDueAmuxOrphanReadManifestKeys } from
   "@/lib/amux/ideaTrackedCheckoutReadManifestOrphanRetention";
 import { purgeDueAmuxSessionAnalysisResults } from
@@ -65,8 +66,16 @@ export async function POST(request: Request): Promise<Response> {
       : { available: false, reason: "v4_content_retention_disabled" };
     const analysis = v4Enabled ? await purgeDueAmuxAnalysisContent()
       : { available: false, reason: "v4_content_retention_disabled" };
-    const taskResults = v4Enabled && amuxV22TaskResultRetentionEnabled(
-      process.env[AMUX_V22_TASK_RESULT_RETENTION_ENV])
+    const v22Enabled = v4Enabled && amuxV22TaskResultRetentionEnabled(
+      process.env[AMUX_V22_TASK_RESULT_RETENTION_ENV]);
+    // Transfer staging no commit will take (docs/policy/amux-v22-result-transfer.md
+    // 2.6) runs with the content retention itself, not behind the v22 result
+    // purge's latch: it removes sealed copies whose original stays on the box
+    // until the app confirms it, never a recorded result. The keys it queues
+    // are deleted by the result purge's key pass once that runs.
+    const transferStaging = v4Enabled ? await sweepAmuxV22TransferStaging()
+      : { available: false, reason: "v4_content_retention_disabled" };
+    const taskResults = v22Enabled
       ? await purgeDueAmuxV22TaskResults()
       : { available: false, reason: "v22_task_result_retention_disabled" };
     const readManifests = v19Enabled
@@ -78,7 +87,7 @@ export async function POST(request: Request): Promise<Response> {
         orphanKeys: await purgeDueAmuxOrphanSessionResultKeys() }
       : { available: false, reason: "v19_session_result_retention_disabled" };
     return amuxJsonNoStore({ holdNotices, cancellation, raw, analysis,
-      taskResults, readManifests, sessionResults });
+      transferStaging, taskResults, readManifests, sessionResults });
   } catch {
     // The worker stops on unknown DB or S3 outcome. The response carries no
     // content, secret, object key, or suggestion to blind-retry this tick.

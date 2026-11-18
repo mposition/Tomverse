@@ -6,8 +6,11 @@ import { AMUX_MAX_EXPECTED_REVISION, AMUX_PRISMA_INT_MAX,
   amuxMachineIdSchema } from "@/lib/amux/claimContract";
 import { AMUX_V22_EXECUTION_ROUTE_BUDGET_MS,
   withAmuxRouteBudget } from "@/lib/amux/dbBoundary";
-import { settleAmuxV22TaskExecution } from "@/lib/amux/execution";
-import { AMUX_V22_PATCH_ENVELOPE_MAX_BYTES } from "@/lib/amux/v22PatchLimit";
+import { AMUX_V22_CHANGED_PATHS_UNRECORDED,
+  settleAmuxV22TaskExecution } from "@/lib/amux/execution";
+import { amuxV22NamedChangedPathsSchema, amuxV22SettlementAllowanceMs,
+  resolveAmuxV22NamedChangedPaths } from "@/lib/amux/v22ChangedPathsStore";
+import { AMUX_V22_PROXY_BODY_MAX_BYTES } from "@/lib/amux/v22TransferCore";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 import { amuxInternalErrorResponse, amuxJsonNoStore,
   isAmuxInputError } from "@/lib/amux/internalRoute";
@@ -34,7 +37,10 @@ const requestSchema = z.object({ attempt_id: z.string().uuid(),
   outcome: z.enum(["succeeded", "failed", "blocked"]),
   // Counts are bounded by the body (the proxy buffer), not by a number of ours.
   invocation_ids: z.array(z.string().uuid()),
+  // A bridge from before the chunked transfer sends the list itself.
   changed_paths: z.array(z.string().max(32 * 1024)).optional(),
+  // A current bridge names the list it committed (changed-paths route).
+  ...amuxV22NamedChangedPathsSchema,
   read_only_retry: readOnlyRetrySchema.optional(),
   // What the sidecar said about a run with no verified result (owner
   // decision 2026-11-15, lib/amux/infraFailureCore.ts). Codes only.
@@ -49,15 +55,34 @@ const requestSchema = z.object({ attempt_id: z.string().uuid(),
 export async function POST(request: Request) {
   if (!isAmuxSyncAuthorized(request))
     return amuxJsonNoStore({ error: "Unauthorized" }, 401);
+  let body: z.infer<typeof requestSchema>;
+  let allowanceMs: number;
+  try {
+    // The old inline list is bounded by the proxy buffer only (external).
+    body = await readLimitedJson(request, AMUX_V22_PROXY_BODY_MAX_BYTES, requestSchema);
+    // The time the patch and the list take grows with them (v22TransferCore.ts).
+    allowanceMs = await amuxV22SettlementAllowanceMs(body.attempt_id);
+  } catch (error) {
+    if (isAmuxInputError(error))
+      return amuxJsonNoStore({ error: "Invalid request." }, 400);
+    return amuxInternalErrorResponse("v22_execution_settle", error);
+  }
   return withAmuxRouteBudget(async () => {
     try {
-      const body = await readLimitedJson(request, AMUX_V22_PATCH_ENVELOPE_MAX_BYTES, requestSchema);
+      // The named list is opened here, outside the settlement's DB boundary.
+      const named = await resolveAmuxV22NamedChangedPaths(body.attempt_id, body);
+      if (named.kind === "invalid")
+        return amuxJsonNoStore({ error: "Invalid request." }, 400);
+      if (named.kind === "unrecorded")
+        return amuxJsonNoStore({ settled: false,
+          reason: AMUX_V22_CHANGED_PATHS_UNRECORDED }, 409);
+      const changedPaths = named.kind === "paths" ? named.paths : body.changed_paths;
       const result = await settleAmuxV22TaskExecution({
         attemptId: body.attempt_id, worker: body.worker,
         instanceId: body.instance_id, generation: body.generation,
         taskRevision: body.task_revision, outcome: body.outcome,
         invocationIds: body.invocation_ids,
-        ...(body.changed_paths ? { changedPaths: body.changed_paths } : {}),
+        ...(changedPaths ? { changedPaths } : {}),
         // Only an unverified settlement carries it; any other is judged on its receipt.
         ...(body.failure && body.outcome === "blocked" ? { failure: {
           code: body.failure.code, cliStarted: body.failure.cli_started ?? null,
@@ -82,5 +107,5 @@ export async function POST(request: Request) {
         return amuxJsonNoStore({ error: "Invalid request." }, 400);
       return amuxInternalErrorResponse("v22_execution_settle", error);
     }
-  }, AMUX_V22_EXECUTION_ROUTE_BUDGET_MS);
+  }, AMUX_V22_EXECUTION_ROUTE_BUDGET_MS + allowanceMs);
 }
