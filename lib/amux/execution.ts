@@ -482,6 +482,7 @@ export async function startAmuxV22TaskExecution(input: {
       const budget = recovery?.riskAcceptanceId ? recoveryAttemptBudget({
         historicalAttempts: prior.historicalRows,
         greatestAttemptNumber: prior.greatestAttemptNumber,
+        infraRows: prior.infraRows,
       }) : decideAmuxAttemptBudget({ historical_rows: prior.historicalRows,
         greatest_attempt_number: prior.greatestAttemptNumber,
         infra_rows: prior.infraRows });

@@ -215,11 +215,11 @@ reason digest를 시스템 감사에 남긴다.
 모두 있어야 한다. `retry`는 task의 `owner`·`claimedAt`만 비우고 revision을
 올린다. 기존 attempt ID, worker instance/generation, delivery receipt는
 수정하지 않으며, 증가한 revision이 과거 fence를 무효화한다. `retry`는 기존 시도 기록을 지우거나
-호출자가 정한 시도 한도(유료 경로)를 초기화하지 않는다. 일반 카드는 2026-11-18부터 시도 한도가 없다. 상한을 소진한 작업은 새
-승인만으로 다시 실행할 수 없다. `blocked`로 종결하고 계속 필요하면 새 task를
+호출자가 정한 시도 한도(유료 경로)를 초기화하지 않는다. 일반 카드는 2026-11-18부터 시도 한도가 없다. 유료 경로의 상한을 소진한 작업은
+새 승인만으로 다시 실행할 수 없다. `blocked`로 종결하고 계속 필요하면 새 task를
 발행한다. 기존 task를 다시 `todo`로 바꾸거나 기록·상한을 리셋하지 않는다.
 
-`retry`는 시도 5회 상한을 절대 초기화하지 않으며, 직전 attempt의 terminal 상태·
+`retry`는 유료 경로의 시도 상한을 초기화하지 않으며(일반 카드는 2026-11-18부터 시도 상한이 없다), 직전 attempt의 terminal 상태·
 delivery fence와 현재 project/team 비용 상한을 **재큐 결정 직전** 다시 확인한다.
 재큐는 비용을 예약하거나 집행할 권한이 아니므로, WIP·비용·quota·incident
 admission은 다음 claim에서 다시 확인한다. 과거 attempt와 receipt를 수정하지 않고 증가한 task revision으로 이전

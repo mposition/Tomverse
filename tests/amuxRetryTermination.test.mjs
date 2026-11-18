@@ -88,10 +88,31 @@ test("(e) a paid retry that names its own bound still stops at it", () => {
     .to_status, "todo");
   // The settle and the start of the paid path name a bound; neither may lose it.
   assert.match(read("lib/amux/execution.ts"), /max_attempts: AMUX_V22_READ_ONLY_RETRY_TASK_ATTEMPT_LIMIT,/);
-  assert.match(read("lib/amux/v22TaskRecoveryService.ts"),
-    /max_attempts: AMUX_V22_PAID_RETRY_ATTEMPT_LIMIT \}\);\n\}/);
+  assert.match(read("lib/amux/v22TaskRecoveryCore.ts"),
+    /infra_rows: input\.infraRows,\n\s+max_attempts: AMUX_V22_PAID_RETRY_ATTEMPT_LIMIT \}\);\n\}/);
+  // The claim, the start and the recovery approval ask the one function, with
+  // the platform failures (review r-20261118-045348-47710f).
   assert.match(read("lib/amux/v22WorkerClaimService.ts"),
-    /recovery\?\.riskAcceptanceId && !decideAmuxAttemptBudget\([^)]*max_attempts: AMUX_V22_PAID_RETRY_ATTEMPT_LIMIT/);
+    /recovery\?\.riskAcceptanceId && !recoveryAttemptBudget\(\{[^}]*infraRows: prior\.infraRows \}\)/);
+  assert.match(read("lib/amux/execution.ts"),
+    /recoveryAttemptBudget\(\{[^}]*infraRows: prior\.infraRows,\n\s+\}\)/);
+  assert.match(read("lib/amux/v22TaskRecoveryService.ts"),
+    /recoveryAttemptBudgetCore\(\{[^}]*infraRows: prior\.infraRows \}\)/);
+});
+
+test("(b2) a paid retry's bound leaves platform failures out", async () => {
+  const { recoveryAttemptBudget, AMUX_V22_PAID_RETRY_ATTEMPT_LIMIT } =
+    await import("../lib/amux/v22TaskRecoveryCore.ts");
+  assert.equal(AMUX_V22_PAID_RETRY_ATTEMPT_LIMIT, 30);
+  // Forty runs, fifteen of them platform failures: twenty-five counted.
+  assert.equal(recoveryAttemptBudget({ historicalAttempts: 40,
+    greatestAttemptNumber: 40, infraRows: 15 }).allowed, true);
+  // Thirty-five counted: the paid bound refuses it.
+  assert.equal(recoveryAttemptBudget({ historicalAttempts: 40,
+    greatestAttemptNumber: 40, infraRows: 5 }).allowed, false);
+  // A card with only platform failures never reaches the paid bound.
+  assert.equal(recoveryAttemptBudget({ historicalAttempts: 100,
+    greatestAttemptNumber: 100, infraRows: 100 }).allowed, true);
 });
 
 test("(c) platform failures never stop a card: they only wait, counted from a person's last retry", () => {

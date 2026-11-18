@@ -28,7 +28,7 @@ import { inspectV52TaskCatalogGrades } from "./v4TaskCostCatalogCore.ts";
 import { amuxTaskRoutePrice } from "./v4TaskCostAutoCatalogCore.ts";
 import { amuxV22ApiModelAccessCurrent, readAmuxV22RecoveryAuthority } from
   "./v22TaskRecoveryService.ts";
-import { AMUX_V22_PAID_RETRY_ATTEMPT_LIMIT, amuxV22RecoveryAddedRouteConsented, amuxV22RecoveryCost, amuxV22RecoveryStartAllowed,
+import { AMUX_V22_PAID_RETRY_ATTEMPT_LIMIT, recoveryAttemptBudget, amuxV22RecoveryAddedRouteConsented, amuxV22RecoveryCost, amuxV22RecoveryStartAllowed,
   amuxV22ReadOnlyRetryRouteCost,
   currentAmuxV22ReadOnlyApiExecutionFrame } from "./v22TaskRecoveryCore.ts";
 import { AMUX_V22_READ_ONLY_API_EXECUTOR_KIND } from
@@ -262,10 +262,12 @@ async function claimCandidate(taskId: string, assignmentId: string,
         card.taskRole, card.executionGrade);
       const recovery = await readAmuxV22RecoveryAuthority(tx, taskId, card.revision,
         null, now);
-      // A paid retry keeps its own bound, the same one its start applies.
-      if (recovery?.riskAcceptanceId && !decideAmuxAttemptBudget({
-        historical_rows: prior.historicalRows, greatest_attempt_number: prior.greatestAttemptNumber,
-        max_attempts: AMUX_V22_PAID_RETRY_ATTEMPT_LIMIT }).allowed) {
+      // A paid retry keeps its own bound, the same one its start and its
+      // approval apply: platform failures use none of it.
+      if (recovery?.riskAcceptanceId && !recoveryAttemptBudget({
+        historicalAttempts: prior.historicalRows,
+        greatestAttemptNumber: prior.greatestAttemptNumber,
+        infraRows: prior.infraRows }).allowed) {
         throw new AmuxClaimSkipError("attempt_budget_exhausted", {
           limit: "attempts", maxAttempts: AMUX_V22_PAID_RETRY_ATTEMPT_LIMIT });
       }
