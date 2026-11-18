@@ -247,7 +247,7 @@ import {
     ATTACHMENT_TEXT_CACHE_CATEGORIES,
     attachmentTextCacheEnabled,
     readAttachmentTextCache,
-    writeBoundAttachmentTextCache,
+    writeAttachmentTextCache,
 } from "@/lib/attachmentTextCache";
 import { chatUserMaxInputTokens } from "@/lib/chatInputLimits";
 import { extractLegacyOfficeText, type LegacyOfficeFormatId } from "@/lib/legacyOfficeText";
@@ -4482,7 +4482,7 @@ async function handleChatPost(
                     !(revisionEnabled && format.id === "xlsx" && resolved?.sourceLineageId) &&
                     attachmentTextCacheEnabled();
                 if (textCacheEligible) {
-                    const cached = await readAttachmentTextCache(attachment.objectKey);
+                    const cached = await readAttachmentTextCache(resolved!.attachmentId!);
                     // The cache stands in for reading the file, not for
                     // knowing it exists: storage is still asked, and a file it
                     // confirms gone takes the ordinary path below, which marks
@@ -4751,14 +4751,13 @@ async function handleChatPost(
                             ) &&
                             producedCharacters + 64 < parseRoomBefore
                         ) {
-                            // Written only while the attachment row is held, so
-                            // a deletion either comes first (nothing written)
-                            // or waits and then drains this text with the file.
-                            await writeBoundAttachmentTextCache({
-                                attachmentId: resolved!.attachmentId!,
-                                objectKey: attachment.objectKey,
-                                entries: produced,
-                            }).catch((error) => {
+                            // A row cascaded from the attachment: a deletion
+                            // removes it in the same transaction, and a write
+                            // for a row already gone fails and writes nothing.
+                            await writeAttachmentTextCache(
+                                resolved!.attachmentId!,
+                                produced
+                            ).catch((error) => {
                                 logRequestError(
                                     "attachment_text_cache_write_failed",
                                     traceId,
@@ -4766,7 +4765,7 @@ async function handleChatPost(
                                     requestedModelId,
                                     {
                                         phase: "attachment_text_cache",
-                                        failureLayer: "storage",
+                                        failureLayer: "database",
                                         ...(resolved?.attachmentId
                                             ? { attachmentId: resolved.attachmentId }
                                             : {}),

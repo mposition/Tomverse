@@ -5,10 +5,7 @@ import {
     ATTACHMENT_TEXT_CACHE_CATEGORIES,
     ATTACHMENT_TEXT_CACHE_VERSION,
     attachmentTextCacheEnabled,
-    attachmentTextCacheKey,
-    attachmentTextCacheKeys,
-    parseCachedAttachmentText,
-    serializeCachedAttachmentText,
+    parseCachedAttachmentEntries,
 } from "../lib/attachmentTextCache.ts";
 import {
     CHAT_MAX_ATTACHMENTS_PER_MESSAGE,
@@ -63,22 +60,6 @@ test("every surface that checks the account limits reads the shared constants", 
     }
 });
 
-test("the cache sits next to the original, inside its account prefix", () => {
-    const key = "attachments/acct-1/abc.pdf";
-    assert.equal(attachmentTextCacheKey(key), `${key}.extracted-v${ATTACHMENT_TEXT_CACHE_VERSION}.json`);
-    assert.ok(attachmentTextCacheKey(key).startsWith(key));
-});
-
-test("deletion covers every cache version up to the current one", () => {
-    const key = "attachments/acct-1/abc.pdf";
-    const keys = attachmentTextCacheKeys(key);
-    assert.equal(keys.length, ATTACHMENT_TEXT_CACHE_VERSION);
-    assert.equal(keys.at(-1), attachmentTextCacheKey(key));
-    assert.equal(keys[0], `${key}.extracted-v1.json`);
-    const cache = source("lib/attachmentTextCache.ts");
-    assert.match(cache, /for \(const key of attachmentTextCacheKeys\(objectKey\)\)/);
-});
-
 test("too many attachments names the real limit", () => {
     assert.match(source("app/api/chat/route.ts"), /at most \$\{MAX_ATTACHMENTS\} attachments/);
 });
@@ -95,16 +76,13 @@ test("no pricing language claims Max has higher file limits", () => {
     }
 });
 
-test("what is written is read back exactly, and anything else is a miss", () => {
+test("what is stored is read back exactly, and anything else is a miss", () => {
     const entries = [{ kind: "PDF file", text: "line one\nline two" }, { kind: "file", text: "한국어" }];
-    assert.deepEqual(parseCachedAttachmentText(serializeCachedAttachmentText(entries)), entries);
-    assert.equal(parseCachedAttachmentText("not json"), null);
-    assert.equal(parseCachedAttachmentText(JSON.stringify({ version: 999, entries })), null);
-    assert.equal(parseCachedAttachmentText(JSON.stringify({ version: ATTACHMENT_TEXT_CACHE_VERSION, entries: [] })), null);
-    assert.equal(
-        parseCachedAttachmentText(JSON.stringify({ version: ATTACHMENT_TEXT_CACHE_VERSION, entries: [{ kind: 1, text: "x" }] })),
-        null
-    );
+    assert.deepEqual(parseCachedAttachmentEntries(JSON.parse(JSON.stringify(entries))), entries);
+    assert.equal(parseCachedAttachmentEntries("not a list"), null);
+    assert.equal(parseCachedAttachmentEntries([]), null);
+    assert.equal(parseCachedAttachmentEntries([{ kind: 1, text: "x" }]), null);
+    assert.equal(parseCachedAttachmentEntries(null), null);
 });
 
 test("only model-independent extractors are cached", () => {
@@ -140,44 +118,34 @@ test("the route caches only an account's earlier, bound file, and never the turn
     // A cut or mixed extraction is never stored.
     assert.match(route, /fileParts\.length === filePartsBefore/);
     assert.match(route, /producedCharacters \+ 64 < parseRoomBefore/);
-    // The route writes only through the row-holding writer, never directly.
-    assert.match(route, /await writeBoundAttachmentTextCache\(\{\s*attachmentId: resolved!\.attachmentId!,/);
-    assert.doesNotMatch(route, /writeAttachmentTextCache\(/);
+    // Read and written by the attachment row's id.
+    assert.ok(route.includes("await readAttachmentTextCache(resolved!.attachmentId!)"));
+    assert.match(route, /await writeAttachmentTextCache\(\s*resolved!\.attachmentId!,/);
 });
 
-// Review r-20261118-061358-048fc2: a cache must never outlive its attachment,
-// durably -- not within a window. The write holds the row, so a deletion is
-// ordered before it (nothing written) or after it (drained with the file).
-test("the cache is written only while its attachment row is held", () => {
+// Reviews r-20261118-061358-048fc2 and r-20261118-064254-d277bc: a cache must
+// never outlive its attachment. It is a row cascaded from the attachment, so
+// a deletion removes it in the same transaction, and a write for a row already
+// gone fails on the foreign key -- no lock, sweep or window involved.
+test("the cache is a row cascaded from its attachment", () => {
+    const schema = source("prisma/schema.prisma");
+    const model = schema.slice(schema.indexOf("model MessageAttachmentTextCache {"));
+    assert.ok(
+        model.slice(0, 1200).includes(
+            "attachment   MessageAttachment @relation(fields: [attachmentId], references: [id], onDelete: Cascade)"
+        )
+    );
+    const migration = source("prisma/migrations/20261118090000_message_attachment_text_cache/migration.sql");
+    assert.ok(
+        migration.includes(
+            'FOREIGN KEY ("attachmentId") REFERENCES "MessageAttachment"("id") ON DELETE CASCADE'
+        )
+    );
     const cache = source("lib/attachmentTextCache.ts");
-    const writer = cache.slice(cache.indexOf("export const writeBoundAttachmentTextCache"));
-    assert.match(writer, /prisma\.\$transaction\(/);
-    assert.match(writer, /FROM "MessageAttachment"\s*WHERE "id" = \$\{input\.attachmentId\} AND "objectKey" = \$\{input\.objectKey\}\s*FOR KEY SHARE/);
-    const lock = writer.indexOf("FOR KEY SHARE");
-    const gone = writer.indexOf("if (rows.length === 0) return false;");
-    const write = writer.indexOf("await writeAttachmentTextCache(input.objectKey, input.entries, {");
-    assert.ok(lock > 0 && gone > lock && write > gone, "lock, then check, then write -- inside one transaction");
-    // No time window to fall out of any more.
-    assert.doesNotMatch(source("lib/messageAttachmentStorage.ts"), /sweepLateAttachmentTextCaches|LATE_TEXT_CACHE/);
-});
-
-// Review r-20261118-064254-d277bc, blocker: a PUT still running when the lock
-// times out could land after the deletion it was ordered against.
-test("the PUT ends well inside the lock, and an unknown outcome is taken back out", async () => {
-    const { ATTACHMENT_TEXT_CACHE_PUT_TIMEOUT_MS, ATTACHMENT_TEXT_CACHE_LOCK_TIMEOUT_MS } = await import("../lib/attachmentTextCache.ts");
-    assert.ok(ATTACHMENT_TEXT_CACHE_PUT_TIMEOUT_MS * 3 <= ATTACHMENT_TEXT_CACHE_LOCK_TIMEOUT_MS);
-    const cache = source("lib/attachmentTextCache.ts");
-    const writer = cache.slice(cache.indexOf("export const writeBoundAttachmentTextCache"));
-    assert.match(writer, /abortSignal: AbortSignal\.timeout\(ATTACHMENT_TEXT_CACHE_PUT_TIMEOUT_MS\)/);
-    assert.match(writer, /\{ timeout: ATTACHMENT_TEXT_CACHE_LOCK_TIMEOUT_MS \}/);
-    // A failed PUT is deleted while the lock is still held...
-    const put = writer.indexOf("await writeAttachmentTextCache(");
-    const inLockDelete = writer.indexOf("await deleteAttachmentTextCache(input.objectKey)", put);
-    const alive = writer.indexOf("await tx.$queryRaw`SELECT 1`");
-    assert.ok(put > 0 && inLockDelete > put && alive > inLockDelete);
-    // ...and a transaction that did not survive the PUT deletes it after.
-    assert.match(writer.slice(alive), /\)\.catch\(async \(error\) => \{\s*await deleteAttachmentTextCache\(input\.objectKey\)/);
-    assert.match(source("lib/r2.ts"), /options\?\.abortSignal \? \{ abortSignal: options\.abortSignal \} : \{\}/);
+    assert.ok(cache.includes('INSERT INTO "MessageAttachmentTextCache"'));
+    // Nothing of the cache lives in object storage any more.
+    assert.ok(!cache.includes('from "@/lib/r2"'));
+    assert.ok(!source("lib/messageAttachmentStorage.ts").includes("AttachmentTextCache"));
 });
 
 // Same review: earlier files must never stop a new message from being sent.
@@ -191,16 +159,10 @@ test("earlier files have their own byte share and are left out past it", () => {
     assert.match(route, /!isLatestMessage &&\s*typeof resolved\?\.size === "number" &&\s*pastAttachmentBytes \+ resolved\.size > MAX_TOTAL_ATTACHMENT_SIZE/);
 });
 
-test("reading the cache never deletes it", () => {
-    const cache = source("lib/attachmentTextCache.ts");
-    assert.match(cache, /readOwnR2ObjectBytes\(attachmentTextCacheKey\(objectKey\)/);
-    assert.doesNotMatch(cache, /readR2Object\(/);
-});
-
 // Same review: a cache hit must not hide a file storage lost.
 test("a cache hit still asks storage whether the original exists", () => {
     const route = source("app/api/chat/route.ts");
-    const hit = route.slice(route.indexOf("const cached = await readAttachmentTextCache(attachment.objectKey);"));
+    const hit = route.slice(route.indexOf("const cached = await readAttachmentTextCache(resolved!.attachmentId!);"));
     assert.match(hit.slice(0, 900), /\(await probeR2Object\(attachment\.objectKey\)\)\.state === "missing"/);
     assert.match(hit.slice(0, 900), /if \(cached && !originalGone\) \{/);
 });
@@ -212,13 +174,4 @@ test("the chat page, receipt recovery and stored previews follow the account lim
     assert.match(source("lib/messageAttachmentPreview.ts"), /MAX_PREVIEW_ATTACHMENT_BYTES = CHAT_MAX_ATTACHMENT_BYTES;/);
     // The mobile app cannot import the constant; its own checks are kept equal.
     assert.match(source("apps/mobile/src/Composer.tsx"), new RegExp(`> ${CHAT_MAX_ATTACHMENTS_PER_MESSAGE}\\) \\{ setError\\(copy\\.fileLimit\\)`));
-});
-
-test("deleting an attachment deletes its cached text with it", () => {
-    const storage = source("lib/messageAttachmentStorage.ts");
-    const drain = storage.slice(storage.indexOf("export const drainMessageAttachmentCleanupQueue"));
-    const original = drain.indexOf("await deleteR2Object(item.objectKey)");
-    const cached = drain.indexOf("await deleteAttachmentTextCache(item.objectKey)");
-    const completed = drain.indexOf("completedAt: now");
-    assert.ok(original > 0 && cached > original && completed > cached, "both deleted before the row completes");
 });

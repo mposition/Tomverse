@@ -301,8 +301,7 @@ export async function readOwnR2ObjectBytes(
 export async function writeR2Object(
   key: string,
   body: Buffer,
-  contentType: string,
-  options?: { abortSignal?: AbortSignal }
+  contentType: string
 ) {
   const { client, bucket } = getR2Client();
   await r2Call("put", () =>
@@ -315,8 +314,7 @@ export async function writeR2Object(
         Metadata: {
           "upload-size": String(body.byteLength),
         },
-      }),
-      options?.abortSignal ? { abortSignal: options.abortSignal } : {}
+      })
     )
   );
 }
