@@ -88,7 +88,7 @@ export const pt: HelpLocaleCopy = {
     assistants: { title: "Assistentes · Memory", description: "Seus assistentes, arquivos de conhecimento e a gestão da memória." },
     imports: { title: "Importar · Continuar", description: "Importe conversas de outros serviços de IA e continue de onde parou." },
     connectors: { title: "Conectores · MCP", description: "Conecte serviços externos e servidores MCP." },
-    coding: { title: "Ferramentas de código · Chaves de API", description: "Use o Tomverse no Claude Code, no Codex e em ferramentas parecidas." },
+    coding: { title: "Ferramentas de programação · Chaves de API", description: "Use o Tomverse no Claude Code, no Codex e em ferramentas parecidas." },
     projects: { title: "Projetos · Compartilhar", description: "Organize, bloqueie e compartilhe conversas em projetos." },
     billing: { title: "Plano · Créditos · Pagamento", description: "Como os créditos são usados, troca de plano, cancelamento e reembolso." },
     account: { title: "Conta · Privacidade", description: "Métodos de login, baixar seus dados e excluir a conta." },
@@ -595,7 +595,7 @@ export const pt: HelpLocaleCopy = {
       summary: "No terminal ou na extensão oficial do VS Code, com poucas linhas de configuração o Claude Code passa a usar os modelos e os créditos do Tomverse.",
       steps: [
         { title: "Preparar a chave", body: "Crie e guarde uma chave seguindo o guia “Criar e revogar chaves de API”." },
-        { title: "Escolher o modelo", body: "Na tela de chaves de API, em “Ferramentas de código”, escolha o “Modelo” no cartão “Configuração do Claude Code”. A lista só mostra modelos compatíveis com a ferramenta." },
+        { title: "Escolher o modelo", body: "Na tela de chaves de API, em “Ferramentas de programação”, escolha o “Modelo” no cartão “Configurar o Claude Code”. A lista só mostra modelos compatíveis com a ferramenta." },
         { title: "Usar no terminal", body: "Use “Copiar” no bloco do PowerShell ou do macOS / Linux e cole no terminal. O comando claude, na última linha, inicia o Claude Code conectado ao Tomverse." },
         { title: "Usar na extensão do VS Code", body: "Coloque o bloco “settings.json de usuário do VS Code” no settings.json de usuário e reinicie o VS Code." },
         { title: "Colocar a chave", body: "Na configuração copiada, troque <YOUR_TOMVERSE_API_KEY> pela chave que você guardou." },
@@ -610,10 +610,10 @@ export const pt: HelpLocaleCopy = {
       title: "Conectar o Codex ao Tomverse",
       summary: "Adicione o Tomverse como provedor no arquivo de configuração do Codex e execute com --profile tomverse. Sua conta habitual do Codex não é alterada.",
       steps: [
-        { title: "Preparar a chave e o modelo", body: "Crie uma chave e, na tela de chaves de API, em “Ferramentas de código” → “Configuração do Codex”, escolha o “Modelo”." },
-        { title: "Adicionar o provedor", body: "Cole o bloco “Adicionar a ~/.codex/config.toml” em ~/.codex/config.toml." },
+        { title: "Preparar a chave e o modelo", body: "Crie uma chave e, na tela de chaves de API, em “Ferramentas de programação” → “Configurar o Codex”, escolha o “Modelo”." },
+        { title: "Adicionar o provedor", body: "Cole o bloco “Adicione a ~/.codex/config.toml” em ~/.codex/config.toml." },
         { title: "Salvar o perfil", body: "Salve o bloco seguinte como ~/.codex/tomverse.config.toml." },
-        { title: "Colocar a chave e iniciar", body: "No bloco “Defina a chave onde você inicia o Codex”, troque <YOUR_TOMVERSE_API_KEY> pela sua chave e execute. A última linha, codex --profile tomverse, inicia o Codex no Tomverse." },
+        { title: "Colocar a chave e iniciar", body: "No bloco “Defina a chave onde o Codex é iniciado”, troque <YOUR_TOMVERSE_API_KEY> pela sua chave e execute. A última linha, codex --profile tomverse, inicia o Codex no Tomverse." },
         { title: "Se você usa a extensão do VS Code", body: "A extensão só lê o config.toml, então coloque no início do config.toml o bloco “Na extensão do VS Code…” mostrado na tela." },
       ],
       faq: [

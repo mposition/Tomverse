@@ -614,7 +614,7 @@ export const zhHant: HelpLocaleCopy = {
         { title: "準備金鑰與模型", body: "建立金鑰，並在 API 金鑰畫面的「程式設計工具」→「Codex 設定」中選擇「模型」。" },
         { title: "加入供應商", body: "將「加入 ~/.codex/config.toml」區塊貼到 ~/.codex/config.toml。" },
         { title: "儲存設定檔", body: "將下一個區塊儲存為 ~/.codex/tomverse.config.toml。" },
-        { title: "填入金鑰並啟動", body: "將「在啟動 Codex 的地方設定金鑰」區塊中的 <YOUR_TOMVERSE_API_KEY> 換成你的金鑰後執行。最後一行 codex --profile tomverse 會以 Tomverse 啟動。" },
+        { title: "填入金鑰並啟動", body: "將「在啟動 Codex 的環境中設定金鑰」區塊中的 <YOUR_TOMVERSE_API_KEY> 換成你的金鑰後執行。最後一行 codex --profile tomverse 會以 Tomverse 啟動。" },
         { title: "使用 VS Code 擴充功能時", body: "擴充功能只會讀取 config.toml，因此請將畫面上「在 VS Code 擴充功能中…」區塊放到 config.toml 的最上方。" },
       ],
       faq: [

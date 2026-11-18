@@ -595,7 +595,7 @@ export const en: HelpLocaleCopy = {
       summary: "With a few lines of settings in the terminal or the official VS Code extension, Claude Code uses Tomverse models and credits.",
       steps: [
         { title: "Get a key ready", body: "Create and save a key as described in the \"Create and revoke API keys\" guide." },
-        { title: "Choose a model", body: "On the API keys screen, under \"Coding tools\", choose the \"Model\" on the \"Claude Code setup\" card. Only models that suit this tool are listed." },
+        { title: "Choose a model", body: "On the API keys screen, under \"Coding tools\", choose the \"Model\" on the \"Claude Code\" card. Only models that suit this tool are listed." },
         { title: "Use it in the terminal", body: "\"Copy\" the PowerShell or macOS / Linux block and paste it into your terminal. The last line, claude, starts Claude Code connected to Tomverse." },
         { title: "Use it in the VS Code extension", body: "Put the \"VS Code user settings.json\" block in your user settings.json and restart VS Code." },
         { title: "Put in your key", body: "In the settings you copied, replace <YOUR_TOMVERSE_API_KEY> with the key you saved." },
@@ -610,10 +610,10 @@ export const en: HelpLocaleCopy = {
       title: "Connect Codex to Tomverse",
       summary: "Add the Tomverse provider to your Codex settings file and run with --profile tomverse. Your usual Codex account is left alone.",
       steps: [
-        { title: "Get a key and model ready", body: "Create a key, then choose the \"Model\" under \"Coding tools\" → \"Codex setup\" on the API keys screen." },
+        { title: "Get a key and model ready", body: "Create a key, then choose the \"Model\" under \"Coding tools\" → \"Codex\" on the API keys screen." },
         { title: "Add the provider", body: "Paste the \"Add to ~/.codex/config.toml\" block into ~/.codex/config.toml." },
         { title: "Save the profile", body: "Save the next block as ~/.codex/tomverse.config.toml." },
-        { title: "Put in the key and start", body: "Replace <YOUR_TOMVERSE_API_KEY> in the \"Set the key where you start Codex\" block with your key and run it. The last line, codex --profile tomverse, starts with Tomverse." },
+        { title: "Put in the key and start", body: "Replace <YOUR_TOMVERSE_API_KEY> in the \"Set the key where Codex starts\" block with your key and run it. The last line, codex --profile tomverse, starts with Tomverse." },
         { title: "If you use the VS Code extension", body: "The extension reads only config.toml, so put the \"For the VS Code extension…\" block from the screen at the very top of config.toml." },
       ],
       faq: [

@@ -89,7 +89,7 @@ export const fr: HelpLocaleCopy = {
     assistants: { title: "Assistants · Memory", description: "Vos propres assistants, leurs fichiers de connaissances et la gestion de la mémoire." },
     imports: { title: "Import · Reprise", description: "Importez des conversations d’autres services d’IA et poursuivez-les ici." },
     connectors: { title: "Connecteurs · MCP", description: "Connectez des services externes et des serveurs MCP." },
-    coding: { title: "Outils de code · Clés API", description: "Utilisez Tomverse dans des outils de code comme Claude Code ou Codex." },
+    coding: { title: "Outils de développement · Clés API", description: "Utilisez Tomverse dans des outils de code comme Claude Code ou Codex." },
     projects: { title: "Projets · Partage", description: "Rangez vos conversations dans des projets, verrouillez-les et partagez-les." },
     billing: { title: "Offre · Crédits · Paiement", description: "Comment les crédits sont utilisés, changer d’offre, résiliation et remboursement." },
     account: { title: "Compte · Confidentialité", description: "Méthodes de connexion, téléchargement des données, suppression du compte." },
@@ -596,7 +596,7 @@ export const fr: HelpLocaleCopy = {
       summary: "Depuis un terminal ou l’extension VS Code officielle, quelques lignes de configuration suffisent pour que Claude Code utilise les modèles et les crédits de Tomverse.",
       steps: [
         { title: "Préparer la clé", body: "Créez et enregistrez une clé en suivant le guide « Créer et révoquer des clés API »." },
-        { title: "Choisir le modèle", body: "Dans « Outils de code » de l’écran des clés API, choisissez le « Modèle » dans la carte « Configuration de Claude Code ». Seuls les modèles compatibles avec cet outil figurent dans la liste." },
+        { title: "Choisir le modèle", body: "Dans « Outils de développement » de l’écran des clés API, choisissez le « Modèle » dans la carte « Configurer Claude Code ». Seuls les modèles compatibles avec cet outil figurent dans la liste." },
         { title: "Utiliser dans le terminal", body: "Utilisez « Copier » sur le bloc PowerShell ou macOS / Linux et collez-le dans le terminal. La dernière ligne, claude, lance Claude Code connecté à Tomverse." },
         { title: "Utiliser dans l’extension VS Code", body: "Placez le bloc « settings.json utilisateur de VS Code » dans votre settings.json utilisateur, puis redémarrez VS Code." },
         { title: "Saisir la clé", body: "Remplacez <YOUR_TOMVERSE_API_KEY> dans la configuration copiée par la clé que vous avez enregistrée." },
@@ -611,10 +611,10 @@ export const fr: HelpLocaleCopy = {
       title: "Connecter Codex à Tomverse",
       summary: "Ajoutez le fournisseur Tomverse au fichier de configuration de Codex et lancez avec --profile tomverse. Votre compte Codex habituel n’est pas modifié.",
       steps: [
-        { title: "Préparer la clé et le modèle", body: "Créez une clé, puis choisissez le « Modèle » dans « Outils de code » → « Configuration de Codex » de l’écran des clés API." },
-        { title: "Ajouter le fournisseur", body: "Collez le bloc « Ajouter à ~/.codex/config.toml » dans ~/.codex/config.toml." },
+        { title: "Préparer la clé et le modèle", body: "Créez une clé, puis choisissez le « Modèle » dans « Outils de développement » → « Configurer Codex » de l’écran des clés API." },
+        { title: "Ajouter le fournisseur", body: "Collez le bloc « À ajouter à ~/.codex/config.toml » dans ~/.codex/config.toml." },
         { title: "Enregistrer le profil", body: "Enregistrez le bloc suivant sous ~/.codex/tomverse.config.toml." },
-        { title: "Saisir la clé et démarrer", body: "Remplacez <YOUR_TOMVERSE_API_KEY> dans le bloc « Définir la clé là où Codex démarre » par votre clé, puis exécutez-le. La dernière ligne, codex --profile tomverse, démarre avec Tomverse." },
+        { title: "Saisir la clé et démarrer", body: "Remplacez <YOUR_TOMVERSE_API_KEY> dans le bloc « Définissez la clé là où Codex démarre » par votre clé, puis exécutez-le. La dernière ligne, codex --profile tomverse, démarre avec Tomverse." },
         { title: "Avec l’extension VS Code", body: "L’extension ne lit que config.toml : placez donc en tête de config.toml le bloc « Dans l’extension VS Code… » affiché à l’écran." },
       ],
       faq: [

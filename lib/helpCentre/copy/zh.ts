@@ -612,7 +612,7 @@ export const zh: HelpLocaleCopy = {
         { title: "准备密钥和模型", body: "创建密钥，并在 API 密钥页面的“编程工具” → “Codex 设置”中选择“模型”。" },
         { title: "添加提供商", body: "把“添加到 ~/.codex/config.toml”的代码块粘贴到 ~/.codex/config.toml 中。" },
         { title: "保存配置文件", body: "把下一个代码块保存为 ~/.codex/tomverse.config.toml。" },
-        { title: "填入密钥并启动", body: "把“在启动 Codex 的地方设置密钥”代码块中的 <YOUR_TOMVERSE_API_KEY> 替换为你的密钥后运行。最后一行 codex --profile tomverse 会以 Tomverse 启动。" },
+        { title: "填入密钥并启动", body: "把“在启动 Codex 的环境中设置密钥”代码块中的 <YOUR_TOMVERSE_API_KEY> 替换为你的密钥后运行。最后一行 codex --profile tomverse 会以 Tomverse 启动。" },
         { title: "使用 VS Code 扩展时", body: "该扩展只读取 config.toml，所以请把页面上“在 VS Code 扩展中…”的代码块放到 config.toml 的最上面。" },
       ],
       faq: [

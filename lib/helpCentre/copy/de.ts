@@ -9,7 +9,7 @@ import type { HelpLocaleCopy } from "../types";
 export const de: HelpLocaleCopy = {
   ui: {
     metaTitle: "Tomverse Hilfecenter | Fragen stellen, Antworten erhalten",
-    metaDescription: "Chat, Review, Bilder, Recherche, Dateien, Assistenten, Import, Konnektoren, Coding-Tools sowie Tarife und Credits: mit Schritt-für-Schritt-Anleitungen und dem Hilfe-Assistenten schnell zur Lösung.",
+    metaDescription: "Chat, Review, Bilder, Recherche, Dateien, Assistenten, Import, Konnektoren, Programmierwerkzeuge sowie Tarife und Credits: mit Schritt-für-Schritt-Anleitungen und dem Hilfe-Assistenten schnell zur Lösung.",
     eyebrow: "Hilfecenter",
     heroTitleLead: "Wobei können wir",
     heroTitleAccent: "Ihnen helfen?",
@@ -89,7 +89,7 @@ export const de: HelpLocaleCopy = {
     assistants: { title: "Assistenten · Memory", description: "Eigene Assistenten mit Wissensdateien und das Gedächtnis (Memory) verwalten." },
     imports: { title: "Import · Fortsetzen", description: "Unterhaltungen aus anderen KI-Diensten importieren und weiterführen." },
     connectors: { title: "Konnektoren · MCP", description: "Externe Dienste und MCP-Server verbinden." },
-    coding: { title: "Coding-Tools · API-Schlüssel", description: "Tomverse in Coding-Tools wie Claude Code und Codex nutzen." },
+    coding: { title: "Programmierwerkzeuge · API-Schlüssel", description: "Tomverse in Programmierwerkzeuge wie Claude Code und Codex nutzen." },
     projects: { title: "Projekte · Teilen", description: "Unterhaltungen in Projekten ordnen, sperren und teilen." },
     billing: { title: "Tarif · Credits · Abrechnung", description: "Wie Credits verbraucht werden, Tarifwechsel, Kündigung und Rückerstattung." },
     account: { title: "Konto · Datenschutz", description: "Anmeldemethoden, Daten herunterladen, Konto löschen." },
@@ -577,7 +577,7 @@ export const de: HelpLocaleCopy = {
     // ----------------------------------------------------------------- coding
     "manage-api-keys": {
       title: "API-Schlüssel erstellen und widerrufen",
-      summary: "Erstellen Sie Tomverse-API-Schlüssel für Coding-Tools, ändern Sie Limit und Namen und widerrufen Sie nicht mehr genutzte Schlüssel. Sichtbar in Konten, für die die API freigeschaltet ist.",
+      summary: "Erstellen Sie Tomverse-API-Schlüssel für Programmierwerkzeuge, ändern Sie Limit und Namen und widerrufen Sie nicht mehr genutzte Schlüssel. Sichtbar in Konten, für die die API freigeschaltet ist.",
       steps: [
         { title: "API-Schlüssel-Bildschirm öffnen", body: "Klicken Sie in den „Einstellungen“ im Tab „Konto“ in der Zeile „API-Schlüssel“ auf „Verwalten“." },
         { title: "Schlüssel erstellen", body: "Geben Sie einen „Name“ ein, legen Sie bei Bedarf ein „Credit-Limit (optional)“ und den „Ablauf“ fest (Standard 90 Tage) und klicken Sie auf „Schlüssel erstellen“." },
@@ -596,7 +596,7 @@ export const de: HelpLocaleCopy = {
       summary: "Mit wenigen Konfigurationszeilen im Terminal oder in der offiziellen VS-Code-Erweiterung nutzt Claude Code die Modelle und Credits von Tomverse.",
       steps: [
         { title: "Schlüssel vorbereiten", body: "Erstellen und speichern Sie einen Schlüssel wie in der Anleitung „API-Schlüssel erstellen und widerrufen“." },
-        { title: "Modell wählen", body: "Wählen Sie auf dem API-Schlüssel-Bildschirm unter „Coding-Tools“ auf der Karte „Claude-Code-Einrichtung“ das „Modell“. In der Liste erscheinen nur Modelle, die zu diesem Tool passen." },
+        { title: "Modell wählen", body: "Wählen Sie auf dem API-Schlüssel-Bildschirm unter „Programmierwerkzeuge“ auf der Karte „Claude Code einrichten“ das „Modell“. In der Liste erscheinen nur Modelle, die zu diesem Tool passen." },
         { title: "Im Terminal nutzen", body: "„Kopieren“ Sie den PowerShell- oder den macOS-/Linux-Block und fügen Sie ihn im Terminal ein. Die letzte Zeile, claude, startet das mit Tomverse verbundene Claude Code." },
         { title: "In der VS-Code-Erweiterung nutzen", body: "Fügen Sie den Block „VS-Code-Benutzer-settings.json“ in Ihre Benutzer-settings.json ein und starten Sie VS Code neu." },
         { title: "Schlüssel einsetzen", body: "Ersetzen Sie in der kopierten Konfiguration <YOUR_TOMVERSE_API_KEY> durch Ihren gespeicherten Schlüssel." },
@@ -611,10 +611,10 @@ export const de: HelpLocaleCopy = {
       title: "Codex mit Tomverse verbinden",
       summary: "Fügen Sie der Codex-Konfigurationsdatei den Tomverse-Anbieter hinzu und starten Sie mit --profile tomverse. Ihr gewohntes Codex-Konto bleibt unverändert.",
       steps: [
-        { title: "Schlüssel und Modell vorbereiten", body: "Erstellen Sie einen Schlüssel und wählen Sie auf dem API-Schlüssel-Bildschirm unter „Coding-Tools“ → „Codex-Einrichtung“ das „Modell“." },
-        { title: "Anbieter hinzufügen", body: "Fügen Sie den Block „Zu ~/.codex/config.toml hinzufügen“ in ~/.codex/config.toml ein." },
+        { title: "Schlüssel und Modell vorbereiten", body: "Erstellen Sie einen Schlüssel und wählen Sie auf dem API-Schlüssel-Bildschirm unter „Programmierwerkzeuge“ → „Codex einrichten“ das „Modell“." },
+        { title: "Anbieter hinzufügen", body: "Fügen Sie den Block „In ~/.codex/config.toml ergänzen“ in ~/.codex/config.toml ein." },
         { title: "Profil speichern", body: "Speichern Sie den folgenden Block als ~/.codex/tomverse.config.toml." },
-        { title: "Schlüssel eintragen und starten", body: "Ersetzen Sie im Block „Schlüssel dort setzen, wo Codex gestartet wird“ <YOUR_TOMVERSE_API_KEY> durch Ihren Schlüssel und führen Sie ihn aus. Die letzte Zeile, codex --profile tomverse, startet mit Tomverse." },
+        { title: "Schlüssel eintragen und starten", body: "Ersetzen Sie im Block „Den Schlüssel dort setzen, wo Codex startet“ <YOUR_TOMVERSE_API_KEY> durch Ihren Schlüssel und führen Sie ihn aus. Die letzte Zeile, codex --profile tomverse, startet mit Tomverse." },
         { title: "Bei der VS-Code-Erweiterung", body: "Die Erweiterung liest nur config.toml. Fügen Sie daher den Block „In der VS-Code-Erweiterung …“ vom Bildschirm ganz oben in config.toml ein." },
       ],
       faq: [
