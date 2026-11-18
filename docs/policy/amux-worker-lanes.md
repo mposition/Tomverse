@@ -25,7 +25,10 @@
 2. **일감은 앱 DB의 백로그에서 온다.** Composer나 사람이 붙여 넣는 지시가 아니다.
 3. **다음 card는 점수로 고른다.** 포트폴리오 점수(아래 3절)를 그대로 쓴다.
 4. **worker의 질문은 DM이 받는다.** 운영자에게 가는 것은 되돌릴 수 없는 일뿐이다.
-5. **AMUX 자체 점검 card는 Tomverse 일감이 아니다.** amux 프로그램이 자기 CI·지연·불변식을 감지해 만든
+5. **worker lane은 사람 승인 없이 도구를 쓴다.** 운영자 승인 2026-11-18 ("승인합니다"). 이 승인은 lane
+   안의 도구 사용에 대한 것이다. main 병합·배포·지출 권한과 운영자 GitHub 계정을 lane에 주는 것은 포함하지
+   않는다(5절 0단계).
+6. **AMUX 자체 점검 card는 Tomverse 일감이 아니다.** amux 프로그램이 자기 CI·지연·불변식을 감지해 만든
    card(`autofix` 태그, `detector:*`)는 board에 두지 않는다.
 
 ## 1. 흐름
@@ -101,12 +104,19 @@ card review / done  → 결과(PR 주소, 실패 이유)가 앱 DB의 Task에 �
 2. **실제 card 실행은 v22 one-shot 경로(bridge + sidecar, 실행 한 번에 CLI 한 번)로 돌고 있었다.**
    이 문서의 구조가 아니다. 이 경로의 settle이 route 예산 계산 오류로 2026-11-16부터 모든 결과를
    거절했다.
-3. **board가 amux 자체 점검 card로 차 있었다.** 2026-11-18에 79장 중 52장을 은퇴·보관했다. 나머지는
-   운영자가 정리하고, detector는 `AMUX_AUTOFIX_SECS=0`으로 끈다.
-4. **앱 백로그 → board 공급 경로는 아직 확인하지 못했다.**
+3. **board가 amux 자체 점검 card로 차 있었다.** 2026-11-18에 252장을 모두 은퇴·보관했다(되돌리기는
+   `unarchive`, 목록은 box의 `~/.amux/archived-autofix-cards-20261118.txt`). autofix detector는
+   `AMUX_AUTOFIX_SECS=0`으로 껐다. board hygiene가 만든 디스크 점검 card(`[disk] [reclaim]`)는 남아 있다.
+4. **앱 백로그 → board 공급 경로가 없다.** 2026-11-18 board의 열린 card에 Tomverse 백로그 Task는 한 장도
+   없었다. lane worktree도 2026-10-04 commit에 머물러 있었다.
+5. **lane의 GitHub 계정이 운영자 본인 계정이다.** box의 tommy `gh`가 `mposition`(scope `repo`,
+   `workflow`)으로 로그인되어 있다. main 보호 규칙은 관리자 우회를 허용한다(`enforce_admins: false`). 그대로
+   두면 사람 승인 없이 도는 lane이 검토 없이 main에 병합하거나 push할 수 있다.
 
 ## 5. 바꾸는 순서
 
+0. **lane 전용 GitHub 신원.** lane은 운영자 계정이 아닌 별도 신원으로 branch를 push하고 draft PR을 연다.
+   main·develop에 직접 쓰거나 병합할 수 없어야 한다. 자격증명을 만들고 넘기는 것은 운영자가 한다.
 1. **worker lane 지시.** 각 lane CLI의 시스템 지시에 다음을 넣는다: amux board 메시지와 lease로 받은
    card가 작업 지시다. 질문은 `needsyou --ask decision`으로 DM에게 한다. 끝나면 다음 card를 lease한다.
 2. **대기 없이 뜨게 한다.** codex의 대화 상자와 copilot의 수동 승인을 없앤다. 사람 승인 없이 도구를
