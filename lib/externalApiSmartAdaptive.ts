@@ -39,9 +39,11 @@ type RunnableEntry = Awaited<ReturnType<typeof externalApiRunnableModels>>[numbe
  * afresh would let the model change half-way through a task. A request that
  * only carries tool results back therefore keeps the model picked for the user
  * message it continues. The pick is remembered in this process, under a
- * digest of the key and the messages up to that user message -- no content is
- * kept, and a miss (another instance, a restart, ten minutes later) simply
- * routes again.
+ * digest of the key and the messages up to that user message, and only once
+ * admission let the request through -- so the memory always holds the model
+ * that answered, never one a refused or concurrent request decided on. No
+ * content is kept, and a miss (another instance, a restart, ten minutes later)
+ * simply routes again.
  */
 
 const STICKY_MS = 10 * 60_000;
@@ -160,19 +162,19 @@ export const routeSmartAdaptive = async (input: {
     requestId: string;
     /** Asked only when a router call is next; false makes none (see smartAdaptiveRouterAllowed). */
     routerAllowed: () => Promise<boolean>;
-    /** The request's Idempotency-Key digest, when it has one. */
-    idempotencyKeyDigest?: string | null;
+    /** The request's Idempotency-Key digest, or null when it has none. */
+    idempotencyKeyDigest: string | null;
     /** Digest of the request body: only an identical duplicate shares a pick. */
-    requestDigest?: string;
+    requestDigest: string;
     now?: number;
-}): Promise<{ entry: RunnableEntry; routedBy: "router" | "continued" | "default" }> => {
+}): Promise<SmartAdaptiveDecision> => {
     const eligible = smartAdaptiveCandidates(input.request, input.runnable);
     // Nothing fits: the default model answers, and its own limits refuse the
     // request with the usual error.
     const pool = eligible.length > 0 ? eligible : input.runnable;
     const fallback = pool.find((entry) => entry.model.id === DEFAULT_MODEL_ID) ?? pool[0];
     const turn = latestTurn(input.request);
-    if (!turn || eligible.length < 2) return { entry: fallback, routedBy: "default" };
+    if (!turn || eligible.length < 2) return { entry: fallback, routedBy: "default", admitted: () => undefined };
 
     // A tool round keeps its remembered pick before the router gate is asked:
     // a gate closed for a while (a refusal two minutes ago) must not hand a
@@ -180,9 +182,15 @@ export const routeSmartAdaptive = async (input: {
     const now = input.now ?? Date.now();
     const digest = createHash("sha256").update(input.keyId).update("\0").update(turn.digestSource).digest("hex");
     const remembered = sticky.get(digest);
+    // Only a request that admission let through is remembered: its model is
+    // the one that actually answered, whatever a concurrent request decided.
+    const remember = (modelId: string) => () => {
+        if (sticky.size >= STICKY_MAX && !sticky.has(digest)) sticky.delete(sticky.keys().next().value as string);
+        sticky.set(digest, { modelId, at: Date.now() });
+    };
     if (turn.continuesToolLoop && remembered && now - remembered.at < STICKY_MS) {
         const entry = eligible.find((candidate) => candidate.model.id === remembered.modelId);
-        if (entry) return { entry, routedBy: "continued" };
+        if (entry) return { entry, routedBy: "continued", admitted: () => undefined };
         // No longer a candidate (retired, or this round needs what it lacks).
         sticky.delete(digest);
     }
@@ -195,30 +203,42 @@ export const routeSmartAdaptive = async (input: {
     // duplicate of this request (admission refuses it as a reused key), so it
     // routes on its own rather than taking a pick made for another body.
     const flight = input.idempotencyKeyDigest
-        ? `${input.keyId}\0${input.idempotencyKeyDigest}\0${input.requestDigest ?? ""}`
+        ? `${input.keyId}\0${input.idempotencyKeyDigest}\0${input.requestDigest}`
         : null;
-    const pending = flight ? routing.get(flight) : undefined;
-    if (pending) return pending;
-    const decision = (async () =>
-        (await input.routerAllowed())
-            ? routeWithRouter(input, eligible, fallback, turn, digest, now)
-            : { entry: fallback, routedBy: "default" as const })();
-    if (!flight) return decision;
-    routing.set(flight, decision);
-    try {
-        return await decision;
-    } finally {
-        routing.delete(flight);
-    }
+    const decide = async () => {
+        const pending = flight ? routing.get(flight) : undefined;
+        if (pending) return pending;
+        const decision = (async () =>
+            (await input.routerAllowed())
+                ? routeWithRouter(input, eligible, fallback, turn)
+                : { entry: fallback, routedBy: "default" as const })();
+        if (!flight) return decision;
+        routing.set(flight, decision);
+        try {
+            return await decision;
+        } finally {
+            routing.delete(flight);
+        }
+    };
+    const { entry, routedBy } = await decide();
+    return { entry, routedBy, admitted: remember(entry.model.id) };
+};
+
+export type SmartAdaptiveDecision = {
+    entry: RunnableEntry;
+    routedBy: "router" | "continued" | "default";
+    /**
+     * Call once admission has let the request through: only then is its model
+     * remembered for the tool rounds that continue this user message.
+     */
+    admitted: () => void;
 };
 
 const routeWithRouter = async (
     input: { userId: string; requestId: string },
     eligible: readonly RunnableEntry[],
     fallback: RunnableEntry,
-    turn: NonNullable<ReturnType<typeof latestTurn>>,
-    digest: string,
-    now: number
+    turn: NonNullable<ReturnType<typeof latestTurn>>
 ): Promise<{ entry: RunnableEntry; routedBy: "router" | "default" }> => {
     const pick = await pickAutoModelWithLlm({
         prompt: turn.prompt,
@@ -238,9 +258,5 @@ const routeWithRouter = async (
     }).catch(() => null);
     // The router's answer only ever names a model already eligible here.
     const picked = pick ? eligible.find((entry) => entry.model.id === pick.modelId) : undefined;
-    const entry = picked ?? fallback;
-
-    if (sticky.size >= STICKY_MAX) sticky.delete(sticky.keys().next().value as string);
-    sticky.set(digest, { modelId: entry.model.id, at: now });
-    return { entry, routedBy: picked ? "router" : "default" };
+    return { entry: picked ?? fallback, routedBy: picked ? "router" : "default" };
 };

@@ -95,11 +95,15 @@ test("external inference API over the real shared credit ledger", { skip: !datab
     const routerCalls = [];
     let routerPick = null;
     let routerDelayMs = 0;
+    // Picks to hand out in order before falling back to routerPick.
+    const routerPickQueue = [];
     mock.module(mod("lib/autoLlmRouter.ts"), {
         namedExports: {
             pickAutoModelWithLlm: async (input) => {
                 routerCalls.push(input);
+                const queued = routerPickQueue.length ? routerPickQueue.shift() : undefined;
                 if (routerDelayMs) await new Promise((r) => setTimeout(r, routerDelayMs));
+                if (queued !== undefined) return queued ? { modelId: queued, rewrite: null } : null;
                 return routerPick ? { modelId: routerPick, rewrite: null } : null;
             },
         },
@@ -506,6 +510,34 @@ test("external inference API over the real shared credit ledger", { skip: !datab
             assert.equal(routerCalls.length, routedBeforeReused + 2, "different bodies do not share a pick");
             assert.deepEqual(pair.map((response) => response.status).sort(), [200, 422]);
 
+            // Same messages, another field different, routed to different
+            // models: the tool round continues with the model of the request
+            // admission let through, not the one decided last.
+            routerDelayMs = 100;
+            routerPickQueue.push(SECOND, MODEL_ID);
+            const split = { headers: { "idempotency-key": "smart-adaptive-split" } };
+            const splitQuestion = { role: "user", content: "Split decision" };
+            const splitPair = await Promise.all([
+                call(key, body({ model: "smart-adaptive", temperature: 0.1, messages: [splitQuestion] }), split),
+                call(key, body({ model: "smart-adaptive", temperature: 0.9, messages: [splitQuestion] }), split),
+            ]);
+            await Promise.all(splitPair.map((response) => response.text()));
+            routerDelayMs = 0;
+            const admitted = splitPair.find((response) => response.status === 200);
+            assert.ok(admitted, "one of them is admitted");
+            const answeredBy = admitted.headers.get("x-tomverse-routed-model");
+            const followUp = await call(key, body({
+                model: "smart-adaptive",
+                messages: [
+                    splitQuestion,
+                    { role: "assistant", content: null, tool_calls: [{ id: "call_s", type: "function", function: { name: "run", arguments: "{}" } }] },
+                    { role: "tool", tool_call_id: "call_s", content: "done" },
+                ],
+                tools: [{ type: "function", function: { name: "run", parameters: { type: "object", properties: {} } } }],
+            }));
+            assert.equal(followUp.headers.get("x-tomverse-routed-by"), "continued");
+            assert.equal(followUp.headers.get("x-tomverse-routed-model"), answeredBy, "the memory holds the model that answered");
+
             // A key whose cap is spent gets no paid router call; admission refuses as usual.
             const capped = await issueKey(userId, { creditCap: 1 });
             assert.equal((await call(capped.key, body({ model: "smart-adaptive", messages: [{ role: "user", content: "First" }] }))).status, 200);
@@ -523,6 +555,7 @@ test("external inference API over the real shared credit ledger", { skip: !datab
             delete process.env.EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED;
             routerPick = null;
             routerDelayMs = 0;
+            routerPickQueue.length = 0;
         }
     });
 
