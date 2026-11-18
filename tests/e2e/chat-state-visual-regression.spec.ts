@@ -1161,9 +1161,9 @@ test.describe("File attachment states", () => {
 
   test("oversized file is rejected before upload starts", async ({ page }) => {
     await enterConversation(page, { theme: "light", viewport: DESKTOP_VIEWPORT });
-    const oversized = Buffer.alloc(10 * 1024 * 1024 + 1, 1);
+    const oversized = Buffer.alloc(50 * 1024 * 1024 + 1, 1);
     await attachFromComputer(page, { name: "qa-huge.png", mimeType: "image/png", buffer: oversized });
-    const toast = page.getByRole("alert").filter({ hasText: "각 파일은 10MB 이하여야 합니다." });
+    const toast = page.getByRole("alert").filter({ hasText: "각 파일은 50MB 이하여야 합니다." });
     await expect(toast).toBeVisible();
   });
 

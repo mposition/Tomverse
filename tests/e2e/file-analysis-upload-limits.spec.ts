@@ -5,7 +5,7 @@ test("file analysis separates comparable upload limits from security guidance", 
   const limits = page.getByRole("article").filter({ has: page.getByRole("heading", { name: "Upload limits", exact: true }) });
   await expect(limits.getByRole("listitem")).toHaveText([
     "Guest: 1 supported file per message, up to 5 MiB per file and 5 MiB total.",
-    "Signed-in account with attachment access: up to 5 files per message, 10 MiB per file and 25 MiB total.",
+    "Signed-in account with attachment access: up to 10 files per message, 50 MiB per file and 100 MiB total.",
   ]);
   const security = page.getByRole("article").filter({ has: page.getByRole("heading", { name: "Security, retention and provider processing", exact: true }) });
   await expect(security).toContainText("Google Drive requires sign-in.");

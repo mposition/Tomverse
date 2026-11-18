@@ -1249,7 +1249,7 @@ export const infoPages = {
       description: "Get help with accounts, model access, files, sharing, active subscriptions, cancellation, refunds, and product feedback.",
       sections: [
         { title: "Help Centre", body: "Start with the Help Centre for common setup and troubleshooting guidance.", bullets: ["Login and OAuth issues", "File upload troubleshooting", "Model access and limits"] },
-        { title: "PDF and Office troubleshooting", body: "If a PDF or Office file fails, check that it is not password-protected, corrupted, too large, or a scanned image without extractable text. Re-exporting the document as PDF, reducing the file size, or pasting the key text directly often resolves the issue.", bullets: ["Images, PDFs, Office files, text files, and Google Drive files are supported after login.", "Guest mode does not support attachments.", "Attach up to 5 files, 10 MB each."] },
+        { title: "PDF and Office troubleshooting", body: "If a PDF or Office file fails, check that it is not password-protected, corrupted, too large, or a scanned image without extractable text. Re-exporting the document as PDF, reducing the file size, or pasting the key text directly often resolves the issue.", bullets: ["Images, PDFs, Office files, text files, and Google Drive files are supported after login.", "Guest mode does not support attachments.", "Attach up to 10 files, 50 MB each."] },
         { title: "Contact support", body: "For account-specific issues, include your account email, approximate time, browser, and any trace ID shown in the product." },
       ],
       cta: { label: "Open Help Centre", href: "/support/help-centre" },
@@ -1330,7 +1330,7 @@ export const infoPages = {
         "body": "파일을 첨부할 수 있는 화면에서는 지원 형식과 크기를 먼저 확인하세요. 암호가 걸리거나 손상된 문서, 읽을 텍스트가 없는 스캔 PDF는 처리되지 않을 수 있습니다. 한 파일로 다시 시도하거나 핵심 텍스트를 직접 붙여넣어 보세요.",
         "bullets": [
           "지원되는 비회원 첨부: 메시지당 1개, 파일당 5MB까지. Google Drive 연결은 로그인 필요.",
-          "첨부가 허용된 로그인 플랜: 최대 5개, 파일당 10MB, 한 요청 합계 25MB까지.",
+          "첨부가 허용된 로그인 플랜: 최대 10개, 파일당 50MB, 한 요청 합계 100MB까지.",
           "계정 파일은 대화와 연결되어 보관됩니다. 비회원 파일은 임시 처리되며 저장·공유·내보내기에 포함되지 않습니다."
         ],
         "link": {
@@ -1406,9 +1406,9 @@ export const infoPages = {
           caption: "Attachment access and limits",
           headers: ["Feature", "Guest", "Signed in"],
           rows: [
-            ["Files per message", String(GUEST_MAX_ATTACHMENTS_PER_MESSAGE), "Up to 5"],
-            ["Per-file size", `${GUEST_MAX_ATTACHMENT_BYTES / (1024 * 1024)} MiB`, "10 MiB"],
-            ["Total per message", `${GUEST_MAX_ATTACHMENT_BYTES / (1024 * 1024)} MiB`, "25 MiB"],
+            ["Files per message", String(GUEST_MAX_ATTACHMENTS_PER_MESSAGE), "Up to 10"],
+            ["Per-file size", `${GUEST_MAX_ATTACHMENT_BYTES / (1024 * 1024)} MiB`, "50 MiB"],
+            ["Total per message", `${GUEST_MAX_ATTACHMENT_BYTES / (1024 * 1024)} MiB`, "100 MiB"],
             ["Google Drive", "Unavailable", "Sign-in required"],
           ],
         },
@@ -1496,7 +1496,7 @@ export const infoPages = {
         "body": "附件可用时，请先确认支持格式与大小。加密、损坏或无可读文字的扫描 PDF 可能无法处理。可尝试一个文件或直接粘贴关键文字。",
         "bullets": [
           "支持的访客附件：每条消息一个文件，最多5MB。连接 Google Drive 需要登录。",
-          "允许附件的登录套餐：最多五个文件，每个10MB，每次请求合计25MB。",
+          "允许附件的登录套餐：最多十个文件，每个50MB，每次请求合计100MB。",
           "账户文件与对话一起保留。访客文件为临时处理，不包含在保存、分享或导出中。"
         ],
         "link": {
@@ -1566,7 +1566,7 @@ export const infoPages = {
         "body": "附件可用時，請先確認支援的格式與大小。加密、損壞或沒有可讀文字的掃描 PDF 可能無法處理。可以嘗試一個檔案，或直接貼上關鍵文字。",
         "bullets": [
           "支援的訪客附件：每則訊息一個檔案，最多 5MB。連接 Google Drive 需要登入。",
-          "允許附件的登入方案：最多五個檔案，每個 10MB，每次請求合計 25MB。",
+          "允許附件的登入方案：最多十個檔案，每個 50MB，每次請求合計 100MB。",
           "帳戶檔案會與對話一起保留。訪客檔案僅為暫時處理，不包含在儲存、分享或匯出中。"
         ],
         "link": {
@@ -1636,7 +1636,7 @@ export const infoPages = {
         "body": "Lorsque les pièces jointes sont proposées, vérifiez formats et tailles. Un document protégé, endommagé ou scanné sans texte lisible peut échouer. Essayez un seul fichier ou collez le texte essentiel.",
         "bullets": [
           "Pièces jointes invité prises en charge : un fichier par message, jusqu’à 5 Mo. Connexion requise pour Google Drive.",
-          "Offres connectées avec pièces jointes : cinq fichiers maximum, 10 Mo chacun et 25 Mo par demande.",
+          "Offres connectées avec pièces jointes : dix fichiers maximum, 50 Mo chacun et 100 Mo par demande.",
           "Les fichiers du compte sont conservés avec la conversation. Les fichiers invités sont temporaires et exclus de l’enregistrement, du partage et des exports."
         ],
         "link": {
@@ -1706,7 +1706,7 @@ export const infoPages = {
         "body": "Prüfen Sie bei verfügbaren Anhängen Format und Größe. Geschützte, beschädigte oder gescannte Dateien ohne lesbaren Text können scheitern. Versuchen Sie eine Datei oder fügen Sie Kerntext ein.",
         "bullets": [
           "Unterstützte Gastanhänge: eine Datei pro Nachricht, bis 5 MB. Google Drive erfordert Anmeldung.",
-          "Berechtigte Kontotarife: bis fünf Dateien, je 10 MB und insgesamt 25 MB pro Anfrage.",
+          "Berechtigte Kontotarife: bis zehn Dateien, je 50 MB und insgesamt 100 MB pro Anfrage.",
           "Kontodateien werden mit dem Gespräch aufbewahrt. Gastdateien sind temporär und nicht Teil von Speicherung, Freigaben oder Exporten."
         ],
         "link": {
@@ -1776,7 +1776,7 @@ export const infoPages = {
         "body": "Cuando se admitan adjuntos, comprueba formato y tamaño. Los documentos protegidos, dañados o escaneados sin texto legible pueden fallar. Prueba un archivo o pega el texto clave.",
         "bullets": [
           "Adjuntos de invitado compatibles: un archivo por mensaje, hasta 5 MB. Google Drive requiere iniciar sesión.",
-          "Planes con adjuntos: hasta cinco archivos, 10 MB cada uno y 25 MB en total por solicitud.",
+          "Planes con adjuntos: hasta diez archivos, 50 MB cada uno y 100 MB en total por solicitud.",
           "Los archivos de cuenta se conservan con la conversación. Los archivos de invitado son temporales y no se incluyen al guardar, compartir o exportar."
         ],
         "link": {
@@ -1846,7 +1846,7 @@ export const infoPages = {
         "body": "Quando anexos estiverem disponíveis, confira formato e tamanho. Documentos protegidos, danificados ou digitalizados sem texto legível podem falhar. Tente um arquivo ou cole o texto principal.",
         "bullets": [
           "Anexos compatíveis para visitantes: um por mensagem, até 5 MB. Google Drive exige login.",
-          "Planos com anexos: até cinco arquivos, 10 MB por arquivo e 25 MB no total por solicitação.",
+          "Planos com anexos: até dez arquivos, 50 MB por arquivo e 100 MB no total por solicitação.",
           "Os arquivos da conta ficam com a conversa. Arquivos de visitantes são temporários e não entram ao salvar, compartilhar ou exportar."
         ],
         "link": {

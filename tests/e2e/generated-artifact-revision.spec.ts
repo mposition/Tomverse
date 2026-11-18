@@ -113,7 +113,7 @@ test("late preparation stays in its original conversation draft @ui-risk", async
   await expect(page.getByTestId("attachment-complete")).toHaveCount(1);
 });
 
-test("files added during preparation keep the five-file limit and reclaim only the unused copy", async ({ page }) => {
+test("files added during preparation keep the ten-file limit and reclaim only the unused copy", async ({ page }) => {
   await open(page);
   await mockAttachmentUpload(page);
   let pending: Route | null = null;
@@ -131,14 +131,14 @@ test("files added during preparation keep the five-file limit and reclaim only t
   await input(page).fill("Keep this text");
   await cards(page).first().getByTestId("generated-artifact-revise").click();
   await expect.poll(() => pending !== null).toBe(true);
-  await page.locator('input[type="file"]').first().setInputFiles(Array.from({ length: 5 }, (_, i) => ({
+  await page.locator('input[type="file"]').first().setInputFiles(Array.from({ length: 10 }, (_, i) => ({
     name: `notes-${i}.txt`, mimeType: "text/plain", buffer: Buffer.from(`Notes ${i}`),
   })));
-  await expect(page.getByTestId("attachment-complete")).toHaveCount(5);
+  await expect(page.getByTestId("attachment-complete")).toHaveCount(10);
   await copied(page, pending!, "artifact-0");
-  await expect(cards(page).first().getByTestId("generated-artifact-revision-error")).toContainText("up to 5 files");
+  await expect(cards(page).first().getByTestId("generated-artifact-revision-error")).toContainText("up to 10 files");
   await expect(input(page)).toHaveValue("Keep this text");
-  await expect(page.getByTestId("attachment-complete")).toHaveCount(5);
+  await expect(page.getByTestId("attachment-complete")).toHaveCount(10);
   expect(removed).toEqual([opaqueCopyId(page, "artifact-0")]);
 });
 
@@ -366,7 +366,7 @@ for (const revisionMode of ["workbook", "workbook-values"]) {
   });
 }
 
-test("ordinary uploads finishing after a prepared revision cannot create a sixth chip @ui-risk", async ({ page }) => {
+test("ordinary uploads finishing after a prepared revision cannot create an eleventh chip @ui-risk", async ({ page }) => {
   await open(page, true, ["md"]);
   await mockAttachmentUpload(page);
   let sourcePending: Route | null = null;
@@ -384,7 +384,7 @@ test("ordinary uploads finishing after a prepared revision cannot create a sixth
   await input(page).fill("Keep this request");
   await cards(page).first().getByTestId("generated-artifact-revise").click();
   await expect.poll(() => sourcePending !== null).toBe(true);
-  await page.locator('input[type="file"]').first().setInputFiles(Array.from({ length: 5 }, (_, i) => ({
+  await page.locator('input[type="file"]').first().setInputFiles(Array.from({ length: 10 }, (_, i) => ({
     name: `late-${i}.txt`, mimeType: "text/plain", buffer: Buffer.from(`Late file ${i}`),
   })));
   await expect.poll(() => uploadPending !== null).toBe(true);
@@ -392,9 +392,9 @@ test("ordinary uploads finishing after a prepared revision cannot create a sixth
   await expect(page.getByTestId("attachment-complete").filter({ hasText: "report.md" })).toHaveCount(1);
   await uploadPending!.fallback();
   await expect.poll(() => removed.length).toBe(1);
-  await expect(page.getByTestId("attachment-complete")).toHaveCount(5);
+  await expect(page.getByTestId("attachment-complete")).toHaveCount(10);
   await expect(page.getByTestId("attachment-complete").filter({ hasText: "report.md" })).toHaveCount(1);
-  await expect(page.getByTestId("attachment-complete").filter({ hasText: "late-4.txt" })).toHaveCount(0);
+  await expect(page.getByTestId("attachment-complete").filter({ hasText: "late-9.txt" })).toHaveCount(0);
   expect(removed[0]).not.toBe(opaqueCopyId(page, "artifact-0"));
   await expect(input(page)).toHaveValue(/Create a new file.*\n\nKeep this request/);
 });
