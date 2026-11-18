@@ -20,6 +20,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::tomverse_api::V22UsageRecord;
