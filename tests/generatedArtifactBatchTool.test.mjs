@@ -176,6 +176,14 @@ test("document headings describe the full schedule and respect the requested tim
   assert.match(description, /if the user asks for only the first week, keep the rows within that week/);
 });
 
+test("document tables name change units and index bases", () => {
+  const description = buildGeneratedArtifactToolConfig(collector()).tools[ARTIFACT_TOOL_NAMES.document].description;
+  assert.match(description, /Name every numeric column's unit in its header/);
+  assert.match(description, /percent change \(%\) or a point change \(%p\)/);
+  assert.match(description, /write changes with their sign/);
+  assert.match(description, /For an index, state its base period and base value/);
+});
+
 /* -------------------------------------------------------------------------- */
 /* Refusals that never touch storage                                          */
 /* -------------------------------------------------------------------------- */
