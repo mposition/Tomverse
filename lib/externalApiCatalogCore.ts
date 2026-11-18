@@ -92,10 +92,12 @@ export const smartAdaptiveRouterEnabled = (env: ExternalApiEnv) =>
     env.EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED === "true";
 
 /**
- * What a client may assume of Smart Adaptive: the most any candidate offers.
- * Each request is routed only among candidates that fit it (images, input
- * length, requested output), so the client is not held to the smallest model.
- * Credits are the most a request can cost.
+ * What a client may assume of Smart Adaptive. Each request is routed only
+ * among candidates that fit it (images, input length, requested output), so
+ * the window is the largest any candidate offers. The output limit is the one
+ * every candidate meets: clients send it back as `max_tokens`, and the
+ * largest would leave a single candidate to route to (and VS Code subtracts it
+ * from the window to size the input). Credits are the most a request can cost.
  */
 export const smartAdaptiveCapabilities = (
     candidates: readonly ExternalApiModelCapabilities[]
@@ -110,7 +112,7 @@ export const smartAdaptiveCapabilities = (
               vision: candidates.some((candidate) => candidate.vision),
               reasoning: false,
               contextWindowTokens: Math.max(...candidates.map((candidate) => candidate.contextWindowTokens)),
-              maxOutputTokens: Math.max(...candidates.map((candidate) => candidate.maxOutputTokens)),
+              maxOutputTokens: Math.min(...candidates.map((candidate) => candidate.maxOutputTokens)),
               creditWeight: Math.max(...candidates.map((candidate) => candidate.creditWeight)),
           };
 
