@@ -110,7 +110,14 @@ export type AnthropicPromptCachePath =
     /** The admin-triggered provider credential check. */
     | "provider_verification"
     /** Memory extraction over a finished conversation. */
-    | "memory_extraction";
+    | "memory_extraction"
+    /**
+     * An external API request on Anthropic Messages (Claude Code), whose
+     * cache_control markers the *client* placed. Tomverse adds no marker here;
+     * it reserves the write premium when the request carries one and bills the
+     * provider-reported writes.
+     */
+    | "external_api_messages";
 
 type PromptCachePathPolicy = {
     /** Whether requests on this path carry `cache_control`. */
@@ -219,6 +226,20 @@ export const ANTHROPIC_PROMPT_CACHE_PATHS: Readonly<
         rationale:
             "A one-shot credential check with a fixed tiny prompt, run when an " +
             "administrator asks. Same reasoning as the probe.",
+    },
+    external_api_messages: {
+        caches: true,
+        rationale:
+            "Claude Code places its own cache_control breakpoints and resends " +
+            "the same system prompt, tools and history every turn, so the " +
+            "markers are the client's, not a Tomverse guess about a prefix. " +
+            "The three parts still hold: the budget reserves the write premium " +
+            "whenever a request carries a marker (lib/externalApiNative.ts), " +
+            "the request carries the client's markers unchanged with any TTL " +
+            "but 5 minutes refused before dispatch " +
+            "(lib/anthropicMessagesProtocol.ts), and settlement bills the " +
+            "provider-reported cache_creation_input_tokens as writes. Stripping " +
+            "the markers instead would bill every turn uncached.",
     },
     memory_extraction: {
         caches: false,

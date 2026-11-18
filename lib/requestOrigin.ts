@@ -56,6 +56,11 @@ const EXEMPT_MUTATION_PATHS = [
   // tests/externalApiBoundary.test.mjs fails if it starts to. Exact path only;
   // key management under /api/user/api-keys keeps this check.
   "/api/v1/chat/completions",
+  // The native protocols on the same Bearer-only condition: Claude Code
+  // (Anthropic Messages and its token count) and Codex (Responses).
+  "/api/v1/responses",
+  "/api/anthropic/v1/messages",
+  "/api/anthropic/v1/messages/count_tokens",
 ];
 
 const parseOrigin = (value: string | null) => {

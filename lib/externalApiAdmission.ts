@@ -2,6 +2,7 @@ import "server-only";
 import { Prisma } from "@prisma/client";
 import { ChatAccessError } from "@/lib/chatSecurity";
 import { externalApiKeyState } from "@/lib/externalApiKeyCore";
+import type { ExternalApiProtocol } from "@/lib/externalApiNativeCore";
 
 export type KeyCreditTotals = { committed: number; held: number; count: number };
 
@@ -55,6 +56,8 @@ export const externalApiAdmissionHook =
         clientName: string | null;
         requestDigest: string;
         idempotencyKeyDigest: string | null;
+        /** Which wire protocol the request arrived on; content-free metadata. */
+        protocol?: ExternalApiProtocol;
         now?: () => Date;
     }) =>
     async (
@@ -118,6 +121,7 @@ export const externalApiAdmissionHook =
                 clientName: input.clientName,
                 modelId: input.modelId,
                 stream: input.stream,
+                protocol: input.protocol ?? "chat_completions",
             },
         });
         // At most once a minute: the row is already locked, and a timestamp

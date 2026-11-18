@@ -608,7 +608,18 @@ export async function handleChatCompletions(request: Request): Promise<Response>
     }
 }
 
-const idempotentReplay = async (keyId: string, idempotencyKeyDigest: string, requestDigest: string) => {
+type ErrorRenderer = typeof externalApiErrorResponse;
+
+/**
+ * The receipt for an Idempotency-Key this key already used, or null. Shared
+ * by every protocol; `render` gives the answer that protocol's error shape.
+ */
+export const idempotentReplay = async (
+    keyId: string,
+    idempotencyKeyDigest: string,
+    requestDigest: string,
+    render: ErrorRenderer = externalApiErrorResponse
+) => {
     const existing = await prisma.externalApiRequest.findUnique({
         where: { keyId_idempotencyKeyDigest: { keyId, idempotencyKeyDigest } },
         select: {
@@ -622,7 +633,7 @@ const idempotentReplay = async (keyId: string, idempotencyKeyDigest: string, req
     });
     if (!existing) return null;
     if (existing.requestDigest !== requestDigest) {
-        return externalApiErrorResponse(
+        return render(
             422,
             "This Idempotency-Key was already used with a different request body.",
             "idempotency_key_reused",
@@ -632,7 +643,7 @@ const idempotentReplay = async (keyId: string, idempotencyKeyDigest: string, req
     // The original is not re-sent and its output is not stored, so the answer
     // is a receipt: what happened to the request this key names.
     const inFlight = existing.reservation.status === "reserved";
-    return externalApiErrorResponse(
+    return render(
         409,
         inFlight
             ? "A request with this Idempotency-Key is still in progress or its outcome is not yet known. It was not sent again."
