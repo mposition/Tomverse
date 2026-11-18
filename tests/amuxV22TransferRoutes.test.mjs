@@ -67,11 +67,17 @@ test("a chunked commit past the storage bound is answered before its chunk list 
   // Review r-20261118-113223-aacd9b: a declared size up to MAX_SAFE_INTEGER
   // once made the commit build a chunk list of that length.
   const result = readFileSync("app/api/internal/amux/v22/execution/result/route.ts", "utf8");
-  const bound = result.indexOf("body.resultBytes > AMUX_V22_STORAGE_MAX_BYTES");
-  const patchBound = result.indexOf("body.patch.bytes > AMUX_V22_STORAGE_MAX_BYTES");
+  const bound = result.indexOf("if (body.resultBytes > AMUX_V22_STORAGE_MAX_BYTES)");
+  const patchFits = result.indexOf("if (body.patch && body.patch.bytes <= AMUX_V22_STORAGE_MAX_BYTES)");
   const inspect = result.indexOf("inspectAmuxV22TransferPart(prisma");
-  assert.ok(bound > 0 && patchBound > bound && inspect > patchBound);
-  assert.match(result.slice(patchBound, inspect), /\{ error: "exceeds_processing" \}, 409/);
+  assert.ok(bound > 0 && patchFits > bound && inspect > patchFits);
+  // Only a result past the bound is refused. A patch past it is dropped from
+  // the parts (review r-20261118-115256-f41a8a), so the result is recorded
+  // and the patch reported rejected.
+  assert.match(result.slice(bound, patchFits), /\{ error: "exceeds_processing" \}, 409/);
+  assert.doesNotMatch(result.slice(bound, inspect), /body\.patch\.bytes > AMUX_V22_STORAGE_MAX_BYTES/);
+  assert.match(result, /if \(body\.patch && parts\[1\]\) \{/);
+  assert.match(result, /patchRejected: patchRejected \|\|\s+\(body\.patch !== undefined && recorded\.result\.patchSha256 === null\)/);
   // The store holds the class: any caller past the bound throws before the
   // database is read or a list is made.
   const child = spawnSync(process.execPath, ["--conditions=react-server", "--import", "tsx",

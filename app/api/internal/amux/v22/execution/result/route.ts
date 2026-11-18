@@ -253,17 +253,18 @@ async function postChunked(body: z.infer<typeof chunkedSchema>): Promise<Respons
     }
     const binding = await readAmuxV22TransferBinding(prisma, body.attemptId, body.worker);
     if (!binding) return amuxJsonNoStore({ error: "binding_mismatch" }, 409);
-    // The same external storage bound the upload holds a part to: a declared
-    // size past it could never be stored, and is answered before its chunk
-    // list is ever built.
-    if (body.resultBytes > AMUX_V22_STORAGE_MAX_BYTES ||
-        (body.patch && body.patch.bytes > AMUX_V22_STORAGE_MAX_BYTES))
+    // The same external storage bound the upload holds a part to, applied
+    // before any chunk list is built. A result past it could never be stored.
+    // A patch past it is dropped and the result still recorded with the patch
+    // reported rejected (docs/policy/amux-v22-result-transfer.md 1.5).
+    if (body.resultBytes > AMUX_V22_STORAGE_MAX_BYTES)
       return amuxJsonNoStore({ error: "exceeds_processing" }, 409);
     const parts: AmuxV22TransferHeader[] = [{ part: "result",
       totalBytes: body.resultBytes, sha256: body.sourceSha256, baseSha: null,
       count: null }];
-    if (body.patch) parts.push({ part: "patch", totalBytes: body.patch.bytes,
-      sha256: body.patch.sha256, baseSha: body.patch.baseSha, count: null });
+    if (body.patch && body.patch.bytes <= AMUX_V22_STORAGE_MAX_BYTES)
+      parts.push({ part: "patch", totalBytes: body.patch.bytes,
+        sha256: body.patch.sha256, baseSha: body.patch.baseSha, count: null });
     // Every chunk first, read without bodies: what is missing is not a refusal.
     const missing: Partial<Record<AmuxV22TransferPart, number[]>> = {};
     for (const header of parts) {
