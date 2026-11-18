@@ -261,7 +261,6 @@ import {
     readAttachmentTextCache,
     writeAttachmentTextCache,
 } from "@/lib/attachmentTextCache";
-import { chatUserMaxInputTokens } from "@/lib/chatInputLimits";
 import { extractLegacyOfficeText, type LegacyOfficeFormatId } from "@/lib/legacyOfficeText";
 import { legacyOfficeValidationCode } from "@/lib/chatAttachmentValidation";
 import {
