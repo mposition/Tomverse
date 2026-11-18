@@ -7,11 +7,13 @@
  * What the flow does (always; the switch that restored the earlier behaviour
  * was removed by owner decision 2026-11-16):
  *
- * - No time limit at all. A run ends when its CLI ends, when the operator
- *   stops it, or when it shows no sign of life for AMUX_V22_RUN_STALL_MS: no
- *   output, no checkout change, and no CPU time used by the CLI's process
- *   tree (children included; Linux /proc, where it can be read). A quiet test
- *   or build that is working is never stopped. Whatever stops a run, the
+ * - No time limit at all, and no limit on how long a run may be quiet (owner
+ *   decision 2026-11-18). A run ends only when its CLI ends or when the
+ *   operator stops it. The sidecar still notes the run's last sign of life
+ *   (new output, a checkout change, or CPU time used by the CLI's process
+ *   tree, children included; Linux /proc, where it can be read) and reports
+ *   it with the sidecar's health signals, so the operator can see how long a
+ *   run has been quiet; nothing is stopped for it. Whatever stops a run, the
  *   checkout's change and the CLI's output are kept.
  * - No prompt, report, output or conclusion byte limits. The brief, the
  *   previous change, prior conclusions, the owner's answer and review
@@ -31,17 +33,20 @@
 
 import { randomBytes } from "node:crypto";
 
-/** No sign of life for this long reads as a hung run: no output, no checkout
- * change and no CPU time in the CLI's process tree (where /proc can be read;
- * elsewhere the first two signals decide). There is no other time limit. The
- * window is long enough for a build, a download or a model call that is only
- * waiting; it is a hang guard, not a work limit. */
-export const AMUX_V22_RUN_STALL_MS = 3 * 60 * 60_000;
+/** How often the sidecar looks for a sign of life (new output, a checkout
+ * change, CPU time in the CLI's process tree). It sets how finely the time a
+ * run has been quiet is known; it ends nothing. */
 export const AMUX_V22_RUN_PROGRESS_POLL_MS = 60_000;
 
 /** Why a run the flow stopped ended; the checkout and output are kept. */
-export const AMUX_V22_RUN_STOP_REASONS = ["stalled", "operator_stop"] as const;
+export const AMUX_V22_RUN_STOP_REASONS = ["operator_stop"] as const;
 export type AmuxV22RunStopReason = (typeof AMUX_V22_RUN_STOP_REASONS)[number];
+
+/** Stop reasons earlier attempts carry that the flow no longer produces:
+ * `stalled` ended a run that showed no sign of life for three hours (removed
+ * by owner decision 2026-11-18). Stored attempts keep it and it still reads as
+ * a run that did the card's work (lib/amux/infraFailureCore.ts). */
+export const AMUX_V22_RETIRED_STOP_REASONS = ["stalled"] as const;
 
 /**
  * A memory backstop for one prompt, context set or report crossing the

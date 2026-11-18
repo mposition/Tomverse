@@ -450,7 +450,6 @@ run(
     // during 2026-11. It found, on its first run, that the observer's two
     // mismatch cause keys were longer than the store admits.
     "tests/integration/amux-card-lifecycle-e2e.db.test.ts",
-    "tests/integration/amux-stalled-card-sweep.db.test.ts",
     // Owner decision 2026-11-15: a worker's platform failure spends no card
     // attempt, the next claim prefers another worker, a worker failing again
     // and again is quarantined until its usage reads again, and why a card

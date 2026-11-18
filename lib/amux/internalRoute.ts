@@ -122,9 +122,9 @@ const amuxOutcomeUnknownResponse = (
 
 /**
  * Whether `amuxInternalErrorResponse` would answer this error with one of the
- * three 503 reasons that say "this request committed nothing" (orchestration
- * policy version 20, section 1): busy, deadline exceeded, call ceiling
- * exceeded. Mirrors the branch order below.
+ * 503 reasons that say "this request committed nothing" (orchestration
+ * policy version 20, section 1): busy and deadline exceeded. Mirrors the
+ * branch order below.
  */
 const isKnownDeadlineFailure = (
   error: unknown,
@@ -169,14 +169,7 @@ const answersNothingCommitted = (error: unknown): boolean => {
     typeof candidate?.meta?.database_error === "string"
       ? candidate.meta.database_error
       : "";
-  if (isKnownDeadlineFailure(error, databaseCode, databaseError)) {
-    return true;
-  }
-  return (
-    databaseCode !== "P2028" &&
-    error instanceof AmuxDbBoundaryError &&
-    error.code === "AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED"
-  );
+  return isKnownDeadlineFailure(error, databaseCode, databaseError);
 };
 
 export const amuxInternalErrorResponse = (
@@ -317,19 +310,6 @@ export const amuxInternalErrorResponse = (
           "X-AMUX-Incident-ID": incident.incidentId,
         },
       },
-    );
-  }
-
-  if (
-    error instanceof AmuxDbBoundaryError &&
-    error.code === "AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED"
-  ) {
-    return amuxJsonNoStore(
-      {
-        error: "AMUX database call ceiling exceeded.",
-        reason: "amux_database_call_ceiling_exceeded",
-      },
-      503,
     );
   }
 

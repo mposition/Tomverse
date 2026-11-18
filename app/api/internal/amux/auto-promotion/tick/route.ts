@@ -19,7 +19,6 @@ import { v22PromotionTickWire, v22WorkerClaimTickWire } from
   "@/lib/amux/v22TickWire";
 import { tickV22WorkerClaim } from "@/lib/amux/v22WorkerClaimService";
 import { amuxRouteHasBudgetForMs, withAmuxRouteBudget } from "@/lib/amux/dbBoundary";
-import { sweepAmuxStalledCards } from "@/lib/amux/stalledCardSweep";
 import { loadCurrentAmuxContentKeys } from "@/lib/amux/ideaKeyConfig";
 import { refreshDueAmuxPortfolioScores } from "@/lib/amux/portfolioScoreService";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
@@ -132,13 +131,7 @@ export async function POST(request: Request) {
       if (stopped) return stopped;
     }
 
-    const response = await claimAndPromote();
-    // AMUXFLOW/B2: stopped cards go to the owner queue after this tick's
-    // answer is decided, so the sweep's write never turns a later transient
-    // claim or promotion error into an unknown outcome. Its own switch; never
-    // a reason this tick fails.
-    if (identity.kind === "admitted") await sweepStalledCardsAfterTick();
-    return response;
+    return claimAndPromote();
 
     async function claimAndPromote(): Promise<Response> {
     try {
@@ -180,16 +173,4 @@ export async function POST(request: Request) {
     }
     }
   }, AUTO_TICK_ROUTE_BUDGET_MS);
-}
-
-/** The stalled card sweep, only while the route still has room for it. */
-async function sweepStalledCardsAfterTick() {
-  if (!amuxRouteHasBudgetForMs(2 * AUTO_TICK_TRANSACTION_MAX_MS)) return;
-  try {
-    const moved = await sweepAmuxStalledCards(3);
-    if (moved.length) console.info(JSON.stringify({ event: "amux_stalled_card_sweep", moved }));
-  } catch (error) {
-    console.error(JSON.stringify({ event: "amux_stalled_card_sweep_unavailable",
-      error: error instanceof Error ? error.name : "unknown" }));
-  }
 }

@@ -7,8 +7,6 @@ import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/amux/auditContract";
 import { AMUX_DM_PENDING_SCAN, AMUX_DM_TICK_LIMIT } from "@/lib/amux/decisionMakerCore";
 import { BoardImportError } from "@/lib/amux/boardImportCore";
 import { readDecisionMakerSwitchesOrThrow } from "@/lib/amux/decisionMakerSwitchStore";
-import { decideAmuxAttemptBudget } from "@/lib/amux/executionBudgetCore";
-import { readAmuxAttemptBudgetFacts } from "@/lib/amux/infraFailureStore";
 import { readAmuxCardTitle } from "./adminExecutionRead.ts";
 import { amuxDatabaseDiagnosticCode } from "./readFailureCore.ts";
 import {
@@ -423,8 +421,8 @@ async function lockUnderKillSwitch(tx: Prisma.TransactionClient, settlementId: s
  * kill switch under it, then the settlement and its card locked together. A
  * Task that moved (its status, a new run, an archive, something running) or an
  * escalation a person resolved cancels the settlement instead. retry returns
- * the Task to todo within its attempt budget (a spent budget leaves it to the
- * person); complete and close are the owner's settlement done by the system
+ * the Task to todo (an ordinary card has no attempt bound since 2026-11-18);
+ * complete and close are the owner's settlement done by the system
  * (legacyCardSystemService.ts); approve records the pull request's verified
  * head and diff digest and changes nothing else.
  *
@@ -509,16 +507,9 @@ export async function applyAmuxDmOwnerSettlementDecision(tx: Prisma.TransactionC
   }
 
   if (decision === "retry") {
-    // The claim's own rule (executionBudgetCore.ts): the card's counted
-    // attempts against the runaway guard, and its platform failures since a
-    // person's last retry against their bound. The settlement's own retry
-    // never starts that bound over (infraFailureStore.ts), so a card that
-    // used it goes to a person instead of running again with no one looking.
-    const facts = await readAmuxAttemptBudgetFacts(tx, row.taskId);
-    if (!decideAmuxAttemptBudget({ historical_rows: facts.historicalRows,
-      greatest_attempt_number: facts.greatestAttemptNumber, infra_rows: facts.infraRows,
-    }).allowed)
-      return handOff("attempt_budget_spent");
+    // No count of attempts or repeat of a failure stops a card (owner
+    // direction 2026-11-18, executionBudgetCore.ts); the claim only waits
+    // longer between tries. A paid retry keeps its own bound at its start.
     const changed = await tx.amuxWorkItem.updateMany({
       where: { id: row.taskId, revision: row.revision, status: row.status, archivedAt: null },
       data: { status: "todo", owner: null, claimedAt: null, reviewPrNumber: null,

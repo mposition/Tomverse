@@ -88,15 +88,17 @@ test("proposal preallocates decision identity and status lookup never reports an
   assert.doesNotMatch(service, /status: "failed"/);
 });
 
-test("recoverable block opens a successor, but a task at the runaway guard stays terminal", () => {
+test("recoverable block opens a successor, and no count of attempts makes it terminal", () => {
   const resolve = service.split("export async function resolveAmuxReview(")[1]
     ?.split("export async function acknowledgeAmuxReview(")[0];
   assert.ok(resolve);
   assert.match(resolve, /proposal\.outcome === "block" && state\.budget\.allowed/);
   assert.match(resolve, /openAmuxHumanEscalation\(tx, \{/);
-  // Owner direction 2026-11-15: no fixed five; the runaway guard is thirty.
+  // Owner direction 2026-11-18: no count of attempts makes a block terminal; only
+  // a caller that names a bound (a paid retry) can.
   assert.equal(decideAmuxAttemptBudget({ historical_rows: 5, greatest_attempt_number: 5 }).allowed, true);
-  assert.equal(decideAmuxAttemptBudget({ historical_rows: 30, greatest_attempt_number: 30 }).allowed, false);
+  assert.equal(decideAmuxAttemptBudget({ historical_rows: 30, greatest_attempt_number: 30 }).allowed, true);
+  assert.equal(decideAmuxAttemptBudget({ historical_rows: 30, greatest_attempt_number: 30, max_attempts: 30 }).allowed, false);
 });
 
 test("retry requeue checks the current cost cap in resource-before-task lock order", () => {

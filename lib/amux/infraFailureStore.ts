@@ -1,16 +1,15 @@
 import { Prisma } from "@prisma/client";
 
+import { amuxResultFailureSignature, amuxResultFailureStreak } from "./executionBudgetCore.ts";
 import { AMUX_INFRA_FAILURE_REASONS, amuxIsInfraFailureReason } from "./infraFailureCore.ts";
 
 /**
  * The infrastructure failures the bound counts start after a person last
  * sent the card back with `retry` (an owner's review decision or recovery).
  * A system resolver -- the Decision Maker's settlement among them -- does not
- * start the bound over: an autonomous retry that did would let the same
- * platform failure run forever with no person seeing it, so a card that used
- * the bound goes to a person (the settlement refuses its retry,
- * dmOwnerSettlementService.ts). Earlier failures still use none of the card's
- * attempts.
+ * start the window over, so its retry keeps the backoff the failures before
+ * it earned. No count refuses that retry (owner direction 2026-11-18).
+ * Earlier failures still use none of the card's attempts.
  */
 export const AMUX_INFRA_WINDOW_RETRY_SQL = Prisma.sql`e."status" = 'resolved' AND e."resolutionOutcome" = 'retry'
   AND e."resolvedById" IS NOT NULL AND e."resolvedById" NOT LIKE 'system:%'`;
@@ -74,19 +73,27 @@ export async function recentAmuxInfraFailureWorkers(tx: Prisma.TransactionClient
 }
 
 /**
- * The Task's latest ended runs other than this one that its workers did the
- * work for (infrastructure failures left out), newest first, as
- * `outcome:reason` (lib/amux/executionBudgetCore.ts amuxRepeatedResultFailure).
+ * How many of the Task's newest ended runs failed the same way in a row (owner
+ * direction 2026-11-18: the claim waits longer for it, executionBudgetCore.ts
+ * amuxResultRetryDelayMs; nothing stops the card). Only runs the worker did the work for count: infrastructure
+ * failures are left out, and so is everything before a person's last retry.
+ * A run is compared as `outcome:reason`. The read covers the newest runs
+ * only; the delay is already at its largest well before this many.
  */
-export async function readAmuxRecentResultSignatures(tx: Prisma.TransactionClient,
-  taskId: string, attemptId: string, count: number): Promise<string[]> {
+const RESULT_STREAK_READ_ROWS = 16;
+export async function readAmuxResultFailureStreak(tx: Prisma.TransactionClient,
+  taskId: string): Promise<{ streak: number }> {
   const infra = [...AMUX_INFRA_FAILURE_REASONS];
-  const rows = await tx.amuxExecutionAttempt.findMany({
-    where: { taskId, id: { not: attemptId }, endedAt: { not: null },
-      OR: [{ reason: null }, { reason: { notIn: infra } }] },
-    orderBy: [{ endedAt: "desc" }, { id: "desc" }], take: Math.max(0, count),
-    select: { outcome: true, reason: true } });
-  return rows.map((row) => `${row.outcome ?? "unknown"}:${row.reason ?? "unknown"}`);
+  const rows = await tx.$queryRaw<Array<{ outcome: string | null; reason: string | null }>>`
+    SELECT a."outcome", a."reason"
+    FROM "AmuxExecutionAttempt" a CROSS JOIN (SELECT ${lastRetry(taskId)} AS "at") r
+    WHERE a."taskId" = ${taskId} AND a."endedAt" IS NOT NULL
+      AND (a."reason" IS NULL OR a."reason" <> ALL(${infra}::text[]))
+      AND (r."at" IS NULL OR a."startedAt" > r."at")
+    ORDER BY a."endedAt" DESC, a."id" DESC
+    LIMIT ${RESULT_STREAK_READ_ROWS}`;
+  return { streak: amuxResultFailureStreak(
+    rows.map((row) => amuxResultFailureSignature(row.outcome, row.reason))) };
 }
 
 /**

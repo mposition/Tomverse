@@ -637,10 +637,38 @@ test("v22 execution routes cover their expanded DB ceilings and client transport
   const reserveMs = number(dbBoundarySource, "AMUX_DB_COMMIT_RESERVE_MS");
   const admittedCall = number(dbBoundarySource,
     "AMUX_ORCHESTRATOR_ADMISSION_LOCK_CALLS");
-  assert.ok((30 + 24 + 3 + admittedCall) * callMs + reserveMs +
-    connectMs <= routeMs);
-  assert.ok((26 + 40 + admittedCall) * callMs + reserveMs +
-    connectMs <= routeMs);
+  // The real ceilings, read from the code (a copy of them here once let the
+  // settlement grow to 80 calls while this test still added up 67).
+  const executionSource = readFileSync(join(process.cwd(), "lib", "amux",
+    "execution.ts"), "utf8");
+  const sum = (source, name) => {
+    const expression = source.match(
+      new RegExp(`export const ${name} = ([0-9_ +]+);`))?.[1];
+    assert.ok(expression, `${name} is not declared`);
+    return expression.split("+").reduce((total, part) =>
+      total + Number(part.trim().replaceAll("_", "")), 0);
+  };
+  const ceiling = (name) => Number(dbBoundarySource.match(
+    new RegExp(`\\n  ${name}: \\{[\\s\\S]*?prismaCallCeiling: (\\d+),`))?.[1]);
+  const startCalls = ceiling("executionStart") +
+    sum(executionSource, "AMUX_V22_START_PUBLICATION_CALLS") +
+    sum(executionSource, "AMUX_V22_START_EXTRA_CALLS") + admittedCall;
+  const settleCalls = ceiling("executionSettle") +
+    sum(executionSource, "AMUX_V22_SETTLE_EXTRA_CALLS") + admittedCall;
+  assert.ok(startCalls > 50 && settleCalls > 70, `${startCalls} ${settleCalls}`);
+  assert.match(executionSource,
+    /executionSettle\.prismaCallCeiling \+ AMUX_V22_SETTLE_EXTRA_CALLS \}/);
+  assert.match(executionSource,
+    /AMUX_V22_START_PUBLICATION_CALLS : 0\) \+\n\s+AMUX_V22_START_EXTRA_CALLS \}/);
+  // Start holds its whole worst case and a connection wait.
+  assert.ok(startCalls * callMs + reserveMs + connectMs <= routeMs);
+  // Settlement's worst case is longer than the route: the boundary runs it in
+  // what the route has left less the connection wait, which must hold far
+  // more than one call (amuxDbTransactionBudgetWithinRouteMs).
+  assert.ok(settleCalls * callMs + reserveMs > routeMs - connectMs);
+  assert.ok(routeMs - connectMs >= 40 * callMs + reserveMs);
+  assert.match(dbBoundarySource,
+    /const transactionBudgetMs = amuxDbTransactionBudgetWithinRouteMs\(\n\s+amuxDbTransactionBudgetMs\(effectiveBoundary\),\n\s+routeRemainingMs,\n\s+\);/);
   for (const route of ["start", "settle"]) {
     const source = readFileSync(join(process.cwd(), "app", "api", "internal",
       "amux", "v22", "execution", route, "route.ts"), "utf8");

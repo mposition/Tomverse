@@ -538,7 +538,7 @@ test("implement refuses a dirty baseline before CLI and holds a patch only in me
   } finally { await rm(stateDir, { recursive: true, force: true }); }
 });
 
-test("unknown output and a stall never become success or retry", async () => {
+test("unknown output and a silent run never become success or retry", async () => {
   const malformed = fakeSpawn("not-json");
   const malformedResult = await runAmuxV22OneShot(request, config, {
     syntheticPlatform: true, spawnChild: malformed.spawnChild, logInvalidOutput: () => {},
@@ -555,14 +555,23 @@ test("unknown output and a stall never become success or retry", async () => {
     failure: wrongShapeResult.failure },
     { kind: "outcome_unknown", failure: "invalid_result" });
 
+  // A CLI that stays silent is not ended for it (owner decision 2026-11-18):
+  // the old `stallMs` option is ignored, and only the operator's stop ends it.
   const hanging = fakeSpawn("", { hang: true });
-  const timeoutResult = await runAmuxV22OneShot(request, config, {
+  const controller = new AbortController();
+  const pending = runAmuxV22OneShot(request, config, {
     syntheticPlatform: true, spawnChild: hanging.spawnChild,
-    stallMs: 30, progressPollMs: 10,
+    stallMs: 30, progressPollMs: 10, signal: controller.signal,
   });
+  let settled = false;
+  void pending.then(() => { settled = true; });
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  assert.equal(settled, false, "silence alone ends nothing");
+  controller.abort();
+  const timeoutResult = await pending;
   assert.deepEqual({ kind: timeoutResult.kind,
     failure: timeoutResult.failure },
-    { kind: "outcome_unknown", failure: "stalled" });
+    { kind: "outcome_unknown", failure: "operator_stop" });
   assert.equal(hanging.calls.length, 1);
 });
 
@@ -599,7 +608,7 @@ test("a failed Claude result names its cause as a closed enum, never the CLI tex
   assert.equal(Object.hasOwn(longResult.usageReceipt, "cliFailure"), false);
 });
 
-test("a signal or a stall stays an unknown outcome with no failure cause", async () => {
+test("a signal or an operator stop stays an unknown outcome with no failure cause", async () => {
   const killed = fakeSpawn(JSON.stringify({ ...usage, subtype: "error_max_turns",
     is_error: true }), { signal: "SIGTERM" });
   const killedResult = await runAmuxV22OneShot(request, config, {
@@ -609,13 +618,15 @@ test("a signal or a stall stays an unknown outcome with no failure cause", async
     receipt: killedResult.usageReceipt },
   { kind: "outcome_unknown", failure: "signal", receipt: undefined });
   const hanging = fakeSpawn("", { hang: true });
-  const timeoutResult = await runAmuxV22OneShot(request, config, {
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), 100);
+  const stoppedResult = await runAmuxV22OneShot(request, config, {
     syntheticPlatform: true, spawnChild: hanging.spawnChild,
-    stallMs: 30, progressPollMs: 10,
+    progressPollMs: 10, signal: controller.signal,
   });
-  assert.deepEqual({ kind: timeoutResult.kind, failure: timeoutResult.failure,
-    receipt: timeoutResult.usageReceipt },
-  { kind: "outcome_unknown", failure: "stalled", receipt: undefined });
+  assert.deepEqual({ kind: stoppedResult.kind, failure: stoppedResult.failure,
+    receipt: stoppedResult.usageReceipt },
+  { kind: "outcome_unknown", failure: "operator_stop", receipt: undefined });
 });
 
 test("durable claim prevents duplicate CLI invocation across handler restart", async () => {

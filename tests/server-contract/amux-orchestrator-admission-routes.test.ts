@@ -14,7 +14,7 @@ import { after, mock, test } from "node:test";
 //   request id is 409 `duplicate_request`; an admission that cannot commit is
 //   503 `amux_database_busy`, with nothing after it run.
 // - Once a receipt of the request may have committed, the route never answers
-//   one of the three "nothing committed" 503 reasons; it answers
+//   one of the "nothing committed" 503 reasons; it answers
 //   `amux_outcome_unknown` (section 1).
 //
 // The database is faked at the store (the admission insert) and at the
@@ -343,13 +343,12 @@ test("after a receipt may have committed, a deadline after the sweep is an unkno
   assert.equal((await afterReceipt.json()).reason, "amux_outcome_unknown");
 });
 
-test("after a receipt may have committed, none of the three nothing-committed answers is sent by the tick", async () => {
+test("after a receipt may have committed, none of the nothing-committed answers is sent by the tick", async () => {
   const { tick } = await routes();
   // "tick의 grant 만료 뒤 기한 초과": a grant expiry committed its receipt,
-  // then the tick failed with each of the three.
+  // then the tick failed with each of them.
   for (const code of [
     "AMUX_DB_DEADLINE_EXCEEDED",
-    "AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED",
     "AMUX_DB_READ_BUSY",
   ] as const) {
     reset({
