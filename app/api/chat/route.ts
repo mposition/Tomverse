@@ -5944,11 +5944,14 @@ async function handleChatPost(
             combinedToolConfig &&
             !researchPreviewExecution &&
             !mcpConnector &&
-            Number.isFinite(toolLoopStepCap)
+            Number.isFinite(toolLoopStepCap) &&
+            Number.isSafeInteger(modelConfig.contextWindowTokens)
                 ? longContextToolLoopStep({
                       maxOutputTokens: requestMaxOutputTokens,
                       inputTokens: budget.inputTokens,
+                      firstPromptTokens: budget.contextInputTokens ?? budget.inputTokens,
                       callCap: toolLoopStepCap,
+                      contextWindowTokens: modelConfig.contextWindowTokens!,
                   })
                 : null;
         await recordDispatchStarted(dispatchRecord);
@@ -5999,6 +6002,7 @@ async function handleChatPost(
                               prepareStep: (options: {
                                   stepNumber: number;
                                   steps: Array<StepResult<ToolSet>>;
+                                  messages: ModelMessage[];
                               }) => ({
                                   ...(lookupStep?.(options) ?? {}),
                                   ...longContextLoopStep(options),

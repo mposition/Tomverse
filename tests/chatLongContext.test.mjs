@@ -576,23 +576,56 @@ test("the installed SDK's stream result returns totalUsage as usage at runtime",
 // Same review: the steps of a long-context tool loop share one output budget
 // and the loop answers on its last reserved call.
 test("a long-context tool loop shares its output budget and answers within its calls", async () => {
-    const { longContextToolLoopStep } = await import("../lib/chatLongContextToolLoop.ts");
-    const step = longContextToolLoopStep({ maxOutputTokens: 10_000, inputTokens: 1_000_000, callCap: 4 });
+    const { longContextToolLoopStep, LongContextToolLoopLimitError } = await import("../lib/chatLongContextToolLoop.ts");
+    const { estimatePromptTokens } = await import("../lib/chatTokenEstimate.ts");
     const used = (input, output) => ({ usage: { inputTokens: input, outputTokens: output } });
-    assert.deepEqual(step({ steps: [] }), { maxOutputTokens: 10_000 });
-    assert.deepEqual(step({ steps: [used(200_000, 3_000)] }), { maxOutputTokens: 7_000 });
+    const base = [{ role: "user", content: "question" }];
+    // Messages that grew by at least `tokens` since `base` (a tool result).
+    const grown = (tokens) => {
+        let text = "";
+        while (estimatePromptTokens(JSON.stringify([...base, { role: "tool", content: text }])) -
+            estimatePromptTokens(JSON.stringify(base)) < tokens) text += "result text ".repeat(500);
+        return [...base, { role: "tool", content: text }];
+    };
+    const limits = { maxOutputTokens: 10_000, inputTokens: 4_000_000, firstPromptTokens: 200_000, callCap: 4, contextWindowTokens: 1_000_000 };
+    const loop = () => {
+        const step = longContextToolLoopStep(limits);
+        step({ steps: [], messages: base });
+        return step;
+    };
+    assert.deepEqual(longContextToolLoopStep(limits)({ steps: [], messages: base }), { maxOutputTokens: 10_000 });
+    assert.deepEqual(loop()({ steps: [used(200_000, 3_000)], messages: base }), { maxOutputTokens: 7_000 });
     // The fourth call is the last reserved one: no more tools.
     assert.deepEqual(
-        step({ steps: [used(200_000, 1_000), used(201_000, 1_000), used(202_000, 1_000)] }),
+        loop()({ steps: [used(200_000, 1_000), used(201_000, 1_000), used(202_000, 1_000)], messages: base }),
         { maxOutputTokens: 7_000, toolChoice: "none" }
     );
     // Output spent: one token and an answer, never a negative cap.
-    assert.deepEqual(step({ steps: [used(200_000, 12_000)] }), { maxOutputTokens: 1, toolChoice: "none" });
-    // Input that would not hold another full step: this one answers.
-    const tight = longContextToolLoopStep({ maxOutputTokens: 10_000, inputTokens: 700_000, callCap: 4 });
-    assert.equal(tight({ steps: [used(300_000, 1_000)] }).toolChoice, "none");
+    assert.deepEqual(loop()({ steps: [used(200_000, 12_000)], messages: base }), { maxOutputTokens: 1, toolChoice: "none" });
+    // An unreported step counts at the most it was allowed: the output is spent.
+    assert.deepEqual(loop()({ steps: [used(undefined, undefined)], messages: base }), { maxOutputTokens: 1, toolChoice: "none" });
+    // Review r-20261118-111248-a62933: the next prompt is measured from the
+    // messages it sends, tool results included. Near the window, the step
+    // answers; past the input reservation or the window, it is never sent.
+    const narrow = { ...limits, contextWindowTokens: 230_000 };
+    const near = longContextToolLoopStep(narrow);
+    assert.deepEqual(near({ steps: [], messages: base }), { maxOutputTokens: 10_000 });
+    const answer = near({ steps: [used(200_000, 1_000)], messages: grown(25_000) });
+    assert.equal(answer.toolChoice, "none");
+    assert.ok(answer.maxOutputTokens <= 5_000);
+    const over = longContextToolLoopStep(narrow);
+    over({ steps: [], messages: base });
+    assert.throws(() => over({ steps: [used(200_000, 1_000)], messages: grown(40_000) }), LongContextToolLoopLimitError);
+    const poor = longContextToolLoopStep({ ...limits, inputTokens: 420_000 });
+    poor({ steps: [], messages: base });
+    assert.throws(() => poor({ steps: [used(200_000, 1_000)], messages: grown(30_000) }), /input_budget/);
+    // A step that may call a tool keeps room for the step after it.
+    const roomy = longContextToolLoopStep({ ...limits, contextWindowTokens: 220_000 });
+    const first = roomy({ steps: [], messages: base });
+    assert.equal(first.toolChoice, undefined);
+    assert.ok(first.maxOutputTokens <= 220_000 - 200_000 - 6_000 - 4_096);
     const route = readFileSync(new URL("../app/api/chat/route.ts", import.meta.url), "utf8");
-    assert.match(route, /longContextToolLoopStep\(\{\s*maxOutputTokens: requestMaxOutputTokens,\s*inputTokens: budget\.inputTokens,\s*callCap: toolLoopStepCap,\s*\}\)/);
+    assert.match(route, /longContextToolLoopStep\(\{\s*maxOutputTokens: requestMaxOutputTokens,\s*inputTokens: budget\.inputTokens,\s*firstPromptTokens: budget\.contextInputTokens \?\? budget\.inputTokens,\s*callCap: toolLoopStepCap,\s*contextWindowTokens: modelConfig\.contextWindowTokens!,\s*\}\)/);
     assert.match(route, /\.\.\.\(lookupStep\?\.\(options\) \?\? \{\}\),\s*\.\.\.longContextLoopStep\(options\),/);
 });
 
