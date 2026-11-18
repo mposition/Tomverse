@@ -208,8 +208,18 @@ the id stays the same while models are added to or retired from the
 catalogue, so a customer never has to recopy it.
 
 - **Candidates:** the offered models that fit the request -- images only to a
-  model that reads them, the requested output within the model's limit, and a
-  rough input estimate plus that output within its window. The `GET /models`
+  model that reads them, the requested output within the model's limit, a
+  rough input estimate plus that output within its window, and the optional
+  features the request uses (`strict` tools, image `detail`,
+  `reasoning_effort`) by the same rules the request is validated with
+  (`modelTakesRequestFeatures`), so the pick never decides whether a request
+  succeeds.
+- **When the router is called:** it is paid and runs before admission (which
+  reserves for the model it picks), so it is skipped -- the default model
+  answers and admission gives its own error -- while AI chat is paused, when
+  the key's cap is spent, for two minutes after a Smart Adaptive request of the
+  key was refused at admission, and for an Idempotency-Key replay (answered
+  before routing). The `GET /models`
   entry advertises the largest window, the default model's output limit
   (clients send it back as `max_tokens`; a candidate that cannot give it is
   left out only of requests that ask for that much, and VS Code subtracts it
@@ -221,8 +231,9 @@ catalogue, so a customer never has to recopy it.
 - **Tool loops:** a request that only carries tool results back keeps the model
   picked for the user message it continues, remembered in process for ten
   minutes under a SHA-256 digest of the key and the messages up to that user
-  message. A miss (another instance, a restart) routes again. A new user message
-  is routed again.
+  message. A miss (another instance, a restart) routes again and shows as
+  `routed-by: router`, so across instances a tool loop can change model. A
+  new user message is routed again.
 - **No answer** (router switch off, no router model configured, provider budget
   refused, timeout, invalid output, one candidate left): the default model
   (`DEFAULT_MODEL_ID`) if it fits, otherwise the first candidate in catalogue
@@ -329,5 +340,9 @@ Not yet done, each a separate step:
   intent, search plan, rewrite) now shares one generous ceiling,
   `ROUTING_CALL_MAX_OUTPUT_TOKENS` (8,192, `lib/routingCallLimits.ts`), used only
   for the worst-case cost hold, and a cut-off answer logs `output_truncated`.
+  The hold is 20-40 times the old one per call (settled to actual), so on a
+  deployment whose provider budget is nearly spent a routing call is refused
+  sooner and the turn takes its deterministic fallback; watch
+  `chat_auto_llm_router_skipped` with `reason: provider_budget`.
   Not yet re-run live.
 - Production migration, merge and deployment.

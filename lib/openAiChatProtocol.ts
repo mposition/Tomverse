@@ -244,6 +244,30 @@ export const resolveRequestOptions = (
 const joinText = (content: string | { text: string }[] | null | undefined) =>
     content == null ? "" : typeof content === "string" ? content : content.map((part) => part.text).join("");
 
+/**
+ * Whether a model can take this request's optional features, by the same rules
+ * `resolveRequestOptions` and `convertChatCompletionRequest` refuse with: strict
+ * tool schemas, an image `detail`, `reasoning_effort`. Smart Adaptive keeps a
+ * model as a candidate only when this holds, so the pick never decides whether
+ * the request succeeds.
+ */
+export const modelTakesRequestFeatures = (request: ChatCompletionRequest, model: ModelCapabilityView) => {
+    const strict = (request.tools ?? []).some((definition) => definition.function.strict === true);
+    const detail = request.messages.some(
+        (message) =>
+            message.role === "user" &&
+            Array.isArray(message.content) &&
+            message.content.some(
+                (part) => part.type === "image_url" && (part.image_url.detail === "low" || part.image_url.detail === "high")
+            )
+    );
+    return (
+        (!strict || STRICT_TOOL_PROVIDERS.has(model.provider ?? "")) &&
+        (!detail || IMAGE_DETAIL_PROVIDERS.has(model.provider ?? "")) &&
+        (request.reasoning_effort == null || (model.reasoning && model.provider === "openai"))
+    );
+};
+
 export type DecodedImage = { mediaType: string; bytes: Uint8Array };
 
 /**

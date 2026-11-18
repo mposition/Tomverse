@@ -37,7 +37,7 @@ import {
     SMART_ADAPTIVE_MODEL_ID,
 } from "@/lib/externalApiCatalogCore";
 import { getRuntimeModel } from "@/lib/modelRegistry";
-import { routeSmartAdaptive } from "@/lib/externalApiSmartAdaptive";
+import { noteSmartAdaptiveRefusal, routeSmartAdaptive, smartAdaptiveRouterAllowed } from "@/lib/externalApiSmartAdaptive";
 import { externalApiRunnableModels } from "@/lib/externalApiCatalog";
 import { externalApiAdmissionHook } from "@/lib/externalApiAdmission";
 import { authenticateExternalApiKey, ExternalApiKeyError } from "@/lib/externalApiKeys";
@@ -252,6 +252,19 @@ export async function handleChatCompletions(request: Request): Promise<Response>
         }
         const parsed = parseChatCompletionRequest(body);
 
+        // Before anything is routed or reserved: a replay is answered as the
+        // original was, with no second router call.
+        const requestDigest = sha256Hex(raw);
+        const idempotencyHeader = request.headers.get("idempotency-key")?.trim() || null;
+        if (idempotencyHeader && idempotencyHeader.length > 255) {
+            throw new ProtocolError(400, "invalid_idempotency_key", "Idempotency-Key must be at most 255 characters.");
+        }
+        const idempotencyKeyDigest = idempotencyHeader ? sha256Hex(idempotencyHeader) : null;
+        if (idempotencyKeyDigest) {
+            const replay = await idempotentReplay(key.keyId, idempotencyKeyDigest, requestDigest);
+            if (replay) return replay;
+        }
+
         const plan = await getUserBillingPlan(key.userId);
         const runnable = await externalApiRunnableModels(plan.tier);
         // Smart Adaptive: Tomverse picks one of the runnable models, and the
@@ -265,6 +278,7 @@ export async function handleChatCompletions(request: Request): Promise<Response>
                 keyId: key.keyId,
                 userId: key.userId,
                 requestId,
+                routerAllowed: await smartAdaptiveRouterAllowed(key),
             });
             entry = routed.entry;
             routedHeaders = { "x-tomverse-routed-model": entry.model.id, "x-tomverse-routed-by": routed.routedBy };
@@ -335,17 +349,6 @@ export async function handleChatCompletions(request: Request): Promise<Response>
                   }
                 : settings.providerOptions;
 
-        const requestDigest = sha256Hex(raw);
-        const idempotencyHeader = request.headers.get("idempotency-key")?.trim() || null;
-        if (idempotencyHeader && idempotencyHeader.length > 255) {
-            throw new ProtocolError(400, "invalid_idempotency_key", "Idempotency-Key must be at most 255 characters.");
-        }
-        const idempotencyKeyDigest = idempotencyHeader ? sha256Hex(idempotencyHeader) : null;
-        if (idempotencyKeyDigest) {
-            const replay = await idempotentReplay(key.keyId, idempotencyKeyDigest, requestDigest);
-            if (replay) return replay;
-        }
-
         // Everything that reaches the provider is in the estimate: the whole
         // history, tool schemas, tool calls and results, and each image.
         const estimate = createTokenEstimateAccumulator();
@@ -406,6 +409,9 @@ export async function handleChatCompletions(request: Request): Promise<Response>
                 const replay = await idempotentReplay(key.keyId, idempotencyKeyDigest, requestDigest);
                 if (replay) return replay;
             }
+            // Admission refused: hold off further router calls for this key a
+            // while, since the next requests would most likely be refused too.
+            if (parsed.model === SMART_ADAPTIVE_MODEL_ID && isChatAccessError(error)) noteSmartAdaptiveRefusal(key.keyId);
             throw error;
         }
         leaseId = grant.leaseId;

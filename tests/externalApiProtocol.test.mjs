@@ -268,3 +268,20 @@ test("missing provider usage is null, never zero", () => {
     assert.equal(toOpenAiFinishReason("tool-calls", false), "tool_calls");
     assert.equal(toOpenAiFinishReason("content-filter", false), "content_filter");
 });
+
+test("a model takes a request's optional features by the rules the request is validated with", async () => {
+    const { modelTakesRequestFeatures } = await import("../lib/openAiChatProtocol.ts");
+    const openai = { id: "o", provider: "openai", vision: true, reasoning: true, maxOutputTokens: 1000 };
+    const deepseek = { id: "d", provider: "deepseek", vision: false, reasoning: true, maxOutputTokens: 1000 };
+    const plain = parseChatCompletionRequest({ model: "smart-adaptive", messages: [{ role: "user", content: "hi" }] });
+    assert.equal(modelTakesRequestFeatures(plain, deepseek), true);
+    const strict = parseChatCompletionRequest({ model: "smart-adaptive", messages: [{ role: "user", content: "hi" }], tools: [{ type: "function", function: { name: "t", strict: true, parameters: { type: "object", properties: {} } } }] });
+    assert.equal(modelTakesRequestFeatures(strict, openai), true);
+    assert.equal(modelTakesRequestFeatures(strict, deepseek), false);
+    const effort = parseChatCompletionRequest({ model: "smart-adaptive", reasoning_effort: "low", messages: [{ role: "user", content: "hi" }] });
+    assert.equal(modelTakesRequestFeatures(effort, openai), true);
+    assert.equal(modelTakesRequestFeatures(effort, deepseek), false);
+    const detail = parseChatCompletionRequest({ model: "smart-adaptive", messages: [{ role: "user", content: [{ type: "image_url", image_url: { url: "data:image/png;base64,AA==", detail: "high" } }] }] });
+    assert.equal(modelTakesRequestFeatures(detail, openai), true);
+    assert.equal(modelTakesRequestFeatures(detail, { ...openai, provider: "anthropic" }), false);
+});

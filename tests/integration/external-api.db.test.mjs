@@ -425,6 +425,40 @@ test("external inference API over the real shared credit ledger", { skip: !datab
             assert.equal(fallback.headers.get("x-tomverse-routed-model"), MODEL_ID);
             assert.equal(fallback.headers.get("x-tomverse-routed-by"), "default");
 
+            // Optional features a candidate cannot take leave it out, by the
+            // same rules the request is validated with.
+            routerPick = SECOND;
+            const strictTool = await call(key, body({
+                model: "smart-adaptive",
+                messages: [{ role: "user", content: "Use the strict tool" }],
+                tools: [{ type: "function", function: { name: "run", strict: true, parameters: { type: "object", properties: {}, additionalProperties: false } } }],
+            }));
+            assert.equal(strictTool.status, 200, "never refused because of the pick");
+            assert.ok(!routerCalls.at(-1).eligibleModelIds.includes(SECOND), "DeepSeek's adapter drops strict, so it is not a candidate");
+            assert.notEqual(strictTool.headers.get("x-tomverse-routed-model"), SECOND);
+            const effort = await call(key, body({ model: "smart-adaptive", reasoning_effort: "low", messages: [{ role: "user", content: "Think a little" }] }));
+            assert.equal(effort.status, 200);
+            assert.ok(routerCalls.at(-1).eligibleModelIds.every((id) => !id.startsWith("deepseek")), "reasoning_effort is OpenAI-only");
+
+            // An Idempotency-Key replay is answered before routing: no second router call.
+            routerPick = MODEL_ID;
+            const idem = { headers: { "idempotency-key": "smart-adaptive-replay-1" } };
+            const once = await call(key, body({ model: "smart-adaptive", messages: [{ role: "user", content: "Once only" }] }), idem);
+            assert.equal(once.status, 200);
+            await once.text();
+            const routedBefore = routerCalls.length;
+            const again = await call(key, body({ model: "smart-adaptive", messages: [{ role: "user", content: "Once only" }] }), idem);
+            assert.equal(again.status, 409, "the replay is the original's receipt");
+            assert.equal(routerCalls.length, routedBefore, "a replay makes no router call");
+
+            // A key whose cap is spent gets no paid router call; admission refuses as usual.
+            const capped = await issueKey(userId, { creditCap: 1 });
+            assert.equal((await call(capped.key, body({ model: "smart-adaptive", messages: [{ role: "user", content: "First" }] }))).status, 200);
+            const routedAtCap = routerCalls.length;
+            const overCap = await call(capped.key, body({ model: "smart-adaptive", messages: [{ role: "user", content: "Second" }] }));
+            assert.notEqual(overCap.status, 200);
+            assert.equal(routerCalls.length, routedAtCap, "no router call for a key whose cap is spent");
+
             // A model the catalogue knows but this deployment does not offer (no
             // credential here) says how to recover instead of a bare 404.
             const retired = await call(key, body({ model: "claude-haiku-5-5" }));

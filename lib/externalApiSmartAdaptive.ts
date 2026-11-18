@@ -1,12 +1,15 @@
 import "server-only";
 import { createHash } from "node:crypto";
+import { assertOperationalFeatureEnabled } from "@/lib/appSettings";
 import { pickAutoModelWithLlm } from "@/lib/autoLlmRouter";
 import { estimateTextTokens } from "@/lib/chatTokenEstimate";
+import { keyCreditTotals } from "@/lib/externalApiAdmission";
 import type { externalApiRunnableModels } from "@/lib/externalApiCatalog";
 import { smartAdaptiveRouterEnabled } from "@/lib/externalApiCatalogCore";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { DEFAULT_MODEL_ID } from "@/lib/models";
-import type { ChatCompletionRequest } from "@/lib/openAiChatProtocol";
+import { modelTakesRequestFeatures, type ChatCompletionRequest } from "@/lib/openAiChatProtocol";
+import { prisma } from "@/lib/prisma";
 
 type RunnableEntry = Awaited<ReturnType<typeof externalApiRunnableModels>>[number];
 
@@ -15,8 +18,18 @@ type RunnableEntry = Awaited<ReturnType<typeof externalApiRunnableModels>>[numbe
  * catalogue model answers a request. See docs/policy/external-api.md.
  *
  * Candidates are the runnable models that fit this request: images only to a
- * model that reads them, and input plus requested output within the model's
- * window. Without the router switch, or when the router gives no answer, the
+ * model that reads them, input plus requested output within the model's
+ * window, and the optional features the request uses (strict tools, image
+ * detail, reasoning effort) by the same rules the request is validated with.
+ *
+ * The router call is paid (the provider operational budget), and it runs
+ * before admission, because admission reserves for the model it picks. So it
+ * is made only when admission is not already known to refuse: not while AI
+ * chat is paused, not when the key's cap is spent, and not for a key whose
+ * Smart Adaptive request was refused at admission in the last two minutes
+ * (credits, allowance, concurrency). Otherwise the default model is taken and
+ * admission refuses with its own error. An Idempotency-Key replay is answered
+ * before this runs. Without the router switch, or when the router gives no answer, the
  * default model answers if it fits, otherwise the first candidate.
  *
  * A coding client sends every tool round as a new request, so routing each one
@@ -31,6 +44,34 @@ type RunnableEntry = Awaited<ReturnType<typeof externalApiRunnableModels>>[numbe
 const STICKY_MS = 10 * 60_000;
 const STICKY_MAX = 2_000;
 const sticky = new Map<string, { modelId: string; at: number }>();
+const REFUSED_MS = 2 * 60_000;
+const refused = new Map<string, number>();
+
+/** Called when admission refused a Smart Adaptive request of this key. */
+export const noteSmartAdaptiveRefusal = (keyId: string, now = Date.now()) => {
+    if (refused.size >= STICKY_MAX) refused.delete(refused.keys().next().value as string);
+    refused.set(keyId, now);
+};
+
+/** Whether the paid router call may be made for this key now. */
+export const smartAdaptiveRouterAllowed = async (
+    key: { keyId: string; creditCap: number | null },
+    now = Date.now()
+) => {
+    if (!smartAdaptiveRouterEnabled(process.env)) return false;
+    const refusedAt = refused.get(key.keyId);
+    if (refusedAt !== undefined && now - refusedAt < REFUSED_MS) return false;
+    try {
+        await assertOperationalFeatureEnabled("aiChatEnabled");
+    } catch {
+        return false;
+    }
+    if (key.creditCap !== null) {
+        const totals = (await keyCreditTotals(prisma, [key.keyId])).get(key.keyId);
+        if ((totals?.committed ?? 0) >= key.creditCap) return false;
+    }
+    return true;
+};
 
 const textOf = (content: unknown): string =>
     typeof content === "string"
@@ -91,10 +132,17 @@ export const smartAdaptiveCandidates = (request: ChatCompletionRequest, runnable
     const output = request.max_completion_tokens ?? request.max_tokens ?? 0;
     const input = estimatedInputTokens(request);
     return runnable.filter(
-        ({ capabilities }) =>
+        ({ model, capabilities }) =>
             (!images || capabilities.vision) &&
             output <= capabilities.maxOutputTokens &&
-            input + output <= capabilities.contextWindowTokens
+            input + output <= capabilities.contextWindowTokens &&
+            modelTakesRequestFeatures(request, {
+                id: model.id,
+                provider: model.provider,
+                vision: capabilities.vision,
+                reasoning: capabilities.reasoning,
+                maxOutputTokens: capabilities.maxOutputTokens,
+            })
     );
 };
 
@@ -104,6 +152,8 @@ export const routeSmartAdaptive = async (input: {
     keyId: string;
     userId: string;
     requestId: string;
+    /** From `smartAdaptiveRouterAllowed`: false makes no router call. */
+    routerAllowed: boolean;
     now?: number;
 }): Promise<{ entry: RunnableEntry; routedBy: "router" | "continued" | "default" }> => {
     const eligible = smartAdaptiveCandidates(input.request, input.runnable);
@@ -112,7 +162,7 @@ export const routeSmartAdaptive = async (input: {
     const pool = eligible.length > 0 ? eligible : input.runnable;
     const fallback = pool.find((entry) => entry.model.id === DEFAULT_MODEL_ID) ?? pool[0];
     const turn = latestTurn(input.request);
-    if (!turn || eligible.length < 2 || !smartAdaptiveRouterEnabled(process.env)) {
+    if (!turn || eligible.length < 2 || !input.routerAllowed) {
         return { entry: fallback, routedBy: "default" };
     }
 
@@ -122,6 +172,8 @@ export const routeSmartAdaptive = async (input: {
     if (turn.continuesToolLoop && remembered && now - remembered.at < STICKY_MS) {
         const entry = eligible.find((candidate) => candidate.model.id === remembered.modelId);
         if (entry) return { entry, routedBy: "continued" };
+        // No longer a candidate (retired, or this round needs what it lacks).
+        sticky.delete(digest);
     }
 
     const pick = await pickAutoModelWithLlm({
