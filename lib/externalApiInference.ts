@@ -300,7 +300,13 @@ export async function handleChatCompletions(request: Request): Promise<Response>
                 }),
             });
         } catch (error) {
-            if (isChatAccessError(error) && error.code === "idempotency_key_in_use" && idempotencyKeyDigest) {
+            // A twin that passed the pre-check together with the original can
+            // be refused by any admission layer -- the shared credit allowance
+            // or concurrency the original just took, the key cap, or the
+            // duplicate check itself. Whichever it was, if the original is now
+            // recorded under this key, the twin is that request: it gets the
+            // original's receipt, not the refusal.
+            if (idempotencyKeyDigest && (isChatAccessError(error) || error instanceof ApiSecurityError)) {
                 const replay = await idempotentReplay(key.keyId, idempotencyKeyDigest, requestDigest);
                 if (replay) return replay;
             }

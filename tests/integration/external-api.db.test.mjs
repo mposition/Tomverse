@@ -580,6 +580,42 @@ test("external inference API over the real shared credit ledger", { skip: !datab
         assert.equal((await reservationsFor(userId)).length, 2);
     });
 
+    await t.test("a twin refused by the shared allowance its original just used up gets the original's receipt", async () => {
+        const userId = await newUser("Free");
+        allow(userId);
+        const { key } = await issueKey(userId);
+        const security = await import(mod("lib/chatSecurity.ts"));
+        const { getRuntimeModel } = await import(mod("lib/modelRegistry.ts"));
+        const { getUserBillingPlan } = await import(mod("lib/billingEntitlements.ts"));
+        const plan = await getUserBillingPlan(userId);
+        const model = await getRuntimeModel(MODEL_ID);
+        const limit = Math.min(plan.dailyMessageLimit, plan.monthlyMessageLimit);
+        // Web holds (one credit each) take all but the last credit.
+        const access = () =>
+            security.identifyChatCaller(new Request("http://localhost/api/chat"), userId, plan.tier, {
+                dailyMessageLimit: plan.dailyMessageLimit,
+                monthlyMessageLimit: plan.monthlyMessageLimit,
+            });
+        for (let i = 0; i < limit - 1; i += 1) {
+            const grant = await security.acquireChatAccess(access(), security.createChatBudget("user", model, 10), { source: "chat" });
+            await security.releaseChatAccess(grant.leaseId);
+        }
+        assert.ok(limit > 0);
+        const headers = { "idempotency-key": "allowance-twin" };
+        const before = dispatches;
+        // The twin passes the pre-check; just before its reservation the
+        // original runs to completion and takes the last credit.
+        let original;
+        beforeReservationTransaction = async () => {
+            original = await call(key, body(), { headers });
+        };
+        const twin = await call(key, body(), { headers });
+        assert.equal(original.status, 200);
+        assert.equal(twin.status, 409, "the twin is answered with the original's receipt");
+        assert.equal((await twin.json()).error.code, "idempotent_request_completed");
+        assert.equal(dispatches - before, 1);
+    });
+
     await t.test("a twin of a request that used up the key cap gets its receipt, not a cap refusal", async () => {
         const userId = await newUser();
         allow(userId);
@@ -978,7 +1014,8 @@ test("external inference API over the real shared credit ledger", { skip: !datab
         assert.equal((await call(key, body())).status, 200);
         const row = await db.externalApiKey.findUnique({ where: { id: summary.id } });
         assert.match(row.secretDigest, /^[0-9a-f]{64}$/);
-        assert.ok(!JSON.stringify(row).includes(key.split("_").at(-1)));
+        // The secret is everything after "tvk_<8>_" (base64url, which can itself contain "_").
+        assert.ok(!JSON.stringify(row).includes(key.slice("tvk_00000000_".length)));
         await assert.rejects(db.externalApiKey.update({ where: { id: summary.id }, data: { secretDigest: "plain-secret" } }));
         await assert.rejects(db.externalApiKey.update({ where: { id: summary.id }, data: { creditCap: 0 } }));
         const [reservation] = await reservationsFor(userId);
