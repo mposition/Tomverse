@@ -1122,9 +1122,15 @@ export const createChatBudget = (
     // On a long-context turn, choose the tier with room for the estimator's
     // error (see LONG_CONTEXT_TIER_ESTIMATE_MARGIN). Tier choice only: the
     // reserved token counts below are the estimate itself.
+    // The margin is applied to what is sent: the reservation-only image
+    // allowance is never sent, so it must not push a short-tier prompt onto
+    // the long rate that settlement would then never lower.
     const tierPromptTokens = (tokens: number) =>
         longContextTurn
-            ? Math.ceil(tokens * LONG_CONTEXT_TIER_ESTIMATE_MARGIN)
+            ? Math.ceil(
+                  Math.max(0, tokens - reservationOnlyInputTokens) *
+                      LONG_CONTEXT_TIER_ESTIMATE_MARGIN
+              )
             : tokens;
     let pricing = resolveModelRequestPricing(model, {
         estimatedPromptTokens: tierPromptTokens(contextInputTokens),
@@ -1137,11 +1143,22 @@ export const createChatBudget = (
     // Every paid step re-sends its context. Earlier assistant output can also
     // be re-sent; reserve it without changing authored-input credit weight.
     const requestedTotalOutputCap = options?.totalOutputTokenCap;
-    const totalOutputTokens =
+    // On a long-context turn the answer can only use the room the window
+    // leaves after the input -- the same room the route later fits the request
+    // to -- so that is what is reserved, not the model's whole output ceiling.
+    const windowRoom =
+        longContextTurn &&
+        Number.isSafeInteger(model.contextWindowTokens) &&
+        model.contextWindowTokens! > 0
+            ? Math.max(0, model.contextWindowTokens! - contextInputTokens)
+            : Infinity;
+    const totalOutputTokens = Math.min(
+        windowRoom,
         Number.isSafeInteger(requestedTotalOutputCap) &&
-        requestedTotalOutputCap! > 0
+            requestedTotalOutputCap! > 0
             ? Math.min(pricing.maxOutputTokens, requestedTotalOutputCap!)
-            : pricing.maxOutputTokens;
+            : pricing.maxOutputTokens
+    );
     const reservedInputTokens =
         contextInputTokens * passes + totalOutputTokens * (passes - 1);
     // On a long-context turn the provider-cost reservation holds the whole

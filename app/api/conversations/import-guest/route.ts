@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic";
 import {
   CHAT_MAX_MESSAGE_BODY_BYTES,
   CHAT_MAX_MESSAGE_CHARACTERS,
-  CHAT_MAX_STORED_ANSWER_CHARACTERS,
+  storedAnswerContent,
 } from "@/lib/chatRequestLimits";
 
 import { NextResponse } from "next/server";
@@ -45,13 +45,13 @@ const importMessageSchema = z
     createdAt: z.string().datetime(),
   })
   .strict()
-  // An answer is stored up to the chat route's own cut, a question up to
-  // what the chat accepts: the same two limits a signed-in turn is held to.
-  .refine(
-    (message) =>
-      message.role !== "assistant" ||
-      message.content.length <= CHAT_MAX_STORED_ANSWER_CHARACTERS,
-    { message: "Answer content is too long.", path: ["content"] }
+  // An answer is stored as the chat route stores one -- cut at its limit,
+  // with the same note -- and never refuses the import; a question is held
+  // to what the chat accepts.
+  .transform((message) =>
+    message.role === "assistant"
+      ? { ...message, content: storedAnswerContent(message.content) }
+      : message
   );
 
 const importGuestConversationSchema = z

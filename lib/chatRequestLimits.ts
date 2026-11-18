@@ -42,6 +42,15 @@ export const CHAT_MAX_MESSAGE_BODY_BYTES = chatRequestMaxBodyBytes(CONTEXT_WINDO
 export const CHAT_MAX_STORED_ANSWER_CHARACTERS = 100_000;
 
 /**
+ * An answer as it is stored: cut at the stored limit, with the note the chat
+ * route appends when it cuts one (app/api/chat/route.ts).
+ */
+export const storedAnswerContent = (content: string) =>
+    content.length > CHAT_MAX_STORED_ANSWER_CHARACTERS
+        ? `${content.slice(0, CHAT_MAX_STORED_ANSWER_CHARACTERS)}\n\n[Response truncated for storage]`
+        : content;
+
+/**
  * The server's limits, as `validateChatPayload()` applies them.
  *
  * The source of truth is `CHAT_REQUEST_LIMITS` in `lib/chatSecurity.ts`, which

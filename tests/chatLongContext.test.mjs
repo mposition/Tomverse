@@ -9,7 +9,12 @@ import {
 } from "../lib/chatInputLimits.ts";
 import { readFileSync } from "node:fs";
 import { CHAT_REQUEST_LIMITS, accountChatMaxInputTokens, createChatBudget } from "../lib/chatSecurity.ts";
-import { CHAT_MAX_MESSAGE_BODY_BYTES, CHAT_MAX_MESSAGE_CHARACTERS } from "../lib/chatRequestLimits.ts";
+import {
+    CHAT_MAX_MESSAGE_BODY_BYTES,
+    CHAT_MAX_MESSAGE_CHARACTERS,
+    CHAT_MAX_STORED_ANSWER_CHARACTERS,
+    storedAnswerContent,
+} from "../lib/chatRequestLimits.ts";
 import { longContextSettlementRates, resolveModelPricing } from "../lib/modelPricing.ts";
 import { AVAILABLE_MODELS, getModel, getWeightedUsageCredits } from "../lib/models.ts";
 import {
@@ -225,19 +230,54 @@ test("a turn under the flat limit stays flat whatever its image allowance", () =
     assert.equal(withImage.longContextThresholdTokens, null);
 });
 
+// Review r-20261118-064619-ed3e4c: the tier margin applies to what is sent,
+// never to the unsent image allowance.
+test("an unsent image allowance does not push a short-tier prompt onto the long rate", () => {
+    const luna = getModel("gpt-6-luna");
+    // 210k sent x 1.25 = 262.5k: short tier (Luna steps at 272k)...
+    const sentOnly = createChatBudget("user", luna, 210_000);
+    assert.equal(sentOnly.longContextThresholdTokens, null);
+    // ...and still short with 16k of unsent allowance on top.
+    const withAllowance = createChatBudget("user", luna, 210_000, { reservationOnlyInputTokens: 16_000 });
+    assert.equal(withAllowance.longContextThresholdTokens, null);
+    assert.equal(withAllowance.inputUsdPerMillionTokens, sentOnly.inputUsdPerMillionTokens);
+});
+
 test("one decision drives every long-context rule", () => {
     const source = readFileSync(new URL("../lib/chatSecurity.ts", import.meta.url), "utf8");
     assert.match(source, /const longContextTurn =\s*chatLongContextEnabled\(\) && estimatedInputTokens > chatUserMaxInputTokens\(\);/);
-    assert.match(source, /longContextTurn\s*\?\s*Math\.ceil\(tokens \* LONG_CONTEXT_TIER_ESTIMATE_MARGIN\)/);
+    assert.match(source, /longContextTurn\s*\?\s*Math\.ceil\(\s*Math\.max\(0, tokens - reservationOnlyInputTokens\) \*\s*LONG_CONTEXT_TIER_ESTIMATE_MARGIN/);
     assert.match(source, /requestedTotalOutputCap === undefined && !longContextTurn/);
     assert.match(source, /const longContextCredits = longContextTurn\s*\?/);
 });
 
-test("guest import stores answers up to the chat route's own cut", () => {
+// Review r-20261118-064619-ed3e4c: a long guest answer is cut, as the chat
+// route cuts one, and never refuses the whole import.
+test("guest import stores a long answer cut, as the chat route does", () => {
     const route = readFileSync(new URL("../app/api/conversations/import-guest/route.ts", import.meta.url), "utf8");
-    assert.match(route, /message\.role !== "assistant" \|\|\s*message\.content\.length <= CHAT_MAX_STORED_ANSWER_CHARACTERS/);
+    assert.match(route, /message\.role === "assistant"\s*\?\s*\{ \.\.\.message, content: storedAnswerContent\(message\.content\) \}/);
+    assert.doesNotMatch(route, /Answer content is too long/);
     const chat = readFileSync(new URL("../app/api/chat/route.ts", import.meta.url), "utf8");
     assert.match(chat, /const MAX_STORED_MESSAGE_CHARACTERS = CHAT_MAX_STORED_ANSWER_CHARACTERS;/);
+    // The same cut and the same note the chat route writes.
+    assert.match(chat, /\\n\\n\[Response truncated for storage\]/);
+    const long = "x".repeat(CHAT_MAX_STORED_ANSWER_CHARACTERS + 5);
+    assert.equal(
+        storedAnswerContent(long),
+        `${"x".repeat(CHAT_MAX_STORED_ANSWER_CHARACTERS)}\n\n[Response truncated for storage]`
+    );
+    assert.equal(storedAnswerContent("short"), "short");
+});
+
+// Same review: the answer can only use the room the window leaves.
+test("a long turn reserves no more output than the window leaves", () => {
+    const luna = getModel("gpt-6-luna");
+    const budget = createChatBudget("user", luna, luna.contextWindowTokens - 1_000);
+    assert.ok(budget.maxOutputTokens <= luna.contextWindowTokens - budget.inputTokens, `${budget.maxOutputTokens}`);
+    assert.equal(budget.reservedOutputTokens, budget.maxOutputTokens);
+    // A flat turn keeps the model's own ceiling; the route fits it later.
+    const flat = createChatBudget("user", luna, 10_000);
+    assert.equal(flat.maxOutputTokens, resolveModelPricing(luna, { estimatedPromptTokens: 10_000 }).maxOutputTokens);
 });
 
 test("settlement charges the actual cost, between the flat floor and the flat rule", () => {
