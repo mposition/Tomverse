@@ -14,6 +14,7 @@ import { existsSync, writeFileSync } from "node:fs";
 import { TEST_KEY } from "./fakeGateway.js";
 import { Journal } from "../src/session.js";
 import { Runner } from "../src/agent.js";
+import { renderFileDiff } from "../src/display.js";
 import { undoChange, UndoError, viewChanges } from "../src/changes.js";
 import { chmodSync, renameSync, statSync, symlinkSync } from "node:fs";
 import { planCommand, runCommand } from "../src/commands.js";
@@ -344,4 +345,12 @@ test("without ps the command result says the process tree could not be checked",
     } finally {
         process.env.PATH = savedPath;
     }
+});
+test("the approval diff is never shortened: every removed and added line is shown", () => {
+    const before = Array.from({ length: 1000 }, (_, i) => `old ${i}`).join("\n");
+    const after = Array.from({ length: 1000 }, (_, i) => `new ${i}`).join("\n");
+    const diff = renderFileDiff("big.txt", before, after);
+    assert.match(diff.split("\n")[0]!, /\(1000 line\(s\) removed, 1000 added\)/);
+    assert.ok(diff.includes("- old 999") && diff.includes("+ new 999"));
+    assert.ok(!/not shown/.test(diff));
 });

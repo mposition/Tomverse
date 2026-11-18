@@ -44,11 +44,12 @@ export const createOutput = (json: boolean, streams = { out: process.stdout, err
     },
 });
 
-const LINE_LIMIT = 400;
-
-/** A unified-looking diff of one file for the approval screen. */
+/**
+ * A unified-looking diff of one file for the approval screen. Never
+ * shortened: what is approved is exactly what is shown, however long. The
+ * header counts the removed and added lines so a long one is seen as long.
+ */
 export const renderFileDiff = (path: string, before: string | null, after: string | null): string => {
-    const header = before === null ? `+++ new file ${path}` : after === null ? `--- delete ${path}` : `*** ${path}`;
     // Line endings are kept in the file; the diff compares lines without them.
     const a = before === null ? [] : before.split(/\r?\n/);
     const b = after === null ? [] : after.split(/\r?\n/);
@@ -61,17 +62,13 @@ export const renderFileDiff = (path: string, before: string | null, after: strin
         endA -= 1;
         endB -= 1;
     }
+    const counts = `(${endA - start} line(s) removed, ${endB - start} added)`;
+    const header = before === null ? `+++ new file ${path} ${counts}` : after === null ? `--- delete ${path} ${counts}` : `*** ${path} ${counts}`;
     const lines: string[] = [header];
     const from = Math.max(0, start - 3);
     for (let i = from; i < start; i += 1) lines.push(`  ${a[i]}`);
     for (let i = start; i < endA; i += 1) lines.push(`- ${a[i]}`);
     for (let i = start; i < endB; i += 1) lines.push(`+ ${b[i]}`);
     for (let i = endA; i < Math.min(a.length, endA + 3); i += 1) lines.push(`  ${a[i]}`);
-    if (lines.length > LINE_LIMIT) {
-        const hidden = lines.length - LINE_LIMIT;
-        return [...lines.slice(0, LINE_LIMIT), `... ${hidden} more diff lines not shown (the whole change is what will be written)`]
-            .map(safeText)
-            .join("\n");
-    }
     return lines.map(safeText).join("\n");
 };
