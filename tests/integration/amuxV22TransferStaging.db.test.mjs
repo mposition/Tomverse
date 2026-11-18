@@ -45,6 +45,15 @@ const prisma = new Proxy({}, {
 });
 mock.module(mod("lib/prisma.ts"), { namedExports: { prisma,
   prismaPoolUsage: () => ({ total: 0, idle: 0, waiting: 0 }) } });
+// A route's unknown outcome is recorded by class and code only; with only
+// synthetic data here, the test prints the whole error so a failure says why.
+mock.module(mod("lib/amux/operationalError.ts"), { namedExports: {
+  reportAmuxOperationalIncident: (operation, error) => {
+    console.error(`[${operation}]`, error instanceof Error ? error.stack : String(error));
+    return { incidentId: "00000000-0000-4000-8000-000000000000",
+      errorClass: "Error", errorCode: "AMUX_INTERNAL_OPERATION_FAILED" };
+  },
+} });
 // The real modules under another URL, so the mocks below keep their exports.
 const realGuard = await import(`${mod("lib/amux/guard.ts")}?real`);
 mock.module(mod("lib/amux/guard.ts"), {
