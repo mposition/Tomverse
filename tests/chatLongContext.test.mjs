@@ -358,7 +358,7 @@ test("above the flat limit the tier is chosen with a quarter of room", () => {
     assert.equal(createChatBudget("user", luna, FLAT).longContextThresholdTokens, null);
 });
 
-test("settlement records a crossed tier at the higher rate, never a lower one", () => {
+test("settlement records a crossed tier at the higher rate", () => {
     const short = resolveModelPricing(getModel("gpt-6-luna"), { estimatedPromptTokens: 1_000 });
     const long = resolveModelPricing(getModel("gpt-6-luna"), { estimatedPromptTokens: 300_000 });
     const snapshot = {
@@ -382,6 +382,61 @@ test("settlement records a crossed tier at the higher rate, never a lower one", 
     // A snapshot above the tier's rate is never lowered.
     const dear = { ...snapshot, inputUsdPerMillionTokens: 99, outputUsdPerMillionTokens: 99 };
     assert.equal(longContextSettlementRates(dear, 300_000).inputUsdPerMillionTokens, 99);
+});
+
+// Review r-20261118-080744-15bf85: the estimate margin may reserve the long
+// rate for a prompt that arrives under the boundary; the provider charges the
+// short rate there, and so does settlement -- credits and provider cost alike.
+test("a long-rate reservation whose prompt stayed under the boundary settles at the short rate", () => {
+    const short = resolveModelPricing(getModel("gpt-6-luna"), { estimatedPromptTokens: 1_000 });
+    const long = resolveModelPricing(getModel("gpt-6-luna"), { estimatedPromptTokens: 300_000 });
+    assert.ok(long.inputUsdPerMillionTokens > short.inputUsdPerMillionTokens);
+    const reservedLong = {
+        modelId: "gpt-6-luna",
+        inputUsdPerMillionTokens: long.inputUsdPerMillionTokens,
+        outputUsdPerMillionTokens: long.outputUsdPerMillionTokens,
+        cacheWriteUsdPerMillionTokens: long.cacheWriteUsdPerMillionTokens,
+        longContextThresholdTokens: 272_000,
+        pricingVersion: long.pricingVersion,
+        costSource: long.costSource,
+    };
+    // 230k x 1.25 = 287.5k reserved long; 230k actually sent.
+    const settled = longContextSettlementRates(reservedLong, 230_000);
+    assert.equal(settled.inputUsdPerMillionTokens, short.inputUsdPerMillionTokens);
+    assert.equal(settled.outputUsdPerMillionTokens, short.outputUsdPerMillionTokens);
+    assert.equal(settled.longContextThresholdTokens, null);
+    // At the boundary itself the prompt is still short.
+    assert.equal(longContextSettlementRates(reservedLong, 272_000).longContextThresholdTokens, null);
+    // A lowering never raises a snapshot rate already under the short one.
+    const cheap = { ...reservedLong, inputUsdPerMillionTokens: 0.01 };
+    assert.equal(longContextSettlementRates(cheap, 230_000).inputUsdPerMillionTokens, 0.01);
+    // Under another price version or a flat price nothing moves.
+    const stale = { ...reservedLong, pricingVersion: "openai-gpt-6-luna-1999-01-01" };
+    assert.equal(longContextSettlementRates(stale, 230_000), stale);
+    const flat = { ...reservedLong, costSource: "model_registry_override" };
+    assert.equal(longContextSettlementRates(flat, 230_000), flat);
+});
+
+// Same review (nit): a profile can change its cached-input multiplier at a
+// boundary (Qwen 3.7 Plus, 0.2 to 1.0 above 256K); it moves with the tier.
+test("the cached-input multiplier moves with the settled tier", () => {
+    const short = resolveModelPricing(getModel("qwen3.7-plus"), { estimatedPromptTokens: 1_000 });
+    const snapshot = {
+        modelId: "qwen3.7-plus",
+        inputUsdPerMillionTokens: short.inputUsdPerMillionTokens,
+        outputUsdPerMillionTokens: short.outputUsdPerMillionTokens,
+        cachedInputPriceMultiplier: short.cachedInputPriceMultiplier,
+        longContextThresholdTokens: null,
+        pricingVersion: short.pricingVersion,
+        costSource: short.costSource,
+    };
+    assert.equal(snapshot.cachedInputPriceMultiplier, 0.2);
+    const raised = longContextSettlementRates(snapshot, 300_000);
+    assert.equal(raised.cachedInputPriceMultiplier, 1);
+    assert.equal(raised.longContextThresholdTokens, 256_000);
+    const lowered = longContextSettlementRates(raised, 200_000);
+    assert.equal(lowered.cachedInputPriceMultiplier, 0.2);
+    assert.equal(lowered.inputUsdPerMillionTokens, short.inputUsdPerMillionTokens);
 });
 
 // Review r-20261118-045351-43dc45: the correction never rewrites a price the

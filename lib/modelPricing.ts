@@ -2181,16 +2181,19 @@ export const findPendingPriceRegisterProblems = ({
 };
 
 /**
- * The profile tier a settled prompt actually fell in, when that is a higher
- * long-context tier than the one its reservation priced.
+ * The profile tier a settled prompt actually fell in, when that is another
+ * tier than the one its reservation priced.
  *
  * Settlement prices a turn with the rates its reservation snapshotted, chosen
  * from a token estimate. With long context an account can reach a tier
- * boundary (GPT-5.6 272K, Grok 4.5 200K, MiniMax M3 512K), and a prompt the
- * estimate put below it can arrive above it. Then the provider charges the
- * long rate and the short one would be recorded. This answers with the tier
- * the provider's own count selects, so the caller can settle at whichever rate
- * is higher -- never lower than the reservation's.
+ * boundary (GPT-5.6 272K, Grok 4.5 200K, MiniMax M3 512K), and the actual
+ * prompt can land on either side of it. Above it, the provider charges the
+ * long rate while the short one would be recorded. Below it, the reservation
+ * may still have taken the long rate: the tier is chosen with an estimate
+ * margin (LONG_CONTEXT_TIER_ESTIMATE_MARGIN), and the provider then charges
+ * the short one (review r-20261118-080744-15bf85). Either way this answers
+ * with the tier the provider's own count selects, so the turn is settled --
+ * credits and provider cost alike -- at the rate the provider applied.
  *
  * Bounded so it never rewrites a price the reservation did not take from these
  * tiers (review r-20261118-045351-43dc45):
@@ -2202,7 +2205,7 @@ export const findPendingPriceRegisterProblems = ({
  *   environment flat price, or a class fallback, answers null.
  *
  * Also null when the profile has one tier, when there is no profile, or when
- * the reserved tier already reaches as far as the actual prompt.
+ * the actual prompt is in the reserved tier.
  */
 export const LONG_CONTEXT_SETTLEMENT_COST_SOURCES: ReadonlySet<string> = new Set([
     "registry",
@@ -2240,14 +2243,16 @@ export const longContextSettlementTier = (input: {
         }
         below = candidate.maxPromptTokens;
     }
-    if ((threshold ?? 0) <= (input.reservedLongContextThresholdTokens ?? 0)) {
-        return null;
-    }
+    const reserved = input.reservedLongContextThresholdTokens ?? 0;
+    if ((threshold ?? 0) === reserved) return null;
     return {
         inputUsdPerMillionTokens: tier.inputUsdPerMillionTokens,
         outputUsdPerMillionTokens: tier.outputUsdPerMillionTokens,
         cacheWriteUsdPerMillionTokens: tier.cacheWriteUsdPerMillionTokens ?? null,
+        cachedInputPriceMultiplier: tier.cachedInputPriceMultiplier,
         longContextThresholdTokens: threshold,
+        /** True when the prompt reached a higher tier than was reserved. */
+        raised: (threshold ?? 0) > reserved,
     };
 };
 
@@ -2256,6 +2261,8 @@ type SettlementRates = {
     inputUsdPerMillionTokens: number;
     outputUsdPerMillionTokens: number;
     cacheWriteUsdPerMillionTokens?: number | null;
+    /** Moved with the tier too: some profiles change it at a boundary. */
+    cachedInputPriceMultiplier?: number;
     longContextThresholdTokens?: number | null;
     /** The reservation's `pricingVersion`; absent means "do not correct". */
     pricingVersion?: string | null;
@@ -2264,8 +2271,10 @@ type SettlementRates = {
 };
 
 /**
- * A snapshot's rates for settling `actualPromptTokens`: each the higher of the
- * snapshot's and the crossed long-context tier's (`longContextSettlementTier`).
+ * A snapshot's rates for settling `actualPromptTokens`, moved to the tier the
+ * prompt actually fell in (`longContextSettlementTier`): up to the higher of
+ * the two rates when it crossed a boundary, down to the lower when it stayed
+ * under the boundary its reservation priced.
  * The one rule every settlement path applies, single-attempt and per-attempt,
  * so the provider ledger and the reservation cannot disagree.
  */
@@ -2281,22 +2290,33 @@ export const longContextSettlementRates = <T extends SettlementRates>(
         reservedCostSource: rates.costSource,
     });
     if (!crossed) return rates;
+    // Toward the tier the prompt fell in, and never past it: a raise keeps a
+    // dearer snapshot rate, a lowering never raises a cheaper one.
+    const pick = crossed.raised ? Math.max : Math.min;
     const cacheWrite = rates.cacheWriteUsdPerMillionTokens;
     return {
         ...rates,
-        inputUsdPerMillionTokens: Math.max(
+        inputUsdPerMillionTokens: pick(
             rates.inputUsdPerMillionTokens,
             crossed.inputUsdPerMillionTokens
         ),
-        outputUsdPerMillionTokens: Math.max(
+        outputUsdPerMillionTokens: pick(
             rates.outputUsdPerMillionTokens,
             crossed.outputUsdPerMillionTokens
         ),
         cacheWriteUsdPerMillionTokens:
             typeof cacheWrite === "number" &&
             typeof crossed.cacheWriteUsdPerMillionTokens === "number"
-                ? Math.max(cacheWrite, crossed.cacheWriteUsdPerMillionTokens)
+                ? pick(cacheWrite, crossed.cacheWriteUsdPerMillionTokens)
                 : cacheWrite,
+        ...(typeof rates.cachedInputPriceMultiplier === "number"
+            ? {
+                  cachedInputPriceMultiplier: pick(
+                      rates.cachedInputPriceMultiplier,
+                      crossed.cachedInputPriceMultiplier
+                  ),
+              }
+            : {}),
         longContextThresholdTokens: crossed.longContextThresholdTokens,
     };
 };

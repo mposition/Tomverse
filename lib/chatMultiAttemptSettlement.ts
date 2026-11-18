@@ -151,8 +151,8 @@ export const priceAttempt = (
     priceOne(attempt);
 
 const priceOne = (attempt: AttemptUsage): { costMicroUsd: number; costSource: PricedAttempt["costSource"] } => {
-    // The same long-context rule as single-attempt settlement: never lower
-    // than the snapshot, higher when the prompt crossed a tier boundary.
+    // The same long-context rule as single-attempt settlement: the rate of
+    // the tier the attempt's prompt actually fell in.
     const price = longContextSettlementRates(attempt.price, attempt.inputTokens);
     const tokenCost = calculateProviderUsageCost({
         inputTokens: attempt.inputTokens,

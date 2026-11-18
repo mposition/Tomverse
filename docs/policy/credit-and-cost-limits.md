@@ -82,8 +82,9 @@ guardrail = 크레딧 수 × COST_PER_CREDIT_CEILING_MICRO_USD × GUARDRAIL_HEAD
   두 가지로 원가 아래 정산을 막습니다.
   - **예약:** 128k를 넘는 turn은 추정치 × 1.25(`LONG_CONTEXT_TIER_ESTIMATE_MARGIN`)로
     구간을 고릅니다. 추정이 경계 바로 아래여도 장문 단가로 예약합니다.
-  - **정산:** 실제 프롬프트 토큰이 예약 구간보다 높은 구간에 들어가면, 두 단가 중 높은
-    쪽으로 정산합니다(`longContextSettlementRates`). 공급사 비용과 위의 실제 비용 크레딧이
+  - **정산:** 실제 프롬프트 토큰이 들어간 구간의 단가로 정산합니다
+    (`longContextSettlementRates`). 예약보다 높은 구간이면 두 단가 중 높은 쪽, 여유분
+    때문에 장문 단가로 예약했지만 실제로는 경계 아래면 단문 단가로 내립니다. 공급사 비용과 위의 실제 비용 크레딧이
     모두 이 단가를 씁니다. 단일 시도 정산, 시도별 가격, 시도 비용 장부가 같은 함수를 씁니다.
   - **보정하지 않는 경우:** 예약의 `pricingVersion`이 지금 가격표와 다르거나(가격 개정은
     소급하지 않습니다), 예약 가격이 profile 구간이 아니라 registry·env 단일 가격이나
@@ -186,7 +187,7 @@ Flash-Lite, API 모델 `gemini-3.5-flash-lite`, Guest, standard)는 이 하한�
   5.5를 Guest · Standard · 1크레딧으로 채택하는 저장은 거절됩니다.
 - **남는 위험(수용).** 100,000토큰 경계는 고정 입력 상한(128,000) 안이라 실제로
   도달합니다. 예약은 자기 토큰 **추정치**로 tier를 고릅니다. 정산은 실제 prompt가
-  경계를 넘으면, 예약의 `pricingVersion`이 지금 가격표와 같고 가격이 profile 구간에서
+  들어간 tier로 다시 고르며, 경계를 넘으면 예약의 `pricingVersion`이 지금 가격표와 같고 가격이 profile 구간에서
   왔을 때 장문 요율로 공급사 원가를 기록합니다(`longContextSettlementRates`).
   레지스트리 행이나 환경변수에 평탄한 가격이 있으면 보정하지 않으므로, 그때는 100,000
   토큰을 넘는 Haiku 요청의 **내부 원가가 단문 요율로 낮게 기록될 수 있습니다.** 사용자

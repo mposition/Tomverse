@@ -1124,7 +1124,7 @@ export const createChatBudget = (
     // reserved token counts below are the estimate itself.
     // The margin is applied to what is sent: the reservation-only image
     // allowance is never sent, so it must not push a short-tier prompt onto
-    // the long rate that settlement would then never lower.
+    // the long rate and inflate what the reservation holds.
     const tierPromptTokens = (tokens: number) =>
         longContextTurn
             ? Math.ceil(
@@ -4684,8 +4684,8 @@ export const settleChatUsage = async (
             searchSurchargeCredits: usage.searchSurchargeCredits,
             searchExecuted: usage.searchExecuted,
         });
-        // A prompt that arrived in a higher long-context tier than its
-        // reservation priced is recorded at the higher rate; never lower.
+        // A prompt that arrived in another long-context tier than its
+        // reservation priced is settled at that tier's rate, up or down.
         const settledRates = longContextSettlementRates(
             {
                 modelId: canonical.modelId,
@@ -4693,6 +4693,7 @@ export const settleChatUsage = async (
                 outputUsdPerMillionTokens: canonical.outputUsdPerMillionTokens,
                 cacheWriteUsdPerMillionTokens:
                     canonical.cacheWriteUsdPerMillionTokens ?? null,
+                cachedInputPriceMultiplier: canonical.cachedInputPriceMultiplier,
                 longContextThresholdTokens:
                     canonical.longContextThresholdTokens ?? null,
                 pricingVersion: canonical.pricingVersion ?? null,
@@ -4707,8 +4708,7 @@ export const settleChatUsage = async (
             outputTokens: actualOutput,
             inputUsdPerMillionTokens: settledRates.inputUsdPerMillionTokens,
             outputUsdPerMillionTokens: settledRates.outputUsdPerMillionTokens,
-            cachedInputPriceMultiplier:
-                canonical.cachedInputPriceMultiplier,
+            cachedInputPriceMultiplier: settledRates.cachedInputPriceMultiplier,
             // From the reservation's own snapshot, not from today's registry:
             // this settles a request that was priced when it was reserved, and
             // re-reading the rate here would apply a later price change
@@ -4727,7 +4727,7 @@ export const settleChatUsage = async (
         */
         const creditRates = billedAttempt
             ? longContextSettlementRates(billedAttempt.price, billedAttempt.inputTokens)
-            : { ...settledRates, cachedInputPriceMultiplier: canonical.cachedInputPriceMultiplier };
+            : settledRates;
         const creditCost = canonical.longContextSettlement
             ? calculateProviderUsageCost({
                   inputTokens: actualInput,
