@@ -175,6 +175,15 @@ export class Workspace {
                     if (!name || seen.has(name) || isSecretPath(name) || this.isPrivate(join(this.root, name))) continue;
                     seen.add(name);
                     if (!existsSync(join(this.root, name))) continue;
+                    // Git lists a link by its own name; where it points decides. The
+                    // same real-path and credential check as read_file: a link to a
+                    // file outside, or to .env under an ordinary name, is left out.
+                    try {
+                        const real = this.resolve(name, "read");
+                        if (!statSync(real.absolute).isFile()) continue;
+                    } catch {
+                        continue;
+                    }
                     if (files.length >= limit) {
                         truncated = true;
                         break;

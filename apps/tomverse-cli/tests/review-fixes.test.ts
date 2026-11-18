@@ -582,3 +582,21 @@ test("search never returns, and with ripgrep never opens, a credential file: onl
             assert.deepEqual(result.matches, ["src/ok.ts:1:TOKEN_X"], JSON.stringify(result));
         }
     ));
+test("in a Git repo a link under an ordinary name is listed only if what it points to may be read", (t) => {
+    if (spawnSync("git", ["--version"]).status !== 0) return t.skip("no git");
+    const root = tempDir("ws");
+    const outside = tempDir("outside");
+    writeFileSync(join(outside, "private.txt"), "TOKEN_Y=outside\n");
+    writeFileSync(join(root, ".env"), "TOKEN_Y=env\n");
+    writeFileSync(join(root, "ok.txt"), "TOKEN_Y=fine\n");
+    try {
+        symlinkSync(join(root, ".env"), join(root, "notes.txt"), "file");
+        symlinkSync(join(outside, "private.txt"), join(root, "readme.txt"), "file");
+    } catch {
+        return t.skip("file links need a privilege here");
+    }
+    spawnSync("git", ["init", "-q"], { cwd: root });
+    const listed = new Workspace(normalizeRoot(root), []).listFiles(".", 100);
+    assert.equal(listed.source, "git");
+    assert.deepEqual(listed.files, ["ok.txt"]);
+});
