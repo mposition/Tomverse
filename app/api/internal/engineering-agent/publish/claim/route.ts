@@ -4,7 +4,7 @@ import { after } from "next/server";
 import { z } from "zod";
 
 import { readLimitedJson } from "@/lib/apiSecurity";
-import { ENGINEERING_PUBLISHER_FEATURES_HEADER,
+import { ENGINEERING_AGENT_APP_FEATURES, ENGINEERING_PUBLISHER_FEATURES_HEADER,
   publisherOpensReviewDrafts, publisherResumesPullRequests } from "@/lib/engineeringAgentCore";
 import {
   ENGINEERING_AGENT_PUBLISH_CLAIM_LEASE_MS,
@@ -68,7 +68,9 @@ export async function POST(request: Request) {
     // The halt beside the work, so a quiet round while halted is not reported
     // as a healthy one (§12). Lookups continue while halted.
     const halt = currentEngineeringAgentHalt(await readEngineeringAgentHaltState(prisma));
-    return engineeringAgentJson({ work: outcome.value, halt }, 200);
+    // What this app takes (ENGINEERING_AGENT_APP_FEATURES): a publisher binds
+    // the v2 change digest only when it is named here.
+    return engineeringAgentJson({ work: outcome.value, halt, appFeatures: ENGINEERING_AGENT_APP_FEATURES }, 200);
   } catch (error) {
     // A switch that refuses the claim (mode off, frozen, kill switch) says
     // nothing about a halt, so the refusal carries it too: a quiet round is

@@ -715,6 +715,18 @@ test("the table refuses what the lifecycle does not allow", async () => {
     assert.equal(await refusedBy("AmuxDmOwnerSettlement_shape_check", () => tx.$executeRaw`
       UPDATE "AmuxDmOwnerSettlement" SET "id" = ${randomUUID()} WHERE "id" = ${card.settlementId}`), true,
       "a version 4 id is not a settlement's");
+    // Owner decision 2026-11-18: an approval names the v2 change digest, or a v1 one recorded
+    // before it; nothing else. (CHECKs are tested by name order: the shape before the state.)
+    for (const digest of [`v3:${"a".repeat(64)}`, `v2:${"a".repeat(63)}`, `V2:${"a".repeat(64)}`, "a".repeat(63)]) {
+      assert.equal(await refusedBy("AmuxDmOwnerSettlement_shape_check", () => tx.$executeRaw`
+        UPDATE "AmuxDmOwnerSettlement" SET "approvedHeadSha" = ${"a".repeat(40)}, "approvedDiffDigest" = ${digest}
+        WHERE "id" = ${card.settlementId}`), true, `not an approval digest: ${digest}`);
+    }
+    for (const digest of [`v2:${"a".repeat(64)}`, "a".repeat(64)]) {
+      assert.equal(await refusedBy("AmuxDmOwnerSettlement_shape_check", () => tx.$executeRaw`
+        UPDATE "AmuxDmOwnerSettlement" SET "approvedHeadSha" = ${"a".repeat(40)}, "approvedDiffDigest" = ${digest}
+        WHERE "id" = ${card.settlementId}`), false, `an approval digest: ${digest} (the open state still refuses it)`);
+    }
     assert.equal(await refusedBy("AmuxDmOwnerSettlement_escalationId_key", () => tx.$executeRaw`
       INSERT INTO "AmuxDmOwnerSettlement" ("id", "taskId", "escalationId", "kind", "taskStatus", "updatedAt")
       VALUES (${"00000000-0000-8000-8000-000000000001"}, ${card.taskId}, ${card.escalationId}, 'stopped',

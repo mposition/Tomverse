@@ -66,8 +66,10 @@ const writeWork = (overrides = {}) => {
   return { ...work, commitDigest: overrides.commitDigest ?? sha256(expectedPublishCommit(work, DATE)) };
 };
 
-const fakeWorld = ({ work, halt = "none", diff = { digest: "d".repeat(64) }, headAfterPull, moveDuringDiff = false, lastLook = { verdict: "no_objection" }, build, pushOk = true, remoteAfterPush, createPull, pulls, branchBefore = null, commitAt = {}, refHiddenReads = 0, pullHiddenReads = 0 } = {}) => {
+const fakeWorld = ({ work, halt = "none", appFeatures, diff = { digest: "d".repeat(64) }, change, headAfterPull, moveDuringDiff = false, lastLook = { verdict: "no_objection" }, build, pushOk = true, remoteAfterPush, createPull, pulls, branchBefore = null, commitAt = {}, refHiddenReads = 0, pullHiddenReads = 0 } = {}) => {
   const calls = [];
+  // Which digest read the cycle took: v2 for an app that names change_digest_v2, v1 otherwise.
+  const digestReads = [];
   const tokens = { minted: 0, revoked: 0 };
   let branch = branchBefore;
   const openPulls = [...(pulls ?? [])];
@@ -77,7 +79,7 @@ const fakeWorld = ({ work, halt = "none", diff = { digest: "d".repeat(64) }, hea
   const pauses = [];
   const app = async (path, body) => {
     calls.push({ path, body });
-    if (path === "publish/claim") return { status: 200, json: { work, halt } };
+    if (path === "publish/claim") return { status: 200, json: { work, halt, ...(appFeatures ? { appFeatures } : {}) } };
     if (path === "publish/last-look") return { status: 200, json: lastLook };
     if (path === "publish/result") return { status: 200, json: { state: "done" } };
     return { status: 404, json: null };
@@ -100,7 +102,13 @@ const fakeWorld = ({ work, halt = "none", diff = { digest: "d".repeat(64) }, hea
         }
         return [...openPulls];
       },
+      pullChangeDigest: async (input) => {
+        digestReads.push({ v2: input });
+        if (moveDuringDiff) branch = "8".repeat(40);
+        return change === undefined ? { digest: CHANGE, headTreeSha: TREE } : change;
+      },
       pullDiffDigest: async () => {
+        digestReads.push("v1");
         if (moveDuringDiff) branch = "8".repeat(40);
         return diff;
       },
@@ -142,10 +150,45 @@ const fakeWorld = ({ work, halt = "none", diff = { digest: "d".repeat(64) }, hea
     workspace,
     pause: async (ms) => void pauses.push(ms),
   };
-  return { ports, calls, tokens, pauses };
+  return { ports, calls, tokens, pauses, digestReads };
 };
 
 const paths = (calls) => calls.map((call) => call.path);
+/** The v2 change digest (lib/pullDiffDigestCore.ts) of the published commit. */
+const CHANGE = `v2:${"a".repeat(64)}`;
+const V2 = { appFeatures: ["change_digest_v2"] };
+
+test("an app that names change_digest_v2 is given the v2 change digest; one before it the v1 diff digest", async () => {
+  const world = fakeWorld({ work: writeWork(), ...V2 });
+  assert.deepEqual(await runPublisherCycle(world.ports), { finishedNormally: true, halt: "none", reason: "confirmed" });
+  assert.deepEqual(world.digestReads, [{ v2: { base: "develop", headSha: COMMIT } }], "the v1 diff is not read");
+  assert.deepEqual(result(world.calls).pullRequest.snapshot,
+    { baseSha: "f".repeat(40), diffDigest: CHANGE, treeId: TREE, invalidatedReviewIds: [] });
+  // An app before the feature (no appFeatures, or other names only) is given what it knows.
+  for (const appFeatures of [undefined, [], ["patch_chunks"], "change_digest_v2"]) {
+    const old = fakeWorld({ work: writeWork(), appFeatures });
+    await runPublisherCycle(old.ports);
+    assert.deepEqual(old.digestReads, ["v1"], JSON.stringify(appFeatures));
+    assert.equal(result(old.calls).pullRequest.snapshot.diffDigest, "d".repeat(64));
+  }
+  // The publisher names the feature in its header.
+  assert.ok(ENGINEERING_PUBLISHER_FEATURES.split(",").includes("change_digest_v2"));
+});
+
+test("a v2 binding has no size or binary refusal; one not read, or of another tree, is left for a lookup", async () => {
+  // A v1 refusal ("not a diff AMUX would bind") is never consulted for a v2 app.
+  const big = fakeWorld({ work: writeWork(), ...V2, diff: { refused: true } });
+  assert.equal((await runPublisherCycle(big.ports)).reason, "confirmed");
+  assert.equal(result(big.calls).pullRequest.snapshot.diffDigest, CHANGE);
+  const unread = fakeWorld({ work: writeWork(), ...V2, change: null });
+  assert.deepEqual([(await runPublisherCycle(unread.ports)).reason, result(unread.calls)], ["snapshot_unreadable", undefined]);
+  const otherTree = fakeWorld({ work: writeWork(), ...V2, change: { digest: CHANGE, headTreeSha: "9".repeat(40) } });
+  assert.deepEqual([(await runPublisherCycle(otherTree.ports)).reason, result(otherTree.calls)],
+    ["pull_request_head_changed", undefined]);
+  // A head that moved while the digest was read is not bound either.
+  const moved = fakeWorld({ work: writeWork(), ...V2, moveDuringDiff: true });
+  assert.deepEqual([(await runPublisherCycle(moved.ports)).reason, result(moved.calls)], ["pull_request_head_changed", undefined]);
+});
 const result = (calls) => calls.find((call) => call.path === "publish/result")?.body;
 
 test("a write claim is rebuilt, looked at last, pushed once to a new branch, and reported with its binding", async () => {
@@ -351,7 +394,9 @@ test("the App token carries the three permissions the policy names and never wor
 });
 
 test("the publisher imports node builtins and the dependency-free core, and nothing else", () => {
-  const allowedLib = new Set(["lib/engineeringAgentCore.ts", "lib/engineeringAgentSecretPatterns.ts"]);
+  // lib/pullDiffDigestCore.ts: the one v2 change digest read every reader shares (owner decision 2026-11-18).
+  const allowedLib = new Set(["lib/engineeringAgentCore.ts", "lib/engineeringAgentSecretPatterns.ts",
+    "lib/pullDiffDigestCore.ts"]);
   const seen = new Set();
   const visit = (file) => {
     if (seen.has(file)) return;

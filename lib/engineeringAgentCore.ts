@@ -491,11 +491,24 @@ export const publisherOpensReviewDrafts = (header: string | null) =>
 export const ENGINEERING_PUBLISHER_PR_RESUME_FEATURE = "pull_request_resume";
 export const publisherResumesPullRequests = (header: string | null) =>
   publisherNames(header, ENGINEERING_PUBLISHER_PR_RESUME_FEATURE);
+/**
+ * The v2 change digest (lib/pullDiffDigestCore.ts, owner decision
+ * 2026-11-18): named by a publisher that binds a pull request by it, and by
+ * the app's claim answer (`appFeatures`) when it takes one. A publisher binds
+ * v2 only for an app that names it; an app before it is given the v1 diff
+ * digest it knows.
+ */
+export const ENGINEERING_AGENT_CHANGE_DIGEST_V2_FEATURE = "change_digest_v2";
 /** Every feature this publisher names, in the header's form. */
 export const ENGINEERING_PUBLISHER_FEATURES = [
   ENGINEERING_PUBLISHER_REVIEW_DRAFT_FEATURE,
   ENGINEERING_PUBLISHER_PR_RESUME_FEATURE,
+  ENGINEERING_AGENT_CHANGE_DIGEST_V2_FEATURE,
 ].join(",");
+/** What the app names in its claim answer (`appFeatures`); a publisher before a feature ignores it. */
+export const ENGINEERING_AGENT_APP_FEATURES: readonly string[] = [
+  ENGINEERING_AGENT_CHANGE_DIGEST_V2_FEATURE,
+];
 
 /**
  * The reasons a lookup gives for a branch with no pull request (§10): the one

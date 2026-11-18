@@ -41,8 +41,10 @@ const ATTEMPT = z.string().min(1).max(64);
 
 const issueBody = z.object({ pullRequestNumber: PR, headSha: SHA }).strict();
 const consumeBody = z.object({ attemptId: ATTEMPT, pullRequestNumber: PR, headSha: SHA, base: z.string().min(1).max(255),
-  // A Decision Maker approved pull request's diff digest, read by the lane right before (lib/pullDiffDigestCore.ts).
-  diffDigest: z.string().regex(/^[0-9a-f]{64}$/).optional() }).strict();
+  // A Decision Maker approved pull request's digests, read by the lane right before (lib/pullDiffDigestCore.ts):
+  // the v2 change digest, and the v1 diff digest a lane before v2 sends alone and a v1 approval needs.
+  diffDigest: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+  changeDigest: z.string().regex(/^v2:[0-9a-f]{64}$/).optional() }).strict();
 const reportBody = z
   .object({
     attemptId: ATTEMPT,

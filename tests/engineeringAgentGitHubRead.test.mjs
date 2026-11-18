@@ -12,6 +12,7 @@ import {
   readEngineeringAgentPinnedBaseTree,
   readEngineeringAgentPullObservation,
 } from "../lib/engineeringAgentGitHubRead.ts";
+import { pullChangeDigest } from "../lib/pullDiffDigestCore.ts";
 
 // The app's read-only GitHub view for registration (docs/policy/engineering-
 // agent.md §2.2, §8): one fixed repository, a pinned commit that must be on
@@ -232,6 +233,12 @@ const pullFetch = (overrides = {}) => {
       { id: 1, name: "Fast Gate", conclusion: "failure" }, { id: 2, name: "Fast Gate", conclusion: "success" },
     ]),
     [`/commits/${HEAD}/status`]: () => overrides.status ?? { statuses: [{ context: "status-only", state: "success" }] },
+    // The v2 change digest's reads: the merge base against develop (or, merged, against the merge
+    // commit's first parent) and the head commit's tree.
+    [`/compare/develop...${HEAD}`]: () => overrides.compare ?? { status: "ahead", merge_base_commit: { sha: "2".repeat(40) } },
+    [`/compare/${"4".repeat(40)}...${HEAD}`]: () => ({ status: "diverged", merge_base_commit: { sha: "2".repeat(40) } }),
+    [`/git/commits/${HEAD}`]: () => ({ sha: HEAD, tree: { sha: "5".repeat(40) } }),
+    [`/git/commits/${"3".repeat(40)}`]: () => ({ sha: "3".repeat(40), parents: [{ sha: "4".repeat(40) }, { sha: HEAD }] }),
   };
   return {
     diff,
@@ -247,7 +254,7 @@ const pullFetch = (overrides = {}) => {
   };
 };
 
-test("a published pull request is read with its reviews, required checks and diff digest", async () => {
+test("a published pull request is read with its reviews, required checks and change digest", async () => {
   const { fetchImpl, diff } = pullFetch();
   const observed = await readEngineeringAgentPullObservation(42, { env, fetchImpl });
   assert.equal(observed.state, "open");
@@ -257,7 +264,27 @@ test("a published pull request is read with its reviews, required checks and dif
   assert.deepEqual(observed.requiredChecks, { allPassed: true });
   // A pending review is the reviewer's draft and is not read.
   assert.deepEqual(observed.reviews.map((review) => [review.id, review.login]), [[9, "mposition"]]);
-  assert.equal(observed.diffDigest, createHash("sha256").update(diff).digest("hex"));
+  // v2 (owner decision 2026-11-18): merge base, head and tree. The v1 diff is not read for it.
+  assert.equal(observed.changeDigest,
+    pullChangeDigest({ mergeBaseSha: "2".repeat(40), headSha: "1".repeat(40), headTreeSha: "5".repeat(40) }));
+  assert.equal(observed.diffDigest, null);
+  // A binding made before v2 reads its v1 diff digest too.
+  const legacy = await readEngineeringAgentPullObservation(42, { env, fetchImpl }, { legacyDiff: true });
+  assert.equal(legacy.diffDigest, createHash("sha256").update(diff).digest("hex"));
+  assert.equal(legacy.changeDigest, observed.changeDigest);
+  // develop absorbed part of the branch: a new merge base at the same head is a new digest.
+  const moved = await readEngineeringAgentPullObservation(42, { env, fetchImpl: pullFetch({
+    compare: { status: "diverged", merge_base_commit: { sha: "6".repeat(40) } } }).fetchImpl });
+  assert.notEqual(moved.changeDigest, observed.changeDigest);
+});
+
+test("a diff past the v1 limit, or one GitHub will not render, still has a change digest", async () => {
+  const big = { ...pullFetch() };
+  const fetchImpl = async (url, init) => init.headers.Accept === "application/vnd.github.diff"
+    ? new Response("x", { status: 406 }) : big.fetchImpl(url, init);
+  const observed = await readEngineeringAgentPullObservation(42, { env, fetchImpl }, { legacyDiff: true });
+  assert.equal(observed.diffDigest, null, "a v1 record of it could never have existed");
+  assert.match(observed.changeDigest, /^v2:[0-9a-f]{64}$/);
 });
 
 test("reviews are read over every page GitHub links", async () => {
@@ -292,6 +319,10 @@ test("a merge is read as its commit, time and merger kind; a merge without them 
   assert.equal(observed.mergedAt.toISOString(), "2026-10-15T06:00:00.000Z");
   assert.equal(observed.mergedByKind, "user");
   assert.deepEqual(observed.changedFiles, ["components/chat/Ordinary.tsx"]);
+  // Merged, develop contains the head: the merge base is read against the merge commit's first
+  // parent, so the digest is the one the open pull request had.
+  assert.equal(observed.changeDigest,
+    pullChangeDigest({ mergeBaseSha: "2".repeat(40), headSha: "1".repeat(40), headTreeSha: "5".repeat(40) }));
   await assert.rejects(
     readEngineeringAgentPullObservation(42, { env, fetchImpl: pullFetch({ pull: { ...merged, merge_commit_sha: null } }).fetchImpl }),
     (error) => error instanceof EngineeringAgentGitHubReadError && error.code === "invalid_response",

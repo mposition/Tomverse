@@ -555,9 +555,11 @@ snapshot과 같아야 한다) → 사람이 병합하고 본 앱이 병합을 �
     5. 그 review가 유효하다 — 보호 branch에 stale-approval dismissal이 **실제로 걸려
        있음을 확인**한 뒤에만 센다. 걸 수 없는 동안에는 결속 snapshot 기록 시각 이후
        제출된 review만 인정한다.
-    6. **현재 base SHA와 현재 diff digest를 관측 시각에 다시 계산해** snapshot과 같다.
+    6. **현재 base SHA와 현재 변경 digest를 관측 시각에 다시 계산해** snapshot과 같다.
        다르면 비승인이고 새 snapshot에 대한 재검증과 새 review가 필요하다.
-       `review.commit_id`도 dismissal도 base만 움직인 경우를 잡지 못한다.
+       `review.commit_id`도 dismissal도 base만 움직인 경우를 잡지 못한다. 변경 digest는 v2(merge
+       base·head commit·head tree, `lib/pullDiffDigestCore.ts`, 운영자 결정 2026-11-18)이고 크기와
+       binary를 가리지 않는다. v2 전에 기록된 snapshot은 v1(diff 바이트의 SHA-256)으로 비교한다.
     7. review 제출 시각이 snapshot 기록 시각보다 뒤다. snapshot을 다시 기록하는
        트랜잭션은 그 시점의 승인 review를 무효 목록에 넣고, 무효가 된 review는 다시
        세지 않는다.
@@ -589,9 +591,10 @@ snapshot과 같아야 한다) → 사람이 병합하고 본 앱이 병합을 �
       넣었거나, 운영자가 직접 push했어도 — 그 병합이 그 diff의 승인이다. 2026-11-14 #3942·
       #3944는 자동 수정의 `auto-fix(conflict): merge develop into #N` 뒤 운영자가 병합했는데
       diff가 검증 때와 달라 `merged_without_approval`이 되었고 에이전트 전체가 약 9시간
-      멈췄다. 앱은 병합 관측의 감사 기록에 실제로 병합된 head(`mergedHeadSha`), PR diff
-      digest(`mergedDiffDigest`, 읽지 못했으면 null), 그것이 검증된 변경과 같은지
-      (`mergedHeadVerified`)를 남긴다. 그래서 자동 수정이 바꾼 내용도 승인된 diff로 기록된다.
+      멈췄다. 앱은 병합 관측의 감사 기록에 실제로 병합된 head(`mergedHeadSha`), binding의 버전으로
+      읽은 변경 digest(`mergedDiffDigest`, 읽지 못했으면 null), 그것이 검증된 변경과 같은지
+      (`mergedHeadVerified`)를 남긴다. v2 binding은 head commit을 묶으므로 움직인 head는 검증된 변경이
+      아니다(v1 binding은 diff가 같으면 검증된 변경으로 본다). 그래서 자동 수정이 바꾼 내용도 승인된 diff로 기록된다.
       종전 규칙(검증된 head이거나, 바이트 단위로 같은 diff — 운영자 결정 2026-11-13, #3828)으로
       돌아가는 스위치(`ENGINEERING_AGENT_LEGACY_HALTS`)는 2026-11-16에 없앴다.
 
@@ -619,8 +622,9 @@ snapshot과 같아야 한다) → 사람이 병합하고 본 앱이 병합을 �
 
     - 병합 전에 기록된 DM 승인(`AmuxDmOwnerSettlement`의 `t2_pr`·`applied`·`approve` 행)이
       이 binding과 그 run에 있다.
-    - 병합된 head가 그 행의 `approvedHeadSha`와 같고, PR diff digest가 `approvedDiffDigest`와
-      같다. head가 움직였으면 해당하지 않는다(병합 레인은 head를 고정해 병합한다).
+    - 병합된 head가 그 행의 `approvedHeadSha`와 같고, 변경 digest가 `approvedDiffDigest`와 그
+      승인의 버전으로 같다(병합된 PR의 merge base는 merge commit의 첫 부모에 대해 읽는다). head가
+      움직였으면 해당하지 않는다(병합 레인은 head를 고정해 병합한다).
     - base가 `develop`이다.
     - 이 판정은 이미 일어난 병합의 증거를 읽을 뿐이라 `TOMVERSE_AMUX_DM_T2_MERGE`와 DM kill switch를 보지 않는다. 두 스위치는
       새 ready와 병합 직전 소비만 막는다. 그래서 레인이 병합한 뒤 스위치를 꺼도 이 병합은 승인으로 판정된다.
@@ -738,10 +742,11 @@ blob 읽기 200 KiB 기본값·2 MiB 상한, tree 20,000 항목, 바뀐 blob 50�
 파일 바이트를 더 보내지 않고, v52 정산은 저장된 파일 대신 patch 본문이 적는 모든 경로(이름
 변경의 양쪽 포함)를 실행 inventory와 대조한다. 게시 서비스의 cycle은 40분(claim lease 45분
 안), runner의 cycle은 60분까지 돈다(그 전 8분·10분·20분). Railway는 이전 실행이 끝나지 않으면
-다음 예약 실행을 건너뛰므로 cycle은 겹치지 않는다. 그대로 둔 것은 두 가지다: GitHub PR 파일
-목록 3,000개(GitHub API 자체의 한계), 그리고 Decision Maker 병합 gate·QA 병합 lane·AMUX 검토와
-함께 쓰는 PR diff binding 1 MiB(`PULL_DIFF_DIGEST_MAX_BYTES`, 다른 에이전트의 병합 근거라 이
-결정 밖이다). 1 MiB를 넘는 diff의 PR도 열리지만 자동 binding 없이 사람이 맡는다.
+다음 예약 실행을 건너뛰므로 cycle은 겹치지 않는다. 그대로 둔 것은 GitHub PR 파일 목록
+3,000개(GitHub API 자체의 한계)다. PR binding의 diff 1 MiB는 2026-11-18 운영자 결정으로 없앴다:
+binding은 v2 변경 digest(merge base·head commit·head tree, `lib/pullDiffDigestCore.ts`)이고 크기와
+binary를 가리지 않는다. `PULL_DIFF_DIGEST_MAX_BYTES`는 v2 전에 기록된 v1 binding을 비교할 때와 AMUX
+검토 화면의 diff 표시에만 남는다(표시하지 못한 diff는 GitHub에서 검토하고, 승인은 변경 digest에 묶인다).
 
 **저장된 patch에서 변경 바이트 재구성(2026-11-10 도입, 2026-11-15 확장).** 앱은 같은 고정
 base commit에서 GitHub로 읽은 기존 blob에 patch를 **메모리 안에서 정확히** 적용해 변경

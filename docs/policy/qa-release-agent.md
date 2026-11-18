@@ -204,17 +204,19 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
      **예외 하나(운영자 결정 2026-11-13, "develop 병합 권한은 DM에게 승인합니다. main은 안됩니다."):** 엔지니어링 에이전트의
      `agent/engineering/<run>` PR 가운데 앱이 "Decision Maker가 승인했고 조건을 지금 다시 확인했다"고 넘겨준 것만 후보가 될 수
      있습니다. 레인은 제품 DB가 없으므로 앱이 상태 읽기(`lib/qaReleaseMergeLaneRoutes.ts`)의 `dmApproved`로 PR 번호·head·브랜치를
-     넘겨 줍니다. 앱은 상태 읽기마다 가장 오래 확인하지 않은 승인 한 건만 골라 그 PR의 현재 diff와 파일 목록을 GitHub에서 다시
+     넘겨 줍니다. 앱은 상태 읽기마다 가장 오래 확인하지 않은 승인 한 건만 골라 그 PR의 현재 변경 digest와 파일 목록을 GitHub에서 다시
      읽어, digest가 승인 때와 같고 파일이 모두 아래 병합 범위 안일 때만 싣습니다(읽지 못하거나 다르면 싣지 않고, 그 승인은 다음
-     차례로 넘어갑니다). 앱이 DM 승인 PR을 ready로 바꾸는 것은 사람이 ready로 바꾸는 것과 같습니다(CI 입장 예약 없음, 앞선 DM
+     차례로 넘어갑니다). 변경 digest는 v2(merge base·head commit·head tree, 운영자 결정 2026-11-18)이며 크기와 binary를 가리지
+     않습니다. 그 전에 기록된 승인은 v1(diff 바이트의 SHA-256)으로 비교합니다. 앱이 DM 승인 PR을 ready로 바꾸는 것은 사람이 ready로 바꾸는 것과 같습니다(CI 입장 예약 없음, 앞선 DM
      ready의 CI가 보이기 전에는 다음 ready를 하지 않으므로 넘침은 PR 한 건으로 묶입니다). 사람이 `ci:hold`를 붙인 PR은 ready로
      바꾸지 않습니다. **fork PR은 제외합니다**: 앱은 head 저장소가 base 저장소와 다르면 싣지 않고, 레인도 GitHub의
      `isCrossRepository`가 `false`일 때만 이 예외를 씁니다. 레인은 지금 GitHub가 보여 주는 번호·head commit·브랜치가
      셋 다 같고 base가 develop일 때만 이 예외를 쓰고, 4항대로 그 head를 `sha`로 고정해 병합합니다. 앱은 병합 직전의 지시 소비에서
      엔지니어링 PR이면 DM 승인을 같은 트랜잭션에서 다시 판정해(T2 스위치, DM kill switch, applied·approve 행, binding, Task, 그 head와 base,
      저장된 patch가 앱의 병합 범위를 통과하는지) 하나라도 맞지 않으면 소비를 거절하고(`dm_approval_not_holding`), 레인은 소비 없이는 병합하지 않습니다. 레인은 소비 직전에
-     그 PR의 현재 diff를 GitHub에서 읽어 엔지니어링 에이전트와 같은 함수(`lib/pullDiffDigestCore.ts`)로 digest를 계산해 소비 요청에
-     싣고, 앱은 그 값이 승인 digest와 같을 때만 소비를 허락합니다(없거나 다르면 `dm_diff_changed`). diff를 읽지 못하면 그 PR은
+     그 PR의 현재 변경 digest를 GitHub에서 엔지니어링 에이전트와 같은 함수(`lib/pullDiffDigestCore.ts`의 `readPullChangeDigest`)로
+     읽어 소비 요청의 `changeDigest`에 싣고, diff를 읽을 수 있으면 v1 `diffDigest`도 함께 싣습니다. 앱은 승인 digest의 버전으로
+     비교해 같을 때만 소비를 허락합니다(없거나 다르면 `dm_diff_changed`). 변경 digest를 읽지 못하면 그 PR은
      건너뜁니다
      (`TOMVERSE_AMUX_DM_T2_MERGE=enabled`, 기본 꺼짐; 꺼져 있으면 목록 자체가 없습니다). 그런 PR도 이 3항의 다른 제외(게이트
      파일, 정책 테스트, 부록 A, 보호 테이블 migration, 목록 미완)와 2항의 CI 판정을 그대로 받습니다. 그리고 **변경 파일이 모두

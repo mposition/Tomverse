@@ -32,7 +32,7 @@ PR diff digest 1 MiB다. 이 문서와 `development-agent-orchestration.md`의 "
 | `apps/tomverse-orchestrator/src/tomverse_api.rs` | `V22_PATCH_MAX_BYTES`, `V22_TRANSPORT_MAX_BYTES`, result POST 한 번 | 새 경로는 조각 POST와 commit |
 | `lib/engineeringAgentStore.ts` | `ENGINEERING_AGENT_PATCH_BODY_MAX_BYTES` 4 MiB | 없앰. claim의 inline 판정 기준으로만 남김 |
 | `lib/engineeringAgentV22CandidateLoad.ts` | `patch_over_limit` | 없앰. 옛 사유 이름은 읽기만 |
-| publisher·`lib/pullDiffDigestCore.ts`·`lib/engineeringAgentGitHubRead.ts`·`lib/amux/reviewGitHub.ts`·`lib/qaReleaseMergeLaneGithub.ts` | diff 1 MiB, binary 거절, `diff_not_bindable` | 승인 binding v2(5절, 운영자 결정 대기) |
+| publisher·`lib/pullDiffDigestCore.ts`·`lib/engineeringAgentGitHubRead.ts`·`lib/amux/reviewGitHub.ts`·`lib/qaReleaseMergeLaneGithub.ts` | diff 1 MiB, binary 거절, `diff_not_bindable` | 승인 binding v2(5절). 1 MiB는 v1 기록 비교와 review 화면 표시에만 남음 |
 
 조사 중 새로 찾은 것:
 - `lib/amux/ideaCrypto.ts`의 봉인 크기가 patch를 4 MiB에서 막는다. DB CHECK를 풀어도 여기서 실패한다.
@@ -354,6 +354,11 @@ pullChangeDigest({ mergeBaseSha, headSha, headTreeSha }) =
   승인될 수 있다.
 - 비교는 dual: 저장된 digest가 v1이면 v1으로, v2면 v2로 비교한다. 새 binding은 모두 v2.
 - 소비자: 게시 snapshot, 승인 관측, DM develop 병합, QA-release merge lane, 합쳐진 PR 관측, AMUX review.
+- 구현: `lib/pullDiffDigestCore.ts`(`pullChangeDigest`, `pullDigestHolds`, `readPullChangeDigest`). 저장 형식은 `v2:` + 위
+  hex(67자), v1은 접두사 없는 64 hex 그대로. merge base는 compare API(`{base}...{head}`)의 `merge_base_commit`, tree는
+  `git/commits/{head}`에서 읽는다. 열린 PR의 base는 PR의 base branch, 합쳐진 PR은 merge commit의 첫 부모. v1 diff는 v1 기록을
+  비교할 때만 읽는다. publisher는 claim 답 `appFeatures`에 `change_digest_v2`가 있을 때만 v2로 묶는다(없으면 옛 앱이므로 v1).
+  DB CHECK 세 개(binding snapshot, DM 승인, AMUX review 제안)는 migration `20261118120200_pull_change_digest_v2`가 두 형식을 받게 한다.
 
 ## 6. 시간 상한
 

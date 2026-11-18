@@ -2273,6 +2273,14 @@ export const RAW_SQL_ALLOWLIST = [
       "The replaced latch insert trigger reads the audit row this transaction wrote (id, target, action, actor, xmin), now telling a person's release from the lane's own. It never writes AdminAuditLog.",
   },
   {
+    path: "prisma/migrations/20261118120200_pull_change_digest_v2/migration.sql",
+    table: "EngineeringAgentBinding",
+    tableMentions: 1,
+    writeVerbs: 6,
+    reason:
+      "This migration only replaces three CHECKs so an approval binding takes the v2 change digest beside v1 (owner decision 2026-11-18): the binding's snapshot, and the AmuxDmOwnerSettlement and AmuxReviewProposal digest columns. It writes no row and changes no trigger.",
+  },
+  {
     path: "prisma/migrations/20261116150000_engineering_agent_binding_record_size/migration.sql",
     table: "EngineeringAgentBinding",
     tableMentions: 1,

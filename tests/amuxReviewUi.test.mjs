@@ -30,8 +30,11 @@ test("review UI identifies the exact GitHub PR, head, and diff digest", () => {
   assert.match(panel, /data-testid="admin-amux-review-artifact"/);
   assert.match(panel, /Number\.isSafeInteger\(value\.pr_number\)/);
   assert.match(panel, /\^\[0-9a-f\]\{40\}\$/);
-  assert.match(panel, /\^\[0-9a-f\]\{64\}\$/);
+  // The change digest an approval binds: v2 (`v2:` + 64 hex) since 2026-11-18, or v1.
+  assert.match(panel, /\^\(v2:\)\?\[0-9a-f\]\{64\}\$/);
   assert.match(panel, /github\.com\/mposition\/Tomverse\/pull\/\$\{validArtifact\.pr_number\}/);
+  // A diff not shown here (too large, binary, unsafe to display) is reviewed on GitHub.
+  assert.match(panel, /data-testid="admin-amux-review-diff-not-shown"/);
   assert.match(panel, /validArtifact\.head_sha/);
   assert.match(panel, /validArtifact\.base_sha/);
   assert.match(panel, /validArtifact\.diff_digest/);

@@ -11,7 +11,8 @@
 import "server-only";
 
 import { ENGINEERING_AGENT_PR_APPROVER_IDS } from "./engineeringAgentPrApprovalCore.ts";
-import { PULL_DIFF_DIGEST_MAX_BYTES, pullDiffDigest } from "./pullDiffDigestCore.ts";
+import { PULL_DIFF_DIGEST_MAX_BYTES, pullDiffDigest, readMergedPullChangeDigest, readPullChangeDigest } from
+  "./pullDiffDigestCore.ts";
 
 import { AMUX_V22_FILE_MAX_BYTES } from "@/lib/amux/v22PatchLimit";
 import { TREE_LIMITS, checkListing, gitObjectId, type TreeEntry } from
@@ -352,10 +353,10 @@ export async function readEngineeringAgentPinnedBaseTree(baseSha: string,
 /* A published pull request, as the approval observer reads it (§9-10)        */
 /* ------------------------------------------------------------------------- */
 
-// GitHub's own limits: a pull request lists at most 3,000 files, and its diff
-// is served up to its size limit.
+// GitHub's own limit: a pull request lists at most 3,000 files.
 const MAX_PR_FILES = 3_000;
-const MAX_DIFF_BYTES = PULL_DIFF_DIGEST_MAX_BYTES;
+/** A v1 digest was only ever taken of a diff this size; a larger one cannot match a v1 record. */
+const MAX_LEGACY_DIFF_BYTES = PULL_DIFF_DIGEST_MAX_BYTES;
 const PASSING_CONCLUSIONS = new Set(["success", "neutral", "skipped"]);
 const FAILING_CONCLUSIONS = new Set(["failure", "cancelled", "timed_out", "action_required", "stale", "startup_failure"]);
 
@@ -378,7 +379,9 @@ export type EngineeringAgentPullObservation = {
   reviews: Array<{ id: number; userId: number; login: string; state: string; commitId: string; submittedAt: Date }>;
   /** Every required check of the head, or null while one is pending or the list cannot be read whole. */
   requiredChecks: { allPassed: boolean } | null;
-  /** sha256 of the diff's own bytes, as the publisher binds it; null when it could not be read. */
+  /** The v2 change digest (lib/pullDiffDigestCore.ts), as the publisher binds it; null when it could not be read. */
+  changeDigest: string | null;
+  /** The v1 diff digest, read only for a v1 record (`legacyDiff`); null otherwise or when it could not be read. */
   diffDigest: string | null;
   /** Complete GitHub PR file names at the observed base/head, or unknown. */
   changedFiles?: string[] | null;
@@ -426,7 +429,30 @@ const instant = (value: unknown): Date | null => {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
 
-async function readPullDiffDigest(
+/** Which digests a read takes: the v1 diff only for a record bound before v2 (lib/pullDiffDigestCore.ts). */
+export type EngineeringAgentPullDigestOptions = { legacyDiff?: boolean };
+
+/**
+ * The v2 change digest of an open pull request against its base branch, or of
+ * a merged one against its merge commit's first parent; null when not read
+ * now. The compare answer lists the changed files with their patches, so it
+ * is read up to GitHub's own file limit, as developContains does.
+ */
+async function readChangeDigest(
+  input: { base: string; headSha: string } | { mergeCommitSha: string; headSha: string },
+  resolved: { env: Readonly<Record<string, string | undefined>>; fetchImpl: FetchLike },
+): Promise<string | null> {
+  const getJson = (path: string) => githubJson(path, resolved, MAX_TREE_JSON_BYTES);
+  try {
+    return ("mergeCommitSha" in input ? await readMergedPullChangeDigest(getJson, input) :
+      await readPullChangeDigest(getJson, input)).digest;
+  } catch {
+    return null;
+  }
+}
+
+/** The v1 diff digest, for comparing a record bound before v2 only. */
+async function readLegacyPullDiffDigest(
   prNumber: number,
   resolved: { env: Readonly<Record<string, string | undefined>>; fetchImpl: FetchLike },
 ): Promise<string | null> {
@@ -452,7 +478,7 @@ async function readPullDiffDigest(
     return null;
   }
   try {
-    return pullDiffDigest(await readBounded(response, MAX_DIFF_BYTES));
+    return pullDiffDigest(await readBounded(response, MAX_LEGACY_DIFF_BYTES));
   } catch {
     return null;
   }
@@ -562,17 +588,19 @@ export async function readEngineeringAgentPullMerge(
 }
 
 /**
- * A pull request's change as it stands now: its base and head, the digest of
- * its diff as the publisher binds it, and its whole file list at that base
- * and head (both sides of a rename). What a Decision Maker approval is
- * checked against before the app marks the pull request ready (owner
- * decision 2026-11-13). A digest or list that cannot be read whole is null.
+ * A pull request's change as it stands now: its base and head, its change
+ * digest as the publisher binds it (and the v1 diff digest for a record bound
+ * before v2), and its whole file list at that base and head (both sides of a
+ * rename). What a Decision Maker approval is checked against before the app
+ * marks the pull request ready (owner decision 2026-11-13). A digest or list
+ * that cannot be read whole is null.
  */
 export async function readEngineeringAgentPullChange(
   prNumber: number,
   deps: Deps = {},
+  options: EngineeringAgentPullDigestOptions = {},
 ): Promise<{ state: "open" | "closed"; baseRef: string; headRef: string; headSha: string;
-  diffDigest: string | null; changedFiles: string[] | null; crossRepository: boolean }> {
+  changeDigest: string | null; diffDigest: string | null; changedFiles: string[] | null; crossRepository: boolean }> {
   if (!Number.isSafeInteger(prNumber) || prNumber <= 0) throw new EngineeringAgentGitHubReadError("invalid_input");
   const resolved = withDefaults(deps);
   const pull = record(await githubJson(`/pulls/${prNumber}`, resolved));
@@ -592,20 +620,23 @@ export async function readEngineeringAgentPullChange(
   const crossRepository = typeof headRepo !== "string" || headRepo !== baseRepo;
   return {
     state, baseRef: base.ref, headRef: head.ref, headSha, crossRepository,
-    diffDigest: await readPullDiffDigest(prNumber, resolved),
+    changeDigest: await readChangeDigest({ base: base.ref, headSha }, resolved),
+    diffDigest: options.legacyDiff === true ? await readLegacyPullDiffDigest(prNumber, resolved) : null,
     changedFiles: await readPullFileNames(prNumber, { baseSha, headSha, changedFiles: pull.changed_files as number }, resolved),
   };
 }
 
 /**
  * One published pull request with what the approval judgement needs: its
- * state and merge, its reviews, its head's required checks and its diff
- * digest. Reads only; a list that is not whole is a refusal, not a shorter
- * list, and a check still running leaves the checks undecided.
+ * state and merge, its reviews, its head's required checks and its change
+ * digest (merged: against the merge commit's first parent). Reads only; a
+ * list that is not whole is a refusal, not a shorter list, and a check still
+ * running leaves the checks undecided.
  */
 export async function readEngineeringAgentPullObservation(
   prNumber: number,
   deps: Deps = {},
+  options: EngineeringAgentPullDigestOptions = {},
 ): Promise<EngineeringAgentPullObservation> {
   if (!Number.isSafeInteger(prNumber) || prNumber <= 0) throw new EngineeringAgentGitHubReadError("invalid_input");
   const resolved = withDefaults(deps);
@@ -659,7 +690,9 @@ export async function readEngineeringAgentPullObservation(
     headSha,
     reviews,
     requiredChecks: await readRequiredChecks(headSha, resolved),
-    diffDigest: await readPullDiffDigest(prNumber, resolved),
+    changeDigest: await readChangeDigest(merged ? { mergeCommitSha: mergeCommitSha!, headSha } :
+      { base: base.ref, headSha }, resolved),
+    diffDigest: options.legacyDiff === true ? await readLegacyPullDiffDigest(prNumber, resolved) : null,
     changedFiles: merged ? await readPullFileNames(prNumber, {
       baseSha, headSha, changedFiles: pull.changed_files as number,
     }, resolved) : null,

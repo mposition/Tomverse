@@ -287,6 +287,53 @@ for (const approval of [null, { verdict: "approved", reviewId: 9, observedAt: "2
     [{ bindingId: "binding", outcome: "merged_without_approval" }]);
 }
 
+// Owner decision 2026-11-18: a binding made from now on holds the v2 change digest
+// (merge base, head and tree). It is compared in v2, a v1 binding in v1, and the v1
+// diff is read only for a v1 binding.
+{
+  const CHANGE = `v2:${"7".repeat(64)}`;
+  const v2Binding = (overrides = {}) => binding({ snapshot: { baseSha: BASE, diffDigest: CHANGE, treeId: "e".repeat(40),
+    invalidatedReviewIds: [] }, ...overrides });
+  const reads = [];
+  const reading = (answer) => async (prNumber, options) => { reads.push(options); return answer; };
+  completeResult = { completed: true, taskRevision: 9 };
+
+  assert.deepEqual(await run([v2Binding()], reading(pull({ changeDigest: CHANGE, diffDigest: null }))),
+    [{ bindingId: "binding", outcome: "approved" }]);
+  assert.deepEqual(reads.at(-1), { legacyDiff: false }, "no v1 diff read for a v2 binding");
+  await run([binding()], reading(pull()));
+  assert.deepEqual(reads.at(-1), { legacyDiff: true }, "a v1 binding reads its v1 diff");
+  // The v2 digest not read, or only v1 read, decides nothing; another change is no approval.
+  for (const digests of [{ changeDigest: null, diffDigest: DIFF }, { changeDigest: `v2:${"8".repeat(64)}` }]) {
+    assert.deepEqual(await run([v2Binding()], reading(pull(digests))), [{ bindingId: "binding", outcome: "waiting" }]);
+    assert.deepEqual(recorded(), []);
+  }
+
+  // A v2 binding names the head commit: someone else's merge of a moved head is never the
+  // verified change, though a v1 diff of it might have read the same.
+  const moved = "f".repeat(40);
+  assert.deepEqual(await run([v2Binding({ approvalObservation: approved })], reading(pull({ ...merged, mergedByKind: "bot",
+    headSha: moved, changeDigest: `v2:${"8".repeat(64)}`, diffDigest: DIFF }))),
+  [{ bindingId: "binding", outcome: "merged_without_approval" }]);
+  // At the verified head and change, it completes on the review recorded first.
+  assert.deepEqual(await run([v2Binding({ approvalObservation: approved })], reading(pull({ ...merged, mergedByKind: "bot",
+    changeDigest: CHANGE }))), [{ bindingId: "binding", outcome: "completed" }]);
+  assert.deepEqual(recorded()[1][2].mergedChange, { headSha: HEAD, diffDigest: CHANGE, headVerified: true });
+
+  // The Decision Maker's v2 approval: the lane's merge of exactly that change completes; any other does not.
+  const dm = (pullOver) => {
+    bindings = [v2Binding()];
+    calls = [];
+    return observeEngineeringAgentPullRequests({ read: reading(pull({ ...merged, mergedByKind: "bot", reviews: [],
+      ...pullOver })), now: () => new Date("2026-10-15T05:40:00Z"),
+    dmMerge: async () => ({ settlementId: "0123abcd-0000-8000-8000-000000000002", approvedHeadSha: HEAD,
+      approvedDiffDigest: CHANGE, decidedAt: new Date("2026-10-15T05:45:00Z"), laneMerge: "merged" }) });
+  };
+  assert.deepEqual(await dm({ changeDigest: CHANGE }), [{ bindingId: "binding", outcome: "completed" }]);
+  assert.deepEqual(await dm({ changeDigest: `v2:${"8".repeat(64)}` }), [{ bindingId: "binding", outcome: "merged_without_approval" }]);
+  assert.deepEqual(await dm({ changeDigest: null, diffDigest: DIFF }), [{ bindingId: "binding", outcome: "waiting" }]);
+}
+
 // A round reads every watched binding, page after page: none is crowded out by older ones that wait.
 {
   const many = Array.from({ length: 45 }, (_, index) => binding({ id: `binding-${String(index).padStart(3, "0")}` }));

@@ -21,6 +21,7 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import {
+  ENGINEERING_AGENT_CHANGE_DIGEST_V2_FEATURE,
   ENGINEERING_AGENT_COMMIT_IDENTITY,
   expectedCommitObject,
   prBodyCarriesMarker,
@@ -151,7 +152,9 @@ export const decideLookup = ({ runId, branch, consumed, branchOid, pulls, headCo
  *   github(token) -> {
  *     branchOid(branch) -> sha | null,
  *     pullsForHead(branch) -> [{ number, state, baseRef, baseSha, headRef, headSha, body }]  (complete, or throws)
- *     pullDiffDigest(number) -> { digest } | { refused: true } | null   (null: not read; refused: not a diff AMUX would bind)
+ *     pullChangeDigest({ base, headSha }) -> { digest, headTreeSha } | null   (v2, lib/pullDiffDigestCore.ts; null: not read)
+ *     pullDiffDigest(number) -> { digest } | { refused: true } | null   (v1, for an app without change_digest_v2 only;
+ *                                                                        null: not read; refused: not a diff AMUX would bind)
  *     createPull({ title, body, head, draft }) ->{ status: "created", number } | { status: "rejected" } | { status: "unknown" },
  *   }
  *   workspace(baseSha) -> {
@@ -179,6 +182,11 @@ export async function runPublisherCycle(ports) {
   // The halt the app reads beside the claim: while anything halts, a round is
   // not a healthy one whatever it did (§12). Unknown is never taken as none.
   const halt = reportedHalt(claimed.json.halt);
+  // What the app says it takes (docs/policy/amux-v22-result-transfer.md §3-5):
+  // an app that names change_digest_v2 is given the v2 change digest; one
+  // before it, which knows only the diff digest, the v1 one.
+  const appFeatures = Array.isArray(claimed.json.appFeatures) ? claimed.json.appFeatures : [];
+  const changeDigestV2 = appFeatures.includes(ENGINEERING_AGENT_CHANGE_DIGEST_V2_FEATURE);
   if (work === null) return { finishedNormally: true, halt, reason: "nothing_to_publish" };
 
   const report = async (outcome, extra = {}) => {
@@ -227,16 +235,24 @@ export async function runPublisherCycle(ports) {
     const github = ports.github(token.token);
 
     // The binding: one commit -- the pull request's head, the branch and the
-    // verified commit all the same -- and the digest of a diff AMUX would bind.
-    // A diff that can never be bound goes to a person; one not read now is
-    // left for the next lookup (§10).
+    // verified commit all the same -- and its change digest (v2: merge base,
+    // head and tree, any size, binary files included). One not read now is
+    // left for the next lookup (§10). Only an app before v2 is given the v1
+    // diff digest, and a diff that can never be bound in v1 goes to a person.
+    const changeDigestOf = async (pull, treeId) => {
+      const change = await github.pullChangeDigest({ base: pull.baseRef, headSha: pull.headSha });
+      if (change === null) return null;
+      // The tree GitHub holds for the head is the tree the app judged.
+      return change.headTreeSha === treeId ? { digest: change.digest } : { unreadable: "pull_request_head_changed" };
+    };
     const snapshotOf = async (pull, treeId, verifiedHeadSha) => {
       if (!SHA1.test(pull.baseSha) || pull.headSha !== verifiedHeadSha) return { unreadable: "pull_request_head_changed" };
-      const diff = await github.pullDiffDigest(pull.number);
+      const diff = changeDigestV2 ? await changeDigestOf(pull, treeId) : await github.pullDiffDigest(pull.number);
       if (diff === null) return { unreadable: "snapshot_unreadable" };
+      if (diff.unreadable) return { unreadable: diff.unreadable };
       if (diff.refused) return { refused: "diff_not_bindable" };
-      // Read again after the diff, as AMUX's review does: a head that moved
-      // while the diff was read means the digest is not this commit's.
+      // Read again after the digest, as AMUX's review does: a head that moved
+      // while it was read means the digest is not this commit's.
       const again = (await github.pullsForHead(work.branch)).find((candidate) => candidate.number === pull.number);
       if (again?.headSha !== verifiedHeadSha || again?.baseSha !== pull.baseSha || (await github.branchOid(work.branch)) !== verifiedHeadSha) {
         return { unreadable: "pull_request_head_changed" };
