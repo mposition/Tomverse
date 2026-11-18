@@ -89,6 +89,7 @@ const toolCallIdsOf = (message: ModelMessage): { calls: string[]; refs: string[]
  * tool call is never separated from its result or its approval.
  */
 export const findCompactionCut = (messages: ModelMessage[], keepTail = 4) => {
+    if (messages.length < 2) return 0;
     for (let cut = Math.max(1, messages.length - keepTail); cut > 0; cut -= 1) {
         const at = messages[cut]!;
         if (at.role !== "user" && at.role !== "assistant") continue;
@@ -644,6 +645,11 @@ export class Runner {
         const window = model.contextWindowTokens || 128_000;
         const reserve = Math.min(MAX_OUTPUT_TOKENS, model.maxOutputTokens || MAX_OUTPUT_TOKENS) + estimateTokens(this.systemPrompt()) + 3000;
         const size = estimateTokens(journal.state.messages);
+        // Nothing to summarise before the first task.
+        if (journal.state.tasks.length === 0 || journal.state.messages.length < 2) {
+            if (force) options.output.info("Nothing to compact yet.");
+            return "skipped";
+        }
         if (!force && size + reserve < window * COMPACT_AT) return "skipped";
         // A failed compaction is not retried automatically (it is a paid request).
         if (!force && journal.state.compactionFailedForTask === journal.state.tasks.length) return "skipped";

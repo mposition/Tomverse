@@ -7,14 +7,14 @@ import test from "node:test";
 import { FakeGateway, lastUserText, toolResultsSinceUser, type ScriptedReply } from "./fakeGateway.js";
 import { makeRepo, makeRunner, scriptedPrompter, tempDir } from "./helpers.js";
 import { readKey } from "../src/auth.js";
-import { costLine } from "../src/main.js";
+import { costLine, sessionCost } from "../src/main.js";
 import { normalizeRoot, PathError, Workspace } from "../src/workspace.js";
 import { planPatch, PatchError } from "../src/patch.js";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, writeFileSync } from "node:fs";
 import { TEST_KEY } from "./fakeGateway.js";
 import { Journal } from "../src/session.js";
-import { Runner } from "../src/agent.js";
+import { Runner, findCompactionCut } from "../src/agent.js";
 import { renderFileDiff, safeText } from "../src/display.js";
 import { canonicalDigest } from "../src/session.js";
 import { undoChange, UndoError, viewChanges } from "../src/changes.js";
@@ -410,3 +410,43 @@ test("a command runs only with the program path the approval showed", () =>
             assert.equal(journal.state.tools.length, 0, "nothing started");
         }
     ));
+test("session cost applies every /usage receipt, even behind more than 40 unknown requests", () =>
+    withGateway(
+        () => ({ text: "x" }),
+        async (gateway) => {
+            const { journal, client } = await makeRunner(gateway, makeRepo());
+            for (let i = 0; i < 45; i += 1) journal.newGeneration("agent");
+            for (const g of journal.state.generations.slice(41)) {
+                g.requestId = `req_${String(g.seq).padStart(32, "0")}`;
+                gateway.receipts.set(g.requestId, { requestId: g.requestId, idempotencyKey: g.idempotencyKey, status: "settled", chargedCredits: 2, heldCredits: 0, modelId: "fake-coder" });
+            }
+            const cost = await sessionCost(client, journal);
+            assert.equal(cost.charged, 8, "the four settled receipts at the end are counted");
+            assert.equal(cost.unknown.length, 41);
+            // The next run looks up the ones not checked yet rather than the same 40 again.
+            const firstRound = new Set(journal.state.generations.filter((g) => g.lookupAt).map((g) => g.seq));
+            await sessionCost(client, journal);
+            assert.ok(journal.state.generations.slice(0, 41).every((g) => g.lookupAt), `${firstRound.size} then all`);
+        }
+    ));
+
+test("/compact before any task, and on a one-message history, is a no-op, not a crash", () =>
+    withGateway(
+        () => ({ text: "x" }),
+        async (gateway) => {
+            const { runner } = await makeRunner(gateway, makeRepo());
+            assert.equal(await runner.maybeCompact(true), "skipped");
+            assert.equal(findCompactionCut([]), 0);
+            assert.equal(findCompactionCut([{ role: "user", content: "a" }]), 0);
+            assert.equal(gateway.completions.length, 0);
+        }
+    ));
+
+test("zero-width and other invisible format characters are escaped and never written", () => {
+    for (const ch of ["\u200b", "\u200c", "\u200d", "\u2060", "\ufeff", "\u206a", "\u206f"]) {
+        assert.ok(!safeText(`a${ch}b`).includes(ch));
+        const root = tempDir("patch");
+        writeFileSync(join(root, "a.txt"), "x\n");
+        assert.throws(() => planPatch(new Workspace(normalizeRoot(root)), [{ path: "a.txt", action: "update", replacements: [{ old: "x", new: `y${ch}` }] }]), PatchError);
+    }
+});

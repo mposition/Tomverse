@@ -62,7 +62,7 @@ const encode = (text: string, bom: boolean) => (bom ? Buffer.concat([BOM, Buffer
  * approves is exactly the text that is written. Tab, LF and the CR of a
  * consistent CRLF file are the only exceptions; see crRule below.
  */
-const UNSHOWABLE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/;
+const UNSHOWABLE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060\u2066-\u206f\ufeff]/;
 
 const assertShowable = (text: string, what: string) => {
     if (UNSHOWABLE.test(text)) {

@@ -5,9 +5,11 @@
 //   TOMVERSE_API_KEY=<capped key> node apps/tomverse-cli/scripts/real-model-check.mjs \
 //       --endpoint https://<host>/api/v1 --model <id> [--max-requests 12]
 //
-// It works only in synthetic repositories it creates in a temp folder, approves
-// the agent's patches and commands there (a test harness, not a CLI feature),
-// and judges the result with its own oracle: the tests must pass when the
+// It works only in synthetic repositories it creates in a temp folder. Every
+// patch and command the model proposes is shown at the terminal and needs the
+// person running it to approve it, exactly as in the CLI: a paid-run approval
+// is not an approval of what the model will ask to run. It judges the result
+// with its own oracle: the tests must pass when the
 // harness runs them itself, and the test files and the user's pre-existing
 // change must be byte-identical. It writes a JSON report with every request id
 // and the receipts the server returned for them.
@@ -27,6 +29,8 @@ const { createOutput } = await import(new URL("display.js", dist));
 const { resolveEndpoint } = await import(new URL("config.js", dist));
 const { readKey } = await import(new URL("auth.js", dist));
 const { sessionCost } = await import(new URL("main.js", dist));
+const { isInteractive, terminalPrompter } = await import(new URL("interactive.js", dist));
+if (!isInteractive()) throw new Error("Run this in a terminal: each patch and command needs your approval.");
 
 const { values } = parseArgs({ options: { endpoint: { type: "string" }, model: { type: "string" }, "max-requests": { type: "string" } } });
 if (!values.endpoint || !values.model) throw new Error("--endpoint and --model are required");
@@ -51,12 +55,13 @@ const repo = (files) => {
 };
 const nodeTest = (root, file) => spawnSync(process.execPath, [file], { cwd: root, encoding: "utf8" }).status === 0;
 const home = realpathSync.native(mkdtempSync(join(tmpdir(), "tvcli-real-home-")));
-const approveAll = { approve: async () => true, confirm: async () => false };
+// The CLI's own terminal prompter: the person decides each action.
+const prompter = terminalPrompter();
 const log = [];
 const output = createOutput(false, { out: { write: (s) => (process.stdout.write(s), true) }, err: { write: (s) => (log.push(s), process.stderr.write(s), true) } });
 
 const newRunner = (root, journal) =>
-    new Runner({ gateway, journal, workspace: new Workspace(root), output, prompter: approveAll, catalog, commandEnv: [], instructions: null });
+    new Runner({ gateway, journal, workspace: new Workspace(root), output, prompter, catalog, commandEnv: [], instructions: null });
 const newJournal = (root) =>
     Journal.create(home, {
         workspace: { root },

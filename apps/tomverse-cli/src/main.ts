@@ -190,16 +190,20 @@ export const sessionCost = async (gateway: Gateway, journal: Journal) => {
     } catch {
         // fall back to one lookup per request below
     }
-    let lookups = 0;
+    // Every receipt /usage returned is applied first, whatever its position.
     for (const g of generations) {
         if (g.requestId && byId.has(g.requestId)) {
             g.receipt = byId.get(g.requestId)!;
             g.lookup = "found";
-            continue;
         }
-        if (g.receipt && g.receipt.status !== "held") continue;
-        if (lookups >= 40) break;
-        lookups += 1;
+    }
+    // Then single lookups for what is still open, the least recently checked
+    // first, so repeated runs reach every request rather than the same 40.
+    const open = generations
+        .filter((g) => !(g.receipt && g.receipt.status !== "held") && !(g.requestId && byId.has(g.requestId)))
+        .sort((x, y) => (x.lookupAt ?? "").localeCompare(y.lookupAt ?? ""))
+        .slice(0, 40);
+    for (const g of open) {
         try {
             const found = await gateway.requestStatus(g.requestId ? { requestId: g.requestId } : { idempotencyKey: g.idempotencyKey });
             g.lookup = found.found ? "found" : "not_found";
