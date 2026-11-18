@@ -204,3 +204,27 @@ test("undo re-checks the real path: a parent swapped for a link out of the works
             assert.equal(readFileSync(join(outside, "sub", "f.txt"), "utf8"), "new\n", "the file outside is untouched");
         }
     ));
+test("search attributes each match by its whole path and never returns a credential file's lines", () =>
+    withGateway(
+        () => ({ text: "x" }),
+        async (gateway) => {
+            const root = makeRepo({ "src/a.ts": "const TOKEN_NAME = 'ok';\n", "config/credentials.json": '{ "TOKEN_NAME": "leak-me" }\n' });
+            const { runner } = await makeRunner(gateway, root);
+            const result = await (runner.tools.search_text as any).execute({ pattern: "TOKEN_NAME" }, { toolCallId: "s1", messages: [] });
+            assert.equal(result.status, "ok");
+            assert.ok(result.matches.includes("src/a.ts:1:const TOKEN_NAME = 'ok';"), JSON.stringify(result));
+            assert.ok(!JSON.stringify(result).includes("leak-me"));
+        }
+    ));
+
+test("a file name with a newline cannot pass as another path", { skip: process.platform === "win32" && "newlines are not allowed in Windows file names" }, () =>
+    withGateway(
+        () => ({ text: "x" }),
+        async (gateway) => {
+            const root = makeRepo();
+            writeFileSync(join(root, "id_rsa\nnotes.txt"), "TOKEN=leak-me\n");
+            const { runner } = await makeRunner(gateway, root);
+            const result = await (runner.tools.search_text as any).execute({ pattern: "TOKEN" }, { toolCallId: "s1", messages: [] });
+            assert.ok(!JSON.stringify(result).includes("leak-me"), JSON.stringify(result));
+        }
+    ));

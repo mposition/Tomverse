@@ -158,18 +158,29 @@ const searchTool = (ctx: ToolContext, input: { pattern: string; path?: string; r
     const matches: string[] = [];
     let truncated = false;
     if (ripgrepAvailable()) {
-        // --null ends each path with NUL: a path may itself contain ':'.
-        const args = ["--no-config", "--null", "--line-number", "--no-heading", "--color", "never", "--max-columns", "300", "--max-columns-preview", "--max-filesize", "1M"];
+        // --json gives each match's path and line as separate fields, so no
+        // character in a file name (':' or a newline) can make one path look
+        // like another. JSON escapes control characters, so one event is one line.
+        const args = ["--no-config", "--json", "--max-columns", "300", "--max-columns-preview", "--max-filesize", "1M"];
         if (!input.regex) args.push("--fixed-strings");
         if (!input.caseSensitive) args.push("--ignore-case");
         args.push("-e", input.pattern, "--", where.relative === "." ? "." : where.relative);
-        const result = spawnSync("rg", args, { cwd: ctx.workspace.root, encoding: "utf8", maxBuffer: 16 * 1024 * 1024, windowsHide: true, shell: false, timeout: 30_000, env: commandEnv() });
+        const result = spawnSync("rg", args, { cwd: ctx.workspace.root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, windowsHide: true, shell: false, timeout: 30_000, env: commandEnv() });
         if (result.status !== 0 && result.status !== 1) return { status: "error", error: (result.stderr || "search failed").slice(0, 500) };
-        for (const line of (result.stdout ?? "").split(/\r?\n/)) {
-            const end = line.indexOf("\0");
-            // No NUL: not a match line we can attribute to a path (e.g. a name with a newline).
-            if (end <= 0) continue;
-            const file = line.slice(0, end).replace(/^\.[\\/]/, "").replaceAll("\\", "/");
+        for (const line of (result.stdout ?? "").split("\n")) {
+            if (!line) continue;
+            let event: { type?: string; data?: { path?: { text?: string }; line_number?: number; lines?: { text?: string } } };
+            try {
+                event = JSON.parse(line);
+            } catch {
+                continue;
+            }
+            if (event.type !== "match") continue;
+            // A path or line that is not valid UTF-8 comes as bytes: left out.
+            const rawPath = event.data?.path?.text;
+            const text = event.data?.lines?.text;
+            if (typeof rawPath !== "string" || typeof text !== "string") continue;
+            const file = rawPath.replace(/^\.[\\/]/, "").replaceAll("\\", "/");
             if (isSecretPath(file)) continue;
             // The same real-path rule as read_file: a match inside a link out of the folder is dropped.
             try {
@@ -181,7 +192,7 @@ const searchTool = (ctx: ToolContext, input: { pattern: string; path?: string; r
                 truncated = true;
                 break;
             }
-            matches.push(`${file}:${line.slice(end + 1)}`);
+            matches.push(`${file}:${event.data?.line_number ?? "?"}:${text.replace(/\r?\n$/, "")}`);
         }
         return { status: "ok", engine: "ripgrep", matches, truncated };
     }
