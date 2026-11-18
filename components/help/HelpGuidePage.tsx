@@ -6,6 +6,7 @@ import { ArrowLeft, ArrowRight, ArrowUpRight, Check, ChevronDown, Sparkles } fro
 import { MarketingFooter, MarketingHeader } from "@/components/marketing/MarketingChrome";
 import { HELP_CATEGORIES, guidesInCategory, helpGuideMeta } from "@/lib/helpCentre/catalog";
 import { helpActionHref, helpGuideHref, helpHubHref } from "@/lib/helpCentre/links";
+import { HELP_ATTACHMENT_FORMAT_GUIDES, helpAttachmentFormats } from "@/lib/helpCentre/attachmentFormats";
 import shotHotspots from "@/lib/helpCentre/shots.json";
 import type { HelpHotspot, HelpLocaleCopy } from "@/lib/helpCentre/types";
 import type { Language } from "@/lib/language";
@@ -19,6 +20,30 @@ const SHOT_HOTSPOTS = new Map(Object.entries(shotHotspots as Record<string, Help
 
 const fill = (template: string, values: Record<string, string | number>) =>
   template.replace(/\{(\w+)\}/g, (match, key: string) => (key in values ? String(values[key]) : match));
+
+/** Supported formats from CHAT_ATTACHMENT_FORMATS, never from guide copy. */
+function AttachmentFormatList({ ui }: { ui: HelpLocaleCopy["ui"] }) {
+  const formats = helpAttachmentFormats();
+  return (
+    <section className="mt-8 rounded-2xl border border-zinc-200 p-5 dark:border-zinc-800" aria-labelledby="help-attachment-formats" data-testid="help-attachment-formats">
+      <h2 id="help-attachment-formats" className="text-lg font-black">{ui.formatsTitle}</h2>
+      <dl className="mt-3 space-y-2 text-sm leading-6">
+        {formats.groups.map((entry) => (
+          <div key={entry.group} className="sm:flex sm:gap-3">
+            <dt className="shrink-0 font-semibold sm:w-56">{ui.formatGroups[entry.group]}</dt>
+            <dd className="text-zinc-600 [overflow-wrap:anywhere] dark:text-zinc-400">{entry.extensions.map((extension) => `.${extension}`).join(", ")}</dd>
+          </div>
+        ))}
+      </dl>
+      <p className="mt-3 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+        {fill(ui.formatsGuestLimits, { files: formats.guestFiles, mb: formats.guestMegabytes })}
+        {formats.signedInOnly.length > 0
+          ? ` ${fill(ui.formatsSignedInOnly, { list: formats.signedInOnly.map((extension) => `.${extension}`).join(", ") })}`
+          : null}
+      </p>
+    </section>
+  );
+}
 
 export function HelpGuidePage({ lang, copy, guideId }: { lang: Language; copy: HelpLocaleCopy; guideId: string }) {
   const ui = copy.ui;
@@ -183,6 +208,8 @@ export function HelpGuidePage({ lang, copy, guideId }: { lang: Language; copy: H
               <span />
             )}
           </div>
+
+          {HELP_ATTACHMENT_FORMAT_GUIDES.has(guideId) ? <AttachmentFormatList ui={ui} /> : null}
 
           {words.faq.length > 0 ? (
             <section className="mt-10" aria-labelledby="help-guide-faq">

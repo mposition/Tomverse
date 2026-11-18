@@ -78,6 +78,17 @@ export const fr: HelpLocaleCopy = {
     nextGuides: "À lire ensuite",
     backToHelp: "Retour au centre d’aide",
     newQuestion: "Nouvelle question",
+    formatsTitle: "Formats pris en charge",
+    formatGroups: {
+      image: "Images (GIF fixes uniquement)",
+      document: "Documents",
+      data: "Données",
+      markup: "Texte et balisage",
+      code: "Code source (lu comme du texte)",
+      archive: "Archives (leur contenu doit passer les contrôles)",
+    },
+    formatsSignedInOnly: "Réservé aux comptes connectés : {list}",
+    formatsGuestLimits: "Sans connexion : {files} fichier par message, {mb} Mo au maximum.",
   },
   categories: {
     "getting-started": { title: "Premiers pas", description: "De la création du compte à votre première question." },
@@ -360,7 +371,7 @@ export const fr: HelpLocaleCopy = {
         { title: "Envoyer", body: "Envoyez le message." },
       ],
       faq: [
-        { q: "Combien de fichiers, et de quelle taille ?", a: "Une fois connecté : 5 fichiers par message au maximum, 10 Mo par fichier. Pour un invité : 1 fichier de 5 Mo. Les limites peuvent changer, consultez l’indication à l’écran." },
+        { q: "Combien de fichiers, et de quelle taille ?", a: "Connecté, jusqu’à 5 fichiers par message, 10 Mo chacun et 25 Mo au total. Les limites sans connexion et tous les formats acceptés figurent dans la liste des formats ci-dessous." },
         { q: "Quels fichiers ne sont pas acceptés ?", a: "Les fichiers exécutables, les archives autres que ZIP (RAR, 7Z, etc.), l’audio et la vidéo, HEIC et TIFF, les GIF animés et les documents protégés par mot de passe." },
         { q: "Jusqu’à quand les fichiers joints sont-ils conservés ?", a: "Lorsque vous êtes connecté, les pièces jointes sont conservées avec la conversation et supprimées avec elle ou avec le compte. Les fichiers d’un invité sont conservés peu de temps puis supprimés automatiquement." },
       ],
@@ -664,7 +675,7 @@ export const fr: HelpLocaleCopy = {
         { title: "Ajouter à l’écran d’accueil", body: "Appuyez sur « Installer Tomverse » dans le menu du compte. Sur iPhone, dans Safari, choisissez Partager → « Sur l’écran d’accueil »." },
       ],
       faq: [
-        { q: "Puis-je aussi envoyer des fichiers depuis un téléphone ?", a: "Oui. Sans connexion : 1 fichier de 5 Mo ; une fois connecté, vous pouvez en envoyer davantage et utiliser Google Drive." },
+        { q: "Puis-je aussi envoyer des fichiers depuis un téléphone ?", a: "Oui. Sans connexion, vous pouvez joindre moins de fichiers, et plus petits ; connecté, vous pouvez aussi utiliser Google Drive. Les limites figurent dans le guide sur les pièces jointes." },
         { q: "Puis-je importer des conversations depuis un téléphone ?", a: "Oui. Mais si le fichier d’export est volumineux, nous vous conseillons de le faire depuis un ordinateur." },
       ],
     },
@@ -819,8 +830,8 @@ export const fr: HelpLocaleCopy = {
         { title: "Si l’erreur concerne une image", body: "Choisissez un modèle capable de lire les images ou cliquez sur « Retirer les modèles incompatibles »." },
       ],
       faq: [
-        { q: "Combien de fichiers, et de quelle taille ?", a: "Une fois connecté : jusqu’à 5 fichiers par message, 10 Mo par fichier et 25 Mo au total. Sans connexion : 1 fichier, 5 Mo. Les limites peuvent changer, prenez pour référence l’indication à l’écran." },
-        { q: "Quels formats sont pris en charge ?", a: "PNG, JPEG, WebP, PDF, texte, Word, Excel, PowerPoint, OpenDocument et les fichiers Google Drive pris en charge. Les GIF animés et les ZIP protégés par mot de passe ne le sont pas." },
+        { q: "Combien de fichiers, et de quelle taille ?", a: "Connecté, jusqu’à 5 fichiers par message, 10 Mo chacun et 25 Mo au total. Les limites sans connexion figurent dans la liste des formats du guide sur les pièces jointes." },
+        { q: "Quels formats sont pris en charge ?", a: "Tous les formats acceptés figurent dans la liste des formats du guide sur les pièces jointes. Les GIF animés et les ZIP protégés par mot de passe ne sont pas acceptés." },
         { q: "Un fichier envoyé auparavant est signalé comme illisible.", a: "Le fichier n’est plus stocké. Joignez-le de nouveau ou cliquez sur « Continuer sans le fichier »." },
       ],
     },

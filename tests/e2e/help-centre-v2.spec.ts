@@ -44,6 +44,19 @@ test("a guide page steps through and keeps the step in the address", async ({ pa
   expect((await page.request.get("/support/help-centre/guides/not-a-guide?lang=en")).status()).toBe(404);
 });
 
+test("the attachment guide lists the supported formats once, from the format table", async ({ page }) => {
+  await prepareGuestPage(page, "en");
+  await mockAssistant(page, null, { enabled: false, signedIn: false });
+  await page.goto("/support/help-centre/guides/attach-files?lang=en");
+  const list = page.getByTestId("help-attachment-formats");
+  await expect(list).toBeVisible({ timeout: 30_000 });
+  const copy = await list.innerText();
+  for (const extension of ["png", "pdf", "docx", "hwp", "zip", "json"]) expect(copy).toContain(`.${extension}`);
+  expect(copy.match(/\.pdf\b/g)).toHaveLength(1);
+  await expect(list).toContainText("Without signing in: 1 file per message, up to 5 MB.");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
 test("the assistant answer shows cited steps and links to the guide", async ({ page }) => {
   await prepareGuestPage(page, "en");
   await mockAssistant(page, {

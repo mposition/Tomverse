@@ -78,6 +78,17 @@ export const zhHant: HelpLocaleCopy = {
     nextGuides: "接下來可以讀的指南",
     backToHelp: "回到說明中心",
     newQuestion: "新問題",
+    formatsTitle: "支援的格式",
+    formatGroups: {
+      image: "圖片（僅靜態 GIF）",
+      document: "文件",
+      data: "資料",
+      markup: "文字與標記",
+      code: "原始碼（以文字讀取）",
+      archive: "壓縮檔（其中檔案也須通過檢查）",
+    },
+    formatsSignedInOnly: "須登入才能上傳：{list}",
+    formatsGuestLimits: "未登入時：每則訊息 {files} 個檔案，每個最多 {mb} MB。",
   },
   categories: {
     "getting-started": { title: "開始使用", description: "從建立帳號到送出第一個問題。" },
@@ -360,7 +371,7 @@ export const zhHant: HelpLocaleCopy = {
         { title: "送出", body: "送出訊息。" },
       ],
       faq: [
-        { q: "可以附加幾個檔案、多大的檔案？", a: "登入後，每則訊息最多 5 個檔案，每個檔案 10MB；訪客則是 1 個檔案、5MB。上限可能會變動，請以畫面上的說明為準。" },
+        { q: "可以附加幾個檔案、多大的檔案？", a: "登入後每則訊息最多 5 個檔案，每個 10 MB，合計 25 MB。未登入時的限制與所有可上傳格式，請見下方的支援格式清單。" },
         { q: "哪些檔案不接受？", a: "可執行檔、非 ZIP 的壓縮檔（RAR、7Z 等）、音訊與影片、HEIC、TIFF、動態 GIF，以及設有密碼的文件。" },
         { q: "附加的檔案會保存多久？", a: "登入狀態下的附件會隨對話一起保存，刪除對話或帳號時會一併刪除。訪客的檔案會短暫保存後自動刪除。" },
       ],
@@ -664,7 +675,7 @@ export const zhHant: HelpLocaleCopy = {
         { title: "加入主畫面", body: "點選帳戶選單中的「安裝 Tomverse」。在 iPhone 上，請在 Safari 中依序點選分享按鈕 →「加入主畫面」。" },
       ],
       faq: [
-        { q: "在手機上也能上傳檔案嗎？", a: "可以。未登入時是 1 個檔案、5MB，登入後可以上傳更多，也能使用 Google Drive。" },
+        { q: "在手機上也能上傳檔案嗎？", a: "可以。未登入時可上傳的檔案數量與大小較少；登入後還能使用 Google Drive。限制請見檔案附件指南。" },
         { q: "在手機上可以匯入對話嗎？", a: "可以。不過如果匯出檔很大，建議在電腦上操作。" },
       ],
     },
@@ -819,8 +830,8 @@ export const zhHant: HelpLocaleCopy = {
         { title: "圖片錯誤時", body: "請選擇可以讀取圖片的模型，或點選「移除不相容模型」。" },
       ],
       faq: [
-        { q: "可以上傳幾個檔案、多大的檔案？", a: "登入後，每則訊息最多 5 個檔案，每個檔案 10MB，合計 25MB。未登入時，最多 1 個檔案、5MB。上限可能會變動，請以畫面上的說明為準。" },
-        { q: "支援哪些格式？", a: "PNG、JPEG、WebP、PDF、文字、Word、Excel、PowerPoint、OpenDocument，以及支援的 Google Drive 檔案。不支援動態 GIF 和設有密碼的 ZIP。" },
+        { q: "可以上傳幾個檔案、多大的檔案？", a: "登入後每則訊息最多 5 個檔案，每個 10 MB，合計 25 MB。未登入時的限制請見檔案附件指南中的支援格式清單。" },
+        { q: "支援哪些格式？", a: "所有可上傳格式請見檔案附件指南中的支援格式清單。不支援動態 GIF 與加密的 ZIP。" },
         { q: "顯示無法讀取之前上傳的檔案。", a: "這是檔案已不再儲存的情況。請重新附加，或點選「不帶此檔案繼續」。" },
       ],
     },

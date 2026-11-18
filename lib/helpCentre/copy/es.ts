@@ -76,6 +76,17 @@ export const es: HelpLocaleCopy = {
     nextGuides: "Qué leer a continuación",
     backToHelp: "Volver al centro de ayuda",
     newQuestion: "Nueva pregunta",
+    formatsTitle: "Formatos compatibles",
+    formatGroups: {
+      image: "Imágenes (solo GIF estáticos)",
+      document: "Documentos",
+      data: "Datos",
+      markup: "Texto y marcado",
+      code: "Código fuente (se lee como texto)",
+      archive: "Archivos comprimidos (su contenido debe pasar las comprobaciones)",
+    },
+    formatsSignedInOnly: "Solo con sesión iniciada: {list}",
+    formatsGuestLimits: "Sin iniciar sesión: {files} archivo por mensaje, hasta {mb} MB.",
   },
   categories: {
     "getting-started": { title: "Primeros pasos", description: "Desde crear tu cuenta hasta enviar tu primera pregunta." },
@@ -358,7 +369,7 @@ export const es: HelpLocaleCopy = {
         { title: "Enviar", body: "Envía el mensaje." },
       ],
       faq: [
-        { q: "¿Cuántos archivos y de qué tamaño?", a: "Con la sesión iniciada, hasta 5 por mensaje y 10 MB por archivo. Los invitados, 1 archivo de 5 MB. Los límites pueden cambiar, así que consulta lo que indica la pantalla." },
+        { q: "¿Cuántos archivos y de qué tamaño?", a: "Con sesión iniciada, hasta 5 archivos por mensaje, 10 MB cada uno y 25 MB en total. Los límites sin sesión y todos los formatos aceptados están en la lista de formatos de abajo." },
         { q: "¿Qué archivos no se aceptan?", a: "Ejecutables, archivos comprimidos que no sean ZIP (RAR, 7Z, etc.), audio y vídeo, HEIC y TIFF, GIF animados y documentos protegidos con contraseña." },
         { q: "¿Hasta cuándo se conservan los archivos adjuntos?", a: "Con la sesión iniciada, los adjuntos se conservan junto con la conversación y se borran cuando eliminas la conversación o la cuenta. Los archivos de invitado se conservan un tiempo breve y se borran automáticamente." },
       ],
@@ -662,7 +673,7 @@ export const es: HelpLocaleCopy = {
         { title: "Añadir a la pantalla de inicio", body: "Pulsa «Instalar Tomverse» en el menú de la cuenta. En iPhone, usa el botón Compartir de Safari y elige «Añadir a la pantalla de inicio»." },
       ],
       faq: [
-        { q: "¿Puedo subir archivos desde el teléfono?", a: "Sí. Sin iniciar sesión, 1 archivo de 5 MB; con la sesión iniciada puedes subir más, y también puedes usar Google Drive." },
+        { q: "¿Puedo subir archivos desde el teléfono?", a: "Sí. Sin iniciar sesión puedes adjuntar menos archivos y más pequeños; con sesión iniciada también puedes usar Google Drive. Los límites están en la guía de archivos adjuntos." },
         { q: "¿Puedo importar conversaciones desde el teléfono?", a: "Sí. Pero si el archivo de exportación es grande, te recomendamos hacerlo desde un ordenador." },
       ],
     },
@@ -817,8 +828,8 @@ export const es: HelpLocaleCopy = {
         { title: "Si es un error de imagen", body: "Elige un modelo que pueda leer imágenes o pulsa «Quitar modelos incompatibles»." },
       ],
       faq: [
-        { q: "¿Cuántos archivos y de qué tamaño puedo subir?", a: "Con la sesión iniciada, hasta 5 por mensaje, 10 MB por archivo y 25 MB en total. Sin iniciar sesión, 1 archivo de hasta 5 MB. Los límites pueden cambiar, así que guíate por lo que indica la pantalla." },
-        { q: "¿Qué formatos se admiten?", a: "PNG, JPEG, WebP, PDF, texto, Word, Excel, PowerPoint, OpenDocument y los archivos admitidos de Google Drive. No se admiten GIF animados ni ZIP protegidos con contraseña." },
+        { q: "¿Cuántos archivos y de qué tamaño puedo subir?", a: "Con sesión iniciada, hasta 5 archivos por mensaje, 10 MB cada uno y 25 MB en total. Los límites sin sesión están en la lista de formatos de la guía de archivos adjuntos." },
+        { q: "¿Qué formatos se admiten?", a: "Todos los formatos aceptados están en la lista de formatos de la guía de archivos adjuntos. No se aceptan GIF animados ni ZIP protegidos con contraseña." },
         { q: "Me dice que no se puede leer un archivo que subí antes.", a: "Es el caso en que el archivo ya no está guardado. Vuelve a adjuntarlo o pulsa «Continuar sin el archivo»." },
       ],
     },

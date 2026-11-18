@@ -77,6 +77,17 @@ export const pt: HelpLocaleCopy = {
     nextGuides: "Próximos guias",
     backToHelp: "Voltar à Central de Ajuda",
     newQuestion: "Nova pergunta",
+    formatsTitle: "Formatos compatíveis",
+    formatGroups: {
+      image: "Imagens (apenas GIF estáticos)",
+      document: "Documentos",
+      data: "Dados",
+      markup: "Texto e marcação",
+      code: "Código-fonte (lido como texto)",
+      archive: "Arquivos compactados (o conteúdo precisa passar nas verificações)",
+    },
+    formatsSignedInOnly: "Somente com login: {list}",
+    formatsGuestLimits: "Sem login: {files} arquivo por mensagem, até {mb} MB.",
   },
   categories: {
     "getting-started": { title: "Primeiros passos", description: "Da criação da conta até a primeira pergunta." },
@@ -359,7 +370,7 @@ export const pt: HelpLocaleCopy = {
         { title: "Enviar", body: "Envie a mensagem." },
       ],
       faq: [
-        { q: "Quantos arquivos e de que tamanho?", a: "Logado, até 5 por mensagem e 10 MB por arquivo. Convidado: 1 arquivo de até 5 MB. Os limites podem mudar, então confira o aviso na tela." },
+        { q: "Quantos arquivos e de que tamanho?", a: "Com login, até 5 arquivos por mensagem, 10 MB cada e 25 MB no total. Os limites sem login e todos os formatos aceitos estão na lista de formatos abaixo." },
         { q: "Quais arquivos não são aceitos?", a: "Executáveis, compactados que não sejam ZIP (RAR, 7Z etc.), áudio e vídeo, HEIC e TIFF, GIFs animados e documentos protegidos por senha." },
         { q: "Por quanto tempo o arquivo anexado fica guardado?", a: "Anexos de quem está logado ficam guardados junto com a conversa e são apagados quando a conversa ou a conta é excluída. Arquivos de convidado ficam guardados por pouco tempo e depois são apagados automaticamente." },
       ],
@@ -663,7 +674,7 @@ export const pt: HelpLocaleCopy = {
         { title: "Adicionar à tela inicial", body: "No menu da conta, toque em “Instalar Tomverse”. No iPhone, no Safari, toque em Compartilhar e escolha “Adicionar à Tela de Início”." },
       ],
       faq: [
-        { q: "Dá para enviar arquivos pelo celular?", a: "Dá. Sem login, 1 arquivo de até 5 MB; logado, você envia mais e também pode usar o Google Drive." },
+        { q: "Dá para enviar arquivos pelo celular?", a: "Sim. Sem login você pode anexar menos arquivos e menores; com login também pode usar o Google Drive. Os limites estão no guia de anexos." },
         { q: "Dá para importar conversas pelo celular?", a: "Dá. Mas, se o arquivo de exportação for grande, é melhor fazer pelo computador." },
       ],
     },
@@ -818,8 +829,8 @@ export const pt: HelpLocaleCopy = {
         { title: "Se for erro de imagem", body: "Escolha um modelo que leia imagens ou toque em “Remover modelos incompatíveis”." },
       ],
       faq: [
-        { q: "Quantos arquivos e de que tamanho posso enviar?", a: "Logado, até 5 por mensagem, 10 MB por arquivo e 25 MB no total. Sem login, 1 arquivo de até 5 MB. Os limites podem mudar, então vale o que a tela indicar." },
-        { q: "Quais formatos são aceitos?", a: "PNG, JPEG, WebP, PDF, texto, Word, Excel, PowerPoint, OpenDocument e arquivos compatíveis do Google Drive. GIFs animados e ZIPs com senha não são aceitos." },
+        { q: "Quantos arquivos e de que tamanho posso enviar?", a: "Com login, até 5 arquivos por mensagem, 10 MB cada e 25 MB no total. Os limites sem login estão na lista de formatos do guia de anexos." },
+        { q: "Quais formatos são aceitos?", a: "Todos os formatos aceitos estão na lista de formatos do guia de anexos. GIFs animados e ZIPs protegidos por senha não são aceitos." },
         { q: "Diz que não consegue ler um arquivo que enviei antes.", a: "É o caso de um arquivo que não está mais guardado. Anexe de novo ou toque em “Continuar sem o arquivo”." },
       ],
     },

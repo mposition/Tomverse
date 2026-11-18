@@ -76,6 +76,17 @@ export const zh: HelpLocaleCopy = {
     nextGuides: "接下来可以读",
     backToHelp: "返回帮助中心",
     newQuestion: "新问题",
+    formatsTitle: "支持的格式",
+    formatGroups: {
+      image: "图片（仅静态 GIF）",
+      document: "文档",
+      data: "数据",
+      markup: "文本与标记",
+      code: "源代码（按文本读取）",
+      archive: "压缩包（其中文件也需通过检查）",
+    },
+    formatsSignedInOnly: "需登录才能上传：{list}",
+    formatsGuestLimits: "未登录时：每条消息 {files} 个文件，每个最多 {mb} MB。",
   },
   categories: {
     "getting-started": { title: "开始使用", description: "从创建账号到发出第一个问题。" },
@@ -358,7 +369,7 @@ export const zh: HelpLocaleCopy = {
         { title: "发送", body: "发送消息。" },
       ],
       faq: [
-        { q: "最多可以附加几个、多大的文件？", a: "登录后，每条消息最多 5 个，每个文件 10MB。访客只能附加 1 个，大小 5MB。限制可能会变化，请以页面上的说明为准。" },
+        { q: "最多可以附加几个、多大的文件？", a: "登录后每条消息最多 5 个文件，每个 10 MB，合计 25 MB。未登录时的限制和全部可上传格式见下方的支持格式列表。" },
         { q: "哪些文件不能接收？", a: "可执行文件、非 ZIP 的压缩文件（RAR、7Z 等）、音频和视频、HEIC 和 TIFF、动图 GIF，以及设置了密码的文档。" },
         { q: "附加的文件会保存多久？", a: "登录状态下的附件会和对话一起保存，对话或账号被删除时会一并删除。访客的文件会短暂保存，之后自动删除。" },
       ],
@@ -662,7 +673,7 @@ export const zh: HelpLocaleCopy = {
         { title: "添加到主屏幕", body: "点击账号菜单中的“安装 Tomverse”。在 iPhone 上，请在 Safari 中点按“共享”，然后选择“添加到主屏幕”。" },
       ],
       faq: [
-        { q: "在手机上也能上传文件吗？", a: "可以。不登录时为 1 个、5MB；登录后可以上传更多，也能使用 Google Drive。" },
+        { q: "在手机上也能上传文件吗？", a: "可以。未登录时可上传的文件数量和大小更少；登录后还能使用 Google Drive。限制见文件附件指南。" },
         { q: "在手机上可以导入对话吗？", a: "可以。不过如果导出文件很大，建议在电脑上操作。" },
       ],
     },
@@ -817,8 +828,8 @@ export const zh: HelpLocaleCopy = {
         { title: "图像出错时", body: "请选择能读取图像的模型，或点击“移除不兼容模型”。" },
       ],
       faq: [
-        { q: "最多可以上传几个、多大的文件？", a: "登录后，每条消息最多 5 个，每个文件 10MB，合计 25MB。未登录时最多 1 个，5MB。限制可能会变化，请以页面上的说明为准。" },
-        { q: "支持哪些格式？", a: "PNG、JPEG、WebP、PDF、文本、Word、Excel、PowerPoint、OpenDocument，以及支持的 Google Drive 文件。不支持动图 GIF 和设置了密码的 ZIP。" },
+        { q: "最多可以上传几个、多大的文件？", a: "登录后每条消息最多 5 个文件，每个 10 MB，合计 25 MB。未登录时的限制见文件附件指南中的支持格式列表。" },
+        { q: "支持哪些格式？", a: "全部可上传格式见文件附件指南中的支持格式列表。不支持动态 GIF 和加密的 ZIP。" },
         { q: "提示以前上传的文件无法读取。", a: "这是文件已经不再保存的情况。请重新附加，或点击“不带该文件继续”。" },
       ],
     },

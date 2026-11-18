@@ -11,6 +11,7 @@
  * than as an unsourced claim.
  */
 
+import { HELP_ATTACHMENT_FORMAT_GUIDES, helpAttachmentFormats } from "@/lib/helpCentre/attachmentFormats";
 import { HELP_GUIDES } from "@/lib/helpCentre/catalog";
 import type { HelpLocaleCopy } from "@/lib/helpCentre/types";
 import type { Language } from "@/lib/language";
@@ -46,6 +47,21 @@ export type HelpAssistantAnswer =
     }
   | { status: "not_found"; summary: string };
 
+/** The format list the attachment guide shows, from CHAT_ATTACHMENT_FORMATS. */
+function attachmentFormatText(copy: HelpLocaleCopy): string {
+  const formats = helpAttachmentFormats();
+  const groups = formats.groups
+    .map((entry) => `  ${copy.ui.formatGroups[entry.group]}: ${entry.extensions.map((extension) => `.${extension}`).join(", ")}`)
+    .join("\n");
+  const guest = copy.ui.formatsGuestLimits
+    .replace("{files}", String(formats.guestFiles))
+    .replace("{mb}", String(formats.guestMegabytes));
+  const only = formats.signedInOnly.length
+    ? ` ${copy.ui.formatsSignedInOnly.replace("{list}", formats.signedInOnly.map((extension) => `.${extension}`).join(", "))}`
+    : "";
+  return `  ${copy.ui.formatsTitle}:\n${groups}\n  ${guest}${only}`;
+}
+
 /** The help text the model may use, one block per guide, ids in brackets. */
 export function helpAssistantCorpus(copy: HelpLocaleCopy): string {
   return HELP_GUIDES.map((guide) => {
@@ -59,7 +75,8 @@ export function helpAssistantCorpus(copy: HelpLocaleCopy): string {
       .map((step, index) => `  ${index + 1}. ${step.title}: ${step.body}`)
       .join("\n");
     const faq = words.faq.map((item) => `  Q: ${item.q}\n  A: ${item.a}`).join("\n");
-    return `[guide:${guide.id}] ${category} > ${words.title} (${needs})\n${words.summary}\n${steps}${faq ? `\n${faq}` : ""}`;
+    const formats = HELP_ATTACHMENT_FORMAT_GUIDES.has(guide.id) ? `\n${attachmentFormatText(copy)}` : "";
+    return `[guide:${guide.id}] ${category} > ${words.title} (${needs})\n${words.summary}\n${steps}${faq ? `\n${faq}` : ""}${formats}`;
   }).join("\n\n");
 }
 

@@ -2,22 +2,6 @@ import type { Language } from "@/components/LanguageProvider";
 import type { MarketingInfoCopy } from "./MarketingInfoPage";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { GUEST_MAX_ATTACHMENTS_PER_MESSAGE, GUEST_MAX_ATTACHMENT_BYTES } from "@/lib/guestAttachmentPolicy";
-import { chatAttachmentExtensionsByGroup, type ChatAttachmentUiGroup } from "@/lib/chatAttachmentFormats";
-
-const attachmentGroupLabels: Record<ChatAttachmentUiGroup, string> = {
-  image: "Images (static GIF only)",
-  document: "Documents",
-  data: "Data",
-  markup: "Text and markup",
-  code: "Source code (read as text)",
-  archive: "Archives (contents must pass file checks)",
-};
-const signedInAttachmentFormats = Object.entries(chatAttachmentExtensionsByGroup())
-  .filter(([, extensions]) => extensions.length > 0)
-  .map(([group, extensions]) => `${attachmentGroupLabels[group as ChatAttachmentUiGroup]}: ${extensions.map((extension) => `.${extension}`).join(", ")}.`);
-const guestAttachmentExtensions = new Set(Object.values(chatAttachmentExtensionsByGroup({ guest: true })).flat());
-const signedInOnlyAttachmentFormats = Object.values(chatAttachmentExtensionsByGroup()).flat()
-  .filter(extension => !guestAttachmentExtensions.has(extension)).map(extension => `.${extension}`);
 
 export const infoPages = {
   faq: {

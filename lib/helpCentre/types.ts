@@ -146,6 +146,13 @@ export type HelpUiCopy = {
   nextGuides: string;
   backToHelp: string;
   newQuestion: string;
+  /** The derived attachment format list (lib/helpCentre/attachmentFormats.ts). */
+  formatsTitle: string;
+  formatGroups: Record<"image" | "document" | "data" | "markup" | "code" | "archive", string>;
+  /** `{list}`: extensions only a signed-in reader may attach. */
+  formatsSignedInOnly: string;
+  /** `{files}` and `{mb}` from lib/guestAttachmentPolicy.ts. */
+  formatsGuestLimits: string;
 };
 
 export type HelpLocaleCopy = {

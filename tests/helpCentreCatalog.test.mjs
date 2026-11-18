@@ -4,6 +4,10 @@ import test from "node:test";
 import { HELP_CATEGORIES, HELP_GUIDES } from "../lib/helpCentre/catalog.ts";
 import { HELP_COPY } from "../lib/helpCentre/copy/index.ts";
 import { HELP_CATEGORY_IDS } from "../lib/helpCentre/types.ts";
+import { helpAttachmentFormats } from "../lib/helpCentre/attachmentFormats.ts";
+import { chatAttachmentExtensionsByGroup } from "../lib/chatAttachmentFormats.ts";
+import { GUEST_MAX_ATTACHMENTS_PER_MESSAGE, GUEST_MAX_ATTACHMENT_BYTES } from "../lib/guestAttachmentPolicy.ts";
+import { helpAssistantCorpus } from "../lib/helpAssistantCore.ts";
 
 const languages = ["ko", "en", "zh", "zh-Hant", "fr", "de", "es", "pt"];
 
@@ -46,6 +50,36 @@ test("every screenshot a step names was captured, with a measured highlight", ()
       assert.ok(existsSync(new URL(`../public/help/shots/${lang}/${key}.webp`, import.meta.url)), `${lang}/${key}.webp missing`);
     }
   }
+});
+
+test("the attachment format list comes from CHAT_ATTACHMENT_FORMATS, and guide copy never lists extensions", () => {
+  const derived = helpAttachmentFormats();
+  const signedIn = chatAttachmentExtensionsByGroup();
+  const guest = new Set(Object.values(chatAttachmentExtensionsByGroup({ guest: true })).flat());
+  assert.deepEqual(
+    derived.groups,
+    Object.entries(signedIn).filter(([, extensions]) => extensions.length).map(([group, extensions]) => ({ group, extensions }))
+  );
+  assert.deepEqual(derived.signedInOnly, Object.values(signedIn).flat().filter((extension) => !guest.has(extension)));
+  assert.equal(derived.guestFiles, GUEST_MAX_ATTACHMENTS_PER_MESSAGE);
+  assert.equal(derived.guestMegabytes, GUEST_MAX_ATTACHMENT_BYTES / (1024 * 1024));
+  const extensions = Object.values(signedIn).flat();
+  // The guides about attaching files. Others may quote a button that names a
+  // download format ("Download all conversations as .txt"), which is not a
+  // statement about what may be attached.
+  const attachmentGuides = ["attach-files", "file-upload-failed", "google-drive", "use-on-mobile"];
+  for (const language of languages) {
+    const copy = HELP_COPY[language];
+    const text = JSON.stringify(attachmentGuides.map((id) => copy.guides[id]));
+    for (const extension of extensions) {
+      assert.doesNotMatch(text, new RegExp(`\\.${extension}\\b(?![/\\w])`, "i"), `${language} guide copy lists .${extension}; use the derived list`);
+    }
+    for (const group of Object.keys(signedIn)) assert.ok(copy.ui.formatGroups[group]?.trim(), `${language} formatGroups.${group}`);
+    assert.match(copy.ui.formatsGuestLimits, /\{files\}/);
+    assert.match(copy.ui.formatsGuestLimits, /\{mb\}/);
+    assert.match(copy.ui.formatsSignedInOnly, /\{list\}/);
+  }
+  assert.match(helpAssistantCorpus(HELP_COPY.en), /\.pdf/);
 });
 
 test("placeholders survive translation", () => {

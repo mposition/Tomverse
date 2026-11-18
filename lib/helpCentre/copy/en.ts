@@ -77,6 +77,17 @@ export const en: HelpLocaleCopy = {
     nextGuides: "Read next",
     backToHelp: "Back to the Help Centre",
     newQuestion: "New question",
+    formatsTitle: "Supported formats",
+    formatGroups: {
+      image: "Images (static GIF only)",
+      document: "Documents",
+      data: "Data",
+      markup: "Text and markup",
+      code: "Source code (read as text)",
+      archive: "Archives (contents must pass file checks)",
+    },
+    formatsSignedInOnly: "Signed-in only: {list}",
+    formatsGuestLimits: "Without signing in: {files} file per message, up to {mb} MB.",
   },
   categories: {
     "getting-started": { title: "Getting started", description: "Create an account and send your first question." },
@@ -359,7 +370,7 @@ export const en: HelpLocaleCopy = {
         { title: "Send", body: "Send your message." },
       ],
       faq: [
-        { q: "How many files, and how large?", a: "When signed in, up to 5 per message and 10 MB per file. Guests get 1 file up to 5 MB. Limits can change, so check the notice on screen." },
+        { q: "How many files, and how large?", a: "Signed in, up to 5 files per message, 10 MB each and 25 MB in total. The limits without signing in, and every accepted format, are in the supported formats list below." },
         { q: "Which files aren't accepted?", a: "Executables, archives other than ZIP (RAR, 7Z and so on), audio and video, HEIC and TIFF, animated GIFs and password-protected documents." },
         { q: "How long are attached files kept?", a: "Files attached while signed in are kept with the chat and deleted when you delete the chat or your account. Guest files are kept briefly and then deleted automatically." },
       ],
@@ -663,7 +674,7 @@ export const en: HelpLocaleCopy = {
         { title: "Add to Home Screen", body: "Select \"Install Tomverse\" in the account menu. On iPhone, in Safari choose the Share button → \"Add to Home Screen\"." },
       ],
       faq: [
-        { q: "Can I upload files from my phone?", a: "Yes. If you're not signed in it's 1 file up to 5 MB; signed in, you can upload more, and Google Drive works too." },
+        { q: "Can I upload files from my phone?", a: "Yes. Without signing in you can attach fewer and smaller files; signed in, you can also use Google Drive. The limits are in the file attachment guide." },
         { q: "Can I import chats on my phone?", a: "Yes. But if the export file is large, we recommend doing it on a computer." },
       ],
     },
@@ -818,8 +829,8 @@ export const en: HelpLocaleCopy = {
         { title: "If it's an image error", body: "Choose a model that can read images, or select \"Remove incompatible models\"." },
       ],
       faq: [
-        { q: "How many files, and how large, can I upload?", a: "When signed in, up to 5 per message, 10 MB per file and 25 MB in total. If you're not signed in, 1 file up to 5 MB. Limits can change, so go by the notice on screen." },
-        { q: "Which formats are supported?", a: "PNG, JPEG, WebP, PDF, text, Word, Excel, PowerPoint, OpenDocument and supported Google Drive files. Animated GIFs and password-protected ZIP files aren't supported." },
+        { q: "How many files, and how large, can I upload?", a: "Signed in, up to 5 files per message, 10 MB each and 25 MB in total. The limits without signing in are in the supported formats list of the file attachment guide." },
+        { q: "Which formats are supported?", a: "Every accepted format is in the supported formats list of the file attachment guide. Animated GIFs and password-protected ZIP files are not accepted." },
         { q: "It says an earlier file can't be read.", a: "The file is no longer stored. Attach it again, or select \"Continue without the file\"." },
       ],
     },

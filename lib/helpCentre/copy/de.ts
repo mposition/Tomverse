@@ -78,6 +78,17 @@ export const de: HelpLocaleCopy = {
     nextGuides: "Als Nächstes lesen",
     backToHelp: "Zurück zum Hilfecenter",
     newQuestion: "Neue Frage",
+    formatsTitle: "Unterstützte Formate",
+    formatGroups: {
+      image: "Bilder (nur statische GIFs)",
+      document: "Dokumente",
+      data: "Daten",
+      markup: "Text und Markup",
+      code: "Quellcode (als Text gelesen)",
+      archive: "Archive (Inhalt muss die Dateiprüfung bestehen)",
+    },
+    formatsSignedInOnly: "Nur nach Anmeldung: {list}",
+    formatsGuestLimits: "Ohne Anmeldung: {files} Datei pro Nachricht, bis zu {mb} MB.",
   },
   categories: {
     "getting-started": { title: "Erste Schritte", description: "Vom Anlegen des Kontos bis zur ersten Frage." },
@@ -360,7 +371,7 @@ export const de: HelpLocaleCopy = {
         { title: "Senden", body: "Senden Sie die Nachricht." },
       ],
       faq: [
-        { q: "Wie viele und wie große Dateien sind möglich?", a: "Angemeldet bis zu 5 Dateien pro Nachricht und 10 MB pro Datei. Als Gast 1 Datei mit 5 MB. Die Limits können sich ändern; maßgeblich sind die Hinweise auf dem Bildschirm." },
+        { q: "Wie viele und wie große Dateien sind möglich?", a: "Angemeldet bis zu 5 Dateien pro Nachricht, je 10 MB und insgesamt 25 MB. Die Grenzen ohne Anmeldung und alle akzeptierten Formate stehen in der Formatliste unten." },
         { q: "Welche Dateien werden nicht akzeptiert?", a: "Ausführbare Dateien, andere Archive als ZIP (RAR, 7Z usw.), Audio und Video, HEIC und TIFF, animierte GIFs sowie passwortgeschützte Dokumente." },
         { q: "Wie lange werden angehängte Dateien aufbewahrt?", a: "Anhänge angemeldeter Nutzer werden zusammen mit der Unterhaltung aufbewahrt und beim Löschen der Unterhaltung oder des Kontos mitgelöscht. Gastdateien werden kurz aufbewahrt und dann automatisch gelöscht." },
       ],
@@ -664,7 +675,7 @@ export const de: HelpLocaleCopy = {
         { title: "Zum Home-Bildschirm hinzufügen", body: "Tippen Sie im Kontomenü auf „Tomverse installieren“. Auf dem iPhone wählen Sie in Safari „Teilen“ → „Zum Home-Bildschirm“." },
       ],
       faq: [
-        { q: "Kann ich auch auf dem Smartphone Dateien hochladen?", a: "Ja. Ohne Anmeldung 1 Datei mit 5 MB, mit Anmeldung mehr, und auch Google Drive ist möglich." },
+        { q: "Kann ich auch auf dem Smartphone Dateien hochladen?", a: "Ja. Ohne Anmeldung können Sie weniger und kleinere Dateien anhängen; angemeldet können Sie auch Google Drive nutzen. Die Grenzen stehen in der Anleitung zu Anhängen." },
         { q: "Kann ich auf dem Smartphone Unterhaltungen importieren?", a: "Ja. Bei großen Exportdateien empfehlen wir jedoch, es am Computer zu tun." },
       ],
     },
@@ -819,8 +830,8 @@ export const de: HelpLocaleCopy = {
         { title: "Bei Bildfehlern", body: "Wählen Sie ein Modell, das Bilder lesen kann, oder klicken Sie auf „Nicht kompatible Modelle entfernen“." },
       ],
       faq: [
-        { q: "Wie viele und wie große Dateien kann ich hochladen?", a: "Angemeldet bis zu 5 Dateien pro Nachricht, 10 MB pro Datei und insgesamt 25 MB. Ohne Anmeldung 1 Datei mit bis zu 5 MB. Die Limits können sich ändern; maßgeblich sind die Hinweise auf dem Bildschirm." },
-        { q: "Welche Formate werden unterstützt?", a: "PNG, JPEG, WebP, PDF, Text, Word, Excel, PowerPoint, OpenDocument und unterstützte Google-Drive-Dateien. Animierte GIFs und passwortgeschützte ZIP-Dateien werden nicht unterstützt." },
+        { q: "Wie viele und wie große Dateien kann ich hochladen?", a: "Angemeldet bis zu 5 Dateien pro Nachricht, je 10 MB und insgesamt 25 MB. Die Grenzen ohne Anmeldung stehen in der Formatliste der Anleitung zu Anhängen." },
+        { q: "Welche Formate werden unterstützt?", a: "Alle akzeptierten Formate stehen in der Formatliste der Anleitung zu Anhängen. Animierte GIFs und passwortgeschützte ZIP-Dateien werden nicht angenommen." },
         { q: "Es heißt, eine früher hochgeladene Datei könne nicht gelesen werden.", a: "Dann ist die Datei nicht mehr gespeichert. Hängen Sie sie erneut an oder klicken Sie auf „Ohne die Datei fortfahren“." },
       ],
     },
