@@ -50,9 +50,10 @@ test("a review commit is made from the exact patch and leaves HEAD clean", async
   assert.equal(calls.at(-1)[0], "status");
 });
 
-test("a review commit with a path list past 32 KiB is checked at the same 4 MiB bound", async () => {
-  // Review r-20261116-204328-14b84a: the path list passed the 4 MiB inventory
-  // and then failed the review commit's diff-tree at 32 KiB.
+test("a review commit with a path list past 32 KiB reads git without a bound of ours", async () => {
+  // Review r-20261116-204328-14b84a: the path list passed the inventory and
+  // then failed the review commit's diff-tree at 32 KiB; since 2026-11-18 no
+  // git read has a bound of ours.
   const paths = Array.from({ length: 1500 }, (_, index) =>
     `lib/generated/a-fairly-long-directory-name/module-${index}.ts`).sort();
   assert.ok(paths.join("\0").length > 32 * 1024);
@@ -81,7 +82,7 @@ test("a review commit with a path list past 32 KiB is checked at the same 4 MiB 
     "11111111-1111-4111-8111-111111111111", paths, PATCH,
     { run, realpath: async (value) => value });
   assert.equal(result.ok, true, JSON.stringify(result));
-  assert.deepEqual(buffers, [4 * 1024 * 1024]);
+  assert.deepEqual(buffers, [Infinity]);
 });
 
 test("v52 includes a new regular file in the patch and the review commit", async () => {
@@ -250,26 +251,27 @@ test("moved HEAD and untracked files never produce a partial candidate", async (
     { ok: false, reason: "untracked_files" });
 });
 
-test("empty, binary and oversized patches fail closed", async () => {
+test("empty and binary patches fail closed; a patch has no size bound", async () => {
   assert.deepEqual(await captureAmuxV22Patch("/repo", BASE,
     fixture({ patch: "" })),
     { ok: false, reason: "no_change" });
   assert.deepEqual(await captureAmuxV22Patch("/repo", BASE,
     fixture({ patch: "abc\0def" })),
     { ok: false, reason: "patch_not_bounded_text" });
-  // The one patch bound (lib/amux/v22PatchLimit.ts): 4 MiB, 64 KiB until
-  // 2026-11-15. A patch of 65,537 bytes is now an ordinary patch.
+  // No size bound of ours (owner decision 2026-11-18; it was 4 MiB until
+  // then). A patch past 4 MiB, even one whose JSON escape is far past twice
+  // its size, is an ordinary candidate: it travels to the app in chunks.
   const large = await captureAmuxV22Patch("/repo", BASE,
     fixture({ patch: PATCH + `+${"x".repeat(65_537)}\n` }));
   assert.equal(large.ok, true);
-  assert.deepEqual(await captureAmuxV22Patch("/repo", BASE,
-    fixture({ patch: "x".repeat(4 * 1024 * 1024 + 1) })),
-    { ok: false, reason: "patch_not_bounded_text" });
-  // Under the bound, but escaped for JSON past twice it (other control
-  // characters are six bytes each): the settlement body could not carry it.
-  assert.deepEqual(await captureAmuxV22Patch("/repo", BASE,
-    fixture({ patch: PATCH + `+${"\u0001".repeat(2 * 1024 * 1024)}\n` })),
-    { ok: false, reason: "patch_not_bounded_text" });
+  const huge = PATCH + `+${"x".repeat(5 * 1024 * 1024)}\n`;
+  const hugeResult = await captureAmuxV22Patch("/repo", BASE,
+    fixture({ patch: huge }));
+  assert.equal(hugeResult.ok, true);
+  assert.equal(Buffer.byteLength(hugeResult.patchBody, "utf8"),
+    Buffer.byteLength(huge, "utf8"));
+  assert.equal((await captureAmuxV22Patch("/repo", BASE,
+    fixture({ patch: PATCH + `+${"\u0001".repeat(2 * 1024 * 1024)}\n` }))).ok, true);
 });
 
 test("local scanner refuses patch secrets and withholds unsafe file evidence", async () => {
@@ -350,8 +352,10 @@ test("v52 inventories every changed name independently of the publish patch cap"
   assert.equal(result.files.length, 45);
   assert.deepEqual(result.contractPaths,
     ["LIB/AMUX/Execution.ts", "docs/policy/new.md"]);
-  assert.equal(calls.find(({ command }) => command[0] === "diff")
-    .maxBuffer, 4 * 1024 * 1024);
+  // Every read of git names is unbounded: no list is cut for its size.
+  for (const call of calls.filter(({ command }) =>
+    ["diff", "ls-files"].includes(command[0])))
+    assert.equal(call.maxBuffer, Infinity);
 });
 
 test("v52 includes ignored contract paths without scanning unrelated ignored files", async () => {
@@ -402,13 +406,15 @@ test("v52 treats missing, malformed and invalid path inventories as unavailable"
     { run: diffOf(many), realpath: async (path) => path });
   assert.equal(manyResult.ok, true);
   assert.equal(manyResult.files.length, 50_000);
-  // Only the settlement body's proxy buffer bounds the list.
-  const tooLarge = Array.from({ length: 30_000 }, (_, index) =>
+  // A list past 4 MiB (the old bound, the settlement body's proxy buffer) is
+  // reported whole; it travels as a pending part in chunks.
+  const large = Array.from({ length: 30_000 }, (_, index) =>
     `p/${index.toString(36).padStart(5, "0")}${"x".repeat(150)}\0`).join("");
-  assert.ok(Buffer.byteLength(tooLarge, "utf8") > 4 * 1024 * 1024);
-  assert.deepEqual(await captureAmuxV52ChangedPaths("/repo", BASE,
-    { run: diffOf(tooLarge), realpath: async (path) => path }),
-    { ok: false, reason: "changed_paths_unavailable" });
+  assert.ok(Buffer.byteLength(large, "utf8") > 4 * 1024 * 1024);
+  const largeResult = await captureAmuxV52ChangedPaths("/repo", BASE,
+    { run: diffOf(large), realpath: async (path) => path });
+  assert.equal(largeResult.ok, true);
+  assert.equal(largeResult.files.length, 30_000);
 });
 
 test("v52 discards a contract attempt only from its original clean base", async () => {
