@@ -269,9 +269,6 @@ export async function handleChatCompletions(request: Request): Promise<Response>
         const settings = getModelGenerationSettings(model, {
             temperature: parsed.temperature ?? undefined,
         });
-        if (parsed.temperature != null && settings.temperature === undefined) {
-            throw new ProtocolError(400, "unsupported_parameter", "temperature is not supported for this model.", "temperature");
-        }
         // Provider-specific options the central compatibility layer derives
         // (e.g. a reasoning profile); never taken from the request.
         const { temperature: _temperature, providerOptions: _providerOptions, ...otherSettings } = settings;
@@ -279,14 +276,21 @@ export async function handleChatCompletions(request: Request): Promise<Response>
         void _providerOptions;
         // Sampling knobs follow the central compatibility layer: a model that
         // takes a temperature (including one registered as reasoning "none")
-        // takes top_p and the penalties too.
+        // takes top_p and the penalties too. For a model that takes none of
+        // them they are left out of the call rather than refused, because
+        // coding clients send them on every request (VS Code always sends a
+        // temperature) and a reasoning model would otherwise be unusable from
+        // them. What was left out is named in a response header.
         const samplingAllowed =
             getModelGenerationSettings(model, { temperature: 1 }).temperature !== undefined;
-        for (const param of ["top_p", "frequency_penalty", "presence_penalty"] as const) {
-            if (parsed[param] != null && !samplingAllowed) {
-                throw new ProtocolError(400, "unsupported_parameter", `${param} is not supported for this model.`, param);
-            }
-        }
+        const ignoredParameters = samplingAllowed
+            ? []
+            : (["temperature", "top_p", "frequency_penalty", "presence_penalty"] as const).filter(
+                  (param) => parsed[param] != null
+              );
+        const ignoredHeader: Record<string, string> = ignoredParameters.length
+            ? { "x-tomverse-ignored-parameters": ignoredParameters.join(", ") }
+            : {};
         // The API is stateless, and OpenAI's Responses API stores requests by
         // default -- so every OpenAI call says store: false explicitly,
         // whatever the client sent.
@@ -431,9 +435,9 @@ export async function handleChatCompletions(request: Request): Promise<Response>
             ...(converted.tools.length ? { tools } : {}),
             ...(converted.toolChoice ? { toolChoice: converted.toolChoice } : {}),
             ...(settings.temperature !== undefined ? { temperature: settings.temperature } : {}),
-            ...(parsed.top_p != null ? { topP: parsed.top_p } : {}),
-            ...(parsed.frequency_penalty != null ? { frequencyPenalty: parsed.frequency_penalty } : {}),
-            ...(parsed.presence_penalty != null ? { presencePenalty: parsed.presence_penalty } : {}),
+            ...(samplingAllowed && parsed.top_p != null ? { topP: parsed.top_p } : {}),
+            ...(samplingAllowed && parsed.frequency_penalty != null ? { frequencyPenalty: parsed.frequency_penalty } : {}),
+            ...(samplingAllowed && parsed.presence_penalty != null ? { presencePenalty: parsed.presence_penalty } : {}),
             ...(options.stop ? { stopSequences: options.stop } : {}),
             ...otherSettings,
             ...(providerOptions ? { providerOptions: providerOptions as never } : {}),
@@ -510,6 +514,7 @@ export async function handleChatCompletions(request: Request): Promise<Response>
                     Connection: "keep-alive",
                     "X-Accel-Buffering": "no",
                     "x-request-id": requestId,
+                    ...ignoredHeader,
                 },
             });
         }
@@ -533,7 +538,7 @@ export async function handleChatCompletions(request: Request): Promise<Response>
                 usage: final.usage,
                 tomverse: { request_id: requestId },
             }),
-            { headers: { ...NO_STORE, "x-request-id": requestId } }
+            { headers: { ...NO_STORE, "x-request-id": requestId, ...ignoredHeader } }
         );
     } catch (error) {
         // Reached only before the provider was called: anything later is

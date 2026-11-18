@@ -129,8 +129,11 @@ base64 `data:` URLs of PNG, JPEG, WebP or GIF up to 8 MB each, 16 per request;
 `stream`, `stream_options.include_usage`, `tools` (function tools, up to 128,
 64 KB per schema; `strict: true` only for providers whose adapter forwards it: OpenAI, Mistral, Moonshot), `tool_choice` (`none`, `auto`, `required`, or a named
 function), `parallel_tool_calls: true`, `max_tokens`, `max_completion_tokens`,
-`temperature`, `top_p`, `frequency_penalty`, `presence_penalty` (where the
-model accepts a temperature, including models registered with reasoning `none`), `stop` (up to 4), `n: 1`, `store: false`,
+`temperature`, `top_p`, `frequency_penalty`, `presence_penalty` (forwarded where the
+model accepts a temperature, including models registered with reasoning `none`;
+for a model that takes none of them they are left out of the call and named in
+the `x-tomverse-ignored-parameters` response header, because coding clients send
+them on every request -- VS Code always sends a temperature), `stop` (up to 4), `n: 1`, `store: false`,
 `user` (accepted, no effect), `reasoning_effort` (OpenAI reasoning models only).
 The request body may be up to 12 MB.
 
@@ -138,10 +141,10 @@ The request body may be up to 12 MB.
 it), a `name` on any message (no provider here has participant names), `n` other than 1, `store: true`, `parallel_tool_calls: false`, both token
 limits with different values, a token limit above the model's maximum, images
 for a model without image input, remote image URLs (never fetched), a tool
-result answering no earlier tool call, and sampling parameters a model does not
-accept, and `strict: true` on a tool for a provider that would drop it.
+result answering no earlier tool call, and `strict: true` on a tool for a provider that would drop it.
 Unknown fields are refused at every level -- messages, content parts, tool
-calls, tool definitions, `tool_choice` and `stream_options`. Nothing is silently dropped.
+calls, tool definitions, `tool_choice` and `stream_options`. Nothing is silently dropped; the sampling parameters above are the one
+exception, and they are named in a header.
 
 **Responses.** One choice. A tool-only reply has `content: null`,
 `tool_calls`, and `finish_reason: "tool_calls"`. A provider stop for length or

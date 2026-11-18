@@ -338,6 +338,26 @@ test("external inference API over the real shared credit ledger", { skip: !datab
         script = textScript("Hello from the fixture.");
     });
 
+    await t.test("sampling parameters a model does not take are left out and named, not refused", async () => {
+        const userId = await newUser();
+        allow(userId);
+        const { key } = await issueKey(userId);
+        // VS Code sends a temperature on every request; GPT 6 Luna takes none.
+        const response = await call(key, body({ temperature: 0.1, top_p: 0.9, presence_penalty: 0.2 }));
+        assert.equal(response.status, 200);
+        assert.equal(response.headers.get("x-tomverse-ignored-parameters"), "temperature, top_p, presence_penalty");
+        const sent = lastCalls.at(-1);
+        assert.equal(sent.temperature, undefined);
+        assert.equal(sent.topP, undefined);
+        assert.equal(sent.presencePenalty, undefined);
+        const streamed = await call(key, body({ stream: true, temperature: 0 }));
+        assert.equal(streamed.status, 200);
+        assert.equal(streamed.headers.get("x-tomverse-ignored-parameters"), "temperature");
+        await streamed.text();
+        const plain = await call(key, body());
+        assert.equal(plain.headers.get("x-tomverse-ignored-parameters"), null);
+    });
+
     await t.test("OpenAI calls never ask the provider to store the request", async () => {
         const userId = await newUser();
         allow(userId);
