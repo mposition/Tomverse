@@ -675,7 +675,9 @@ test("v22 execution routes cover their expanded DB ceilings and client transport
     assert.match(source, /\}, AMUX_V22_EXECUTION_ROUTE_BUDGET_MS\);/);
   }
   const settle = rustSource.match(/async fn v22_execution_settle_with_receipt\([\s\S]*?\n    \}/)?.[0];
-  assert.match(settle, /\.timeout\(TOMVERSE_INTERNAL_V22_EXECUTION_TIMEOUT\)/);
+  // The base is the route's budget; the transfer adds time in proportion to
+  // the patch and path bytes the app opens (docs/policy/amux-v22-result-transfer.md 6).
+  assert.match(settle, /\.timeout\(TOMVERSE_INTERNAL_V22_EXECUTION_TIMEOUT \+ v22_size_allowance\(allowance_bytes\)\)/);
 });
 
 test("selection reads reserve connect and response time beyond both route budgets", () => {
