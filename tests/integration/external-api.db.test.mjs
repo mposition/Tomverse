@@ -374,6 +374,7 @@ test("external inference API over the real shared credit ledger", { skip: !datab
             assert.equal(routerCalls[0].prompt, "Run the tests and fix the failure");
             assert.equal(routerCalls[0].conversationId, null, "no decision row, so no prompt is stored");
             assert.deepEqual(routerCalls[0].eligibleModelIds, [MODEL_ID, SECOND]);
+            assert.ok(routerCalls[0].models.length > 2, "the router model is looked up among all runtime models");
             const receipt = await db.externalApiRequest.findFirst({ where: { userId }, orderBy: { createdAt: "desc" } });
             assert.equal(receipt.modelId, SECOND, "the receipt and the charge are the routed model's");
 

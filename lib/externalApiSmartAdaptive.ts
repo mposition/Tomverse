@@ -2,6 +2,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 import { pickAutoModelWithLlm } from "@/lib/autoLlmRouter";
 import type { externalApiRunnableModels } from "@/lib/externalApiCatalog";
+import { getRuntimeModels } from "@/lib/modelRegistry";
 import type { ChatCompletionRequest } from "@/lib/openAiChatProtocol";
 
 type RunnableEntry = Awaited<ReturnType<typeof externalApiRunnableModels>>[number];
@@ -91,7 +92,9 @@ export const routeSmartAdaptive = async (input: {
         prompt: turn.prompt,
         previousAnswer: turn.previousAnswer,
         eligibleModelIds: eligible.map((entry) => entry.model.id),
-        models: eligible.map((entry) => entry.model),
+        // Every runtime model, not just the candidates: the router model set in
+        // Admin › Routing is looked up here and need not be a candidate itself.
+        models: await getRuntimeModels(),
         creditsByModelId: Object.fromEntries(eligible.map((entry) => [entry.model.id, entry.capabilities.creditWeight])),
         ruleModelId: fallback.model.id,
         taskKind: "external_api",
