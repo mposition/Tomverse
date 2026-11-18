@@ -184,6 +184,45 @@ test("the chat page, receipt recovery and stored previews follow the account lim
     assert.match(page, /maxAttachmentsPerMessage: CHAT_MAX_ATTACHMENTS_PER_MESSAGE,\s*maxAttachmentBytes: CHAT_MAX_ATTACHMENT_BYTES,\s*attachmentPersistence: "account"/);
     assert.match(source("lib/chatDraftMessageConsume.ts"), /attachmentUploadIds: z\.array\(opaqueId\)\.max\(CHAT_MAX_ATTACHMENTS_PER_MESSAGE\)/);
     assert.match(source("lib/messageAttachmentPreview.ts"), /MAX_PREVIEW_ATTACHMENT_BYTES = CHAT_MAX_ATTACHMENT_BYTES;/);
-    // The mobile app cannot import the constant; its own checks are kept equal.
-    assert.match(source("apps/mobile/src/Composer.tsx"), new RegExp(`> ${CHAT_MAX_ATTACHMENTS_PER_MESSAGE}\\) \\{ setError\\(copy\\.fileLimit\\)`));
+    // The mobile app reads the same constants.
+    assert.match(source("apps/mobile/src/Composer.tsx"), /> CHAT_MAX_ATTACHMENTS_PER_MESSAGE\) \{ setError\(copy\.fileLimit\)/);
+});
+
+// Review r-20261118-081025-978715: a long conversation's earlier files never
+// stop it from being continued.
+test("past the conversation's file count the oldest earlier files are left out, not refused", () => {
+    const route = source("app/api/chat/route.ts");
+    assert.ok(!route.includes('"TOO_MANY_CONVERSATION_ATTACHMENTS"'));
+    assert.ok(!route.includes('"TOO_MANY_ATTACHMENT_OBJECTS"'));
+    assert.match(route, /let olderAttachmentsToOmit = Math\.max\(\s*0,[\s\S]{0,300}- MAX_CONVERSATION_ATTACHMENTS\s*\);/);
+    assert.match(
+        route,
+        /if \(!isLatestMessage && olderAttachmentsToOmit > 0\) \{\s*olderAttachmentsToOmit -= 1;\s*textAttachments\.push\(\{\s*name: attachment\.name,\s*kind: PAST_ATTACHMENT_OMITTED_KIND,/
+    );
+    // A guest chat keeps its own small refusal.
+    assert.ok(route.includes('"GUEST_TOO_MANY_CONVERSATION_ATTACHMENTS"'));
+});
+
+// Same review: every surface that counts or sizes a message's files agrees.
+test("feedback, the composer and the mobile app follow the message limits", () => {
+    assert.match(
+        source("app/api/feedback/route.ts"),
+        /attachmentCount: z\.number\(\)\.int\(\)\.min\(0\)\.max\(CHAT_MAX_ATTACHMENTS_PER_MESSAGE\)/
+    );
+    const composer = source("components/chat/ChatInput.tsx");
+    assert.match(composer, /attachmentBytesTotal\(current\) \+ attachment\.size >\s*CHAT_MAX_TOTAL_ATTACHMENT_BYTES/);
+    assert.match(composer, /CHAT_MAX_TOTAL_ATTACHMENT_BYTES - attachmentBytesTotal\(attachments\)/);
+    for (const locale of ["en", "ko", "de", "es", "fr", "pt", "zh", "zhHant"]) {
+        assert.match(source(`locales/${locale}.ts`), /attachmentTotalSizeError: "/, locale);
+    }
+    const mobile = source("apps/mobile/src/Composer.tsx");
+    assert.match(mobile, /file\.size > CHAT_MAX_ATTACHMENT_BYTES/);
+    assert.match(mobile, /> CHAT_MAX_TOTAL_ATTACHMENT_BYTES\) \{\s*setError\(mobileUploadCopy\[language\]\.sizeLimit\)/);
+    // The native bridge gets one base64 string the WebView encoded, not a
+    // byte array and a binary string built beside it.
+    const upload = source("apps/mobile/src/nativeUpload.ts");
+    assert.match(upload, /reader\.readAsDataURL\(file\)/);
+    assert.ok(!upload.includes("btoa("));
+    assert.ok(!upload.includes("arrayBuffer()"));
+    assert.match(upload, /file\.size > CHAT_MAX_ATTACHMENT_BYTES/);
 });

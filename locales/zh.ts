@@ -464,6 +464,7 @@ export const zh = {
         dropFilesDescription: "支持图片、PDF、文本和 Office 文件。",
         attachmentCountError: "最多可添加 10 个文件。",
         attachmentSizeError: "每个文件必须小于或等于 50MB。",
+        attachmentTotalSizeError: "一条消息中的文件总大小不能超过 100MB。",
         attachmentTypeError: "不支持此文件类型。",
         attachmentTypeMismatch: "文件扩展名与实际格式不一致。",
         attachmentEncodingUnreadable: "无法读取文件的字符编码。",

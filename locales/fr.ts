@@ -455,6 +455,7 @@ export const fr = {
         dropFilesDescription: "Images, PDF, texte et fichiers Office sont pris en charge.",
         attachmentCountError: "Vous pouvez joindre jusqu'à 10 fichiers.",
         attachmentSizeError: "Chaque fichier doit faire 50 Mo ou moins.",
+        attachmentTotalSizeError: "Les fichiers d'un message peuvent totaliser jusqu'à 100 Mo.",
         attachmentTypeError: "Ce type de fichier n'est pas pris en charge.",
         attachmentTypeMismatch: "L'extension du fichier ne correspond pas à son format réel.",
         attachmentEncodingUnreadable: "L'encodage de caractères du fichier n'a pas pu être lu.",

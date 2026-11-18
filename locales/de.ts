@@ -444,6 +444,7 @@ export const de = {
         dropFilesDescription: "Bilder, PDFs, Text und Office-Dateien werden unterstützt.",
         attachmentCountError: "Sie können bis zu 10 Dateien anhängen.",
         attachmentSizeError: "Jede Datei darf höchstens 50 MB groß sein.",
+        attachmentTotalSizeError: "Die Dateien einer Nachricht dürfen zusammen höchstens 100 MB groß sein.",
         attachmentTypeError: "Dieser Dateityp wird nicht unterstützt.",
         attachmentTypeMismatch: "Die Dateiendung stimmt nicht mit dem tatsächlichen Format überein.",
         attachmentEncodingUnreadable: "Die Zeichenkodierung der Datei konnte nicht gelesen werden.",

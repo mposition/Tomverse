@@ -459,6 +459,7 @@ export const zhHant = {
         dropFilesDescription: "支援圖片、PDF、文字和 Office 檔案。",
         attachmentCountError: "最多可附加 10 個檔案。",
         attachmentSizeError: "每個檔案必須小於或等於 50MB。",
+        attachmentTotalSizeError: "一則訊息中的檔案總大小不能超過 100MB。",
         attachmentTypeError: "不支援此檔案類型。",
         attachmentTypeMismatch: "檔案副檔名與實際格式不一致。",
         attachmentEncodingUnreadable: "無法讀取檔案的字元編碼。",

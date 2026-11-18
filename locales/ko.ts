@@ -436,6 +436,7 @@ export const ko = {
         dropFilesDescription: "이미지, PDF, 텍스트, Office 파일을 지원합니다.",
         attachmentCountError: "파일은 최대 10개까지 첨부할 수 있습니다.",
         attachmentSizeError: "각 파일은 50MB 이하여야 합니다.",
+        attachmentTotalSizeError: "한 메시지의 파일은 합계 100MB까지 첨부할 수 있습니다.",
         attachmentTypeError: "지원하지 않는 파일 형식입니다.",
         attachmentTypeMismatch: "파일 확장자와 실제 형식이 일치하지 않습니다.",
         attachmentEncodingUnreadable: "파일의 문자 인코딩을 읽을 수 없습니다.",

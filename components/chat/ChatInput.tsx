@@ -87,6 +87,7 @@ import { chatAttachmentErrorCopyKey } from "@/lib/chatAttachmentErrorCopy";
 import {
   CHAT_MAX_ATTACHMENTS_PER_MESSAGE,
   CHAT_MAX_ATTACHMENT_BYTES,
+  CHAT_MAX_TOTAL_ATTACHMENT_BYTES,
 } from "@/lib/chatAttachmentLimits";
 import {
   APP_DEFAULTS,
@@ -180,6 +181,8 @@ type PublicModelStatusRecord = {
 
 const MAX_ATTACHMENTS = CHAT_MAX_ATTACHMENTS_PER_MESSAGE;
 const MAX_ATTACHMENT_SIZE = CHAT_MAX_ATTACHMENT_BYTES;
+const attachmentBytesTotal = (list: readonly ChatAttachment[]) =>
+  list.reduce((sum, item) => sum + (Number.isFinite(item.size) ? item.size : 0), 0);
 const GOOGLE_DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 const GOOGLE_WORKSPACE_TYPES = [
   "application/vnd.google-apps.document",
@@ -2615,14 +2618,25 @@ export function ChatInput({
         // to the conversation the file was picked in, which may no longer be
         // the one on screen.
         let capacityRejected = false;
+        let totalRejected = false;
         onAttachmentsChange((current) => {
           if (current.length >= maxAttachments) {
             capacityRejected = true;
             return current;
           }
+          // The server refuses a message whose files total more than this
+          // (ATTACHMENT_TOTAL_TOO_LARGE); say so here, before it is sent.
+          if (
+            !isEphemeralAttachment &&
+            attachmentBytesTotal(current) + attachment.size >
+              CHAT_MAX_TOTAL_ATTACHMENT_BYTES
+          ) {
+            totalRejected = true;
+            return current;
+          }
           return [...current, attachment];
         }, scopeId);
-        if (capacityRejected) {
+        if (capacityRejected || totalRejected) {
           // A prepared revision may have occupied a slot while this upload ran.
           // Remove only this unused upload; a bound upload is kept by the API.
           try {
@@ -2631,7 +2645,10 @@ export function ChatInput({
               body: JSON.stringify({ uploadId: attachment.uploadId }) });
             await discardResponseBody(response);
           } catch { /* An unbound upload retains the existing account-cleanup lifetime. */ }
-          dispatchAppToast(t("chat.attachmentCountError"), "error");
+          dispatchAppToast(
+            t(totalRejected ? "chat.attachmentTotalSizeError" : "chat.attachmentCountError"),
+            "error"
+          );
           return;
         }
         noticeArchiveExclusions(finalized.archive);
@@ -2688,9 +2705,27 @@ export function ChatInput({
       return;
     }
 
+    // An account's message holds CHAT_MAX_TOTAL_ATTACHMENT_BYTES in all: a
+    // file that would take it past that is not uploaded at all.
+    let remainingBytes = isEphemeralAttachment
+      ? Infinity
+      : CHAT_MAX_TOTAL_ATTACHMENT_BYTES - attachmentBytesTotal(attachments);
+    let overTotal = false;
     const entries = Array.from(files)
       .slice(0, availableSlots)
+      .filter((file) => {
+        // An oversized file is left to the per-file check, which names it.
+        if (file.size > maxAttachmentBytes) return true;
+        if (file.size > remainingBytes) {
+          overTotal = true;
+          return false;
+        }
+        remainingBytes -= file.size;
+        return true;
+      })
       .map((file) => ({ file, trackingId: crypto.randomUUID() }));
+    if (overTotal) dispatchAppToast(t("chat.attachmentTotalSizeError"), "error");
+    if (entries.length === 0) return;
     await runUploadBatch(entries);
   };
 

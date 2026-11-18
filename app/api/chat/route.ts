@@ -3076,13 +3076,10 @@ async function handleChatPost(
                 `A chat request can contain at most ${MAX_ATTACHMENTS} attachments.`
             );
         }
-        if (requestAttachments.length > MAX_CONVERSATION_ATTACHMENTS) {
-            throw new ChatAccessError(
-                413,
-                "TOO_MANY_CONVERSATION_ATTACHMENTS",
-                "This conversation has reached its attachment limit. Start a new chat to attach more files."
-            );
-        }
+        // No refusal for the conversation's file count: past
+        // MAX_CONVERSATION_ATTACHMENTS the oldest earlier files are named to
+        // the model and left out (see `olderAttachmentsToOmit`), so a long
+        // conversation can always be continued.
         /*
           One attachment is named once per turn, whichever handle names it.
 
@@ -3116,13 +3113,6 @@ async function handleChatPost(
                 }
                 attachmentIdentities.add(identity);
             }
-        }
-        if (attachmentIdentities.size > MAX_CONVERSATION_ATTACHMENTS) {
-            throw new ChatAccessError(
-                413,
-                "TOO_MANY_ATTACHMENT_OBJECTS",
-                "This conversation has reached its attachment limit. Start a new chat to attach more files."
-            );
         }
         // Resolved before the model, because Auto needs the plan to decide
         // whether this account is routed at all. Reused here rather than
@@ -3341,6 +3331,18 @@ async function handleChatPost(
         // out, as past the token share, so a conversation's history can never
         // stop a new message from being sent.
         let pastAttachmentBytes = 0;
+        // How many of the oldest earlier files this turn walks past without
+        // reading: the conversation's count above MAX_CONVERSATION_ATTACHMENTS.
+        // The turn's own files (at most MAX_ATTACHMENTS) are never among them.
+        let olderAttachmentsToOmit = Math.max(
+            0,
+            executionMessages.reduce(
+                (count, message) =>
+                    count +
+                    (Array.isArray(message.attachments) ? message.attachments.length : 0),
+                0
+            ) - MAX_CONVERSATION_ATTACHMENTS
+        );
         let totalExtractedCharacters = 0;
         // Earlier messages' files share half the input allowance; past it they
         // are left out of the turn rather than failing it. See
@@ -4439,6 +4441,18 @@ async function handleChatPost(
                     attachment.objectKey.startsWith(userObjectPrefix!);
                 if (!isOwnUserObject && !isGuestObject) {
                     throw new Error("Attachment access denied.");
+                }
+
+                // The oldest earlier files past the conversation's count are
+                // named to the model and left out unread; the turn still goes.
+                if (!isLatestMessage && olderAttachmentsToOmit > 0) {
+                    olderAttachmentsToOmit -= 1;
+                    textAttachments.push({
+                        name: attachment.name,
+                        kind: PAST_ATTACHMENT_OMITTED_KIND,
+                        text: PAST_ATTACHMENT_OMITTED_TEXT,
+                    });
+                    continue;
                 }
 
                 const attachmentScope: "current_turn" | "past_turn" =
