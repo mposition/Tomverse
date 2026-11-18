@@ -4200,6 +4200,36 @@ domains:
       The `id` is a server-issued random value, so it identifies the device to
       Tomverse and to nothing else.
 
+  - domain: externalApiKey
+    prismaModel: ExternalApiKey
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+    note: >-
+      A key the person issued for the external inference API
+      (docs/policy/external-api.md): name, public prefix, optional credit cap,
+      expiry, revocation and last use. Only a SHA-256 digest of the secret is
+      stored, and the export withholds it.
+
+  - domain: externalApiRequest
+    prismaModel: ExternalApiRequest
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+    note: >-
+      The content-free link from one API request to its key and to the shared
+      ChatCreditReservation. Removed with the key, which is removed with the
+      account; the reservation row stays detached like every Chat reservation.
+      Holds no prompt, output, tool argument or image.
+
   - domain: mobileTokenFamily
     prismaModel: MobileTokenFamily
     userLinkageRole: subject

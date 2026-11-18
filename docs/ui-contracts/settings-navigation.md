@@ -101,6 +101,7 @@ which tab happened to exist first:
 | `external-import` | `data` | `auth.dataTab` | `settingsNav.dataAndPersonalization` |
 | `account-data` | `data` | `auth.dataTab` | `settingsNav.dataAndPersonalization` |
 | `email-notifications` | `account` | `auth.accountTab` | its account communication row |
+| `api-keys` | `account` | `auth.accountTab` | its API keys row (shown only where `NEXT_PUBLIC_EXTERNAL_API_SETTINGS_VISIBLE=true`) |
 
 Email notifications live on the default Account tab because they are choices
 about communication to the signed-in identity, not stored-data operations.

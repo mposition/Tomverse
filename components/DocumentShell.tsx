@@ -66,8 +66,7 @@ export function DocumentShell({
           First child of <body>, above everything renderable: the parser
           executes it before it has reached any content to paint, which is the
           same guarantee <head> would give without tripping
-          @next/next/no-head-element. MarketingConsentReservation is placed the
-          same way for the same reason. On dynamic routes the class is already
+          @next/next/no-head-element. On dynamic routes the class is already
           on <html> above and this only re-asserts it; on static marketing
           routes it is the only thing that can.
         */}

@@ -1,0 +1,273 @@
+import "server-only";
+import { assertOperationalFeatureEnabled } from "@/lib/appSettings";
+import { pickAutoModelWithLlm } from "@/lib/autoLlmRouter";
+import { estimateTextTokens } from "@/lib/chatTokenEstimate";
+import { keyCreditTotals } from "@/lib/externalApiAdmission";
+import type { externalApiRunnableModels } from "@/lib/externalApiCatalog";
+import { smartAdaptiveRouterEnabled } from "@/lib/externalApiCatalogCore";
+import { getRuntimeModels } from "@/lib/modelRegistry";
+import { DEFAULT_MODEL_ID } from "@/lib/models";
+import { modelTakesRequestFeatures, toolCallText, type ChatCompletionRequest } from "@/lib/openAiChatProtocol";
+import { prisma } from "@/lib/prisma";
+
+type RunnableEntry = Awaited<ReturnType<typeof externalApiRunnableModels>>[number];
+
+/**
+ * Smart Adaptive for the external API: Chat's own LLM router picks which
+ * catalogue model answers a request. See docs/policy/external-api.md.
+ *
+ * Candidates are the runnable models that fit this request: images only to a
+ * model that reads them, input plus requested output within the model's
+ * window, and the optional features the request uses (strict tools, image
+ * detail, reasoning effort) by the same rules the request is validated with.
+ *
+ * The router call is paid (the provider operational budget), and it runs
+ * before admission, because admission reserves for the model it picks. So it
+ * is made only when admission is not already known to refuse: not while AI
+ * chat is paused, not when the key's cap is spent, and not for a key whose
+ * Smart Adaptive request was refused at admission in the last two minutes
+ * (credits, allowance, concurrency). Otherwise the default model is taken and
+ * admission refuses with its own error. An Idempotency-Key replay is answered
+ * before this runs, and a concurrent duplicate of one still routing waits for
+ * that call and takes the same model. The gate's checks run only when a
+ * router call is next.
+ * Without the router switch, or when the router gives no answer, the default
+ * model answers if it fits, otherwise the first candidate.
+ *
+ * A coding client sends every tool round as a new request, so routing each one
+ * afresh would let the model change half-way through a task. A request that
+ * carries tool results back therefore goes to the model that made those tool
+ * calls: when a Smart Adaptive answer ends with tool calls, its model is
+ * remembered in this process under the key and each tool-call id, and the
+ * round that answers them is looked up by the ids it carries. A tool-call id
+ * belongs to one answer, so concurrent requests with the same history, refused
+ * requests and requests that never produced a call cannot overwrite each
+ * other. Only ids and model ids are kept; a miss (another instance, a
+ * restart, ten minutes later) simply routes again.
+ */
+
+const STICKY_MS = 10 * 60_000;
+const STICKY_MAX = 2_000;
+const sticky = new Map<string, { modelId: string; at: number }>();
+const callKey = (keyId: string, toolCallId: string) => `${keyId}\0${toolCallId}`;
+
+/** Called when a Smart Adaptive answer ended with these tool calls. */
+export const rememberSmartAdaptiveToolCalls = (
+    keyId: string,
+    modelId: string,
+    toolCallIds: readonly string[],
+    now = Date.now()
+) => {
+    for (const id of toolCallIds) {
+        const entryKey = callKey(keyId, id);
+        if (sticky.size >= STICKY_MAX && !sticky.has(entryKey)) sticky.delete(sticky.keys().next().value as string);
+        sticky.set(entryKey, { modelId, at: now });
+    }
+};
+
+/** The tool-call ids the trailing tool results of this request answer. */
+const answeredToolCallIds = (request: ChatCompletionRequest) => {
+    const messages = request.messages;
+    let index = messages.length - 1;
+    while (index >= 0 && messages[index].role === "tool") index -= 1;
+    if (index === messages.length - 1) return [];
+    const assistant = messages[index];
+    return assistant?.role === "assistant" ? (assistant.tool_calls ?? []).map((call) => call.id) : [];
+};
+const REFUSED_MS = 2 * 60_000;
+const refused = new Map<string, number>();
+
+/** Called when admission refused a Smart Adaptive request of this key. */
+export const noteSmartAdaptiveRefusal = (keyId: string, now = Date.now()) => {
+    if (refused.size >= STICKY_MAX) refused.delete(refused.keys().next().value as string);
+    refused.set(keyId, now);
+};
+
+/** Idempotent requests routing now, by key and Idempotency-Key digest. */
+const routing = new Map<string, Promise<{ entry: RunnableEntry; routedBy: "router" | "default" }>>();
+
+/** Whether the paid router call may be made for this key now. */
+export const smartAdaptiveRouterAllowed = async (
+    key: { keyId: string; creditCap: number | null },
+    now = Date.now()
+) => {
+    if (!smartAdaptiveRouterEnabled(process.env)) return false;
+    const refusedAt = refused.get(key.keyId);
+    if (refusedAt !== undefined && now - refusedAt < REFUSED_MS) return false;
+    try {
+        await assertOperationalFeatureEnabled("aiChatEnabled");
+    } catch {
+        return false;
+    }
+    if (key.creditCap !== null) {
+        const totals = (await keyCreditTotals(prisma, [key.keyId])).get(key.keyId);
+        if ((totals?.committed ?? 0) >= key.creditCap) return false;
+    }
+    return true;
+};
+
+const textOf = (content: unknown): string =>
+    typeof content === "string"
+        ? content
+        : Array.isArray(content)
+          ? content
+                .map((part) => (part && typeof part === "object" && "text" in part ? String(part.text) : ""))
+                .filter(Boolean)
+                .join("\n")
+          : "";
+
+const hasImage = (request: ChatCompletionRequest) =>
+    request.messages.some(
+        (message) =>
+            message.role === "user" &&
+            Array.isArray(message.content) &&
+            message.content.some((part) => part.type === "image_url")
+    );
+
+/** A rough size of the request, only to leave out models it cannot fit. */
+const estimatedInputTokens = (request: ChatCompletionRequest) =>
+    estimateTextTokens(
+        request.messages
+            .map((message) =>
+                [
+                    textOf(message.content),
+                    ...(message.role === "assistant" ? (message.tool_calls ?? []).map(toolCallText) : []),
+                ].join("\n")
+            )
+            .join("\n") + JSON.stringify(request.tools ?? [])
+    );
+
+/** Where the latest user message is, and the turn it belongs to. */
+const latestTurn = (request: ChatCompletionRequest) => {
+    const messages = request.messages;
+    let index = messages.length - 1;
+    while (index >= 0 && messages[index].role !== "user") index -= 1;
+    if (index < 0) return null;
+    let previous: string | null = null;
+    for (let at = index - 1; at >= 0; at -= 1) {
+        const message = messages[at];
+        if (message.role === "user") break;
+        if (message.role === "assistant") {
+            previous = textOf(message.content) || null;
+            break;
+        }
+    }
+    return {
+        prompt: textOf(messages[index].content),
+        previousAnswer: previous,
+    };
+};
+
+export const smartAdaptiveCandidates = (request: ChatCompletionRequest, runnable: readonly RunnableEntry[]) => {
+    const images = hasImage(request);
+    const output = request.max_completion_tokens ?? request.max_tokens ?? 0;
+    const input = estimatedInputTokens(request);
+    return runnable.filter(
+        ({ model, capabilities }) =>
+            (!images || capabilities.vision) &&
+            output <= capabilities.maxOutputTokens &&
+            input + output <= capabilities.contextWindowTokens &&
+            modelTakesRequestFeatures(request, {
+                id: model.id,
+                provider: model.provider,
+                vision: capabilities.vision,
+                reasoning: capabilities.reasoning,
+                maxOutputTokens: capabilities.maxOutputTokens,
+            })
+    );
+};
+
+export const routeSmartAdaptive = async (input: {
+    request: ChatCompletionRequest;
+    runnable: readonly RunnableEntry[];
+    keyId: string;
+    userId: string;
+    requestId: string;
+    /** Asked only when a router call is next; false makes none (see smartAdaptiveRouterAllowed). */
+    routerAllowed: () => Promise<boolean>;
+    /** The request's Idempotency-Key digest, or null when it has none. */
+    idempotencyKeyDigest: string | null;
+    /** Digest of the request body: only an identical duplicate shares a pick. */
+    requestDigest: string;
+    now?: number;
+}): Promise<SmartAdaptiveDecision> => {
+    const eligible = smartAdaptiveCandidates(input.request, input.runnable);
+    // Nothing fits: the default model answers, and its own limits refuse the
+    // request with the usual error.
+    const pool = eligible.length > 0 ? eligible : input.runnable;
+    const fallback = pool.find((entry) => entry.model.id === DEFAULT_MODEL_ID) ?? pool[0];
+    const turn = latestTurn(input.request);
+    if (!turn || eligible.length < 2) return { entry: fallback, routedBy: "default" };
+
+    // A tool round goes to the model that made the calls it answers, before
+    // the router gate is asked: a gate closed for a while (a refusal two
+    // minutes ago) must not hand a running task to another model.
+    const now = input.now ?? Date.now();
+    for (const id of answeredToolCallIds(input.request)) {
+        const remembered = sticky.get(callKey(input.keyId, id));
+        if (!remembered || now - remembered.at >= STICKY_MS) continue;
+        const entry = eligible.find((candidate) => candidate.model.id === remembered.modelId);
+        if (entry) return { entry, routedBy: "continued" };
+        // Not a candidate for this request (it needs what the model lacks, or
+        // the model was retired). The entry stays: another round answering the
+        // same call may still fit it, and the ten-minute expiry clears it.
+    }
+
+    // One router call per Idempotency-Key at a time in this process: a
+    // concurrent duplicate waits for that call and takes the same model, and
+    // admission answers it as the duplicate it is.
+    // Keyed by the body as well: a different body under the same key is not a
+    // duplicate of this request (admission refuses it as a reused key), so it
+    // routes on its own rather than taking a pick made for another body.
+    const flight = input.idempotencyKeyDigest
+        ? `${input.keyId}\0${input.idempotencyKeyDigest}\0${input.requestDigest}`
+        : null;
+    const decide = async () => {
+        const pending = flight ? routing.get(flight) : undefined;
+        if (pending) return pending;
+        const decision = (async () =>
+            (await input.routerAllowed())
+                ? routeWithRouter(input, eligible, fallback, turn)
+                : { entry: fallback, routedBy: "default" as const })();
+        if (!flight) return decision;
+        routing.set(flight, decision);
+        try {
+            return await decision;
+        } finally {
+            routing.delete(flight);
+        }
+    };
+    return decide();
+};
+
+export type SmartAdaptiveDecision = {
+    entry: RunnableEntry;
+    routedBy: "router" | "continued" | "default";
+};
+
+const routeWithRouter = async (
+    input: { userId: string; requestId: string },
+    eligible: readonly RunnableEntry[],
+    fallback: RunnableEntry,
+    turn: NonNullable<ReturnType<typeof latestTurn>>
+): Promise<{ entry: RunnableEntry; routedBy: "router" | "default" }> => {
+    const pick = await pickAutoModelWithLlm({
+        prompt: turn.prompt,
+        previousAnswer: turn.previousAnswer,
+        eligibleModelIds: eligible.map((entry) => entry.model.id),
+        // Every runtime model, not just the candidates: the router model set in
+        // Admin › Routing is looked up here and need not be a candidate itself.
+        models: await getRuntimeModels(),
+        creditsByModelId: Object.fromEntries(eligible.map((entry) => [entry.model.id, entry.capabilities.creditWeight])),
+        ruleModelId: fallback.model.id,
+        taskKind: "external_api",
+        userId: input.userId,
+        // No conversation: the router keeps no decision row, so no prompt is stored.
+        conversationId: null,
+        traceId: input.requestId,
+        rewriteAllowed: false,
+    }).catch(() => null);
+    // The router's answer only ever names a model already eligible here.
+    const picked = pick ? eligible.find((entry) => entry.model.id === pick.modelId) : undefined;
+    return { entry: picked ?? fallback, routedBy: picked ? "router" : "default" };
+};

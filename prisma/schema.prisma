@@ -135,6 +135,7 @@ model User {
   modelMigrationRecords                ModelMigrationRecord[]
   mobileDevices                        MobileDevice[]
   mobileTokenFamilies                  MobileTokenFamily[]
+  externalApiKeys                      ExternalApiKey[]
   mobileLoginGrants                    MobileLoginGrant[]
   mobileAuthEvents                     MobileAuthEvent[]
   quotaScopes                          QuotaScope[]
@@ -2022,6 +2023,7 @@ model ChatCreditReservation {
   settlementAttempt      ChatAttemptUsage?  @relation("ReservationSettlementAttempt", fields: [id, settlementAttemptIndex], references: [reservationId, attemptIndex], onDelete: NoAction, onUpdate: NoAction, map: "ChatCreditReservation_settlementAttempt_fkey")
   attemptUsage           ChatAttemptUsage[]
   researchPreviewRun     ResearchPreviewRun?
+  externalApiRequest     ExternalApiRequest?
 
   @@index([status, expiresAt])
   @@index([userId, createdAt])
@@ -2029,6 +2031,63 @@ model ChatCreditReservation {
   @@unique([subjectKey, clientTurnId])
   @@index([providerRequestId])
   @@index([providerResponseId])
+}
+
+/// A key the account holder issued for the external inference API (/api/v1).
+/// The secret is shown once, at creation; only its SHA-256 digest is stored.
+/// It authorises inference, the account's own runnable model list and this
+/// key's own usage -- nothing else (docs/policy/external-api.md).
+model ExternalApiKey {
+  id           String    @id @default(cuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name         String
+  /// Public, non-secret identifier shown in lists and receipts.
+  keyPrefix    String    @unique
+  secretDigest String    @unique
+  /// Optional lifetime credit ceiling the account holder chose for this key.
+  /// Counted from the shared reservations: settled, held and unresolved.
+  creditCap    Int?
+  expiresAt    DateTime?
+  revokedAt    DateTime?
+  lastUsedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  requests     ExternalApiRequest[]
+
+  @@index([userId, createdAt])
+}
+
+/// One external inference request: the content-free link between a key and
+/// the shared ChatCreditReservation that holds and settles its credits. Every
+/// amount lives on the reservation; this row stores no prompt, output, tool
+/// argument, image or key material.
+model ExternalApiRequest {
+  id                   String                @id
+  keyId                String
+  key                  ExternalApiKey        @relation(fields: [keyId], references: [id], onDelete: Cascade)
+  userId               String
+  reservationId        String                @unique
+  reservation          ChatCreditReservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  /// SHA-256 of the client's Idempotency-Key header, when it sent one.
+  idempotencyKeyDigest String?
+  /// SHA-256 of the raw request body bytes, to tell a retry from a reuse; a
+  /// re-serialised body with reordered keys counts as a different request.
+  requestDigest        String
+  clientName           String?
+  modelId              String
+  stream               Boolean
+  /// Wire protocol: chat_completions, anthropic_messages or responses. Rows
+  /// written before the column existed are Chat Completions.
+  protocol             String                @default("chat_completions")
+  finishReason         String?
+  errorCode            String?
+  createdAt            DateTime              @default(now())
+  completedAt          DateTime?
+
+  @@unique([keyId, idempotencyKeyDigest])
+  @@index([userId, createdAt])
+  @@index([keyId, createdAt])
 }
 
 /// A default-off, owner-scoped Research Preview execution that can survive a

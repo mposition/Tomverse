@@ -1272,6 +1272,41 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
       take: EXPORT_ROW_CAP,
     }),
 
+  externalApiKey: (userId) =>
+    prisma.externalApiKey.findMany({
+      where: { userId },
+      select: {
+        name: true,
+        keyPrefix: true,
+        creditCap: true,
+        createdAt: true,
+        lastUsedAt: true,
+        expiresAt: true,
+        revokedAt: true,
+      },
+      orderBy: { createdAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
+
+  externalApiRequest: (userId) =>
+    prisma.externalApiRequest.findMany({
+      where: { userId },
+      select: {
+        id: true,
+        modelId: true,
+        stream: true,
+        protocol: true,
+        clientName: true,
+        finishReason: true,
+        errorCode: true,
+        createdAt: true,
+        completedAt: true,
+        key: { select: { keyPrefix: true } },
+      },
+      orderBy: { createdAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
+
   mobileTokenFamily: (userId) =>
     prisma.mobileTokenFamily.findMany({
       where: { userId },
