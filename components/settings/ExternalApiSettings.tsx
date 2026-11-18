@@ -164,7 +164,30 @@ function KeyUsage({ keyId }: { keyId: string }) {
     );
 }
 
-function KeyRow({ entry, onChanged, revokeOnly = false }: { entry: KeySummary; onChanged: () => void; revokeOnly?: boolean }) {
+/**
+ * A typed key limit, checked before it is sent. Only a field the person left
+ * empty means "no key limit"; anything else must be a whole number in range,
+ * so a stray paste or an overflowing number can never clear a limit.
+ */
+const parseCapDraft = (draft: string, max: number): { ok: true; value: number | null } | { ok: false } => {
+    const trimmed = draft.trim();
+    if (trimmed === "") return { ok: true, value: null };
+    if (!/^[0-9]+$/.test(trimmed)) return { ok: false };
+    const value = Number(trimmed);
+    return Number.isSafeInteger(value) && value >= 1 && value <= max ? { ok: true, value } : { ok: false };
+};
+
+function KeyRow({
+    entry,
+    onChanged,
+    revokeOnly = false,
+    maxCreditCap = 0,
+}: {
+    entry: KeySummary;
+    onChanged: () => void;
+    revokeOnly?: boolean;
+    maxCreditCap?: number;
+}) {
     const { t } = useLanguage();
     const [editing, setEditing] = useState<"name" | "cap" | null>(null);
     const [draft, setDraft] = useState("");
@@ -241,7 +264,11 @@ function KeyRow({ entry, onChanged, revokeOnly = false }: { entry: KeySummary; o
                     onSubmit={(event) => {
                         event.preventDefault();
                         if (editing === "name") void patch({ name: draft });
-                        else if (/^[0-9]*$/.test(draft)) void patch({ creditCap: draft === "" ? null : Number(draft) });
+                        else {
+                            const parsed = parseCapDraft(draft, maxCreditCap);
+                            if (parsed.ok) void patch({ creditCap: parsed.value });
+                            else setError(fill(t("externalApi.capInvalid"), { max: maxCreditCap }));
+                        }
                     }}
                 >
                     <input
@@ -249,11 +276,7 @@ function KeyRow({ entry, onChanged, revokeOnly = false }: { entry: KeySummary; o
                         aria-label={editing === "name" ? t("externalApi.nameLabel") : t("externalApi.capLabel")}
                         inputMode={editing === "cap" ? "numeric" : undefined}
                         value={draft}
-                        // The limit field keeps digits only, like the create form: an
-                        // empty field means "no limit", so nothing else may reach it.
-                        onChange={(event) =>
-                            setDraft(editing === "cap" ? event.target.value.replace(/[^0-9]/g, "") : event.target.value)
-                        }
+                        onChange={(event) => setDraft(event.target.value)}
                         className="min-w-0 flex-1 rounded-lg border border-zinc-300 bg-white px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900"
                     />
                     <button type="submit" className="rounded-lg bg-zinc-900 px-3 py-1 text-xs font-semibold text-white dark:bg-zinc-100 dark:text-zinc-900">
@@ -327,6 +350,12 @@ export function ExternalApiSettings() {
     }, [version]);
 
     const create = async () => {
+        const maxCreditCap = overview?.enabled ? overview.limits.maxCreditCap : 0;
+        const parsedCap = parseCapDraft(cap, maxCreditCap);
+        if (!parsedCap.ok) {
+            setCreateError(fill(t("externalApi.capInvalid"), { max: maxCreditCap }));
+            return;
+        }
         setCreating(true);
         setCreateError(null);
         try {
@@ -335,7 +364,7 @@ export function ExternalApiSettings() {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     name,
-                    creditCap: cap.trim() === "" ? null : Number(cap),
+                    creditCap: parsedCap.value,
                     expiresInDays: expiry === "never" ? null : Number(expiry),
                 }),
             });
@@ -414,7 +443,7 @@ export function ExternalApiSettings() {
                             </label>
                             <label className="grid gap-1 text-sm">
                                 <span className="font-semibold">{t("externalApi.capLabel")}</span>
-                                <input data-testid="external-api-cap" inputMode="numeric" value={cap} onChange={(event) => setCap(event.target.value.replace(/[^0-9]/g, ""))} className="rounded-lg border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900" />
+                                <input data-testid="external-api-cap" inputMode="numeric" value={cap} onChange={(event) => setCap(event.target.value)} className="rounded-lg border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900" />
                                 <span className="text-xs text-zinc-500">{t("externalApi.capHint")}</span>
                             </label>
                             <label className="grid gap-1 text-sm">
@@ -442,7 +471,7 @@ export function ExternalApiSettings() {
                         ) : (
                             <ul className="divide-y divide-zinc-200 dark:divide-zinc-800" data-testid="external-api-keys">
                                 {overview.keys.map((entry) => (
-                                    <KeyRow key={entry.id} entry={entry} onChanged={() => void load()} />
+                                    <KeyRow key={entry.id} entry={entry} onChanged={() => void load()} maxCreditCap={overview.limits.maxCreditCap} />
                                 ))}
                             </ul>
                         )}

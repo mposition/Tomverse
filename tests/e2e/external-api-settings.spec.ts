@@ -138,6 +138,10 @@ test("API keys: create shows the secret once with a ready config, then revoke @u
     await expect(page.getByTestId("settings-detail-nav")).toBeVisible();
 
     await page.getByTestId("external-api-name").fill("회사 노트북");
+    await page.getByTestId("external-api-cap").fill("5OO");
+    await page.getByTestId("external-api-create").click();
+    await expect(page.getByText("1부터 1000000 사이의 정수")).toBeVisible();
+    expect(calls).not.toContain("POST /api/user/api-keys");
     await page.getByTestId("external-api-cap").fill("500");
     await page.getByTestId("external-api-create").click();
 
@@ -161,11 +165,13 @@ test("API keys: create shows the secret once with a ready config, then revoke @u
     await row.getByRole("button", { name: "저장" }).click();
     await expect(row).toContainText("집 데스크톱");
     await row.getByRole("button", { name: "한도 변경" }).click();
-    // Only digits reach the limit field; "abc" can never turn into "no limit".
-    await row.getByRole("textbox").fill("abc");
-    await expect(row.getByRole("textbox")).toHaveValue("");
-    await row.getByRole("textbox").fill("3x0");
-    await expect(row.getByRole("textbox")).toHaveValue("30");
+    // Anything but a whole number in range is refused before it is sent; it
+    // can never turn into "no limit". Only an empty field clears the limit.
+    for (const bad of ["abc", "1e400", "99999999999999999999", "0", "1.5"]) {
+        await row.getByRole("textbox").fill(bad);
+        await row.getByRole("button", { name: "저장" }).click();
+        await expect(row).toContainText("1부터 1000000 사이의 정수");
+    }
     await row.getByRole("textbox").fill("");
     await row.getByRole("button", { name: "저장" }).click();
     await expect(row).toContainText("키 한도 없음");
