@@ -11,7 +11,7 @@ const filesKey = (owner: string, conversation: string | null) => `${deviceDraftK
 export function readNativeDraftFiles(storage: DraftStorage, owner: string, conversation: string | null, now = Date.now()): MobileAttachment[] {
   try {
     const value = JSON.parse(storage.getItem(filesKey(owner, conversation)) ?? "null");
-    if (!value || !Array.isArray(value.files) || value.files.length > 5 ||
+    if (!value || !Array.isArray(value.files) || value.files.length > 10 ||
       typeof value.savedAt !== "number" || value.savedAt > now || now - value.savedAt >= 86_400_000) return [];
     return value.files.flatMap((item: unknown) => {
       if (!item || typeof item !== "object") return [];
@@ -19,7 +19,7 @@ export function readNativeDraftFiles(storage: DraftStorage, owner: string, conve
       if (typeof file.uploadId !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(file.uploadId) ||
         typeof file.name !== "string" || !file.name || file.name.length > 255 ||
         typeof file.mediaType !== "string" || file.mediaType.length > 200 ||
-        typeof file.size !== "number" || !Number.isSafeInteger(file.size) || file.size <= 0 || file.size > 10 * 1024 * 1024) return [];
+        typeof file.size !== "number" || !Number.isSafeInteger(file.size) || file.size <= 0 || file.size > 50 * 1024 * 1024) return [];
       return [{ uploadId: file.uploadId, name: file.name, mediaType: file.mediaType, size: file.size }];
     });
   } catch { return []; }
@@ -40,7 +40,7 @@ export const nativeRevisionConflict = (files: MobileAttachment[], name: string) 
   artifactRevisionDraftConflict({ text: "", attachments: files.map(asAttachment) }, name);
 
 export function appendNativeRevisionDraft(draft: NativeRevisionDraft, file: MobileAttachment, request: string): {
-  draft: NativeRevisionDraft; conflict: "count" | "name" | "text" | null;
+  draft: NativeRevisionDraft; conflict: "count" | "name" | "text" | "size" | null;
 } {
   const appended = appendArtifactRevisionDraft({ text: draft.text, attachments: draft.files.map(asAttachment) }, asAttachment(file), request);
   if (appended.conflict) return { draft, conflict: appended.conflict };

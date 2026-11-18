@@ -98,8 +98,13 @@ test("acknowledgements are a bounded list of ids, not a flag", () => {
   assert.equal(acknowledgedUnavailableAttachmentsSchema.safeParse(["a", "b"]).success, true);
   assert.equal(acknowledgedUnavailableAttachmentsSchema.safeParse(true).success, false);
   assert.equal(
-    acknowledgedUnavailableAttachmentsSchema.safeParse(new Array(51).fill("a")).success,
+    acknowledgedUnavailableAttachmentsSchema.safeParse(new Array(1_001).fill("a")).success,
     false
+  );
+  // Every file one request can carry (100 messages of 10) can be acknowledged.
+  assert.equal(
+    acknowledgedUnavailableAttachmentsSchema.safeParse(new Array(1_000).fill("a")).success,
+    true
   );
 });
 

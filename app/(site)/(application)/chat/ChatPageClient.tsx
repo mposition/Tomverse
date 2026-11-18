@@ -63,6 +63,10 @@ import {
   GUEST_MAX_ATTACHMENT_BYTES,
   type ChatAttachmentCapabilities,
 } from "@/lib/guestAttachmentPolicy";
+import {
+  CHAT_MAX_ATTACHMENTS_PER_MESSAGE,
+  CHAT_MAX_ATTACHMENT_BYTES,
+} from "@/lib/chatAttachmentLimits";
 import { SourceGroundingBadge } from "@/components/chat/SourceGroundingBadge";
 import { dispatchAppToast } from "@/lib/appToast";
 import { toSourceGrounding } from "@/lib/sourceGrounding";
@@ -9769,8 +9773,8 @@ export function ChatPageClient({
     : {
         canAttachLocalFiles: true,
         canConnectGoogleDrive: true,
-        maxAttachmentsPerMessage: 5,
-        maxAttachmentBytes: 10 * 1024 * 1024,
+        maxAttachmentsPerMessage: CHAT_MAX_ATTACHMENTS_PER_MESSAGE,
+        maxAttachmentBytes: CHAT_MAX_ATTACHMENT_BYTES,
         attachmentPersistence: "account",
       };
 

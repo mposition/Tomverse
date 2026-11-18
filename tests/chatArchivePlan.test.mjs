@@ -230,13 +230,19 @@ test("a single oversized entry is refused from its declared size", () => {
 });
 
 test("the total uncompressed size is refused before anything is inflated", () => {
+  // Each entry under the per-entry ceiling and a sane ratio; together past the
+  // total. Derived from the limits, so a change to them keeps this a test of
+  // the total rather than of whichever ceiling happens to be lower.
+  const uncompressedSize = Math.floor(ACCOUNT.maxEntryUncompressedBytes * 0.9);
+  const count = Math.floor(ACCOUNT.maxTotalUncompressedBytes / uncompressedSize) + 1;
+  assert.ok(count <= ACCOUNT.maxProcessedFiles);
   const entries = [];
-  for (let index = 0; index < 10; index += 1) {
+  for (let index = 0; index < count; index += 1) {
     entries.push({
       name: `part-${index}.txt`,
       data: [...strToU8("x")],
-      compressedSize: 1_000_000,
-      uncompressedSize: 9_000_000,
+      compressedSize: Math.ceil(uncompressedSize / 10),
+      uncompressedSize,
     });
   }
   refuses(buildRawZip(entries), CODES.expansionTooLarge);

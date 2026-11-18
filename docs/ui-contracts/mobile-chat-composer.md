@@ -246,9 +246,9 @@ from `isGuestMode` at the point of render:
 
 | Capability | Guest | Signed-in |
 | --- | --- | --- |
-| `canAttachLocalFiles` | yes — one file per message | yes — up to 5 |
+| `canAttachLocalFiles` | yes — one file per message | yes — up to 10 (`CHAT_MAX_ATTACHMENTS_PER_MESSAGE`) |
 | `canConnectGoogleDrive` | no; the row states the reason and offers sign-in | yes |
-| `maxAttachmentBytes` | 5 MB | 10 MB |
+| `maxAttachmentBytes` | 5 MB | 50 MB (`CHAT_MAX_ATTACHMENT_BYTES`) |
 | `attachmentPersistence` | `ephemeral` | `account` |
 
 Requirements:

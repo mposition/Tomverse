@@ -355,8 +355,10 @@ const runWorker = <T>(
             eval: true,
             workerData,
             transferList,
+            // Sized for a 50 MB file held whole, as the Office worker is
+            // (operator decision 2026-11-18; was 256).
             resourceLimits: {
-                maxOldGenerationSizeMb: 256,
+                maxOldGenerationSizeMb: 512,
                 maxYoungGenerationSizeMb: 32,
                 stackSizeMb: 4,
             },

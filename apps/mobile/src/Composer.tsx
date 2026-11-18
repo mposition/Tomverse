@@ -17,6 +17,12 @@ import { mobileComposerCopy } from "../../../locales/mobileComposer";
 import { UploadProgressDialog, type UploadProgress } from "./UploadProgressDialog";
 import type { NativeFileUpdate } from "./nativeRevisionDraft";
 import { mobileArtifactRevisionCopy } from "../../../locales/mobileArtifactRevision";
+import { mobileUploadCopy } from "../../../locales/mobileUpload";
+import {
+  CHAT_MAX_ATTACHMENTS_PER_MESSAGE,
+  CHAT_MAX_ATTACHMENT_BYTES,
+  CHAT_MAX_TOTAL_ATTACHMENT_BYTES,
+} from "../../../lib/chatAttachmentLimits";
 
 type Props = {
   researchPreview?: ResearchPreviewControls;
@@ -73,8 +79,15 @@ export function Composer({ researchPreview, locationIdentity = null, files: cont
   const voiceBusy = isVoiceRecorderBusy(voice.state);
   async function attach(selected: FileList | null) {
     if (disabled || offline || streaming || uploading || !selected?.length) return;
-    if (files.length + selected.length > 5) { setError(copy.fileLimit); return; }
+    if (files.length + selected.length > CHAT_MAX_ATTACHMENTS_PER_MESSAGE) { setError(copy.fileLimit); return; }
     const pending = Array.from(selected);
+    // The server's per-file and per-message byte limits, checked before any
+    // upload so a file it would refuse is never read into memory.
+    const attachedBytes = files.reduce((sum, file) => sum + (file.size || 0), 0);
+    if (pending.some((file) => file.size > CHAT_MAX_ATTACHMENT_BYTES) ||
+        pending.reduce((sum, file) => sum + file.size, attachedBytes) > CHAT_MAX_TOTAL_ATTACHMENT_BYTES) {
+      setError(mobileUploadCopy[language].sizeLimit); return;
+    }
     setUpload({ file: pending[0], completed: 0, total: pending.length }); setError("");
     try {
       for (const [completed, file] of pending.entries()) {
