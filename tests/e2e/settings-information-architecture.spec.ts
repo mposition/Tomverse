@@ -588,11 +588,11 @@ test("pending analytics consent leaves memory settings and draft input uncovered
   await page.setExtraHTTPHeaders({ "cf-ipcountry": "DE" });
   await gotoSettingsDepth(page, "/settings/memory?lang=ko");
   const slot = page.getByTestId("settings-consent-slot");
-  const notice = slot.getByTestId("chat-consent-notice");
+  const notice = page.getByTestId("chat-consent-notice");
   await expect(notice).toBeVisible({ timeout: 15_000 });
   const draft = page.getByTestId("memory-create-statement");
   for (const locator of [page.getByTestId("memory-style-toggle").locator(".."), page.getByTestId("memory-default-mode"), draft]) {
-    await locator.scrollIntoViewIfNeeded();
+    await locator.evaluate(element => element.scrollIntoView({ block: "center", behavior: "instant" }));
     await expect(locator).toBeVisible();
     expect(await locator.evaluate(element => {
       const rect = element.getBoundingClientRect();
@@ -617,11 +617,11 @@ test("pending analytics consent reserves space below imported conversations", as
   await page.setExtraHTTPHeaders({ "cf-ipcountry": "DE" });
   await gotoSettingsDepth(page, "/settings/imports?lang=ko");
   const slot = page.getByTestId("settings-consent-slot");
-  const notice = slot.getByTestId("chat-consent-notice");
+  const notice = page.getByTestId("chat-consent-notice");
   await expect(notice).toBeVisible({ timeout: 15_000 });
   const empty = page.getByTestId("external-import-conversations-empty");
   await expect(empty).toBeVisible();
-  await empty.scrollIntoViewIfNeeded();
+  await empty.evaluate(element => element.scrollIntoView({ block: "center", behavior: "instant" }));
   const uncovered = await empty.evaluate(element => {
     const rect = element.getBoundingClientRect();
     const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);

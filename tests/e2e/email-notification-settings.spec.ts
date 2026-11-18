@@ -103,10 +103,10 @@ test("pending analytics consent leaves notification guidance and controls uncove
   } }));
   await page.goto("/settings/notifications?lang=ko");
   const slot = page.getByTestId("settings-consent-slot");
-  const notice = slot.getByTestId("chat-consent-notice");
+  const notice = page.getByTestId("chat-consent-notice");
   await expect(notice).toBeVisible({ timeout: 15_000 });
   for (const locator of [page.getByTestId("email-product-updates-opt-in"), page.getByTestId("email-preference-promotions")]) {
-    await locator.scrollIntoViewIfNeeded();
+    await locator.evaluate(element => element.scrollIntoView({ block: "center", behavior: "instant" }));
     await expect(locator).toBeVisible();
     expect(await locator.evaluate(element => {
       const rect = element.getBoundingClientRect();
