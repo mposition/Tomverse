@@ -3334,12 +3334,16 @@ async function handleChatPost(
         // How many of the oldest earlier files this turn walks past without
         // reading: the conversation's count above MAX_CONVERSATION_ATTACHMENTS.
         // The turn's own files (at most MAX_ATTACHMENTS) are never among them.
+        // Counted as the loop below reads them: an assistant message's
+        // attachments are never read, so they never take a place.
+        const readAttachmentCount = (message: (typeof executionMessages)[number]) =>
+            message.role !== "assistant" && Array.isArray(message.attachments)
+                ? message.attachments.length
+                : 0;
         let olderAttachmentsToOmit = Math.max(
             0,
             executionMessages.reduce(
-                (count, message) =>
-                    count +
-                    (Array.isArray(message.attachments) ? message.attachments.length : 0),
+                (count, message) => count + readAttachmentCount(message),
                 0
             ) - MAX_CONVERSATION_ATTACHMENTS
         );
@@ -3357,10 +3361,8 @@ async function handleChatPost(
             let remaining = olderAttachmentsToOmit;
             for (const [index, message] of executionMessages.entries()) {
                 if (remaining <= 0 || index === executionMessages.length - 1) break;
-                const attachments = (
-                    Array.isArray(message.attachments) ? message.attachments : []
-                ) as IncomingAttachment[];
-                for (const incoming of attachments) {
+                if (readAttachmentCount(message) === 0) continue;
+                for (const incoming of message.attachments as IncomingAttachment[]) {
                     if (remaining <= 0) break;
                     remaining -= 1;
                     const referenceKey = attachmentReferenceKey(incoming);
@@ -3368,10 +3370,16 @@ async function handleChatPost(
                         ? resolvedAttachments.get(referenceKey)
                         : undefined;
                     if (resolved?.unavailableAt) continue;
+                    // Only a key the caller owns is ever asked about, so this
+                    // probe can never tell anyone whether another account's
+                    // object exists. The loop below refuses any other key
+                    // before reading; a guest chat never reaches this count.
                     const key =
                         resolved?.objectKey ??
                         (typeof incoming?.objectKey === "string" ? incoming.objectKey : null);
-                    if (key) keys.push(key);
+                    if (key && userObjectPrefix && key.startsWith(userObjectPrefix)) {
+                        keys.push(key);
+                    }
                 }
             }
             for (let start = 0; start < keys.length; start += 16) {

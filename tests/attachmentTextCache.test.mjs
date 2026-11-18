@@ -209,6 +209,13 @@ test("a file left out by count is still checked for loss first", () => {
     const route = source("app/api/chat/route.ts");
     // Asked of storage before the loop, in parallel batches.
     assert.match(route, /const countOmittedMissingKeys = new Set<string>\(\);/);
+    // Review r-20261118-091155-e1b15e: counted exactly as the loop reads --
+    // an assistant message's attachments take no place -- and only a key the
+    // caller owns is ever probed, so the probe is no existence oracle.
+    assert.match(route, /message\.role !== "assistant" && Array\.isArray\(message\.attachments\)/);
+    assert.match(route, /count \+ readAttachmentCount\(message\)/);
+    assert.match(route, /if \(readAttachmentCount\(message\) === 0\) continue;/);
+    assert.match(route, /if \(key && userObjectPrefix && key\.startsWith\(userObjectPrefix\)\) \{\s*keys\.push\(key\);/);
     assert.match(route, /await Promise\.all\(batch\.map\(\(key\) => probeR2Object\(key\)\)\)/);
     assert.match(route, /if \(probe\.state === "missing"\) countOmittedMissingKeys\.add/);
     // A recorded loss is honoured before the count decides anything ...
