@@ -2,7 +2,6 @@ export const dynamic = "force-dynamic";
 import {
   CHAT_MAX_MESSAGE_BODY_BYTES,
   CHAT_MAX_MESSAGE_CHARACTERS,
-  storedAnswerContent,
 } from "@/lib/chatRequestLimits";
 
 import { NextResponse } from "next/server";
@@ -44,15 +43,11 @@ const importMessageSchema = z
     modelId: modelIdSchema.nullable().optional(),
     createdAt: z.string().datetime(),
   })
-  .strict()
-  // An answer is stored as the chat route stores one -- cut at its limit,
-  // with the same note -- and never refuses the import; a question is held
-  // to what the chat accepts.
-  .transform((message) =>
-    message.role === "assistant"
-      ? { ...message, content: storedAnswerContent(message.content) }
-      : message
-  );
+  // Every message, question or answer, is held to one limit and stored whole:
+  // the guest already has the full answer on screen, and an import that cut it
+  // would report success while losing what it was asked to keep (review
+  // r-20261118-075201-6d1a48).
+  .strict();
 
 const importGuestConversationSchema = z
   .object({

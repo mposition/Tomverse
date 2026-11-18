@@ -13,7 +13,6 @@ import {
     CHAT_MAX_MESSAGE_BODY_BYTES,
     CHAT_MAX_MESSAGE_CHARACTERS,
     CHAT_MAX_STORED_ANSWER_CHARACTERS,
-    storedAnswerContent,
 } from "../lib/chatRequestLimits.ts";
 import { longContextSettlementRates, resolveModelPricing } from "../lib/modelPricing.ts";
 import { AVAILABLE_MODELS, getModel, getWeightedUsageCredits } from "../lib/models.ts";
@@ -256,11 +255,24 @@ test("the attempt ledger keeps the settled rates and the price's own source", ()
     assert.match(ledger, /pricingSnapshot: \{\s*\.\.\.longContextSettlementRates\(attempt\.price, attempt\.inputTokens\),\s*reservationCostSource: attempt\.price\.costSource \?\? null,/);
 });
 
-test("the public credit guide says long turns are charged by actual cost", () => {
+// Review r-20261118-075201-6d1a48: the public guide states the floor, uses the
+// configured threshold, and says nothing when long context is off.
+test("the public credit guide describes long turns only as configured", () => {
     const pricing = readFileSync(new URL("../components/marketing/PricingPageContent.tsx", import.meta.url), "utf8");
-    const bodies = [...pricing.matchAll(/longContextBody: "([^"]+)"/g)].map((match) => match[1]);
-    assert.equal(bodies.length, 8);
-    for (const body of bodies) assert.match(body, /128[,. ]000/, body);
+    const notes = [...pricing.matchAll(/longContextChargeNote: \(tokens\) => `([^`]+)`/g)].map((match) => match[1]);
+    assert.equal(notes.length, 8);
+    for (const note of notes) {
+        assert.ok(note.includes("${tokens}"), note);
+        assert.doesNotMatch(note, /128[,. ]000/, note);
+    }
+    // The multiplier sentence no longer carries a fixed threshold.
+    for (const match of pricing.matchAll(/longContextBody: "([^"]+)"/g)) {
+        assert.doesNotMatch(match[1], /128[,. ]000/);
+    }
+    assert.match(
+        pricing,
+        /billing\.config\?\.appLongContext === true && billing\.config\.appInputTokenLimit\s*\?\s*` \$\{creditGuide\.longContextChargeNote\(numberFormatter\.format\(billing\.config\.appInputTokenLimit\)\)\}`/
+    );
 });
 
 test("one decision drives every long-context rule", () => {
@@ -271,22 +283,14 @@ test("one decision drives every long-context rule", () => {
     assert.match(source, /const longContextCredits = longContextTurn\s*\?/);
 });
 
-// Review r-20261118-064619-ed3e4c: a long guest answer is cut, as the chat
-// route cuts one, and never refuses the whole import.
-test("guest import stores a long answer cut, as the chat route does", () => {
+// Reviews r-20261118-064619-ed3e4c and r-20261118-075201-6d1a48: a long guest
+// answer neither refuses the whole import nor is cut -- it is stored whole,
+// under the same one-message limit a question is held to.
+test("guest import keeps every message whole, under one limit", () => {
     const route = readFileSync(new URL("../app/api/conversations/import-guest/route.ts", import.meta.url), "utf8");
-    assert.match(route, /message\.role === "assistant"\s*\?\s*\{ \.\.\.message, content: storedAnswerContent\(message\.content\) \}/);
-    assert.doesNotMatch(route, /Answer content is too long/);
-    const chat = readFileSync(new URL("../app/api/chat/route.ts", import.meta.url), "utf8");
-    assert.match(chat, /const MAX_STORED_MESSAGE_CHARACTERS = CHAT_MAX_STORED_ANSWER_CHARACTERS;/);
-    // The same cut and the same note the chat route writes.
-    assert.match(chat, /\\n\\n\[Response truncated for storage\]/);
-    const long = "x".repeat(CHAT_MAX_STORED_ANSWER_CHARACTERS + 5);
-    assert.equal(
-        storedAnswerContent(long),
-        `${"x".repeat(CHAT_MAX_STORED_ANSWER_CHARACTERS)}\n\n[Response truncated for storage]`
-    );
-    assert.equal(storedAnswerContent("short"), "short");
+    assert.match(route, /content: z\.string\(\)\.max\(CHAT_MAX_MESSAGE_CHARACTERS\)/);
+    assert.doesNotMatch(route, /Answer content is too long|storedAnswerContent|\.transform\(/);
+    assert.ok(CHAT_MAX_MESSAGE_CHARACTERS > CHAT_MAX_STORED_ANSWER_CHARACTERS);
 });
 
 // Same review: the answer can only use the room the window leaves.
