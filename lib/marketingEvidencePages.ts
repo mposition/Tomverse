@@ -46,7 +46,6 @@ export const MARKETING_EVIDENCE_PAGES = Object.freeze({
   "/faq": "faq",
   "/refund": "refund",
   "/safety": "safety",
-  "/support/help-centre": "helpCentre",
   "/terms": "terms",
 } as const);
 

@@ -5,7 +5,11 @@ import {
   SITE_ORIGIN,
   localizedLanguageAlternates,
   localizedPath,
+  localizedQueryPath,
+  queryLanguageAlternates,
 } from "@/lib/seo";
+import { HELP_GUIDE_IDS } from "@/lib/helpCentre/catalog";
+import { helpGuidePath } from "@/lib/helpCentre/links";
 import { SITEMAP_CONTENT_EVIDENCE } from "@/lib/sitemapContentDates";
 
 /**
@@ -70,5 +74,18 @@ export default function sitemap(): MetadataRoute.Sitemap {
       changeFrequency: page.changeFrequency,
       priority: page.priority,
     })),
+    // Help Centre guides are request-time pages that take the language as
+    // `?lang=` (lib/helpCentre/links.ts), so each language is its own URL and
+    // they share one query-based hreflang set, like the page metadata says.
+    ...HELP_GUIDE_IDS.flatMap((guideId) => {
+      const basePath = helpGuidePath(guideId);
+      const alternates = { languages: queryLanguageAlternates(basePath) };
+      return SEO_LOCALES.map((locale) => ({
+        url: `${SITE_ORIGIN}${localizedQueryPath(locale, basePath)}`,
+        changeFrequency: "monthly" as const,
+        priority: 0.5,
+        alternates,
+      }));
+    }),
   ];
 }
