@@ -22,11 +22,7 @@ import {
   type AmuxAttachment,
 } from "@/lib/amux/dbBoundary";
 import {
-  AMUX_REPEATED_FAILURE_REASON,
-  AMUX_REPEATED_FAILURE_RUNS,
   amuxApprovedCeilingOverrun,
-  amuxRepeatedResultFailure,
-  amuxResultFailureSignature,
   decideAmuxAttemptBudget,
   settlementDestinationForBudget,
 } from "@/lib/amux/executionBudgetCore";
@@ -113,8 +109,8 @@ import { amuxWorkerRuntimeUsesReadOnlyApi } from "@/lib/amux/workerRuntime";
 import { amuxInfraFailureReason,
   amuxV22InfraFailureKind,
   type AmuxSidecarFailureReport } from "@/lib/amux/infraFailureCore";
-import { countAmuxInfraAttemptsBefore, readAmuxAttemptBudgetFacts,
-  readAmuxRecentResultSignatures } from "@/lib/amux/infraFailureStore";
+import { countAmuxInfraAttemptsBefore, readAmuxAttemptBudgetFacts } from
+  "@/lib/amux/infraFailureStore";
 import { AMUX_V22_CLI_USAGE_UNREPORTED_REASON,
   amuxExecutionLeaseMs,
   amuxV22CliUsageRecordOnly } from
@@ -330,6 +326,12 @@ const validSettlement = (
   (outcome === "failed" && toStatus === "todo") ||
   (outcome === "blocked" && toStatus === "blocked");
 
+/** Calls the v22 start adds to `executionStart` when it publishes (the
+ * publication reads) and always (three more reads); see the use below.
+ * tests/amuxClaimContractParity reads these values. */
+export const AMUX_V22_START_PUBLICATION_CALLS = 25;
+export const AMUX_V22_START_EXTRA_CALLS = 3;
+
 /** Consume exactly the A13 assignment, without reusing legacy ownership as
  * execution authority. No CLI call occurs here; the A14 usage receipt must
  * follow the delivery before settlement can be accepted. */
@@ -352,7 +354,8 @@ export async function startAmuxV22TaskExecution(input: {
     // One more read is needed only after an audited frontier escalation.
     prismaCallCeiling: AMUX_DB_BOUNDARIES.executionStart.prismaCallCeiling +
       // + 1: the card a card-scoped halt reads at admission (AMUXFLOW/B2).
-      (publicationBaseSha ? 25 : 0) + 3 },
+      (publicationBaseSha ? AMUX_V22_START_PUBLICATION_CALLS : 0) +
+      AMUX_V22_START_EXTRA_CALLS },
     async (tx, context) => {
       const now = context.dbNow;
       const incident = await lockAmuxAdmissionAndReadIncident(tx, now);
@@ -479,6 +482,7 @@ export async function startAmuxV22TaskExecution(input: {
       const budget = recovery?.riskAcceptanceId ? recoveryAttemptBudget({
         historicalAttempts: prior.historicalRows,
         greatestAttemptNumber: prior.greatestAttemptNumber,
+        infraRows: prior.infraRows,
       }) : decideAmuxAttemptBudget({ historical_rows: prior.historicalRows,
         greatest_attempt_number: prior.greatestAttemptNumber,
         infra_rows: prior.infraRows });
@@ -856,48 +860,9 @@ export async function startAmuxExecution(
         historical_rows: attemptAggregate._count._all,
         greatest_attempt_number: attemptAggregate._max.attemptNumber,
       });
+      // This start names no bound, so an ordinary card is never refused here
+      // (owner direction 2026-11-18); the type still carries the refusal.
       if (!budget.allowed) {
-        const blocked = await tx.amuxWorkItem.updateMany({
-          where: {
-            id: input.taskId,
-            owner: input.worker,
-            status: "todo",
-            archivedAt: null,
-            revision: input.expectedRevision,
-          },
-          data: {
-            status: "blocked",
-            revision: { increment: 1 },
-          },
-        });
-        if (blocked.count !== 1) {
-          return {
-            started: false as const,
-            reason: "task_not_startable" as const,
-          };
-        }
-        await openAmuxHumanEscalation(tx, {
-          taskId: input.taskId,
-          specialty: "execution-recovery",
-          reason: "attempt_budget_exhausted",
-          openedBy: AMUX_SYSTEM_AUDIT_ACTOR,
-        });
-        await writeSystemAuditLog({
-          systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
-          action: "amux.execution.budget_exhausted",
-          targetType: "AmuxWorkItem",
-          targetId: input.taskId,
-          summary: `Blocked AMUX task ${input.taskId} after its execution attempt budget was exhausted.`,
-          metadata: {
-            worker: input.worker,
-            exhausted_limit: budget.exhausted_limit,
-            attempts_used: budget.attempts_used,
-            max_attempts: budget.max_attempts,
-            previous_revision: input.expectedRevision,
-            next_revision: input.expectedRevision + 1,
-          },
-          tx,
-        });
         return {
           started: false as const,
           reason: "attempt_budget_exhausted" as const,
@@ -1421,6 +1386,13 @@ async function recordAmuxV52ReviewWithFindings(
     });
 }
 
+/** Calls the v22 settlement adds to `executionSettle` (reasons at the use
+ * below). With them the planned worst case is larger than the v22 execution
+ * route, which runs it inside what the route has left
+ * (amuxDbTransactionBudgetWithinRouteMs); tests/amuxClaimContractParity reads
+ * this value instead of a copy of it. */
+export const AMUX_V22_SETTLE_EXTRA_CALLS = 44 + 6 + 1 + 2;
+
 /** A reported result is not a cost observation. Only exact, recorded A14
  * invocation receipts allow success or automatic requeue after a failure. */
 export async function settleAmuxV22TaskExecution(input: {
@@ -1450,7 +1422,7 @@ export async function settleAmuxV22TaskExecution(input: {
   // + 2: the Task's earlier infrastructure failures, and its latest result
   // failures for the repeat check (owner decision 2026-11-15).
   const settleBoundary = { ...AMUX_DB_BOUNDARIES.executionSettle,
-    prismaCallCeiling: AMUX_DB_BOUNDARIES.executionSettle.prismaCallCeiling + 44 + 6 + 1 + 2 };
+    prismaCallCeiling: AMUX_DB_BOUNDARIES.executionSettle.prismaCallCeiling + AMUX_V22_SETTLE_EXTRA_CALLS };
   const conclusionMode = amuxV22ConclusionMode(process.env[AMUX_V22_CONCLUSION_ENV]);
   const publicationEligible = v22PublishPreflightEligible({
     policyVersion: ENGINEERING_AGENT_POLICY_VERSION,
@@ -1806,31 +1778,23 @@ export async function settleAmuxV22TaskExecution(input: {
       const unverifiedReason = infraKind ? amuxInfraFailureReason(infraKind) :
         cliUsageRecordOnly ? AMUX_V22_CLI_USAGE_UNREPORTED_REASON :
         knownCliFailure ?? "usage_outcome_unknown";
-      // Owner direction 2026-11-15: no fixed count stops a card. A retry of
-      // the worker's own failed result stops only when it is the same
-      // failure as the runs before it, and then goes to a person and the
-      // Decision Maker with that reason (executionBudgetCore.ts). A grade
-      // escalation starts the card over and is not a repeat.
-      const resultRetry = requestedStatus === "todo" && !infraKind &&
-        effectivePathDecision !== "escalate" && !questionPlan;
-      const repeatedFailure = resultRetry && amuxRepeatedResultFailure([
-        amuxResultFailureSignature(input.outcome, reviewDisposition?.reason ??
-          (receiptsComplete ? "reported_result" : unverifiedReason)),
-        ...await readAmuxRecentResultSignatures(tx, task.id, attempt.id,
-          AMUX_REPEATED_FAILURE_RUNS - 1)]);
+      // Owner direction 2026-11-15 and 2026-11-18: no count and no repeat of
+      // the same failure stops a card. A failed result goes back to todo and
+      // the claim waits longer between tries while it keeps failing the same
+      // way (executionBudgetCore.ts amuxResultRetryDelayMs). Only a paid
+      // retry's own bound below stops one.
       const budget = settlementDestinationForBudget({
         requested_status: requestedStatus,
         attempt_number: attempt.attemptNumber,
         infra_attempts_before: infraBefore.total,
         infra_failure: infraKind !== null,
-        repeated_failure: repeatedFailure,
         ...(attempt.taskId === AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID &&
           settlementAssignment?.recoveryApprovalId ? {
           max_attempts: AMUX_V22_READ_ONLY_RETRY_TASK_ATTEMPT_LIMIT,
         } : {}),
       });
-      const exhaustedReason = budget.exhausted_limit === "repeated_failure" ? AMUX_REPEATED_FAILURE_REASON :
-        budget.exhausted_limit === "attempts" ? "attempt_budget_exhausted" : null;
+      const exhaustedReason = budget.exhausted_limit === "attempts" ?
+        "attempt_budget_exhausted" : null;
       const next = effectivePathDecision === "blocked" ? "blocked" :
         budget.to_status;
       const gradeEscalated = effectivePathDecision === "escalate" &&

@@ -7,7 +7,8 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { AMUX_V22_CONTEXT_FILES, AMUX_V22_RUN_STOP_REASONS, AMUX_V22_TRANSPORT_MAX_BYTES,
+import { AMUX_V22_CONTEXT_FILES, AMUX_V22_RETIRED_STOP_REASONS, AMUX_V22_RUN_STOP_REASONS,
+  AMUX_V22_TRANSPORT_MAX_BYTES,
   amuxV22ContextPromptSection, amuxV22EmbedContextFiles, amuxV22ExtractContextFiles,
   amuxV22FitReportText, amuxV22LocalCliLeaseMs,
   amuxV22RoleHasShell, parseAmuxV22ContextFiles } from "../lib/amux/v22LocalCliFlowCore.ts";
@@ -160,31 +161,43 @@ test("a report over the transport backstop keeps its start and its last lines", 
 });
 
 test("a run past the earlier ten-minute deadline goes on while it makes progress", async () => {
-  // The earlier flow's deadline option is ignored; progress keeps the run
-  // alive past the stall window, and it finishes by itself.
+  // The earlier flow's deadline option is ignored; the run goes on past it
+  // and finishes by itself.
   const chunks = [...Array.from({ length: 8 }, () => `${JSON.stringify({ type: "assistant" })}\n`),
     stream(resultEvent)];
   const fake = fakeSpawn({ chunks, everyMs: 15 });
   const result = await runAmuxV22OneShot({ ...request, role: "investigate" }, config, {
     syntheticPlatform: true, spawnChild: fake.spawnChild,
-    deadlineMs: 5, stallMs: 60, progressPollMs: 10 });
+    deadlineMs: 5, progressPollMs: 10 });
   assert.equal(result.kind, "succeeded");
   assert.equal(result.resultText, resultEvent.result);
   assert.equal(result.usageReceipt.completeness, "reported_complete");
 });
 
-test("a run with no sign of life stops as stalled; there is no time cap; the operator can stop one", async () => {
+test("a silent run is never ended for being quiet; only its CLI or the operator ends it", async () => {
+  // Owner decision 2026-11-18: no run is stopped for showing no sign of life.
+  // The earlier `stallMs` option (which ended this run as "stalled") is ignored.
   const silent = fakeSpawn({ chunks: [], hang: true });
-  const stalled = await runAmuxV22OneShot(request, config, { syntheticPlatform: true,
-    spawnChild: silent.spawnChild, stallMs: 30, progressPollMs: 10 });
-  assert.deepEqual([stalled.kind, stalled.failure], ["outcome_unknown", "stalled"]);
-  assert.deepEqual([...AMUX_V22_RUN_STOP_REASONS], ["stalled", "operator_stop"]);
+  const quietController = new AbortController();
+  const quiet = runAmuxV22OneShot(request, config, { syntheticPlatform: true,
+    spawnChild: silent.spawnChild, stallMs: 30, progressPollMs: 10,
+    probeCpu: () => 7, signal: quietController.signal });
+  let quietSettled = false;
+  void quiet.then(() => { quietSettled = true; });
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  assert.equal(quietSettled, false, "250 ms of silence with no CPU change ends nothing");
+  quietController.abort();
+  const quietResult = await quiet;
+  assert.deepEqual([quietResult.kind, quietResult.failure], ["outcome_unknown", "operator_stop"]);
+  assert.deepEqual([...AMUX_V22_RUN_STOP_REASONS], ["operator_stop"]);
+  // Attempts that ended as "stalled" before keep that reason and still read.
+  assert.deepEqual([...AMUX_V22_RETIRED_STOP_REASONS], ["stalled"]);
   // The earlier safety cap is gone: a busy run goes on until its CLI ends.
   const busy = fakeSpawn({ chunks: [...Array.from({ length: 40 }, () => "{}\n"),
     stream(resultEvent)], everyMs: 5 });
   const long = await runAmuxV22OneShot(request, config, { syntheticPlatform: true,
     spawnChild: busy.spawnChild, runCapMs: 20, deadlineMs: 20,
-    stallMs: 1_000, progressPollMs: 10 });
+    progressPollMs: 10 });
   assert.equal(long.kind, "succeeded");
   const controller = new AbortController();
   const waiting = fakeSpawn({ chunks: [], hang: true });
@@ -195,23 +208,39 @@ test("a run with no sign of life stops as stalled; there is no time cap; the ope
   assert.deepEqual([stopped.kind, stopped.failure], ["outcome_unknown", "operator_stop"]);
 });
 
-test("CPU time in the process tree keeps a quiet run alive; with none, and nothing else, it stalls", async () => {
+test("CPU time in the process tree moves a run's last sign of life; with none it stays put and the run is not stopped", async () => {
   // A quiet test or build: no output, no checkout change, but CPU in use.
   let ticks = 0;
+  const signs = [];
   const controller = new AbortController();
   const quiet = runAmuxV22OneShot(request, config, { syntheticPlatform: true,
     spawnChild: fakeSpawn({ chunks: [], hang: true }).spawnChild,
-    stallMs: 40, progressPollMs: 10, signal: controller.signal,
+    progressPollMs: 10, signal: controller.signal, onProgress: (at) => signs.push(at),
     probeCpu: () => { ticks += 3; return ticks; } });
   setTimeout(() => controller.abort(), 250);
-  assert.equal((await quiet).failure, "operator_stop", "never stalled while it used CPU");
-  // The same tree once it stops using CPU, and a tree /proc cannot read.
+  assert.equal((await quiet).failure, "operator_stop");
+  assert.ok(signs.length >= 3, "each CPU change is reported as a sign of life");
+  assert.deepEqual(signs, [...signs].sort((a, b) => a - b), "the last sign of life only moves forward");
+  // The same tree once it stops using CPU, and a tree /proc cannot read: the
+  // start is the only sign of life, and the run still is not ended for it.
   for (const probeCpu of [() => 7, () => null, () => { throw new Error("no /proc"); }]) {
-    const idle = await runAmuxV22OneShot(request, config, { syntheticPlatform: true,
+    const idleSigns = [];
+    const idleController = new AbortController();
+    const idle = runAmuxV22OneShot(request, config, { syntheticPlatform: true,
       spawnChild: fakeSpawn({ chunks: [], hang: true }).spawnChild,
-      stallMs: 40, progressPollMs: 10, probeCpu });
-    assert.equal(idle.failure, "stalled");
+      stallMs: 40, progressPollMs: 10, probeCpu, signal: idleController.signal,
+      onProgress: (at) => idleSigns.push(at) });
+    setTimeout(() => idleController.abort(), 200);
+    assert.equal((await idle).failure, "operator_stop");
+    assert.equal(idleSigns.length, 1);
   }
+  // A reporting callback that throws never changes the run.
+  const noisy = new AbortController();
+  const noisyRun = runAmuxV22OneShot(request, config, { syntheticPlatform: true,
+    spawnChild: fakeSpawn({ chunks: [], hang: true }).spawnChild, progressPollMs: 10,
+    signal: noisy.signal, onProgress: () => { throw new Error("reporter down"); } });
+  setTimeout(() => noisy.abort(), 50);
+  assert.equal((await noisyRun).failure, "operator_stop");
 });
 
 test("a run that keeps writing a file it already changed is alive even without /proc", async () => {
@@ -239,23 +268,35 @@ test("a run that keeps writing a file it already changed is alive even without /
     await appendFile(join(repo, "log.txt"), "more\n");
     assert.notEqual(await probe(), second, "an untracked file written again is progress");
     assert.equal(await probe(), await probe(), "no write, no progress");
-    // The stall watch with no CPU reading: a writer keeps the run alive...
+    // The progress watch with no CPU reading: a writer keeps moving the last
+    // sign of life...
     const writer = setInterval(() => { appendFile(join(repo, "log.txt"), "tick\n").catch(() => {}); }, 20);
     const controller = new AbortController();
+    const signs = [];
     const kept = runAmuxV22OneShot(request, config, { syntheticPlatform: true,
       spawnChild: fakeSpawn({ chunks: [], hang: true }).spawnChild,
-      stallMs: 1_500, progressPollMs: 40, signal: controller.signal, probeCpu: () => null,
-      probeActivity: probe });
-    setTimeout(() => controller.abort(), 4_000);
+      progressPollMs: 40, signal: controller.signal, probeCpu: () => null,
+      probeActivity: probe, onProgress: (at) => signs.push(at) });
+    setTimeout(() => controller.abort(), 600);
     const keptResult = await kept;
     clearInterval(writer);
-    assert.equal(keptResult.failure, "operator_stop", "never stalled while it kept writing");
-    // ...and once nothing writes, it stalls.
-    const idle = await runAmuxV22OneShot(request, config, { syntheticPlatform: true,
+    assert.equal(keptResult.failure, "operator_stop");
+    assert.ok(signs.length >= 3, "each write is a sign of life");
+    // ...and once nothing writes, only the start is one, and the run is not ended.
+    const idleSigns = [];
+    const idleController = new AbortController();
+    const idle = runAmuxV22OneShot(request, config, { syntheticPlatform: true,
       spawnChild: fakeSpawn({ chunks: [], hang: true }).spawnChild,
-      stallMs: 1_500, progressPollMs: 40, probeCpu: () => null, probeActivity: probe });
-    assert.equal(idle.failure, "stalled");
-  } finally { await rm(repo, { recursive: true, force: true }); }
+      stallMs: 100, progressPollMs: 40, probeCpu: () => null, probeActivity: probe,
+      signal: idleController.signal, onProgress: (at) => idleSigns.push(at) });
+    setTimeout(() => idleController.abort(), 500);
+    assert.equal((await idle).failure, "operator_stop");
+    assert.equal(idleSigns.length, 1);
+  } finally {
+    // A probe still reading the checkout when the run ended can hold it for a
+    // moment on Windows.
+    await rm(repo, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
 });
 
 test("a transcript of hundreds of MB is read back in a small heap without losing the result", {
@@ -348,23 +389,31 @@ test("the process-tree CPU reading sums the CLI, its descendants and its group o
   assert.equal(await readAmuxV22ProcessTreeCpuTicks(0, { fs }), null);
 });
 
-test("on Linux a real quiet busy child is kept and a real sleeping one stalls", {
+test("on Linux a real quiet busy child keeps moving its last sign of life and a real sleeping one does not", {
   skip: process.platform === "linux" ? undefined : "reads /proc",
 }, async () => {
   const { spawn } = await import("node:child_process");
   const real = (script) => (_binary, _args, options) =>
     spawn(process.execPath, ["-e", script], { ...options, cwd: process.cwd(), env: process.env });
-  // The stall window is wide so a child starved of CPU on a loaded runner still
-  // shows a tick inside it; the busy run is longer than the window.
   const busy = `const end=Date.now()+2500;while(Date.now()<end){}` +
     `process.stdout.write(${JSON.stringify(stream(resultEvent))})`;
+  const busySigns = [];
   const kept = await runAmuxV22OneShot(request, config, { syntheticPlatform: true,
-    spawnChild: real(busy), stallMs: 1000, progressPollMs: 50 });
-  assert.equal(kept.kind, "succeeded", "2500 ms of silent CPU is not a stall");
-  const asleep = await runAmuxV22OneShot(request, config, { syntheticPlatform: true,
-    spawnChild: real("setTimeout(()=>{},10000)"), stallMs: 1000,
-    progressPollMs: 50 });
-  assert.equal(asleep.failure, "stalled");
+    spawnChild: real(busy), progressPollMs: 50, onProgress: (at) => busySigns.push(at) });
+  assert.equal(kept.kind, "succeeded");
+  assert.ok(busySigns.length > 1, "silent CPU is a sign of life");
+  // A sleeping child shows none after the start, and is still not ended for it.
+  const asleepSigns = [];
+  const controller = new AbortController();
+  const asleep = runAmuxV22OneShot(request, config, { syntheticPlatform: true,
+    spawnChild: real("setTimeout(()=>{},10000)"), progressPollMs: 50,
+    signal: controller.signal, onProgress: (at) => asleepSigns.push(at) });
+  // The child's own start-up may use a few ticks; after that it uses none.
+  let settledCount = -1;
+  setTimeout(() => { settledCount = asleepSigns.length; }, 800);
+  setTimeout(() => controller.abort(), 1500);
+  assert.equal((await asleep).failure, "operator_stop");
+  assert.equal(asleepSigns.length, settledCount);
 });
 
 test("a stopped run keeps its checkout change and writes it beside the journal", async () => {
@@ -590,6 +639,51 @@ test("a verify (investigate) run can install packages, run tests and report what
   assert.ok(result.resultText.includes(`refs/amux-v22-preserved/${attemptId}`));
   assert.ok(result.resultText.endsWith(resultEvent.result));
   assert.equal(result.resultSha256, sha(result.resultText));
+});
+
+test("the health operation shows how long the live run has been quiet, and when it ended", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "amux-v22-flow-health-"));
+  try {
+    const keepalive = { source: "login_keepalive", signal: "relogin_soon",
+      observedAt: "2026-11-18T00:00:00.000Z" };
+    const handler = createAmuxV22SidecarHandler({ worker: "worker-a", stateDir,
+      health: async () => [keepalive],
+      // A run whose CPU never changes: quiet from its first moment.
+      run: (input, extra) => runAmuxV22OneShot(input, config, { ...extra, syntheticPlatform: true,
+        progressPollMs: 10, probeCpu: () => 7,
+        spawnChild: fakeSpawn({ chunks: [], hang: true }).spawnChild }) });
+    const ask = async () => handler({ op: "health", requestId: "00000000-0000-4000-8000-000000000009",
+      worker: "worker-a" });
+    // No run yet: only the box's own signals.
+    assert.deepEqual((await ask()).signals, [keepalive]);
+    const before = Date.now();
+    assert.equal((await handler({ op: "execute", ...request })).kind, "in_progress");
+    let first;
+    for (const started = Date.now(); !first && Date.now() - started < 10_000;) {
+      const { signals } = await ask();
+      first = signals.find((signal) => signal.source === "sidecar");
+      if (!first) await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    assert.equal(first.signal, "run_progress");
+    assert.ok(Date.parse(first.observedAt) >= before);
+    assert.deepEqual((await ask()).signals[0], keepalive);
+    // Silence moves nothing: the same last sign of life, and the run goes on.
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    const later = (await ask()).signals.find((signal) => signal.source === "sidecar");
+    assert.deepEqual(later, first);
+    assert.equal((await handler({ op: "readback", attemptId })).kind, "in_progress");
+    assert.deepEqual(await handler({ op: "stop", attemptId }), { kind: "stopping", attemptId });
+    let ended;
+    for (const started = Date.now(); !ended && Date.now() - started < 10_000;) {
+      ended = (await ask()).signals.find((signal) => signal.signal === "run_ended");
+      if (!ended) await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    assert.equal(ended.source, "sidecar");
+    assert.ok(Date.parse(ended.observedAt) >= Date.parse(first.observedAt));
+    // The strict request shape is unchanged.
+    await assert.rejects(() => handler({ op: "health", requestId: "00000000-0000-4000-8000-000000000009",
+      worker: "worker-a", extra: 1 }));
+  } finally { await rm(stateDir, { recursive: true, force: true }); }
 });
 
 test("a failed install is named to the worker and in the result", async () => {

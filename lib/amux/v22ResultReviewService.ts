@@ -9,7 +9,6 @@ import { BoardImportError } from "@/lib/amux/boardImportCore";
 import { openAmuxContent, verifyAmuxContentDigest } from "@/lib/amux/ideaCrypto";
 import { loadAmuxContentKeyRing } from "@/lib/amux/ideaKeyStore";
 import { readDecisionMakerSwitchesOrThrow } from "@/lib/amux/decisionMakerSwitchStore";
-import { settlementDestinationForBudget } from "@/lib/amux/executionBudgetCore";
 import { parseAmuxV22Conclusion } from "@/lib/amux/v22ConclusionCore";
 import { amuxV22ResultReviewRelayCard, amuxV22ResultReviewTarget,
   type AmuxV22ResultReviewDecision, type AmuxV22ResultReviewKind } from
@@ -269,9 +268,8 @@ export async function applyAmuxV22ResultReviewDecision(tx: Prisma.TransactionCli
           decision: input.decision, source: input.source } });
     return { applied: false as const, outcome: "handed_off" as const };
   }
-  let target = amuxV22ResultReviewTarget(input.decision);
-  if (target === "todo" && settlementDestinationForBudget({ requested_status: "todo",
-    attempt_number: row.attemptNumber }).to_status !== "todo") target = "blocked";
+  // No count of attempts turns a retry into a block (owner direction 2026-11-18).
+  const target = amuxV22ResultReviewTarget(input.decision);
   await tx.amuxWorkItem.update({ where: { id: row.taskId }, data: {
     status: target, revision: { increment: 1 },
     ...(target === "done" ? { v4TerminalAt: input.now } : {}),

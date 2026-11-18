@@ -220,19 +220,17 @@ test("a twice-rejected reason without its reject record is not retryable", {
   });
 });
 
-test("a used-up attempt budget refuses the retry at the DB edge", {
+test("thirty attempts no longer refuse an owner's retry at the DB edge", {
   skip: allowed ? undefined : "requires a dedicated loopback test database",
 }, async () => {
   await inRollback(async (tx, db) => {
-    // The same budget the review snapshot reads (decideAmuxAttemptBudget):
-    // the greatest attempt number counts as attempts used.
-    // Owner direction 2026-11-15: no fixed five; the runaway guard is thirty,
-    // here and in the review proposal guard.
+    // Owner direction 2026-11-18: neither the app (decideAmuxAttemptBudget)
+    // nor the review proposal guard (20261118100000_amux_review_retry_no_attempt_bound) bounds an ordinary card.
     const { taskId, priorAttemptId } = await seedRejected(db, { attemptNumber: 5 });
     const { decideAmuxAttemptBudget } =
       await import("../../lib/amux/executionBudgetCore.ts");
     assert.equal(decideAmuxAttemptBudget({ historical_rows: 1,
-      greatest_attempt_number: 30 }).allowed, false);
+      greatest_attempt_number: 30 }).allowed, true);
     assert.equal(decideAmuxAttemptBudget({ historical_rows: 1,
       greatest_attempt_number: 5 }).allowed, true);
     // The settled run's number placed at the guard, past its insert triggers.
@@ -240,7 +238,9 @@ test("a used-up attempt budget refuses the retry at the DB edge", {
     await tx.$executeRaw`UPDATE "AmuxExecutionAttempt" SET "attemptNumber" = 30
       WHERE "id" = ${priorAttemptId}`;
     await tx.$executeRawUnsafe("SET LOCAL session_replication_role = origin");
-    await assert.rejects(ownerRetries(db, taskId, priorAttemptId),
-      /AMUX review retry attempt budget exhausted/);
+    await ownerRetries(db, taskId, priorAttemptId);
+    const [after] = await tx.$queryRaw`SELECT "status" FROM "AmuxWorkItem"
+      WHERE "id" = ${taskId}`;
+    assert.equal(after.status, "todo");
   });
 });

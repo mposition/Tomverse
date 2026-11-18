@@ -260,7 +260,9 @@ test("a failed read is tried once more, outside a route too, except for the boun
   const source = read("lib/amux/ideaProgressRead.ts");
   const body = source.slice(source.indexOf("export async function readAmuxIdeaProgressForOwner"), source.indexOf("type SqlChunk"));
   assert.ok(body.includes("return attempt();"), "one more attempt");
-  assert.ok(body.includes('"AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED"') && body.includes('"AMUX_DB_COMMIT_CHECK_MISSING"'));
+  assert.ok(body.includes('"AMUX_DB_COMMIT_CHECK_MISSING"'));
+  // No count of ours refuses a call any more (owner direction 2026-11-18).
+  assert.equal(body.includes("CALL_CEILING"), false);
   assert.equal((body.match(/\battempt\(\)/g) ?? []).length, 2, "called twice at most");
   assert.equal(/\b(?:while|for)\s*\(/.test(body), false, "never a loop");
   assert.equal(body.includes("isAmuxDbBusyError"), false,

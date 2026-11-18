@@ -2,66 +2,56 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  AMUX_MAX_EXECUTION_ATTEMPTS,
   amuxApprovedCeilingOverrun,
   decideAmuxAttemptBudget,
   settlementDestinationForBudget,
 } from "../lib/amux/executionBudgetCore.ts";
 
-// Owner direction 2026-11-15: no fixed count of five; the bound below is the
-// runaway guard (tests/amuxInfraFailureCore.test.mjs has the repeat rule).
-test("new attempts are monotonic and stop only at the runaway guard", () => {
+// Owner direction 2026-11-15 and 2026-11-18: no fixed count stops an ordinary
+// card, and "no bound" is null (tests/amuxRetryTermination.test.mjs has the
+// repeat rule and tests/amuxInfraFailureCore.test.mjs the platform failures).
+test("new attempts are monotonic and an ordinary card has no bound", () => {
   assert.deepEqual(
     decideAmuxAttemptBudget({
       historical_rows: 2,
       greatest_attempt_number: 2,
     }),
-    {
-      allowed: true,
-      next_attempt_number: 3,
-      max_attempts: AMUX_MAX_EXECUTION_ATTEMPTS,
-    },
+    { allowed: true, next_attempt_number: 3, max_attempts: null },
   );
   assert.equal(decideAmuxAttemptBudget({ historical_rows: 5, greatest_attempt_number: null }).allowed, true);
   assert.deepEqual(
-    decideAmuxAttemptBudget({
-      historical_rows: AMUX_MAX_EXECUTION_ATTEMPTS,
-      greatest_attempt_number: null,
-    }),
-    {
-      allowed: false,
-      exhausted_limit: "attempts",
-      attempts_used: AMUX_MAX_EXECUTION_ATTEMPTS,
-      max_attempts: AMUX_MAX_EXECUTION_ATTEMPTS,
-    },
+    decideAmuxAttemptBudget({ historical_rows: 30, greatest_attempt_number: null }),
+    { allowed: true, next_attempt_number: 31, max_attempts: null },
+    "the number thirty that stopped a card until 2026-11-18 stops nothing",
+  );
+  assert.deepEqual(
+    decideAmuxAttemptBudget({ historical_rows: 4, greatest_attempt_number: 900 }),
+    { allowed: true, next_attempt_number: 901, max_attempts: null },
   );
 });
 
-test("the last failed attempt blocks instead of requeueing forever", () => {
+test("a caller that names a bound is stopped at it, and only that caller", () => {
   assert.deepEqual(
-    settlementDestinationForBudget({
-      requested_status: "todo",
-      attempt_number: AMUX_MAX_EXECUTION_ATTEMPTS,
-    }),
-    {
-      to_status: "blocked",
-      exhausted_limit: "attempts",
-      max_attempts: AMUX_MAX_EXECUTION_ATTEMPTS,
-    },
+    decideAmuxAttemptBudget({ historical_rows: 3, greatest_attempt_number: null, max_attempts: 3 }),
+    { allowed: false, exhausted_limit: "attempts", attempts_used: 3, max_attempts: 3 },
   );
-  assert.equal(
-    settlementDestinationForBudget({
-      requested_status: "todo",
-      attempt_number: 5,
-    }).to_status,
-    "todo",
+  assert.deepEqual(
+    decideAmuxAttemptBudget({ historical_rows: 3, greatest_attempt_number: null, max_attempts: 4 }),
+    { allowed: true, next_attempt_number: 4, max_attempts: 4 },
   );
-  assert.equal(
-    settlementDestinationForBudget({
-      requested_status: "review",
-      attempt_number: AMUX_MAX_EXECUTION_ATTEMPTS,
-    }).to_status,
-    "review",
+});
+
+test("a failed attempt of an ordinary card goes back to todo however many came before", () => {
+  assert.deepEqual(
+    settlementDestinationForBudget({ requested_status: "todo", attempt_number: 30 }),
+    { to_status: "todo", exhausted_limit: null, max_attempts: null },
+  );
+  assert.equal(settlementDestinationForBudget({ requested_status: "todo", attempt_number: 5 }).to_status, "todo");
+  assert.equal(settlementDestinationForBudget({ requested_status: "review", attempt_number: 30 }).to_status, "review");
+  // A paid retry's own bound blocks the last failed attempt instead of requeueing it.
+  assert.deepEqual(
+    settlementDestinationForBudget({ requested_status: "todo", attempt_number: 2, max_attempts: 2 }),
+    { to_status: "blocked", exhausted_limit: "attempts", max_attempts: 2 },
   );
 });
 

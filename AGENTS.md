@@ -124,7 +124,7 @@ Report implemented and tested behavior separately from documentation, review, me
 | 엔지니어링 Agent | `docs/policy/engineering-agent.md` |
 | AMUX Decision Maker | `docs/policy/amux-decision-maker.md`, `docs/ops/amux/decision-maker-s0.md` |
 | AMUX 카드 표시 번호 | `docs/policy/amux-card-display-key.md`, `docs/policy/amux-intake.md` |
-| AMUX 실행 구조(worker lane = 서버의 코딩 에이전트 CLI, 질문은 DM, 다음 card는 점수) — 실행 방식을 바꾸거나 제안하기 전에 | `docs/policy/amux-worker-lanes.md` |
+| AMUX 실행 구조(worker = 서버의 코딩 에이전트 CLI, 기존 v22 로컬 CLI 흐름, 질문은 DM, 다음 card는 점수) — 실행 방식을 바꾸거나 제안하기 전에 | `docs/policy/amux-worker-lanes.md` |
 | AI Review (교차검토) 품질과 M5 | `docs/policy/ai-review-m5-quality-contract.md`, `docs/ui-contracts/ai-review-evidence-chain.md` |
 | Mobile chat composer invariant | `docs/ui-contracts/mobile-chat-composer.md` |
 | Mobile sidebar drawer invariant | `docs/ui-contracts/mobile-sidebar-drawer.md` |
