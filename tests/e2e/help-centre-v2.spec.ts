@@ -1,5 +1,13 @@
 import { expect, test, type Page } from "@playwright/test";
 import { prepareGuestPage } from "./support/app-fixtures";
+import {
+  CHAT_MAX_ATTACHMENTS_PER_MESSAGE,
+  CHAT_MAX_ATTACHMENT_BYTES,
+  CHAT_MAX_TOTAL_ATTACHMENT_BYTES,
+} from "../../lib/chatAttachmentLimits";
+import { GUEST_MAX_ATTACHMENTS_PER_MESSAGE, GUEST_MAX_ATTACHMENT_BYTES } from "../../lib/guestAttachmentPolicy";
+
+const MB = 1024 * 1024;
 
 // Help Centre v2: the hub (question box, common tasks, every category), the
 // step-through guide page, and the assistant's answer card. The assistant's
@@ -53,7 +61,10 @@ test("the attachment guide lists the supported formats once, from the format tab
   const copy = await list.innerText();
   for (const extension of ["png", "pdf", "docx", "hwp", "zip", "json"]) expect(copy).toContain(`.${extension}`);
   expect(copy.match(/\.pdf\b/g)).toHaveLength(1);
-  await expect(list).toContainText("Without signing in: 1 file per message, up to 5 MB.");
+  await expect(list).toContainText(
+    `Signed in: up to ${CHAT_MAX_ATTACHMENTS_PER_MESSAGE} files per message, ${CHAT_MAX_ATTACHMENT_BYTES / MB} MB each and ${CHAT_MAX_TOTAL_ATTACHMENT_BYTES / MB} MB in total.`
+  );
+  await expect(list).toContainText(`Without signing in: ${GUEST_MAX_ATTACHMENTS_PER_MESSAGE} file per message, up to ${GUEST_MAX_ATTACHMENT_BYTES / MB} MB.`);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 

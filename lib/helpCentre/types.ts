@@ -153,6 +153,8 @@ export type HelpUiCopy = {
   formatsSignedInOnly: string;
   /** `{files}` and `{mb}` from lib/guestAttachmentPolicy.ts. */
   formatsGuestLimits: string;
+  /** `{files}`, `{mb}` and `{total}` from lib/chatAttachmentLimits.ts. */
+  formatsSignedInLimits: string;
 };
 
 export type HelpLocaleCopy = {

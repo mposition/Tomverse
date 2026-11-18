@@ -36,6 +36,7 @@ function AttachmentFormatList({ ui }: { ui: HelpLocaleCopy["ui"] }) {
         ))}
       </dl>
       <p className="mt-3 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+        {fill(ui.formatsSignedInLimits, { files: formats.signedInFiles, mb: formats.signedInMegabytes, total: formats.signedInTotalMegabytes })}{" "}
         {fill(ui.formatsGuestLimits, { files: formats.guestFiles, mb: formats.guestMegabytes })}
         {formats.signedInOnly.length > 0
           ? ` ${fill(ui.formatsSignedInOnly, { list: formats.signedInOnly.join(", ") })}`

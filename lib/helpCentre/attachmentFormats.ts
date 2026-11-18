@@ -1,4 +1,9 @@
 import { CHAT_ATTACHMENT_FORMATS, type ChatAttachmentUiGroup } from "@/lib/chatAttachmentFormats";
+import {
+  CHAT_MAX_ATTACHMENTS_PER_MESSAGE,
+  CHAT_MAX_ATTACHMENT_BYTES,
+  CHAT_MAX_TOTAL_ATTACHMENT_BYTES,
+} from "@/lib/chatAttachmentLimits";
 import { GUEST_MAX_ATTACHMENTS_PER_MESSAGE, GUEST_MAX_ATTACHMENT_BYTES } from "@/lib/guestAttachmentPolicy";
 
 /**
@@ -16,7 +21,12 @@ export type HelpAttachmentFormats = {
   signedInOnly: string[];
   guestFiles: number;
   guestMegabytes: number;
+  signedInFiles: number;
+  signedInMegabytes: number;
+  signedInTotalMegabytes: number;
 };
+
+const MB = 1024 * 1024;
 
 const GROUP_ORDER: readonly ChatAttachmentUiGroup[] = ["image", "document", "data", "markup", "code", "archive"];
 
@@ -40,7 +50,10 @@ export function helpAttachmentFormats(): HelpAttachmentFormats {
     groups,
     signedInOnly: groups.flatMap((entry) => entry.entries).filter((entry) => !guest.has(entry)),
     guestFiles: GUEST_MAX_ATTACHMENTS_PER_MESSAGE,
-    guestMegabytes: GUEST_MAX_ATTACHMENT_BYTES / (1024 * 1024),
+    guestMegabytes: GUEST_MAX_ATTACHMENT_BYTES / MB,
+    signedInFiles: CHAT_MAX_ATTACHMENTS_PER_MESSAGE,
+    signedInMegabytes: CHAT_MAX_ATTACHMENT_BYTES / MB,
+    signedInTotalMegabytes: CHAT_MAX_TOTAL_ATTACHMENT_BYTES / MB,
   };
 }
 

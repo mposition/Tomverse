@@ -7,6 +7,11 @@ import { HELP_CATEGORY_IDS } from "../lib/helpCentre/types.ts";
 import { helpAttachmentFormats } from "../lib/helpCentre/attachmentFormats.ts";
 import { CHAT_ATTACHMENT_FORMATS, chatAttachmentExtensionsByGroup } from "../lib/chatAttachmentFormats.ts";
 import { GUEST_MAX_ATTACHMENTS_PER_MESSAGE, GUEST_MAX_ATTACHMENT_BYTES } from "../lib/guestAttachmentPolicy.ts";
+import {
+  CHAT_MAX_ATTACHMENTS_PER_MESSAGE,
+  CHAT_MAX_ATTACHMENT_BYTES,
+  CHAT_MAX_TOTAL_ATTACHMENT_BYTES,
+} from "../lib/chatAttachmentLimits.ts";
 import { helpAssistantCorpus } from "../lib/helpAssistantCore.ts";
 
 const languages = ["ko", "en", "zh", "zh-Hant", "fr", "de", "es", "pt"];
@@ -67,6 +72,9 @@ test("the attachment format list comes from CHAT_ATTACHMENT_FORMATS, and guide c
   assert.ok(shown.size === new Set(CHAT_ATTACHMENT_FORMATS.flatMap((format) => [...format.extensions.map((e) => `.${e}`), ...(format.filenames ?? [])])).size, "nothing extra is listed");
   assert.equal(derived.guestFiles, GUEST_MAX_ATTACHMENTS_PER_MESSAGE);
   assert.equal(derived.guestMegabytes, GUEST_MAX_ATTACHMENT_BYTES / (1024 * 1024));
+  assert.equal(derived.signedInFiles, CHAT_MAX_ATTACHMENTS_PER_MESSAGE);
+  assert.equal(derived.signedInMegabytes, CHAT_MAX_ATTACHMENT_BYTES / (1024 * 1024));
+  assert.equal(derived.signedInTotalMegabytes, CHAT_MAX_TOTAL_ATTACHMENT_BYTES / (1024 * 1024));
   const extensions = Object.values(signedIn).flat();
   // The guides about attaching files. Others may quote a button that names a
   // download format ("Download all conversations as .txt"), which is not a
@@ -82,6 +90,10 @@ test("the attachment format list comes from CHAT_ATTACHMENT_FORMATS, and guide c
     assert.match(copy.ui.formatsGuestLimits, /\{files\}/);
     assert.match(copy.ui.formatsGuestLimits, /\{mb\}/);
     assert.match(copy.ui.formatsSignedInOnly, /\{list\}/);
+    for (const key of ["{files}", "{mb}", "{total}"]) assert.ok(copy.ui.formatsSignedInLimits.includes(key), `${language} formatsSignedInLimits ${key}`);
+    // Limits are stated by the derived list, not in guide copy.
+    const limitCopy = JSON.stringify(["attach-files", "file-upload-failed"].map((id) => copy.guides[id].faq));
+    assert.doesNotMatch(limitCopy, /\d+\s?(MB|Mo|MiB)/, `${language} attachment FAQ states a size; point at the list`);
   }
   assert.match(helpAssistantCorpus(HELP_COPY.en), /\.pdf/);
 });

@@ -89,6 +89,7 @@ export const de: HelpLocaleCopy = {
     },
     formatsSignedInOnly: "Nur nach Anmeldung: {list}",
     formatsGuestLimits: "Ohne Anmeldung: {files} Datei pro Nachricht, bis zu {mb} MB.",
+    formatsSignedInLimits: "Angemeldet: bis zu {files} Dateien pro Nachricht, je {mb} MB und insgesamt {total} MB.",
   },
   categories: {
     "getting-started": { title: "Erste Schritte", description: "Vom Anlegen des Kontos bis zur ersten Frage." },
@@ -371,7 +372,7 @@ export const de: HelpLocaleCopy = {
         { title: "Senden", body: "Senden Sie die Nachricht." },
       ],
       faq: [
-        { q: "Wie viele und wie große Dateien sind möglich?", a: "Angemeldet bis zu 5 Dateien pro Nachricht, je 10 MB und insgesamt 25 MB. Die Grenzen ohne Anmeldung und alle akzeptierten Formate stehen in der Formatliste unten." },
+        { q: "Wie viele und wie große Dateien sind möglich?", a: "Die Grenzen für Anzahl und Größe, mit und ohne Anmeldung, sowie alle akzeptierten Formate stehen in der Formatliste unten." },
         { q: "Welche Dateien werden nicht akzeptiert?", a: "Ausführbare Dateien, andere Archive als ZIP (RAR, 7Z usw.), Audio und Video, HEIC und TIFF, animierte GIFs sowie passwortgeschützte Dokumente." },
         { q: "Wie lange werden angehängte Dateien aufbewahrt?", a: "Anhänge angemeldeter Nutzer werden zusammen mit der Unterhaltung aufbewahrt und beim Löschen der Unterhaltung oder des Kontos mitgelöscht. Gastdateien werden kurz aufbewahrt und dann automatisch gelöscht." },
       ],
@@ -824,13 +825,13 @@ export const de: HelpLocaleCopy = {
       title: "Wenn ein Datei-Upload fehlschlägt",
       summary: "Prüfen Sie Format, Größe, Passwort und ob lesbarer Text vorhanden ist, und versuchen Sie es mit einer einzelnen Datei erneut.",
       steps: [
-        { title: "Fehlermeldung prüfen", body: "Achten Sie auf Meldungen wie „Jede Datei darf höchstens 10 MB groß sein“, „Dieses Dokument ist passwortgeschützt“ oder „In dieser Datei wurde kein lesbarer Text gefunden“." },
+        { title: "Fehlermeldung prüfen", body: "Achten Sie auf Meldungen wie „Jede Datei darf höchstens 50 MB groß sein“, „Dieses Dokument ist passwortgeschützt“ oder „In dieser Datei wurde kein lesbarer Text gefunden“." },
         { title: "Datei korrigieren", body: "Entfernen Sie das Passwort oder speichern Sie die Datei erneut als PDF und verkleinern Sie sie." },
         { title: "Einzeln erneut versuchen", body: "Hängen Sie nur eine Datei an und senden Sie erneut. Wenn es eilt, fügen Sie die wichtigsten Inhalte in das Eingabefeld ein." },
         { title: "Bei Bildfehlern", body: "Wählen Sie ein Modell, das Bilder lesen kann, oder klicken Sie auf „Nicht kompatible Modelle entfernen“." },
       ],
       faq: [
-        { q: "Wie viele und wie große Dateien kann ich hochladen?", a: "Angemeldet bis zu 5 Dateien pro Nachricht, je 10 MB und insgesamt 25 MB. Die Grenzen ohne Anmeldung stehen in der Formatliste der Anleitung zu Anhängen." },
+        { q: "Wie viele und wie große Dateien kann ich hochladen?", a: "Die Grenzen für Anzahl und Größe, mit und ohne Anmeldung, stehen in der Formatliste der Anleitung zu Anhängen." },
         { q: "Welche Formate werden unterstützt?", a: "Alle akzeptierten Formate stehen in der Formatliste der Anleitung zu Anhängen. Animierte GIFs und passwortgeschützte ZIP-Dateien werden nicht angenommen." },
         { q: "Es heißt, eine früher hochgeladene Datei könne nicht gelesen werden.", a: "Dann ist die Datei nicht mehr gespeichert. Hängen Sie sie erneut an oder klicken Sie auf „Ohne die Datei fortfahren“." },
       ],

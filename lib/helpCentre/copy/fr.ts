@@ -89,6 +89,7 @@ export const fr: HelpLocaleCopy = {
     },
     formatsSignedInOnly: "Réservé aux comptes connectés : {list}",
     formatsGuestLimits: "Sans connexion : {files} fichier par message, {mb} Mo au maximum.",
+    formatsSignedInLimits: "Connecté : jusqu’à {files} fichiers par message, {mb} Mo chacun et {total} Mo au total.",
   },
   categories: {
     "getting-started": { title: "Premiers pas", description: "De la création du compte à votre première question." },
@@ -371,7 +372,7 @@ export const fr: HelpLocaleCopy = {
         { title: "Envoyer", body: "Envoyez le message." },
       ],
       faq: [
-        { q: "Combien de fichiers, et de quelle taille ?", a: "Connecté, jusqu’à 5 fichiers par message, 10 Mo chacun et 25 Mo au total. Les limites sans connexion et tous les formats acceptés figurent dans la liste des formats ci-dessous." },
+        { q: "Combien de fichiers, et de quelle taille ?", a: "Les limites de nombre et de taille, avec ou sans connexion, et tous les formats acceptés figurent dans la liste des formats ci-dessous." },
         { q: "Quels fichiers ne sont pas acceptés ?", a: "Les fichiers exécutables, les archives autres que ZIP (RAR, 7Z, etc.), l’audio et la vidéo, HEIC et TIFF, les GIF animés et les documents protégés par mot de passe." },
         { q: "Jusqu’à quand les fichiers joints sont-ils conservés ?", a: "Lorsque vous êtes connecté, les pièces jointes sont conservées avec la conversation et supprimées avec elle ou avec le compte. Les fichiers d’un invité sont conservés peu de temps puis supprimés automatiquement." },
       ],
@@ -824,13 +825,13 @@ export const fr: HelpLocaleCopy = {
       title: "Quand l’envoi d’un fichier échoue",
       summary: "Vérifiez le format, la taille, le mot de passe et la présence de texte lisible, puis réessayez avec un seul fichier.",
       steps: [
-        { title: "Lire le message d’erreur", body: "Repérez un message comme « Chaque fichier doit faire 10 Mo ou moins. », « Ce document est protégé par mot de passe. » ou « Aucun texte lisible n'a été trouvé dans ce fichier. »." },
+        { title: "Lire le message d’erreur", body: "Repérez un message comme « Chaque fichier doit faire 50 Mo ou moins. », « Ce document est protégé par mot de passe. » ou « Aucun texte lisible n'a été trouvé dans ce fichier. »." },
         { title: "Corriger le fichier", body: "Retirez le mot de passe, ré-enregistrez en PDF ou réduisez la taille." },
         { title: "Réessayer un par un", body: "Joignez un seul fichier et renvoyez. Si c’est urgent, collez l’essentiel du contenu dans le champ de saisie." },
         { title: "Si l’erreur concerne une image", body: "Choisissez un modèle capable de lire les images ou cliquez sur « Retirer les modèles incompatibles »." },
       ],
       faq: [
-        { q: "Combien de fichiers, et de quelle taille ?", a: "Connecté, jusqu’à 5 fichiers par message, 10 Mo chacun et 25 Mo au total. Les limites sans connexion figurent dans la liste des formats du guide sur les pièces jointes." },
+        { q: "Combien de fichiers, et de quelle taille ?", a: "Les limites de nombre et de taille, avec ou sans connexion, figurent dans la liste des formats du guide sur les pièces jointes." },
         { q: "Quels formats sont pris en charge ?", a: "Tous les formats acceptés figurent dans la liste des formats du guide sur les pièces jointes. Les GIF animés et les ZIP protégés par mot de passe ne sont pas acceptés." },
         { q: "Un fichier envoyé auparavant est signalé comme illisible.", a: "Le fichier n’est plus stocké. Joignez-le de nouveau ou cliquez sur « Continuer sans le fichier »." },
       ],

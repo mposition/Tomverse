@@ -88,6 +88,7 @@ export const en: HelpLocaleCopy = {
     },
     formatsSignedInOnly: "Signed-in only: {list}",
     formatsGuestLimits: "Without signing in: {files} file per message, up to {mb} MB.",
+    formatsSignedInLimits: "Signed in: up to {files} files per message, {mb} MB each and {total} MB in total.",
   },
   categories: {
     "getting-started": { title: "Getting started", description: "Create an account and send your first question." },
@@ -370,7 +371,7 @@ export const en: HelpLocaleCopy = {
         { title: "Send", body: "Send your message." },
       ],
       faq: [
-        { q: "How many files, and how large?", a: "Signed in, up to 5 files per message, 10 MB each and 25 MB in total. The limits without signing in, and every accepted format, are in the supported formats list below." },
+        { q: "How many files, and how large?", a: "The file count and size limits, signed in and not, and every accepted format are in the supported formats list below." },
         { q: "Which files aren't accepted?", a: "Executables, archives other than ZIP (RAR, 7Z and so on), audio and video, HEIC and TIFF, animated GIFs and password-protected documents." },
         { q: "How long are attached files kept?", a: "Files attached while signed in are kept with the chat and deleted when you delete the chat or your account. Guest files are kept briefly and then deleted automatically." },
       ],
@@ -823,13 +824,13 @@ export const en: HelpLocaleCopy = {
       title: "When a file upload fails",
       summary: "Check the format, size, password and that there's readable text, and try again with a single file.",
       steps: [
-        { title: "Read the error text", body: "Check the wording, such as \"Each file must be 10 MB or smaller\", \"This document is password-protected\" or \"No readable text was found in this file\"." },
+        { title: "Read the error text", body: "Check the wording, such as \"Each file must be 50 MB or smaller\", \"This document is password-protected\" or \"No readable text was found in this file\"." },
         { title: "Fix the file", body: "Remove the password, or save it again as a PDF, and make it smaller." },
         { title: "Try one at a time", body: "Attach just one file and send again. If you're in a hurry, paste the key content into the message box." },
         { title: "If it's an image error", body: "Choose a model that can read images, or select \"Remove incompatible models\"." },
       ],
       faq: [
-        { q: "How many files, and how large, can I upload?", a: "Signed in, up to 5 files per message, 10 MB each and 25 MB in total. The limits without signing in are in the supported formats list of the file attachment guide." },
+        { q: "How many files, and how large, can I upload?", a: "The file count and size limits, signed in and not, are in the supported formats list of the file attachment guide." },
         { q: "Which formats are supported?", a: "Every accepted format is in the supported formats list of the file attachment guide. Animated GIFs and password-protected ZIP files are not accepted." },
         { q: "It says an earlier file can't be read.", a: "The file is no longer stored. Attach it again, or select \"Continue without the file\"." },
       ],

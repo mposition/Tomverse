@@ -87,6 +87,7 @@ export const es: HelpLocaleCopy = {
     },
     formatsSignedInOnly: "Solo con sesión iniciada: {list}",
     formatsGuestLimits: "Sin iniciar sesión: {files} archivo por mensaje, hasta {mb} MB.",
+    formatsSignedInLimits: "Con sesión iniciada: hasta {files} archivos por mensaje, {mb} MB cada uno y {total} MB en total.",
   },
   categories: {
     "getting-started": { title: "Primeros pasos", description: "Desde crear tu cuenta hasta enviar tu primera pregunta." },
@@ -369,7 +370,7 @@ export const es: HelpLocaleCopy = {
         { title: "Enviar", body: "Envía el mensaje." },
       ],
       faq: [
-        { q: "¿Cuántos archivos y de qué tamaño?", a: "Con sesión iniciada, hasta 5 archivos por mensaje, 10 MB cada uno y 25 MB en total. Los límites sin sesión y todos los formatos aceptados están en la lista de formatos de abajo." },
+        { q: "¿Cuántos archivos y de qué tamaño?", a: "Los límites de cantidad y tamaño, con y sin sesión, y todos los formatos aceptados están en la lista de formatos de abajo." },
         { q: "¿Qué archivos no se aceptan?", a: "Ejecutables, archivos comprimidos que no sean ZIP (RAR, 7Z, etc.), audio y vídeo, HEIC y TIFF, GIF animados y documentos protegidos con contraseña." },
         { q: "¿Hasta cuándo se conservan los archivos adjuntos?", a: "Con la sesión iniciada, los adjuntos se conservan junto con la conversación y se borran cuando eliminas la conversación o la cuenta. Los archivos de invitado se conservan un tiempo breve y se borran automáticamente." },
       ],
@@ -822,13 +823,13 @@ export const es: HelpLocaleCopy = {
       title: "Cuando falla la subida de un archivo",
       summary: "Comprueba el formato, el tamaño, la contraseña y que haya texto legible, y vuelve a intentarlo con un solo archivo.",
       steps: [
-        { title: "Leer el mensaje de error", body: "Fíjate en mensajes como «Cada archivo debe tener 10 MB o menos», «Este documento está protegido con contraseña» o «No se encontró texto legible en este archivo»." },
+        { title: "Leer el mensaje de error", body: "Fíjate en mensajes como «Cada archivo debe tener 50 MB o menos», «Este documento está protegido con contraseña» o «No se encontró texto legible en este archivo»." },
         { title: "Arreglar el archivo", body: "Quita la contraseña, vuelve a guardarlo como PDF o reduce su tamaño." },
         { title: "Probar de uno en uno", body: "Adjunta solo un archivo y vuelve a enviar. Si tienes prisa, pega lo esencial directamente en el cuadro de texto." },
         { title: "Si es un error de imagen", body: "Elige un modelo que pueda leer imágenes o pulsa «Quitar modelos incompatibles»." },
       ],
       faq: [
-        { q: "¿Cuántos archivos y de qué tamaño puedo subir?", a: "Con sesión iniciada, hasta 5 archivos por mensaje, 10 MB cada uno y 25 MB en total. Los límites sin sesión están en la lista de formatos de la guía de archivos adjuntos." },
+        { q: "¿Cuántos archivos y de qué tamaño puedo subir?", a: "Los límites de cantidad y tamaño, con y sin sesión, están en la lista de formatos de la guía de archivos adjuntos." },
         { q: "¿Qué formatos se admiten?", a: "Todos los formatos aceptados están en la lista de formatos de la guía de archivos adjuntos. No se aceptan GIF animados ni ZIP protegidos con contraseña." },
         { q: "Me dice que no se puede leer un archivo que subí antes.", a: "Es el caso en que el archivo ya no está guardado. Vuelve a adjuntarlo o pulsa «Continuar sin el archivo»." },
       ],

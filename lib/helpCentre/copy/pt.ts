@@ -88,6 +88,7 @@ export const pt: HelpLocaleCopy = {
     },
     formatsSignedInOnly: "Somente com login: {list}",
     formatsGuestLimits: "Sem login: {files} arquivo por mensagem, até {mb} MB.",
+    formatsSignedInLimits: "Com login: até {files} arquivos por mensagem, {mb} MB cada e {total} MB no total.",
   },
   categories: {
     "getting-started": { title: "Primeiros passos", description: "Da criação da conta até a primeira pergunta." },
@@ -370,7 +371,7 @@ export const pt: HelpLocaleCopy = {
         { title: "Enviar", body: "Envie a mensagem." },
       ],
       faq: [
-        { q: "Quantos arquivos e de que tamanho?", a: "Com login, até 5 arquivos por mensagem, 10 MB cada e 25 MB no total. Os limites sem login e todos os formatos aceitos estão na lista de formatos abaixo." },
+        { q: "Quantos arquivos e de que tamanho?", a: "Os limites de quantidade e tamanho, com e sem login, e todos os formatos aceitos estão na lista de formatos abaixo." },
         { q: "Quais arquivos não são aceitos?", a: "Executáveis, compactados que não sejam ZIP (RAR, 7Z etc.), áudio e vídeo, HEIC e TIFF, GIFs animados e documentos protegidos por senha." },
         { q: "Por quanto tempo o arquivo anexado fica guardado?", a: "Anexos de quem está logado ficam guardados junto com a conversa e são apagados quando a conversa ou a conta é excluída. Arquivos de convidado ficam guardados por pouco tempo e depois são apagados automaticamente." },
       ],
@@ -823,13 +824,13 @@ export const pt: HelpLocaleCopy = {
       title: "Quando o envio de um arquivo falha",
       summary: "Confira o formato, o tamanho, a senha e se há texto legível, e tente de novo com um arquivo só.",
       steps: [
-        { title: "Ver a mensagem de erro", body: "Veja mensagens como “Cada arquivo deve ter 10 MB ou menos.”, “Este documento está protegido por senha.” e “Nenhum texto legível foi encontrado neste arquivo.”." },
+        { title: "Ver a mensagem de erro", body: "Veja mensagens como “Cada arquivo deve ter 50 MB ou menos.”, “Este documento está protegido por senha.” e “Nenhum texto legível foi encontrado neste arquivo.”." },
         { title: "Corrigir o arquivo", body: "Remova a senha, salve de novo como PDF ou reduza o tamanho." },
         { title: "Tentar um por vez", body: "Anexe só um arquivo e envie de novo. Se tiver pressa, cole o conteúdo principal no campo de mensagem." },
         { title: "Se for erro de imagem", body: "Escolha um modelo que leia imagens ou toque em “Remover modelos incompatíveis”." },
       ],
       faq: [
-        { q: "Quantos arquivos e de que tamanho posso enviar?", a: "Com login, até 5 arquivos por mensagem, 10 MB cada e 25 MB no total. Os limites sem login estão na lista de formatos do guia de anexos." },
+        { q: "Quantos arquivos e de que tamanho posso enviar?", a: "Os limites de quantidade e tamanho, com e sem login, estão na lista de formatos do guia de anexos." },
         { q: "Quais formatos são aceitos?", a: "Todos os formatos aceitos estão na lista de formatos do guia de anexos. GIFs animados e ZIPs protegidos por senha não são aceitos." },
         { q: "Diz que não consegue ler um arquivo que enviei antes.", a: "É o caso de um arquivo que não está mais guardado. Anexe de novo ou toque em “Continuar sem o arquivo”." },
       ],

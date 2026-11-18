@@ -53,9 +53,13 @@ function attachmentFormatText(copy: HelpLocaleCopy): string {
   const groups = formats.groups
     .map((entry) => `  ${copy.ui.formatGroups[entry.group]}: ${entry.entries.join(", ")}`)
     .join("\n");
-  const guest = copy.ui.formatsGuestLimits
+  const signedIn = copy.ui.formatsSignedInLimits
+    .replace("{files}", String(formats.signedInFiles))
+    .replace("{mb}", String(formats.signedInMegabytes))
+    .replace("{total}", String(formats.signedInTotalMegabytes));
+  const guest = `${signedIn} ${copy.ui.formatsGuestLimits
     .replace("{files}", String(formats.guestFiles))
-    .replace("{mb}", String(formats.guestMegabytes));
+    .replace("{mb}", String(formats.guestMegabytes))}`;
   const only = formats.signedInOnly.length
     ? ` ${copy.ui.formatsSignedInOnly.replace("{list}", formats.signedInOnly.join(", "))}`
     : "";

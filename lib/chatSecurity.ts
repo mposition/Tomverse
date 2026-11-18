@@ -6212,7 +6212,9 @@ export const validateChatPayload = (body: unknown) => {
         const ids = payload.acknowledgedUnavailableAttachmentIds;
         if (
             !Array.isArray(ids) ||
-            ids.length > 50 ||
+            // Every file one request can carry (100 messages of 10), since one
+            // refusal names every lost file a long conversation holds.
+            ids.length > 1_000 ||
             ids.some(
                 (id) =>
                     typeof id !== "string" ||

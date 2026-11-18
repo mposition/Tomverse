@@ -1,4 +1,3 @@
-import { MarketingConsentReservation } from "@/components/analytics/MarketingConsentReservation";
 import { AppToastViewport } from "@/components/AppToastViewport";
 import { MarketingProviders } from "@/components/marketing/MarketingProviders";
 import { MarketingChatAvailabilityProvider } from "@/components/marketing/MarketingChatAvailability";
@@ -38,9 +37,6 @@ export function MarketingShell({
 }>) {
   return (
     <>
-      {/* First thing in the marketing subtree, so it runs before the header --
-          and therefore the consent slot -- is parsed. */}
-      <MarketingConsentReservation nonce={nonce} />
       <StructuredData
         nonce={nonce}
         data={{

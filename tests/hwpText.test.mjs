@@ -8,7 +8,7 @@ import { deflateSync, unzipSync, zipSync } from "fflate";
 import { resolveChatAttachmentFormat } from "../lib/chatAttachmentFormats.ts";
 import { validateChatAttachmentUpload } from "../lib/chatAttachmentValidation.ts";
 import { OFFICE_RENDERABLE_EXTENSIONS } from "../lib/fileConversionCore.ts";
-import { createLegacyParseBudget } from "../lib/legacyOffice/budget.ts";
+import { createLegacyParseBudget, DEFAULT_LEGACY_PARSE_LIMITS } from "../lib/legacyOffice/budget.ts";
 import { openCompoundFile, readCompoundStream } from "../lib/legacyOffice/cfbf.ts";
 import { extractLegacyOfficeText } from "../lib/legacyOfficeText.ts";
 import { measureRenderInput } from "../lib/officeRenderInput.ts";
@@ -265,7 +265,8 @@ test("a compressed HWP section that expands without end is stopped part-way", ()
 test("an HWPX section that expands without end is stopped part-way, whatever it declares", () => {
   const bytes = zipSync({
     mimetype: encoder.encode("application/hwp+zip"),
-    "Contents/section0.xml": new Uint8Array(64 * 1024 * 1024),
+    // Past the parse budget, whatever that is: derived, not a fixed size.
+    "Contents/section0.xml": new Uint8Array(DEFAULT_LEGACY_PARSE_LIMITS.maxBytes + 4 * 1024 * 1024),
   });
   assert.throws(() => readText(bytes, "hwpx"), (error) => error.code === "LEGACY_OFFICE_TOO_LARGE");
 });

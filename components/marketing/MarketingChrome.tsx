@@ -5,7 +5,6 @@ import { useEffect, useId, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 import { ArrowRight, ExternalLink, Menu, X } from "lucide-react";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
-import { MarketingConsentSlot } from "@/components/analytics/AnalyticsProvider";
 import { MarketingLanguageSwitcher } from "./MarketingLanguageSwitcher";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { LOCALIZED_SEO_PATHS, localizedPath } from "@/lib/seo";
@@ -512,7 +511,6 @@ function LegacyMarketingHeader({
         document flow, instead of as a bottom-anchored fixed overlay that
         covered the hero's primary CTA on <=360px viewports.
       */}
-      <MarketingConsentSlot maxWidth={maxWidth} />
       <LocaleSupportNotice
         localizedContentAvailable={localizedContentAvailable}
         maxWidth={maxWidth}
@@ -739,7 +737,6 @@ function LaunchMarketingHeader({
           </Link>
         </nav>}
       </header>
-      <MarketingConsentSlot maxWidth={maxWidth} />
       <LocaleSupportNotice localizedContentAvailable={localizedContentAvailable} maxWidth={maxWidth} />
     </>
   );

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { appendArtifactRevisionDraft, artifactRevisionDraftConflict } from "../lib/generatedArtifactRevisionDraft.ts";
 import { draftKeyFor, readDraftEntry, writeDraftEntry } from "../lib/conversationDraftStore.ts";
+import { CHAT_MAX_ATTACHMENTS_PER_MESSAGE } from "../lib/chatAttachmentLimits.ts";
 
 const file = (name, uploadId = name) => ({ id: uploadId, uploadId, name, mediaType: "text/plain", size: 12, kind: "text" });
 
@@ -22,11 +23,14 @@ test("the same opaque upload cannot append a second request or chip", () => {
   assert.equal(again.conflict, null);
 });
 
-test("same-name inputs and the fifth-file limit preserve the entire draft", () => {
+test("same-name inputs and the attachment limit preserve the entire draft", () => {
   const nameCollision = { text: "Keep", attachments: [file("Report.MD", "other-upload")] };
   assert.equal(artifactRevisionDraftConflict(nameCollision, "report.md"), "name");
   assert.equal(appendArtifactRevisionDraft(nameCollision, file("report.md"), "New").draft, nameCollision);
-  const full = { text: "Keep", attachments: Array.from({ length: 5 }, (_, i) => file(`${i}.txt`)) };
+  const full = { text: "Keep", attachments: Array.from({ length: CHAT_MAX_ATTACHMENTS_PER_MESSAGE }, (_, i) => file(`${i}.txt`)) };
+  // Room below the limit is room: nine files still take the revision.
+  const roomy = { text: "Keep", attachments: Array.from({ length: CHAT_MAX_ATTACHMENTS_PER_MESSAGE - 1 }, (_, i) => file(`${i}.txt`)) };
+  assert.equal(artifactRevisionDraftConflict(roomy, "report.md"), null);
   assert.equal(appendArtifactRevisionDraft(full, file("report.md"), "New").conflict, "count");
   assert.equal(appendArtifactRevisionDraft(full, file("report.md"), "New").draft, full);
 });

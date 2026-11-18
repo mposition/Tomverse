@@ -1,3 +1,7 @@
+import {
+    CHAT_MAX_ATTACHMENTS_PER_MESSAGE,
+    CHAT_MAX_ATTACHMENT_BYTES,
+} from "@/lib/chatAttachmentLimits";
 import { prepareMemoryHistoryContext } from "@/lib/memoryHistorySnapshot";
 import { randomUUID } from "node:crypto";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
@@ -76,11 +80,11 @@ const preflightSchema = z
                 z
                     .object({
                         mediaType: z.string().min(1).max(160),
-                        size: z.number().int().min(0).max(10 * 1024 * 1024),
+                        size: z.number().int().min(0).max(CHAT_MAX_ATTACHMENT_BYTES),
                     })
                     .strict()
             )
-            .max(5),
+            .max(CHAT_MAX_ATTACHMENTS_PER_MESSAGE),
         webSearchMode: z.enum(WEB_SEARCH_MODES).optional(),
     })
     .strict();

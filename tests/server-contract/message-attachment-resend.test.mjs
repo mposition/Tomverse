@@ -4,6 +4,7 @@ import test, { mock } from "node:test";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { ZodError } from "zod";
+import { CHAT_MAX_ATTACHMENTS_PER_MESSAGE } from "../../lib/chatAttachmentLimits.ts";
 
 const mod = (path) => pathToFileURL(resolve(import.meta.dirname, "../..", path)).href;
 let state, copied, readKeys, storageFailure, failDb, capacityFailure, capacityChecks,
@@ -258,7 +259,7 @@ test("strict route schema rejects ambiguous, excessive, duplicate and client-met
     message({ attachmentReferences: [{ attachmentId: "source", name: "override" }] }),
     message({ attachmentReferences: [{ attachmentId: "source" }, { attachmentId: "source" }] }),
     message({ attachmentReferences: [{ uploadId: "fresh" }, { uploadId: "fresh" }] }),
-    message({ attachmentReferences: Array.from({ length: 6 }, (_, i) => ({ attachmentId: `source${i}` })) }),
+    message({ attachmentReferences: Array.from({ length: CHAT_MAX_ATTACHMENTS_PER_MESSAGE + 1 }, (_, i) => ({ attachmentId: `source${i}` })) }),
     message({ attachmentReferences: [{}] }), message({ attachmentReferences: [] }),
     message({ attachmentUploadIds: ["fresh"] }),
   ];
