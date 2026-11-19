@@ -588,6 +588,19 @@ export const convertChatCompletionRequest = (
                         parts.push({ type: "tool-call", toolCallId: call.id, toolName: call.custom.name, input: { input: call.custom.input } });
                         return;
                     }
+                    if (customTools.has(call.function.name)) {
+                        // A custom tool's call echoed in function form: its
+                        // arguments are the raw input (or an { input } object).
+                        const echoed = safeJson(call.function.arguments);
+                        const raw =
+                            echoed && typeof echoed === "object" && typeof (echoed as { input?: unknown }).input === "string"
+                                ? (echoed as { input: string }).input
+                                : call.function.arguments;
+                        textSegments.push(call.function.name, raw);
+                        toolNamesById.set(call.id, call.function.name);
+                        parts.push({ type: "tool-call", toolCallId: call.id, toolName: call.function.name, input: { input: raw } });
+                        return;
+                    }
                     let input: unknown;
                     try {
                         input = call.function.arguments.trim() ? JSON.parse(call.function.arguments) : {};
@@ -685,6 +698,15 @@ export const toOpenAiUsage = (usage: UsageView | null) => {
  * custom tool's raw input when `custom` is set.
  */
 export type CollectedToolCall = { id: string; name: string; arguments: string; custom?: boolean };
+
+/**
+ * EXTERNAL_API_CUSTOM_CALLS_AS_FUNCTION (default off, for client testing on
+ * dev): a custom tool's call goes back as a function call whose `arguments`
+ * is the raw input, instead of a `custom` call. Requests take either form
+ * back in history.
+ */
+export const customCallsAsFunction = (env: Record<string, string | undefined>) =>
+    env.EXTERNAL_API_CUSTOM_CALLS_AS_FUNCTION === "true";
 
 /** A custom tool's input from the `{ input }` object its function form took. */
 const customInputOf = (input: unknown) => {
@@ -791,7 +813,8 @@ export const createChunkTranslator = (
      * are held back and the decoded input is sent once, when the call is
      * complete: a prefix of `{"input":"…` is not a prefix of the input.
      */
-    customTools: ReadonlySet<string> = new Set()
+    customTools: ReadonlySet<string> = new Set(),
+    options: { customCallsAsFunction?: boolean } = {}
 ) => {
     let roleSent = false;
     const toolIndexById = new Map<string, number>();
@@ -813,7 +836,7 @@ export const createChunkTranslator = (
         toolIndexById.set(id, index);
         namesById.set(id, name);
         argumentsById.set(id, "");
-        const call = customTools.has(name)
+        const call = customTools.has(name) && !options.customCallsAsFunction
             ? { index, id, type: "custom", custom: { name, input: "" } }
             : { index, id, type: "function", function: { name, arguments: "" } };
         return buildChunk(base, withRole({ tool_calls: [call] }));
@@ -865,7 +888,15 @@ export const createChunkTranslator = (
                         const input = customInputOf(part.input);
                         argumentsById.set(id, input);
                         if (input) {
-                            chunks.push(buildChunk(base, { tool_calls: [{ index: toolIndexById.get(id), custom: { input } }] }));
+                            chunks.push(
+                                buildChunk(base, {
+                                    tool_calls: [
+                                        options.customCallsAsFunction
+                                            ? { index: toolIndexById.get(id), function: { arguments: input } }
+                                            : { index: toolIndexById.get(id), custom: { input } },
+                                    ],
+                                })
+                            );
                         }
                         return chunks;
                     }
@@ -902,7 +933,7 @@ export const createChunkTranslator = (
                         id,
                         name: namesById.get(id) ?? "",
                         arguments: argumentsById.get(id) ?? "",
-                        ...(isCustom(id) ? { custom: true } : {}),
+                        ...(isCustom(id) && !options.customCallsAsFunction ? { custom: true } : {}),
                         /** False when the provider started the call and never finished it. */
                         complete: completedIds.has(id),
                     })),
