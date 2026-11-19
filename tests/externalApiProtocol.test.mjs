@@ -99,8 +99,9 @@ test("nested unknown fields are refused too", () => {
     assert.ok(parseChatCompletionRequest(withPart({ type: "image_url", image_url: { url: PNG_1x1, detail: "low" } })));
     const withMessage = (extra) => ({ ...vscodeRequest, messages: [...vscodeRequest.messages, extra] });
     rejects(() => parseChatCompletionRequest(withMessage({ role: "assistant", content: "x", audio: { id: "a" } })), "unsupported_parameter");
-    rejects(() => parseChatCompletionRequest(withMessage({ role: "tool", tool_call_id: "c", content: "x", name: "read" })), "unsupported_parameter");
-    // Participant names would be dropped by every provider here, so they are refused on every role.
+    rejects(() => parseChatCompletionRequest(withMessage({ role: "tool", tool_call_id: "c", content: "x", cache_control: { type: "ephemeral" } })), "unsupported_parameter");
+    // Participant names would be dropped by every provider here, so they are refused on every role but
+    // tool, whose name is the tool's (Cursor sends it) and is already known from tool_call_id.
     for (const role of ["system", "developer", "user", "assistant"]) {
         rejects(() => parseChatCompletionRequest(withMessage({ role, content: "x", name: "alice" })), "unsupported_parameter");
     }
@@ -414,4 +415,43 @@ test("Cursor's flat custom tool shape is read as the nested Chat Completions one
     assert.deepEqual(converted.messages[1].content[0].input, { input: "*** Begin Patch\n*** End Patch" });
     // An unknown field on the flat shape is still refused by name.
     rejects(() => parseChatCompletionRequest({ ...flat, tools: [{ type: "custom", name: "x", defer_loading: true }] }), "unsupported_parameter");
+});
+
+test("Cursor's tool round: a call's stream index and a tool message's name are accepted and unused", () => {
+    // The shape Cursor sends after its first tool calls (field names from the
+    // dev request-shape log; no real content).
+    const round = {
+        model: "fixture",
+        stream: true,
+        user: "u",
+        stream_options: { include_usage: true },
+        messages: [
+            { role: "system", content: "s" },
+            { role: "user", content: [{ type: "text", text: "explain sum.js" }] },
+            {
+                role: "assistant",
+                content: [],
+                tool_calls: [
+                    { id: "c1", index: 0, type: "function", function: { name: "Glob", arguments: '{"pattern":"*.js"}' } },
+                    { id: "c2", index: 1, type: "function", function: { name: "Glob", arguments: '{"pattern":"*.ts"}' } },
+                    { id: "c3", index: 2, type: "custom", name: "ApplyPatch", input: "*** Begin Patch\n*** End Patch" },
+                ],
+            },
+            { role: "tool", name: "Glob", tool_call_id: "c1", content: [{ type: "text", text: "sum.js" }] },
+            { role: "tool", name: "Glob", tool_call_id: "c2", content: [{ type: "text", text: "" }] },
+            { role: "tool", name: "ApplyPatch", tool_call_id: "c3", content: "Done" },
+        ],
+        tools: [
+            { type: "function", function: { name: "Glob", parameters: { type: "object", properties: {} } } },
+            { type: "custom", name: "ApplyPatch", format: { type: "grammar", syntax: "lark", definition: "start: x" } },
+        ],
+    };
+    const converted = convertChatCompletionRequest(parseChatCompletionRequest(round), model);
+    const assistant = converted.messages.find((entry) => entry.role === "assistant");
+    assert.deepEqual(assistant.content.map((part) => [part.toolCallId, part.toolName]), [["c1", "Glob"], ["c2", "Glob"], ["c3", "ApplyPatch"]]);
+    assert.deepEqual(assistant.content[2].input, { input: "*** Begin Patch\n*** End Patch" });
+    const results = converted.messages.find((entry) => entry.role === "tool").content;
+    assert.deepEqual(results.map((part) => [part.toolCallId, part.toolName]), [["c1", "Glob"], ["c2", "Glob"], ["c3", "ApplyPatch"]]);
+    // A name on any other message is still refused.
+    rejects(() => parseChatCompletionRequest({ ...round, messages: [{ role: "user", name: "x", content: "hi" }] }), "unsupported_parameter");
 });
