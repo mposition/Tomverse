@@ -118,7 +118,8 @@ per task".
   for a change, every later create or update of files in this folder; for a
   command, exactly the same program, arguments, folder and environment names
   (only the time limit may differ — any other command is asked). Deleting a
-  file is always asked. What runs without asking is still shown, and every
+  file is always asked, and its question offers only `y`/`N` (`a` there
+  declines). What runs without asking is still shown, and every
   check above (paths, credential files, file content at that moment, the
   resolved program) still applies. An `a` answer is not saved: a resumed
   session asks again. `/approvals` lists what is allowed, `/approvals clear`
