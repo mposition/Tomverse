@@ -47,6 +47,7 @@ import { ModelLogo } from "@/components/chat/ModelLogo";
 import { useLanguage } from "@/components/LanguageProvider";
 import { helpCentreHref } from "@/lib/localizedHelpHref";
 import { ChatImageTurnCard } from "@/components/chat/ChatImageTurnCard";
+import { SearchCitationList } from "@/components/chat/SearchCitationList";
 import { imageModelOwner } from "@/lib/imageModelRegistry";
 import { useImageModelCatalog } from "@/components/images/ImageModelCatalogProvider";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
@@ -1622,48 +1623,8 @@ export function ChatMessageList({
                         <p>{t(msg.searchMetadata.research.evidenceLevel === "search_snippets_and_pages" ? "chat.researchPreviewPageEvidence" : "chat.researchPreviewEvidence")}</p>
                       </div>
                     )}
-                    {msg.searchMetadata && msg.searchMetadata.citations.length > 0 && (
-                      <div
-                        data-testid="search-citation-list"
-                        className="mt-3 border-t border-zinc-200 pt-2 dark:border-zinc-700/60"
-                      >
-                        <p className="mb-1 text-[11px] font-bold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
-                          {t("chat.searchCitationsLabel")}
-                        </p>
-                        <ul className="space-y-1">
-                          {msg.searchMetadata.citations.map((citation, citationIndex) => (
-                            <li
-                              key={`${citation.url}-${citationIndex}`}
-                              data-testid="search-citation-item"
-                              data-reference-number={citation.referenceNumber ?? ""}
-                              className="flex items-baseline gap-1.5"
-                            >
-                              {/*
-                                The number the answer text already used, shown
-                                as the provider numbered it. Providers that
-                                publish no citation order (OpenAI, Anthropic,
-                                Google inline annotations) leave it undefined
-                                and the row renders without one -- a made-up
-                                sequence would point at the wrong source.
-                              */}
-                              {citation.referenceNumber !== undefined && (
-                                <span className="shrink-0 text-[11px] font-bold tabular-nums text-zinc-400 dark:text-zinc-500">
-                                  [{citation.referenceNumber}]
-                                </span>
-                              )}
-                              <a
-                                href={citation.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                title={citation.url}
-                                className="truncate text-[11px] font-medium text-blue-600 underline underline-offset-2 dark:text-blue-400"
-                              >
-                                {citation.title || citation.url}
-                              </a>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
+                    {msg.searchMetadata && (
+                      <SearchCitationList citations={msg.searchMetadata.citations} label={t("chat.searchCitationsLabel")} />
                     )}
                     </>
                   ) : (
