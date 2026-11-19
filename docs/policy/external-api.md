@@ -599,7 +599,11 @@ providers, so signed or encrypted state is never sent to another provider.
 - **Candidates** are the provider's models the request fits: images only to a
   model that reads them, and the input estimate plus the output the gateway
   would reserve on that model (the client's limit within the model's own)
-  within its window. Every refusal that does not depend on the model
+  within its window, after the protocol's own check for that model (a
+  thinking budget above its output limit leaves it out). When no model of the
+  provider fits, the request is refused (`image_input_unsupported`,
+  `context_length_exceeded`, or the model check's own error) before any
+  router call or hold. Every refusal that does not depend on the model
   (provider-run tools, cache TTL, stored state, forwarded headers) is checked
   before the router call, so a request refused anyway never spends one.
 - **A missed pin never fails or re-routes.** A request whose history already

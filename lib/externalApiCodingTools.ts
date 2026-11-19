@@ -54,7 +54,8 @@ export const claudeCodeConfig = (
 ): ClaudeCodeConfig => {
     // Claude Code's background work (titles, summaries) goes to the Haiku
     // alias: the cheapest fixed Anthropic model, never Smart Adaptive, so it
-    // makes no router call and never takes the main conversation's pin.
+    // makes no router call and never takes the main conversation's pin. (Smart
+    // Adaptive is offered here only alongside at least one fixed model.)
     const small = byCredits(available.filter((model) => model.id !== SMART_ADAPTIVE_MODEL_ID))[0] ?? main;
     const window = Math.min(1_000_000, Math.max(100_000, plannedInputWindow(main)));
     const env: [string, string][] = [

@@ -813,6 +813,24 @@ test("native protocols over the real shared credit ledger", { skip: !databaseUrl
         });
         assert.equal(thinking.entry.model.id, "long-output");
 
+        // Nothing of the provider fits: refused here, with no router call.
+        const noFitCalls = routerCalls.length;
+        const refusedRoute = (runnable, payload) =>
+            routeNativeSmartAdaptive({
+                protocol: "anthropic_messages",
+                request: new Request("http://localhost/x", { headers: { "x-claude-code-session-id": "no-fit" } }),
+                body: payload,
+                runnable,
+                keyId: "k",
+                userId,
+                requestId: "r",
+                routerAllowed: async () => true,
+                prepare: (model) => prepareAnthropicMessages(payload, model),
+            });
+        await assert.rejects(refusedRoute([small], body), (error) => error.code === "context_length_exceeded");
+        await assert.rejects(refusedRoute([shortOut], thinkingBody), (error) => error.status === 400, "the model check's own refusal");
+        assert.equal(routerCalls.length, noFitCalls);
+
         // Concurrent first requests share one router call, and each takes the
         // shared pick only if it is one of its own candidates.
         process.env.EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED = "true";

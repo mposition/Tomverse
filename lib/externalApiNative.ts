@@ -512,7 +512,9 @@ export async function handleNativeGeneration(request: Request, spec: NativeProto
             // Every refusal that does not depend on the model (provider-run
             // tools, cache TTL, stored state, a header fetch could not send)
             // comes before the paid router call, so a request that would be
-            // refused anyway never spends one.
+            // refused anyway never spends one. `prepare` checks and rewrites the
+            // body only; the model it is given is written into the copy, never
+            // looked up, and each candidate is prepared again for itself.
             const probe = spec.prepare(body, { apiModel: SMART_ADAPTIVE_MODEL_ID, maxOutputTokens: Number.MAX_SAFE_INTEGER });
             checkForwardedHeaders(spec.upstreamHeaders(request, probe));
         }

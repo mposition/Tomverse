@@ -2,7 +2,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 import type { externalApiRunnableModels } from "@/lib/externalApiCatalog";
 import { nativeSmartAdaptiveDefaultId } from "@/lib/externalApiCatalogCore";
-import { estimateNativeInput, isRecord } from "@/lib/externalApiNativeCore";
+import { estimateNativeInput, isRecord, NativeProtocolError } from "@/lib/externalApiNativeCore";
 import { NATIVE_PROTOCOL_PROVIDER } from "@/lib/externalApiProtocols";
 import { pickWithSmartAdaptiveRouter } from "@/lib/externalApiSmartAdaptive";
 import { DEFAULT_MODEL_ID } from "@/lib/models";
@@ -151,21 +151,37 @@ export const routeNativeSmartAdaptive = async (input: {
     // A candidate is a model this request passes on, exactly as it would be
     // sent: its own validation, then the estimate of the rewritten body plus
     // the output the gateway would reserve on it within its window.
+    let refusal: unknown = null;
+    let unreadImage = false;
     const fits = pool.filter(({ model, capabilities }) => {
         let prepared: { payload: unknown; outputLimit: number };
         try {
             prepared = input.prepare({ apiModel: model.apiModel, maxOutputTokens: capabilities.maxOutputTokens });
-        } catch {
+        } catch (error) {
+            refusal ??= error;
             return false;
         }
         const estimate = estimateNativeInput(prepared.payload, provider);
-        return (
-            (estimate.images === 0 || capabilities.vision) &&
-            estimate.breakdown.rawTotal + prepared.outputLimit <= capabilities.contextWindowTokens
-        );
+        if (estimate.images > 0 && !capabilities.vision) {
+            unreadImage = true;
+            return false;
+        }
+        return estimate.breakdown.rawTotal + prepared.outputLimit <= capabilities.contextWindowTokens;
     });
-    // Nothing fits: the default answers, and its own limits refuse the request.
-    const candidates = fits.length > 0 ? fits : pool;
+    // Nothing of this provider can take the request: refused here, before any
+    // router call, reservation or dispatch.
+    if (fits.length === 0) {
+        if (refusal) throw refusal;
+        throw unreadImage
+            ? new NativeProtocolError(400, "image_input_unsupported", "No model available to Smart Adaptive here reads images.", "messages")
+            : new NativeProtocolError(
+                  400,
+                  "context_length_exceeded",
+                  "The request is too long for every model available to Smart Adaptive here. Compact the conversation or lower the output limit.",
+                  "messages"
+              );
+    }
+    const candidates = fits;
     const defaultId = nativeSmartAdaptiveDefaultId(
         candidates.map((entry) => entry.capabilities),
         DEFAULT_MODEL_ID
@@ -197,6 +213,8 @@ export const routeNativeSmartAdaptive = async (input: {
     }
     // Concurrent first requests of one conversation share one router call;
     // each still takes the shared pick only if it is one of its own candidates.
+    // A waiter that cannot take it answers on its own default without moving
+    // the pin; its next request re-checks the pin like any other.
     const pending = routing.get(pinKey);
     if (pending) {
         const shared = await pending;
