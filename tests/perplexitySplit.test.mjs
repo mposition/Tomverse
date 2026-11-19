@@ -204,6 +204,8 @@ test("the import worker never calls the network itself", () => {
     const worker = readFileSync(new URL("../lib/workers/externalImportWorker.ts", import.meta.url), "utf8");
     assert.ok(!/\bfetch\s*\(/.test(worker), "the page asks, with its own credentials");
     assert.match(worker, /type: "split_questions"/);
+    // A cancel ends the wait for hints at once rather than after the timeout.
+    assert.match(worker, /request\.type === "cancel"\) \{\s*cancelled = true;[\s\S]{0,120}answerSplit\?\.\(null\)/);
 });
 
 /* ------------------------------------------------------------ server - */

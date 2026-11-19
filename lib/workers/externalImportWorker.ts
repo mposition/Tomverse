@@ -439,6 +439,8 @@ scope.onmessage = async (event: MessageEvent<WorkerRequest>) => {
     }
     if (request.type === "cancel") {
         cancelled = true;
+        // Stop waiting for split hints; the parse then sees `cancelled`.
+        answerSplit?.(null);
         post({ type: "cancelled" });
         return;
     }
