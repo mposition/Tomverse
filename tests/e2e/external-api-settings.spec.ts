@@ -243,7 +243,7 @@ test("API keys: Claude Code, Codex and Cursor each get their own configuration @
                     enabled: true,
                     baseUrl,
                     limits: { maxKeys: 10, maxCreditCap: 1000000, expiryDays: [7, 30, 90, 365] },
-                    models: [{ ...smartAdaptive, protocols: ["chat_completions"] }, sonnet, haiku, luna],
+                    models: [{ ...smartAdaptive, protocols: ["chat_completions", "anthropic_messages", "responses"] }, sonnet, haiku, luna],
                     keys: [],
                 },
             })
@@ -252,14 +252,18 @@ test("API keys: Claude Code, Codex and Cursor each get their own configuration @
     const connect = page.getByTestId("external-api-connect");
     await expect(connect.getByRole("heading", { name: "도구 연결" })).toBeVisible();
 
-    // Claude Code: the Anthropic namespace, a fixed model, never Smart Adaptive.
+    // Claude Code: the Anthropic namespace, Smart Adaptive among Anthropic
+    // models by default, background work on the cheapest fixed model.
     await page.getByTestId("external-api-platform-claude-code").click();
     const claude = page.getByTestId("external-api-claude-code-powershell");
     await expect(claude).toContainText('ANTHROPIC_BASE_URL = "https://tomverse.app/api/anthropic"');
-    await expect(claude).toContainText('ANTHROPIC_MODEL = "claude-sonnet-5"');
+    await expect(claude).toContainText('ANTHROPIC_MODEL = "smart-adaptive"');
     await expect(claude).toContainText('ANTHROPIC_DEFAULT_HAIKU_MODEL = "claude-haiku-4-5"');
     await expect(claude).toContainText("<YOUR_TOMVERSE_API_KEY>");
-    await expect(claude).not.toContainText("smart-adaptive");
+    await expect(page.getByTestId("external-api-native-smart-hint")).toBeVisible();
+    await page.getByTestId("external-api-claude-code-model").selectOption("claude-sonnet-5");
+    await expect(claude).toContainText('ANTHROPIC_MODEL = "claude-sonnet-5"');
+    await expect(page.getByTestId("external-api-native-smart-hint")).toHaveCount(0);
     await page.getByTestId("external-api-claude-code-model").selectOption("claude-haiku-4-5");
     await expect(claude).toContainText('ANTHROPIC_MODEL = "claude-haiku-4-5"');
     // One block at a time: the other shell, then the VS Code extension.
@@ -269,16 +273,18 @@ test("API keys: Claude Code, Codex and Cursor each get their own configuration @
     await page.getByTestId("external-api-surface-extension").click();
     await expect(page.getByTestId("external-api-claude-code-vscode")).toContainText("claudeCode.environmentVariables");
 
-    // Codex: its own provider and profile, by the provider's model id.
+    // Codex: its own provider and profile; Smart Adaptive among OpenAI models, or a fixed model by the provider's model id.
     await page.getByTestId("external-api-platform-codex").click();
     await expect(page.getByTestId("external-api-tool-claude-code")).toHaveCount(0);
     await page.getByTestId("external-api-surface-terminal").click();
     await expect(page.getByTestId("external-api-codex-provider")).toContainText('wire_api = "responses"');
     await expect(page.getByTestId("external-api-codex-provider")).toContainText("request_max_retries = 0");
     const profile = page.getByTestId("external-api-codex-profile");
+    await expect(profile).toContainText('model = "smart-adaptive"');
+    await page.getByTestId("external-api-codex-model").selectOption("gpt-5-6-luna");
     await expect(profile).toContainText('model = "gpt-5.6-luna"');
     await expect(profile).toContainText('web_search = "disabled"');
-    await expect(page.getByTestId("external-api-codex-model").locator("option")).toHaveCount(1);
+    await expect(page.getByTestId("external-api-codex-model").locator("option")).toHaveCount(2);
 
     // Cursor: the Chat Completions base URL with a fixed model.
     await page.getByTestId("external-api-platform-cursor").click();

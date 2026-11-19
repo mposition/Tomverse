@@ -50,7 +50,7 @@ All default off. Server-side; hiding UI is never the gate.
 | `EXTERNAL_API_ANTHROPIC_ENABLED` | Exactly `true` (and `EXTERNAL_API_ENABLED`) turns on the Anthropic Messages routes for Claude Code: `POST /api/anthropic/v1/messages`, its `count_tokens` and `GET /api/anthropic/v1/models`. Off: 503 `feature_unavailable`, nothing dispatched. |
 | `EXTERNAL_API_RESPONSES_ENABLED` | Exactly `true` (and `EXTERNAL_API_ENABLED`) turns on `POST /api/v1/responses` for Codex. Off: 503, nothing dispatched. |
 | `TOMVERSE_CLI_GUIDE_ENABLED` | Exactly `true` shows the Tomverse CLI install and connect card in Settings > API keys (section 11). Off until the package is published, so the page never points at a package that is not on the registry. It turns nothing on in the API. |
-| `EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED` | Exactly `true` lets Smart Adaptive (section 5.1) ask Chat's router model which candidate answers. Off by default, because each routed request adds one router call, held against the provider operational budget rather than the user's credits. Off, `smart-adaptive` still works and every request goes to the default model. |
+| `EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED` | Exactly `true` lets Smart Adaptive (section 5.1) ask Chat's router model which candidate answers. Off by default, because each routed request adds one router call, held against the provider operational budget rather than the user's credits. Off, `smart-adaptive` still works and every request goes to the default model (on a native protocol, that provider's default, section 10.6). |
 
 **Kill switch.** The Admin operational pause for AI chat
 (`feature.aiChatEnabled`) stops every new external dispatch at once (503
@@ -441,12 +441,13 @@ Refused before dispatch, with nothing held (`lib/anthropicMessagesProtocol.ts`,
   hold, so a request fetch could not send never consumes provider budget);
 - stored or server-side state: `previous_response_id`, `conversation`,
   stored `prompt`, `background`, `item_reference`;
-- Smart Adaptive and models of another provider: a native request stays on
-  the model that produced its state. The model list per protocol is the same
-  runtime registry, plan and credential filter as `/models`, narrowed by
-  provider (`protocols` on each `/models` entry). A Responses request may
-  name the provider's model id (`gpt-5.6-luna`) when it maps to exactly one
-  offered model; Codex picks its patch tool by it.
+- models of another provider: a native request stays on its own provider.
+  The model list per protocol is the same runtime registry, plan and
+  credential filter as `/models`, narrowed by provider (`protocols` on each
+  `/models` entry). A Responses request may name the provider's model id
+  (`gpt-5.6-luna`) when it maps to exactly one offered model; Codex picks its
+  patch tool by it. `smart-adaptive` is accepted and routed among the
+  provider's own models (section 10.6).
 
 `anthropic-beta` is forwarded unchanged (filtering one half of a header/body
 pair yields a provider 400); the cost-bearing features are checked in the body.
@@ -581,7 +582,72 @@ times and reported a server error.
 
 Not yet verified, each a separate step: other operating systems, Claude Code
 and Codex against a deployed environment (their runs above called the handlers
-directly, not through the Next.js server), and any client against production.
+directly, not through the Next.js server), any client against production, and
+native Smart Adaptive (section 10.6) with real models or real clients end to end.
+
+### 10.6 Smart Adaptive on the native protocols (`lib/externalApiNativeSmartAdaptive.ts`)
+
+`model: "smart-adaptive"` on Anthropic Messages routes among the Anthropic
+models this key can run, on Responses among the OpenAI models -- never across
+providers, so signed or encrypted state is never sent to another provider.
+
+- **Constraint checked (provider docs, 2026-11-19).** Anthropic binds each
+  thinking block to the model that produced it; a model that cannot read an
+  earlier block drops it and the request still succeeds. OpenAI omits
+  incompatible encrypted reasoning when the model family changes, also without
+  failing. So a model switch mid-task costs reasoning and the prompt cache,
+  not the request; the gateway still avoids it.
+- **One pick per conversation.** The first request of a conversation (no model
+  output in its history) is routed with the same router call, gate and switch
+  as Chat Completions (section 5.1, `pickWithSmartAdaptiveRouter`); every later
+  request of that conversation goes to the same model (`x-tomverse-routed-by:
+  continued`). The conversation is the client's own id: Codex's
+  `prompt_cache_key` (its thread id; `session-id`/`thread-id` headers),
+  Claude Code's `x-claude-code-session-id` or the session in
+  `metadata.user_id`; otherwise a digest of the history's opening. The pin is
+  kept in this process for six hours from the conversation's last generation
+  request (a token count reads it without extending it).
+- **Candidates** are the provider's models the request fits: images only to a
+  model that reads them, and the input estimate plus the output the gateway
+  would reserve on that model (the client's limit within the model's own)
+  within its window, after the protocol's own check for that model (a
+  thinking budget above its output limit leaves it out). When no model of the
+  provider fits, the request is refused (`image_input_unsupported`,
+  `context_length_exceeded`, or the model check's own error) before any
+  router call or hold. Every refusal that does not depend on the model
+  (provider-run tools, cache TTL, stored state, forwarded headers) is checked
+  before the router call, so a request refused anyway never spends one.
+- **A missed pin never fails or re-routes.** A request whose history already
+  carries model output and whose pin this process does not have (another
+  instance, a restart) takes the provider default and pins it. The body
+  names no producing model to recover, and both providers accept the switch.
+  If the pinned model can no longer take the request (window, retirement),
+  another fitting model of the provider answers and the pin moves.
+- **Provider default:** the catalogue default (`gpt-6-luna`) when the
+  provider has it, otherwise the lower-median model by credits
+  (`nativeSmartAdaptiveDefaultId`). It also answers with the router switch
+  off, when the router gives no answer or names a model outside the
+  candidates, and for the free `count_tokens` call, which never routes and
+  reads the pin only.
+- **Money:** the pick happens before admission, so the reservation, receipt
+  and credits are the picked model's; billing code is unchanged. A refused
+  admission pauses router calls for the key for two minutes, as in section 5.1.
+  Responses carry `x-tomverse-routed-model` and `x-tomverse-routed-by`.
+- **Settings:** Claude Code and Codex offer Smart Adaptive first, scoped to
+  their provider (`nativeSmartAdaptiveCapabilities`): the smallest window
+  among those models (the conversation keeps its first model, so the tool
+  compacts before the smallest window), the default's output limit, the
+  dearest model's credits. Claude Code's Haiku alias stays on the cheapest
+  fixed Anthropic model, so background work makes no router call. Codex 0.146
+  given `smart-adaptive` (a slug it does not know) sends its generic function
+  tools (`shell_command`, `update_plan`, ...) and no freeform tool, captured
+  2026-11-19 against a local server; every OpenAI model takes those.
+- **Verified 2026-11-19** with a fake provider and a faked router over the real
+  ledger (`tests/integration/external-api-native.db.test.mjs`): Anthropic-only
+  and OpenAI-only candidate lists, a cross-provider router answer ignored, the
+  pick kept across tool rounds that carry thinking signatures and encrypted
+  reasoning, a dropped pin answered by the default with no router call and no
+  failure, every request settled.
 
 ## 11. Tomverse CLI (`apps/tomverse-cli`)
 
