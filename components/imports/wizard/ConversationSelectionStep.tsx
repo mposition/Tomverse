@@ -160,6 +160,18 @@ export function ConversationSelectionStep({
                     })}
                 </p>
             )}
+            {state.detectedProvider === "perplexity" && (
+                // A Markdown export does not mark where a multi-line question
+                // ends, and an uncited answer's own rule and heading look like
+                // a new question. The parser cannot tell; the user can.
+                <p
+                    className="mt-2 flex items-start gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm leading-6 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950/60 dark:text-zinc-300"
+                    data-testid="external-import-perplexity-structure-notice"
+                >
+                    <Info className="mt-1 h-4 w-4 shrink-0" />
+                    {t("externalImport.perplexityStructureNotice")}
+                </p>
+            )}
 
             <ParseWarnings warnings={state.warnings} />
 

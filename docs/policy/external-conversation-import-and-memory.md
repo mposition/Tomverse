@@ -51,6 +51,7 @@ approvalTicket: N/A
 |---|---|---|
 | **A — Import** | ChatGPT·Claude 공식 export의 브라우저 파싱, 선택 대화의 정규화 저장, account-private read-only viewer, 삭제·export | Gemini, memory 추출·주입, 이어서 대화하기, password lock, 공유 링크, `Conversation` 변환 |
 | **A2 — Gemini Import** | Google Takeout `My Activity → Gemini Apps`의 JSON parser. **scope 승인됨 (2026-08-14, §23)** — 계약은 `docs/policy/external-import-gemini-a2.md`이며, 분기별 독립 대화·내용 형태 인식·중첩 아카이브 미해제·첨부 누락 표시가 그 핵심입니다. 승인은 **구현 착수까지**이고 production 활성화는 별도입니다 | HTML export, Gems, scheduled actions, 첨부 파일 복제 |
+| **A3 — Perplexity Import** | 스레드별 Markdown export(`.md`, 답변 아래 Export → Markdown) 하나를 한 대화로 읽는 parser(`lib/externalImportAdapters/perplexity.ts`). 출처 각주는 `[n]` 표시와 답변 끝 "Sources" 목록으로 보존합니다. 파일만으로 정할 수 없는 두 경계(여러 줄 질문이 어디서 끝나는지, 출처 없는 답변 뒤 `# ` 제목이 새 질문인지)는 각 질문과 그 주변 답변의 발췌(각 600자 이내)만 `/api/imports/external/perplexity-split`에 보내 모델(기본 `gpt-6-luna`, `EXTERNAL_IMPORT_PERPLEXITY_SPLIT_MODEL_ID`로 바꿔도 고지한 OpenAI 모델만)이 번호·예/아니오로 답하고, 원문은 그 번호대로 자릅니다(§11 예외, §16). 운영자 요청(2026-11-19 채팅)으로 구현하며 별도 scope token은 두지 않습니다(AGENTS.md Frontier 절). DB CHECK 확장 migration `20261119120000`이 함께 갑니다 | 공유 링크 Import(perplexity.ai는 서버 요청에 Cloudflare 봇 검사로 답해 가져올 수 없음), 계정 전체 일괄 export(Perplexity가 제공하지 않음), PDF·DOCX export, 첨부·이미지 |
 | **B — 계정 장기 메모리** | 메모리 후보 추출·검토·승인, 서버 주도 retrieval·주입, context bundle, external conversation lock 일반화 + memory suspension | Assistant Profile, knowledge, 외부 embedding(§9a의 기본 꺼진 스위치 뒤 경로는 예외) |
 | **C — Assistant Profile** | private 프로필(지시문·모델·도구·memory 범위·지식 파일), 버전 고정, searchTerms 기반 knowledge RAG | public marketplace, 공유·판매, Actions, OAuth connector, 코드 실행, 외부 embedding(§9a의 기본 꺼진 스위치 뒤 경로는 예외) |
 
@@ -182,7 +183,7 @@ MEMORY_EXTRACTION_PROVIDER_<PROVIDER>_COST_MICROUSD_PER_MONTH (절대값 overrid
 
 ### 5.1 파싱 위치 — 브라우저 Web Worker (확정)
 
-- 원본 ZIP/JSON은 Tomverse API·R2·로그 어디로도 전송하지 않습니다.
+- 원본 ZIP/JSON/Markdown은 Tomverse API·R2·로그 어디로도 전송하지 않습니다.
 - 서버에는 사용자가 선택한 정규화 텍스트 batch만 전송합니다.
 - 서버 raw archive staging fallback은 구현하지 않습니다.
 - media entry는 압축 해제 없이 skip하고, 필요한 JSON·metadata entry만 streaming
@@ -956,7 +957,17 @@ Node crypto)입니다.
 
 ## 11. Extraction 실행 계약
 
-- Import 파싱·저장은 AI 호출 없이 수행합니다(credit 소비 없음).
+- Import 파싱·저장은 AI 호출 없이 수행합니다(credit 소비 없음). **예외 하나 — Perplexity
+  분리 힌트 [확정 · 2026-11-19 운영자 채팅]**: Perplexity Markdown export는 질문이 끝나는
+  위치를 표시하지 않으므로, 브라우저 worker가 판단이 필요한 발췌(턴마다 제목과 첫 문단
+  최대 3개, 출처 없는 답변 뒤 경계의 앞뒤, 각 600자)만 `/api/imports/external/perplexity-split`
+  에 보냅니다. 모델은 턴마다 "첫머리 몇 문단까지 질문인가"와 경계마다 "앞 답변의
+  이어짐인가"만 돌려주고, 개수·범위가 질문과 정확히 맞지 않으면 버립니다
+  (`perplexitySplitHintsFit`). 저장되는 글은 언제나 export 원문입니다. 기본 켜짐이며
+  `EXTERNAL_IMPORT_PERPLEXITY_LLM_SPLIT=false`로 끕니다. 비용은 Tomverse가 내고(credit 0),
+  호출 전 최악값을 provider 일·월 운영 예산(chat·메모리 추출·Auto router와 공유)에 hold하며
+  예산이 없으면 호출하지 않습니다. 꺼짐·실패·시간 초과·예산 부족이면 파일 분리 그대로
+  진행하고, 선택 단계 안내가 잘못 나뉠 수 있음을 알립니다. 발췌 원문은 저장하지 않습니다.
 - **무료 자동 추출 — [확정 · 2026-10-24 @mposition]**: import 완료(finalize)가
   곧 추출 요청입니다. 서버가 계정의 아직 추출되지 않은, 잠기지 않은 finalized
   대화(최대 500개, 최근 import 순)로 run을 만들고 `after()`로 kick합니다
@@ -1764,6 +1775,7 @@ flag를 순서 때문에 되돌리지는 않습니다.
 |---|---|
 | A | 제3자 AI 서비스 export 대화의 계정 저장(제3자 개인정보 포함 가능, 사용자의 권한·적법성 확인 책임), raw archive는 브라우저에서만 처리, 정규화 선택분만 서버 저장, media 미저장, 보존·삭제·export, Tomverse 삭제가 원 제공자 삭제를 의미하지 않음 |
 | B | 가져온 대화의 extraction provider 자동 전송(import 완료 시, 기억 사용이 켜진 동안, credit 무료 — 2026-10-24), 활성 memory/style의 chat provider 전송(비교 시 여러 provider), 민감 정보 미저장과 최신 대화 우선, memory 보존, 조회·수정·비활성화·전체 export·delete-all, source lock·suspension 동작. import 확정 화면에도 같은 고지를 둡니다 |
+| A3 Perplexity 분리 힌트 (2026-11-19) | Perplexity export를 가져올 때 각 질문과 그 주변 답변의 짧은 발췌(각 600자 이내)를 경계 판단용으로 AI 모델 제공자(OpenAI)에 전송, 판단 결과 외 미저장, Tomverse 비용 부담. `privacyPolicy.externalImport`와 Perplexity 안내 카드(파일을 열기 전)에 고지합니다. 시행일(`privacyPolicy.effective`)은 배포 때 운영자가 정합니다 |
 | C | instructions 저장, knowledge file 저장·분석, knowledge excerpt의 provider 전송, 보존·삭제, private 기본, share snapshot 제외, marketplace·connector 미지원 |
 | §9a 의미 검색 (스위치를 켤 때) | 질문, 후보 knowledge chunk·memory statement, 스캔 페이지 이미지의 검색 provider(Cohere) 전송과 그 결과로 만든 vector의 저장·삭제. 7개 locale 고지(`privacyPolicy.semanticSearch*`)는 이미 들어 있되, 운영자 확인 3가지(처리 국가, 학습 미이용 설정, 보관 기간)가 비어 있는 동안 `SEMANTIC_SEARCH_PRIVACY_NOTICE_CONFIRMED`가 false라 **페이지에 보이지 않고 호출도 막혀 있습니다**. 세 가지를 채워 그 값을 true로 바꾸는 변경이 새 `/privacy` 버전 승인입니다 |
 
@@ -2315,6 +2327,14 @@ Data 탭(`AuthButton.tsx`)에는 진입점·요약만 두고 대형 UI를 modal�
   lexical이므로 의미 검색 품질에 한계가 있습니다. 의미 검색은 §9a의 기본 꺼진
   스위치 뒤에 구현돼 있고(2026-11-12), 켜는 것이 별도 승인입니다.
 - 모바일 대형 archive Import는 데스크톱 권장으로 제한됩니다.
+- Perplexity는 스레드마다 `.md` 파일 하나를 올립니다(한 번에 한 스레드). export에
+  시각·모델명이 없어 출처 시각과 모델 표시는 비어 있습니다. lineage는 첫 질문과 첫
+  답변의 hash(파일 분리 기준)라 같은 스레드의 재-export만 묶입니다. 턴 경계는 `---` 뒤
+  `# ` 제목이며, 답변 안의 같은 모양은 답변 끝 각주 정의의 턴 번호(`[^턴_n]:`)로 되돌립니다.
+  출처 없는 답변 속 경계와 여러 줄 질문의 끝은 §11의 분리 힌트(모델 판단)로 정하며, 모델도
+  틀릴 수 있고 힌트가 없으면(꺼짐·실패) 제목 줄만 질문이 됩니다. 어느 경우든 선택 단계가
+  잘못 나뉠 수 있음을 알리고, 사용자는 가져온 뒤 확인·삭제할 수 있습니다. iOS 앱 shell의
+  worker 요청은 웹 origin에 닿지 않을 수 있으며, 그때는 파일 분리로 진행합니다.
 - media·첨부는 Import되지 않습니다.
 
 ### 릴리스 A scope 승인에 필요한 항목

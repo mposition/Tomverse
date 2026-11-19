@@ -9,7 +9,7 @@ approvalTicket: N/A
 
 # 외부 대화 이어가기 (Tomverse에서 이어가기)
 
-가져온 외부 대화(ChatGPT · Claude · Gemini)를 **읽기 전용 원본으로 보존한 채**,
+가져온 외부 대화(ChatGPT · Claude · Gemini · Perplexity)를 **읽기 전용 원본으로 보존한 채**,
 사용자의 명시적 선택으로 새 Tomverse Conversation을 만들어 같은 화면에서 대화를
 이어가는 기능의 계약입니다.
 
