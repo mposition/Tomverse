@@ -43,6 +43,12 @@ import {
  * carries no such evidence, so a rule-and-heading inside one still splits it
  * -- and can shift the numbering for the turn after. Known limitation.
  *
+ * The question is the heading line. A multi-line question exports its later
+ * lines as plain paragraphs under the heading, with nothing marking where the
+ * answer begins, so those lines arrive at the top of the answer. Known
+ * limitation; telling them apart is a semantic call (an LLM split), which
+ * would be a new paid call on the raw export.
+ *
  * Citations are kept. The footnote marks become `[n]` and the definitions a
  * "Sources" list at the end of the answer, because a footnote definition
  * whose mark is hidden (the display:none span) would be dropped by a
@@ -67,7 +73,30 @@ const HIDDEN_CITATIONS = /^<span\b[^>]*display:\s*none[^>]*>(?:\s*,?\s*\[\^\d+_\
 const FOOTNOTE_DEFINITION = /^\[\^\d+_(\d+)\]:\s*(.+)$/;
 const FOOTNOTE_MARK = /\[\^\d+_(\d+)\]/g;
 const FOOTNOTE_DEFINITION_TURN = /^\[\^(\d+)_\d+\]:\s/;
-const FENCE = /^\s*(```|~~~)/;
+
+/**
+ * A per-line "is this code?" check for one pass over the text, following
+ * CommonMark fences: a run of three or more backticks or tildes opens one,
+ * and only a run of the same character, at least as long, alone on its line,
+ * closes it. A four-backtick block that shows a three-backtick one stays
+ * code throughout. Fence lines themselves count as code.
+ */
+function codeLines(): (line: string) => boolean {
+    let open: string | null = null;
+    return (line) => {
+        if (open === null) {
+            const match = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+            if (!match) return false;
+            // A backtick fence's info string cannot itself hold a backtick.
+            if (match[1][0] === "`" && line.slice(match[0].length).includes("`")) return false;
+            open = match[1];
+            return true;
+        }
+        const close = /^ {0,3}(`{3,}|~{3,})\s*$/.exec(line);
+        if (close && close[1][0] === open[0] && close[1].length >= open.length) open = null;
+        return true;
+    };
+}
 const HEADING = /^# (?!#)(.*)$/;
 
 const markdownOf = (value: unknown): string | null =>
@@ -117,11 +146,10 @@ type Turn = { question: string; heading: string; body: string[] };
 function candidateTurns(lines: readonly string[]): Turn[] {
     const turns: Turn[] = [];
     let current: Turn | null = null;
-    let inFence = false;
+    const isCode = codeLines();
     let lastNonBlank = "";
     for (const line of lines) {
-        if (FENCE.test(line)) inFence = !inFence;
-        const heading = inFence ? null : HEADING.exec(line);
+        const heading = isCode(line) ? null : HEADING.exec(line);
         if (heading && (current === null || lastNonBlank.trim() === "---")) {
             current = { question: heading[1], heading: line, body: [] };
             turns.push(current);
@@ -141,10 +169,9 @@ function candidateTurns(lines: readonly string[]): Turn[] {
  */
 function definedTurns(turn: Turn): number[] {
     const numbers: number[] = [];
-    let inFence = false;
+    const isCode = codeLines();
     for (const line of turn.body) {
-        if (FENCE.test(line)) inFence = !inFence;
-        const match = inFence ? null : FOOTNOTE_DEFINITION_TURN.exec(line.trim());
+        const match = isCode(line) ? null : FOOTNOTE_DEFINITION_TURN.exec(line.trim());
         if (match) numbers.push(Number(match[1]));
     }
     return numbers;
@@ -191,11 +218,10 @@ const cleanQuestion = (raw: string): string =>
 function cleanAnswer(body: readonly string[]): string {
     const sources = new Map<number, string>();
     const kept: string[] = [];
-    let inFence = false;
+    const isCode = codeLines();
     for (const line of body) {
-        if (FENCE.test(line)) inFence = !inFence;
         const trimmed = line.trim();
-        if (!inFence) {
+        if (!isCode(line)) {
             if (LOGO.test(trimmed) || DIVIDER.test(trimmed) || HIDDEN_CITATIONS.test(trimmed)) {
                 continue;
             }

@@ -183,6 +183,22 @@ test("blank lines inside a code block are kept as they are", () => {
     assert.equal(answer, "```python\nx = 1\n\n\n\ny = 2\n```\n\nAfter.");
 });
 
+test("a longer fence that shows a shorter one stays code to its own close", () => {
+    const conversation = parse(
+        [
+            LOGO, "", "# show me a fenced block", "",
+            "````markdown", "```", "---", "", "# not a question", "[^1_9]: https://example.com/code", "```", "````",
+            "", "Done.[^1_1]", "", "[^1_1]: https://example.com/real", "",
+            "---", "", "# next", "", "Yes.", "",
+        ].join("\n")
+    );
+    assert.deepEqual(conversation.messages.map((m) => m.role), ["user", "assistant", "user", "assistant"]);
+    const answer = conversation.messages[1].content;
+    assert.match(answer, /````markdown\n```\n---\n\n# not a question\n\[\^1_9\]: https:\/\/example\.com\/code\n```\n````/);
+    assert.ok(answer.endsWith("Sources:\n[1] https://example.com/real"), "a definition inside code is code");
+    assert.equal(conversation.messages[2].content, "next");
+});
+
 test("threads that open with the same question but differ are separate lineages", () => {
     const thread = (answer) => parse(`${LOGO}\n\n# What should I cook tonight?\n\n${answer}\n`);
     const one = thread("Try a risotto.");
