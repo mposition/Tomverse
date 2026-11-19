@@ -177,8 +177,35 @@ export async function requestPerplexitySplitHints(
         return { ok: false, reason: "provider_error" };
     }
 
-    const inputTokens = generated.usage?.inputTokens ?? 0;
-    const outputTokens = generated.usage?.outputTokens ?? 0;
+    const inputTokens = generated.usage?.inputTokens;
+    const outputTokens = generated.usage?.outputTokens;
+    // Settle and record only on usage the provider reported in full. Without
+    // it the worst-case hold stays: over-counted is the safe side of a budget.
+    const reported =
+        Number.isSafeInteger(inputTokens) && Number.isSafeInteger(outputTokens) &&
+        (inputTokens as number) >= 0 && (outputTokens as number) >= 0;
+    if (reported) await settleAndRecord(model, prices, worstCase, reservedAt, inputTokens as number, outputTokens as number, deps);
+
+    let output: unknown;
+    try {
+        output = generated.output;
+    } catch {
+        return { ok: false, reason: "invalid_output" };
+    }
+    return perplexitySplitHintsFit(questions, output)
+        ? { ok: true, hints: { questionParagraphs: output.questionParagraphs, continuesAnswer: output.continuesAnswer } }
+        : { ok: false, reason: "invalid_output" };
+}
+
+async function settleAndRecord(
+    model: AiModel,
+    prices: { inputUsdPerMillionTokens: number; outputUsdPerMillionTokens: number },
+    worstCase: number,
+    reservedAt: Date,
+    inputTokens: number,
+    outputTokens: number,
+    deps: { settle?: typeof settleRouterCost; record?: typeof recordInternalProviderUsage }
+): Promise<void> {
     await (deps.settle ?? settleRouterCost)(
         model.provider,
         callCostMicroUsd({ inputTokens, outputTokens, ...prices }) - worstCase,
@@ -207,14 +234,4 @@ export async function requestPerplexitySplitHints(
     } catch {
         // Bookkeeping only; the budget hold above already counted the call.
     }
-
-    let output: unknown;
-    try {
-        output = generated.output;
-    } catch {
-        return { ok: false, reason: "invalid_output" };
-    }
-    return perplexitySplitHintsFit(questions, output)
-        ? { ok: true, hints: { questionParagraphs: output.questionParagraphs, continuesAnswer: output.continuesAnswer } }
-        : { ok: false, reason: "invalid_output" };
 }

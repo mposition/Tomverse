@@ -1564,7 +1564,7 @@ export const zhHant = {
         capacityConversations: "已匯入 {used} 個對話（上限 {limit} 個）",
         selectFile: "選擇匯出檔案",
         selectFileHint:
-            "ChatGPT、Claude 或 Gemini 資料匯出檔（.zip 或 .json），或以 Markdown（.md）匯出的 Perplexity 討論串，最大 1GB。Gemini 需要在 Google Takeout 中匯出「我的活動 → Gemini 應用程式」的 JSON 格式檔案。檔案較大也沒關係 — 媒體檔案會直接略過，不會讀取。",
+            "ChatGPT、Claude 或 Gemini 資料匯出檔（.zip 或 .json），或以 Markdown（.md）匯出的 Perplexity 討論串，最大 1GB。Gemini 需要在 Google Takeout 中匯出「我的活動 → Gemini 應用程式」的 JSON 格式檔案。檔案較大也沒關係 — 媒體檔案會直接略過，不會讀取。對於 Perplexity 檔案，會將每輪開頭的少量摘錄傳送給 AI 模型（OpenAI），以判斷每個問題在哪裡結束。",
         parsing: "正在瀏覽器中讀取匯出檔案…",
         parsingProgress: "已發現 {conversations} 個對話",
         cancel: "取消",

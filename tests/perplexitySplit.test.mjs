@@ -239,6 +239,29 @@ test("the server holds the worst case, asks with excerpts as data, settles and r
     assert.equal(calls.record[0].inputTokens, 900);
 });
 
+test("usage the provider did not report in full keeps the whole hold", async () => {
+    for (const usage of [undefined, { inputTokens: 900 }, { outputTokens: 40 }, { inputTokens: -1, outputTokens: 4 }]) {
+        const { calls, deps } = ledger();
+        const outcome = await withEnv({ OPENAI_API_KEY: "test-key" }, () =>
+            requestPerplexitySplitHints(perplexitySplitQuestions(THREAD), {
+                ...deps,
+                generate: async () => ({ output: { questionParagraphs: [0, 0, 0], continuesAnswer: [false] }, usage }),
+            })
+        );
+        assert.equal(outcome.ok, true, "the hints are still usable");
+        assert.equal(calls.reserve.length, 1);
+        assert.equal(calls.settle.length, 0, `${JSON.stringify(usage)} must not give the hold back`);
+        assert.equal(calls.record.length, 0);
+    }
+});
+
+test("a notes file that merely uses footnotes is not taken for a Perplexity export", () => {
+    const notes = "# Reading notes\n\nA claim.[^1_1]\n\n[^1_1]: https://example.com/book\n";
+    assert.equal(perplexityAdapter.detect([perplexityMarkdownEntry(notes)]), false);
+    const logoless = `# q\n\nA.[^1_1]\n\n<div align="center">⁂</div>\n\n[^1_1]: https://example.com/a\n`;
+    assert.equal(perplexityAdapter.detect([perplexityMarkdownEntry(logoless)]), true);
+});
+
 test("a spent budget means no call", async () => {
     let called = false;
     const outcome = await withEnv({ OPENAI_API_KEY: "test-key" }, () =>

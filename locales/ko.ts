@@ -1563,7 +1563,7 @@ export const ko = {
         capacityConversations: "가져온 대화 {limit}개 중 {used}개",
         selectFile: "내보내기 파일 선택",
         selectFileHint:
-            "ChatGPT·Claude·Gemini 데이터 내보내기(.zip 또는 .json) 또는 Perplexity 스레드 Markdown 내보내기(.md), 최대 1GB. Gemini는 Google Takeout에서 내 활동 → Gemini 앱을 JSON으로 내보낸 파일이어야 합니다. 용량이 커도 괜찮습니다 — 미디어 파일은 읽지 않고 건너뜁니다.",
+            "ChatGPT·Claude·Gemini 데이터 내보내기(.zip 또는 .json) 또는 Perplexity 스레드 Markdown 내보내기(.md), 최대 1GB. Gemini는 Google Takeout에서 내 활동 → Gemini 앱을 JSON으로 내보낸 파일이어야 합니다. 용량이 커도 괜찮습니다 — 미디어 파일은 읽지 않고 건너뜁니다. Perplexity 파일은 질문과 답변의 경계를 정하려고 각 질문 앞부분 일부를 AI 모델(OpenAI)에 보냅니다.",
         parsing: "브라우저에서 내보내기 파일을 읽는 중…",
         parsingProgress: "대화 {conversations}개 발견",
         cancel: "취소",

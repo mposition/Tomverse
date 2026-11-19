@@ -1569,7 +1569,7 @@ export const zh = {
         capacityConversations: "已导入 {used} 个对话（上限 {limit} 个）",
         selectFile: "选择导出文件",
         selectFileHint:
-            "ChatGPT、Claude 或 Gemini 数据导出（.zip 或 .json），或以 Markdown（.md）导出的 Perplexity 话题，最大 1GB。Gemini 需要在 Google Takeout 中导出「我的活动 → Gemini 应用」的 JSON 格式文件。文件较大也没关系 — 媒体文件会直接跳过，不会读取。",
+            "ChatGPT、Claude 或 Gemini 数据导出（.zip 或 .json），或以 Markdown（.md）导出的 Perplexity 话题，最大 1GB。Gemini 需要在 Google Takeout 中导出「我的活动 → Gemini 应用」的 JSON 格式文件。文件较大也没关系 — 媒体文件会直接跳过，不会读取。对于 Perplexity 文件，会将每轮开头的少量摘录发送给 AI 模型（OpenAI），以判断每个问题在哪里结束。",
         parsing: "正在浏览器中读取导出文件…",
         parsingProgress: "已发现 {conversations} 个对话",
         cancel: "取消",

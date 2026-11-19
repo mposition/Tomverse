@@ -1556,7 +1556,7 @@ export const de = {
         capacityConversations: "{used} von {limit} importierten Unterhaltungen",
         selectFile: "Exportdatei auswählen",
         selectFileHint:
-            "Datenexport von ChatGPT, Claude oder Gemini (.zip oder .json) oder ein als Markdown (.md) exportierter Perplexity-Thread, bis zu 1 GB. Für Gemini wird der JSON-Export von Meine Aktivitäten → Gemini-Apps aus Google Takeout benötigt. Große Archive sind kein Problem — Mediendateien werden übersprungen, ohne gelesen zu werden.",
+            "Datenexport von ChatGPT, Claude oder Gemini (.zip oder .json) oder ein als Markdown (.md) exportierter Perplexity-Thread, bis zu 1 GB. Für Gemini wird der JSON-Export von Meine Aktivitäten → Gemini-Apps aus Google Takeout benötigt. Große Archive sind kein Problem — Mediendateien werden übersprungen, ohne gelesen zu werden. Bei einer Perplexity-Datei werden kurze Auszüge vom Anfang jedes Austauschs an ein KI-Modell (OpenAI) gesendet, um zu erkennen, wo jede Frage endet.",
         parsing: "Export wird in Ihrem Browser gelesen…",
         parsingProgress: "{conversations} Unterhaltungen gefunden",
         cancel: "Abbrechen",

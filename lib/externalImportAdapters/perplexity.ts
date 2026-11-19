@@ -115,12 +115,13 @@ const markdownOf = (value: unknown): string | null =>
         : null;
 
 /**
- * The export's logo line, or its turn-scoped footnotes (`[^1_1]:`) next to a
- * question heading. A plain notes file has neither.
+ * The export's logo line, or -- for a copy with the logo removed -- its
+ * turn-scoped footnotes (`[^1_1]:`) together with the `⁂` source divider. A
+ * notes file that merely uses footnotes has neither pair.
  */
 const looksLikePerplexityExport = (text: string): boolean =>
     /r2cdn\.perplexity\.ai\/pplx-/.test(text) ||
-    (/^\[\^1_1\]:\s/m.test(text) && /^# (?!#)/m.test(text));
+    (/^\[\^1_1\]:\s/m.test(text) && /^<div\b[^>]*>\s*⁂\s*<\/div>\s*$/m.test(text) && /^# (?!#)/m.test(text));
 
 const truncateTitle = (question: string): string => {
     const collapsed = question.replace(/\s+/g, " ").trim();
