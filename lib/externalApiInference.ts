@@ -41,7 +41,7 @@ import { noteSmartAdaptiveRefusal, rememberSmartAdaptiveToolCalls, routeSmartAda
 import { externalApiRunnableModels } from "@/lib/externalApiCatalog";
 import { externalApiAdmissionHook } from "@/lib/externalApiAdmission";
 import { pickRequestedModel } from "@/lib/externalApiProtocols";
-import { describeRequestShape, describeStreamFailure, requestShapeLogEnabled } from "@/lib/externalApiRequestShape";
+import { collapseKinds, describeChunk, describeRequestShape, describeStreamFailure, requestShapeLogEnabled } from "@/lib/externalApiRequestShape";
 import { authenticateExternalApiKey, ExternalApiKeyError } from "@/lib/externalApiKeys";
 import { sha256Hex } from "@/lib/externalApiKeyCore";
 import { getModelGenerationSettings } from "@/lib/modelGenerationCompatibility";
@@ -50,6 +50,7 @@ import {
     buildUsageChunk,
     convertChatCompletionRequest,
     createChunkTranslator,
+    customCallsAsFunction,
     openAiError,
     parseChatCompletionRequest,
     PROTOCOL_LIMITS,
@@ -719,7 +720,8 @@ const createRun = (input: {
             created: input.created,
             model: input.model.id,
         },
-        input.customTools
+        input.customTools,
+        { customCallsAsFunction: customCallsAsFunction(process.env) }
     );
     let sdkFinishReason: string | undefined;
     let usage: UsageView | null = null;
@@ -751,7 +753,11 @@ const createRun = (input: {
         keepAlive();
         // EXTERNAL_API_REQUEST_SHAPE_LOG (dev only): the part types that led
         // to a stream failure, and where it was thrown. Types only.
-        const trail = requestShapeLogEnabled(process.env) ? { startedAt: Date.now(), counts: {} as Record<string, number>, last: [] as string[] } : null;
+        const trail = requestShapeLogEnabled(process.env) ? { startedAt: Date.now(), counts: {} as Record<string, number>, last: [] as string[], emitted: [] as string[] } : null;
+        const send = (chunk: unknown) => {
+            if (trail) trail.emitted.push(...describeChunk(chunk));
+            emit(chunk);
+        };
         const logFailure = (failure: unknown, via: string) => {
             if (!trail) return;
             console.log(
@@ -823,7 +829,7 @@ const createRun = (input: {
                 if (part.type === "tool-call" && typeof part.toolCallId === "string") {
                     input.onToolCalls?.([part.toolCallId]);
                 }
-                for (const chunk of translator.translate(part)) emit(chunk);
+                for (const chunk of translator.translate(part)) send(chunk);
             }
         } catch (error) {
             logFailure(error, "thrown");
@@ -872,10 +878,23 @@ const createRun = (input: {
         }
 
         if (!error) {
-            emit(translator.finish(finishReason));
+            send(translator.finish(finishReason));
             if (input.includeUsage) {
-                emit(buildUsageChunk({ id: input.completionId, created: input.created, model: input.model.id }, usage));
+                send(buildUsageChunk({ id: input.completionId, created: input.created, model: input.model.id }, usage));
             }
+        }
+        if (trail) {
+            // What the client was sent, as chunk kinds only (dev only).
+            console.log(
+                JSON.stringify({
+                    event: "external_api_response_shape",
+                    requestId: input.requestId,
+                    outcome,
+                    finishReason,
+                    errorCode: error?.code ?? null,
+                    emitted: collapseKinds(trail.emitted),
+                })
+            );
         }
 
         // Settlement: provider usage when it was reported. When it was not,

@@ -96,3 +96,53 @@ export const describeStreamFailure = (error: unknown) => {
         ...(value?.cause ? { cause: { name: token((value.cause as { name?: unknown }).name), code: token((value.cause as { code?: unknown }).code) } } : {}),
     };
 };
+
+/**
+ * One emitted Chat Completions chunk as kinds only: `text`, `reasoning`,
+ * `role`, a tool call's type, name and which payload field it carried
+ * (`tool:custom:ApplyPatch:input`), `finish:<reason>`, `usage`. No text,
+ * argument or input is kept.
+ */
+export const describeChunk = (chunk: unknown): string[] => {
+    if (!isRecord(chunk)) return [typeOf(chunk)];
+    const choices = Array.isArray(chunk.choices) ? chunk.choices : [];
+    if (choices.length === 0) return [chunk.usage !== undefined ? "usage" : "empty"];
+    const kinds: string[] = [];
+    for (const choice of choices) {
+        if (!isRecord(choice)) continue;
+        const delta = isRecord(choice.delta) ? choice.delta : {};
+        if (delta.role !== undefined) kinds.push("role");
+        if (typeof delta.content === "string") kinds.push("text");
+        if (typeof delta.reasoning_content === "string") kinds.push("reasoning");
+        if (Array.isArray(delta.tool_calls)) {
+            for (const call of delta.tool_calls) {
+                if (!isRecord(call)) continue;
+                const inner = isRecord(call.function) ? call.function : isRecord(call.custom) ? call.custom : {};
+                const payload = "arguments" in inner ? "arguments" : "input" in inner ? "input" : "";
+                kinds.push(["tool", call.type === undefined ? "+" : token(call.type), token(inner.name) ?? "", payload].join(":"));
+            }
+        }
+        if (choice.finish_reason) kinds.push(`finish:${token(choice.finish_reason)}`);
+    }
+    return kinds.length ? kinds : ["empty"];
+};
+
+/** Consecutive repeats collapsed: ["text","text","text"] → ["text×3"]. */
+export const collapseKinds = (kinds: readonly string[]) => {
+    const out: string[] = [];
+    let last = "";
+    let count = 0;
+    const flush = () => {
+        if (count) out.push(count > 1 ? `${last}×${count}` : last);
+    };
+    for (const kind of kinds) {
+        if (kind === last) count += 1;
+        else {
+            flush();
+            last = kind;
+            count = 1;
+        }
+    }
+    flush();
+    return out;
+};
