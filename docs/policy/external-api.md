@@ -40,7 +40,7 @@ All default off. Server-side; hiding UI is never the gate.
 | Variable | Meaning |
 |---|---|
 | `EXTERNAL_API_ENABLED` | Exactly `true` turns the routes on. Anything else: every `/api/v1` route answers 503 `feature_unavailable` and nothing is dispatched. |
-| `EXTERNAL_API_ALLOWED_USER_IDS` | Comma-separated user IDs allowed to manage and use keys, or `*`. Empty means nobody. |
+| `EXTERNAL_API_ALLOWED_USER_IDS` | Comma-separated user IDs allowed to manage and use keys, or `*`. Empty means nobody. `*` still means paid accounts only: a Free account is refused whatever this list says (section 3). |
 | `EXTERNAL_API_PUBLIC_BASE_URL` | Optional canonical base URL shown to users (e.g. `https://tomverse.app/api/v1`). Otherwise derived from the request host. |
 | `NEXT_PUBLIC_EXTERNAL_API_SETTINGS_VISIBLE` | Build-time. Shows the API keys row in the settings panel. `/settings/api` itself checks availability through the server. |
 | `EXTERNAL_API_REQUESTS_PER_MINUTE` / `_PER_DAY` | Per-account request-rate abuse guard, defaults 120 / 20 000. Credits, the key cap and concurrency are what bound usage; this only stops runaway clients. |
@@ -79,6 +79,17 @@ are settled normally in both cases. Revoking a key stops that key immediately.
   create-new then revoke-old. Revocation is always possible, even after the
   feature is switched off for the account: the settings page still lists
   existing keys, with revoke as the only action.
+- **Paid plans only** (owner decision 2026-11-19). Access needs the switch, the
+  allowlist and a Pro or Max effective plan (`externalApiPlanAllowed`, read
+  through `getUserBillingPlan`, so a lapsed subscription counts as Free). A
+  Free account cannot create a key (403 `PLAN_NOT_ELIGIBLE` from
+  `createExternalApiKey`), and every keyed request (`lib/externalApiAccess.ts`:
+  Chat Completions, Anthropic Messages, Responses, `/models`, `/usage`,
+  `/requests/status`) re-reads the plan, so a key made on a paid plan answers
+  403 `plan_not_eligible` once the account is Free. The Tomverse CLI is a Chat
+  Completions client and is refused the same way. A Free account still lists,
+  renames and revokes its keys; Settings > API keys shows it an upgrade prompt
+  instead of the create button.
 - Create, rename, cap change and revoke are written to the hash-chained audit
   log in the same transaction, with the prefix and never the secret or digest.
 - Unknown, revoked and expired keys, and keys of a suspended or
@@ -195,7 +206,7 @@ with Tomverse limit details under `tomverse` where they exist.
 |---|---|
 | 400 | `invalid_json`, `invalid_request`, `unsupported_parameter`, `conflicting_parameters`, `max_tokens_too_large`, `invalid_tool`, `invalid_tool_choice`, `invalid_tool_call`, `invalid_tool_result`, `unsupported_image_url`, `unsupported_image_type`, `invalid_image`, `model_does_not_support_images`, `invalid_request_selector` and `invalid_idempotency_key` (status lookup) |
 | 401 | `invalid_api_key` |
-| 403 | `account_not_enabled`, account restrictions from `assertUserOperationalAccess`, plan access |
+| 403 | `account_not_enabled` (not on the allowlist), `plan_not_eligible` (Free plan), account restrictions from `assertUserOperationalAccess`, plan access |
 | 404 | `model_not_found`, `request_not_found` (status lookup) |
 | 409 | `idempotent_request_in_progress`, `idempotent_request_completed` |
 | 413 | `image_too_large`, `too_many_images`, `tool_schema_too_large`, `request_body_too_large`, `CHAT_INPUT_TOKEN_LIMIT` |

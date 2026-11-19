@@ -14,6 +14,7 @@ import {
     asideProviderConfig,
     externalApiEnabled,
     externalApiModelCapabilities,
+    externalApiPlanAllowed,
     externalApiUserAllowed,
     isExternalApiServableModel,
     KEY_PLACEHOLDER,
@@ -89,6 +90,11 @@ test("exposure needs the switch, the account, the registry and the plan", () => 
     assert.equal(externalApiUserAllowed({}, "u1"), false);
     assert.equal(externalApiUserAllowed({ EXTERNAL_API_ALLOWED_USER_IDS: "u2, u1" }, "u1"), true);
     assert.equal(externalApiUserAllowed({ EXTERNAL_API_ALLOWED_USER_IDS: "*" }, "anyone"), true);
+    // Paid plans only, whatever the allowlist says.
+    assert.equal(externalApiPlanAllowed("Free"), false);
+    assert.equal(externalApiPlanAllowed("Pro"), true);
+    assert.equal(externalApiPlanAllowed("Max"), true);
+    assert.equal(externalApiPlanAllowed(undefined), false, "an unknown tier is not a paid plan");
     // The catalogue is the only list: no second, operator-kept list of ids.
     assert.equal(isExternalApiServableModel(baseModel, "Pro"), true);
     assert.equal(isExternalApiServableModel(baseModel, "Free"), false, "plan");

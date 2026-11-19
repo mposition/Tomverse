@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next";
 import type { Session } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { getUserBillingPlan } from "@/lib/billingEntitlements";
+import { externalApiAccountAccess } from "@/lib/externalApiAccess";
 import { externalApiEnabled, externalApiUserAllowed } from "@/lib/externalApiCatalogCore";
 import { authenticateExternalApiKey, type AuthenticatedExternalApiKey } from "@/lib/externalApiKeys";
 import { apiSecurityResponse, consumeApiRateLimit } from "@/lib/apiSecurity";
@@ -36,9 +37,8 @@ export const withBearerKey = async (
     }
     try {
         const key = await authenticateExternalApiKey(request.headers.get("authorization"));
-        if (!externalApiUserAllowed(process.env, key.userId)) {
-            return externalApiErrorResponse(403, "The Tomverse API is not enabled for this account.", "account_not_enabled");
-        }
+        const access = await externalApiAccountAccess(key.userId);
+        if (!access.allowed) return externalApiErrorResponse(403, access.message, access.code);
         // Read routes (models, usage) have their own per-account budget,
         // separate from completions, so polling cannot crowd out real calls.
         await consumeApiRateLimit(request, key.userId, "external-api-reads", {
