@@ -177,3 +177,19 @@ test("Tomverse CLI guide: off until published; key in the shell only; endpoint o
     assert.match(tomverseCliGuide({ TOMVERSE_CLI_GUIDE_ENABLED: "true" }, "https://x.example/api/v1;rm -rf ~").posix, /endpoint 'https:\/\/x\.example\/api\/v1;rm -rf ~'/, "quoted as one argument");
     assert.ok(!/--api-key/.test(staging.posix + staging.powershell), "the key is never a command-line argument");
 });
+
+test("the response shape log keeps chunk kinds and tool names, never text or input", async () => {
+    const { describeChunk, collapseKinds } = await import("../lib/externalApiRequestShape.ts");
+    const SECRET = "private patch text";
+    const chunks = [
+        { choices: [{ index: 0, delta: { role: "assistant", content: SECRET }, finish_reason: null }] },
+        { choices: [{ index: 0, delta: { content: SECRET }, finish_reason: null }] },
+        { choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: "c", type: "custom", custom: { name: "ApplyPatch", input: "" } }] }, finish_reason: null }] },
+        { choices: [{ index: 0, delta: { tool_calls: [{ index: 0, custom: { input: SECRET } }] }, finish_reason: null }] },
+        { choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }] },
+        { choices: [], usage: { prompt_tokens: 1 } },
+    ];
+    const kinds = collapseKinds(chunks.flatMap(describeChunk));
+    assert.deepEqual(kinds, ["role", "text×2", "tool:custom:ApplyPatch:input", "tool:+::input", "finish:tool_calls", "usage"]);
+    assert.doesNotMatch(JSON.stringify(kinds), /private/);
+});
