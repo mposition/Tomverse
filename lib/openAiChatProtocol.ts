@@ -424,7 +424,7 @@ export type ConvertedRequest = {
     textSegments: string[];
     images: DecodedImage[];
     tools: { name: string; description?: string; parameters: Record<string, unknown>; strict?: boolean }[];
-    /** Tools the client declared as custom: their calls go back as custom calls. */
+    /** Tools the client declared as custom: their calls carry raw input, not JSON arguments. */
     customTools: Set<string>;
     toolChoice:
         | "none"
@@ -588,6 +588,19 @@ export const convertChatCompletionRequest = (
                         parts.push({ type: "tool-call", toolCallId: call.id, toolName: call.custom.name, input: { input: call.custom.input } });
                         return;
                     }
+                    if (customTools.has(call.function.name)) {
+                        // A custom tool's call echoed in function form: its
+                        // arguments are the raw input (or an { input } object).
+                        const echoed = safeJson(call.function.arguments);
+                        const raw =
+                            echoed && typeof echoed === "object" && typeof (echoed as { input?: unknown }).input === "string"
+                                ? (echoed as { input: string }).input
+                                : call.function.arguments;
+                        textSegments.push(call.function.name, raw);
+                        toolNamesById.set(call.id, call.function.name);
+                        parts.push({ type: "tool-call", toolCallId: call.id, toolName: call.function.name, input: { input: raw } });
+                        return;
+                    }
                     let input: unknown;
                     try {
                         input = call.function.arguments.trim() ? JSON.parse(call.function.arguments) : {};
@@ -682,9 +695,9 @@ export const toOpenAiUsage = (usage: UsageView | null) => {
 
 /**
  * One call the model made. `arguments` is a function's JSON arguments, or a
- * custom tool's raw input when `custom` is set.
+ * custom tool's raw input (see `createChunkTranslator`).
  */
-export type CollectedToolCall = { id: string; name: string; arguments: string; custom?: boolean };
+export type CollectedToolCall = { id: string; name: string; arguments: string };
 
 /** A custom tool's input from the `{ input }` object its function form took. */
 const customInputOf = (input: unknown) => {
@@ -728,11 +741,11 @@ export const buildChatCompletion = (input: {
                 ...(input.reasoning ? { reasoning_content: input.reasoning } : {}),
                 ...(input.toolCalls.length
                     ? {
-                          tool_calls: input.toolCalls.map((call) =>
-                              call.custom
-                                  ? { id: call.id, type: "custom" as const, custom: { name: call.name, input: call.arguments } }
-                                  : { id: call.id, type: "function" as const, function: { name: call.name, arguments: call.arguments } }
-                          ),
+                          tool_calls: input.toolCalls.map((call) => ({
+                              id: call.id,
+                              type: "function" as const,
+                              function: { name: call.name, arguments: call.arguments },
+                          })),
                       }
                     : {}),
             },
@@ -787,9 +800,12 @@ export const openAiError = (
 export const createChunkTranslator = (
     base: { id: string; created: number; model: string },
     /**
-     * Custom tools (see `toolDefinition`). Their function-form JSON fragments
-     * are held back and the decoded input is sent once, when the call is
-     * complete: a prefix of `{"input":"…` is not a prefix of the input.
+     * Custom tools (see `toolDefinition`). A custom tool's call goes back as
+     * a function call whose `arguments` is the raw input, not JSON: Cursor's
+     * Agent does not read a `custom` call from a Chat Completions stream.
+     * The model's `{"input":"…` fragments are held back and the decoded input
+     * is sent once, when the call is complete: a prefix of that JSON is not a
+     * prefix of the input.
      */
     customTools: ReadonlySet<string> = new Set()
 ) => {
@@ -813,9 +829,7 @@ export const createChunkTranslator = (
         toolIndexById.set(id, index);
         namesById.set(id, name);
         argumentsById.set(id, "");
-        const call = customTools.has(name)
-            ? { index, id, type: "custom", custom: { name, input: "" } }
-            : { index, id, type: "function", function: { name, arguments: "" } };
+        const call = { index, id, type: "function", function: { name, arguments: "" } };
         return buildChunk(base, withRole({ tool_calls: [call] }));
     };
     const isCustom = (id: string) => customTools.has(namesById.get(id) ?? "");
@@ -865,7 +879,11 @@ export const createChunkTranslator = (
                         const input = customInputOf(part.input);
                         argumentsById.set(id, input);
                         if (input) {
-                            chunks.push(buildChunk(base, { tool_calls: [{ index: toolIndexById.get(id), custom: { input } }] }));
+                            chunks.push(
+                                buildChunk(base, {
+                                    tool_calls: [{ index: toolIndexById.get(id), function: { arguments: input } }],
+                                })
+                            );
                         }
                         return chunks;
                     }
@@ -902,7 +920,6 @@ export const createChunkTranslator = (
                         id,
                         name: namesById.get(id) ?? "",
                         arguments: argumentsById.get(id) ?? "",
-                        ...(isCustom(id) ? { custom: true } : {}),
                         /** False when the provider started the call and never finished it. */
                         complete: completedIds.has(id),
                     })),

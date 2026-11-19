@@ -47,7 +47,6 @@ All default off. Server-side; hiding UI is never the gate.
 | `EXTERNAL_API_HEARTBEAT_MS` | How often an in-flight request renews its concurrency slot and reservation, default 60 000. Runs from dispatch, including the wait for a streaming request's first part. Lowered only by tests. |
 | `EXTERNAL_API_READS_PER_MINUTE` / `_PER_DAY` | Separate per-account budget for `GET /models`, `GET /usage` and `GET /requests/status`, defaults 60 / 5 000. The settings read routes (key list, receipts) have a fixed 60 / 5 000; revocation has none, so it always works. |
 | `EXTERNAL_API_TIMEOUT_MS` | Server timeout for one generation, default 600 000. |
-| `EXTERNAL_API_REQUEST_SHAPE_LOG` | Dev only, default off, temporary. Exactly `true` logs each Chat Completions request's shape (field names and types, tool kinds and names, message roles, numbers and booleans, header names) and, on a stream failure, the part types before it and the error's name, code and stack frames. No message text, code, argument, schema body or header value is logged (`lib/externalApiRequestShape.ts`). Added to find out what Cursor sends; to be removed once Cursor works. |
 | `EXTERNAL_API_ANTHROPIC_ENABLED` | Exactly `true` (and `EXTERNAL_API_ENABLED`) turns on the Anthropic Messages routes for Claude Code: `POST /api/anthropic/v1/messages`, its `count_tokens` and `GET /api/anthropic/v1/models`. Off: 503 `feature_unavailable`, nothing dispatched. |
 | `EXTERNAL_API_RESPONSES_ENABLED` | Exactly `true` (and `EXTERNAL_API_ENABLED`) turns on `POST /api/v1/responses` for Codex. Off: 503, nothing dispatched. |
 | `TOMVERSE_CLI_GUIDE_ENABLED` | Exactly `true` shows the Tomverse CLI install and connect card in Settings > API keys (section 11). Off until the package is published, so the page never points at a package that is not on the registry. It turns nothing on in the API. |
@@ -152,7 +151,8 @@ base64 `data:` URLs of PNG, JPEG, WebP or GIF up to 8 MB each, 16 per request;
 and custom tools, free-form input with an optional `text` or `grammar` format, which Cursor's GPT Agent
 sends -- every provider here takes JSON tools only, so a custom tool reaches the model as a function with one
 `input` string and its grammar in the description, described rather than enforced, and its calls go back as
-`custom` calls, streamed as one input fragment when the call completes), `tool_choice` (`none`, `auto`,
+function calls whose `arguments` is the raw input rather than JSON, streamed as one fragment when the call
+completes -- Cursor reads and echoes a custom tool's call only in that form; a `custom` call in history is still accepted), `tool_choice` (`none`, `auto`,
 `required`, or a named function or custom tool), `parallel_tool_calls: true`, `max_tokens`, `max_completion_tokens`,
 `temperature`, `top_p`, `frequency_penalty`, `presence_penalty` (forwarded where the
 model accepts a temperature, including models registered with reasoning `none`;
@@ -554,9 +554,23 @@ protocols; after revocation both returned 401 with nothing dispatched. Ledger
 input, cache read/write and output matched Claude Code's own usage report to
 the token. 57 requests, none left held.
 
-Not yet verified, each a separate step: Cursor Chat and Agent (needs public
-HTTPS), other operating systems, and a deployed environment (the run above
-called the handlers directly, not through the Next.js server).
+Cursor, 2026-11-19, on the dev deployment (public HTTPS, the deployed Next.js
+server, real model GPT-5.6 Luna), driven by the operator in the Cursor desktop
+app on Windows 10 (3.21.16 when installed on 2026-11-18) and configured only by
+the page's Cursor steps: Chat explained two files; Agent ran a failing test,
+fixed the file with `ApplyPatch` and re-ran it to a pass, on two files; with
+Run Mode set to Allowlist, a command refused at the approval prompt was not
+run and the next request was accepted, then the same command approved ran; a
+reply stopped mid-stream settled as cancelled at 1 credit, against 2 for the
+completed request before it, and the receipts on the API keys page carried the
+same request ids and states as the server. No request in these runs failed or
+was retried. Before the function form of section 6, each `ApplyPatch` call
+sent as a `custom` call completed and was charged while Cursor retried it four
+times and reported a server error.
+
+Not yet verified, each a separate step: other operating systems, Claude Code
+and Codex against a deployed environment (their runs above called the handlers
+directly, not through the Next.js server), and any client against production.
 
 ## 11. Tomverse CLI (`apps/tomverse-cli`)
 

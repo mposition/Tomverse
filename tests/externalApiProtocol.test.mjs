@@ -349,7 +349,7 @@ test("custom tools reach the model as one-string functions and their history con
     );
 });
 
-test("a custom tool's call goes back as a custom call carrying the raw input", () => {
+test("a custom tool's call goes back in function form carrying the raw input", () => {
     const translator = createChunkTranslator({ id: "chatcmpl-x", created: 1, model: "fixture" }, new Set(["apply_patch"]));
     const chunks = [
         ...translator.translate({ type: "tool-input-start", id: "c1", toolName: "apply_patch" }),
@@ -359,17 +359,18 @@ test("a custom tool's call goes back as a custom call carrying the raw input", (
         ...translator.translate({ type: "tool-call", toolCallId: "c2", toolName: "read_file", input: { path: "a" } }),
     ];
     const calls = chunks.flatMap((chunk) => chunk.choices[0].delta.tool_calls ?? []);
-    assert.deepEqual(calls[0], { index: 0, id: "c1", type: "custom", custom: { name: "apply_patch", input: "" } });
+    // Function form, as Cursor's Agent reads it: `arguments` is the raw input.
+    assert.deepEqual(calls[0], { index: 0, id: "c1", type: "function", function: { name: "apply_patch", arguments: "" } });
     // The JSON fragments are held back; the decoded input arrives once.
-    assert.deepEqual(calls[1], { index: 0, custom: { input: "*** Begin Patch" } });
+    assert.deepEqual(calls[1], { index: 0, function: { arguments: "*** Begin Patch" } });
     assert.equal(calls[2].type, "function");
     assert.equal(calls.filter((call) => call.index === 0).length, 2);
     const collected = translator.collected();
     assert.deepEqual(
-        collected.toolCalls.map(({ id, name, arguments: text, custom }) => ({ id, name, text, custom })),
+        collected.toolCalls.map(({ id, name, arguments: text }) => ({ id, name, text })),
         [
-            { id: "c1", name: "apply_patch", text: "*** Begin Patch", custom: true },
-            { id: "c2", name: "read_file", text: '{"path":"a"}', custom: undefined },
+            { id: "c1", name: "apply_patch", text: "*** Begin Patch" },
+            { id: "c2", name: "read_file", text: '{"path":"a"}' },
         ]
     );
     const completion = buildChatCompletion({
@@ -384,8 +385,8 @@ test("a custom tool's call goes back as a custom call carrying the raw input", (
     });
     assert.deepEqual(completion.choices[0].message.tool_calls[0], {
         id: "c1",
-        type: "custom",
-        custom: { name: "apply_patch", input: "*** Begin Patch" },
+        type: "function",
+        function: { name: "apply_patch", arguments: "*** Begin Patch" },
     });
     assert.equal(completion.choices[0].message.tool_calls[1].type, "function");
 });
@@ -418,8 +419,8 @@ test("Cursor's flat custom tool shape is read as the nested Chat Completions one
 });
 
 test("Cursor's tool round: a call's stream index and a tool message's name are accepted and unused", () => {
-    // The shape Cursor sends after its first tool calls (field names from the
-    // dev request-shape log; no real content).
+    // The shape Cursor sends after its first tool calls (field names seen on
+    // dev, 2026-11-19; no real content).
     const round = {
         model: "fixture",
         stream: true,
@@ -454,4 +455,23 @@ test("Cursor's tool round: a call's stream index and a tool message's name are a
     assert.deepEqual(results.map((part) => [part.toolCallId, part.toolName]), [["c1", "Glob"], ["c2", "Glob"], ["c3", "ApplyPatch"]]);
     // A name on any other message is still refused.
     rejects(() => parseChatCompletionRequest({ ...round, messages: [{ role: "user", name: "x", content: "hi" }] }), "unsupported_parameter");
+});
+
+test("a custom tool's call echoed back in function form converts to the model's { input } call", () => {
+    // Raw, as it was sent, or as an { input } object.
+    for (const args of ["*** Begin Patch", JSON.stringify({ input: "*** Begin Patch" })]) {
+        const converted = convertChatCompletionRequest(
+            parseChatCompletionRequest({
+                model: "fixture",
+                messages: [
+                    { role: "user", content: "fix" },
+                    { role: "assistant", content: [], tool_calls: [{ id: "p1", index: 0, type: "function", function: { name: "ApplyPatch", arguments: args } }] },
+                    { role: "tool", name: "ApplyPatch", tool_call_id: "p1", content: "ok" },
+                ],
+                tools: [{ type: "custom", name: "ApplyPatch", format: { type: "grammar", syntax: "lark", definition: "start: x" } }],
+            }),
+            model
+        );
+        assert.deepEqual(converted.messages[1].content[0].input, { input: "*** Begin Patch" });
+    }
 });
