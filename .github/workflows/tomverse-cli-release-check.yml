@@ -25,19 +25,22 @@ cache-mode: read
 permissions:
   contents: read
 
+# Each job names its GitHub-hosted runner literally rather than through a
+# matrix expression, so lib/agentCredentialReachability.ts can see that no job
+# here runs anywhere that could hold a credential.
+
 concurrency:
   group: tomverse-cli-release-check-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  npm-package:
-    name: npm package (${{ matrix.os }}, Node ${{ matrix.node }})
-    runs-on: ${{ matrix.os }}
+  npm-linux:
+    name: npm package (Linux, Node ${{ matrix.node }})
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15, windows-2025]
         node: [22, 24]
     steps:
       - name: Checkout
@@ -49,8 +52,8 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node }}
-          # v6 caches by default once package.json names a package manager; this
-          # job holds the run's token, so it restores no cache
+          # v6 caches by default once package.json names a package manager;
+          # nothing here restores a cache
           # (.github/audits/actions-cache-poisoning-audit-2026-10-03.md 4.2).
           package-manager-cache: false
 
@@ -66,20 +69,82 @@ jobs:
       - name: Pack, install and verify the tarball
         run: npm run cli:pack:verify
 
-  standalone:
-    name: standalone ${{ matrix.target }}
-    runs-on: ${{ matrix.runner }}
+  npm-macos:
+    name: npm package (macOS, Node ${{ matrix.node }})
+    runs-on: macos-15
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { target: windows-x64, runner: windows-2025 }
-          - { target: windows-arm64, runner: windows-11-arm }
-          - { target: macos-arm64, runner: macos-15 }
-          - { target: macos-x64, runner: macos-15-intel }
-          - { target: linux-x64, runner: ubuntu-24.04 }
-          - { target: linux-arm64, runner: ubuntu-24.04-arm }
+        node: [22, 24]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node }}
+          # v6 caches by default once package.json names a package manager;
+          # nothing here restores a cache
+          # (.github/audits/actions-cache-poisoning-audit-2026-10-03.md 4.2).
+          package-manager-cache: false
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Typecheck
+        run: npm run cli:typecheck
+
+      - name: Build and test
+        run: npm run cli:test
+
+      - name: Pack, install and verify the tarball
+        run: npm run cli:pack:verify
+
+  npm-windows:
+    name: npm package (Windows, Node ${{ matrix.node }})
+    runs-on: windows-2025
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node }}
+          # v6 caches by default once package.json names a package manager;
+          # nothing here restores a cache
+          # (.github/audits/actions-cache-poisoning-audit-2026-10-03.md 4.2).
+          package-manager-cache: false
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Typecheck
+        run: npm run cli:typecheck
+
+      - name: Build and test
+        run: npm run cli:test
+
+      - name: Pack, install and verify the tarball
+        run: npm run cli:pack:verify
+
+  standalone-windows-x64:
+    name: standalone windows-x64
+    runs-on: windows-2025
+    timeout-minutes: 30
+    env:
+      TARGET: windows-x64
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -102,8 +167,6 @@ jobs:
       - name: Process tests against the executable
         shell: bash
         working-directory: apps/tomverse-cli
-        env:
-          TARGET: ${{ matrix.target }}
         run: |
           built="$(node -p "({win32:'windows',darwin:'macos',linux:'linux'})[process.platform]+'-'+process.arch")"
           if [ "$built" != "$TARGET" ]; then echo "this runner builds $built, not $TARGET"; exit 1; fi
@@ -114,7 +177,237 @@ jobs:
       - name: Keep the archive
         uses: actions/upload-artifact@v7
         with:
-          name: tomverse-cli-${{ matrix.target }}
+          name: tomverse-cli-windows-x64
+          path: |
+            apps/tomverse-cli/release/*.zip
+            apps/tomverse-cli/release/*.tar.gz
+            apps/tomverse-cli/release/*.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  standalone-windows-arm64:
+    name: standalone windows-arm64
+    runs-on: windows-11-arm
+    timeout-minutes: 30
+    env:
+      TARGET: windows-arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      # The executable carries this runtime, so it is the current LTS line.
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Build the executable
+        run: npm --workspace @tomverse/cli run build:binary
+
+      - name: Process tests against the executable
+        shell: bash
+        working-directory: apps/tomverse-cli
+        run: |
+          built="$(node -p "({win32:'windows',darwin:'macos',linux:'linux'})[process.platform]+'-'+process.arch")"
+          if [ "$built" != "$TARGET" ]; then echo "this runner builds $built, not $TARGET"; exit 1; fi
+          # A native path (not Git Bash's /d/...), so node can spawn it on Windows too.
+          exe="$(node -e "const p=require('path'),v=require('./package.json').version;console.log(p.resolve('release','tomverse-'+v+'-'+process.env.TARGET,process.platform==='win32'?'tomverse.exe':'tomverse'))")"
+          TOMVERSE_CLI_BIN="$exe" node --import tsx --test --test-concurrency=1 tests/cli.process.test.ts
+
+      - name: Keep the archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: tomverse-cli-windows-arm64
+          path: |
+            apps/tomverse-cli/release/*.zip
+            apps/tomverse-cli/release/*.tar.gz
+            apps/tomverse-cli/release/*.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  standalone-macos-arm64:
+    name: standalone macos-arm64
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      TARGET: macos-arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      # The executable carries this runtime, so it is the current LTS line.
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Build the executable
+        run: npm --workspace @tomverse/cli run build:binary
+
+      - name: Process tests against the executable
+        shell: bash
+        working-directory: apps/tomverse-cli
+        run: |
+          built="$(node -p "({win32:'windows',darwin:'macos',linux:'linux'})[process.platform]+'-'+process.arch")"
+          if [ "$built" != "$TARGET" ]; then echo "this runner builds $built, not $TARGET"; exit 1; fi
+          # A native path (not Git Bash's /d/...), so node can spawn it on Windows too.
+          exe="$(node -e "const p=require('path'),v=require('./package.json').version;console.log(p.resolve('release','tomverse-'+v+'-'+process.env.TARGET,process.platform==='win32'?'tomverse.exe':'tomverse'))")"
+          TOMVERSE_CLI_BIN="$exe" node --import tsx --test --test-concurrency=1 tests/cli.process.test.ts
+
+      - name: Keep the archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: tomverse-cli-macos-arm64
+          path: |
+            apps/tomverse-cli/release/*.zip
+            apps/tomverse-cli/release/*.tar.gz
+            apps/tomverse-cli/release/*.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  standalone-macos-x64:
+    name: standalone macos-x64
+    runs-on: macos-15-intel
+    timeout-minutes: 30
+    env:
+      TARGET: macos-x64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      # The executable carries this runtime, so it is the current LTS line.
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Build the executable
+        run: npm --workspace @tomverse/cli run build:binary
+
+      - name: Process tests against the executable
+        shell: bash
+        working-directory: apps/tomverse-cli
+        run: |
+          built="$(node -p "({win32:'windows',darwin:'macos',linux:'linux'})[process.platform]+'-'+process.arch")"
+          if [ "$built" != "$TARGET" ]; then echo "this runner builds $built, not $TARGET"; exit 1; fi
+          # A native path (not Git Bash's /d/...), so node can spawn it on Windows too.
+          exe="$(node -e "const p=require('path'),v=require('./package.json').version;console.log(p.resolve('release','tomverse-'+v+'-'+process.env.TARGET,process.platform==='win32'?'tomverse.exe':'tomverse'))")"
+          TOMVERSE_CLI_BIN="$exe" node --import tsx --test --test-concurrency=1 tests/cli.process.test.ts
+
+      - name: Keep the archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: tomverse-cli-macos-x64
+          path: |
+            apps/tomverse-cli/release/*.zip
+            apps/tomverse-cli/release/*.tar.gz
+            apps/tomverse-cli/release/*.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  standalone-linux-x64:
+    name: standalone linux-x64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      TARGET: linux-x64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      # The executable carries this runtime, so it is the current LTS line.
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Build the executable
+        run: npm --workspace @tomverse/cli run build:binary
+
+      - name: Process tests against the executable
+        shell: bash
+        working-directory: apps/tomverse-cli
+        run: |
+          built="$(node -p "({win32:'windows',darwin:'macos',linux:'linux'})[process.platform]+'-'+process.arch")"
+          if [ "$built" != "$TARGET" ]; then echo "this runner builds $built, not $TARGET"; exit 1; fi
+          # A native path (not Git Bash's /d/...), so node can spawn it on Windows too.
+          exe="$(node -e "const p=require('path'),v=require('./package.json').version;console.log(p.resolve('release','tomverse-'+v+'-'+process.env.TARGET,process.platform==='win32'?'tomverse.exe':'tomverse'))")"
+          TOMVERSE_CLI_BIN="$exe" node --import tsx --test --test-concurrency=1 tests/cli.process.test.ts
+
+      - name: Keep the archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: tomverse-cli-linux-x64
+          path: |
+            apps/tomverse-cli/release/*.zip
+            apps/tomverse-cli/release/*.tar.gz
+            apps/tomverse-cli/release/*.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  standalone-linux-arm64:
+    name: standalone linux-arm64
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    env:
+      TARGET: linux-arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      # The executable carries this runtime, so it is the current LTS line.
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Build the executable
+        run: npm --workspace @tomverse/cli run build:binary
+
+      - name: Process tests against the executable
+        shell: bash
+        working-directory: apps/tomverse-cli
+        run: |
+          built="$(node -p "({win32:'windows',darwin:'macos',linux:'linux'})[process.platform]+'-'+process.arch")"
+          if [ "$built" != "$TARGET" ]; then echo "this runner builds $built, not $TARGET"; exit 1; fi
+          # A native path (not Git Bash's /d/...), so node can spawn it on Windows too.
+          exe="$(node -e "const p=require('path'),v=require('./package.json').version;console.log(p.resolve('release','tomverse-'+v+'-'+process.env.TARGET,process.platform==='win32'?'tomverse.exe':'tomverse'))")"
+          TOMVERSE_CLI_BIN="$exe" node --import tsx --test --test-concurrency=1 tests/cli.process.test.ts
+
+      - name: Keep the archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: tomverse-cli-linux-arm64
           path: |
             apps/tomverse-cli/release/*.zip
             apps/tomverse-cli/release/*.tar.gz
