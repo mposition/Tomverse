@@ -49,6 +49,10 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node }}
+          # v6 caches by default once package.json names a package manager; this
+          # job holds the run's token, so it restores no cache
+          # (.github/audits/actions-cache-poisoning-audit-2026-10-03.md 4.2).
+          package-manager-cache: false
 
       - name: Install dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
@@ -87,6 +91,7 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 24
+          package-manager-cache: false
 
       - name: Install dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
