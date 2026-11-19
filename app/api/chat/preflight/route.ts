@@ -1,3 +1,4 @@
+import { CHAT_MAX_MESSAGE_BODY_BYTES, CHAT_MAX_MESSAGE_CHARACTERS } from "@/lib/chatRequestLimits";
 import {
     CHAT_MAX_ATTACHMENTS_PER_MESSAGE,
     CHAT_MAX_ATTACHMENT_BYTES,
@@ -73,7 +74,7 @@ const preflightSchema = z
         comparisonId: z.string().regex(/^\d{10,20}$/),
         conversationId: z.string().min(1).max(64),
         modelIds: z.array(z.string().min(1).max(100)).min(2).max(3),
-        prompt: z.string().max(50_000),
+        prompt: z.string().max(CHAT_MAX_MESSAGE_CHARACTERS),
         previousContextBundle: z.string().min(1).max(8_192).optional(),
         attachments: z
             .array(
@@ -161,7 +162,7 @@ export async function POST(request: Request) {
         );
         const payload = await readLimitedJson(
             request,
-            64 * 1024,
+            CHAT_MAX_MESSAGE_BODY_BYTES,
             preflightSchema
         );
         const uniqueModelIds = Array.from(new Set(payload.modelIds));

@@ -1,3 +1,5 @@
+import { AVAILABLE_MODELS, type AiModel } from "@/lib/models";
+
 /**
  * Extraction ceiling for revising a generated file (lib/generatedArtifactRevision.ts,
  * lib/generatedArtifactWorkbookRevision.ts). A Chat request does not use it.
@@ -8,9 +10,8 @@ export const MAX_EXTRACTED_ATTACHMENT_CHARACTERS = 300_000;
  * How much text the parsers may build for one Chat request.
  *
  * Not a product limit. What a turn may send is the input token limit
- * (`CHAT_INPUT_TOKEN_LIMIT`, 128,000 tokens for an account by default) and the
- * model's context window, both checked on the whole conversation later. This
- * sits far above either, so a turn under them never meets it; it only stops a
+ * (`CHAT_INPUT_TOKEN_LIMIT`: for an account, the model's context window), checked
+ * on the whole conversation later. This only stops a
  * parser from assembling a string no request could carry. The parsers guard
  * their own memory separately (lib/officeSecurity.ts, lib/chatArchiveLimits.ts).
  *
@@ -18,8 +19,19 @@ export const MAX_EXTRACTED_ATTACHMENT_CHARACTERS = 300_000;
  * files of every earlier message again on each turn, so a conversation whose
  * files added up past it refused every later message, new file or not
  * (2026-11-16 report). Operator decision 2026-11-16: drop it.
+ *
+ * Sized from the largest compiled context window (operator decision
+ * 2026-11-18), so it never refuses a file the model could hold: five characters
+ * a token is above English text (about four) and far above Korean.
  */
-export const CHAT_ATTACHMENT_PARSE_CHARACTERS = 2_000_000;
+export const CHAT_ATTACHMENT_CHARACTERS_PER_CONTEXT_TOKEN = 5;
+
+export const CHAT_ATTACHMENT_PARSE_CHARACTERS = Math.max(
+  2_000_000,
+  ...(AVAILABLE_MODELS as readonly AiModel[]).map(
+    (model) => (model.contextWindowTokens ?? 0) * CHAT_ATTACHMENT_CHARACTERS_PER_CONTEXT_TOKEN
+  )
+);
 
 /**
  * The part of the input allowance that earlier messages' files may fill.

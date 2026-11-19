@@ -1,4 +1,8 @@
 export const dynamic = "force-dynamic";
+import {
+  CHAT_MAX_MESSAGE_BODY_BYTES,
+  CHAT_MAX_MESSAGE_CHARACTERS,
+} from "@/lib/chatRequestLimits";
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -28,7 +32,7 @@ const modelIdSchema = z.string().min(1).max(120);
 const importMessageSchema = z
   .object({
     role: z.enum(["user", "assistant"]),
-    content: z.string().max(50_000),
+    content: z.string().max(CHAT_MAX_MESSAGE_CHARACTERS),
     // "incomplete" travels with the message like every other status: a guest
     // answer the provider cut short must still read as cut short after the
     // conversation is imported into an account.
@@ -39,6 +43,10 @@ const importMessageSchema = z
     modelId: modelIdSchema.nullable().optional(),
     createdAt: z.string().datetime(),
   })
+  // Every message, question or answer, is held to one limit and stored whole:
+  // the guest already has the full answer on screen, and an import that cut it
+  // would report success while losing what it was asked to keep (review
+  // r-20261118-075201-6d1a48).
   .strict();
 
 const importGuestConversationSchema = z
@@ -76,7 +84,7 @@ export async function POST(req: Request) {
       day: 50,
     });
 
-    const body = await readLimitedJson(req, 2 * 1024 * 1024, importGuestConversationSchema);
+    const body = await readLimitedJson(req, CHAT_MAX_MESSAGE_BODY_BYTES, importGuestConversationSchema);
 
     const requestedModelIds = Array.from(
       new Set([

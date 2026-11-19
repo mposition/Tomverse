@@ -617,6 +617,9 @@ const checks = [
     // instead of here, for free. MCP reserves repeated paid steps separately;
     // the window bounds one request, including its tool overhead, rather than
     // that aggregate cost reservation (docs/ops/mcp-connector-preview.md).
+    // The reservation-only image allowance may be taken off: it is reserved
+    // and charged but never sent (lib/chatImageInputTokens.ts), so it takes no
+    // room in the window. Tools stay in.
     name: "The context-window guard measures reserved per-request input including tools",
     file: "app/api/chat/route.ts",
     test: (source) => {
@@ -626,7 +629,10 @@ const checks = [
       );
       return (
         guard.includes("const contextInputTokens = budget.contextInputTokens ?? budget.inputTokens;") &&
-        guard.includes("reservedInputTokens: contextInputTokens") &&
+        (guard.includes("reservedInputTokens: contextInputTokens,") ||
+          guard.includes(
+            "reservedInputTokens: Math.max(0, contextInputTokens - reservationOnlyInputTokens),"
+          )) &&
         !guard.includes("estimatedInputTokens")
       );
     },

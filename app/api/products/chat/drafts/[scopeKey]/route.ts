@@ -1,4 +1,5 @@
 export const dynamic = "force-dynamic";
+import { CHAT_MAX_MESSAGE_BODY_BYTES } from "@/lib/chatRequestLimits";
 
 import { getServerSession } from "next-auth/next";
 import { z } from "zod";
@@ -145,7 +146,7 @@ export async function PUT(request: Request, { params }: Params) {
       day: 2_000,
     });
     if ("response" in scope) return noStore(scope.response);
-    const body = await readLimitedJson(request, 220 * 1024, chatComposerDraftPutSchema);
+    const body = await readLimitedJson(request, CHAT_MAX_MESSAGE_BODY_BYTES, chatComposerDraftPutSchema);
     if (!validateDraftReferencesForScope(scope.scopeKey, body.attachmentReferences)) {
       return jsonError(
         "A new Chat draft may reference completed uploads only.",
