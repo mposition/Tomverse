@@ -81,8 +81,8 @@ export const perplexitySplitRequestSchema = z
     })
     .strict();
 
-/** Largest body the route reads; every excerpt at its limit, JSON-escaped. */
-export const PERPLEXITY_SPLIT_MAX_REQUEST_BYTES = 2 * 1024 * 1024;
+/** Largest body the route reads: the same bound the browser asks within. */
+export const PERPLEXITY_SPLIT_MAX_REQUEST_BYTES = PERPLEXITY_SPLIT_LIMITS.maxRequestBytes;
 
 const SYSTEM_PROMPT = [
     "You split a conversation exported from Perplexity as Markdown into user questions and assistant answers.",

@@ -262,6 +262,11 @@ export const PERPLEXITY_SPLIT_LIMITS = {
     maxTurns: 200,
     maxParagraphsPerTurn: 3,
     excerptChars: 600,
+    /**
+     * The questions as sent, in UTF-8 bytes. Past this nothing is asked: the
+     * request would outgrow a short model context, and the file split stands.
+     */
+    maxRequestBytes: 256 * 1024,
 } as const;
 
 /** Cut to the limit in UTF-16 units (what the route checks), never mid-pair. */
@@ -342,7 +347,9 @@ export function perplexitySplitQuestions(text: string): PerplexitySplitQuestions
     const open =
         questions.turns.some((turn) => turn.paragraphs.length > 0) ||
         questions.boundaries.length > 0;
-    return open ? questions : null;
+    if (!open) return null;
+    const bytes = new TextEncoder().encode(JSON.stringify(questions)).length;
+    return bytes <= PERPLEXITY_SPLIT_LIMITS.maxRequestBytes ? questions : null;
 }
 
 /**

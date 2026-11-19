@@ -90,6 +90,16 @@ test("excerpts are bounded and a file past the turn limit asks nothing", () => {
     assert.equal(perplexitySplitQuestions(`${LOGO}\n\n${many}`), null);
 });
 
+test("questions past the request size bound are not asked at all", () => {
+    // 150 turns of three 600-character paragraphs of 3-byte characters: well
+    // inside the turn limit, well past 256 KiB.
+    const para = "가".repeat(600);
+    const turns = Array.from({ length: 150 }, (_, i) => `# q${i}\n\n${para}\n\n${para}\n\n${para}\n\nA.[^${i + 1}_1]\n\n[^${i + 1}_1]: https://e.com/${i}\n`).join("\n---\n\n");
+    assert.equal(perplexitySplitQuestions(`${LOGO}\n\n${turns}`), null);
+    const fits = perplexitySplitQuestions(THREAD);
+    assert.ok(new TextEncoder().encode(JSON.stringify(fits)).length <= PERPLEXITY_SPLIT_LIMITS.maxRequestBytes);
+});
+
 test("a file with nothing open asks nothing", () => {
     assert.equal(perplexitySplitQuestions(`${LOGO}\n\n# q\n\n\`\`\`\ncode first\n\`\`\`\n`), null);
 });

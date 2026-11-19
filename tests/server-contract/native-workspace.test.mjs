@@ -231,3 +231,15 @@ test("web handlers keep using their cookie owner while native workspace access i
     }
   } finally { cookieOwner = "cookie-owner"; enable(); }
 });
+
+test("Perplexity split hints are enrolled for the native workspace as POST only, and only with the rollout on", () => {
+  const path = "/api/imports/external/perplexity-split";
+  assert.equal(nativeWorkspaceBearerRoute(path, "POST"), false);
+  assert.equal(nativeWorkspaceBearerRoute(path, "POST", true), true);
+  for (const method of ["GET", "PUT", "PATCH", "DELETE"]) assert.equal(nativeWorkspaceBearerRoute(path, method, true), false, method);
+  for (const other of ["/api/imports/external/perplexity-split/extra", "/api/imports/external/perplexity-split%2Fx"]) {
+    assert.equal(nativeWorkspaceBearerRoute(other, "POST", true), false, other);
+  }
+  assert.equal(nativeParityBearerRoute(path, "POST", true, true), true);
+  assert.equal(nativeParityBearerRoute(path, "POST", true, false), false);
+});
