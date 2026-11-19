@@ -911,7 +911,7 @@ export const infoPages = {
       },
       {
         "title": "보안과 데이터 처리",
-        "body": "답변을 만드는 AI 공급자는 그 답변에 필요한 질문과 자료를 처리합니다. Auto를 쓰면 Tomverse가 공급자를 고르고, 대화 제목 만들기 같은 일부 보조 단계는 Tomverse가 정한 공급자가 처리합니다. 대화를 잠그면 비밀번호를 입력해야 열고 공유·다운로드할 수 있으며, 잠금은 대화를 암호화하지 않습니다. 공유 링크는 만든 시점의 대화 텍스트를 보여 주고, 일정 기간 뒤 자동으로 만료되며, 공유를 끄면 삭제됩니다. 공급자와 국가, 보관과 삭제는 개인정보 처리방침에서 확인하세요.",
+        "body": "답변을 만드는 AI 공급자는 그 답변에 필요한 질문과 자료를 처리합니다. Auto를 쓰면 Tomverse가 공급자를 고르고, 대화 제목 만들기 같은 일부 보조 단계는 Tomverse가 정한 공급자가 처리합니다. 대화를 잠그면 비밀번호를 입력해야 열고 공유·다운로드할 수 있으며, 잠금은 대화를 암호화하지 않고, 이미 만든 공유 링크도 닫지 않습니다. 공유 링크는 만든 시점의 대화 텍스트를 보여 주고, 일정 기간 뒤 자동으로 만료되며, 공유를 끄면 삭제됩니다. 공급자와 국가, 보관과 삭제는 개인정보 처리방침에서 확인하세요.",
         "link": { "label": "개인정보 처리방침 보기", "href": "/privacy" }
       },
       {
@@ -932,7 +932,7 @@ export const infoPages = {
       },
       {
         "title": "Security and data handling",
-        "body": "The AI provider that writes an answer processes the question and material needed for it. With Auto, Tomverse chooses that provider, and some helper steps such as conversation titles use a provider Tomverse chooses. Locking a conversation means its password is needed to open, share or download it; locking does not encrypt it. A share link shows the conversation's text as it was when you created it, expires automatically and is deleted when you turn sharing off. Read the privacy policy for providers, countries, retention and deletion.",
+        "body": "The AI provider that writes an answer processes the question and material needed for it. With Auto, Tomverse chooses that provider, and some helper steps such as conversation titles use a provider Tomverse chooses. Locking a conversation means its password is needed to open, share or download it; locking does not encrypt it or close a share link that already exists. A share link shows the conversation's text as it was when you created it, expires automatically and is deleted when you turn sharing off. Read the privacy policy for providers, countries, retention and deletion.",
         "link": { "label": "Read the privacy policy", "href": "/privacy" }
       },
       {
@@ -953,7 +953,7 @@ export const infoPages = {
       },
       {
         "title": "安全与数据处理",
-        "body": "生成回答的 AI 提供商会处理该回答所需的问题和资料。使用 Auto 时由 Tomverse 选择提供商，生成对话标题等部分辅助步骤由 Tomverse 选定的提供商处理。锁定对话后，需要输入密码才能打开、分享或下载；锁定不会加密对话。分享链接显示创建时的对话文字，会自动过期，关闭分享后即删除。提供商、所在国家、保留和删除详情请查看隐私政策。",
+        "body": "生成回答的 AI 提供商会处理该回答所需的问题和资料。使用 Auto 时由 Tomverse 选择提供商，生成对话标题等部分辅助步骤由 Tomverse 选定的提供商处理。锁定对话后，需要输入密码才能打开、分享或下载；锁定不会加密对话，也不会关闭已存在的分享链接。分享链接显示创建时的对话文字，会自动过期，关闭分享后即删除。提供商、所在国家、保留和删除详情请查看隐私政策。",
         "link": { "label": "查看隐私政策", "href": "/privacy" }
       },
       {
@@ -974,7 +974,7 @@ export const infoPages = {
       },
       {
         "title": "安全與資料處理",
-        "body": "生成回答的 AI 供應商會處理該回答所需的問題和資料。使用 Auto 時由 Tomverse 選擇供應商，產生對話標題等部分輔助步驟由 Tomverse 選定的供應商處理。鎖定對話後，需要輸入密碼才能開啟、分享或下載；鎖定不會加密對話。分享連結顯示建立時的對話文字，會自動過期，關閉分享後即刪除。供應商、所在國家、保留與刪除詳情請查看隱私權政策。",
+        "body": "生成回答的 AI 供應商會處理該回答所需的問題和資料。使用 Auto 時由 Tomverse 選擇供應商，產生對話標題等部分輔助步驟由 Tomverse 選定的供應商處理。鎖定對話後，需要輸入密碼才能開啟、分享或下載；鎖定不會加密對話，也不會關閉已存在的分享連結。分享連結顯示建立時的對話文字，會自動過期，關閉分享後即刪除。供應商、所在國家、保留與刪除詳情請查看隱私權政策。",
         "link": { "label": "查看隱私權政策", "href": "/privacy" }
       },
       {
@@ -995,7 +995,7 @@ export const infoPages = {
       },
       {
         "title": "Sécurité et traitement des données",
-        "body": "Le fournisseur d’IA qui rédige une réponse traite la question et les documents nécessaires. Avec Auto, Tomverse choisit ce fournisseur, et certaines étapes d’assistance, comme les titres de conversation, utilisent un fournisseur choisi par Tomverse. Une conversation verrouillée ne s’ouvre, ne se partage et ne se télécharge qu’avec son mot de passe ; le verrou ne la chiffre pas. Un lien de partage montre le texte tel qu’il était à sa création, expire automatiquement et est supprimé quand vous désactivez le partage. Consultez la politique de confidentialité pour les fournisseurs, les pays, la conservation et la suppression.",
+        "body": "Le fournisseur d’IA qui rédige une réponse traite la question et les documents nécessaires. Avec Auto, Tomverse choisit ce fournisseur, et certaines étapes d’assistance, comme les titres de conversation, utilisent un fournisseur choisi par Tomverse. Une conversation verrouillée ne s’ouvre, ne se partage et ne se télécharge qu’avec son mot de passe ; le verrou ne la chiffre pas et ne ferme pas un lien de partage déjà créé. Un lien de partage montre le texte tel qu’il était à sa création, expire automatiquement et est supprimé quand vous désactivez le partage. Consultez la politique de confidentialité pour les fournisseurs, les pays, la conservation et la suppression.",
         "link": { "label": "Lire la politique de confidentialité", "href": "/privacy" }
       },
       {
@@ -1016,7 +1016,7 @@ export const infoPages = {
       },
       {
         "title": "Sicherheit und Datenverarbeitung",
-        "body": "Der KI-Anbieter, der eine Antwort schreibt, verarbeitet die dafür nötige Frage und das Material. Mit Auto wählt Tomverse diesen Anbieter, und einige Hilfsschritte wie Unterhaltungstitel nutzen einen von Tomverse gewählten Anbieter. Eine gesperrte Unterhaltung lässt sich nur mit ihrem Passwort öffnen, teilen oder herunterladen; die Sperre verschlüsselt sie nicht. Ein Freigabelink zeigt den Text so, wie er beim Erstellen war, läuft automatisch ab und wird gelöscht, wenn Sie das Teilen beenden. Anbieter, Länder, Aufbewahrung und Löschung finden Sie in der Datenschutzerklärung.",
+        "body": "Der KI-Anbieter, der eine Antwort schreibt, verarbeitet die dafür nötige Frage und das Material. Mit Auto wählt Tomverse diesen Anbieter, und einige Hilfsschritte wie Unterhaltungstitel nutzen einen von Tomverse gewählten Anbieter. Eine gesperrte Unterhaltung lässt sich nur mit ihrem Passwort öffnen, teilen oder herunterladen; die Sperre verschlüsselt sie nicht und schließt keinen bestehenden Freigabelink. Ein Freigabelink zeigt den Text so, wie er beim Erstellen war, läuft automatisch ab und wird gelöscht, wenn Sie das Teilen beenden. Anbieter, Länder, Aufbewahrung und Löschung finden Sie in der Datenschutzerklärung.",
         "link": { "label": "Datenschutzerklärung lesen", "href": "/privacy" }
       },
       {
@@ -1037,7 +1037,7 @@ export const infoPages = {
       },
       {
         "title": "Seguridad y tratamiento de datos",
-        "body": "El proveedor de IA que redacta una respuesta procesa la pregunta y el material necesarios. Con Auto, Tomverse elige ese proveedor, y algunos pasos auxiliares, como los títulos de conversación, usan un proveedor elegido por Tomverse. Una conversación bloqueada solo se abre, comparte o descarga con su contraseña; el bloqueo no la cifra. Un enlace compartido muestra el texto tal como estaba al crearlo, caduca automáticamente y se elimina al desactivar el uso compartido. Consulta la política de privacidad para ver proveedores, países, conservación y eliminación.",
+        "body": "El proveedor de IA que redacta una respuesta procesa la pregunta y el material necesarios. Con Auto, Tomverse elige ese proveedor, y algunos pasos auxiliares, como los títulos de conversación, usan un proveedor elegido por Tomverse. Una conversación bloqueada solo se abre, comparte o descarga con su contraseña; el bloqueo no la cifra ni cierra un enlace compartido existente. Un enlace compartido muestra el texto tal como estaba al crearlo, caduca automáticamente y se elimina al desactivar el uso compartido. Consulta la política de privacidad para ver proveedores, países, conservación y eliminación.",
         "link": { "label": "Leer la política de privacidad", "href": "/privacy" }
       },
       {
@@ -1058,7 +1058,7 @@ export const infoPages = {
       },
       {
         "title": "Segurança e tratamento de dados",
-        "body": "O provedor de IA que escreve uma resposta processa a pergunta e o material necessários. Com Auto, a Tomverse escolhe esse provedor, e algumas etapas auxiliares, como os títulos das conversas, usam um provedor escolhido pela Tomverse. Uma conversa bloqueada só abre, é compartilhada ou baixada com a senha; o bloqueio não a criptografa. Um link de compartilhamento mostra o texto como estava ao ser criado, expira automaticamente e é excluído quando você desativa o compartilhamento. Veja a política de privacidade para provedores, países, retenção e exclusão.",
+        "body": "O provedor de IA que escreve uma resposta processa a pergunta e o material necessários. Com Auto, a Tomverse escolhe esse provedor, e algumas etapas auxiliares, como os títulos das conversas, usam um provedor escolhido pela Tomverse. Uma conversa bloqueada só abre, é compartilhada ou baixada com a senha; o bloqueio não a criptografa nem fecha um link de compartilhamento já existente. Um link de compartilhamento mostra o texto como estava ao ser criado, expira automaticamente e é excluído quando você desativa o compartilhamento. Veja a política de privacidade para provedores, países, retenção e exclusão.",
         "link": { "label": "Ler a política de privacidade", "href": "/privacy" }
       },
       {
@@ -1402,11 +1402,11 @@ export const focusedSafetyPages = {
     "ko": {
       "eyebrow": "안전과 데이터 처리",
       "title": "보안과 데이터 처리",
-      "description": "답변을 만드는 AI 공급자는 그 답변에 필요한 질문과 자료를 처리합니다. Auto를 쓰면 Tomverse가 공급자를 고르고, 대화 제목 만들기 같은 일부 보조 단계는 Tomverse가 정한 공급자가 처리합니다. 대화를 잠그면 비밀번호를 입력해야 열고 공유·다운로드할 수 있으며, 잠금은 대화를 암호화하지 않습니다. 공유 링크는 만든 시점의 대화 텍스트를 보여 주고, 일정 기간 뒤 자동으로 만료되며, 공유를 끄면 삭제됩니다. 공급자와 국가, 보관과 삭제는 개인정보 처리방침에서 확인하세요.",
+      "description": "답변을 만드는 AI 공급자는 그 답변에 필요한 질문과 자료를 처리합니다. Auto를 쓰면 Tomverse가 공급자를 고르고, 대화 제목 만들기 같은 일부 보조 단계는 Tomverse가 정한 공급자가 처리합니다. 대화를 잠그면 비밀번호를 입력해야 열고 공유·다운로드할 수 있으며, 잠금은 대화를 암호화하지 않고, 이미 만든 공유 링크도 닫지 않습니다. 공유 링크는 만든 시점의 대화 텍스트를 보여 주고, 일정 기간 뒤 자동으로 만료되며, 공유를 끄면 삭제됩니다. 공급자와 국가, 보관과 삭제는 개인정보 처리방침에서 확인하세요.",
       "sections": [
         {
           "title": "보안과 데이터 처리",
-          "body": "답변을 만드는 AI 공급자는 그 답변에 필요한 질문과 자료를 처리합니다. Auto를 쓰면 Tomverse가 공급자를 고르고, 대화 제목 만들기 같은 일부 보조 단계는 Tomverse가 정한 공급자가 처리합니다. 대화를 잠그면 비밀번호를 입력해야 열고 공유·다운로드할 수 있으며, 잠금은 대화를 암호화하지 않습니다. 공유 링크는 만든 시점의 대화 텍스트를 보여 주고, 일정 기간 뒤 자동으로 만료되며, 공유를 끄면 삭제됩니다. 공급자와 국가, 보관과 삭제는 개인정보 처리방침에서 확인하세요.",
+          "body": "답변을 만드는 AI 공급자는 그 답변에 필요한 질문과 자료를 처리합니다. Auto를 쓰면 Tomverse가 공급자를 고르고, 대화 제목 만들기 같은 일부 보조 단계는 Tomverse가 정한 공급자가 처리합니다. 대화를 잠그면 비밀번호를 입력해야 열고 공유·다운로드할 수 있으며, 잠금은 대화를 암호화하지 않고, 이미 만든 공유 링크도 닫지 않습니다. 공유 링크는 만든 시점의 대화 텍스트를 보여 주고, 일정 기간 뒤 자동으로 만료되며, 공유를 끄면 삭제됩니다. 공급자와 국가, 보관과 삭제는 개인정보 처리방침에서 확인하세요.",
           "link": { "label": "개인정보 처리방침 보기", "href": "/privacy" }
         }
       ]
@@ -1414,11 +1414,11 @@ export const focusedSafetyPages = {
     "en": {
       "eyebrow": "Safety and data handling",
       "title": "Security and data handling",
-      "description": "The AI provider that writes an answer processes the question and material needed for it. With Auto, Tomverse chooses that provider, and some helper steps such as conversation titles use a provider Tomverse chooses. Locking a conversation means its password is needed to open, share or download it; locking does not encrypt it. A share link shows the conversation's text as it was when you created it, expires automatically and is deleted when you turn sharing off. Read the privacy policy for providers, countries, retention and deletion.",
+      "description": "The AI provider that writes an answer processes the question and material needed for it. With Auto, Tomverse chooses that provider, and some helper steps such as conversation titles use a provider Tomverse chooses. Locking a conversation means its password is needed to open, share or download it; locking does not encrypt it or close a share link that already exists. A share link shows the conversation's text as it was when you created it, expires automatically and is deleted when you turn sharing off. Read the privacy policy for providers, countries, retention and deletion.",
       "sections": [
         {
           "title": "Security and data handling",
-          "body": "The AI provider that writes an answer processes the question and material needed for it. With Auto, Tomverse chooses that provider, and some helper steps such as conversation titles use a provider Tomverse chooses. Locking a conversation means its password is needed to open, share or download it; locking does not encrypt it. A share link shows the conversation's text as it was when you created it, expires automatically and is deleted when you turn sharing off. Read the privacy policy for providers, countries, retention and deletion.",
+          "body": "The AI provider that writes an answer processes the question and material needed for it. With Auto, Tomverse chooses that provider, and some helper steps such as conversation titles use a provider Tomverse chooses. Locking a conversation means its password is needed to open, share or download it; locking does not encrypt it or close a share link that already exists. A share link shows the conversation's text as it was when you created it, expires automatically and is deleted when you turn sharing off. Read the privacy policy for providers, countries, retention and deletion.",
           "link": { "label": "Read the privacy policy", "href": "/privacy" }
         }
       ]
@@ -1426,11 +1426,11 @@ export const focusedSafetyPages = {
     "zh": {
       "eyebrow": "安全与数据处理",
       "title": "安全与数据处理",
-      "description": "生成回答的 AI 提供商会处理该回答所需的问题和资料。使用 Auto 时由 Tomverse 选择提供商，生成对话标题等部分辅助步骤由 Tomverse 选定的提供商处理。锁定对话后，需要输入密码才能打开、分享或下载；锁定不会加密对话。分享链接显示创建时的对话文字，会自动过期，关闭分享后即删除。提供商、所在国家、保留和删除详情请查看隐私政策。",
+      "description": "生成回答的 AI 提供商会处理该回答所需的问题和资料。使用 Auto 时由 Tomverse 选择提供商，生成对话标题等部分辅助步骤由 Tomverse 选定的提供商处理。锁定对话后，需要输入密码才能打开、分享或下载；锁定不会加密对话，也不会关闭已存在的分享链接。分享链接显示创建时的对话文字，会自动过期，关闭分享后即删除。提供商、所在国家、保留和删除详情请查看隐私政策。",
       "sections": [
         {
           "title": "安全与数据处理",
-          "body": "生成回答的 AI 提供商会处理该回答所需的问题和资料。使用 Auto 时由 Tomverse 选择提供商，生成对话标题等部分辅助步骤由 Tomverse 选定的提供商处理。锁定对话后，需要输入密码才能打开、分享或下载；锁定不会加密对话。分享链接显示创建时的对话文字，会自动过期，关闭分享后即删除。提供商、所在国家、保留和删除详情请查看隐私政策。",
+          "body": "生成回答的 AI 提供商会处理该回答所需的问题和资料。使用 Auto 时由 Tomverse 选择提供商，生成对话标题等部分辅助步骤由 Tomverse 选定的提供商处理。锁定对话后，需要输入密码才能打开、分享或下载；锁定不会加密对话，也不会关闭已存在的分享链接。分享链接显示创建时的对话文字，会自动过期，关闭分享后即删除。提供商、所在国家、保留和删除详情请查看隐私政策。",
           "link": { "label": "查看隐私政策", "href": "/privacy" }
         }
       ]
@@ -1438,11 +1438,11 @@ export const focusedSafetyPages = {
     "zh-Hant": {
       "eyebrow": "安全與資料處理",
       "title": "安全與資料處理",
-      "description": "生成回答的 AI 供應商會處理該回答所需的問題和資料。使用 Auto 時由 Tomverse 選擇供應商，產生對話標題等部分輔助步驟由 Tomverse 選定的供應商處理。鎖定對話後，需要輸入密碼才能開啟、分享或下載；鎖定不會加密對話。分享連結顯示建立時的對話文字，會自動過期，關閉分享後即刪除。供應商、所在國家、保留與刪除詳情請查看隱私權政策。",
+      "description": "生成回答的 AI 供應商會處理該回答所需的問題和資料。使用 Auto 時由 Tomverse 選擇供應商，產生對話標題等部分輔助步驟由 Tomverse 選定的供應商處理。鎖定對話後，需要輸入密碼才能開啟、分享或下載；鎖定不會加密對話，也不會關閉已存在的分享連結。分享連結顯示建立時的對話文字，會自動過期，關閉分享後即刪除。供應商、所在國家、保留與刪除詳情請查看隱私權政策。",
       "sections": [
         {
           "title": "安全與資料處理",
-          "body": "生成回答的 AI 供應商會處理該回答所需的問題和資料。使用 Auto 時由 Tomverse 選擇供應商，產生對話標題等部分輔助步驟由 Tomverse 選定的供應商處理。鎖定對話後，需要輸入密碼才能開啟、分享或下載；鎖定不會加密對話。分享連結顯示建立時的對話文字，會自動過期，關閉分享後即刪除。供應商、所在國家、保留與刪除詳情請查看隱私權政策。",
+          "body": "生成回答的 AI 供應商會處理該回答所需的問題和資料。使用 Auto 時由 Tomverse 選擇供應商，產生對話標題等部分輔助步驟由 Tomverse 選定的供應商處理。鎖定對話後，需要輸入密碼才能開啟、分享或下載；鎖定不會加密對話，也不會關閉已存在的分享連結。分享連結顯示建立時的對話文字，會自動過期，關閉分享後即刪除。供應商、所在國家、保留與刪除詳情請查看隱私權政策。",
           "link": { "label": "查看隱私權政策", "href": "/privacy" }
         }
       ]
@@ -1450,11 +1450,11 @@ export const focusedSafetyPages = {
     "fr": {
       "eyebrow": "Sécurité et traitement des données",
       "title": "Sécurité et traitement des données",
-      "description": "Le fournisseur d’IA qui rédige une réponse traite la question et les documents nécessaires. Avec Auto, Tomverse choisit ce fournisseur, et certaines étapes d’assistance, comme les titres de conversation, utilisent un fournisseur choisi par Tomverse. Une conversation verrouillée ne s’ouvre, ne se partage et ne se télécharge qu’avec son mot de passe ; le verrou ne la chiffre pas. Un lien de partage montre le texte tel qu’il était à sa création, expire automatiquement et est supprimé quand vous désactivez le partage. Consultez la politique de confidentialité pour les fournisseurs, les pays, la conservation et la suppression.",
+      "description": "Le fournisseur d’IA qui rédige une réponse traite la question et les documents nécessaires. Avec Auto, Tomverse choisit ce fournisseur, et certaines étapes d’assistance, comme les titres de conversation, utilisent un fournisseur choisi par Tomverse. Une conversation verrouillée ne s’ouvre, ne se partage et ne se télécharge qu’avec son mot de passe ; le verrou ne la chiffre pas et ne ferme pas un lien de partage déjà créé. Un lien de partage montre le texte tel qu’il était à sa création, expire automatiquement et est supprimé quand vous désactivez le partage. Consultez la politique de confidentialité pour les fournisseurs, les pays, la conservation et la suppression.",
       "sections": [
         {
           "title": "Sécurité et traitement des données",
-          "body": "Le fournisseur d’IA qui rédige une réponse traite la question et les documents nécessaires. Avec Auto, Tomverse choisit ce fournisseur, et certaines étapes d’assistance, comme les titres de conversation, utilisent un fournisseur choisi par Tomverse. Une conversation verrouillée ne s’ouvre, ne se partage et ne se télécharge qu’avec son mot de passe ; le verrou ne la chiffre pas. Un lien de partage montre le texte tel qu’il était à sa création, expire automatiquement et est supprimé quand vous désactivez le partage. Consultez la politique de confidentialité pour les fournisseurs, les pays, la conservation et la suppression.",
+          "body": "Le fournisseur d’IA qui rédige une réponse traite la question et les documents nécessaires. Avec Auto, Tomverse choisit ce fournisseur, et certaines étapes d’assistance, comme les titres de conversation, utilisent un fournisseur choisi par Tomverse. Une conversation verrouillée ne s’ouvre, ne se partage et ne se télécharge qu’avec son mot de passe ; le verrou ne la chiffre pas et ne ferme pas un lien de partage déjà créé. Un lien de partage montre le texte tel qu’il était à sa création, expire automatiquement et est supprimé quand vous désactivez le partage. Consultez la politique de confidentialité pour les fournisseurs, les pays, la conservation et la suppression.",
           "link": { "label": "Lire la politique de confidentialité", "href": "/privacy" }
         }
       ]
@@ -1462,11 +1462,11 @@ export const focusedSafetyPages = {
     "de": {
       "eyebrow": "Sicherheit und Datenverarbeitung",
       "title": "Sicherheit und Datenverarbeitung",
-      "description": "Der KI-Anbieter, der eine Antwort schreibt, verarbeitet die dafür nötige Frage und das Material. Mit Auto wählt Tomverse diesen Anbieter, und einige Hilfsschritte wie Unterhaltungstitel nutzen einen von Tomverse gewählten Anbieter. Eine gesperrte Unterhaltung lässt sich nur mit ihrem Passwort öffnen, teilen oder herunterladen; die Sperre verschlüsselt sie nicht. Ein Freigabelink zeigt den Text so, wie er beim Erstellen war, läuft automatisch ab und wird gelöscht, wenn Sie das Teilen beenden. Anbieter, Länder, Aufbewahrung und Löschung finden Sie in der Datenschutzerklärung.",
+      "description": "Der KI-Anbieter, der eine Antwort schreibt, verarbeitet die dafür nötige Frage und das Material. Mit Auto wählt Tomverse diesen Anbieter, und einige Hilfsschritte wie Unterhaltungstitel nutzen einen von Tomverse gewählten Anbieter. Eine gesperrte Unterhaltung lässt sich nur mit ihrem Passwort öffnen, teilen oder herunterladen; die Sperre verschlüsselt sie nicht und schließt keinen bestehenden Freigabelink. Ein Freigabelink zeigt den Text so, wie er beim Erstellen war, läuft automatisch ab und wird gelöscht, wenn Sie das Teilen beenden. Anbieter, Länder, Aufbewahrung und Löschung finden Sie in der Datenschutzerklärung.",
       "sections": [
         {
           "title": "Sicherheit und Datenverarbeitung",
-          "body": "Der KI-Anbieter, der eine Antwort schreibt, verarbeitet die dafür nötige Frage und das Material. Mit Auto wählt Tomverse diesen Anbieter, und einige Hilfsschritte wie Unterhaltungstitel nutzen einen von Tomverse gewählten Anbieter. Eine gesperrte Unterhaltung lässt sich nur mit ihrem Passwort öffnen, teilen oder herunterladen; die Sperre verschlüsselt sie nicht. Ein Freigabelink zeigt den Text so, wie er beim Erstellen war, läuft automatisch ab und wird gelöscht, wenn Sie das Teilen beenden. Anbieter, Länder, Aufbewahrung und Löschung finden Sie in der Datenschutzerklärung.",
+          "body": "Der KI-Anbieter, der eine Antwort schreibt, verarbeitet die dafür nötige Frage und das Material. Mit Auto wählt Tomverse diesen Anbieter, und einige Hilfsschritte wie Unterhaltungstitel nutzen einen von Tomverse gewählten Anbieter. Eine gesperrte Unterhaltung lässt sich nur mit ihrem Passwort öffnen, teilen oder herunterladen; die Sperre verschlüsselt sie nicht und schließt keinen bestehenden Freigabelink. Ein Freigabelink zeigt den Text so, wie er beim Erstellen war, läuft automatisch ab und wird gelöscht, wenn Sie das Teilen beenden. Anbieter, Länder, Aufbewahrung und Löschung finden Sie in der Datenschutzerklärung.",
           "link": { "label": "Datenschutzerklärung lesen", "href": "/privacy" }
         }
       ]
@@ -1474,11 +1474,11 @@ export const focusedSafetyPages = {
     "es": {
       "eyebrow": "Seguridad y tratamiento de datos",
       "title": "Seguridad y tratamiento de datos",
-      "description": "El proveedor de IA que redacta una respuesta procesa la pregunta y el material necesarios. Con Auto, Tomverse elige ese proveedor, y algunos pasos auxiliares, como los títulos de conversación, usan un proveedor elegido por Tomverse. Una conversación bloqueada solo se abre, comparte o descarga con su contraseña; el bloqueo no la cifra. Un enlace compartido muestra el texto tal como estaba al crearlo, caduca automáticamente y se elimina al desactivar el uso compartido. Consulta la política de privacidad para ver proveedores, países, conservación y eliminación.",
+      "description": "El proveedor de IA que redacta una respuesta procesa la pregunta y el material necesarios. Con Auto, Tomverse elige ese proveedor, y algunos pasos auxiliares, como los títulos de conversación, usan un proveedor elegido por Tomverse. Una conversación bloqueada solo se abre, comparte o descarga con su contraseña; el bloqueo no la cifra ni cierra un enlace compartido existente. Un enlace compartido muestra el texto tal como estaba al crearlo, caduca automáticamente y se elimina al desactivar el uso compartido. Consulta la política de privacidad para ver proveedores, países, conservación y eliminación.",
       "sections": [
         {
           "title": "Seguridad y tratamiento de datos",
-          "body": "El proveedor de IA que redacta una respuesta procesa la pregunta y el material necesarios. Con Auto, Tomverse elige ese proveedor, y algunos pasos auxiliares, como los títulos de conversación, usan un proveedor elegido por Tomverse. Una conversación bloqueada solo se abre, comparte o descarga con su contraseña; el bloqueo no la cifra. Un enlace compartido muestra el texto tal como estaba al crearlo, caduca automáticamente y se elimina al desactivar el uso compartido. Consulta la política de privacidad para ver proveedores, países, conservación y eliminación.",
+          "body": "El proveedor de IA que redacta una respuesta procesa la pregunta y el material necesarios. Con Auto, Tomverse elige ese proveedor, y algunos pasos auxiliares, como los títulos de conversación, usan un proveedor elegido por Tomverse. Una conversación bloqueada solo se abre, comparte o descarga con su contraseña; el bloqueo no la cifra ni cierra un enlace compartido existente. Un enlace compartido muestra el texto tal como estaba al crearlo, caduca automáticamente y se elimina al desactivar el uso compartido. Consulta la política de privacidad para ver proveedores, países, conservación y eliminación.",
           "link": { "label": "Leer la política de privacidad", "href": "/privacy" }
         }
       ]
@@ -1486,11 +1486,11 @@ export const focusedSafetyPages = {
     "pt": {
       "eyebrow": "Segurança e tratamento de dados",
       "title": "Segurança e tratamento de dados",
-      "description": "O provedor de IA que escreve uma resposta processa a pergunta e o material necessários. Com Auto, a Tomverse escolhe esse provedor, e algumas etapas auxiliares, como os títulos das conversas, usam um provedor escolhido pela Tomverse. Uma conversa bloqueada só abre, é compartilhada ou baixada com a senha; o bloqueio não a criptografa. Um link de compartilhamento mostra o texto como estava ao ser criado, expira automaticamente e é excluído quando você desativa o compartilhamento. Veja a política de privacidade para provedores, países, retenção e exclusão.",
+      "description": "O provedor de IA que escreve uma resposta processa a pergunta e o material necessários. Com Auto, a Tomverse escolhe esse provedor, e algumas etapas auxiliares, como os títulos das conversas, usam um provedor escolhido pela Tomverse. Uma conversa bloqueada só abre, é compartilhada ou baixada com a senha; o bloqueio não a criptografa nem fecha um link de compartilhamento já existente. Um link de compartilhamento mostra o texto como estava ao ser criado, expira automaticamente e é excluído quando você desativa o compartilhamento. Veja a política de privacidade para provedores, países, retenção e exclusão.",
       "sections": [
         {
           "title": "Segurança e tratamento de dados",
-          "body": "O provedor de IA que escreve uma resposta processa a pergunta e o material necessários. Com Auto, a Tomverse escolhe esse provedor, e algumas etapas auxiliares, como os títulos das conversas, usam um provedor escolhido pela Tomverse. Uma conversa bloqueada só abre, é compartilhada ou baixada com a senha; o bloqueio não a criptografa. Um link de compartilhamento mostra o texto como estava ao ser criado, expira automaticamente e é excluído quando você desativa o compartilhamento. Veja a política de privacidade para provedores, países, retenção e exclusão.",
+          "body": "O provedor de IA que escreve uma resposta processa a pergunta e o material necessários. Com Auto, a Tomverse escolhe esse provedor, e algumas etapas auxiliares, como os títulos das conversas, usam um provedor escolhido pela Tomverse. Uma conversa bloqueada só abre, é compartilhada ou baixada com a senha; o bloqueio não a criptografa nem fecha um link de compartilhamento já existente. Um link de compartilhamento mostra o texto como estava ao ser criado, expira automaticamente e é excluído quando você desativa o compartilhamento. Veja a política de privacidade para provedores, países, retenção e exclusão.",
           "link": { "label": "Ler a política de privacidade", "href": "/privacy" }
         }
       ]
