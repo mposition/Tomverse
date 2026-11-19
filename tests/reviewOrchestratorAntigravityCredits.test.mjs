@@ -18,6 +18,7 @@ import {
   antigravityQuotaFromUsage,
   antigravityStdin,
 } from "../tools/review-orchestrator/lib/antigravity.mjs";
+import { eligibleProviders, planAssignments } from "../tools/review-orchestrator/lib/assign.mjs";
 import { validateConfig } from "../tools/review-orchestrator/lib/config.mjs";
 import { isInstructionPath } from "../tools/review-orchestrator/lib/git.mjs";
 import { codexQuotaFromUsage } from "../tools/review-orchestrator/lib/quota.mjs";
@@ -106,15 +107,53 @@ test("the example config validates, with Antigravity off and Codex credits off u
   const example = JSON.parse(readFileSync(resolve("tools/review-orchestrator/config.example.json"), "utf8"));
   validateConfig(example);
   const byId = Object.fromEntries(example.providers.map((provider) => [provider.id, provider]));
-  assert.equal(byId.antigravity.enabled, false);
-  assert.equal(byId.antigravity.vendor, "google");
+  assert.equal(byId["antigravity-argon"].enabled, false);
+  assert.equal(byId["antigravity-argon"].vendor, "google");
   assert.equal(byId.codex.useCredits, false);
-  assert.deepEqual(byId.antigravity.quotaGroups, ["Gemini 4 Argon"]);
-  assert.equal(byId.antigravity.model.startsWith("gemini-4-argon"), true);
+  assert.deepEqual(byId["antigravity-argon"].quotaGroups, ["Gemini 4 Argon"]);
+  assert.equal(byId["antigravity-argon"].model.startsWith("gemini-4-argon"), true);
   // The deny rules are real JSON agy can read, and they shut every tool but reads.
-  const settings = JSON.parse(byId.antigravity.args[byId.antigravity.args.indexOf("--settings") + 1]);
+  const settings = JSON.parse(byId["antigravity-argon"].args[byId["antigravity-argon"].args.indexOf("--settings") + 1]);
   assert.deepEqual(settings.permissions.deny,
     ["command(*)", "write_file(*)", "read_url(*)", "execute_url(*)", "mcp(*)"]);
+});
+
+test("each agy model lane is bounded by its own usage group and vendored by its model, all on the same read-only args", () => {
+  const example = validateConfig(JSON.parse(readFileSync(resolve("tools/review-orchestrator/config.example.json"), "utf8")));
+  const lanes = example.providers.filter((provider) => provider.quotaProbe === "antigravity");
+  // agy 1.5.4 /usage on the box (2026-11-19): Hydrogen is in "Gemini Models",
+  // Claude Opus 5.5 in "Claude and GPT models", Argon apart in its own group.
+  assert.deepEqual(lanes.map((p) => [p.id, p.vendor, p.model, p.quotaGroups]), [
+    ["antigravity-argon", "google", "gemini-4-argon-medium", ["Gemini 4 Argon"]],
+    ["antigravity-hydrogen", "google", "gemini-4-hydrogen-high", ["Gemini Models"]],
+    ["antigravity-opus", "anthropic", "claude-opus-5-5-high", ["Claude and GPT models"]],
+  ]);
+  for (const lane of lanes) {
+    assert.equal(lane.enabled, false, lane.id);
+    assert.equal(lane.io, "antigravity-stream-json", lane.id);
+    assert.deepEqual(lane.args, byIdArgs(example, "antigravity-argon"), lane.id);
+  }
+  // Opus through agy is still an Anthropic model: never a reviewer of Claude's work.
+  const enabled = example.providers.map((p) => ({ ...p, enabled: p.quotaProbe === "antigravity" }));
+  assert.deepEqual(eligibleProviders(enabled, "anthropic").map((p) => p.id), ["antigravity-argon", "antigravity-hydrogen"]);
+  assert.deepEqual(eligibleProviders(enabled, "openai").map((p) => p.id),
+    ["antigravity-argon", "antigravity-hydrogen", "antigravity-opus"]);
+});
+
+const byIdArgs = (config, id) => config.providers.find((provider) => provider.id === id).args;
+
+test("a spent Argon week leaves the review to a Gemini or Claude lane with quota left", () => {
+  const providers = [
+    { id: "antigravity-argon", vendor: "google", enabled: true, maxConcurrent: 1 },
+    { id: "antigravity-hydrogen", vendor: "google", enabled: true, maxConcurrent: 1 },
+    { id: "antigravity-opus", vendor: "anthropic", enabled: true, maxConcurrent: 1 },
+  ];
+  const job = { id: "j", authorVendor: "openai" };
+  const decisions = planAssignments({
+    jobs: [{ job, slots: [{ index: 0, status: "queued" }, { index: 1, status: "queued" }] }],
+    providers, load: {}, now: NOW, blockedProviders: new Set(["antigravity-argon"]),
+  });
+  assert.deepEqual(decisions.map((d) => d.provider), ["antigravity-hydrogen", "antigravity-opus"]);
 });
 
 // --- agy event stream -----------------------------------------------------
@@ -138,6 +177,21 @@ test("the answer is the result event's response, from a request-review run that 
   assert.deepEqual(antigravityAnswer(jsonl(init(), { event: "telemetry" }, result())), { reason: "antigravity_event_unexpected" });
   assert.deepEqual(antigravityAnswer(jsonl(init(), result({ status: "ERROR" }))), { reason: "antigravity_no_result" });
   assert.deepEqual(antigravityAnswer(`${jsonl(init())}not json\n`), { reason: "antigravity_stream_invalid" });
+});
+
+test("Hydrogen and Opus runs stream the same events the parser accepts (agy 1.5.4, box 2026-11-19)", () => {
+  for (const model of ["gemini-4-hydrogen-low", "claude-opus-5-5-low"]) {
+    const step = (index, fields) => ({ event: "step_update", step_update: { conversation_id: "c", step_index: index,
+      state: "DONE", ...fields } });
+    const stream = jsonl(
+      { event: "init", conversation_id: "c", init: { model, cwd: "/w", permission_mode: "request-review" } },
+      step(0, { step_type: "user_input" }),
+      step(1, { step_type: "agent_response", duration_seconds: 1, usage: {} }),
+      step(2, { step_type: "tool", tool_name: "read_file", tool_info: {} }),
+      step(3, { step_type: "agent_response", text_delta: "Looks", usage: {} }),
+      result());
+    assert.deepEqual(antigravityAnswer(stream), { text: VERDICT }, model);
+  }
 });
 
 test("the prompt goes to agy as one NDJSON user event", () => {

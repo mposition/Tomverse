@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { ProviderDestinationTable } from "@/components/legal/ProviderDestinationTable";
-import { ArrowLeft, BarChart3, Bot, Database, FileUp, Mail, MapPin, MessageSquare, Mic, Scale, Search, Send, ShieldCheck, Share2, UserRound } from "lucide-react";
+import { ArrowLeft, BarChart3, Bot, Building2, Database, FileUp, ImageIcon, KeyRound, Mail, MapPin, MessageSquare, Mic, Scale, Search, Send, ShieldCheck, Share2, UserRound, Workflow } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { englishLocationNotice } from "@/locales/privacyLocation";
 import {
@@ -110,15 +110,24 @@ const sections = [
     ["purposeTitle", "purpose", Database],
     ["locationTitle", "location", MapPin],
     ["providersTitle", "providers", Send],
+    // Its own section, right after the provider table: titles, Prompt Refiner,
+    // the Auto router, image and location intent and Review's cross-review send
+    // part of the input to a provider Tomverse chooses, whichever model the
+    // user picked, so "do not choose that model" does not refuse them.
+    ["auxiliaryProcessingTitle", "auxiliaryProcessing", Workflow],
     // Its own section rather than a sentence inside "External AI providers":
     // the promise that matters here is what happens to the *recording*, and
     // that is a retention statement, not a transfer one
     // (docs/policy/voice-input.md §11.4).
     ["voiceInputTitle", "voiceInput", Mic],
     ["attachmentsTitle", "attachments", FileUp],
+    // Prompts and photos to edit go to image providers (docs/policy/image-generation.md).
+    ["imageGenerationTitle", "imageGeneration", ImageIcon],
     ["externalImportTitle", "externalImport", FileUp],
     ["memoryTitle", "memory", Database],
     ["assistantProfilesTitle", "assistantProfiles", Bot],
+    // Requests from coding tools and what is kept of them (docs/policy/external-api.md section 6).
+    ["externalApiTitle", "externalApi", KeyRound],
     // Its own section: the semantic search sends the question and candidate
     // passages to a search provider, which is a transfer the assistant-profile
     // and memory paragraphs do not describe. Hidden, with the calls, until the
@@ -136,6 +145,8 @@ const sections = [
     // whether or not they have an account, so it is not a line under a feature
     // an account holder uses (docs/policy/marketing-automation.md section 12.1).
     ["commentsTitle", "comments", MessageSquare],
+    // The non-AI companies that host, store and bill (APP 1.4(f)-(g)).
+    ["serviceProvidersTitle", "serviceProviders", Building2],
     ["analyticsTitle", "analytics", BarChart3],
     ["retentionTitle", "retention", Database],
     ["sharingTitle", "sharing", Share2],

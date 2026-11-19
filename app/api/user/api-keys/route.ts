@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import { z } from "zod";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
 import { externalApiOfferedModels } from "@/lib/externalApiCatalog";
+import { externalApiPlanAllowed } from "@/lib/externalApiCatalogCore";
 import { tomverseCliGuide } from "@/lib/externalApiCodingTools";
 import {
     EXTERNAL_API_KEY_LIMITS,
@@ -29,6 +30,11 @@ export async function GET(request: Request) {
     return withKeyManagementSession(
         request,
         async ({ userId, plan }) => withManagementReadLimit(request, userId, async () => {
+            // A Free account sees an upgrade prompt and its existing keys, which
+            // it can still revoke; nothing it could use is offered.
+            if (!externalApiPlanAllowed(plan.tier)) {
+                return managementJson(200, { enabled: false, reason: "plan_not_eligible", keys: await listExternalApiKeys(userId) });
+            }
             const baseUrl = externalApiBaseUrl(request);
             const models = await externalApiOfferedModels(plan.tier);
             return managementJson(200, {

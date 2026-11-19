@@ -2,7 +2,9 @@ import "server-only";
 import type { Session } from "next-auth";
 import { prisma } from "@/lib/prisma";
 import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
+import { getUserBillingPlan } from "@/lib/billingEntitlements";
 import { keyCreditTotals } from "@/lib/externalApiAdmission";
+import { EXTERNAL_API_PLAN_REQUIRED_MESSAGE, externalApiPlanAllowed } from "@/lib/externalApiCatalogCore";
 import {
     EXTERNAL_API_KEY_LIMITS,
     digestExternalApiKey,
@@ -100,6 +102,12 @@ export const createExternalApiKey = async (
     input: { userId: string; name: string; creditCap: number | null; expiresAt: Date | null },
     audit: AuditContext
 ) => {
+    // A Free account cannot make a key; one it made on a paid plan is refused
+    // per request instead (lib/externalApiAccess.ts).
+    const plan = await getUserBillingPlan(input.userId);
+    if (!externalApiPlanAllowed(plan.tier)) {
+        throw new ExternalApiKeyError(403, "PLAN_NOT_ELIGIBLE", EXTERNAL_API_PLAN_REQUIRED_MESSAGE);
+    }
     for (let attempt = 0; ; attempt += 1) {
         try {
             return await createExternalApiKeyOnce(input, audit);

@@ -18,7 +18,8 @@ import { estimateTextTokens } from "@/lib/chatTokenEstimate";
 import { ApiSecurityError, consumeApiRateLimit, readLimitedText } from "@/lib/apiSecurity";
 import { externalApiAdmissionHook } from "@/lib/externalApiAdmission";
 import { externalApiRunnableModels } from "@/lib/externalApiCatalog";
-import { externalApiEnabled, externalApiUserAllowed, SMART_ADAPTIVE_MODEL_ID } from "@/lib/externalApiCatalogCore";
+import { externalApiAccountAccess } from "@/lib/externalApiAccess";
+import { externalApiEnabled, SMART_ADAPTIVE_MODEL_ID } from "@/lib/externalApiCatalogCore";
 import { externalApiErrorResponse, idempotentReplay, positiveInteger } from "@/lib/externalApiInference";
 import { authenticateExternalApiKey, ExternalApiKeyError, type AuthenticatedExternalApiKey } from "@/lib/externalApiKeys";
 import { sha256Hex } from "@/lib/externalApiKeyCore";
@@ -134,9 +135,8 @@ export const authenticateNative = async (
         throw new NativeProtocolError(503, "feature_unavailable", `The Tomverse ${PROTOCOL_LABEL[spec.protocol]} API is not enabled.`);
     }
     const key = await authenticateExternalApiKey(credentialHeader(request, spec.acceptsXApiKey));
-    if (!externalApiUserAllowed(process.env, key.userId)) {
-        throw new NativeProtocolError(403, "account_not_enabled", "The Tomverse API is not enabled for this account.");
-    }
+    const access = await externalApiAccountAccess(key.userId);
+    if (!access.allowed) throw new NativeProtocolError(403, access.code, access.message);
     // The same per-account guards as Chat Completions: one bucket for every
     // generation protocol, so a second protocol is not a second allowance.
     await consumeApiRateLimit(
