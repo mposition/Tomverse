@@ -67,6 +67,11 @@ import {
 } from "@/lib/imageProviderAdapter";
 import { ImageEditSourceError, imageEditEnabled, loadImageEditInput } from "@/lib/imageEditSource";
 import {
+  detectImageMimeType,
+  readImageDimensions,
+  type ImageDimensions,
+} from "@/lib/imageDimensions";
+import {
   getImageGenerationPricing,
   IMAGE_EDIT_INPUT_MAX_EDGE_PX,
   imageEditPricing,
@@ -1477,6 +1482,42 @@ const parseSize = (size: string): { width: number; height: number } => {
   return { width: width || 0, height: height || 0 };
 };
 
+export type ProviderImageVerification =
+  | {
+      ok: true;
+      mimeType: "image/png" | "image/jpeg" | "image/webp";
+      dimensions: ImageDimensions | null;
+    }
+  | { ok: false; reason: string };
+
+/**
+ * Whether the bytes a provider returned are an image we can store and show,
+ * checked before the original is written so a broken file never becomes a
+ * completed, charged generation.
+ *
+ * The container comes from the bytes' own signature, not the provider's
+ * label. The pixels are then fully decoded: a header-only read
+ * (`metadata()`) accepts a file whose image data is truncated or corrupt,
+ * and the thumbnail path that would decode it swallows its own failure.
+ * `stats()` walks every pixel without holding a decoded copy, and sharp's
+ * default `failOn: "warning"` -- the same the thumbnail uses -- aborts on
+ * truncated or damaged data. Any throw here, a failed sharp import included,
+ * is a rejection. The bytes themselves are never modified (policy section 9).
+ */
+export const verifyProviderImageOutput = async (
+  bytes: Buffer
+): Promise<ProviderImageVerification> => {
+  try {
+    const mimeType = detectImageMimeType(bytes);
+    if (!mimeType) return { ok: false, reason: "unrecognized_image_signature" };
+    const sharp = (await import("sharp")).default;
+    await sharp(bytes).stats();
+    return { ok: true, mimeType, dimensions: readImageDimensions(bytes, mimeType) };
+  } catch (error) {
+    return { ok: false, reason: `image_decode_failed: ${String(error).slice(0, 400)}` };
+  }
+};
+
 /**
  * The processing step, claim-based so any executor (the post-response kick,
  * a future dedicated worker, or the reconciliation sweep) can run it and
@@ -1589,6 +1630,51 @@ export const processImageGeneration = async (
     }
     answered = result;
 
+    // Nothing has been written yet, so a rejection leaves no R2 object to
+    // clean up. The provider was reached and may have billed this response,
+    // so the budget charge and billed usage are kept as on a storage failure.
+    const verified = await verifyProviderImageOutput(result.imageBytes);
+    if (!verified.ok) {
+      await finalizeFailure({
+        generationId,
+        failurePhase: "provider_output_invalid",
+        publicErrorCode: "IMAGE_GENERATION_FAILED",
+        internalErrorDetail: verified.reason,
+        providerRequestId: result.providerRequestId,
+        providerRequestParams: result.requestParams,
+        releaseProviderBudget: false,
+        billed: {
+          nonImageBillableTokens: result.nonImageBillableTokens,
+          imageTokens: result.billedImageTokens,
+          imageCount: 1,
+          inputTokens: result.inputTokens,
+        },
+      });
+      return;
+    }
+    const outputWidth = verified.dimensions?.width ?? result.outputWidth;
+    const outputHeight = verified.dimensions?.height ?? result.outputHeight;
+    if (
+      verified.mimeType !== result.mimeType ||
+      outputWidth !== result.outputWidth ||
+      outputHeight !== result.outputHeight
+    ) {
+      // No prompt, no user: what the provider claimed against what the bytes say.
+      console.error(
+        JSON.stringify({
+          event: "image_provider_output_mismatch",
+          generationId,
+          modelId: generation.modelId,
+          reportedMimeType: result.mimeType,
+          detectedMimeType: verified.mimeType,
+          reportedWidth: result.outputWidth ?? null,
+          reportedHeight: result.outputHeight ?? null,
+          detectedWidth: verified.dimensions?.width ?? null,
+          detectedHeight: verified.dimensions?.height ?? null,
+        })
+      );
+    }
+
     const originalKey = imageAssetR2Key({
       userId: generation.userId,
       conversationId: generation.conversationId,
@@ -1599,7 +1685,7 @@ export const processImageGeneration = async (
       // The provider's bytes go to R2 untouched: no normalization, no
       // re-encode -- C2PA/SynthID provenance survives (policy section 9).
       // Store what the provider actually returned, unmodified (policy §9/§12).
-      await writeR2Object(originalKey, result.imageBytes, result.mimeType);
+      await writeR2Object(originalKey, result.imageBytes, verified.mimeType);
     } catch (error) {
       await prisma.imageAssetCleanup
         .createMany({
@@ -1631,15 +1717,15 @@ export const processImageGeneration = async (
     // tier (policy section 12.1), and it is the fallback only so a header
     // this parser could not read still leaves the asset row complete.
     const requestedSize = parseSize(generation.size);
-    const width = result.outputWidth ?? requestedSize.width;
-    const height = result.outputHeight ?? requestedSize.height;
+    const width = outputWidth ?? requestedSize.width;
+    const height = outputHeight ?? requestedSize.height;
     await prisma.imageAsset.create({
       data: {
         generationId,
         role: "original",
         status: "ready",
         r2Key: originalKey,
-        mimeType: result.mimeType,
+        mimeType: verified.mimeType,
         width,
         height,
         byteSize: result.imageBytes.byteLength,
@@ -1880,8 +1966,8 @@ export const processImageGeneration = async (
           providerRequestId: result.providerRequestId ?? undefined,
           // Null when the header could not be read: absent is a fact, an
           // inferred number would contradict the file it describes.
-          outputWidth: result.outputWidth,
-          outputHeight: result.outputHeight,
+          outputWidth,
+          outputHeight,
           providerRequestParams: toJsonSnapshot(result.requestParams),
         },
       });
