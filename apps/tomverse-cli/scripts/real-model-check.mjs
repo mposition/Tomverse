@@ -15,13 +15,11 @@
 // and the receipts the server returned for them.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-
-// The fixtures' own imports carry a placeholder so the control-plane analysis does not read them as this file's loads.
-const fixture = (code) => code.replaceAll("<here>", ".");
 
 const dist = new URL("../dist/", import.meta.url);
 const { Runner } = await import(new URL("agent.js", dist));
@@ -48,12 +46,22 @@ const model = catalog.find((m) => m.id === values.model);
 if (!model) throw new Error(`${values.model} is not offered to this key.`);
 
 const sha = (path) => createHash("sha256").update(readFileSync(path)).digest("hex");
-const repo = (files) => {
-    const root = realpathSync.native(mkdtempSync(join(tmpdir(), "tvcli-real-")));
-    for (const [path, content] of Object.entries(files)) {
-        mkdirSync(join(root, path, ".."), { recursive: true });
-        writeFileSync(join(root, path), content);
+// Each scenario's synthetic repository is a folder in real-model-fixtures/,
+// copied with LF line endings (real files, so the repository's import
+// analysis can follow what they import).
+const copyFixture = (from, to) => {
+    for (const entry of readdirSync(from, { withFileTypes: true })) {
+        const source = join(from, entry.name);
+        const target = join(to, entry.name);
+        if (entry.isDirectory()) {
+            mkdirSync(target, { recursive: true });
+            copyFixture(source, target);
+        } else writeFileSync(target, readFileSync(source, "utf8").replaceAll("\r\n", "\n"));
     }
+};
+const repo = (name) => {
+    const root = realpathSync.native(mkdtempSync(join(tmpdir(), "tvcli-real-")));
+    copyFixture(fileURLToPath(new URL(`./real-model-fixtures/${name}/`, import.meta.url)), root);
     return root;
 };
 const nodeTest = (root, file) => spawnSync(process.execPath, [file], { cwd: root, encoding: "utf8" }).status === 0;
@@ -91,11 +99,7 @@ const record = async (name, journal, checks) => {
 
 // 1. A single failing test.
 {
-    const root = repo({
-        "package.json": '{ "type": "module" }\n',
-        "sum.js": "export function sum(a, b) {\n  return a - b;\n}\n",
-        "test.js": fixture('import { sum } from "<here>/sum.js";\nif (sum(2, 3) !== 5) { console.error("FAIL"); process.exit(1); }\nconsole.log("PASS");\n'),
-    });
+    const root = repo("single");
     const testHash = sha(join(root, "test.js"));
     const journal = newJournal(root);
     const outcome = await newRunner(root, journal).runTask("node test.js fails. Fix the code (not the test) and run the test to confirm.");
@@ -105,13 +109,7 @@ const record = async (name, journal, checks) => {
 
 // 2. Several files, with the user's own uncommitted change kept.
 {
-    const root = repo({
-        "package.json": '{ "type": "module" }\n',
-        "src/add.js": "export const add = (a, b) => a - b;\n",
-        "src/mul.js": "export const mul = (a, b) => a + b;\n",
-        "test.js": fixture('import { add } from "<here>/src/add.js";\nimport { mul } from "<here>/src/mul.js";\nconst bad = [];\nif (add(2, 3) !== 5) bad.push("add");\nif (mul(2, 3) !== 6) bad.push("mul");\nif (bad.length) { console.error("FAIL " + bad.join(",")); process.exit(1); }\nconsole.log("PASS");\n'),
-        "NOTES.md": "My own notes, not committed.\n",
-    });
+    const root = repo("multi");
     const hashes = { test: sha(join(root, "test.js")), notes: sha(join(root, "NOTES.md")) };
     const journal = newJournal(root);
     const outcome = await newRunner(root, journal).runTask("node test.js reports failures. Fix every failing function without editing test.js or NOTES.md, then run the test.");
@@ -127,11 +125,7 @@ const record = async (name, journal, checks) => {
 
 // 3. Compact, close, resume, and a follow-up task; earlier commands are not run again.
 {
-    const root = repo({
-        "package.json": '{ "type": "module" }\n',
-        "calc.js": "export const sum = (a, b) => a - b;\n",
-        "test.js": fixture('import * as calc from "<here>/calc.js";\nif (calc.sum(2, 3) !== 5) process.exit(1);\nif (typeof calc.sub === "function" && calc.sub(5, 3) !== 2) process.exit(2);\nconsole.log("PASS");\n'),
-    });
+    const root = repo("resume");
     const journal = newJournal(root);
     const first = await newRunner(root, journal).runTask("Fix calc.js so node test.js passes; run it.");
     const compacted = await newRunner(root, journal).maybeCompact(true);

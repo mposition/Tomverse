@@ -1,6 +1,7 @@
-import { mkdtempSync, mkdirSync, writeFileSync, realpathSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Runner, type ApprovalView, type Prompter } from "../src/agent.js";
 import { createOutput, type Output } from "../src/display.js";
 import { Gateway } from "../src/gateway.js";
@@ -10,16 +11,26 @@ import { TEST_KEY, type FakeGateway } from "./fakeGateway.js";
 
 export const tempDir = (prefix: string) => realpathSync.native(mkdtempSync(join(tmpdir(), `tvcli-${prefix}-`)));
 
-/** A tiny project with a failing test: sum() subtracts. */
+/**
+ * Copies a fixture folder with LF line endings, whatever the checkout did to
+ * them. The fixtures are real files rather than strings here, so the
+ * repository's import analysis can follow what they import.
+ */
+export const copyFixture = (from: string, to: string) => {
+    for (const entry of readdirSync(from, { withFileTypes: true })) {
+        const source = join(from, entry.name);
+        const target = join(to, entry.name);
+        if (entry.isDirectory()) {
+            mkdirSync(target, { recursive: true });
+            copyFixture(source, target);
+        } else writeFileSync(target, readFileSync(source, "utf8").replace(/\r\n/g, "\n"));
+    }
+};
+
+/** A tiny project with a failing test: sum() subtracts (tests/fixtures/sum-repo). */
 export const makeRepo = (extra: Record<string, string> = {}) => {
     const root = tempDir("repo");
-    writeFileSync(join(root, "sum.js"), "export function sum(a, b) {\n  return a - b;\n}\n");
-    writeFileSync(
-        join(root, "test.js"),
-        // The fixture's own import is written with a placeholder so the control-plane analysis does not read it as this file's load.
-        'import { sum } from "<here>/sum.js";\nif (sum(2, 3) !== 5) { console.error("FAIL sum(2,3)=" + sum(2, 3)); process.exit(1); }\nconsole.log("PASS");\n'.replace("<here>", ".")
-    );
-    writeFileSync(join(root, "package.json"), '{ "type": "module" }\n');
+    copyFixture(fileURLToPath(new URL("./fixtures/sum-repo/", import.meta.url)), root);
     for (const [path, content] of Object.entries(extra)) {
         mkdirSync(join(root, path, ".."), { recursive: true });
         writeFileSync(join(root, path), content);

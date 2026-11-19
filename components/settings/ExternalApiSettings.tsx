@@ -647,7 +647,7 @@ function ConnectSection({
         ["extension", t("externalApi.vscodeExtension")],
     ];
     const platformName = (id: Platform) =>
-        ({ "tomverse-cli": t("externalApi.tomverseCliTitle"), "claude-code": "Claude Code", codex: "Codex", cursor: "Cursor", aside: "Aside", vscode: "VS Code", other: t("externalApi.platformOther") })[id];
+        ({ "tomverse-cli": "Tomverse CLI", "claude-code": "Claude Code", codex: "Codex", cursor: "Cursor", aside: "Aside", vscode: "VS Code", other: t("externalApi.platformOther") })[id];
     const platformHint = (id: Platform) =>
         ({
             "tomverse-cli": t("externalApi.terminal"),
