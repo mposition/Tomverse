@@ -30,8 +30,15 @@ import { amuxJsonNoStore } from "@/lib/amux/internalRoute";
  *
  * `workspace: null` is the card alone: a request whose source has no evidence
  * to open. The workspace is always on (owner direction 2026-11-16: its kill
- * switch is gone). Files are base64, so the answer's
- * size is the evidence's (at most DM_WORKSPACE_EVIDENCE_MAX_BYTES and a third).
+ * switch is gone). Files are base64, so the answer's size is the evidence's
+ * and a third.
+ *
+ * This is the older route: evidence in one answer, so it keeps the 64 MiB
+ * the relays built around it can hold (DM_WORKSPACE_LEGACY_INLINE_MAX_BYTES; a
+ * larger set leaves its later files out as `too_large` and that relay sends
+ * nothing). A relay that has the parts protocol asks `workspace/parts` first
+ * and reads each file in chunks from `workspace/chunk`, with no such bound
+ * (docs/policy/amux-v22-result-transfer.md 10.2).
  */
 
 const MAX_BODY_BYTES = 1_024;
@@ -52,7 +59,7 @@ export async function POST(request: Request) {
         readDecisionMakerWorkspaceSource(tx, requestId),
       );
       if (source === null) return refused(404, "request_unknown");
-      const evidence = await openDecisionMakerWorkspaceEvidence(source);
+      const evidence = await openDecisionMakerWorkspaceEvidence(source, { inline: true });
       return amuxJsonNoStore({
         found: true,
         workspace: evidence === null ? null : {

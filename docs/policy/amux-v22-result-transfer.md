@@ -418,6 +418,76 @@ pullChangeDigest({ mergeBaseSha, headSha, headTreeSha }) =
 
 ## 9. 범위 밖
 
-- 내려가는 방향: 재개 때 이전 patch를 context로 보내는 묶음 32 MiB(`AMUX_V22_TRANSPORT_MAX_BYTES`, `lib/amux/delivery.ts`),
-  DM workspace 증거 64 MiB. 다음 작업에서 같은 조각 기법으로 다룬다. 그 전까지는 넘으면 기존 생략 안내로 내려보낸다.
+- 내려가는 방향(재개 때 이전 patch 32 MiB, DM workspace 증거 64 MiB)은 10절에서 같은 조각 기법으로 없앴다(2026-11-19).
 - 후보 재구성은 바뀐 파일마다 GitHub blob을 읽으므로 아주 큰 patch는 GitHub API 속도 한도(외부)에 걸릴 수 있다.
+
+## 10. 내려가는 방향의 조각 전송 (2026-11-19)
+
+9절에 남겼던 내려가는 방향을 1절과 같은 조각(`AMUX_V22_TRANSFER_CHUNK_BYTES`, `amuxV22TransferChunkRange`)으로 보낸다.
+새 테이블과 migration은 없다. 조각을 줄 때마다 앱이 원본 행에서 같은 내용을 다시 만들고, 받는 쪽은 전체 sha256으로 확인한다.
+
+### 10.1 재개 context(card 실행)
+
+크기에 상한이 없는 context 파일은 둘이다. 나머지(brief, 운영자 답, 검토 지적)는 출처에서 크기가 정해진다.
+
+| 파일 | 원본 | 다시 만드는 방법 |
+|---|---|---|
+| `prior.patch` | 질문한 run의 `AmuxV22TaskPatch` | `readAmuxV22ResumeRows`(DB boundary 안) → `openAmuxV22ResumeContext`의 `previousPatch` |
+| `prior-conclusions.md` | 앞선 Task들의 결론 | `readAmuxV22PriorConclusionRows` → `openAmuxV22PriorConclusions` → `buildAmuxV22PriorConclusionSection({budgetBytes:null}).section` |
+
+- **기능 협상:** bridge는 `POST /api/internal/amux/delivery/pull`에 header `x-amux-bridge-features: context_chunks`를 붙인다. 옛 앱은 header를 무시한다.
+- **pull 답:** header가 있고 local CLI flow 전달이면(checkout 있음, read-only retry 아님) 위 두 파일을 prompt의 context 묶음에 넣지 않는다. prompt의 안내 목록(`amuxV22ContextPromptSection`)에는 그대로 둔다. delivery에 `context_parts: [{"name","bytes","sha256"}]`를 더한다(비어 있으면 키 없음). bytes는 UTF-8 바이트 수, sha256은 그 바이트의 hex다. header가 없으면 지금처럼 inline이다.
+- **조각 route `POST /api/internal/amux/v22/execution/context`:** 요청은 `{"attemptId","worker","name","index"}`(strict, body ≤ 1 KiB)이고, binding 검사는 upload route와 같다.
+  - 200 `{"attemptId","name","index","totalBytes","chunkCount","sha256","bytesBase64"}`
+  - 404 `{"error":"context_absent"}`: 원본이 없거나 비었음
+  - 400: schema 오류, index 범위 밖
+  - 409 `binding_mismatch`
+  - 503 `outcome_unknown`
+  - 다시 만든 내용이 pull 때와 다르면 bridge가 sha256 불일치로 알아채고, 그 전달을 보내지 않는다. 다음 pull이 새로 만든다.
+- **sidecar op `put_context`:** `{"op":"put_context","attemptId","name","index","totalBytes","sha256","bytesBase64"}`(키 정확히 이것만).
+  - journal 디렉터리의 `<attemptId>.ctx-<name>.part`에 그 범위를 쓴다(0600, `O_NOFOLLOW`, offset = index × 조각 크기). 같은 index를 다시 받으면 같은 자리를 덮어쓴다. 곁의 `<attemptId>.ctx-<name>.part.meta`가 그 part의 `totalBytes`·`sha256`를 기억한다.
+  - 앞 조각과 `totalBytes`·`sha256`가 다른 조각이 오면 refused가 아니라 그 파일을 처음부터 다시 시작한다(옛 part·meta를 지우고 새 meta를 쓴 뒤 그 조각을 쓴다). refused로 답하고 옛 part를 그대로 두면 다음 pull도 같은 곳에서 막히기 때문이다. 섞인 내용은 execute의 sha256 확인이 잡는다.
+  - 답은 `{"kind":"context_stored","attemptId","name","index"}`. 이름이 허용 목록 밖이거나, 키·범위·base64(정규형만)가 다르거나, attempt가 실행 중이거나 이미 시작·종료됐으면(`<attemptId>.claimed`·`.result` 존재) `{"kind":"refused"}`. 옛 sidecar도 `refused`로 답한다.
+  - `*.pending`·`*.result` 이름을 쓰지 않는다. 설치 조건과 readback의 pending·terminal 검사는 정확한 이름으로 찾으므로 `.part`·`.part.meta`는 잡히지 않는다.
+- **execute:** 선택 키 `contextParts: [{"name","bytes","sha256"}]`(이름은 한 번씩, 허용 두 이름만, read-only retry와 함께 쓰지 못함)를 받는다. 실행을 시작하기 전에 part 파일이 있고 크기가 같은지 보고(없거나 inline으로도 온 이름이면 `failed`, `cliStarted:false`, `failure:"context_parts_invalid"`), checkout에 둘 때 바이트를 그대로 복사하면서 sha256을 확인해 inline 파일과 같은 자리(`.amux/context/<name>`)에 둔다. 이전 patch 자동 적용은 inline일 때와 같다(implement role). 확인에 실패하면 복사본을 지우고 같은 `context_parts_invalid`로 실행하지 않는다. 옮긴 part·meta는 바로 지우고, attempt가 끝나면 남은 것도 지운다. 시작한 attempt의 것과 retention(30일)을 넘긴 것은 다음 실행 시작 때 지운다.
+- **bridge:** `context_parts`가 있으면 execute 전에 part마다 index 0..n-1을 받아 `put_context`로 넘긴다. 다 넘긴 뒤 `contextParts`를 붙여 execute한다.
+  - 조각 답을 잃거나 503이면 같은 조각을 다시 요청한다. 횟수 상한은 없고, 1초부터 두 배씩 기다리되 60초에서 멈춘다. `put_context` 교환이 깨져도 같은 조각을 상한 없이 다시 넘기되 앱에는 다시 묻지 않는다.
+  - 404·응답의 totalBytes·sha256이 pull과 다름·part 전체 sha256 불일치·`refused`(결정적 거절)이면 그 전달을 보내지 않고 warn 한 줄을 남긴다(halt 없음). attempt는 CLI 시작 전 실패 보고(`code:"context_unavailable"`, `cli_started:false`)를 붙인 unverified로 settle한다. 앱은 이것을 인프라 실패로 읽어 카드 시도로 세지 않고 큐로 돌린다. 다음 pull이 새로 만든다.
+  - read-only retry 전달에 `context_parts`가 함께 오면 같은 방식으로 보내지 않는다. `contextParts`는 part가 있을 때만 execute에 넣는다(빈 배열을 보내지 않는다).
+  - 전송은 heartbeat를 60초 넘게 막지 않는다: attempt마다 별도 tokio task가 part를 받아 넘기고, 그동안 attempt는 `pending`으로 heartbeat를 받으며 run loop은 끝났는지만 본다. task가 끝나면 loop이 깨어 execute를 한 번 보낸다(그 시각부터 sidecar 응답 대기 15분을 센다). 그 사이 bridge가 halt하면 보내지 않고 unverified로 settle한다.
+- **없애는 값:** `parseAmuxV22ContextFiles`의 32 MiB 합계 검사. 큰 파일이 prompt에 실리지 않으므로 prompt 64 MiB 검사는 실제로 걸리지 않는다. 옛 bridge와 옛 sidecar의 경로에서만 쓰인다.
+
+### 10.2 DM workspace 증거
+
+`POST /api/internal/amux/decision-maker/workspace`가 증거 파일 본문을 한 답에 싣던 것(합계 64 MiB, 넘으면 `too_large`로 제외)을 같은 조각으로 바꾼다. 흐름은 앱 → box의 DM relay(`dm_relay/**`) → broker(unix socket)다. 원본은 `openDecisionMakerWorkspaceEvidence(source)`이고 조각을 줄 때마다 다시 열어 같은 파일이 나오는지 sha256으로 확인한다. 새 테이블과 migration은 없다.
+
+바뀌는 점은 둘이다. 증거 파일의 본문은 앱 답에도, broker의 `workspace` 요청에도 실리지 않고(설명만 간다), broker는 조각을 모두 받은 뒤에야 파일을 쓴다.
+
+- **협상(10.1과 다른 점):** header를 쓰지 않는다. DM route를 부르는 relay client(`post_decision_maker`)는 header를 싣지 못하고, route가 있는지가 같은 신호이기 때문이다. relay는 `workspace/parts`를 먼저 묻는다. 옛 앱에는 그 route가 없어 프레임워크의 404(본문에 `found` 키가 없음)가 오고, relay는 그때만 옛 `workspace` route로 간다. 앱 자신의 거절(`{found:false,reason}`, 401, 연결 끊김)은 route 없음이 아니므로 폴백하지 않고 카드를 운영자에게 둔다(`workspace_unreadable`).
+- **앱 route ① `POST .../decision-maker/workspace/parts`:** 요청 `{"request_id"}`(strict, body ≤ 1 KiB). 읽기이고 아무것도 쓰지 않는다. 200 `{"found":true,"workspace":null}`(카드만) 또는 `{"found":true,"workspace":{"target_sha":<hex40|null>,"parts":[{"name","bytes","sha256","blob"}],"excluded":{…}}}`. `name`은 닫힌 목록(`PATCH.diff`·`FINDINGS.md`·`CRITERIA.md`·`CONTEXT.md`) 안에서 한 번씩, `bytes ≥ 1`은 UTF-8 바이트 수, `sha256`은 그 바이트의 hex, `blob`은 git blob id(payload가 파일을 이름 짓는 값)다. `excluded`는 옛 route와 같은 사유 집합이고, 비어 있지 않으면 relay는 아무것도 보내지 않는다(`workspace_evidence_refused`). 404 `request_unknown`, 400 `invalid_request`, 401, 503.
+- **앱 route ② `POST .../decision-maker/workspace/chunk`:** 요청 `{"request_id","name","index","sha256"}`(strict, body ≤ 1 KiB). 200 `{"found":true,"name","index","total_bytes","chunk_count","sha256","bytes_base64"}`이고 바이트 범위는 `amuxV22TransferChunkRange`(4 MiB, 마지막은 짧다)다. 404 `evidence_absent`(그 이름의 파일이 지금 없거나 아래 검사가 거절), 404 `request_unknown`, 409 `evidence_changed`(다시 연 파일의 sha256이 요청과 다름), 400 `index_out_of_range`·`invalid_request`, 401, 503.
+- **비밀 검사는 파일 전체를 대상으로 한다. 약해진 곳이 없다.** 앱은 파일마다 route ①에서 `dmWorkspaceAcceptFiles`(닫힌 이름, 비밀 경로 목록, 텍스트, `detectSecretsInFields`, 패치의 binary 본문 `binaryPatchCarriesSecret`)를 파일 전체에 돌린 것만 설명하고, route ②도 같은 검사를 다시 거친 파일만 조각낸다. 그 검사를 조각마다 되풀이하지 않도록 한 프로세스가 방금 통과시킨 한 파일의 바이트를 2분 동안만 쥔다(요청·이름·sha256이 같을 때만 쓰고, 다른 프로세스·만료·다른 요청은 다시 열어 다시 검사한다). broker는 조각을 다 받은 뒤 그 파일 전체의 크기와 sha256을 설명과 대조하고, 같은 `dmWorkspaceAcceptFiles`를 파일 전체에 다시 돌린 뒤에 통과한 파일만 쓴다. 하나라도 거절되면 workspace 전체가 `workspace_mismatch`다. 이것은 vendor로 나가기 전의 경계이고 조각 경계에서 끊어 읽지 않는다.
+- **broker의 `workspace` 요청(intent 전):** `{"v":1,"type":"workspace","requestId","targetSha","parts":[{"name","bytes","sha256","blob"}]}`(키는 정확히 이것만, 옛 inline 요청은 `files`). broker는 이름 검사(닫힌 목록, 한 번씩, 비밀 경로)와 commit 확인만 하고 payload에 들어갈 줄을 답한다. 답의 모양은 옛것과 같다(`lines`, `files`, `excluded`). 바이트를 받지 않으므로 파일이 아무리 커도 이 요청은 작다. relay는 broker가 이름 지은 blob id가 앱이 설명한 것과 같은지 확인하고, 다르면 아무것도 보내지 않는다.
+- **launch(intent 뒤):** launch line의 `workspace`가 `{"state","targetSha","parts":[{"name","bytes","sha256"}]}`(`files` 대신 `parts`)이면 본문은 같은 연결로 따라온다. broker는 intent와 payload를 먼저 검사하고(거절이면 첫 답이 `result`이고 조각은 요청하지 않는다) `{"v":1,"type":"send_parts","requestId"}`를 쓴다. relay는 설명한 순서대로 파일마다 index 0..n-1을 한 줄씩 `{"v":1,"type":"part","requestId","name","index","bytesBase64"}`로 보내고, broker는 줄마다 `{"v":1,"type":"part_stored","name","index"}`로 답한 뒤에야 다음 줄을 받는다(한 줄 한 답 규칙 그대로, `trailing_bytes`는 여전히 오류). relay가 조각을 받지 못하면 `{"v":1,"type":"abort","requestId"}`를 보내고, 연결이 끊긴 채로 남지 않게 broker가 거절 `result`로 답한다. 조각은 broker 메모리에 파일마다 한 `Buffer`로 모이고 디스크는 건드리지 않는다. 다 받으면 위 검사를 거쳐 `request.workspace`가 되고, 그 뒤는 옛 경로와 같다(payload 끝이 이 workspace의 줄과 정확히 같아야 하고, 요청 디렉터리를 만들어 쓰고 git을 돌린다). 줄 하나의 상한 `DM_PART_LINE_MAX_BYTES`는 조각 하나가 실리는 크기이지 증거의 상한이 아니다.
+- **오류 매핑(broker → `result`, 모두 `transmission: not_started`):** 조각이 설명과 다름(순서·index·길이·base64·요청 id), 파일의 sha256·크기 불일치, 전체 검사 거절, payload가 이 파일들을 이름 짓지 않음 → `workspace_mismatch`. abort, 전송 중단·연결 끊김, workspace 시간 한도 → `workspace_unavailable`. 어느 쪽이든 intent는 이미 기록됐으므로 relay는 옛 launch 거절과 같이 `unavailable` 결과와 미시작 receipt를 기록한다.
+- **시간:** 조각을 받는 시간과 그 뒤 build가 `DM_WORKSPACE_TIME_LIMIT_MS` 하나를 나눠 쓴다(broker의 답 deadline `DM_BROKER_RESPONSE_DEADLINE_MS`는 그대로). relay의 `workspace/parts`·`workspace/chunk` 호출은 파일 크기에 비례해 걸리므로 `DM_ROUTE_CLIENT_TIMEOUT`(18 s) 대신 같은 한도까지 기다리고(`AppRoute::client_timeout`), 조각의 답을 잃거나 503이면 같은 조각을 2초 뒤 다시 요청하되 결과 deadline이나 그 한도 중 먼저 오는 때까지만 반복한다(조각은 멱등이다). 거절(404·409·sha256 불일치)은 다시 묻지 않고 abort한다.
+- **없애는 값과 남는 값:** `DM_WORKSPACE_EVIDENCE_MAX_BYTES`(합계 64 MiB, 넘으면 `too_large`)는 `DM_WORKSPACE_LEGACY_INLINE_MAX_BYTES`가 되어 옛 `workspace` route와 옛 inline 줄에만 남는다(옛 relay의 메모리 기준이므로 그 relay는 넘으면 지금처럼 카드를 운영자에게 둔다). 새 protocol에는 파일 크기와 합계에 우리가 둔 상한이 없다. `too_large`는 이제 파일을 문자열 하나로 둘 수 없을 때(`DM_WORKSPACE_TEXT_MAX_BYTES` = V8 문자열 한계, 약 512 MiB)만 쓴다. 남는 외부 한계는 그것과 앱·broker의 메모리(파일 하나가 한 `Buffer`와 한 문자열로 있다), 그리고 이번 범위 밖인 box 디스크 `DM_WORKSPACE_DISK_MAX_BYTES`와 시간 한도다. `DM_LAUNCH_LINE_MAX_BYTES`는 payload와 옛 inline 증거의 방 크기이고, 새 protocol의 launch line은 payload와 몇백 바이트다.
+- **release:** 새 파일이 없다. broker 묶음(`broker.mjs`)은 import를 따라가므로 `npm run build:amux-decision-maker`가 그대로 새 코드를 싣고, 묶음 목록(`DM_RELEASE_TOP_FILES`)과 manifest 형식은 바뀌지 않는다. relay(Rust)와 broker는 같은 설치 묶음으로 설치한다.
+
+### 10.3 하위 호환
+
+| 앱 | bridge | sidecar | 결과 |
+|---|---|---|---|
+| 새 | 옛 | 옛 | header가 없으므로 지금처럼 inline |
+| 새 | 새 | 옛 | `put_context`가 `refused`이므로 전달하지 않고 기다린다. box는 둘을 함께 설치한다 |
+| 옛 | 새 | 새 | 옛 앱은 header를 무시하고 inline으로 보낸다. 새 bridge는 `context_parts`가 없으면 지금처럼 보낸다 |
+
+DM workspace 증거(10.2)는 앱, relay, broker 셋의 조합이다. box에서 relay와 broker는 같은 설치 묶음(DM release)이다.
+
+| 앱 | relay | broker | 결과 |
+|---|---|---|---|
+| 새 | 새 | 새 | parts protocol: 설명만 오가고 본문은 launch 연결에서 조각으로 간다. 크기 상한 없음 |
+| 옛 | 새 | 새 | `workspace/parts`가 프레임워크 404이므로 relay는 옛 `workspace` route와 옛 inline 줄로 간다. 그 route의 64 MiB는 그대로(넘으면 `too_large`로 제외되어 카드는 운영자에게) |
+| 새 | 옛 | 옛·새 | 옛 relay는 `workspace` route만 부른다. 앱은 그 route에 64 MiB를 유지하고 새 broker는 옛 inline 요청·launch도 받으므로 지금과 같다 |
+| 새 | 새 | 옛 | 옛 broker는 `parts` 요청을 읽지 못해 workspace 없음으로 답하고, relay는 intent 전에 `workspace_unavailable`로 request를 버린다(카드는 운영자에게, 기록·정지 없음). 설치가 둘을 함께 하므로 생기지 않는 조합이다 |
+| 옛 | 새 | 옛 | relay가 옛 `workspace` route로 가므로 지금과 같다 |

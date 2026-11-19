@@ -7,18 +7,29 @@ import test from "node:test";
 
 import { dmSnapshotManifestDigest } from "../lib/amux/decisionMakerBodyCore.ts";
 import { DM_CARD_TEXT_MAX_BYTES } from "../lib/amux/decisionMakerCore.ts";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import {
-  DM_WORKSPACE_EVIDENCE_MAX_BYTES,
   DM_WORKSPACE_EVIDENCE_NAMES,
+  DM_WORKSPACE_LEGACY_INLINE_MAX_BYTES,
+  DM_WORKSPACE_TEXT_MAX_BYTES,
+  dmAssembleWorkspace,
   dmCardEvidenceContext,
+  dmEncodeLaunchWorkspaceParts,
+  dmEncodeWorkspaceAnswer,
   dmLaunchWorkspaceRefusal,
+  dmOutlinePayloadLines,
   dmParseLaunchWorkspace,
+  dmParseLaunchWorkspaceParts,
   dmParseWorkspaceFiles,
+  dmParseWorkspaceRequest,
   dmEncodeLaunchWorkspace,
   dmWorkspaceAcceptFiles,
+  dmWorkspaceAcceptParts,
   dmWorkspaceGuide,
   dmWorkspaceManifestDigest,
+  dmWorkspaceOutline,
+  dmWorkspacePartOf,
   dmWorkspacePayloadLines,
   gitBlobId,
 } from "../lib/amux/decisionMakerWorkspaceCore.ts";
@@ -49,11 +60,25 @@ test("evidence files: the closed names, text only, the secret path list and the 
   assert.equal(files[0].text, PATCH, "whole, never cut");
   assert.deepEqual(excluded, { repeated: 1, name_refused: 2, secret_content: 1, not_text: 2 });
   assert.deepEqual([...DM_WORKSPACE_EVIDENCE_NAMES], ["PATCH.diff", "FINDINGS.md", "CRITERIA.md", "CONTEXT.md"]);
-  // The one cap is the evidence's total, far above any one card.
-  const big = "y".repeat(DM_WORKSPACE_EVIDENCE_MAX_BYTES);
-  const capped = dmWorkspaceAcceptFiles([{ name: "PATCH.diff", bytes: bytes(big) }, { name: "FINDINGS.md", bytes: bytes("z") }]);
-  assert.deepEqual(capped.files.map((file) => file.name), ["PATCH.diff"]);
+});
+
+test("no size of ours bounds the evidence: past 64 MiB whole, and only the string V8 can hold is a limit", () => {
+  // The 64 MiB the inline protocol held is now only that protocol's.
+  assert.equal(DM_WORKSPACE_LEGACY_INLINE_MAX_BYTES, 64 * 1024 * 1024);
+  const big = "y".repeat(DM_WORKSPACE_LEGACY_INLINE_MAX_BYTES + 1024);
+  const files = [{ name: "PATCH.diff", bytes: bytes(big) }, { name: "FINDINGS.md", bytes: bytes("z") }];
+  const whole = dmWorkspaceAcceptFiles(files);
+  assert.deepEqual(whole.files.map((file) => file.name), ["PATCH.diff", "FINDINGS.md"]);
+  assert.equal(whole.files[0].text.length, big.length, "whole, never cut");
+  assert.deepEqual(whole.excluded, {});
+  // The inline protocol alone passes its total, and the second file no longer fits.
+  const capped = dmWorkspaceAcceptFiles(files, { totalMaxBytes: DM_WORKSPACE_LEGACY_INLINE_MAX_BYTES });
+  assert.deepEqual(capped.files.map((file) => file.name), ["FINDINGS.md"]);
   assert.deepEqual(capped.excluded, { too_large: 1 });
+  // A file V8 cannot hold as one string cannot be shown clean: left out as too_large, not read.
+  const unreadable = { length: DM_WORKSPACE_TEXT_MAX_BYTES + 1, includes() { throw new Error("must not be scanned"); } };
+  assert.deepEqual(dmWorkspaceAcceptFiles([{ name: "PATCH.diff", bytes: unreadable }]),
+    { files: [], excluded: { too_large: 1 } });
 });
 
 test("the payload names the commit and each file by its blob id, never its text, and the launch must be exactly that", () => {
@@ -161,4 +186,94 @@ test("a patch whose binary file carries a secret, or whose binary section cannot
   assert.equal(dmWorkspaceAcceptFiles([{ name: "PATCH.diff", bytes: bytes(clean) }]).files.length, 1);
   const broken = clean.replace(/^literal (\d+)$/m, (_line, size) => `literal ${Number(size) + 5}`);
   assert.deepEqual(dmWorkspaceAcceptFiles([{ name: "PATCH.diff", bytes: bytes(broken) }]).excluded, { secret_content: 1 });
+});
+
+// ---------------------------------------------------------------------------
+// The parts protocol (docs/policy/amux-v22-result-transfer.md 10.2): the app
+// describes each file, the bytes follow the launch on its connection.
+// ---------------------------------------------------------------------------
+
+const sha256 = (value) => createHash("sha256").update(value).digest("hex");
+
+test("a file is described by its name, size, sha256 and blob id; the payload names the same blob", () => {
+  const part = dmWorkspacePartOf({ name: "PATCH.diff", bytes: bytes(PATCH) });
+  assert.deepEqual(part, { name: "PATCH.diff", bytes: bytes(PATCH).length, sha256: sha256(bytes(PATCH)), blob: gitBlobId(bytes(PATCH)) });
+  const workspace = { state: "develop", targetSha: SHA, files: [{ name: "PATCH.diff", text: PATCH }] };
+  // The outline the broker answers from descriptions alone is the payload the launch must match.
+  const outline = { state: "develop", targetSha: SHA, entries: [{ name: part.name, blob: part.blob, bytes: part.bytes }] };
+  assert.deepEqual(dmWorkspaceOutline(workspace), outline);
+  assert.equal(dmOutlinePayloadLines(outline), dmWorkspacePayloadLines(workspace));
+  const answer = dmEncodeWorkspaceAnswer("0a1b2c3d-4e5f-4a6b-8c7d-000000000001", { ok: true, workspace: outline, excluded: {}, reason: null });
+  assert.deepEqual([answer.files, answer.state, answer.targetSha], [["PATCH.diff"], "develop", SHA]);
+  assert.equal(Buffer.from(answer.lines, "base64").toString("utf8"), dmWorkspacePayloadLines(workspace));
+});
+
+test("a workspace request names its files inline or by description, never both, and a description is strict", () => {
+  const id = "0a1b2c3d-4e5f-4a6b-8c7d-000000000001";
+  const part = { name: "PATCH.diff", bytes: 400_000_000, sha256: "a".repeat(64), blob: "b".repeat(40) };
+  const line = (extra) => JSON.stringify({ v: 1, type: "workspace", requestId: id, targetSha: null, ...extra });
+  const parsed = dmParseWorkspaceRequest(line({ parts: [part] }));
+  assert.deepEqual([parsed.files, parsed.parts], [null, [part]], "400 MB is a size, not a refusal");
+  assert.deepEqual(dmParseWorkspaceRequest(line({ files: [{ name: "PATCH.diff", content: "eA==" }] })).parts, null);
+  for (const bad of [
+    line({ files: [], parts: [] }),
+    line({ parts: [{ ...part, bytes: 0 }] }),
+    line({ parts: [{ ...part, bytes: 1.5 }] }),
+    line({ parts: [{ ...part, sha256: "A".repeat(64) }] }),
+    line({ parts: [{ ...part, blob: "b".repeat(39) }] }),
+    line({ parts: [{ ...part, extra: 1 }] }),
+    line({ parts: [part, part, part, part, part] }),
+    line({ parts: "x" }),
+  ]) {
+    assert.equal(dmParseWorkspaceRequest(bad), null, bad.slice(0, 90));
+  }
+  // The names are checked as a file's are: closed list, once, not a secret path.
+  const accepted = dmWorkspaceAcceptParts([part, { ...part, name: "PATCH.diff" }, { ...part, name: "x.sh" }, { ...part, name: "CONTEXT.md" }]);
+  assert.deepEqual(accepted.parts.map((entry) => entry.name), ["PATCH.diff", "CONTEXT.md"]);
+  assert.deepEqual(accepted.excluded, { repeated: 1, name_refused: 1 });
+  assert.deepEqual(dmWorkspaceAcceptParts([{ ...part, bytes: DM_WORKSPACE_TEXT_MAX_BYTES + 1 }]),
+    { parts: [], excluded: { too_large: 1 } });
+});
+
+test("a launch names its parts exactly, and the bytes that arrive must be those parts and pass the whole-file checks", () => {
+  const text = PATCH;
+  const launch = { state: "develop", targetSha: SHA, parts: [{ name: "PATCH.diff", bytes: bytes(text).length, sha256: sha256(bytes(text)) }] };
+  assert.deepEqual(dmParseLaunchWorkspaceParts(dmEncodeLaunchWorkspaceParts(launch)), launch);
+  for (const bad of [
+    { ...launch, parts: [{ ...launch.parts[0], name: "x.sh" }] },
+    { ...launch, parts: [launch.parts[0], launch.parts[0]] },
+    { ...launch, parts: [{ ...launch.parts[0], bytes: 0 }] },
+    { ...launch, parts: [{ ...launch.parts[0], sha256: "zz" }] },
+    { ...launch, parts: [{ ...launch.parts[0], blob: "b".repeat(40) }] },
+    { ...launch, state: "none" },
+    { ...launch, targetSha: "nope" },
+    { state: "develop", targetSha: SHA, files: [] },
+    null,
+  ]) {
+    assert.equal(dmParseLaunchWorkspaceParts(bad), undefined, JSON.stringify(bad).slice(0, 80));
+  }
+  assert.deepEqual(dmParseLaunchWorkspaceParts({ state: "develop", targetSha: SHA, parts: [] }), { state: "develop", targetSha: SHA, parts: [] });
+  const arrived = new Map([["PATCH.diff", bytes(text)]]);
+  assert.deepEqual(dmAssembleWorkspace(launch, arrived), { state: "develop", targetSha: SHA, files: [{ name: "PATCH.diff", text }] });
+  // Another size, another sha256, a part that never came.
+  assert.equal(dmAssembleWorkspace(launch, new Map([["PATCH.diff", bytes(`${text}+`)]])), undefined);
+  assert.equal(dmAssembleWorkspace(launch, new Map([["PATCH.diff", bytes(text.replace("a.ts", "b.ts"))]])), undefined);
+  assert.equal(dmAssembleWorkspace(launch, new Map()), undefined);
+});
+
+test("the secret scan holds over the whole file that arrived in parts: a secret past the 64 MiB mark refuses the workspace", () => {
+  // The token sits after more than 64 MiB of clean text, as one file of many chunks.
+  const token = ["gh", "p_", "Q".repeat(36)].join("");
+  const line = "+clean line of a very long patch\n";
+  const padding = line.repeat(Math.ceil((DM_WORKSPACE_LEGACY_INLINE_MAX_BYTES + 1024) / line.length));
+  const dirty = bytes(`diff --git a/a b/a\n${padding}+${token}\n`);
+  const clean = bytes(`diff --git a/a b/a\n${padding}`);
+  const launchOf = (file) => ({ state: "develop", targetSha: SHA, parts: [{ name: "PATCH.diff", bytes: file.length, sha256: sha256(file) }] });
+  assert.ok(dirty.length > DM_WORKSPACE_LEGACY_INLINE_MAX_BYTES);
+  assert.equal(dmAssembleWorkspace(launchOf(dirty), new Map([["PATCH.diff", dirty]])), undefined, "refused whole");
+  assert.equal(dmAssembleWorkspace(launchOf(clean), new Map([["PATCH.diff", clean]]))?.files[0].text.length, clean.length);
+  // A secret file path, a binary file and a patch whose binary section hides one are refused as they are inline.
+  const nul = new Uint8Array([0x61, 0x00, 0x62]);
+  assert.equal(dmAssembleWorkspace({ state: "none", targetSha: null, parts: [{ name: "CONTEXT.md", bytes: 3, sha256: sha256(nul) }] },
+    new Map([["CONTEXT.md", nul]])), undefined);
 });

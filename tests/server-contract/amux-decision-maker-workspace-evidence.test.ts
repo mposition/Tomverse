@@ -5,6 +5,7 @@
 // sends nothing rather than a DM judging without it.
 
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { mock, test } from "node:test";
@@ -159,4 +160,104 @@ test("there is no kill switch: the old variable does not turn the workspace off 
   } finally {
     delete process.env.TOMVERSE_AMUX_DM_WORKSPACE;
   }
+});
+
+// ---------------------------------------------------------------------------
+// The evidence in chunks (docs/policy/amux-v22-result-transfer.md 10.2)
+// ---------------------------------------------------------------------------
+
+const sha256Of = (text: string) => createHash("sha256").update(text, "utf8").digest("hex");
+
+test("the older route keeps its 64 MiB; the parts route has no bound: a patch past it is described whole", async () => {
+  const { openDecisionMakerWorkspaceEvidence, describeDecisionMakerWorkspaceEvidence } = await service;
+  const line = "+a line of a patch far past the old evidence cap\n";
+  const huge = `diff --git a/a b/a\n${line.repeat(Math.ceil((64 * 1024 * 1024 + 1024 * 1024) / line.length))}`;
+  const source = { kind: "t2_draft" as const, patchBody: huge, baseSha: SHA };
+  const inline = (await openDecisionMakerWorkspaceEvidence(source, { inline: true }))!;
+  const whole = (await openDecisionMakerWorkspaceEvidence(source))!;
+  // The older route leaves the file out (a relay built around 64 MiB sends nothing); the parts route does not.
+  assert.deepEqual([inline.files, inline.excluded], [[], { too_large: 1 }]);
+  assert.deepEqual(whole.files.map((file: { name: string }) => file.name), ["PATCH.diff"]);
+  assert.equal(whole.files[0].text.length, huge.length);
+  const described = (await describeDecisionMakerWorkspaceEvidence(source))!;
+  assert.deepEqual(described.parts, [{
+    name: "PATCH.diff",
+    bytes: Buffer.byteLength(huge),
+    sha256: sha256Of(huge),
+    blob: createHash("sha1").update(`blob ${Buffer.byteLength(huge)}\0`).update(huge, "utf8").digest("hex"),
+  }]);
+  assert.equal(described.targetSha, SHA);
+  assert.deepEqual(described.excluded, {});
+  // Evidence the card points at that cannot be read is still counted, so nothing is sent.
+  assert.deepEqual((await describeDecisionMakerWorkspaceEvidence({ kind: "t2_draft", patchBody: null, baseSha: null }))!.excluded,
+    { unreadable: 1 });
+});
+
+test("a chunk is the file's own bytes at the transfer's range, and the file is checked whole before any of it is served", async () => {
+  const { readDecisionMakerWorkspaceChunk } = await service;
+  const { AMUX_V22_TRANSFER_CHUNK_BYTES } = await import(mod("lib/amux/v22TransferCore.ts"));
+  const line = "+a line of the patch\n";
+  const patch = `diff --git a/a b/a\n${line.repeat(Math.ceil((AMUX_V22_TRANSFER_CHUNK_BYTES * 2 + 1000) / line.length))}`;
+  const total = Buffer.byteLength(patch);
+  const sha256 = sha256Of(patch);
+  let loads = 0;
+  const load = async () => { loads += 1; return { kind: "t2_draft" as const, patchBody: patch, baseSha: SHA }; };
+  const ask = (index: number, extra: Record<string, unknown> = {}) =>
+    readDecisionMakerWorkspaceChunk({ requestId: "r-1", name: "PATCH.diff", sha256, index, ...extra } as never, load);
+  const chunks = [];
+  for (let index = 0; index < 3; index += 1) {
+    const chunk = await ask(index);
+    assert.equal(chunk.ok, true);
+    chunks.push(chunk);
+  }
+  const ok = chunks as Array<{ ok: true; totalBytes: number; chunkCount: number; bytes: Buffer }>;
+  assert.deepEqual(ok.map((chunk) => [chunk.totalBytes, chunk.chunkCount]), [[total, 3], [total, 3], [total, 3]]);
+  assert.deepEqual(ok.map((chunk) => chunk.bytes.length), [AMUX_V22_TRANSFER_CHUNK_BYTES, AMUX_V22_TRANSFER_CHUNK_BYTES, total - 2 * AMUX_V22_TRANSFER_CHUNK_BYTES]);
+  assert.equal(sha256Of(Buffer.concat(ok.map((chunk) => chunk.bytes)).toString("utf8")), sha256, "the chunks are the file, whole");
+  // The source was opened and the file checked once; the chunks after the first are served from what passed.
+  assert.equal(loads, 1);
+  // Past the last chunk, another file's name, a file that has changed, a source with no such file: none is served.
+  assert.deepEqual(await ask(3), { ok: false, reason: "index_out_of_range" });
+  assert.deepEqual(await ask(-1), { ok: false, reason: "index_out_of_range" });
+  assert.deepEqual(await readDecisionMakerWorkspaceChunk({ requestId: "r-1", name: "x.sh", sha256, index: 0 }, load),
+    { ok: false, reason: "evidence_absent" });
+  assert.deepEqual(await readDecisionMakerWorkspaceChunk({ requestId: "r-2", name: "FINDINGS.md", sha256, index: 0 }, load),
+    { ok: false, reason: "evidence_absent" });
+  assert.deepEqual(await readDecisionMakerWorkspaceChunk({ requestId: "r-3", name: "PATCH.diff", sha256: "f".repeat(64), index: 0 }, load),
+    { ok: false, reason: "evidence_changed" });
+  assert.deepEqual(await readDecisionMakerWorkspaceChunk({ requestId: "r-4", name: "PATCH.diff", sha256, index: 0 }, async () => null),
+    { ok: false, reason: "request_unknown" });
+});
+
+test("a chunk is never served from a file the whole-file checks refuse: a secret late in a large patch", async () => {
+  const { readDecisionMakerWorkspaceChunk } = await service;
+  const token = ["gh", "p_", "Q".repeat(36)].join("");
+  const line = "+a line of the patch\n";
+  const patch = `diff --git a/a b/a\n${line.repeat(400_000)}+${token}\n`;
+  const result = await readDecisionMakerWorkspaceChunk(
+    { requestId: "r-secret", name: "PATCH.diff", sha256: sha256Of(patch), index: 0 },
+    async () => ({ kind: "t2_draft" as const, patchBody: patch, baseSha: SHA }),
+  );
+  assert.deepEqual(result, { ok: false, reason: "evidence_absent" });
+});
+
+test("the bytes one process checked are held for two minutes for one file, and not past them", async () => {
+  const { readDecisionMakerWorkspaceChunk } = await service;
+  const patch = `diff --git a/a b/a\n${"+held line\n".repeat(1000)}`;
+  const sha256 = sha256Of(patch);
+  let loads = 0;
+  const load = async () => { loads += 1; return { kind: "t2_draft" as const, patchBody: patch, baseSha: SHA }; };
+  let now = 1_000_000;
+  const clock = () => now;
+  const ask = (requestId: string) => readDecisionMakerWorkspaceChunk({ requestId, name: "PATCH.diff", sha256, index: 0 }, load, clock);
+  assert.equal((await ask("held")).ok, true);
+  assert.equal((await ask("held")).ok, true);
+  assert.equal(loads, 1, "a hit opens nothing");
+  // Another request replaces the one entry; the first must be opened again.
+  assert.equal((await ask("other")).ok, true);
+  assert.equal((await ask("held")).ok, true);
+  assert.equal(loads, 3);
+  now += 2 * 60 * 1000 + 1;
+  assert.equal((await ask("held")).ok, true);
+  assert.equal(loads, 4, "an expired entry is opened and checked again");
 });
