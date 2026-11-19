@@ -7,7 +7,7 @@ import test from "node:test";
 import { FakeGateway, lastUserText, toolResultsSinceUser, type ScriptedReply } from "./fakeGateway.js";
 import { makeRepo, makeRunner, scriptedPrompter, tempDir } from "./helpers.js";
 import { readKey } from "../src/auth.js";
-import { costLine, sessionCost } from "../src/main.js";
+import { costLine, creditsLabel, sessionCost } from "../src/main.js";
 import { isSecretPath, normalizeRoot, PathError, Workspace } from "../src/workspace.js";
 import { planPatch, PatchError } from "../src/patch.js";
 import { spawn, spawnSync } from "node:child_process";
@@ -599,4 +599,11 @@ test("in a Git repo a link under an ordinary name is listed only if what it poin
     const listed = new Workspace(normalizeRoot(root), []).listFiles(".", 100);
     assert.equal(listed.source, "git");
     assert.deepEqual(listed.files, ["ok.txt"]);
+});
+test("Smart Adaptive's credits read as a range from the cheapest model it can pick; a fixed model as one figure", () => {
+    const model = (id: string, creditsPerRequest: number) => ({ id, provider: "p", creditsPerRequest, contextWindowTokens: 1000, maxOutputTokens: 100 });
+    const catalog = [model("smart-adaptive", 20), model("cheap", 1), model("big", 20)];
+    assert.equal(creditsLabel(catalog[0]!, catalog), "1-20 credits/request");
+    assert.equal(creditsLabel(catalog[2]!, catalog), "20 credits/request");
+    assert.equal(creditsLabel(catalog[0]!, [catalog[0]!, model("only", 20)]), "20 credits/request");
 });
