@@ -14,21 +14,25 @@
 -- Widening a CHECK is backward compatible: every existing row satisfies the
 -- new constraint, and code that never writes 'perplexity' is unaffected.
 -- Migrate the database first, deploy the application after.
+--
+-- A CHECK-only replacement is invisible to migrate diff, so the prior
+-- definitions are pinned in baseline-check.json beside this file.
+
+BEGIN;
 
 ALTER TABLE "ExternalImport"
-    DROP CONSTRAINT IF EXISTS "ExternalImport_provider_check";
-ALTER TABLE "ExternalImport"
+    DROP CONSTRAINT "ExternalImport_provider_check",
     ADD CONSTRAINT "ExternalImport_provider_check"
-    CHECK ("provider" IN ('chatgpt', 'claude', 'gemini', 'perplexity'));
+        CHECK ("provider" IN ('chatgpt', 'claude', 'gemini', 'perplexity'));
 
 ALTER TABLE "ExternalConversation"
-    DROP CONSTRAINT IF EXISTS "ExternalConversation_provider_check";
-ALTER TABLE "ExternalConversation"
+    DROP CONSTRAINT "ExternalConversation_provider_check",
     ADD CONSTRAINT "ExternalConversation_provider_check"
-    CHECK ("provider" IN ('chatgpt', 'claude', 'gemini', 'perplexity'));
+        CHECK ("provider" IN ('chatgpt', 'claude', 'gemini', 'perplexity'));
 
 ALTER TABLE "ConversationContinuationBridge"
-    DROP CONSTRAINT IF EXISTS "ConversationContinuationBridge_provider_check";
-ALTER TABLE "ConversationContinuationBridge"
+    DROP CONSTRAINT "ConversationContinuationBridge_provider_check",
     ADD CONSTRAINT "ConversationContinuationBridge_provider_check"
-    CHECK ("provider" IN ('chatgpt', 'claude', 'gemini', 'perplexity'));
+        CHECK ("provider" IN ('chatgpt', 'claude', 'gemini', 'perplexity'));
+
+COMMIT;

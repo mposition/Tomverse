@@ -130,9 +130,15 @@ export const AMENDED_DOCUMENT_EVIDENCE: Readonly<
   // refusal lines brought in line with en). Observation
   // only; the effective date did not move, nothing is added to
   // APPROVED_AMENDED_DIGESTS and no email is authorized.
+  // 2026-11-19: the external-import notice names Perplexity and says that, for
+  // a Perplexity export, short excerpts of each question and the answer text
+  // around it go to an AI model provider (OpenAI) to find where questions end
+  // (owner decision in chat; docs/policy/external-conversation-import-and-memory.md
+  // §16). Observation only; the effective date did not move, nothing is added
+  // to APPROVED_AMENDED_DIGESTS and no email is authorized.
   "/privacy": {
     date: "2026-11-16",
-    contentSha256: "d2e62518af47d168c50f16a67a21256b215b2bcc4fb6770f103812250aa393c3",
+    contentSha256: "b729a6341137af9c09bafababdba586eb323ae61bcfec99a6937ddf259196be7",
   },
   // 2026-11-19: terms gain the API-key clause, the app-store billing and
   // non-expiring store credit sentences, and the missing zh clauses.
