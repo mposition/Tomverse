@@ -4,7 +4,18 @@ import { createGroundedCitationStream } from "@/lib/groundedCitationLinks";
 import { createChatSearchObservation, type ChatSearchObservation } from "@/lib/chatSearchObservation";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { copyGeneratedArtifactForRevision, generatedArtifactCopySchema, GeneratedArtifactRevisionError } from "@/lib/generatedArtifactRevision";
-import { stepCountIs, streamText, type FilePart, type ModelMessage } from "ai";
+import {
+    stepCountIs,
+    streamText,
+    type FilePart,
+    type ModelMessage,
+    type StepResult,
+    type ToolSet,
+} from "ai";
+import {
+    LongContextToolLoopLimitError,
+    longContextToolLoopStep,
+} from "@/lib/chatLongContextToolLoop";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { parseChatLocation } from "@tomverse/chat-core";
 import { appendChatLocationContext } from "@/lib/chatLocationPrompt";
@@ -106,7 +117,7 @@ import {
     profileTextFor,
     turnCarriesAttachments,
 } from "@/lib/autoDispatchPreflight";
-import { resolveModelPricing } from "@/lib/modelPricing";
+import { resolveModelPricing, type ProviderCallUsage } from "@/lib/modelPricing";
 import {
     authoriseDispatch,
     beginInstrumentedDispatch,
@@ -233,6 +244,7 @@ import {
     submitDeepResearchJob,
 } from "@/lib/perplexityDeepResearch";
 import { assertModelRuntimeAvailable } from "@/lib/modelAvailability";
+import { CHAT_MAX_STORED_ANSWER_CHARACTERS } from "@/lib/chatRequestLimits";
 import { OfficeTextOverflowError, parseOfficeSafely } from "@/lib/officeSecurity";
 import {
     CHAT_ATTACHMENT_PARSE_CHARACTERS,
@@ -249,7 +261,6 @@ import {
     readAttachmentTextCache,
     writeAttachmentTextCache,
 } from "@/lib/attachmentTextCache";
-import { chatUserMaxInputTokens } from "@/lib/chatInputLimits";
 import { extractLegacyOfficeText, type LegacyOfficeFormatId } from "@/lib/legacyOfficeText";
 import { legacyOfficeValidationCode } from "@/lib/chatAttachmentValidation";
 import {
@@ -278,6 +289,7 @@ import {
     assertModelAccess,
     assertChatRequestSize,
     ChatAccessError,
+    accountChatMaxInputTokens,
     assertUserOperationalAccess,
     chatErrorResponse,
     createChatBudget,
@@ -509,6 +521,57 @@ import {
     ATTACHMENT_UNAVAILABLE_CODE,
 } from "@/lib/chatAttachmentErrorCopy";
 
+/**
+ * Each provider call of a multi-step turn (a tool loop, Research Preview), from
+ * the SDK's per-step usage: every call is its own prompt and is settled at the
+ * long-context tier that prompt fell in (lib/modelPricing.ts). Undefined for a
+ * one-call turn, or when the steps cannot be read -- settlement then keeps to
+ * its rule for a summed input.
+ */
+const providerCallUsage = async (stream: {
+    steps: PromiseLike<
+        ReadonlyArray<{
+            usage: {
+                inputTokens?: number;
+                outputTokens?: number;
+                inputTokenDetails?: {
+                    cacheReadTokens?: number;
+                    cacheWriteTokens?: number;
+                };
+            };
+        }>
+    >;
+}): Promise<ProviderCallUsage[] | undefined> => {
+    try {
+        const steps = await stream.steps;
+        if (steps.length < 2) return undefined;
+        // All or nothing: a step without its own counts would price as zero,
+        // so the turn then settles on its totals instead.
+        const counted = (value: number | undefined) =>
+            Number.isSafeInteger(value) && value! >= 0;
+        if (
+            !steps.every(
+                (step) => counted(step.usage.inputTokens) && counted(step.usage.outputTokens)
+            )
+        ) {
+            return undefined;
+        }
+        // Each call's own cache split too: calls differ in how much of their
+        // prompt was cached, and the turn's cost is the sum of each call's.
+        return steps.map((step) => ({
+            inputTokens: Math.max(0, step.usage.inputTokens ?? 0),
+            outputTokens: Math.max(0, step.usage.outputTokens ?? 0),
+            cachedInputTokens: Math.max(0, step.usage.inputTokenDetails?.cacheReadTokens ?? 0),
+            cacheWriteInputTokens: Math.max(
+                0,
+                step.usage.inputTokenDetails?.cacheWriteTokens ?? 0
+            ),
+        }));
+    } catch {
+        return undefined;
+    }
+};
+
 const MAX_ATTACHMENTS = CHAT_MAX_ATTACHMENTS_PER_MESSAGE;
 // Every request resends the full conversation history, so this bounds how many
 // earlier files one turn walks. Raised from 30 with the 10-file message limit
@@ -523,7 +586,7 @@ const MAX_CONVERSATION_ATTACHMENTS = 100;
 const GUEST_MAX_CONVERSATION_ATTACHMENTS = 5;
 const MAX_ATTACHMENT_SIZE = CHAT_MAX_ATTACHMENT_BYTES;
 const MAX_TOTAL_ATTACHMENT_SIZE = CHAT_MAX_TOTAL_ATTACHMENT_BYTES;
-const MAX_STORED_MESSAGE_CHARACTERS = 100_000;
+const MAX_STORED_MESSAGE_CHARACTERS = CHAT_MAX_STORED_ANSWER_CHARACTERS;
 type IncomingAttachment = {
     name?: unknown;
     mediaType?: unknown;
@@ -3395,7 +3458,9 @@ async function handleChatPost(
         // are left out of the turn rather than failing it. See
         // lib/chatAttachmentLimits.ts.
         const pastAttachmentTokenBudget = pastTurnAttachmentTokenBudget(
-            access.kind === "guest" ? guestChatMaxInputTokens() : chatUserMaxInputTokens()
+            access.kind === "guest"
+                ? guestChatMaxInputTokens()
+                : accountChatMaxInputTokens(modelConfig)
         );
         let pastAttachmentTokens = 0;
         let totalImageCount = 0;
@@ -5105,8 +5170,23 @@ async function handleChatPost(
                 reservationOnlyInputTokens,
                 additionalToolInputTokens: mcpConnector ? mcpConnector.definitionTokens + mcpConnector.resultInputAllowance : 0,
                 toolInputPasses: mcpConnector ? MCP_CHAT_MAX_STEPS : 1,
+                // Reserved only above the flat limit; the loop is then stopped
+                // at what was reserved (`toolLoopStepCap` below).
+                longContextToolInputPasses: Math.max(
+                    artifactToolPlan?.registerTool ? GENERATED_ARTIFACT_MAX_STEPS : 1,
+                    appManagedSearchEnabled && webSearchCapability.searchBackend
+                        ? APP_MANAGED_SEARCH_MAX_STEPS
+                        : 1
+                ),
                   }
               );
+        // On a long-context turn the application tool loop runs no more calls
+        // than the reservation holds: each re-sends the whole prompt, and a
+        // call past the hold would be one the turn's credits do not cover.
+        const toolLoopStepCap =
+            budget.longContextSettlement && !isResearchPreview
+                ? (budget.providerCallPasses ?? 1)
+                : Number.POSITIVE_INFINITY;
         if (
             isResearchPreview &&
             budget.maxOutputTokens !== researchPreviewAdmission?.limits?.totalOutputTokens
@@ -5136,7 +5216,9 @@ async function handleChatPost(
         // to hold one, so the guard reads the single-pass view of the budget.
         const outputBudget = fitChatOutputToContextWindow({
             contextWindowTokens: modelConfig.contextWindowTokens,
-            reservedInputTokens: contextInputTokens,
+            // What is sent: the image allowance is reserved, never sent, so
+            // it takes no room from the answer (lib/chatSecurity.ts windowRoom).
+            reservedInputTokens: Math.max(0, contextInputTokens - reservationOnlyInputTokens),
             requestOutputCapTokens: budget.maxOutputTokens,
             providerMaxOutputTokens: budget.providerMaxOutputTokens,
         });
@@ -5737,19 +5819,22 @@ async function handleChatPost(
                       ...(appManagedSearchTool && !artifactToolConfig
                           ? {
                                 stopWhen: stepCountIs(
-                                    APP_MANAGED_SEARCH_MAX_STEPS
+                                    Math.min(APP_MANAGED_SEARCH_MAX_STEPS, toolLoopStepCap)
                                 ),
                             }
                           : {}),
                       ...(artifactToolConfig
                           ? {
                                 stopWhen: stepCountIs(
-                                    appManagedSearchTool
-                                        ? Math.max(
-                                              GENERATED_ARTIFACT_MAX_STEPS,
-                                              APP_MANAGED_SEARCH_MAX_STEPS
-                                          )
-                                        : GENERATED_ARTIFACT_MAX_STEPS
+                                    Math.min(
+                                        appManagedSearchTool
+                                            ? Math.max(
+                                                  GENERATED_ARTIFACT_MAX_STEPS,
+                                                  APP_MANAGED_SEARCH_MAX_STEPS
+                                              )
+                                            : GENERATED_ARTIFACT_MAX_STEPS,
+                                        toolLoopStepCap
+                                    )
                                 ),
                                 /*
                                   The two halves of "was this file begun, and
@@ -6064,6 +6149,34 @@ async function handleChatPost(
                 log(event);
             };
         };
+        // A long-context turn's application tool loop (not MCP or Research
+        // Preview, which keep their own step budgets) shares the reserved
+        // output and input across its calls (lib/chatLongContextToolLoop.ts).
+        // Only where this application runs a tool loop (artifacts, its own
+        // search): a turn whose only tool is a provider-native search makes
+        // one call, and is left exactly as it was (its tool choice included).
+        const longContextLoopStep =
+            combinedToolConfig &&
+            (artifactToolConfig || appManagedSearchTool) &&
+            !researchPreviewExecution &&
+            !mcpConnector &&
+            Number.isFinite(toolLoopStepCap) &&
+            toolLoopStepCap > 1 &&
+            Number.isSafeInteger(modelConfig.contextWindowTokens)
+                ? longContextToolLoopStep({
+                      maxOutputTokens: requestMaxOutputTokens,
+                      inputTokens: budget.inputTokens,
+                      // What the first call sends: the reservation-only image
+                      // allowance is reserved, never sent.
+                      firstPromptTokens: Math.max(
+                          0,
+                          (budget.contextInputTokens ?? budget.inputTokens) -
+                              reservationOnlyInputTokens
+                      ),
+                      callCap: toolLoopStepCap,
+                      contextWindowTokens: modelConfig.contextWindowTokens!,
+                  })
+                : null;
         await recordDispatchStarted(dispatchRecord);
         if (hasContinuation) void recordContinuationSeedOutcome(finalContinuation.outcome);
         latency.provider();
@@ -6105,7 +6218,27 @@ async function handleChatPost(
                           }
                         : combinedToolConfig ?? {}),
                     ...searchObservation?.sdk,
-                    ...(lookupStep ? { prepareStep: lookupStep } : {}),
+                    ...(longContextLoopStep
+                        ? {
+                              // One output budget across the loop, and an
+                              // answer due on the last reserved call.
+                              prepareStep: (options: {
+                                  stepNumber: number;
+                                  steps: Array<StepResult<ToolSet>>;
+                                  messages: ModelMessage[];
+                              }) => ({
+                                  ...(lookupStep?.(options) ?? {}),
+                                  ...longContextLoopStep.prepareStep(options),
+                              }),
+                              // And no call once the reserved output is spent.
+                              stopWhen: [
+                                  ...[combinedToolConfig?.stopWhen ?? []].flat(),
+                                  longContextLoopStep.outputSpent,
+                              ],
+                          }
+                        : lookupStep
+                          ? { prepareStep: lookupStep }
+                          : {}),
                     ...(mcpConnector ? {
                         maxRetries: 0,
                         stopWhen: stepCountIs(MCP_CHAT_MAX_STEPS),
@@ -6201,6 +6334,9 @@ async function handleChatPost(
                         ? ANTHROPIC_PROMPT_CACHE_TTL
                         : null,
                 pricingVersion: budget.pricingVersion ?? null,
+                providerCallPasses: budget.providerCallPasses ?? null,
+                longContextThresholdTokens: budget.longContextThresholdTokens,
+                costSource: budget.costSource ?? null,
             } satisfies AttemptPriceSnapshot,
         };
         durableCheckpointWriter?.setAttribution(
@@ -6371,6 +6507,7 @@ async function handleChatPost(
                 outputTokens?: number;
                 reasoningTokens?: number;
                 usageFromProvider?: boolean;
+                providerCalls?: ProviderCallUsage[];
                 searchSurchargeCredits?: number;
                 searchExecuted?: boolean;
                 // The provider's half of a native search, and whether anybody
@@ -6469,20 +6606,58 @@ async function handleChatPost(
                     }
                     const providerUsageSnapshot =
                         (await takePerplexityCapture())?.usage ?? null;
+                    // Without provider usage (a cancel, a lost total) a
+                    // multi-call loop is settled on the input it already sent
+                    // -- its finished calls and the one in flight -- not on
+                    // every call the reservation held.
+                    // A long-context app loop rebuilds that input call by call,
+                    // cache split included, so its cache writes and each
+                    // call's tier are priced as on a completed turn.
+                    const loopUsage =
+                        usage?.inputTokens === undefined &&
+                        dispatched.attemptIndex === 0 &&
+                        longContextLoopStep &&
+                        longContextLoopStep.sentInputTokens() > 0
+                            ? longContextLoopStep.settlementUsage(
+                                  usage?.outputTokens ?? estimatedGeneratedOutputTokens()
+                              )
+                            : null;
+                    const sentMcpInput =
+                        !loopUsage && dispatched.attemptIndex === 0
+                            ? (mcpConnector?.observedInputTokens() ?? 0)
+                            : 0;
+                    const loopFits =
+                        loopUsage !== null && loopUsage.inputTokens <= reservation.inputTokens;
                     const settledInputTokens =
-                        usage?.inputTokens ?? reservation.inputTokens;
+                        usage?.inputTokens ??
+                        (loopUsage
+                            ? Math.min(loopUsage.inputTokens, reservation.inputTokens)
+                            : sentMcpInput > 0
+                              ? Math.min(sentMcpInput, reservation.inputTokens)
+                              : reservation.inputTokens);
                     const settledOutputTokens =
-                        usage?.outputTokens ?? estimatedGeneratedOutputTokens();
+                        usage?.outputTokens ??
+                        loopUsage?.outputTokens ??
+                        estimatedGeneratedOutputTokens();
+                    const settledCachedInputTokens =
+                        usage?.cachedInputTokens ??
+                        (loopFits ? loopUsage!.cachedInputTokens : undefined);
+                    const settledCacheWriteInputTokens =
+                        usage?.cacheWriteInputTokens ??
+                        (loopFits ? loopUsage!.cacheWriteInputTokens : undefined);
+                    const settledProviderCalls =
+                        usage?.providerCalls ?? (loopFits ? loopUsage!.providerCalls : undefined);
                     await settleChatUsage(reservation, {
                         inputTokens: settledInputTokens,
-                        cachedInputTokens: usage?.cachedInputTokens,
-                        cacheWriteInputTokens: usage?.cacheWriteInputTokens,
+                        cachedInputTokens: settledCachedInputTokens,
+                        cacheWriteInputTokens: settledCacheWriteInputTokens,
                         outputTokens: settledOutputTokens,
                         reasoningTokens: usage?.reasoningTokens,
                         // Absent provider usage metadata, the output figure
                         // above is the documented fallback estimate rather
                         // than a measured value -- recorded as such.
                         usageFromProvider: usage?.usageFromProvider === true,
+                        providerCalls: settledProviderCalls,
                         outcome,
                         searchSurchargeCredits: usage?.searchSurchargeCredits,
                         searchExecuted: usage?.searchExecuted,
@@ -6502,10 +6677,11 @@ async function handleChatPost(
                                       attemptIndex: dispatched.attemptIndex,
                                       price: dispatched.price,
                                       inputTokens: settledInputTokens,
+                                      providerCalls: settledProviderCalls,
                                       cachedInputTokens:
-                                          usage?.cachedInputTokens ?? 0,
+                                          settledCachedInputTokens ?? 0,
                                       cacheWriteInputTokens:
-                                          usage?.cacheWriteInputTokens ?? 0,
+                                          settledCacheWriteInputTokens ?? 0,
                                       outputTokens: settledOutputTokens,
                                       reasoningTokens: usage?.reasoningTokens,
                                       usageFromProvider:
@@ -7513,6 +7689,11 @@ async function handleChatPost(
                         ? ANTHROPIC_PROMPT_CACHE_TTL
                         : null,
                 pricingVersion: plan.budget.pricingVersion ?? null,
+                providerCallPasses: plan.budget.providerCallPasses ?? null,
+                // Same as the primary's snapshot: the long-context settlement
+                // rule needs both to decide whether a crossed tier is corrected.
+                longContextThresholdTokens: plan.budget.longContextThresholdTokens,
+                costSource: plan.budget.costSource ?? null,
             };
             durableCheckpointWriter?.setAttribution(
                 dispatched.modelId,
@@ -7893,6 +8074,7 @@ async function handleChatPost(
 
                         if (usageResult.status === "fulfilled") {
                             const usage = usageResult.value;
+                            const providerCalls = await providerCallUsage(dispatched.stream);
                             await settleSafely(
                                 generatedText.trim() ? "completed" : "empty",
                                 {
@@ -7916,6 +8098,7 @@ async function handleChatPost(
                                         usage.outputTokenDetails
                                             .reasoningTokens,
                                     usageFromProvider: true,
+                                    providerCalls,
                                     ...searchSettlementFields,
                                 }
                             );
@@ -8508,6 +8691,7 @@ async function handleChatPost(
                             try {
                                 const usage = await dispatched.stream.usage;
                                 researchFailureUsage = {
+                                    providerCalls: await providerCallUsage(dispatched.stream),
                                     inputTokens: usage.inputTokens,
                                     cachedInputTokens:
                                         usage.inputTokenDetails.cacheReadTokens,
@@ -8526,6 +8710,33 @@ async function handleChatPost(
                                 };
                             }
                         }
+                    } else if (
+                        (error instanceof LongContextToolLoopLimitError ||
+                            (error as { cause?: unknown } | null)?.cause instanceof
+                                LongContextToolLoopLimitError) &&
+                        longContextLoopStep &&
+                        dispatched.attemptIndex === 0 &&
+                        longContextLoopStep.spent().steps > 0
+                    ) {
+                        // A long-context tool loop stopped before a call that
+                        // would not fit: that call was never sent, so the
+                        // finished calls are the provider's whole cost,
+                        // recorded as such. The failed turn's credits follow
+                        // the failure rule. Any other failure may have a call
+                        // in flight and takes the general path in settleSafely.
+                        const spent = longContextLoopStep.settlementUsage(
+                            longContextLoopStep.spent().outputTokens
+                        );
+                        researchFailureUsage = {
+                            inputTokens: spent.inputTokens,
+                            cachedInputTokens: spent.cachedInputTokens,
+                            cacheWriteInputTokens: spent.cacheWriteInputTokens,
+                            outputTokens: spent.outputTokens,
+                            providerCalls: spent.providerCalls,
+                            // An unreported call filled in at its allowance is
+                            // an estimate, recorded as one.
+                            usageFromProvider: spent.measured,
+                        };
                     }
                     await settleSafely(
                         "failed",

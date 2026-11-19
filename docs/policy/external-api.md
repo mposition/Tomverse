@@ -45,11 +45,12 @@ All default off. Server-side; hiding UI is never the gate.
 | `NEXT_PUBLIC_EXTERNAL_API_SETTINGS_VISIBLE` | Build-time. Shows the API keys row in the settings panel. `/settings/api` itself checks availability through the server. |
 | `EXTERNAL_API_REQUESTS_PER_MINUTE` / `_PER_DAY` | Per-account request-rate abuse guard, defaults 120 / 20 000. Credits, the key cap and concurrency are what bound usage; this only stops runaway clients. |
 | `EXTERNAL_API_HEARTBEAT_MS` | How often an in-flight request renews its concurrency slot and reservation, default 60 000. Runs from dispatch, including the wait for a streaming request's first part. Lowered only by tests. |
-| `EXTERNAL_API_READS_PER_MINUTE` / `_PER_DAY` | Separate per-account budget for `GET /models` and `GET /usage`, defaults 60 / 5 000. The settings read routes (key list, receipts) have a fixed 60 / 5 000; revocation has none, so it always works. |
+| `EXTERNAL_API_READS_PER_MINUTE` / `_PER_DAY` | Separate per-account budget for `GET /models`, `GET /usage` and `GET /requests/status`, defaults 60 / 5 000. The settings read routes (key list, receipts) have a fixed 60 / 5 000; revocation has none, so it always works. |
 | `EXTERNAL_API_TIMEOUT_MS` | Server timeout for one generation, default 600 000. |
 | `EXTERNAL_API_REQUEST_SHAPE_LOG` | Dev only, default off, temporary. Exactly `true` logs each Chat Completions request's shape (field names and types, tool kinds and names, message roles, numbers and booleans, header names) and, on a stream failure, the part types before it and the error's name, code and stack frames. No message text, code, argument, schema body or header value is logged (`lib/externalApiRequestShape.ts`). Added to find out what Cursor sends; to be removed once Cursor works. |
 | `EXTERNAL_API_ANTHROPIC_ENABLED` | Exactly `true` (and `EXTERNAL_API_ENABLED`) turns on the Anthropic Messages routes for Claude Code: `POST /api/anthropic/v1/messages`, its `count_tokens` and `GET /api/anthropic/v1/models`. Off: 503 `feature_unavailable`, nothing dispatched. |
 | `EXTERNAL_API_RESPONSES_ENABLED` | Exactly `true` (and `EXTERNAL_API_ENABLED`) turns on `POST /api/v1/responses` for Codex. Off: 503, nothing dispatched. |
+| `TOMVERSE_CLI_GUIDE_ENABLED` | Exactly `true` shows the Tomverse CLI install and connect card in Settings > API keys (section 11). Off until the package is published, so the page never points at a package that is not on the registry. It turns nothing on in the API. |
 | `EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED` | Exactly `true` lets Smart Adaptive (section 5.1) ask Chat's router model which candidate answers. Off by default, because each routed request adds one router call, held against the provider operational budget rather than the user's credits. Off, `smart-adaptive` still works and every request goes to the default model. |
 
 **Kill switch.** The Admin operational pause for AI chat
@@ -140,6 +141,7 @@ list of ids: enabling a model in the catalogue offers it here too.
 | `GET /models` | OpenAI model list of what this key's account can run now. Tomverse facts under `tomverse`: capabilities, `context_window_tokens`, `max_output_tokens`, `credits_per_request`. |
 | `POST /chat/completions` | Chat Completions, streaming or not. |
 | `GET /usage?limit=50` | Tomverse-specific: this key's cap, committed and held credits, and recent request receipts. |
+| `GET /requests/status` | Tomverse-specific, read only: the receipt of **one** request of this key, by `?request_id=req_…` or by the `Idempotency-Key` header it was sent with -- exactly one of the two. For a client that lost a response (before or after its headers) or keeps a session longer than the 100 receipts `/usage` lists. Never dispatches, reserves or changes anything; returns no output (none is stored). Another key's request, another account's and a missing one answer the same `404 request_not_found`, and not found is not evidence that nothing was sent or charged: a request may not have arrived or been admitted yet. `usage_source: server_settlement` because the row does not say whether the token counts came from the provider or the reservation estimate. |
 
 **Supported request fields:** `model`, `messages` (roles `system`,
 `developer`, `user`, `assistant`, `tool`; text parts; `image_url` parts with
@@ -161,7 +163,7 @@ them on every request -- VS Code always sends a temperature), `stop` (up to 4), 
 The request body may be up to 12 MB.
 
 **Refused with a typed 400:** any other field (`unsupported_parameter`, naming
-it), a `name` on any message (no provider here has participant names), `n` other than 1, `store: true`, `parallel_tool_calls: false`, both token
+it), a `name` on a system, user or assistant message (no provider here has participant names; a tool message's `name`, which Cursor sends, is accepted and ignored, as is a history tool call's stream `index`), `n` other than 1, `store: true`, `parallel_tool_calls: false`, both token
 limits with different values, a token limit above the model's maximum, images
 for a model without image input, remote image URLs (never fetched), a tool
 result answering no earlier tool call, and `strict: true` on a tool for a provider that would drop it.
@@ -191,10 +193,10 @@ with Tomverse limit details under `tomverse` where they exist.
 
 | Status | Codes |
 |---|---|
-| 400 | `invalid_json`, `invalid_request`, `unsupported_parameter`, `conflicting_parameters`, `max_tokens_too_large`, `invalid_tool`, `invalid_tool_choice`, `invalid_tool_call`, `invalid_tool_result`, `unsupported_image_url`, `unsupported_image_type`, `invalid_image`, `model_does_not_support_images` |
+| 400 | `invalid_json`, `invalid_request`, `unsupported_parameter`, `conflicting_parameters`, `max_tokens_too_large`, `invalid_tool`, `invalid_tool_choice`, `invalid_tool_call`, `invalid_tool_result`, `unsupported_image_url`, `unsupported_image_type`, `invalid_image`, `model_does_not_support_images`, `invalid_request_selector` and `invalid_idempotency_key` (status lookup) |
 | 401 | `invalid_api_key` |
 | 403 | `account_not_enabled`, account restrictions from `assertUserOperationalAccess`, plan access |
-| 404 | `model_not_found` |
+| 404 | `model_not_found`, `request_not_found` (status lookup) |
 | 409 | `idempotent_request_in_progress`, `idempotent_request_completed` |
 | 413 | `image_too_large`, `too_many_images`, `tool_schema_too_large`, `request_body_too_large`, `CHAT_INPUT_TOKEN_LIMIT` |
 | 422 | `idempotency_key_reused` |
@@ -209,7 +211,8 @@ again does not dispatch: it answers 409 with the original request's receipt
 (status, outcome, finish reason, charged credits). Outputs are not stored, so
 the original answer cannot be replayed. A different body under the same
 Idempotency-Key is 422. Concurrent twins dispatch exactly once. Without the
-header, a retry is a new request — the server cannot tell it from a new one.
+header, a retry is a new request — the server cannot tell it from a new one. A client that recorded the
+header before sending can look the request up later with `GET /requests/status`.
 
 ### 5.1 Smart Adaptive
 
@@ -554,3 +557,50 @@ the token. 57 requests, none left held.
 Not yet verified, each a separate step: Cursor Chat and Agent (needs public
 HTTPS), other operating systems, and a deployed environment (the run above
 called the handlers directly, not through the Next.js server).
+
+## 11. Tomverse CLI (`apps/tomverse-cli`)
+
+Tomverse's own coding agent, `@tomverse/cli` (bin `tomverse`), is a client of
+this API like any other: Chat Completions only, one key, the account's shared
+credits, the key cap as the only hard credit limit. No separate wallet, task
+price, Conversation, `productKey` or server-side agent. The user guide and
+output contract are in `apps/tomverse-cli/README.md`.
+
+- **Transport.** An explicit AI SDK provider instance (`createOpenAI({ baseURL,
+  apiKey, fetch }).chat(model)`) with retries 0. Its fetch allows only
+  `POST /chat/completions` on the configured origin and below its API root,
+  never follows a redirect, and records a durable intent with a new
+  `Idempotency-Key` before each request -- one per model step, never shared
+  across steps. Configuration is the user's (home folder); nothing in a
+  repository can change the endpoint, the key or a permission. https only;
+  http only for a loopback development server the user allowed.
+- **Cost.** A session's cost is the sum of its own receipts, looked up by
+  request id (`/usage`, then `/requests/status`), never the key's total before
+  and after. Held is shown as held and unknown as unknown. Compaction is a
+  model request of the same model and counts against the per-task request
+  limit (default 20 requests, 15 active minutes, 120 s per command).
+- **Recovery.** A lost response is looked up with `/requests/status` by the
+  recorded Idempotency-Key; the answer itself cannot be replayed, and sending
+  the step again is the user's decision (a new request). `request_not_found`
+  is never treated as free or as safe to resend.
+- **Local boundary** (the CLI's code, not the server's): approvals bound to the
+  exact tool input and file preimages and checked again inside the tool's
+  execute, no re-run of a call that started, credential paths and `.git/`
+  never read, commands get a fixed short list of environment variables (PATH,
+  HOME, temp, locale, …) plus names the user adds, never a Tomverse one, and no
+  approval without a terminal. At the terminal the user can answer "always"
+  for the rest of that process: all file creates and updates (a delete is
+  always asked), or one exact command (program, arguments, folder,
+  environment names). It is not saved, so a resumed session asks again, and
+  it skips only the question, not the checks. Commands run with the user's
+  own permissions; the CLI does not claim a sandbox.
+- **Smart Adaptive.** The first answer's `x-tomverse-routed-model` is pinned for
+  the session before any tool of that answer runs; later requests name it.
+- **Tomverse Code.** Its Rust host is not embedded in v1 (a Windows desktop
+  runtime with its own providers and store). The CLI follows its contracts --
+  tool names, result states, the credential path list, argv-first commands --
+  so a later shared executor can replace the CLI's local tools.
+
+Verification state, publication and the operating systems actually run are
+reported per change (the PR); package publication and enabling
+`TOMVERSE_CLI_GUIDE_ENABLED` are separate approved steps.

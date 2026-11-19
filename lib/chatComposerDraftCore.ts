@@ -1,3 +1,4 @@
+import { CHAT_MAX_MESSAGE_CHARACTERS } from "@/lib/chatRequestLimits";
 import { CHAT_MAX_ATTACHMENTS_PER_MESSAGE } from "@/lib/chatAttachmentLimits";
 import { z } from "zod";
 
@@ -48,7 +49,7 @@ export const chatDraftAttachmentReferencesSchema = z
 export const chatComposerDraftPutSchema = z
   .object({
     expectedRevision: z.number().int().min(0).max(2_147_483_646),
-    text: z.string().max(50_000),
+    text: z.string().max(CHAT_MAX_MESSAGE_CHARACTERS),
     attachmentReferences: chatDraftAttachmentReferencesSchema,
   })
   .strict();

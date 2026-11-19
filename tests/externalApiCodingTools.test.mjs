@@ -7,6 +7,7 @@ import {
     codexModelId,
     codingToolModels,
     cursorConfig,
+    tomverseCliGuide,
 } from "../lib/externalApiCodingTools.ts";
 import { KEY_PLACEHOLDER } from "../lib/externalApiCatalogCore.ts";
 
@@ -162,4 +163,17 @@ test("the request shape log keeps names, types and numbers, never content", asyn
     const withContent = describeStreamFailure(new Error(SECRET_TEXT));
     assert.equal(withContent.message, undefined);
     assert.doesNotMatch(JSON.stringify(withContent), /private code/);
+});
+
+test("Tomverse CLI guide: off until published; key in the shell only; endpoint only when not the default", () => {
+    assert.equal(tomverseCliGuide({}, "https://tomverse.app/api/v1"), null);
+    assert.equal(tomverseCliGuide({ TOMVERSE_CLI_GUIDE_ENABLED: "1" }, "https://tomverse.app/api/v1"), null);
+    const guide = tomverseCliGuide({ TOMVERSE_CLI_GUIDE_ENABLED: "true" }, "https://tomverse.app/api/v1");
+    assert.equal(guide.install, "npm install -g @tomverse/cli");
+    assert.equal(guide.powershell, `$env:TOMVERSE_API_KEY = "${KEY_PLACEHOLDER}"\ntomverse doctor`);
+    assert.equal(guide.posix, `export TOMVERSE_API_KEY="${KEY_PLACEHOLDER}"\ntomverse doctor`);
+    const staging = tomverseCliGuide({ TOMVERSE_CLI_GUIDE_ENABLED: "true" }, "https://dev.tomverse.app/api/v1");
+    assert.match(staging.posix, /tomverse config set endpoint 'https:\/\/dev\.tomverse\.app\/api\/v1'/);
+    assert.match(tomverseCliGuide({ TOMVERSE_CLI_GUIDE_ENABLED: "true" }, "https://x.example/api/v1;rm -rf ~").posix, /endpoint 'https:\/\/x\.example\/api\/v1;rm -rf ~'/, "quoted as one argument");
+    assert.ok(!/--api-key/.test(staging.posix + staging.powershell), "the key is never a command-line argument");
 });
