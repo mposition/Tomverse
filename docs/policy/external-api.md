@@ -554,9 +554,23 @@ protocols; after revocation both returned 401 with nothing dispatched. Ledger
 input, cache read/write and output matched Claude Code's own usage report to
 the token. 57 requests, none left held.
 
-Not yet verified, each a separate step: Cursor Chat and Agent (needs public
-HTTPS), other operating systems, and a deployed environment (the run above
-called the handlers directly, not through the Next.js server).
+Cursor, 2026-11-19, on the dev deployment (public HTTPS, the deployed Next.js
+server, real model GPT-5.6 Luna), driven by the operator in the Cursor desktop
+app on Windows 10 (3.21.16 when installed on 2026-11-18) and configured only by
+the page's Cursor steps: Chat explained two files; Agent ran a failing test,
+fixed the file with `ApplyPatch` and re-ran it to a pass, on two files; with
+Run Mode set to Allowlist, a command refused at the approval prompt was not
+run and the next request was accepted, then the same command approved ran; a
+reply stopped mid-stream settled as cancelled at 1 credit, against 2 for the
+completed request before it, and the receipts on the API keys page carried the
+same request ids and states as the server. No request in these runs failed or
+was retried. Before the function form of section 6, each `ApplyPatch` call
+sent as a `custom` call completed and was charged while Cursor retried it four
+times and reported a server error.
+
+Not yet verified, each a separate step: other operating systems, Claude Code
+and Codex against a deployed environment (their runs above called the handlers
+directly, not through the Next.js server), and any client against production.
 
 ## 11. Tomverse CLI (`apps/tomverse-cli`)
 
