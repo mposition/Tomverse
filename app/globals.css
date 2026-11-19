@@ -311,6 +311,20 @@
   --color-status-switch-on-700: var(--color-emerald-700);
 }
 
+/*
+ * Public-site palette (homepage V2, owner decision 2026-11-20). Marketing,
+ * help, legal and status pages draw their dark surfaces from Tailwind's zinc
+ * utilities; inside [data-tv-site] those resolve to the V2 values instead:
+ * page #111318, card #1c1e25, hover #272a33, hairline #31343f. Accent colours
+ * (blue, the help-centre gradient) are untouched.
+ */
+[data-tv-site] {
+  --color-zinc-950: #111318;
+  --color-zinc-900: #1c1e25;
+  --color-zinc-800: #272a33;
+  --color-zinc-700: #31343f;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);

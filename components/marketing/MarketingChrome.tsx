@@ -671,7 +671,7 @@ function LaunchMarketingHeader({
   const chatHref = entry.chatAvailable ? suppliedChatHref ?? entry.chatHref : entry.chatHref;
   const items = [
     { label: lang === "ko" ? "채팅" : "Chat", href: chatHref, key: "chat" },
-    { label: lang === "ko" ? "리뷰" : "Review", href: reviewInfoHref ?? localizedPath(lang, REVIEW_PRODUCT_PATH), key: "review" },
+    { label: lang === "ko" ? "답변 비교" : "Review", href: reviewInfoHref ?? localizedPath(lang, REVIEW_PRODUCT_PATH), key: "review" },
     { label: copy.pricing, href: "/pricing", key: "pricing" },
     { label: copy.models, href: "/models", key: "models" },
   ];
@@ -704,24 +704,24 @@ function LaunchMarketingHeader({
 
   return (
     <>
-      <header className="relative z-40 border-b border-white/10 bg-zinc-950 text-white" data-testid="launch-marketing-header">
+      <header className="sticky top-0 z-40 border-b border-white/[0.08] bg-[rgb(17_19_24/0.82)] text-white backdrop-blur-xl backdrop-saturate-150" data-testid="launch-marketing-header">
         <div className={`mx-auto ${showMobileEntry ? "grid grid-cols-[minmax(0,1fr)_auto] lg:flex" : "flex flex-wrap"} min-h-[72px] ${maxWidth} items-center justify-between gap-[12px] px-[16px] py-3 sm:px-6 lg:flex-nowrap lg:px-[64px]`}>
           <Link href={localizedHref(lang, "/")} className={`flex shrink-0 ${showMobileEntry ? "min-w-0 flex-wrap" : ""} items-center gap-[8px] ${launchFocus}`} data-testid="marketing-brand-link" onClick={() => setIsMenuOpen(false)}>
             <span className="flex h-[36px] w-[36px] shrink-0 overflow-hidden rounded-[10px] bg-white">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src="/tomverse-logo.png" alt="" className="h-full w-full object-cover" />
             </span>
-            <span className="text-sm font-bold tracking-tight max-[240px]:sr-only sm:text-lg" data-testid="marketing-brand-name">Tomverse</span>
+            <span className="text-sm font-bold tracking-[-0.02em] max-[240px]:sr-only sm:text-lg"><span data-testid="marketing-brand-name">Tomverse</span><span aria-hidden="true">.</span></span>
           </Link>
-          <nav aria-label={copy.navigation} className="hidden items-center gap-6 text-sm font-semibold lg:flex">
-            {items.map((item) => <Link key={item.key} href={localizedHref(lang, item.href)} data-testid={`header-${item.key}-link`} className={`py-3 text-zinc-300 transition hover:text-white ${launchFocus}`}>{item.label}</Link>)}
+          <nav aria-label={copy.navigation} className="hidden items-center gap-1 text-sm font-semibold lg:flex">
+            {items.map((item) => <Link key={item.key} href={localizedHref(lang, item.href)} data-testid={`header-${item.key}-link`} className={`rounded-full px-3 py-2 text-zinc-300 transition hover:bg-white/[0.06] hover:text-white ${launchFocus}`}>{item.label}</Link>)}
           </nav>
           <div className={`${showMobileEntry ? "contents lg:flex" : "flex"} min-w-0 items-center gap-[8px]`}>
             <div className="min-w-0 [&>label]:h-[44px] [&>label]:max-w-[126px] [&>label]:border-zinc-700 [&>label]:bg-zinc-900 [&>label]:text-zinc-100 [&_select]:text-zinc-100 [&_select]:[color-scheme:dark]">
               <MarketingLanguageSwitcher />
             </div>
             {status !== "authenticated" && <Link href={loginHref} className={`hidden px-2 py-3 text-sm font-semibold text-zinc-300 hover:text-white lg:inline-flex ${launchFocus}`}>{copy.login}</Link>}
-            <Link href={primaryHref} data-testid="marketing-header-app-cta" data-session-state={status} onClick={() => trackStart("marketing_header")} className={`${showMobileEntry ? "col-start-1 row-start-2 inline-flex min-w-0 justify-center px-3 lg:px-5" : "hidden px-5"} min-h-[44px] items-center gap-2 rounded-full bg-blue-600 py-2 text-center text-sm font-bold hover:bg-blue-500 lg:inline-flex ${launchFocus}`}>
+            <Link href={primaryHref} data-testid="marketing-header-app-cta" data-session-state={status} onClick={() => trackStart("marketing_header")} className={`${showMobileEntry ? "col-start-1 row-start-2 inline-flex min-w-0 justify-center px-3 lg:px-5" : "hidden px-5"} min-h-[44px] items-center gap-2 rounded-full bg-[#155dfb] py-2 text-center text-sm font-bold shadow-[0_10px_40px_-12px_rgb(21_93_251/0.8)] transition hover:-translate-y-px hover:bg-[#144ee0] lg:inline-flex ${launchFocus}`}>
               {appLabel}<ArrowRight className="h-4 w-4 shrink-0" aria-hidden="true" />
             </Link>
             <button ref={menuButtonRef} type="button" aria-label={isMenuOpen ? menuCopy.close : menuCopy.menu} aria-controls={menuId} aria-expanded={isMenuOpen} onClick={() => setIsMenuOpen((open) => !open)} data-testid="marketing-menu-button" className={`${showMobileEntry ? "col-start-2 row-start-2 justify-self-end" : ""} inline-flex h-[44px] w-[44px] shrink-0 items-center justify-center rounded-full border border-zinc-700 bg-zinc-900 hover:bg-zinc-800 lg:hidden ${launchFocus}`}>
@@ -763,7 +763,7 @@ function LaunchMarketingFooter({ maxWidth = "max-w-7xl" }: MarketingFooterProps)
     ] },
   ];
   return (
-    <footer className="bg-zinc-950 text-zinc-400" data-testid="launch-marketing-footer">
+    <footer className="border-t border-zinc-800 bg-zinc-950 text-zinc-400" data-testid="launch-marketing-footer">
       <div className={`mx-auto ${maxWidth} px-[16px] pb-8 pt-12 sm:px-6 lg:px-[64px]`}>
         <div className="grid grid-cols-1 gap-x-8 gap-y-10 lg:grid-cols-[1.8fr_3fr]">
           <div className="min-w-0">
@@ -771,7 +771,7 @@ function LaunchMarketingFooter({ maxWidth = "max-w-7xl" }: MarketingFooterProps)
               <span className="h-[36px] w-[36px] shrink-0 overflow-hidden rounded-[10px] bg-white">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src="/tomverse-logo.png" alt="" className="h-full w-full object-cover" />
-              </span><span className="min-w-0 [overflow-wrap:anywhere]">Tomverse</span>
+              </span><span className="min-w-0 tracking-[-0.02em] [overflow-wrap:anywhere]">Tomverse<span aria-hidden="true">.</span></span>
             </Link>
             <p className="mt-4 max-w-md text-sm leading-6">{copy.description}</p>
           </div>
