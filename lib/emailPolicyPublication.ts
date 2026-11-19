@@ -132,7 +132,7 @@ export const AMENDED_DOCUMENT_EVIDENCE: Readonly<
   // APPROVED_AMENDED_DIGESTS and no email is authorized.
   "/privacy": {
     date: "2026-11-16",
-    contentSha256: "5469885933648f3134c5118a92b17f2dddda798fb6f0922769eb12b63469e304",
+    contentSha256: "d2e62518af47d168c50f16a67a21256b215b2bcc4fb6770f103812250aa393c3",
   },
   // 2026-11-19: terms gain the API-key clause, the app-store billing and
   // non-expiring store credit sentences, and the missing zh clauses.
