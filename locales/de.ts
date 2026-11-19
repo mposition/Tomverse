@@ -1536,14 +1536,14 @@ export const de = {
     externalImport: {
         dataTabTitle: "Aus einem anderen KI-Dienst importieren",
         dataTabDescription:
-            "Speichern Sie frühere Unterhaltungen aus einer Exportdatei von ChatGPT, Claude oder Gemini (Google Takeout) in Ihrem Tomverse-Konto. Die Exportdatei wird nur in Ihrem Browser gelesen.",
+            "Speichern Sie frühere Unterhaltungen aus einer Exportdatei von ChatGPT, Claude, Gemini (Google Takeout) oder Perplexity in Ihrem Tomverse-Konto. Die Exportdatei wird nur in Ihrem Browser gelesen.",
         dataTabUsage:
             "{conversations} importierte Unterhaltungen · {storage} gespeichert",
         dataTabOpen: "Importe verwalten",
         dataTabUsageEmpty: "Noch keine importierten Unterhaltungen",
         pageTitle: "Unterhaltungen aus einem anderen KI-Dienst importieren",
         pageDescription:
-            "Laden Sie einen offiziellen Datenexport von ChatGPT, Claude oder Gemini hoch, prüfen Sie den Inhalt und wählen Sie die Unterhaltungen aus, die Sie in Ihrem Tomverse-Konto behalten möchten.",
+            "Laden Sie einen offiziellen Datenexport von ChatGPT, Claude, Gemini oder Perplexity hoch, prüfen Sie den Inhalt und wählen Sie die Unterhaltungen aus, die Sie in Ihrem Tomverse-Konto behalten möchten.",
         backToImports: "Zurück zu den Importen",
         signInRequired:
             "Melden Sie sich an, um Unterhaltungen aus einem anderen KI-Dienst zu importieren.",
@@ -1556,7 +1556,7 @@ export const de = {
         capacityConversations: "{used} von {limit} importierten Unterhaltungen",
         selectFile: "Exportdatei auswählen",
         selectFileHint:
-            "Datenexport von ChatGPT, Claude oder Gemini (.zip oder .json), bis zu 1 GB. Für Gemini wird der JSON-Export von Meine Aktivitäten → Gemini-Apps aus Google Takeout benötigt. Große Archive sind kein Problem — Mediendateien werden übersprungen, ohne gelesen zu werden.",
+            "Datenexport von ChatGPT, Claude oder Gemini (.zip oder .json) oder ein als Markdown (.md) exportierter Perplexity-Thread, bis zu 1 GB. Für Gemini wird der JSON-Export von Meine Aktivitäten → Gemini-Apps aus Google Takeout benötigt. Große Archive sind kein Problem — Mediendateien werden übersprungen, ohne gelesen zu werden. Bei einer Perplexity-Datei werden kurze Auszüge jeder Frage und des umgebenden Antworttexts (je höchstens 600 Zeichen) an ein KI-Modell (OpenAI) gesendet, um zu erkennen, wo jede Frage endet.",
         parsing: "Export wird in Ihrem Browser gelesen…",
         parsingProgress: "{conversations} Unterhaltungen gefunden",
         cancel: "Abbrechen",
@@ -1694,8 +1694,12 @@ export const de = {
             "Wählen Sie Meine Aktivitäten, darin Gemini-Apps, und stellen Sie das Format auf JSON — das Produkt Gemini enthält Gems, keine Unterhaltungen",
         guideGeminiStep3:
             "Exportieren und die .zip hochladen, sobald Google den Download-Link sendet",
+        guidePerplexityTitle: "Perplexity-Thread exportieren",
+        guidePerplexityStep1: "Öffnen Sie in Perplexity den Thread, den Sie übernehmen möchten",
+        guidePerplexityStep2: "Tippen Sie unter einer Antwort auf Exportieren und wählen Sie Markdown",
+        guidePerplexityStep3: "Laden Sie die .md-Datei hoch. Eine Datei ist ein Thread, und die Quellenlinks der Antworten kommen mit. Um zu erkennen, wo jede Frage endet, werden kurze Auszüge jeder Frage und des umgebenden Antworttexts (je höchstens 600 Zeichen) an ein KI-Modell (OpenAI) gesendet.",
         guideFormats:
-            "ZIP- und JSON-Dateien werden beide unterstützt. Ein Gemini-Export muss im JSON-Format vorliegen — HTML kann nicht gelesen werden.",
+            "ZIP- und JSON-Dateien werden unterstützt, außerdem Markdown-Dateien (.md) von Perplexity. Ein Gemini-Export muss im JSON-Format vorliegen — HTML kann nicht gelesen werden.",
         guideStaysLocal:
             "Die Exportdatei verlässt Ihr Gerät nicht — sie wird nur im Browser geöffnet.",
         guideMediaExcluded:
@@ -1704,6 +1708,8 @@ export const de = {
         guideContinue: "Exportdatei auswählen",
         providerMismatchNotice:
             "Dies ist ein {detected}-Export, daher fahren wir mit {detected} fort.",
+        perplexityStructureNotice:
+            "Ein Perplexity-Export markiert nicht, wo eine Frage endet, daher können Frage und Antwort an der falschen Stelle getrennt werden. Öffnen Sie die Unterhaltung nach dem Import zur Kontrolle und löschen Sie sie, falls sie falsch aufgeteilt wurde.",
         // Zustand „Desktop empfohlen“
         desktopRecommendedTitle:
             "Dieses Gerät kann die Datei nicht sicher öffnen",
@@ -2354,7 +2360,7 @@ export const de = {
         attachmentsTitle: "Anhänge",
         attachments: "Anhänge werden für Modellzustellung und Dokumentextraktion in verschlüsseltem Objektspeicher gespeichert. Bei angemeldeten Konten bleiben sie bei der Unterhaltung und werden gelöscht, wenn Sie diese Unterhaltung oder Ihr Konto löschen. Ohne Konto angehängte Dateien sind temporär und werden durch eine geplante Bereinigung automatisch entfernt. Enthält ein PDF keinen lesbaren Text (etwa ein Scan), wird die Datei an den Texterkennungsdienst von Mistral AI (Frankreich) gesendet, damit der Text gelesen werden kann, unabhängig vom gewählten Modell. Wenn Sie eine Datei aus Google Drive auswählen, fordert Tomverse nur Zugriff auf die ausgewählten Dateien an, ruft die Datei einmal ab und speichert sie wie jeden anderen Anhang; das Google-Zugriffstoken wird nur für diese Anfrage verwendet und nicht gespeichert.",
         externalImportTitle: "Aus anderen KI-Diensten importierte Unterhaltungen",
-        externalImport: "Sie können frühere Unterhaltungen, die Sie aus einer bei einem anderen KI-Dienst wie ChatGPT, Claude oder Gemini (Google Takeout) heruntergeladenen Exportdatei auswählen, in Ihrem Tomverse-Konto speichern. Die Exportdatei wird ausschließlich in Ihrem Browser geöffnet; das ursprüngliche Archiv wird niemals auf Server oder Speicher von Tomverse hochgeladen oder dort aufbewahrt. Gespeichert werden nur der normalisierte Text der ausgewählten Unterhaltungen sowie Herkunftsangaben (Ausgangsdienst, ursprüngliche Zeitstempel, Modellnamen nur zur Anzeige). Bilder, Audio und Anhänge werden nicht importiert. Importierte Unterhaltungen können personenbezogene Daten anderer Personen enthalten; Sie sind daher dafür verantwortlich sicherzustellen, dass Sie zum Import dieser Daten berechtigt sind. Sie können importierte Inhalte jederzeit einsehen, löschen und exportieren; sie werden mit Ihrem Konto gelöscht. Eine Löschung bei Tomverse löscht nicht die beim ursprünglichen Dienst gespeicherten Daten. Wenn Sie eine importierte Unterhaltung fortsetzen, werden die relevanten Teile wie bei jeder anderen Unterhaltung an KI-Anbieter gesendet, um ein Modell zu wählen und die Antwort zu erzeugen.",
+        externalImport: "Sie können frühere Unterhaltungen, die Sie aus einer bei einem anderen KI-Dienst wie ChatGPT, Claude, Gemini (Google Takeout) oder Perplexity heruntergeladenen Exportdatei auswählen, in Ihrem Tomverse-Konto speichern. Beim Import eines Perplexity-Exports werden nur kurze Auszüge jeder Frage und des umgebenden Antworttexts (je höchstens 600 Zeichen) an einen KI-Modellanbieter (OpenAI) gesendet, um zu bestimmen, wo Fragen enden; außer diesem Ergebnis wird nichts gespeichert, und die Kosten trägt Tomverse. Die Exportdatei wird ausschließlich in Ihrem Browser geöffnet; das ursprüngliche Archiv wird niemals auf Server oder Speicher von Tomverse hochgeladen oder dort aufbewahrt. Gespeichert werden nur der normalisierte Text der ausgewählten Unterhaltungen sowie Herkunftsangaben (Ausgangsdienst, ursprüngliche Zeitstempel, Modellnamen nur zur Anzeige). Bilder, Audio und Anhänge werden nicht importiert. Importierte Unterhaltungen können personenbezogene Daten anderer Personen enthalten; Sie sind daher dafür verantwortlich sicherzustellen, dass Sie zum Import dieser Daten berechtigt sind. Sie können importierte Inhalte jederzeit einsehen, löschen und exportieren; sie werden mit Ihrem Konto gelöscht. Eine Löschung bei Tomverse löscht nicht die beim ursprünglichen Dienst gespeicherten Daten. Wenn Sie eine importierte Unterhaltung fortsetzen, werden die relevanten Teile wie bei jeder anderen Unterhaltung an KI-Anbieter gesendet, um ein Modell zu wählen und die Antwort zu erzeugen.",
         memoryTitle: "Langzeitgedächtnis des Kontos",
         memory: "Wenn Sie importierte Unterhaltungen in Ihrem Tomverse-Konto speichern, erstellt Tomverse daraus automatisch Erinnerungen, solange die Gedächtnisfunktion eingeschaltet ist. Dazu wird der Inhalt dieser Unterhaltungen an einen von Tomverse gewählten KI-Anbieter (derzeit OpenAI, USA) übermittelt; dafür werden keine Credits abgebucht. Sensible Inhalte wie Gesundheitsangaben werden nicht als Erinnerung gespeichert; nur Inhalte, die die Prüfung bestehen, werden gespeichert und sofort verwendet. Zum selben Thema ersetzt der Inhalt einer neueren Unterhaltung die frühere Erinnerung. Erinnerungen und deren Begründungen verbleiben in Ihrem Konto, bis Sie sie löschen oder Ihre Kontodaten gelöscht werden. Erinnerungen und Antwortstil-Präferenzen werden als Referenzmaterial an den KI-Anbieter übermittelt, der die jeweilige neue Antwort erzeugt — beim Vergleich mehrerer Modelle also an den Anbieter jedes Modells. Sie können gespeicherte Erinnerungen jederzeit einsehen, bearbeiten und löschen, die vollständige Liste als Datei herunterladen oder alles auf einmal löschen. Wenn Sie das Gedächtnis ausschalten, wird es in neuen Chats nicht mehr verwendet, und aus importierten Unterhaltungen entstehen keine neuen Erinnerungen.",
         assistantProfilesTitle: "Eigene KI-Assistenten und Wissensdateien",

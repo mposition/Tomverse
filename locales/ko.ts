@@ -1546,13 +1546,13 @@ export const ko = {
     externalImport: {
         dataTabTitle: "다른 AI 서비스에서 가져오기",
         dataTabDescription:
-            "ChatGPT·Claude·Gemini(Google Takeout) 내보내기 파일의 과거 대화를 Tomverse 계정에 저장합니다. 내보내기 파일은 브라우저 안에서만 읽습니다.",
+            "ChatGPT·Claude·Gemini(Google Takeout)·Perplexity 내보내기 파일의 과거 대화를 Tomverse 계정에 저장합니다. 내보내기 파일은 브라우저 안에서만 읽습니다.",
         dataTabUsage: "가져온 대화 {conversations}개 · {storage} 저장됨",
         dataTabOpen: "가져오기 관리",
         dataTabUsageEmpty: "아직 가져온 대화가 없습니다",
         pageTitle: "다른 AI 서비스에서 대화 가져오기",
         pageDescription:
-            "ChatGPT, Claude, Gemini의 공식 데이터 내보내기 파일을 올리고, 내용을 확인한 뒤 Tomverse 계정에 보관할 대화를 선택하세요.",
+            "ChatGPT, Claude, Gemini, Perplexity의 공식 데이터 내보내기 파일을 올리고, 내용을 확인한 뒤 Tomverse 계정에 보관할 대화를 선택하세요.",
         backToImports: "가져오기 목록으로",
         signInRequired: "다른 AI 서비스의 대화를 가져오려면 로그인하세요.",
         disabledNotice: "외부 대화 가져오기는 지금 사용할 수 없습니다.",
@@ -1563,7 +1563,7 @@ export const ko = {
         capacityConversations: "가져온 대화 {limit}개 중 {used}개",
         selectFile: "내보내기 파일 선택",
         selectFileHint:
-            "ChatGPT·Claude·Gemini 데이터 내보내기(.zip 또는 .json), 최대 1GB. Gemini는 Google Takeout에서 내 활동 → Gemini 앱을 JSON으로 내보낸 파일이어야 합니다. 용량이 커도 괜찮습니다 — 미디어 파일은 읽지 않고 건너뜁니다.",
+            "ChatGPT·Claude·Gemini 데이터 내보내기(.zip 또는 .json) 또는 Perplexity 스레드 Markdown 내보내기(.md), 최대 1GB. Gemini는 Google Takeout에서 내 활동 → Gemini 앱을 JSON으로 내보낸 파일이어야 합니다. 용량이 커도 괜찮습니다 — 미디어 파일은 읽지 않고 건너뜁니다. Perplexity 파일은 질문과 답변의 경계를 정하려고 각 질문과 그 주변 답변의 짧은 발췌(각 600자 이내)를 AI 모델(OpenAI)에 보냅니다.",
         parsing: "브라우저에서 내보내기 파일을 읽는 중…",
         parsingProgress: "대화 {conversations}개 발견",
         cancel: "취소",
@@ -1692,8 +1692,12 @@ export const ko = {
             "내 활동을 선택한 뒤 그 안에서 Gemini 앱을 고르고 형식을 JSON으로 지정합니다 — Gemini 항목 자체에는 대화가 아니라 Gem이 들어 있습니다",
         guideGeminiStep3:
             "내보낸 뒤 Google이 보내 준 다운로드 링크로 받은 .zip을 올립니다",
+        guidePerplexityTitle: "Perplexity 스레드 내보내기",
+        guidePerplexityStep1: "Perplexity에서 가져올 스레드를 엽니다",
+        guidePerplexityStep2: "답변 아래 내보내기 버튼을 누르고 Markdown을 고릅니다",
+        guidePerplexityStep3: "받은 .md 파일을 올립니다. 파일 하나가 스레드 하나이며, 답변의 출처 링크도 함께 가져옵니다. 질문과 답변의 경계를 정하려고 각 질문과 그 주변 답변의 짧은 발췌(각 600자 이내)를 AI 모델(OpenAI)에 보냅니다.",
         guideFormats:
-            "ZIP 파일과 JSON 파일을 모두 지원합니다. Gemini 내보내기는 JSON 형식이어야 하며 HTML은 읽을 수 없습니다.",
+            "ZIP·JSON 파일과 Perplexity의 Markdown(.md) 파일을 지원합니다. Gemini 내보내기는 JSON 형식이어야 하며 HTML은 읽을 수 없습니다.",
         guideStaysLocal:
             "원본 파일은 기기를 벗어나지 않습니다. 브라우저 안에서만 열립니다.",
         guideMediaExcluded: "이미지·음성·첨부파일은 가져오지 않습니다.",
@@ -1701,6 +1705,8 @@ export const ko = {
         guideContinue: "내보내기 파일 선택하기",
         providerMismatchNotice:
             "{detected} 내보내기 파일로 확인되어 {detected} 기준으로 진행합니다.",
+        perplexityStructureNotice:
+            "Perplexity 내보내기에는 질문이 끝나는 표시가 없어 질문과 답변이 잘못 나뉠 수 있습니다. 가져온 뒤 대화를 열어 확인하고, 잘못 나뉘었으면 삭제할 수 있습니다.",
         // 데스크톱 권장 상태
         desktopRecommendedTitle: "이 기기에서는 파일을 열기 어렵습니다",
         desktopRecommendedNoUpload: "원본 파일은 업로드되지 않았습니다.",
@@ -2350,7 +2356,7 @@ export const ko = {
         attachmentsTitle: "첨부파일",
         attachments: "첨부파일은 모델 전달과 문서 추출을 위해 암호화된 객체 저장소에 저장됩니다. 로그인 계정의 첨부파일은 대화와 함께 보관되며 해당 대화나 계정을 삭제할 때 삭제됩니다. 로그인하지 않고 첨부한 파일은 임시로만 보관되며 정기 정리 작업으로 자동 삭제됩니다. 스캔본처럼 읽을 수 있는 글자가 없는 PDF는 글자를 읽기 위해, 어떤 모델을 골랐는지와 관계없이 Mistral AI(프랑스)의 문자 인식 서비스로 보냅니다. Google Drive에서 파일을 고르면 Tomverse는 고른 파일에만 접근 권한을 요청해 그 파일을 한 번 가져오고 다른 첨부파일과 같이 저장합니다. Google 접근 토큰은 그 요청에만 쓰고 저장하지 않습니다.",
         externalImportTitle: "다른 AI 서비스에서 가져온 대화",
-        externalImport: "사용자는 ChatGPT, Claude, Gemini(Google Takeout) 등 다른 AI 서비스에서 내려받은 내보내기 파일에서 선택한 과거 대화를 Tomverse 계정에 저장할 수 있습니다. 내보내기 파일은 사용자의 브라우저에서만 열리며, 원본 파일은 Tomverse 서버나 저장소에 업로드·보관되지 않습니다. 사용자가 선택한 대화의 정규화된 텍스트와 출처 정보(서비스명, 원래 시간, 표시용 모델명)만 계정 전용 자료로 저장되고, 이미지·음성·첨부파일은 가져오지 않습니다. 가져온 대화에는 다른 사람의 개인정보가 포함될 수 있으므로, 해당 데이터를 가져올 권한이 있는지 확인할 책임은 사용자에게 있습니다. 가져온 자료는 언제든지 조회·삭제·내보내기 할 수 있으며, 계정 삭제 시 함께 삭제됩니다. Tomverse에서 삭제해도 원래 서비스에 있는 데이터는 삭제되지 않습니다. 가져온 대화를 이어서 대화하면, 다른 대화와 마찬가지로 그 대화의 관련 부분이 모델 선택과 답변 생성을 위해 AI 공급자에게 전송됩니다.",
+        externalImport: "사용자는 ChatGPT, Claude, Gemini(Google Takeout), Perplexity 등 다른 AI 서비스에서 내려받은 내보내기 파일에서 선택한 과거 대화를 Tomverse 계정에 저장할 수 있습니다. Perplexity 내보내기를 가져올 때는 질문이 끝나는 위치를 판단하기 위해 각 질문과 그 주변 답변의 짧은 발췌(각 600자 이내)만 AI 모델 제공자(OpenAI)에 보내며, 이 판단 결과 외에는 저장하지 않고 비용은 Tomverse가 부담합니다. 내보내기 파일은 사용자의 브라우저에서만 열리며, 원본 파일은 Tomverse 서버나 저장소에 업로드·보관되지 않습니다. 사용자가 선택한 대화의 정규화된 텍스트와 출처 정보(서비스명, 원래 시간, 표시용 모델명)만 계정 전용 자료로 저장되고, 이미지·음성·첨부파일은 가져오지 않습니다. 가져온 대화에는 다른 사람의 개인정보가 포함될 수 있으므로, 해당 데이터를 가져올 권한이 있는지 확인할 책임은 사용자에게 있습니다. 가져온 자료는 언제든지 조회·삭제·내보내기 할 수 있으며, 계정 삭제 시 함께 삭제됩니다. Tomverse에서 삭제해도 원래 서비스에 있는 데이터는 삭제되지 않습니다. 가져온 대화를 이어서 대화하면, 다른 대화와 마찬가지로 그 대화의 관련 부분이 모델 선택과 답변 생성을 위해 AI 공급자에게 전송됩니다.",
         memoryTitle: "계정 장기 기억",
         memory: "가져온 대화를 Tomverse 계정에 저장하면, Tomverse는 기억 기능이 켜져 있는 동안 그 대화에서 기억을 자동으로 정리합니다. 이를 위해 가져온 대화의 내용이 Tomverse가 정한 AI 공급자(현재 미국의 OpenAI)에게 전송되며, 이 처리에는 크레딧이 차감되지 않습니다. 건강 정보처럼 민감한 내용은 기억으로 저장하지 않고, 검증을 통과한 내용만 기억으로 저장되어 바로 사용됩니다. 같은 주제에 대해서는 더 최근 대화의 내용이 이전 기억을 대신합니다. 기억과 그 근거는 사용자가 삭제하거나 계정 데이터가 삭제될 때까지 계정에 보관됩니다. 기억과 답변 스타일 선호는 새 대화의 답변을 생성할 때 참고 자료로 해당 답변을 생성하는 AI 공급자에게 전송되며, 여러 모델을 비교하는 경우 각 모델의 공급자에게 전송됩니다. 사용자는 저장된 기억을 언제든지 조회·수정·삭제할 수 있고, 전체 목록을 파일로 내려받거나 한 번에 모두 삭제할 수 있습니다. 기억 사용을 끄면 새 대화에서 기억이 사용되지 않고, 가져온 대화에서 새 기억도 만들어지지 않습니다.",
         assistantProfilesTitle: "사용자 정의 AI 어시스턴트와 지식 파일",

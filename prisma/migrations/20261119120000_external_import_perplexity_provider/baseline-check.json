@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "migrationSqlSha256": "83913cfac491bb85a79aad3e49f3e16782bbafd693157d02cb32f359b4d60eeb",
+  "replacedChecks": [
+    {
+      "table": "ExternalImport",
+      "constraint": "ExternalImport_provider_check",
+      "previousDefinitionSha256": "13d6f1c78a13aa8e3d6d5c113fe91788e57e4441e655ef8d9775f5db482e4b8a"
+    },
+    {
+      "table": "ExternalConversation",
+      "constraint": "ExternalConversation_provider_check",
+      "previousDefinitionSha256": "13d6f1c78a13aa8e3d6d5c113fe91788e57e4441e655ef8d9775f5db482e4b8a"
+    },
+    {
+      "table": "ConversationContinuationBridge",
+      "constraint": "ConversationContinuationBridge_provider_check",
+      "previousDefinitionSha256": "13d6f1c78a13aa8e3d6d5c113fe91788e57e4441e655ef8d9775f5db482e4b8a"
+    }
+  ]
+}

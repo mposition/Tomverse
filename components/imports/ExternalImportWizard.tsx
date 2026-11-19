@@ -42,6 +42,10 @@ import {
     type StagedConversationSummary,
 } from "@/lib/externalImportWizard";
 import type { WorkerResponse } from "@/lib/workers/externalImportWorker";
+import {
+    askPerplexitySplitHints,
+    sameOriginPerplexitySplitSend,
+} from "@/lib/perplexitySplitClient";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 
@@ -217,6 +221,19 @@ export function ExternalImportWizard() {
                 dispatch({
                     type: "parse_progress",
                     conversationsFound: message.conversationsFound,
+                });
+                return;
+            }
+            if (message.type === "split_questions") {
+                // The worker never calls the network; the page asks with its
+                // own session and answers. Null keeps the file's split.
+                void askPerplexitySplitHints(
+                    message.questions,
+                    sameOriginPerplexitySplitSend()
+                ).then((hints) => {
+                    if (workerRef.current === worker) {
+                        worker.postMessage({ type: "split_hints", hints });
+                    }
                 });
                 return;
             }

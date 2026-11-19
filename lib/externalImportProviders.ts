@@ -24,6 +24,7 @@ export const EXTERNAL_IMPORT_PROVIDERS = [
     "chatgpt",
     "claude",
     "gemini",
+    "perplexity",
 ] as const;
 
 export type ExternalImportProvider = (typeof EXTERNAL_IMPORT_PROVIDERS)[number];

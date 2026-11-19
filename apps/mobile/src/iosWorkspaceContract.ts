@@ -25,6 +25,8 @@ export interface WorkspaceTransport {
   imports(offset?: number): Promise<{ conversations: ExternalSnapshot[]; total: number; continuationEnabled: boolean }>;
   source(id: string): Promise<ExternalDetail>;
   importText(provider: string, selected: ParsedExternalConversation[]): Promise<void>;
+  /** Asks the import route for Perplexity split hints; resolves to the response body. */
+  perplexitySplit(questions: import("../../../lib/externalImportAdapters/perplexity").PerplexitySplitQuestions): Promise<unknown>;
   continue(id: string, key: string): Promise<{ conversationId: string }>;
 }
 
