@@ -31,7 +31,7 @@ import {
  * Share links (perplexity.ai/search/...) are not fetched: every perplexity.ai
  * path answers a server-side request with a Cloudflare bot challenge, so the
  * export file is the route, and it keeps the same "the original never leaves
- * the device" rule as every other provider (§5.1).
+ * the device" rule as every other provider (docs/policy/external-conversation-import-and-memory.md §5.1).
  *
  * A turn starts at a level-one heading that opens the file or follows a `---`
  * rule, outside a code fence. An answer may also hold a `---` and a `#`
@@ -135,7 +135,7 @@ const truncateTitle = (question: string): string => {
 /**
  * A stable lineage id from the opening turn. The export carries no thread id;
  * a re-export of the same thread with more turns opens with the same question
- * and answer, so it lands in the same lineage as a new snapshot (§4.2), while
+ * and answer, so it lands in the same lineage as a new snapshot (docs/policy/external-conversation-import-and-memory.md §4.2), while
  * two threads that merely asked the same first question do not. Hashed so the
  * conversation text itself is not used as an identifier.
  */

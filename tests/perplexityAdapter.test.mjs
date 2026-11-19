@@ -99,7 +99,7 @@ test("the conversation carries a title, a stable lineage id and no invented prov
         !conversation.rawExternalConversationId.includes("sourdough"),
         "the question text is not used as an identifier"
     );
-    // A re-export with one more turn is the same lineage (§4.2).
+    // A re-export with one more turn is the same lineage (docs/policy/external-conversation-import-and-memory.md §4.2).
     const longer = parse(`${THREAD}\n---\n\n# one more\n\nSure.\n`);
     assert.equal(longer.rawExternalConversationId, conversation.rawExternalConversationId);
     assert.equal(longer.messages.length, 8);
