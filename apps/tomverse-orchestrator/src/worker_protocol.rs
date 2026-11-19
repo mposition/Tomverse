@@ -510,6 +510,7 @@ mod tests {
                 prompt: "Do the task".into(),
                 receipt_id: "00000000-0000-4000-8000-000000000012".into(),
                 lease_expires_at: "2026-09-20T12:00:30Z".into(),
+                context_parts: Vec::new(),
             }
         }
 

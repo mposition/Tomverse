@@ -186,6 +186,14 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 4,
     isolation: "read",
   },
+  // A chunk of a resumed run's context file (docs/policy/amux-v22-result-transfer.md
+  // 10.1): setup + the attempt's binding + the file's rows (3 at most, the
+  // owner's answer with its two result rows or the prerequisites' results) + fence.
+  v22ContextRead: {
+    operation: "v22_context_read",
+    prismaCallCeiling: 6,
+    isolation: "read",
+  },
   deliveryAck: {
     operation: "delivery_ack",
     // +1: the audit chain lock before the Task row (lib/adminAudit.ts takeAuditChainLock).

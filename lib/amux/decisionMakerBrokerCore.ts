@@ -14,11 +14,15 @@ import type { DmInstanceScope } from "./decisionMakerSwitchCore.ts";
 import { DM_CARD_TEXT_MAX_BYTES } from "./decisionMakerCore.ts";
 import {
   DM_WORKSPACE_TIME_LIMIT_MS,
-  DM_WORKSPACE_EVIDENCE_MAX_BYTES,
+  DM_WORKSPACE_LEGACY_INLINE_MAX_BYTES,
   dmEncodeLaunchWorkspace,
   dmParseLaunchWorkspace,
+  dmParseLaunchWorkspaceParts,
   type DmLaunchWorkspace,
+  type DmLaunchWorkspaceParts,
+  type DmWorkspaceEvidenceName,
 } from "./decisionMakerWorkspaceCore.ts";
+import { AMUX_V22_TRANSFER_CHUNK_BYTES, amuxV22TransferChunkRange } from "./v22TransferCore.ts";
 
 /**
  * The AMUX Decision Maker broker's local socket protocols, their
@@ -78,12 +82,20 @@ export const DM_LAUNCHER_SOCKET_PATHS: Readonly<Record<DmInstanceScope, string>>
  */
 export const DM_PAYLOAD_MAX_BYTES = DM_CARD_TEXT_MAX_BYTES + 64 * 1024;
 /**
- * A `launch` or `workspace` line: the payload and the workspace's evidence as
- * base64 (4/3 each) and the fixed fields. The evidence never goes to the
- * launcher; only the broker reads it.
+ * A `launch` or `workspace` line: the payload and, in the older inline
+ * protocol, the workspace's evidence as base64 (4/3 each) and the fixed
+ * fields. In the parts protocol the evidence is not in the line (a few hundred
+ * bytes of descriptions are), so this is the older protocol's room only. The
+ * evidence never goes to the launcher; only the broker reads it.
  */
 export const DM_LAUNCH_LINE_MAX_BYTES =
-  Math.ceil(DM_PAYLOAD_MAX_BYTES / 3) * 4 + Math.ceil(DM_WORKSPACE_EVIDENCE_MAX_BYTES / 3) * 4 + 64 * 1024;
+  Math.ceil(DM_PAYLOAD_MAX_BYTES / 3) * 4 + Math.ceil(DM_WORKSPACE_LEGACY_INLINE_MAX_BYTES / 3) * 4 + 64 * 1024;
+/**
+ * A `part` line: one chunk of an evidence file as base64 and the fixed fields.
+ * What one line carries, never a bound on the evidence (a file is as many
+ * chunks as it needs).
+ */
+export const DM_PART_LINE_MAX_BYTES = Math.ceil(AMUX_V22_TRANSFER_CHUNK_BYTES / 3) * 4 + 4 * 1024;
 /**
  * A `result` line: the output (at most `DM_LAUNCH_OUTPUT_MAX_BYTES`, at most
  * six bytes each as a JSON string) and the fixed fields.
@@ -108,8 +120,9 @@ export const DM_LAUNCHER_UNIT_RUNTIME_MAX_MS = DM_LAUNCH_HARD_TIMEOUT_MS + 2 * 6
 export const DM_LAUNCHER_RESPONSE_TIMEOUT_MS = DM_LAUNCHER_UNIT_RUNTIME_MAX_MS + 60 * 1000;
 /**
  * What the bridge must wait at least for the broker's answer before it
- * treats the outcome as unknown: the launcher's, the workspace build before
- * it, and a minute -- 3 hours 4 minutes, inside the request's result window
+ * treats the outcome as unknown: the launcher's, the workspace before it (the
+ * evidence parts' arrival and the build share one `DM_WORKSPACE_TIME_LIMIT_MS`),
+ * and a minute -- 3 hours 4 minutes, inside the request's result window
  * (DM_RESULT_WINDOW_MS, eight hours), so a DM that uses all of its time still
  * answers in it.
  */
@@ -230,9 +243,16 @@ export type DmLaunchRequest = {
   /**
    * The workspace the broker builds in the request directory, or null for the
    * card alone. Only the bridge's line carries it; the broker never forwards
-   * it to the launcher, which reads the workspace from the directory.
+   * it to the launcher, which reads the workspace from the directory. With
+   * `workspaceParts` set it is null until the parts have arrived.
    */
   workspace: DmLaunchWorkspace | null;
+  /**
+   * The parts protocol's workspace: the commit and the files' descriptions,
+   * their bytes still to come on this connection (`send_parts`). Null for an
+   * inline workspace or none.
+   */
+  workspaceParts: DmLaunchWorkspaceParts | null;
 };
 
 const LAUNCH_KEYS = ["v", "type", "requestId", "instance", "requestKey", "payload", "transmitIntent"] as const;
@@ -283,19 +303,22 @@ export const dmParseLaunchRequest = (line: string): DmLaunchParse => {
   if (requestKey === null) return malformed("request_key_invalid", requestId, instance, null);
   const payload = dmDecodeBase64(value.payload, DM_PAYLOAD_MAX_BYTES);
   if (payload === null) return malformed("payload_invalid", requestId, instance, requestKey);
-  const workspace = Object.hasOwn(value, "workspace") ? dmParseLaunchWorkspace(value.workspace) : null;
-  if (workspace === undefined) return malformed("workspace_mismatch", requestId, instance, requestKey);
-  return { ok: true, request: { requestId, instance, requestKey, payload, transmitIntent: value.transmitIntent, workspace } };
+  const given = Object.hasOwn(value, "workspace") ? value.workspace : null;
+  const byParts = isPlainObject(given) && Object.hasOwn(given, "parts");
+  const workspace = byParts ? null : Object.hasOwn(value, "workspace") ? dmParseLaunchWorkspace(given) : null;
+  const workspaceParts = byParts ? dmParseLaunchWorkspaceParts(given) : null;
+  if (workspace === undefined || workspaceParts === undefined) return malformed("workspace_mismatch", requestId, instance, requestKey);
+  return { ok: true, request: { requestId, instance, requestKey, payload, transmitIntent: value.transmitIntent, workspace, workspaceParts } };
 };
 
 /** The bridge's line to the broker (the bridge writes it in Rust; tests here): the seven keys and the workspace. */
-export const dmEncodeBridgeLaunchRequest = (request: DmLaunchRequest) => ({
+export const dmEncodeBridgeLaunchRequest = (request: Omit<DmLaunchRequest, "workspaceParts">) => ({
   ...dmEncodeLaunchRequest(request),
   workspace: dmEncodeLaunchWorkspace(request.workspace),
 });
 
 /** The broker's line to the launcher: the seven keys, never the workspace. */
-export const dmEncodeLaunchRequest = (request: Omit<DmLaunchRequest, "workspace">) => ({
+export const dmEncodeLaunchRequest = (request: Omit<DmLaunchRequest, "workspace" | "workspaceParts">) => ({
   v: DM_BROKER_PROTOCOL_VERSION,
   type: "launch",
   requestId: request.requestId,
@@ -304,6 +327,68 @@ export const dmEncodeLaunchRequest = (request: Omit<DmLaunchRequest, "workspace"
   payload: request.payload.toString("base64"),
   transmitIntent: request.transmitIntent,
 });
+
+// ---------------------------------------------------------------------------
+// The parts protocol: evidence bytes, bridge -> broker, on the launch's connection
+// ---------------------------------------------------------------------------
+
+/*
+ * A launch whose workspace names its files by description (`workspace.parts`)
+ * is answered, once the broker has checked the intent, not with a `result` but
+ * with `send_parts`. The bridge then sends each file's chunks in order -- one
+ * `part` line per chunk (`AMUX_V22_TRANSFER_CHUNK_BYTES`), the file's bytes cut
+ * at `amuxV22TransferChunkRange` -- and the broker answers each with
+ * `part_stored` before the next goes. The bridge may send `abort` instead of a
+ * part. After the last `part_stored` the broker checks every file (its size,
+ * its sha256, then the workspace's own checks over the whole file), builds the
+ * workspace and answers with the one `result` line, as for any launch. A
+ * request the broker refuses before `send_parts` is answered with that
+ * `result` at once. Nothing is written to disk until every part has arrived.
+ */
+
+export const dmEncodeSendParts = (requestId: string) => ({ v: DM_BROKER_PROTOCOL_VERSION, type: "send_parts", requestId });
+
+export const dmEncodePartStored = (name: string, index: number) => ({
+  v: DM_BROKER_PROTOCOL_VERSION,
+  type: "part_stored",
+  name,
+  index,
+});
+
+/** The bridge's lines (the bridge writes them in Rust; tests here). */
+export const dmEncodePartLine = (requestId: string, name: string, index: number, bytes: Uint8Array) => ({
+  v: DM_BROKER_PROTOCOL_VERSION,
+  type: "part",
+  requestId,
+  name,
+  index,
+  bytesBase64: Buffer.from(bytes).toString("base64"),
+});
+export const dmEncodeAbortLine = (requestId: string) => ({ v: DM_BROKER_PROTOCOL_VERSION, type: "abort", requestId });
+
+export type DmPartExpectation = {
+  requestId: string;
+  name: DmWorkspaceEvidenceName;
+  index: number;
+  /** The file's whole size: the chunk's length is fixed by it and the index. */
+  totalBytes: number;
+};
+
+/**
+ * The next line of a parts exchange: exactly the chunk expected (this request,
+ * this file, this index, canonical base64 of exactly that range's length), an
+ * `abort` for this request, or null for anything else.
+ */
+export const dmParsePartLine = (line: string, expected: DmPartExpectation): { kind: "part"; bytes: Buffer } | { kind: "abort" } | null => {
+  const value = parseJson(line);
+  if (!isPlainObject(value) || value.v !== DM_BROKER_PROTOCOL_VERSION || value.requestId !== expected.requestId) return null;
+  if (value.type === "abort") return hasExactKeys(value, ["v", "type", "requestId"]) ? { kind: "abort" } : null;
+  if (value.type !== "part" || !hasExactKeys(value, ["v", "type", "requestId", "name", "index", "bytesBase64"])) return null;
+  if (value.name !== expected.name || value.index !== expected.index) return null;
+  const range = amuxV22TransferChunkRange(expected.totalBytes, expected.index);
+  const bytes = dmDecodeBase64(value.bytesBase64, AMUX_V22_TRANSFER_CHUNK_BYTES);
+  return bytes !== null && bytes.length === range.end - range.start ? { kind: "part", bytes } : null;
+};
 
 // ---------------------------------------------------------------------------
 // `ready`: launcher -> broker
