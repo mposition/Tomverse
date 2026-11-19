@@ -16,7 +16,8 @@ export const makeRepo = (extra: Record<string, string> = {}) => {
     writeFileSync(join(root, "sum.js"), "export function sum(a, b) {\n  return a - b;\n}\n");
     writeFileSync(
         join(root, "test.js"),
-        'import { sum } from "./sum.js";\nif (sum(2, 3) !== 5) { console.error("FAIL sum(2,3)=" + sum(2, 3)); process.exit(1); }\nconsole.log("PASS");\n'
+        // The fixture's own import is written with a placeholder so the control-plane analysis does not read it as this file's load.
+        'import { sum } from "<here>/sum.js";\nif (sum(2, 3) !== 5) { console.error("FAIL sum(2,3)=" + sum(2, 3)); process.exit(1); }\nconsole.log("PASS");\n'.replace("<here>", ".")
     );
     writeFileSync(join(root, "package.json"), '{ "type": "module" }\n');
     for (const [path, content] of Object.entries(extra)) {

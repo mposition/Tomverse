@@ -65,7 +65,7 @@ const ENGLISH_STRING_CEILING = {
   // four locales punctuate it identically. French takes a space before the
   // colon and Chinese a full-width one, so neither moved. Allowlisted in
   // check-locale-translation-core.mjs with the same reason.
-  ko: 9,
+  ko: 10,
   // zh 191 -> 9, fr 235 -> 26, de 234 -> 20, es 230 -> 16, pt 227 -> 13.
   //
   // fr, de, es and pt each gain one on 2026-08-14: the Gemini import guide's
@@ -194,11 +194,15 @@ const ENGLISH_STRING_CEILING = {
   // same change. +1 fr for the key state "Active" (the French adjective for an
   // active key) and +1 de for the "Name" field label, both the ordinary word.
   // The rest of the page is translated in all six.
-  zh: 13,
-  fr: 47,
-  de: 35,
-  es: 25,
-  pt: 22,
+  //
+  // +1 ko, zh, fr, de, es and pt on 2026-11-19 from the Tomverse CLI card's
+  // title, "Tomverse CLI": a product name and a command-line term that no
+  // locale translates. The card's hint, steps and notes are translated.
+  zh: 14,
+  fr: 48,
+  de: 36,
+  es: 26,
+  pt: 23,
 };
 
 test("every supported language is in the dictionary map", () => {

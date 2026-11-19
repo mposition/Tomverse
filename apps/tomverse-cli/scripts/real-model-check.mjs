@@ -20,6 +20,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 
+// The fixtures' own imports carry a placeholder so the control-plane analysis does not read them as this file's loads.
+const fixture = (code) => code.replaceAll("<here>", ".");
+
 const dist = new URL("../dist/", import.meta.url);
 const { Runner } = await import(new URL("agent.js", dist));
 const { Gateway } = await import(new URL("gateway.js", dist));
@@ -91,7 +94,7 @@ const record = async (name, journal, checks) => {
     const root = repo({
         "package.json": '{ "type": "module" }\n',
         "sum.js": "export function sum(a, b) {\n  return a - b;\n}\n",
-        "test.js": 'import { sum } from "./sum.js";\nif (sum(2, 3) !== 5) { console.error("FAIL"); process.exit(1); }\nconsole.log("PASS");\n',
+        "test.js": fixture('import { sum } from "<here>/sum.js";\nif (sum(2, 3) !== 5) { console.error("FAIL"); process.exit(1); }\nconsole.log("PASS");\n'),
     });
     const testHash = sha(join(root, "test.js"));
     const journal = newJournal(root);
@@ -106,7 +109,7 @@ const record = async (name, journal, checks) => {
         "package.json": '{ "type": "module" }\n',
         "src/add.js": "export const add = (a, b) => a - b;\n",
         "src/mul.js": "export const mul = (a, b) => a + b;\n",
-        "test.js": 'import { add } from "./src/add.js";\nimport { mul } from "./src/mul.js";\nconst bad = [];\nif (add(2, 3) !== 5) bad.push("add");\nif (mul(2, 3) !== 6) bad.push("mul");\nif (bad.length) { console.error("FAIL " + bad.join(",")); process.exit(1); }\nconsole.log("PASS");\n',
+        "test.js": fixture('import { add } from "<here>/src/add.js";\nimport { mul } from "<here>/src/mul.js";\nconst bad = [];\nif (add(2, 3) !== 5) bad.push("add");\nif (mul(2, 3) !== 6) bad.push("mul");\nif (bad.length) { console.error("FAIL " + bad.join(",")); process.exit(1); }\nconsole.log("PASS");\n'),
         "NOTES.md": "My own notes, not committed.\n",
     });
     const hashes = { test: sha(join(root, "test.js")), notes: sha(join(root, "NOTES.md")) };
@@ -127,7 +130,7 @@ const record = async (name, journal, checks) => {
     const root = repo({
         "package.json": '{ "type": "module" }\n',
         "calc.js": "export const sum = (a, b) => a - b;\n",
-        "test.js": 'import * as calc from "./calc.js";\nif (calc.sum(2, 3) !== 5) process.exit(1);\nif (typeof calc.sub === "function" && calc.sub(5, 3) !== 2) process.exit(2);\nconsole.log("PASS");\n',
+        "test.js": fixture('import * as calc from "<here>/calc.js";\nif (calc.sum(2, 3) !== 5) process.exit(1);\nif (typeof calc.sub === "function" && calc.sub(5, 3) !== 2) process.exit(2);\nconsole.log("PASS");\n'),
     });
     const journal = newJournal(root);
     const first = await newRunner(root, journal).runTask("Fix calc.js so node test.js passes; run it.");
