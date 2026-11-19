@@ -27,7 +27,11 @@ import {
 } from "../lib/amux/decisionMakerDeliveryCore.ts";
 import { DM_DELIVERY_NOT_SENT_REASONS } from "../lib/amux/decisionMakerJudgmentCore.ts";
 import { DM_LAUNCH_OUTPUT_MAX_BYTES } from "../lib/amux/decisionMakerLauncherCore.ts";
-import { DM_WORKSPACE_TIME_LIMIT_MS } from "../lib/amux/decisionMakerWorkspaceCore.ts";
+import {
+  DM_WORKSPACE_LEGACY_INLINE_MAX_BYTES,
+  DM_WORKSPACE_TIME_LIMIT_MS,
+} from "../lib/amux/decisionMakerWorkspaceCore.ts";
+import { AMUX_V22_TRANSFER_CHUNK_BYTES } from "../lib/amux/v22TransferCore.ts";
 import { DM_STALE_CLOSE_AFTER_MS } from "../lib/amux/decisionMakerRequestCore.ts";
 import { parseDmCard } from "../lib/amux/decisionMakerRequestCore.ts";
 import { DM_INSTANCE_SCOPES } from "../lib/amux/decisionMakerSwitchCore.ts";
@@ -82,6 +86,15 @@ test("the caps and the socket are the broker's and the launcher's", () => {
   assert.deepEqual(instances, [...DM_INSTANCE_SCOPES]);
 });
 
+test("the older workspace route's bound is the app's, and the parts protocol has none of its own", () => {
+  const workspace = read("apps/tomverse-orchestrator/src/dm_relay/workspace.rs");
+  assert.equal(product(constant(workspace, "DM_WORKSPACE_LEGACY_INLINE_MAX_BYTES")), DM_WORKSPACE_LEGACY_INLINE_MAX_BYTES);
+  // A chunk's answer is one chunk as base64 and an envelope; no constant bounds a file or the evidence.
+  assert.match(workspace, /DM_WORKSPACE_CHUNK_ANSWER_MAX_BYTES: usize =\s*crate::tomverse_api::V22_TRANSFER_CHUNK_BYTES\.div_ceil\(3\) \* 4 \+ 64 \* 1024;/);
+  assert.equal(product(constant(read("apps/tomverse-orchestrator/src/tomverse_api.rs"), "V22_TRANSFER_CHUNK_BYTES")), AMUX_V22_TRANSFER_CHUNK_BYTES);
+  assert.doesNotMatch(workspace, /DM_WORKSPACE_EVIDENCE_MAX_BYTES|DM_WORKSPACE_PARTS_MAX/);
+});
+
 test("the result route takes every body the relay can build, so no result is refused unread", () => {
   const route = read("app/api/internal/amux/decision-maker/results/route.ts");
   const cap = route.match(/const MAX_BODY_BYTES = ([^;]+);/);
@@ -100,8 +113,10 @@ test("every route the relay calls exists and answers under the envelope the rela
   const routes = [...flow.matchAll(/AppRoute::(\w+) => \{?\s*"\/api\/internal\/amux\/decision-maker\/([a-z/-]+)"/g)];
   // Nine for a question (stage S2-2b2), three for a confirmed answer's delivery (S2-2b3), and the
   // unsettled read and the direct answer's report (S2-2b4), and the workspace read that replaced the
-  // snapshot (owner decision 2026-11-15): the card's whole evidence, read before the intent.
-  assert.equal(routes.length, 15);
+  // snapshot (owner decision 2026-11-15): the card's whole evidence, read before the intent. Two more
+  // for the evidence in chunks (docs/policy/amux-v22-result-transfer.md 10.2): the files described,
+  // and one chunk of one file.
+  assert.equal(routes.length, 17);
   const envelopes = {
     Requests: "routed",
     Results: "submitted",
@@ -109,6 +124,8 @@ test("every route the relay calls exists and answers under the envelope the rela
     DeliveriesNext: "found",
     DeliveriesUnsettled: "found",
     Workspace: "found",
+    WorkspaceParts: "found",
+    WorkspaceChunk: "found",
   };
   for (const [, name, path] of routes) {
     const file = `app/api/internal/amux/decision-maker/${path}/route.ts`;

@@ -1,15 +1,21 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
+
 import type { Prisma } from "@prisma/client";
 
 import { isDmRequestId } from "@/lib/amux/decisionMakerRequestCore";
 import { readDecisionMakerRequestCardId } from "@/lib/amux/decisionMakerRequestStore";
 import {
+  DM_WORKSPACE_LEGACY_INLINE_MAX_BYTES,
   dmWorkspaceAcceptFiles,
+  dmWorkspacePartOf,
+  isDmWorkspaceEvidenceName,
   type DmWorkspaceEvidenceName,
   type DmWorkspaceExclusion,
   type DmWorkspaceFile,
 } from "@/lib/amux/decisionMakerWorkspaceCore";
+import { amuxV22TransferChunkCount, amuxV22TransferChunkRange } from "@/lib/amux/v22TransferCore";
 import { amuxDmOwnerSettlementFindingsText } from "@/lib/amux/dmOwnerSettlementCore";
 import { readAmuxDmOwnerSettlementPullEvidence } from "@/lib/amux/dmOwnerSettlementRead";
 import { parseAmuxV22Conclusion } from "@/lib/amux/v22ConclusionCore";
@@ -167,9 +173,14 @@ const openCriteria = async (row: SealedBody & SealedResult) => {
 /**
  * The workspace evidence, opened outside the read transaction. The workspace
  * is always on (owner direction 2026-11-16). Evidence that cannot be opened is
- * left out; the checkout still goes.
+ * left out; the checkout still goes. Every file is checked whole and has no
+ * size of ours; `inline` is the older route's (evidence in one answer), which
+ * keeps its 64 MiB set for the relays built around it.
  */
-export async function openDecisionMakerWorkspaceEvidence(source: DmWorkspaceSource): Promise<DmWorkspaceEvidence | null> {
+export async function openDecisionMakerWorkspaceEvidence(
+  source: DmWorkspaceSource,
+  options: { inline?: boolean } = {},
+): Promise<DmWorkspaceEvidence | null> {
   // `missing`: the card points at this text, so one that cannot be read is
   // counted as left out (`unreadable`), and the bridge then sends nothing --
   // a DM never judges a card without the evidence it names.
@@ -206,8 +217,107 @@ export async function openDecisionMakerWorkspaceEvidence(source: DmWorkspaceSour
     files.push({ name: "CONTEXT.md", text: context, missing: text === null && source.resultIdeaId !== null });
   }
   const accepted = dmWorkspaceAcceptFiles(files.flatMap((file) =>
-    file.text ? [{ name: file.name, bytes: Buffer.from(file.text, "utf8") }] : []));
+    file.text ? [{ name: file.name, bytes: Buffer.from(file.text, "utf8") }] : []),
+  options.inline ? { totalMaxBytes: DM_WORKSPACE_LEGACY_INLINE_MAX_BYTES } : {});
   const unreadable = files.filter((file) => file.missing).length;
   return { targetSha, files: accepted.files,
     excluded: unreadable > 0 ? { ...accepted.excluded, unreadable } : accepted.excluded };
+}
+
+// ---------------------------------------------------------------------------
+// The evidence in chunks (docs/policy/amux-v22-result-transfer.md 10.2)
+// ---------------------------------------------------------------------------
+
+/**
+ * One evidence file's bytes, held for the chunks of one transfer. The app
+ * opens a file whole and checks it whole (`dmWorkspaceAcceptFiles`) before it
+ * says anything of it; a chunk route that did that for each of a large file's
+ * chunks would open and scan it again and again. So the last file one process
+ * checked is kept for two minutes, under the request, the name and the sha256
+ * the caller asks for: a hit is bytes that already passed the whole-file
+ * checks in this process, and a miss (another process, a later request, an
+ * expired entry) opens and checks again. One entry, so what is held is one
+ * file. The two minutes end on their own: an unref'd timer drops the entry
+ * whether or not another request comes, so the bytes never outlive them. The
+ * buffer is dropped, not zeroed: the chunk a caller is still encoding is a view
+ * of it.
+ */
+const CHUNK_HOLD_MS = 2 * 60 * 1000;
+let held: { requestId: string; name: DmWorkspaceEvidenceName; sha256: string; bytes: Buffer; until: number } | null = null;
+let heldTimer: ReturnType<typeof setTimeout> | null = null;
+
+const dropHeld = () => {
+  if (heldTimer !== null) clearTimeout(heldTimer);
+  heldTimer = null;
+  held = null;
+};
+
+const holdFile = (entry: NonNullable<typeof held>) => {
+  dropHeld();
+  held = entry;
+  heldTimer = setTimeout(() => {
+    heldTimer = null;
+    if (held === entry) held = null;
+  }, CHUNK_HOLD_MS);
+  heldTimer.unref?.();
+};
+
+const sha256Of = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
+
+/**
+ * The evidence the way the bridge asks for it in the parts protocol: what each
+ * accepted file is (name, size, sha256, git blob id), not its bytes. The files
+ * have passed the same whole-file checks as the inline route's, and the answer
+ * counts what was left out, so the relay sends nothing when the card's
+ * evidence is short.
+ */
+export async function describeDecisionMakerWorkspaceEvidence(source: DmWorkspaceSource) {
+  const evidence = await openDecisionMakerWorkspaceEvidence(source);
+  if (evidence === null) return null;
+  return {
+    targetSha: evidence.targetSha,
+    parts: evidence.files.map((file) => dmWorkspacePartOf({ name: file.name, bytes: Buffer.from(file.text, "utf8") })),
+    excluded: evidence.excluded,
+  };
+}
+
+export type DmWorkspaceChunk =
+  | { ok: true; totalBytes: number; chunkCount: number; sha256: string; bytes: Buffer }
+  | { ok: false; reason: "request_unknown" | "evidence_absent" | "evidence_changed" | "index_out_of_range" };
+
+/**
+ * One chunk of one evidence file: the bytes [start, end) of
+ * `amuxV22TransferChunkRange`. The file is the one the request's source holds
+ * under `name`, opened and checked whole again unless this process still holds
+ * it, and its sha256 must be the one the caller was told; a file that is gone
+ * or has changed since is refused, never served in part.
+ */
+export async function readDecisionMakerWorkspaceChunk(
+  input: { requestId: string; name: string; sha256: string; index: number },
+  loadSource: () => Promise<DmWorkspaceSource | null>,
+  now: () => number = Date.now,
+): Promise<DmWorkspaceChunk> {
+  if (!isDmWorkspaceEvidenceName(input.name)) return { ok: false, reason: "evidence_absent" };
+  const name = input.name;
+  let bytes: Buffer | null = null;
+  if (held !== null && held.until > now() && held.requestId === input.requestId && held.name === name && held.sha256 === input.sha256) {
+    bytes = held.bytes;
+  } else {
+    dropHeld();
+    const source = await loadSource();
+    if (source === null) return { ok: false, reason: "request_unknown" };
+    const evidence = await openDecisionMakerWorkspaceEvidence(source);
+    const file = evidence?.files.find((candidate) => candidate.name === name);
+    if (file === undefined) return { ok: false, reason: "evidence_absent" };
+    const opened = Buffer.from(file.text, "utf8");
+    if (sha256Of(opened) !== input.sha256) return { ok: false, reason: "evidence_changed" };
+    holdFile({ requestId: input.requestId, name, sha256: input.sha256, bytes: opened, until: now() + CHUNK_HOLD_MS });
+    bytes = opened;
+  }
+  const chunkCount = amuxV22TransferChunkCount(bytes.length);
+  if (!Number.isSafeInteger(input.index) || input.index < 0 || input.index >= chunkCount) {
+    return { ok: false, reason: "index_out_of_range" };
+  }
+  const { start, end } = amuxV22TransferChunkRange(bytes.length, input.index);
+  return { ok: true, totalBytes: bytes.length, chunkCount, sha256: input.sha256, bytes: bytes.subarray(start, end) };
 }

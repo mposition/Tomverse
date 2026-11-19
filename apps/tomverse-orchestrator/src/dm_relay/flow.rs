@@ -57,8 +57,9 @@ use super::wire::{
     DmResult, DmRoutingBinding, DmTransmissionWire, HttpAnswer,
 };
 use super::workspace::{
-    dm_workspace_manifest_digest, read_app_workspace, read_workspace_answer,
-    workspace_request_line, DM_WORKSPACE_WAIT,
+    dm_workspace_manifest_digest, read_app_parts, read_app_workspace, read_workspace_answer,
+    read_workspace_parts_answer, workspace_parts_request_line, workspace_request_line, AppEvidence,
+    WorkspacePart, DM_WORKSPACE_WAIT,
 };
 
 // ---------------------------------------------------------------------------
@@ -98,8 +99,15 @@ pub enum AppRoute {
     V22QuestionCard,
     /// A v22 question's local card closed.
     V22QuestionClosed,
-    /// What a request's workspace holds (a read, before the intent).
+    /// What a request's workspace holds (a read, before the intent), evidence inline:
+    /// the older route.
     Workspace,
+    /// The same, the evidence described and not carried (a read, before the intent):
+    /// the parts protocol's. An app that has no such route answers 404 and the relay
+    /// asks `Workspace`.
+    WorkspaceParts,
+    /// One chunk of one evidence file of that workspace (a read, with the launch).
+    WorkspaceChunk,
 }
 
 impl AppRoute {
@@ -127,6 +135,20 @@ impl AppRoute {
             AppRoute::V22QuestionCard => "/api/internal/amux/decision-maker/v22-questions/card",
             AppRoute::V22QuestionClosed => "/api/internal/amux/decision-maker/v22-questions/closed",
             AppRoute::Workspace => "/api/internal/amux/decision-maker/workspace",
+            AppRoute::WorkspaceParts => "/api/internal/amux/decision-maker/workspace/parts",
+            AppRoute::WorkspaceChunk => "/api/internal/amux/decision-maker/workspace/chunk",
+        }
+    }
+
+    /// How long one call may take. The parts routes open and check a whole evidence
+    /// file, which takes as long as the file is large, so they wait as long as the
+    /// workspace's one time limit (the result deadline cuts it shorter when it comes
+    /// first, and a chunk is asked again within it); every other route answers within
+    /// the AMUX route budget.
+    pub fn client_timeout(self) -> std::time::Duration {
+        match self {
+            AppRoute::WorkspaceParts | AppRoute::WorkspaceChunk => DM_WORKSPACE_WAIT,
+            _ => super::io::DM_ROUTE_CLIENT_TIMEOUT,
         }
     }
 
@@ -140,6 +162,8 @@ impl AppRoute {
     pub fn answer_max_bytes(self) -> usize {
         match self {
             AppRoute::Workspace => super::workspace::DM_WORKSPACE_ANSWER_MAX_BYTES,
+            AppRoute::WorkspaceParts => super::workspace::DM_WORKSPACE_PARTS_ANSWER_MAX_BYTES,
+            AppRoute::WorkspaceChunk => super::workspace::DM_WORKSPACE_CHUNK_ANSWER_MAX_BYTES,
             AppRoute::DeliveriesNext | AppRoute::DeliveriesUnsettled => {
                 super::delivery::DM_DELIVERY_MESSAGE_MAX_BYTES * 6 + 64 * 1024
             }
@@ -157,6 +181,8 @@ impl AppRoute {
             AppRoute::DeliveriesNext => "found",
             AppRoute::DeliveriesUnsettled => "found",
             AppRoute::Workspace => "found",
+            AppRoute::WorkspaceParts => "found",
+            AppRoute::WorkspaceChunk => "found",
             AppRoute::V22QuestionSync => "synced",
             _ => "recorded",
         }
@@ -229,10 +255,98 @@ pub trait DmLocal: Send + Sync {
     async fn post(&self, route: LocalRoute, body: Value) -> HttpAnswer;
 }
 
+/// The bytes of the workspace's files, as the broker asks for them on a launch's
+/// connection (docs/policy/amux-v22-result-transfer.md 10.2).
+#[async_trait]
+pub trait DmPartSource: Send + Sync {
+    /// Chunk `index` of file `name` as base64, or `None` when it cannot be had
+    /// (the exchange is then aborted, and nothing is sent).
+    async fn chunk(&self, name: &str, index: u64) -> Option<String>;
+}
+
+/// Which files' chunks the broker will ask for, in order: each name and its size.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PartPlan {
+    pub request_id: String,
+    pub parts: Vec<(String, u64)>,
+}
+
 #[async_trait]
 pub trait DmBroker: Send + Sync {
     /// Sends one launch line and waits for the one answer line.
     async fn exchange(&self, line: Vec<u8>) -> BrokerExchange;
+
+    /// A launch whose workspace names its files by description: the broker answers
+    /// `send_parts`, the relay sends each file's chunks (`source`) one line at a time,
+    /// each acknowledged, and the one answer line follows. A broker that cannot
+    /// stream gets the launch line alone.
+    async fn exchange_parts(
+        &self,
+        line: Vec<u8>,
+        plan: &PartPlan,
+        source: &dyn DmPartSource,
+    ) -> BrokerExchange {
+        let _ = (plan, source);
+        self.exchange(line).await
+    }
+}
+
+/// The chunks of the workspace's files, asked of the app one at a time. A chunk
+/// whose answer is lost, or that the app cannot give for now, is asked again until
+/// `until`; one the app refuses, or that is not the bytes the relay was told, is
+/// not asked again.
+pub struct AppParts<'a, A: DmApp + ?Sized> {
+    pub app: &'a A,
+    pub request_id: &'a str,
+    pub parts: &'a [WorkspacePart],
+    pub until: Instant,
+}
+
+const CHUNK_RETRY_PAUSE: std::time::Duration = std::time::Duration::from_secs(2);
+
+#[async_trait]
+impl<A: DmApp + ?Sized> DmPartSource for AppParts<'_, A> {
+    async fn chunk(&self, name: &str, index: u64) -> Option<String> {
+        let part = self.parts.iter().find(|part| part.name == name)?;
+        let (start, end) = crate::tomverse_api::v22_transfer_chunk_range(part.bytes, index)?;
+        loop {
+            let answered = self
+                .app
+                .post(
+                    AppRoute::WorkspaceChunk,
+                    json!({"request_id": self.request_id, "name": name, "index": index,
+                        "sha256": part.sha256}),
+                )
+                .await;
+            match read_app_answer(&answered, AppRoute::WorkspaceChunk.envelope()) {
+                AppAnswer::Done(value) => return read_chunk(&value, part, index, end - start),
+                AppAnswer::Refused(reason) if !refused_for_now(&reason) => return None,
+                AppAnswer::Refused(_) | AppAnswer::Unknown => {}
+            }
+            if Instant::now() + CHUNK_RETRY_PAUSE >= self.until {
+                return None;
+            }
+            tokio::time::sleep(CHUNK_RETRY_PAUSE).await;
+        }
+    }
+}
+
+/// The chunk the app answered, when it is this file's, this index and exactly the
+/// bytes of that range (the broker checks the file whole against its sha256).
+fn read_chunk(value: &Value, part: &WorkspacePart, index: u64, length: u64) -> Option<String> {
+    use base64::Engine as _;
+    if value.get("name")?.as_str()? != part.name
+        || value.get("index")?.as_u64()? != index
+        || value.get("total_bytes")?.as_u64()? != part.bytes
+        || value.get("sha256")?.as_str()? != part.sha256
+    {
+        return None;
+    }
+    let encoded = value.get("bytes_base64")?.as_str()?;
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .ok()?;
+    (decoded.len() as u64 == length).then(|| encoded.to_owned())
 }
 
 // ---------------------------------------------------------------------------
@@ -720,6 +834,51 @@ where
     run
 }
 
+/// A 404 that is the framework's, not the route's own refusal: the app has no such route.
+fn route_absent(answer: &HttpAnswer) -> bool {
+    match answer {
+        HttpAnswer::Answered { status: 404, body } => serde_json::from_slice::<Value>(body)
+            .ok()
+            .is_none_or(|value| value.get("found").is_none()),
+        _ => false,
+    }
+}
+
+/// What the app says the request's workspace holds, in the parts protocol when the
+/// app has it, else inline. `Ok(None)` is the card alone; `Err` is the code the
+/// request is discarded under (§2-1: the card stays with the operator).
+async fn read_evidence<A: DmApp + ?Sized>(
+    app: &A,
+    request_id: &str,
+) -> Result<Option<AppEvidence>, &'static str> {
+    let asked = app
+        .post(AppRoute::WorkspaceParts, json!({"request_id": request_id}))
+        .await;
+    if !route_absent(&asked) {
+        return match read_app_answer(&asked, AppRoute::WorkspaceParts.envelope()) {
+            AppAnswer::Done(value) if value.get("workspace") == Some(&Value::Null) => Ok(None),
+            AppAnswer::Done(value) => match read_app_parts(&value) {
+                Some(parts) if parts.complete => Ok(Some(AppEvidence::Parts(parts))),
+                Some(_) => Err("workspace_evidence_refused"),
+                None => Err("workspace_unreadable"),
+            },
+            _ => Err("workspace_unreadable"),
+        };
+    }
+    let answered = app
+        .post(AppRoute::Workspace, json!({"request_id": request_id}))
+        .await;
+    match read_app_answer(&answered, AppRoute::Workspace.envelope()) {
+        AppAnswer::Done(value) if value.get("workspace") == Some(&Value::Null) => Ok(None),
+        AppAnswer::Done(value) => match read_app_workspace(&value) {
+            Some(evidence) if evidence.complete => Ok(Some(AppEvidence::Inline(evidence))),
+            Some(_) => Err("workspace_evidence_refused"),
+            None => Err("workspace_unreadable"),
+        },
+        _ => Err("workspace_unreadable"),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn after_marker<A, L, B>(
     app: &A,
@@ -748,40 +907,40 @@ where
     // evidence for) sends the card alone. The broker's wait ends at the
     // result deadline or after DM_WORKSPACE_WAIT, whichever comes first, so a
     // broker that does not answer never holds the card past its window.
-    let answered = app
-        .post(AppRoute::Workspace, json!({"request_id": request_id}))
-        .await;
-    let evidence = match read_app_answer(&answered, AppRoute::Workspace.envelope()) {
-        AppAnswer::Done(value) if value.get("workspace") == Some(&Value::Null) => None,
-        AppAnswer::Done(value) => match read_app_workspace(&value) {
-            Some(evidence) if evidence.complete => Some(evidence),
-            Some(_) => {
-                return discard(app, local, book, request_id, "workspace_evidence_refused").await
-            }
-            None => return discard(app, local, book, request_id, "workspace_unreadable").await,
-        },
-        _ => return discard(app, local, book, request_id, "workspace_unreadable").await,
+    //
+    // Evidence is asked for in the parts protocol first: the app describes each
+    // file (name, size, sha256, blob id) and the bytes go to the broker chunk by
+    // chunk with the launch, so no size of ours bounds a file. An app that has no
+    // such route (404 with no `found` of its own) is asked the older route, whose
+    // answer carries the files inline.
+    let evidence = match read_evidence(app, request_id).await {
+        Ok(evidence) => evidence,
+        Err(code) => return discard(app, local, book, request_id, code).await,
     };
     let workspace = match &evidence {
         None => None,
         Some(evidence) => {
             let until = deadline.min(Instant::now() + DM_WORKSPACE_WAIT);
-            let answer = match tokio::time::timeout_at(
-                until,
-                broker.exchange(workspace_request_line(request_id, evidence)),
-            )
-            .await
-            {
-                Ok(BrokerExchange::Answered(answer)) => {
-                    read_workspace_answer(&answer, request_id, evidence)
-                }
+            let line = match evidence {
+                AppEvidence::Inline(inline) => workspace_request_line(request_id, inline),
+                AppEvidence::Parts(parts) => workspace_parts_request_line(request_id, parts),
+            };
+            let answer = match tokio::time::timeout_at(until, broker.exchange(line)).await {
+                Ok(BrokerExchange::Answered(answer)) => match evidence {
+                    AppEvidence::Inline(inline) => {
+                        read_workspace_answer(&answer, request_id, inline)
+                    }
+                    AppEvidence::Parts(parts) => {
+                        read_workspace_parts_answer(&answer, request_id, parts)
+                    }
+                },
                 Ok(BrokerExchange::NotContacted | BrokerExchange::Lost) | Err(_) => None,
             };
             match answer {
                 // Every file the app sent, or none of this goes.
                 Some(workspace)
                     if workspace.manifest.len()
-                        == evidence.files.len() + usize::from(workspace.target_sha.is_some()) =>
+                        == evidence.file_count() + usize::from(workspace.target_sha.is_some()) =>
                 {
                     Some(workspace)
                 }
@@ -914,7 +1073,32 @@ where
         &launch_workspace,
     );
     let exchange = {
-        let answer = broker.exchange(line);
+        // A workspace named by description: the broker asks for its bytes on this
+        // connection, and each chunk comes from the app as it is asked for.
+        let parts = workspace
+            .as_ref()
+            .map(|workspace| workspace.parts.as_slice())
+            .unwrap_or_default();
+        let plan = PartPlan {
+            request_id: request_id.to_owned(),
+            parts: parts
+                .iter()
+                .map(|part| (part.name.clone(), part.bytes))
+                .collect(),
+        };
+        let source = AppParts {
+            app,
+            request_id,
+            parts,
+            until: deadline.min(Instant::now() + DM_WORKSPACE_WAIT),
+        };
+        let answer = async {
+            if parts.is_empty() {
+                broker.exchange(line).await
+            } else {
+                broker.exchange_parts(line, &plan, &source).await
+            }
+        };
         tokio::pin!(answer);
         let mut released_early = false;
         loop {
@@ -1237,7 +1421,13 @@ pub(crate) mod tests {
             self.all_routes()
                 .into_iter()
                 .filter(|route| {
-                    *route != AppRoute::V22QuestionSync && *route != AppRoute::Workspace
+                    !matches!(
+                        route,
+                        AppRoute::V22QuestionSync
+                            | AppRoute::Workspace
+                            | AppRoute::WorkspaceParts
+                            | AppRoute::WorkspaceChunk
+                    )
                 })
                 .collect()
         }
@@ -1273,10 +1463,16 @@ pub(crate) mod tests {
                 .get_mut(route.path())
                 .and_then(VecDeque::pop_front);
             // A workspace nobody scripted is the app's kill switch: the card alone.
+            // An app with no parts route (nobody scripted one) answers the framework's 404,
+            // and the relay asks the older route.
             queued.unwrap_or_else(|| match route {
                 AppRoute::Workspace => HttpAnswer::Answered {
                     status: 200,
                     body: br#"{"found":true,"workspace":null}"#.to_vec(),
+                },
+                AppRoute::WorkspaceParts => HttpAnswer::Answered {
+                    status: 404,
+                    body: b"<html>not found</html>".to_vec(),
                 },
                 _ => HttpAnswer::Lost,
             })
@@ -1599,6 +1795,368 @@ pub(crate) mod tests {
                 "inputPayloadDigest": dm_payload_digest(&key, &payload),
             })
         );
+    }
+
+    // -- The parts protocol (docs/policy/amux-v22-result-transfer.md 10.2) --------
+
+    /// A file far past the 64 MiB the older route holds: 150 MiB is 38 chunks.
+    const BIG_FILE_BYTES: u64 = 150 * 1024 * 1024;
+    const PARTS_SHA256: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    fn parts_answer(bytes: u64) -> HttpAnswer {
+        HttpAnswer::Answered {
+            status: 200,
+            body: serde_json::to_vec(&json!({"found": true, "workspace": {"target_sha": null,
+                "parts": [{"name": "PATCH.diff", "bytes": bytes, "sha256": PARTS_SHA256,
+                    "blob": "a".repeat(40)}], "excluded": {}}}))
+            .unwrap(),
+        }
+    }
+
+    /// The chunk the app gives for `index` of a `bytes`-byte file.
+    fn chunk_answer(bytes: u64, index: u64) -> HttpAnswer {
+        let (start, end) = crate::tomverse_api::v22_transfer_chunk_range(bytes, index).unwrap();
+        HttpAnswer::Answered {
+            status: 200,
+            body: serde_json::to_vec(&json!({"found": true, "name": "PATCH.diff", "index": index,
+                "total_bytes": bytes, "chunk_count": crate::tomverse_api::v22_transfer_chunk_count(bytes),
+                "sha256": PARTS_SHA256,
+                "bytes_base64": base64::engine::general_purpose::STANDARD
+                    .encode(vec![b'x'; (end - start) as usize])}))
+            .unwrap(),
+        }
+    }
+
+    fn app_with_parts(bytes: u64, chunks: Vec<HttpAnswer>) -> FakeApp {
+        let mut app = FakeApp::with(vec![
+            (AppRoute::Requests, routed("dm_proposal")),
+            (AppRoute::Assignments, assigned(Duration::from_secs(1800))),
+            (AppRoute::WorkspaceParts, parts_answer(bytes)),
+            (AppRoute::Transmissions, recorded()),
+            (AppRoute::Results, submitted("accepted")),
+            (AppRoute::TransmissionOutcome, recorded()),
+        ]);
+        for chunk in chunks {
+            app = app.and(AppRoute::WorkspaceChunk, chunk);
+        }
+        app
+    }
+
+    /// A broker that speaks the trait's parts exchange: the workspace line is
+    /// answered, and a launch that names parts asks the source for every chunk
+    /// the plan lists, as the real broker's `send_parts` does over the socket.
+    struct PartsBroker {
+        inner: FakeBroker,
+        plan: Mutex<Option<PartPlan>>,
+        chunks: Mutex<Vec<Option<usize>>>,
+    }
+    #[async_trait]
+    impl DmBroker for PartsBroker {
+        async fn exchange(&self, line: Vec<u8>) -> BrokerExchange {
+            self.inner.exchange(line).await
+        }
+        async fn exchange_parts(
+            &self,
+            line: Vec<u8>,
+            plan: &PartPlan,
+            source: &dyn DmPartSource,
+        ) -> BrokerExchange {
+            *self.plan.lock().unwrap() = Some(plan.clone());
+            for (name, bytes) in &plan.parts {
+                for index in 0..crate::tomverse_api::v22_transfer_chunk_count(*bytes) {
+                    let chunk = source.chunk(name, index).await;
+                    self.chunks
+                        .lock()
+                        .unwrap()
+                        .push(chunk.as_ref().map(String::len));
+                    if chunk.is_none() {
+                        // The real exchange sends `abort`; the broker answers a refusal.
+                        return BrokerExchange::Answered(
+                            serde_json::to_vec(&json!({"v": 1, "type": "result", "requestId": REQUEST_ID,
+                                "instance": INSTANCE, "transmission": "not_started",
+                                "result": {"kind": "unavailable"},
+                                "resultDigest": dm_result_digest(&RequestKey::from_bytes(KEY), &DmResult::Unavailable),
+                                "launch": {"outcome": "broker_refused", "reasons": ["workspace_unavailable"]},
+                                "cleanup": {"status": "verified"}}))
+                            .unwrap(),
+                        );
+                    }
+                }
+            }
+            self.inner.exchange(line).await
+        }
+    }
+
+    fn parts_broker() -> PartsBroker {
+        PartsBroker {
+            inner: FakeBroker::answering(|line| {
+                if is_workspace_line(line) {
+                    workspace_answer(&workspace_lines())
+                } else {
+                    broker_says(proposal(), "process_ended", json!({"status": "verified"}))
+                }
+            }),
+            plan: Mutex::new(None),
+            chunks: Mutex::new(Vec::new()),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_file_past_the_older_route_goes_to_the_broker_in_chunks_the_launch_names_only() {
+        // 150 MiB: the app describes it, the payload names its blob id, and the launch
+        // line carries the description -- never a byte of it -- while 38 chunks follow.
+        let chunk_count = crate::tomverse_api::v22_transfer_chunk_count(BIG_FILE_BYTES);
+        assert_eq!(chunk_count, 38);
+        let app = app_with_parts(
+            BIG_FILE_BYTES,
+            (0..chunk_count)
+                .map(|i| chunk_answer(BIG_FILE_BYTES, i))
+                .collect(),
+        );
+        let local = FakeLocal::marking();
+        let broker = parts_broker();
+        let run = relay_candidate(&app, &local, &broker, &candidate()).await;
+        assert_eq!(run, RelayRun::end(RelayEnd::Settled("result_recorded")));
+        // The older route was never asked: the app has the parts route.
+        assert!(!app.all_routes().contains(&AppRoute::Workspace));
+        assert_eq!(
+            app.body(AppRoute::WorkspaceParts),
+            json!({"request_id": REQUEST_ID})
+        );
+        let lines = broker.inner.lines.lock().unwrap().clone();
+        let request: Value = serde_json::from_slice(&lines[0].0[..lines[0].0.len() - 1]).unwrap();
+        assert_eq!(
+            request,
+            json!({"v": 1, "type": "workspace", "requestId": REQUEST_ID, "targetSha": null,
+                "parts": [{"name": "PATCH.diff", "bytes": BIG_FILE_BYTES, "sha256": PARTS_SHA256,
+                    "blob": "a".repeat(40)}]})
+        );
+        let launch: Value = serde_json::from_slice(&lines[1].0[..lines[1].0.len() - 1]).unwrap();
+        assert_eq!(
+            launch["workspace"],
+            json!({"state": "develop", "targetSha": WORKSPACE_SHA,
+                "parts": [{"name": "PATCH.diff", "bytes": BIG_FILE_BYTES, "sha256": PARTS_SHA256}]})
+        );
+        assert!(
+            lines[1].0.len() < 64 * 1024,
+            "no evidence byte in the launch line"
+        );
+        let plan = broker.plan.lock().unwrap().clone().unwrap();
+        assert_eq!(
+            plan,
+            PartPlan {
+                request_id: REQUEST_ID.to_owned(),
+                parts: vec![("PATCH.diff".to_owned(), BIG_FILE_BYTES)]
+            }
+        );
+        // Every chunk was asked of the app once, by the sha256 it described; the last is the short one.
+        let asked: Vec<Value> = app
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(route, _)| *route == AppRoute::WorkspaceChunk)
+            .map(|(_, body)| body.clone())
+            .collect();
+        assert_eq!(asked.len(), 38);
+        assert_eq!(
+            asked[37],
+            json!({"request_id": REQUEST_ID, "name": "PATCH.diff", "index": 37,
+            "sha256": PARTS_SHA256})
+        );
+        let sizes = broker.chunks.lock().unwrap().clone();
+        assert_eq!(sizes[0], Some(5_592_408));
+        assert_eq!(
+            sizes[37],
+            Some((BIG_FILE_BYTES % (4 * 1024 * 1024)).div_ceil(3) as usize * 4)
+        );
+    }
+
+    #[tokio::test]
+    async fn an_app_without_the_parts_route_is_asked_the_older_one() {
+        // The framework's 404 (no `found` of its own) is a route the app does not have.
+        let app = app_with_workspace();
+        let local = FakeLocal::marking();
+        let broker = FakeBroker::answering(|line| {
+            if is_workspace_line(line) {
+                workspace_answer(&workspace_lines())
+            } else {
+                broker_says(proposal(), "process_ended", json!({"status": "verified"}))
+            }
+        });
+        let run = relay_candidate(&app, &local, &broker, &candidate()).await;
+        assert_eq!(run, RelayRun::end(RelayEnd::Settled("result_recorded")));
+        assert_eq!(
+            app.all_routes()
+                .into_iter()
+                .filter(|route| matches!(route, AppRoute::WorkspaceParts | AppRoute::Workspace))
+                .collect::<Vec<_>>(),
+            vec![AppRoute::WorkspaceParts, AppRoute::Workspace]
+        );
+        // The app's own refusal on the parts route is not an absent route: the card stays.
+        for refusal in [
+            refused(404, "found", "request_unknown"),
+            HttpAnswer::Lost,
+            HttpAnswer::Answered {
+                status: 200,
+                body: b"{}".to_vec(),
+            },
+        ] {
+            let app = FakeApp::with(vec![
+                (AppRoute::Requests, routed("dm_proposal")),
+                (AppRoute::Assignments, assigned(Duration::from_secs(1800))),
+                (AppRoute::WorkspaceParts, refusal),
+                (AppRoute::AssignmentDiscard, recorded()),
+            ]);
+            let run = relay_candidate(
+                &app,
+                &FakeLocal::marking(),
+                &FakeBroker::answering(|_| BrokerExchange::Lost),
+                &candidate(),
+            )
+            .await;
+            assert_eq!(
+                run,
+                RelayRun::end(RelayEnd::Settled("workspace_unreadable"))
+            );
+            assert!(!app.all_routes().contains(&AppRoute::Workspace));
+        }
+    }
+
+    #[tokio::test]
+    async fn evidence_the_app_left_out_keeps_the_card_with_the_operator_in_the_parts_protocol_too()
+    {
+        let app = FakeApp::with(vec![
+            (AppRoute::Requests, routed("dm_proposal")),
+            (AppRoute::Assignments, assigned(Duration::from_secs(1800))),
+            (
+                AppRoute::WorkspaceParts,
+                HttpAnswer::Answered {
+                    status: 200,
+                    body: br#"{"found":true,"workspace":{"target_sha":null,"parts":[],"excluded":{"secret_content":1}}}"#.to_vec(),
+                },
+            ),
+            (AppRoute::AssignmentDiscard, recorded()),
+        ]);
+        let run = relay_candidate(&app, &FakeLocal::marking(), &parts_broker(), &candidate()).await;
+        assert_eq!(
+            run,
+            RelayRun::end(RelayEnd::Settled("workspace_evidence_refused"))
+        );
+    }
+
+    #[tokio::test]
+    async fn a_blob_id_the_broker_names_that_the_app_did_not_is_no_workspace() {
+        // The payload must name the bytes the relay will deliver: the app's blob id.
+        let app = app_with_parts(1024, vec![chunk_answer(1024, 0)])
+            .and(AppRoute::AssignmentDiscard, recorded());
+        let other = format!(
+            "{}\n{}\n",
+            json!({"workspace": {"repository": "github.com/mposition/Tomverse", "commit": WORKSPACE_SHA,
+                "state": "develop", "patch": true, "files": 1}}),
+            json!({"file": "evidence/PATCH.diff", "blob": "b".repeat(40), "bytes": 1024})
+        );
+        let broker = PartsBroker {
+            inner: FakeBroker::answering(move |line| {
+                assert!(is_workspace_line(line), "nothing is launched");
+                workspace_answer(other.as_bytes())
+            }),
+            plan: Mutex::new(None),
+            chunks: Mutex::new(Vec::new()),
+        };
+        let run = relay_candidate(&app, &FakeLocal::marking(), &broker, &candidate()).await;
+        assert_eq!(
+            run,
+            RelayRun::end(RelayEnd::Settled("workspace_unavailable"))
+        );
+        assert!(broker.plan.lock().unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn a_chunk_the_app_refuses_or_gives_wrong_is_not_sent_and_the_broker_is_told() {
+        // Gone (404), changed (409), another file's sha256, a short chunk: each is `None`,
+        // and the exchange ends with the broker's refusal, recorded as nothing started.
+        let altered = |edit: &dyn Fn(&mut Value)| {
+            let mut body: Value = match chunk_answer(1024, 0) {
+                HttpAnswer::Answered { body, .. } => serde_json::from_slice(&body).unwrap(),
+                _ => unreachable!(),
+            };
+            edit(&mut body);
+            HttpAnswer::Answered {
+                status: 200,
+                body: serde_json::to_vec(&body).unwrap(),
+            }
+        };
+        let wrong_sha = altered(&|body| body["sha256"] = json!("c".repeat(64)));
+        let short = altered(&|body| {
+            body["bytes_base64"] =
+                json!(base64::engine::general_purpose::STANDARD.encode(vec![b'x'; 1000]))
+        });
+        for chunk in [
+            refused(404, "found", "evidence_absent"),
+            refused(409, "found", "evidence_changed"),
+            wrong_sha,
+            short,
+        ] {
+            let app = app_with_parts(1024, vec![chunk]);
+            let broker = parts_broker();
+            let run = relay_candidate(&app, &FakeLocal::marking(), &broker, &candidate()).await;
+            assert_eq!(broker.chunks.lock().unwrap().clone(), vec![None]);
+            // The launch was never made; the refusal is the broker's answer to the abort.
+            assert_eq!(broker.inner.lines.lock().unwrap().len(), 1);
+            assert!(matches!(run.end, RelayEnd::Settled(_)));
+            assert_eq!(
+                app.all_routes()
+                    .iter()
+                    .filter(|route| **route == AppRoute::WorkspaceChunk)
+                    .count(),
+                1,
+                "not asked again"
+            );
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_chunk_whose_answer_is_lost_or_not_ready_is_asked_again_until_the_window_ends() {
+        let app = FakeApp::with(vec![
+            (AppRoute::WorkspaceChunk, HttpAnswer::Lost),
+            (
+                AppRoute::WorkspaceChunk,
+                refused(503, "found", "amux_database_busy"),
+            ),
+            (AppRoute::WorkspaceChunk, chunk_answer(1024, 0)),
+        ]);
+        let parts = [WorkspacePart {
+            name: "PATCH.diff".to_owned(),
+            bytes: 1024,
+            sha256: PARTS_SHA256.to_owned(),
+            blob: "a".repeat(40),
+        }];
+        let source = AppParts {
+            app: &app,
+            request_id: REQUEST_ID,
+            parts: &parts,
+            until: Instant::now() + Duration::from_secs(60),
+        };
+        assert!(source.chunk("PATCH.diff", 0).await.is_some());
+        assert_eq!(app.all_routes().len(), 3);
+        // Nothing but lost answers: asked until the window ends, then given up.
+        let silent = FakeApp::default();
+        let source = AppParts {
+            app: &silent,
+            request_id: REQUEST_ID,
+            parts: &parts,
+            until: Instant::now() + Duration::from_secs(10),
+        };
+        assert!(source.chunk("PATCH.diff", 0).await.is_none());
+        assert!(
+            (4..=6).contains(&silent.all_routes().len()),
+            "{}",
+            silent.all_routes().len()
+        );
+        // A chunk of a file or an index the description does not hold is never asked.
+        assert!(source.chunk("FINDINGS.md", 0).await.is_none());
+        assert!(source.chunk("PATCH.diff", 1).await.is_none());
     }
 
     /// A broker whose workspace answer never comes; a launch is answered.

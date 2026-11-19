@@ -16,11 +16,17 @@ import {
   DM_LAUNCHER_SOCKET_PATHS,
   DM_LAUNCHER_UNIT_RUNTIME_MAX_MS,
   DM_LAUNCH_LINE_MAX_BYTES,
+  DM_PART_LINE_MAX_BYTES,
   DM_PAYLOAD_MAX_BYTES,
   DM_RESULT_LINE_MAX_BYTES,
   dmBrokerAnswer,
   dmDecodeBase64,
+  dmEncodeAbortLine,
   dmEncodeLaunchRequest,
+  dmEncodePartLine,
+  dmEncodePartStored,
+  dmEncodeSendParts,
+  dmParsePartLine,
   dmEncodeLauncherLaunched,
   dmEncodeLauncherReady,
   dmEncodeLauncherRejected,
@@ -36,6 +42,7 @@ import {
   DM_LAUNCH_UNAVAILABLE_REASONS,
 } from "../lib/amux/decisionMakerLauncherCore.ts";
 import { DM_LAUNCH_HARD_TIMEOUT_MS } from "../lib/amux/decisionMakerLauncherProcess.ts";
+import { AMUX_V22_TRANSFER_CHUNK_BYTES } from "../lib/amux/v22TransferCore.ts";
 import { dmReadLine, dmWriteLine } from "../lib/amux/decisionMakerSocketLine.ts";
 import { EVENT_ID, PAYLOAD, REQUEST_ID, REQUEST_KEY } from "./support/amuxDmLauncherFixture.mjs";
 
@@ -339,4 +346,65 @@ test("a line over the cap, after the newline, cut short, silent or not UTF-8 is 
   assert.deepEqual(await fed([Buffer.from([0xff, 0x0a])]), { ok: false, error: "not_utf8" });
   // The cap counts the line, not its newline.
   assert.deepEqual(await fed(["12345678\n"]), { ok: true, line: "12345678" });
+});
+
+// ---------------------------------------------------------------------------
+// The parts protocol (docs/policy/amux-v22-result-transfer.md 10.2)
+// ---------------------------------------------------------------------------
+
+const SHA = "0123456789abcdef0123456789abcdef01234567";
+const partsWorkspace = (parts) => ({ state: "develop", targetSha: SHA, parts });
+const onePart = { name: "PATCH.diff", bytes: 150 * 1024 * 1024, sha256: "a".repeat(64) };
+
+test("a launch names a workspace by description: no byte of evidence is in the line, and a file may be any size", () => {
+  const parsed = dmParseLaunchRequest(line(launch({ workspace: partsWorkspace([onePart]) })));
+  assert.equal(parsed.ok, true);
+  assert.deepEqual(parsed.request.workspaceParts, partsWorkspace([onePart]));
+  assert.equal(parsed.request.workspace, null, "the files are not known until they arrive");
+  // The line is the payload and a few hundred bytes, whatever the evidence weighs.
+  assert.ok(Buffer.byteLength(line(launch({ workspace: partsWorkspace([onePart]) }))) < 4096);
+  // No description: the workspace is the commit alone, with nothing to wait for.
+  assert.deepEqual(dmParseLaunchRequest(line(launch({ workspace: partsWorkspace([]) }))).request.workspaceParts, partsWorkspace([]));
+  // Anything but the exact description is a workspace that does not match.
+  for (const workspace of [
+    partsWorkspace([{ ...onePart, name: "x.sh" }]),
+    partsWorkspace([onePart, onePart]),
+    partsWorkspace([{ ...onePart, bytes: 0 }]),
+    partsWorkspace([{ ...onePart, sha256: "nope" }]),
+    { ...partsWorkspace([onePart]), files: [] },
+    { state: "none", targetSha: SHA, parts: [] },
+  ]) {
+    const refused = dmParseLaunchRequest(line(launch({ workspace })));
+    assert.deepEqual([refused.ok, refused.refusal], [false, "workspace_mismatch"], JSON.stringify(workspace).slice(0, 80));
+  }
+});
+
+test("a chunk line is exactly the chunk the broker expects: this request, this file, this index, that range's length", () => {
+  const total = AMUX_V22_TRANSFER_CHUNK_BYTES + 10;
+  const expected = (index) => ({ requestId: REQUEST_ID, name: "PATCH.diff", index, totalBytes: total });
+  const first = Buffer.alloc(AMUX_V22_TRANSFER_CHUNK_BYTES, 7);
+  const last = Buffer.alloc(10, 9);
+  const parse = (value, index) => dmParsePartLine(line(value), expected(index));
+  // The full chunk fits the line cap with its envelope; the last is the short remainder.
+  assert.ok(Buffer.byteLength(line(dmEncodePartLine(REQUEST_ID, "PATCH.diff", 0, first))) < DM_PART_LINE_MAX_BYTES);
+  assert.deepEqual(parse(dmEncodePartLine(REQUEST_ID, "PATCH.diff", 0, first), 0), { kind: "part", bytes: first });
+  assert.deepEqual(parse(dmEncodePartLine(REQUEST_ID, "PATCH.diff", 1, last), 1), { kind: "part", bytes: last });
+  assert.deepEqual(parse(dmEncodeAbortLine(REQUEST_ID), 0), { kind: "abort" });
+  for (const [bad, index] of [
+    [dmEncodePartLine(REQUEST_ID, "PATCH.diff", 1, first), 0],
+    [dmEncodePartLine(REQUEST_ID, "FINDINGS.md", 0, first), 0],
+    [dmEncodePartLine("0a1b2c3d-4e5f-4a6b-8c7d-000000000002", "PATCH.diff", 0, first), 0],
+    [dmEncodePartLine(REQUEST_ID, "PATCH.diff", 0, first.subarray(1)), 0],
+    [dmEncodePartLine(REQUEST_ID, "PATCH.diff", 1, first), 1],
+    [{ ...dmEncodePartLine(REQUEST_ID, "PATCH.diff", 1, last), extra: 1 }, 1],
+    [{ ...dmEncodePartLine(REQUEST_ID, "PATCH.diff", 1, last), bytesBase64: "AA=A" }, 1],
+    [{ ...dmEncodeAbortLine(REQUEST_ID), extra: 1 }, 0],
+    [dmEncodeSendParts(REQUEST_ID), 0],
+  ]) {
+    assert.equal(parse(bad, index), null, JSON.stringify(bad).slice(0, 80));
+  }
+  assert.equal(dmParsePartLine("not json", expected(0)), null);
+  // What the broker answers the bridge.
+  assert.deepEqual(dmEncodeSendParts(REQUEST_ID), { v: 1, type: "send_parts", requestId: REQUEST_ID });
+  assert.deepEqual(dmEncodePartStored("PATCH.diff", 3), { v: 1, type: "part_stored", name: "PATCH.diff", index: 3 });
 });

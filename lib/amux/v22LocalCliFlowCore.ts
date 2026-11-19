@@ -18,9 +18,14 @@
  * - No prompt, report, output or conclusion byte limits. The brief, the
  *   previous change, prior conclusions, the owner's answer and review
  *   findings travel as files in the worker's checkout (AMUX_V22_CONTEXT_DIR)
- *   and the prompt points at them. AMUX_V22_TRANSPORT_MAX_BYTES is only a
- *   memory backstop for one message crossing the bridge; a report over it is
- *   shortened in the middle, never dropped, so its last lines still parse.
+ *   and the prompt points at them. The previous change and the prior
+ *   conclusions, the two files whose size no source sets, reach the box in
+ *   chunks (v22ContextPartsCore.ts; docs/policy/amux-v22-result-transfer.md
+ *   10.1) and so have no bound at all. AMUX_V22_TRANSPORT_MAX_BYTES is only a
+ *   memory backstop for one report or one inline prompt crossing the bridge
+ *   (an earlier bridge or sidecar still carries the files inline); a report
+ *   over it is shortened in the middle, never dropped, so its last lines
+ *   still parse.
  * - Every one-shot role has the jailed shell and can run tests. The jail
  *   (no network, the checkout the one writable path) and the credential
  *   isolation are unchanged; a read role's change is reported, never
@@ -53,8 +58,9 @@ export const AMUX_V22_RETIRED_STOP_REASONS = ["stalled"] as const;
  * bridge and the sidecar socket, far above any useful run. Not a work limit.
  */
 export const AMUX_V22_TRANSPORT_MAX_BYTES = 32 * 1024 * 1024;
-/** A delivered prompt with its context-file block (the files' own backstop
- * plus the prompt around them). The bridge checks the same bound. */
+/** A delivered prompt with its inline context-file block (twice the transport
+ * backstop: the block of an earlier bridge and the prompt around it). The
+ * bridge checks the same bound. A chunked file is not in the prompt. */
 export const AMUX_V22_PROMPT_MAX_BYTES = 2 * AMUX_V22_TRANSPORT_MAX_BYTES;
 
 /** An execution lease long enough that a slow bridge round never ends a
@@ -96,12 +102,12 @@ const CONTEXT_NAMES = new Set<string>(Object.values(AMUX_V22_CONTEXT_FILES));
 export type AmuxV22ContextFile = { name: string; text: string };
 
 /** The delivery's context files, checked: known names once each, text with
- * no NUL, the whole set under the transport backstop. Throws on anything else. */
+ * no NUL. No byte bound of ours (owner decision 2026-11-19); the prompt's own
+ * backstop bounds what arrives inline. Throws on anything else. */
 export function parseAmuxV22ContextFiles(value: unknown): AmuxV22ContextFile[] {
   if (!Array.isArray(value) || value.length > CONTEXT_NAMES.size)
     throw new TypeError("invalid v22 context files");
   const seen = new Set<string>();
-  let bytes = 0;
   const files: AmuxV22ContextFile[] = [];
   for (const item of value) {
     if (!item || typeof item !== "object" || Array.isArray(item) ||
@@ -112,11 +118,8 @@ export function parseAmuxV22ContextFiles(value: unknown): AmuxV22ContextFile[] {
         typeof text !== "string" || text.includes("\0"))
       throw new TypeError("invalid v22 context file");
     seen.add(name);
-    bytes += Buffer.byteLength(text, "utf8");
     files.push({ name, text });
   }
-  if (bytes > AMUX_V22_TRANSPORT_MAX_BYTES)
-    throw new TypeError("v22 context files exceed the transport backstop");
   return files;
 }
 
