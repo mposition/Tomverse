@@ -34,8 +34,12 @@ import {
  * the device" rule as every other provider (§5.1).
  *
  * A turn starts at a level-one heading that opens the file or follows a `---`
- * rule, outside a code fence. An answer's own `---` is followed by `##` or
- * prose in every export seen, and a fenced `---` / `# comment` is code.
+ * rule, outside a code fence. An answer may also hold a `---` and a `#`
+ * heading of its own, so a candidate turn is checked against the export's
+ * footnote numbering: Perplexity numbers citations per turn (`[^3_1]` is the
+ * third turn's first source), and a candidate whose citations all belong to
+ * the turns before it is the rest of the previous answer. An uncited answer
+ * carries no such evidence; that case stays a known limitation.
  *
  * Citations are kept. The footnote marks become `[n]` and the definitions a
  * "Sources" list at the end of the answer, because a footnote definition
@@ -57,9 +61,10 @@ const TITLE_CODE_POINTS = 80;
 
 const LOGO = /^<img\s[^>]*perplexity\.ai[^>]*\/?>$/i;
 const DIVIDER = /^<div\b[^>]*>\s*⁂\s*<\/div>$/;
-const HIDDEN_CITATIONS = /^<span\s+style="display:\s*none;?">(?:\[\^\d+_\d+\])*<\/span>$/;
+const HIDDEN_CITATIONS = /^<span\b[^>]*display:\s*none[^>]*>(?:\[\^\d+_\d+\])*<\/span>$/;
 const FOOTNOTE_DEFINITION = /^\[\^\d+_(\d+)\]:\s*(.+)$/;
 const FOOTNOTE_MARK = /\[\^\d+_(\d+)\]/g;
+const FOOTNOTE_TURN = /\[\^(\d+)_\d+\]/g;
 const FENCE = /^\s*(```|~~~)/;
 const HEADING = /^# (?!#)(.*)$/;
 
@@ -86,13 +91,14 @@ const truncateTitle = (question: string): string => {
 };
 
 /**
- * A stable lineage id from the opening question. The export carries no
- * thread id; a re-export of the same thread with more turns opens with the
- * same question, so it lands in the same lineage as a new snapshot (§4.2).
- * Hashed so the question text itself is not used as an identifier.
+ * A stable lineage id from the opening turn. The export carries no thread id;
+ * a re-export of the same thread with more turns opens with the same question
+ * and answer, so it lands in the same lineage as a new snapshot (§4.2), while
+ * two threads that merely asked the same first question do not. Hashed so the
+ * conversation text itself is not used as an identifier.
  */
-const lineageId = (question: string): string => {
-    const text = question.replace(/\s+/g, " ").trim();
+const lineageId = (question: string, answer: string): string => {
+    const text = `${question}\n${answer}`.replace(/\s+/g, " ").trim();
     let a = 0x811c9dc5;
     let b = 0x01000193 ^ text.length;
     for (let i = 0; i < text.length; i += 1) {
@@ -103,10 +109,10 @@ const lineageId = (question: string): string => {
     return `perplexity-md-${a.toString(16).padStart(8, "0")}${b.toString(16).padStart(8, "0")}`;
 };
 
-type Turn = { question: string; body: string[] };
+type Turn = { question: string; heading: string; body: string[] };
 
-function splitTurns(text: string): Turn[] {
-    const lines = text.replace(/\r\n?/g, "\n").split("\n");
+/** Every heading that could open a turn, before the numbering check. */
+function candidateTurns(lines: readonly string[]): Turn[] {
     const turns: Turn[] = [];
     let current: Turn | null = null;
     let inFence = false;
@@ -114,21 +120,44 @@ function splitTurns(text: string): Turn[] {
     for (const line of lines) {
         if (FENCE.test(line)) inFence = !inFence;
         const heading = inFence ? null : HEADING.exec(line);
-        const opensTurn =
-            heading !== null && (current === null || lastNonBlank.trim() === "---");
-        if (opensTurn) {
-            if (current) {
-                // The `---` that separated the turns belongs to neither.
-                const at = current.body.map((l) => l.trim()).lastIndexOf("---");
-                if (at >= 0) current.body.splice(at);
-            }
-            current = { question: heading[1], body: [] };
+        if (heading && (current === null || lastNonBlank.trim() === "---")) {
+            current = { question: heading[1], heading: line, body: [] };
             turns.push(current);
         } else if (current) {
             current.body.push(line);
         }
         if (line.trim()) lastNonBlank = line;
     }
+    return turns;
+}
+
+/** The turn numbers a candidate's citations belong to. */
+const citedTurns = (turn: Turn): number[] =>
+    [turn.heading, ...turn.body].flatMap((line) =>
+        [...line.matchAll(FOOTNOTE_TURN)].map((match) => Number(match[1]))
+    );
+
+/** Drops the `---` that separated a turn from the next one. */
+function dropSeparator(body: string[]): void {
+    while (body.length > 0 && !body[body.length - 1].trim()) body.pop();
+    if (body.length > 0 && body[body.length - 1].trim() === "---") body.pop();
+}
+
+function splitTurns(text: string): Turn[] {
+    const lines = text.replace(/\r\n?/g, "\n").split("\n");
+    const turns: Turn[] = [];
+    for (const candidate of candidateTurns(lines)) {
+        const previous = turns[turns.length - 1];
+        const cited = citedTurns(candidate);
+        if (previous && cited.length > 0 && Math.max(...cited) <= turns.length) {
+            // Its sources are the earlier turns': an answer's own rule and
+            // heading, not a new question.
+            previous.body.push(candidate.heading, ...candidate.body);
+            continue;
+        }
+        turns.push(candidate);
+    }
+    for (const turn of turns.slice(0, -1)) dropSeparator(turn.body);
     return turns;
 }
 
@@ -156,7 +185,13 @@ function cleanAnswer(body: readonly string[]): string {
         }
         kept.push(line);
     }
-    let answer = kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+    let answer = kept
+        .join("\n")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim()
+        // A closing rule of the answer's own, left once the separator is gone.
+        .replace(/(?:\n+---)+$/, "")
+        .trim();
     if (sources.size > 0) {
         const list = [...sources.entries()]
             .sort(([a], [b]) => a - b)
@@ -183,7 +218,7 @@ export const perplexityAdapter: ExternalConversationAdapter = {
         if (turns.length === 0) return null;
 
         const firstQuestion = cleanQuestion(turns[0].question);
-        const rawId = lineageId(firstQuestion);
+        const rawId = lineageId(firstQuestion, cleanAnswer(turns[0].body));
         const warnings = emptyWarnings();
         const messages: ParsedExternalMessage[] = [];
         const push = (role: "user" | "assistant", content: string) => {

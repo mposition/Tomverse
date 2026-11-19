@@ -111,6 +111,74 @@ test("the conversation carries a title, a stable lineage id and no invented prov
     }
 });
 
+const LOGO = '<img src="https://r2cdn.perplexity.ai/pplx-full-logo-primary-dark%402x.png"/>';
+
+test("an answer's own rule and level-one heading stay in the answer when its citations say so", () => {
+    const conversation = parse(
+        [
+            LOGO,
+            "",
+            "# Compare the two plans",
+            "",
+            "Plan A is cheaper.[^1_1]",
+            "",
+            "---",
+            "",
+            "# Summary",
+            "",
+            "Pick A unless you need B's support.[^1_2]",
+            "",
+            '<div align="center">⁂</div>',
+            "",
+            "[^1_1]: https://example.com/a",
+            "",
+            "[^1_2]: https://example.com/b",
+            "",
+            "---",
+            "",
+            "# And for a team?",
+            "",
+            "Then B.[^2_1]",
+            "",
+            "[^2_1]: https://example.com/team",
+            "",
+        ].join("\n")
+    );
+    assert.deepEqual(
+        conversation.messages.map((m) => [m.role, m.content.split("\n")[0]]),
+        [
+            ["user", "Compare the two plans"],
+            ["assistant", "Plan A is cheaper.[1]"],
+            ["user", "And for a team?"],
+            ["assistant", "Then B.[1]"],
+        ]
+    );
+    const answer = conversation.messages[1].content;
+    assert.match(answer, /---\n\n# Summary\n\nPick A unless you need B's support\.\[2\]/);
+    assert.ok(answer.endsWith("Sources:\n[1] https://example.com/a\n[2] https://example.com/b"));
+});
+
+test("threads that open with the same question but differ are separate lineages", () => {
+    const thread = (answer) => parse(`${LOGO}\n\n# What should I cook tonight?\n\n${answer}\n`);
+    const one = thread("Try a risotto.");
+    const two = thread("Try a curry.");
+    assert.notEqual(one.rawExternalConversationId, two.rawExternalConversationId);
+    assert.notEqual(one.messages[0].rawExternalMessageId, two.messages[0].rawExternalMessageId);
+});
+
+test("hidden citation spans are recognised in other attribute spellings", () => {
+    const answer = parse(
+        `${LOGO}\n\n# q\n\nA.[^1_1]\n<span class="hidden" style="display: none;">[^1_2]</span>\n\n[^1_1]: https://example.com/1\n\n[^1_2]: https://example.com/2\n`
+    ).messages[1].content;
+    assert.ok(!answer.includes("<span"));
+    assert.ok(answer.endsWith("[2] https://example.com/2"));
+});
+
+test("an answer ending on a rule of its own does not keep it", () => {
+    const conversation = parse(`${LOGO}\n\n# q\n\nAnswer.\n\n---\n\n---\n\n# next\n\nMore.\n`);
+    assert.equal(conversation.messages[1].content, "Answer.");
+});
+
 test("Windows line endings parse the same", () => {
     const lf = parse(THREAD);
     const crlf = parse(THREAD.replace(/\n/g, "\r\n"));
