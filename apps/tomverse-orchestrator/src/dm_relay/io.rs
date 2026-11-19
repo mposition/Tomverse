@@ -16,7 +16,8 @@ use super::delivery::{deliver_next, settle_unsettled, CursorMove, DeliveryCursor
 use super::direct::{report_direct_answers, DirectCursor};
 use super::flow::{
     listed_markers, relay_candidate_holding, release_marker, scan, AppRoute, DmApp, DmBroker,
-    DmLocal, LocalRead, LocalRoute, MarkerKey, RelayEnd, LOCAL_MARKER_LIST_PATH,
+    DmLocal, DmPartSource, LocalRead, LocalRoute, MarkerKey, PartPlan, RelayEnd,
+    LOCAL_MARKER_LIST_PATH,
 };
 use super::owed::{OwedBook, OwedStore};
 use super::wire::{BrokerExchange, HttpAnswer, DM_RESULT_LINE_MAX_BYTES};
@@ -109,7 +110,7 @@ impl DmApp for HttpApp {
             .post_decision_maker(
                 route.path(),
                 &body,
-                DM_ROUTE_CLIENT_TIMEOUT,
+                route.client_timeout(),
                 route.answer_max_bytes(),
             )
             .await
@@ -267,6 +268,153 @@ impl DmBroker for UnixBroker {
         let _ = &self.path;
         BrokerExchange::NotContacted
     }
+
+    #[cfg(unix)]
+    async fn exchange_parts(
+        &self,
+        line: Vec<u8>,
+        plan: &PartPlan,
+        source: &dyn DmPartSource,
+    ) -> BrokerExchange {
+        match tokio::time::timeout(
+            DM_BROKER_CONNECT_TIMEOUT,
+            tokio::net::UnixStream::connect(&self.path),
+        )
+        .await
+        {
+            Ok(Ok(stream)) => {
+                exchange_parts_on(stream, line, plan, source, DM_BROKER_RESPONSE_DEADLINE).await
+            }
+            _ => BrokerExchange::NotContacted,
+        }
+    }
+
+    #[cfg(not(unix))]
+    async fn exchange_parts(
+        &self,
+        _line: Vec<u8>,
+        _plan: &PartPlan,
+        _source: &dyn DmPartSource,
+    ) -> BrokerExchange {
+        BrokerExchange::NotContacted
+    }
+}
+
+/// One line of the broker, without its newline, within `max_bytes`; `None` for
+/// anything short of a whole line.
+async fn read_broker_line<R>(reader: &mut R, max_bytes: usize) -> Option<Vec<u8>>
+where
+    R: tokio::io::AsyncBufRead + Unpin,
+{
+    let mut limited = reader.take(max_bytes as u64 + 1);
+    let mut line = Vec::new();
+    match limited.read_until(b'\n', &mut line).await {
+        Ok(_) if line.last() == Some(&b'\n') && line.len() <= max_bytes + 1 => {
+            line.pop();
+            Some(line)
+        }
+        _ => None,
+    }
+}
+
+fn line_type(line: &[u8]) -> Option<(String, Value)> {
+    let value: Value = serde_json::from_slice(line).ok()?;
+    let kind = value.get("type")?.as_str()?.to_owned();
+    Some((kind, value))
+}
+
+/// How long the broker has to answer an `abort` with its refusal.
+const DM_PARTS_ABORT_WAIT: Duration = Duration::from_secs(30);
+
+/// One request on an open connection, in the parts protocol
+/// (lib/amux/decisionMakerBrokerCore.ts): the launch line; then either the answer
+/// (a refusal before anything was asked) or `send_parts`, after which each file's
+/// chunks go one `part` line at a time, each answered `part_stored`, and the one
+/// answer line comes last. A chunk the relay cannot get is not sent: it sends
+/// `abort` and the broker answers a refusal, so the exchange ends with an answer
+/// the relay can record and not with a lost one. Anything else that goes wrong
+/// once a byte may have been written is a lost answer, as in `exchange_on`.
+pub async fn exchange_parts_on<S>(
+    stream: S,
+    line: Vec<u8>,
+    plan: &PartPlan,
+    source: &dyn DmPartSource,
+    deadline: Duration,
+) -> BrokerExchange
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send,
+{
+    let operation = async move {
+        let (read_half, mut write) = tokio::io::split(stream);
+        let mut reader = tokio::io::BufReader::new(read_half);
+        if write.write_all(&line).await.is_err() || write.flush().await.is_err() {
+            return BrokerExchange::Lost;
+        }
+        let Some(first) = read_broker_line(&mut reader, DM_RESULT_LINE_MAX_BYTES).await else {
+            return BrokerExchange::Lost;
+        };
+        match line_type(&first) {
+            Some((kind, value)) if kind == "send_parts" => {
+                if value["requestId"] != serde_json::json!(plan.request_id) {
+                    return BrokerExchange::Lost;
+                }
+            }
+            Some((kind, _)) if kind == "result" => return BrokerExchange::Answered(first),
+            _ => return BrokerExchange::Lost,
+        }
+        for (name, bytes) in &plan.parts {
+            for index in 0..crate::tomverse_api::v22_transfer_chunk_count(*bytes) {
+                let message = match source.chunk(name, index).await {
+                    Some(base64) => serde_json::json!({"v": 1, "type": "part",
+                        "requestId": plan.request_id, "name": name, "index": index,
+                        "bytesBase64": base64}),
+                    None => {
+                        // Nothing more to send: tell the broker, and take its answer.
+                        let abort = serde_json::json!({"v": 1, "type": "abort", "requestId": plan.request_id});
+                        let mut abort = serde_json::to_vec(&abort).expect("abort serializes");
+                        abort.push(b'\n');
+                        if write.write_all(&abort).await.is_err() || write.flush().await.is_err() {
+                            return BrokerExchange::Lost;
+                        }
+                        return match tokio::time::timeout(
+                            DM_PARTS_ABORT_WAIT,
+                            read_broker_line(&mut reader, DM_RESULT_LINE_MAX_BYTES),
+                        )
+                        .await
+                        {
+                            Ok(Some(answer)) => BrokerExchange::Answered(answer),
+                            _ => BrokerExchange::Lost,
+                        };
+                    }
+                };
+                let mut sent = serde_json::to_vec(&message).expect("a part serializes");
+                sent.push(b'\n');
+                if write.write_all(&sent).await.is_err() || write.flush().await.is_err() {
+                    return BrokerExchange::Lost;
+                }
+                let Some(ack) = read_broker_line(&mut reader, DM_RESULT_LINE_MAX_BYTES).await
+                else {
+                    return BrokerExchange::Lost;
+                };
+                match line_type(&ack) {
+                    Some((kind, value))
+                        if kind == "part_stored"
+                            && value["name"] == serde_json::json!(name)
+                            && value["index"] == serde_json::json!(index) => {}
+                    // The broker stopped before the end and said so.
+                    Some((kind, _)) if kind == "result" => return BrokerExchange::Answered(ack),
+                    _ => return BrokerExchange::Lost,
+                }
+            }
+        }
+        match read_broker_line(&mut reader, DM_RESULT_LINE_MAX_BYTES).await {
+            Some(answer) => BrokerExchange::Answered(answer),
+            None => BrokerExchange::Lost,
+        }
+    };
+    tokio::time::timeout(deadline, operation)
+        .await
+        .unwrap_or(BrokerExchange::Lost)
 }
 
 /// One request on an open connection: the launch line, then exactly one
@@ -1013,6 +1161,7 @@ mod tests {
             vec![
                 "requests",
                 "assignments",
+                "workspace/parts",
                 "workspace",
                 "transmissions",
                 "results",
@@ -1084,7 +1233,8 @@ mod tests {
         );
         // A settled question is not routed again.
         assert_eq!(relay.tick().await, Tick::Idle);
-        assert_eq!(question_paths(&app_seen).len(), 6);
+        // The seven calls of one question, the parts route (the older one answered 404) included.
+        assert_eq!(question_paths(&app_seen).len(), 7);
     }
 
     #[tokio::test]
@@ -1104,6 +1254,7 @@ mod tests {
             vec![
                 "requests",
                 "assignments",
+                "workspace/parts",
                 "workspace",
                 "transmissions",
                 "transmissions",
@@ -1131,6 +1282,7 @@ mod tests {
             vec![
                 "requests",
                 "assignments",
+                "workspace/parts",
                 "workspace",
                 "transmissions",
                 "results",
@@ -1175,6 +1327,7 @@ mod tests {
             vec![
                 "requests",
                 "assignments",
+                "workspace/parts",
                 "workspace",
                 "transmissions",
                 "results",
@@ -1293,6 +1446,233 @@ mod tests {
             exchange_on(bridge_end, b"x\n".to_vec(), Duration::from_secs(5)).await,
             BrokerExchange::Answered(b"{\"v\":1}".to_vec())
         );
+    }
+
+    // -- The parts protocol on the broker's socket ----------------------------
+
+    /// Chunks as base64 by (name, index); a name or index not listed cannot be had.
+    struct Chunks(Vec<(&'static str, u64, &'static str)>);
+    #[async_trait]
+    impl DmPartSource for Chunks {
+        async fn chunk(&self, name: &str, index: u64) -> Option<String> {
+            self.0
+                .iter()
+                .find(|(n, i, _)| *n == name && *i == index)
+                .map(|(_, _, bytes)| (*bytes).to_owned())
+        }
+    }
+
+    fn plan() -> PartPlan {
+        PartPlan {
+            request_id: REQUEST_ID.to_owned(),
+            // 5 MiB is two chunks; 10 bytes is one.
+            parts: vec![
+                ("PATCH.diff".to_owned(), 5 * 1024 * 1024),
+                ("FINDINGS.md".to_owned(), 10),
+            ],
+        }
+    }
+
+    async fn broker_line<R: tokio::io::AsyncBufRead + Unpin>(reader: &mut R) -> Value {
+        let mut line = String::new();
+        reader.read_line(&mut line).await.unwrap();
+        serde_json::from_str(&line).unwrap()
+    }
+
+    async fn broker_writes<W: AsyncWrite + Unpin>(writer: &mut W, value: Value) {
+        let mut line = serde_json::to_vec(&value).unwrap();
+        line.push(b'\n');
+        writer.write_all(&line).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn parts_go_one_line_each_and_each_is_acknowledged_before_the_next() {
+        let (bridge_end, broker_end) = tokio::io::duplex(1 << 20);
+        let seen = Arc::new(Mutex::new(Vec::<Value>::new()));
+        let record = seen.clone();
+        tokio::spawn(async move {
+            let (read, mut write) = tokio::io::split(broker_end);
+            let mut reader = tokio::io::BufReader::new(read);
+            let line = broker_line(&mut reader).await;
+            record.lock().unwrap().push(line);
+            broker_writes(
+                &mut write,
+                json!({"v": 1, "type": "send_parts", "requestId": REQUEST_ID}),
+            )
+            .await;
+            for (name, index) in [("PATCH.diff", 0), ("PATCH.diff", 1), ("FINDINGS.md", 0)] {
+                let part = broker_line(&mut reader).await;
+                record.lock().unwrap().push(part);
+                broker_writes(
+                    &mut write,
+                    json!({"v": 1, "type": "part_stored", "name": name, "index": index}),
+                )
+                .await;
+            }
+            broker_writes(&mut write, json!({"v": 1, "type": "result"})).await;
+        });
+        let source = Chunks(vec![
+            ("PATCH.diff", 0, "AAAA"),
+            ("PATCH.diff", 1, "BBBB"),
+            ("FINDINGS.md", 0, "CCCC"),
+        ]);
+        let answer = exchange_parts_on(
+            bridge_end,
+            b"{\"type\":\"launch\"}\n".to_vec(),
+            &plan(),
+            &source,
+            Duration::from_secs(5),
+        )
+        .await;
+        assert!(
+            matches!(&answer, BrokerExchange::Answered(line)
+            if serde_json::from_slice::<Value>(line).unwrap() == json!({"v": 1, "type": "result"})),
+            "{answer:?}"
+        );
+        let seen = seen.lock().unwrap().clone();
+        assert_eq!(seen[0], json!({"type": "launch"}));
+        assert_eq!(
+            seen[1..],
+            [
+                json!({"v": 1, "type": "part", "requestId": REQUEST_ID, "name": "PATCH.diff", "index": 0, "bytesBase64": "AAAA"}),
+                json!({"v": 1, "type": "part", "requestId": REQUEST_ID, "name": "PATCH.diff", "index": 1, "bytesBase64": "BBBB"}),
+                json!({"v": 1, "type": "part", "requestId": REQUEST_ID, "name": "FINDINGS.md", "index": 0, "bytesBase64": "CCCC"}),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_refusal_before_send_parts_is_the_answer_and_no_chunk_is_asked_for() {
+        let (bridge_end, broker_end) = tokio::io::duplex(1 << 20);
+        tokio::spawn(async move {
+            let (read, mut write) = tokio::io::split(broker_end);
+            let mut reader = tokio::io::BufReader::new(read);
+            broker_line(&mut reader).await;
+            broker_writes(
+                &mut write,
+                json!({"v": 1, "type": "result", "launch": {"outcome": "broker_refused"}}),
+            )
+            .await;
+        });
+        // A source with nothing: asking it would end the exchange in an abort.
+        let answer = exchange_parts_on(
+            bridge_end,
+            b"{}\n".to_vec(),
+            &plan(),
+            &Chunks(vec![]),
+            Duration::from_secs(5),
+        )
+        .await;
+        assert!(
+            matches!(&answer, BrokerExchange::Answered(line) if String::from_utf8_lossy(line).contains("broker_refused")),
+            "{answer:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_chunk_that_cannot_be_had_sends_abort_and_the_brokers_refusal_is_the_answer() {
+        let (bridge_end, broker_end) = tokio::io::duplex(1 << 20);
+        let seen = Arc::new(Mutex::new(Vec::<Value>::new()));
+        let record = seen.clone();
+        tokio::spawn(async move {
+            let (read, mut write) = tokio::io::split(broker_end);
+            let mut reader = tokio::io::BufReader::new(read);
+            broker_line(&mut reader).await;
+            broker_writes(
+                &mut write,
+                json!({"v": 1, "type": "send_parts", "requestId": REQUEST_ID}),
+            )
+            .await;
+            let line = broker_line(&mut reader).await;
+            record.lock().unwrap().push(line);
+            broker_writes(
+                &mut write,
+                json!({"v": 1, "type": "part_stored", "name": "PATCH.diff", "index": 0}),
+            )
+            .await;
+            // The second chunk could not be had: the next line is the abort.
+            let line = broker_line(&mut reader).await;
+            record.lock().unwrap().push(line);
+            broker_writes(
+                &mut write,
+                json!({"v": 1, "type": "result", "launch": {"reasons": ["workspace_unavailable"]}}),
+            )
+            .await;
+        });
+        let source = Chunks(vec![("PATCH.diff", 0, "AAAA")]);
+        let answer = exchange_parts_on(
+            bridge_end,
+            b"{}\n".to_vec(),
+            &plan(),
+            &source,
+            Duration::from_secs(5),
+        )
+        .await;
+        assert!(
+            matches!(&answer, BrokerExchange::Answered(line) if String::from_utf8_lossy(line).contains("workspace_unavailable")),
+            "{answer:?}"
+        );
+        let seen = seen.lock().unwrap().clone();
+        assert_eq!(
+            seen[1],
+            json!({"v": 1, "type": "abort", "requestId": REQUEST_ID})
+        );
+    }
+
+    #[tokio::test]
+    async fn anything_else_on_the_socket_is_a_lost_answer() {
+        // The broker's first line is neither send_parts nor a result; a part is
+        // acknowledged as another chunk; the connection ends; it names another request.
+        for script in 0..4 {
+            let (bridge_end, broker_end) = tokio::io::duplex(1 << 20);
+            tokio::spawn(async move {
+                let (read, mut write) = tokio::io::split(broker_end);
+                let mut reader = tokio::io::BufReader::new(read);
+                broker_line(&mut reader).await;
+                match script {
+                    0 => broker_writes(&mut write, json!({"v": 1, "type": "ready"})).await,
+                    1 => {
+                        broker_writes(
+                            &mut write,
+                            json!({"v": 1, "type": "send_parts", "requestId": REQUEST_ID}),
+                        )
+                        .await;
+                        broker_line(&mut reader).await;
+                        broker_writes(&mut write, json!({"v": 1, "type": "part_stored", "name": "PATCH.diff", "index": 1})).await;
+                    }
+                    2 => {
+                        broker_writes(
+                            &mut write,
+                            json!({"v": 1, "type": "send_parts", "requestId": REQUEST_ID}),
+                        )
+                        .await;
+                        drop(write);
+                    }
+                    _ => {
+                        broker_writes(
+                            &mut write,
+                            json!({"v": 1, "type": "send_parts", "requestId": "another"}),
+                        )
+                        .await
+                    }
+                }
+                std::future::pending::<()>().await;
+            });
+            let source = Chunks(vec![
+                ("PATCH.diff", 0, "AAAA"),
+                ("PATCH.diff", 1, "BBBB"),
+                ("FINDINGS.md", 0, "CCCC"),
+            ]);
+            let answer = exchange_parts_on(
+                bridge_end,
+                b"{}\n".to_vec(),
+                &plan(),
+                &source,
+                Duration::from_millis(300),
+            )
+            .await;
+            assert_eq!(answer, BrokerExchange::Lost, "script {script}");
+        }
     }
 
     #[tokio::test]

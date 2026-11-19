@@ -85,6 +85,7 @@ const PROVIDER_DISPLAY: Readonly<Record<ExternalImportProvider, string>> = {
     chatgpt: "ChatGPT (OpenAI)",
     claude: "Claude (Anthropic)",
     gemini: "Gemini (Google)",
+    perplexity: "Perplexity",
 };
 
 export const continuationProviderDisplay = (provider: string): string =>

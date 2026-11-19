@@ -99,6 +99,12 @@ const chatgptExportFile = (conversationCount: number) => ({
   ),
 });
 
+/**
+ * A Perplexity thread export: one Markdown file, parsed by the real worker.
+ * Playwright resolves the path from the repository root it runs in.
+ */
+const perplexityThreadFile = "tests/fixtures/perplexityMarkdown/thread.md";
+
 /** What GET /api/imports/external/[importId] returns to the owner. */
 type ImportDetail = {
   id: string;
@@ -129,6 +135,10 @@ type ImportDetail = {
 
 type ImportApiState = {
   createCount: number;
+  /** The provider each create request named. */
+  createProviders: string[];
+  /** Bodies the worker sent to the Perplexity split route. */
+  splitBodies: unknown[];
   batchBodies: Array<{
     sequence: number;
     conversations: Array<{
@@ -210,6 +220,8 @@ async function mockImportApi(
     failFinalize?: { code: string; status: number; times: number };
     /** Payload served by GET /api/imports/external/[importId]. */
     importDetail?: ImportDetail;
+    /** Hints the Perplexity split route answers with; absent = switched off (404). */
+    perplexitySplitHints?: { questionParagraphs: number[]; continuesAnswer: boolean[] };
     /** §13.1 impact served to the delete confirmation. */
     memoryImpact?: {
       derivedCount: number;
@@ -225,6 +237,8 @@ async function mockImportApi(
 ): Promise<ImportApiState> {
   const state: ImportApiState = {
     createCount: 0,
+    createProviders: [],
+    splitBodies: [],
     batchBodies: [],
     finalizeBody: null,
     finalizeCount: 0,
@@ -283,6 +297,9 @@ async function mockImportApi(
       }
       if (options.disabled) return route.fulfill(disabledResponse);
       state.createCount += 1;
+      state.createProviders.push(
+        String((route.request().postDataJSON() as { provider?: unknown })?.provider)
+      );
       return route.fulfill({
         status: 201,
         contentType: "application/json",
@@ -542,6 +559,20 @@ async function mockImportApi(
     }
   );
 
+
+  // Registered last: the import-detail pattern above also matches this path,
+  // and Playwright tries the most recently registered handler first.
+  await page.route(
+    (url) => url.pathname === "/api/imports/external/perplexity-split",
+    (route) => {
+      state.splitBodies.push(route.request().postDataJSON());
+      if (!options.perplexitySplitHints) {
+        return route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ code: "PERPLEXITY_SPLIT_DISABLED" }) });
+      }
+      return route.fulfill(json({ hints: options.perplexitySplitHints }));
+    }
+  );
+
   return state;
 }
 
@@ -763,6 +794,88 @@ test.describe("external import settings", () => {
       expect(body).not.toContain("current_node");
       expect(body).not.toContain("mapping");
     }
+  });
+
+  test("a Perplexity thread exported as Markdown imports with its sources", async ({
+    page,
+  }) => {
+    await prepareGuestPage(page, "ko");
+    await mockAuthenticatedApi(page);
+    const api = await mockImportApi(page);
+
+    await page.goto("/settings/imports/new");
+    await page.getByTestId("external-import-guide-perplexity").click();
+    await expect(page.getByTestId("external-import-guide")).toContainText(
+      "Perplexity 스레드 내보내기"
+    );
+    await page
+      .getByTestId("external-import-file-input")
+      .setInputFiles(perplexityThreadFile);
+
+    await expect(page.getByTestId("external-import-selection")).toBeVisible();
+    await expect(
+      page.getByTestId("external-import-conversation-toggle")
+    ).toHaveCount(1);
+    await expect(
+      page.getByText("How do I keep a sourdough starter alive while travelling?")
+    ).toBeVisible();
+    await expect(
+      page.getByTestId("external-import-provider-mismatch")
+    ).toHaveCount(0);
+    // The split the parser cannot be sure of is disclosed before saving.
+    await expect(
+      page.getByTestId("external-import-perplexity-structure-notice")
+    ).toContainText("가져온 뒤 대화를 열어 확인");
+
+    await page.getByTestId("external-import-continue-to-review").click();
+    await expect(page.getByTestId("external-import-review")).toBeVisible();
+    expect(api.createProviders).toEqual(["perplexity"]);
+    const [conversation] = api.batchBodies[0].conversations;
+    expect(conversation.messages.map((m) => m.role)).toEqual([
+      "user",
+      "assistant",
+      "user",
+      "assistant",
+      "user",
+      "assistant",
+    ]);
+    expect(conversation.messages[1].content).toContain(
+      "Sources:\n[1] https://example.com/starter-care"
+    );
+    expect(conversation.messages[1].content).not.toContain("[^1_");
+  });
+
+  test("split hints from the import route put a multi-line question back together", async ({
+    page,
+  }) => {
+    await prepareGuestPage(page, "ko");
+    await mockAuthenticatedApi(page);
+    const api = await mockImportApi(page, {
+      perplexitySplitHints: { questionParagraphs: [2, 0, 0], continuesAnswer: [true] },
+    });
+
+    await page.goto("/settings/imports/new");
+    await page.getByTestId("external-import-guide-perplexity").click();
+    await page
+      .getByTestId("external-import-file-input")
+      .setInputFiles("tests/fixtures/perplexityMarkdown/multiline-question.md");
+    await expect(page.getByTestId("external-import-selection")).toBeVisible();
+
+    // Only excerpts went up, never the file.
+    expect(api.splitBodies).toHaveLength(1);
+    const asked = JSON.stringify(api.splitBodies[0]);
+    expect(asked).toContain("Can you tighten it?");
+    expect(asked).not.toContain("pplx-full-logo");
+    expect(asked).not.toContain("https://example.com/style");
+
+    await page.getByTestId("external-import-continue-to-review").click();
+    await expect(page.getByTestId("external-import-review")).toBeVisible();
+    const [conversation] = api.batchBodies[0].conversations;
+    expect(conversation.messages.map((m) => m.role)).toEqual(["user", "assistant", "user", "assistant"]);
+    expect(conversation.messages[0].content).toBe(
+      "Here is my draft paragraph:\n\nThe quick brown fox jumps over the lazy dog.\n\nCan you tighten it?"
+    );
+    expect(conversation.messages[3].content).toContain("# Other options");
   });
 
   test("a guidance provider that disagrees with the file is a notice, not a failure", async ({

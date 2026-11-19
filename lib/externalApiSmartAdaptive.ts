@@ -227,7 +227,7 @@ export const routeSmartAdaptive = async (input: {
         if (pending) return pending;
         const decision = (async () =>
             (await input.routerAllowed())
-                ? routeWithRouter(input, eligible, fallback, turn)
+                ? pickWithSmartAdaptiveRouter({ ...input, eligible, fallback, ...turn })
                 : { entry: fallback, routedBy: "default" as const })();
         if (!flight) return decision;
         routing.set(flight, decision);
@@ -245,15 +245,23 @@ export type SmartAdaptiveDecision = {
     routedBy: "router" | "continued" | "default";
 };
 
-const routeWithRouter = async (
-    input: { userId: string; requestId: string },
-    eligible: readonly RunnableEntry[],
-    fallback: RunnableEntry,
-    turn: NonNullable<ReturnType<typeof latestTurn>>
-): Promise<{ entry: RunnableEntry; routedBy: "router" | "default" }> => {
+/**
+ * One paid router call over these candidates, shared by Chat Completions and
+ * the native protocols (lib/externalApiNativeSmartAdaptive.ts). The caller
+ * has already asked the gate (smartAdaptiveRouterAllowed).
+ */
+export const pickWithSmartAdaptiveRouter = async (input: {
+    userId: string;
+    requestId: string;
+    prompt: string;
+    previousAnswer: string | null;
+    eligible: readonly RunnableEntry[];
+    fallback: RunnableEntry;
+}): Promise<{ entry: RunnableEntry; routedBy: "router" | "default" }> => {
+    const { eligible, fallback } = input;
     const pick = await pickAutoModelWithLlm({
-        prompt: turn.prompt,
-        previousAnswer: turn.previousAnswer,
+        prompt: input.prompt,
+        previousAnswer: input.previousAnswer,
         eligibleModelIds: eligible.map((entry) => entry.model.id),
         // Every runtime model, not just the candidates: the router model set in
         // Admin › Routing is looked up here and need not be a candidate itself.

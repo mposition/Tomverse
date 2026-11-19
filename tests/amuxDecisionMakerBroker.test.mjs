@@ -27,7 +27,15 @@ import {
   dmWorkspaceHttpClient,
   dmWorkspaceSystemGitEnvironment,
 } from "../lib/amux/decisionMakerWorkspaceBuild.ts";
-import { dmEncodeLaunchWorkspace, dmWorkspacePayloadLines, gitBlobId } from "../lib/amux/decisionMakerWorkspaceCore.ts";
+import {
+  DM_WORKSPACE_LEGACY_INLINE_MAX_BYTES,
+  dmEncodeLaunchWorkspace,
+  dmEncodeLaunchWorkspaceParts,
+  dmWorkspacePayloadLines,
+  gitBlobId,
+} from "../lib/amux/decisionMakerWorkspaceCore.ts";
+import { dmEncodePartLine } from "../lib/amux/decisionMakerBrokerCore.ts";
+import { createHash } from "node:crypto";
 import { DM_SYSTEM_HOST } from "../lib/amux/decisionMakerLauncherFs.ts";
 
 const makeTempRoot = () => mkdtempSync(join(tmpdir(), "amux-dm-workspace-"));
@@ -628,4 +636,173 @@ test("the build measures the directory as git writes into it: every regular file
   } finally {
     rmSync(probe, { recursive: true, force: true });
   }
+});
+
+// ---------------------------------------------------------------------------
+// The parts protocol (docs/policy/amux-v22-result-transfer.md 10.2): evidence
+// of any size reaches the broker as chunks on the launch's connection.
+// ---------------------------------------------------------------------------
+
+const sha256Hex = (value) => createHash("sha256").update(value).digest("hex");
+
+/** Past the 64 MiB the inline protocol held, and valid text all the way. */
+const HUGE_PATCH = (() => {
+  const line = "+a line of a patch far past the old evidence cap\n";
+  return `diff --git a/a b/a\n${line.repeat(Math.ceil((DM_WORKSPACE_LEGACY_INLINE_MAX_BYTES + 1024 * 1024) / line.length))}`;
+})();
+
+/**
+ * A launch whose workspace is named by description. `files` is what the bridge will send
+ * (`name`, `text`); `named` is what the payload's lines name (default: the same).
+ */
+const partsLaunch = (broker, files, { named = files, state = "none", targetSha = null } = {}) => {
+  const payload = Buffer.concat([PAYLOAD, Buffer.from(dmWorkspacePayloadLines({ state, targetSha, files: named }), "utf8")]);
+  return launchLine(broker.fixture, {
+    payload: payload.toString("base64"),
+    transmitIntent: { ...broker.fixture.evidence, inputPayloadDigest: dmPayloadDigest(REQUEST_KEY, payload) },
+    workspace: dmEncodeLaunchWorkspaceParts({
+      state,
+      targetSha,
+      parts: files.map((file) => ({ name: file.name, bytes: Buffer.byteLength(file.text), sha256: sha256Hex(file.text) })),
+    }),
+  });
+};
+const bytesOf = (files) => new Map(files.map((file) => [file.name, Buffer.from(file.text, "utf8")]));
+const SMALL = "diff --git a/x b/x\n+x\n";
+
+test("a workspace request in the parts protocol is answered from the descriptions alone: no bytes, no directory, no launcher", async () => {
+  const reads = [];
+  await withBroker(OPENAI, { launcher: "absent", workspaceHttp: publicReads(reads) }, async (broker) => {
+    const part = (name, text) => ({ name, bytes: Buffer.byteLength(text), sha256: sha256Hex(text), blob: gitBlobId(enc(text)) });
+    const parts = [part("PATCH.diff", HUGE_PATCH), part("FINDINGS.md", "the report\n"), { ...part("CONTEXT.md", "x"), name: ".env" }];
+    const answer = await broker.call({ v: 1, type: "workspace", requestId: REQUEST_ID, targetSha: null, parts });
+    assert.deepEqual([answer.type, answer.state, answer.targetSha], ["workspace", "develop", WORKSPACE_SHA]);
+    assert.deepEqual(answer.files, ["PATCH.diff", "FINDINGS.md"]);
+    assert.deepEqual(answer.excluded, { name_refused: 1 });
+    const lines = Buffer.from(answer.lines, "base64").toString("utf8").trim().split("\n").map((line) => JSON.parse(line));
+    assert.deepEqual(lines[1], { file: "evidence/PATCH.diff", blob: gitBlobId(enc(HUGE_PATCH)), bytes: Buffer.byteLength(HUGE_PATCH) });
+    assert.ok(Buffer.byteLength(HUGE_PATCH) > DM_WORKSPACE_LEGACY_INLINE_MAX_BYTES);
+    assert.equal(broker.launcherConnections.length, 0);
+    assert.equal(existsSync(broker.requestDirectory()), false);
+  });
+});
+
+test("a file past the old 64 MiB cap arrives in chunks, is checked whole, and is written whole for the launcher", async () => {
+  const seen = [];
+  const launcher = scripted(OPENAI, async (socket, request, fixture) => {
+    const base = fixture.at(fixture.paths.requestDirectory);
+    const written = readFileSync(join(base, "evidence", "PATCH.diff"));
+    seen.push({ bytes: written.length, sha256: sha256Hex(written), findings: readFileSync(join(base, "evidence", "FINDINGS.md"), "utf8") });
+    await dmWriteLine(socket, dmEncodeLauncherLaunched(request, { outcome: "timeout" }, VERIFIED), 2_000);
+    socket.end();
+  });
+  await withBroker(OPENAI, { launcher }, async (broker) => {
+    const files = [{ name: "PATCH.diff", text: HUGE_PATCH }, { name: "FINDINGS.md", text: "the report\n" }];
+    const { answer, transcript } = await broker.callParts(partsLaunch(broker, files), bytesOf(files));
+    assert.equal(answer.type, "result", JSON.stringify(answer).slice(0, 300));
+    assert.equal(answer.transmission, "process_ended", JSON.stringify(broker.logs.at(-1)));
+    assert.deepEqual(seen, [{ bytes: Buffer.byteLength(HUGE_PATCH), sha256: sha256Hex(HUGE_PATCH), findings: "the report\n" }]);
+    // send_parts first, then one part_stored per chunk (the patch's, then the report's one), then the result.
+    assert.equal(transcript[0].type, "send_parts");
+    assert.ok(transcript.slice(1, -1).every((line) => line.type === "part_stored"));
+    assert.equal(transcript.length, 1 + Math.ceil(Buffer.byteLength(HUGE_PATCH) / (4 * 1024 * 1024)) + 1 + 1);
+    assert.deepEqual(answer.cleanup, VERIFIED);
+    assert.equal(existsSync(broker.requestDirectory()), false);
+    assert.equal(broker.logs.at(-1).workspace, "built:not_applied", "a patch with no checkout to apply to");
+  });
+});
+
+test("the secret scan still holds the whole file: one past the 64 MiB mark refuses the workspace before anything is made", async () => {
+  const token = ["gh", "p_", "Q".repeat(36)].join("");
+  await withBroker(OPENAI, {}, async (broker) => {
+    const files = [{ name: "PATCH.diff", text: `${HUGE_PATCH}+${token}\n` }];
+    const { answer } = await broker.callParts(partsLaunch(broker, files), bytesOf(files));
+    assert.deepEqual(answer.launch, { outcome: "broker_refused", reasons: ["workspace_mismatch"] });
+    assert.equal(answer.transmission, "not_started");
+    assert.equal(broker.launcherConnections.length, 0);
+    assert.equal(existsSync(broker.requestDirectory()), false);
+  });
+});
+
+test("bytes that are not what the launch described are refused: another sha256, an out-of-order chunk, a payload that names other files", async () => {
+  await withBroker(OPENAI, {}, async (broker) => {
+    const files = [{ name: "PATCH.diff", text: SMALL.repeat(400_000) }];
+    const refusal = (result) => assert.deepEqual([result.answer.launch, result.answer.transmission],
+      [{ outcome: "broker_refused", reasons: ["workspace_mismatch"] }, "not_started"]);
+    const line = partsLaunch(broker, files);
+    // A byte changed in transit: the whole file's sha256 differs.
+    const flipped = Buffer.from(files[0].text, "utf8");
+    flipped[1000] ^= 1;
+    refusal(await broker.callParts(line, new Map([["PATCH.diff", flipped]])));
+    // The second chunk sent first.
+    refusal(await broker.callParts(line, bytesOf(files), {
+      plan: (name, index, chunk) => dmEncodePartLine(REQUEST_ID, name, index === 0 ? 1 : index, chunk),
+    }));
+    // A chunk of another request.
+    refusal(await broker.callParts(line, bytesOf(files), {
+      plan: (name, index, chunk) => dmEncodePartLine("0a1b2c3d-4e5f-4a6b-8c7d-000000000002", name, index, chunk),
+    }));
+    // Bytes that match their description but not the payload the intent recorded.
+    const other = [{ name: "PATCH.diff", text: "diff --git a/y b/y\n+y\n" }];
+    refusal(await broker.callParts(partsLaunch(broker, other, { named: files }), bytesOf(other)));
+    assert.equal(broker.launcherConnections.length, 0);
+    assert.equal(existsSync(broker.requestDirectory()), false);
+    assert.equal(broker.broker.inFlight().size, 0);
+  });
+});
+
+test("an abort, a bridge that goes quiet and one that goes away end the request with nothing made and the broker free", async () => {
+  await withBroker(OPENAI, { timeouts: { workspace: 1500 } }, async (broker) => {
+    const files = [{ name: "PATCH.diff", text: SMALL.repeat(500_000) }];
+    const line = partsLaunch(broker, files);
+    const unavailable = (result) => assert.deepEqual([result.answer.launch, result.answer.transmission],
+      [{ outcome: "broker_refused", reasons: ["workspace_unavailable"] }, "not_started"]);
+    // The bridge could not get a chunk: it says so, and the broker answers.
+    unavailable(await broker.callParts(line, bytesOf(files), { plan: (name, index) => (index === 1 ? "abort" : undefined) }));
+    // The bridge stops after the first chunk and the workspace's time ends.
+    unavailable(await broker.callParts(line, bytesOf(files), { plan: (name, index) => (index === 1 ? "stop" : undefined) }));
+    // The bridge hangs up: nothing to answer to, and nothing left behind.
+    const gone = await broker.callParts(line, bytesOf(files), { plan: (name, index) => (index === 1 ? "stop" : undefined), hangUp: true });
+    assert.equal(gone.answer.error, "bridge_gone");
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    assert.equal(broker.broker.inFlight().size, 0);
+    assert.equal(broker.launcherConnections.length, 0);
+    assert.equal(existsSync(broker.requestDirectory()), false);
+    // And the next request is served.
+    const next = await broker.call(launchLine(broker.fixture, { transmitIntent: null }));
+    assert.deepEqual(next.launch, { outcome: "broker_refused", reasons: ["transmit_intent_missing"] });
+  });
+});
+
+test("without the recorded intent no chunk is asked for: the refusal is the first answer", async () => {
+  await withBroker(OPENAI, {}, async (broker) => {
+    const files = [{ name: "PATCH.diff", text: SMALL }];
+    const line = { ...partsLaunch(broker, files), transmitIntent: null };
+    const { answer, transcript } = await broker.callParts(line, bytesOf(files));
+    assert.deepEqual(answer.launch, { outcome: "broker_refused", reasons: ["transmit_intent_missing"] });
+    assert.deepEqual(transcript.map((entry) => entry.type), ["result"]);
+  });
+});
+
+test("a launch with no workspace but a payload that names one is still refused, and a request that arrives while one receives is refused busy", async () => {
+  await withBroker(OPENAI, {}, async (broker) => {
+    const inline = { state: "none", targetSha: null, files: [{ name: "PATCH.diff", text: SMALL }] };
+    const mismatch = await broker.call({ ...workspaceLaunch(broker, inline), workspace: null });
+    assert.deepEqual(mismatch.launch, { outcome: "broker_refused", reasons: ["workspace_mismatch"] });
+    // One request is mid-receive when another arrives for the same instance.
+    const files = [{ name: "PATCH.diff", text: SMALL.repeat(500_000) }];
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    const slow = broker.callParts(partsLaunch(broker, files), bytesOf(files), {
+      plan: async (name, index, chunk) => {
+        if (index === 1) await gate;
+        return dmEncodePartLine(REQUEST_ID, name, index, chunk);
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const busy = await broker.call(launchLine(broker.fixture, { requestId: "0a1b2c3d-4e5f-4a6b-8c7d-000000000002" }));
+    assert.deepEqual(busy.launch, { outcome: "broker_refused", reasons: ["busy"] });
+    release();
+    await slow;
+  });
 });

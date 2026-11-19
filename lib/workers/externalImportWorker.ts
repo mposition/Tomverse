@@ -4,6 +4,14 @@ import { Unzip, UnzipInflate } from "fflate";
 import {
     detectExternalImportAdapter,
 } from "@/lib/externalImportAdapters";
+import {
+    perplexityMarkdownEntry,
+    perplexitySplitHintsFit,
+    perplexitySplitQuestions,
+    type PerplexitySplitHints,
+    type PerplexitySplitQuestions,
+} from "@/lib/externalImportAdapters/perplexity";
+import { PERPLEXITY_SPLIT_TIMEOUT_MS } from "@/lib/perplexitySplitClient";
 import type {
     ExternalAdapterProvider,
     ParsedExternalConversation,
@@ -45,19 +53,43 @@ import {
 
 export type WorkerRequest =
     | { type: "parse"; file: File }
-    | { type: "cancel" };
+    | { type: "cancel" }
+    /** The page's answer to a `split_questions` message (null = none). */
+    | { type: "split_hints"; hints: PerplexitySplitHints | null };
 
 export type WorkerResponse =
     | { type: "progress"; phase: "scanning" | "parsing"; bytesRead: number; conversationsFound: number }
     | { type: "preview"; preview: ImportPreview; conversations: ParsedExternalConversation[] }
     | { type: "cancelled" }
-    | { type: "error"; reason: string; message: string };
+    | { type: "error"; reason: string; message: string }
+    /**
+     * A Perplexity file left calls the file cannot make. The page asks the
+     * import route with its own credentials and answers with `split_hints`;
+     * the worker never calls the network itself.
+     */
+    | { type: "split_questions"; questions: PerplexitySplitQuestions };
 
 const scope = self as unknown as DedicatedWorkerGlobalScope;
 
 let cancelled = false;
 
 const post = (message: WorkerResponse) => scope.postMessage(message);
+
+let answerSplit: ((hints: PerplexitySplitHints | null) => void) | null = null;
+
+/** Asks the page; no answer within the route's own timeout keeps the file split. */
+function askPageForSplitHints(questions: PerplexitySplitQuestions): Promise<PerplexitySplitHints | null> {
+    return new Promise((resolve) => {
+        const timer = setTimeout(() => finish(null), PERPLEXITY_SPLIT_TIMEOUT_MS + 5_000);
+        const finish = (hints: PerplexitySplitHints | null) => {
+            clearTimeout(timer);
+            answerSplit = null;
+            resolve(hints && perplexitySplitHintsFit(questions, hints) ? hints : null);
+        };
+        answerSplit = finish;
+        post({ type: "split_questions", questions });
+    });
+}
 
 const errorResponse = (error: unknown): WorkerResponse => {
     if (error instanceof ExternalImportArchiveError) {
@@ -120,16 +152,26 @@ async function parseArchive(file: File): Promise<{
         );
     }
 
-    // A bare .json export skips the archive path entirely.
+    // A bare .json export skips the archive path entirely. So does a
+    // Markdown file: Perplexity exports one thread per .md, and the adapter
+    // reads the text rather than a parsed JSON value.
     if (!lowerName.endsWith(".zip")) {
         const text = await file.text();
-        const value = JSON.parse(text);
+        const markdown = /\.(md|markdown)$/.test(lowerName);
+        let value: unknown = markdown ? [perplexityMarkdownEntry(text)] : JSON.parse(text);
         const adapter = detectExternalImportAdapter(value);
         if (!adapter) {
             throw new ExternalImportArchiveError(
                 "The file is not a supported export.",
                 "no_conversation_data"
             );
+        }
+        const questions = markdown && adapter.provider === "perplexity" ? perplexitySplitQuestions(text) : null;
+        if (questions) {
+            // Where the file cannot tell a question from an answer, the page
+            // asks the import route (excerpts only). No answer keeps the file split.
+            const hints = await askPageForSplitHints(questions);
+            value = [perplexityMarkdownEntry(text, hints ?? undefined)];
         }
         const { conversations, extras } = parseConversationItems(
             adapter.provider,
@@ -391,8 +433,14 @@ async function parseArchive(file: File): Promise<{
 
 scope.onmessage = async (event: MessageEvent<WorkerRequest>) => {
     const request = event.data;
+    if (request.type === "split_hints") {
+        answerSplit?.(request.hints);
+        return;
+    }
     if (request.type === "cancel") {
         cancelled = true;
+        // Stop waiting for split hints; the parse then sees `cancelled`.
+        answerSplit?.(null);
         post({ type: "cancelled" });
         return;
     }

@@ -209,7 +209,7 @@ export function FileInspectionStep({
                 <input
                     ref={fileInputRef}
                     type="file"
-                    accept=".zip,.json,.html,.htm,application/zip,application/json,text/html"
+                    accept=".zip,.json,.md,.markdown,.html,.htm,application/zip,application/json,text/markdown,text/html"
                     className="sr-only"
                     data-testid="external-import-file-input"
                     onChange={(event) => {

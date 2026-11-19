@@ -92,6 +92,7 @@ const describeApiError = (error: unknown) => {
     const code = error.extra.code;
     if (code === "invalid_api_key") return "The key was not accepted: it is wrong, expired or revoked. Check Tomverse Settings > API keys.";
     if (code === "account_not_enabled") return "The Tomverse API is not enabled for this account.";
+    if (code === "plan_not_eligible") return "The Tomverse API and CLI need a paid plan. Upgrade in Tomverse Settings > Plan.";
     if (code === "feature_unavailable") return "The Tomverse API is switched off on this server.";
     if (code === "key_credit_cap_reached") return "This key has reached the credit limit set for it. Raise the limit in Settings > API keys or use another key.";
     if (code === "rate_limited") return `Too many requests; try again${error.extra.retryAfter ? ` in ${error.extra.retryAfter} s` : " shortly"}.`;

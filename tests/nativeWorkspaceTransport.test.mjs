@@ -75,3 +75,13 @@ test("starting an assistant binds during creation and preserves its explicit mod
   assert.equal(writes[0].path, "/api/products/chat/conversations");
   assert.equal(writes[0].body.assistantProfileId, "profile-1");
 });
+
+test("Perplexity split questions go through the native credential transport, and only when import is advertised", async () => {
+  const calls = [];
+  const questions = { turns: [{ question: "draft:", paragraphs: ["the draft"] }], boundaries: [] };
+  const client = createWorkspaceTransport(async (path, init) => { calls.push({ path, method: init?.method, body: JSON.parse(init.body) }); return { hints: { questionParagraphs: [1], continuesAnswer: [] } }; }, async () => ({ workspace: enabled }), async () => {});
+  assert.deepEqual(await client.perplexitySplit(questions), { hints: { questionParagraphs: [1], continuesAnswer: [] } });
+  assert.deepEqual(calls, [{ path: "/api/imports/external/perplexity-split", method: "POST", body: questions }]);
+  const closed = createWorkspaceTransport(async () => { throw Error("must not be called"); }, async () => ({}), async () => {});
+  await assert.rejects(closed.perplexitySplit(questions), /NATIVE_WORKSPACE_UNAVAILABLE/);
+});

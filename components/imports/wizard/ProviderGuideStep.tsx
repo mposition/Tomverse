@@ -59,6 +59,19 @@ const PROVIDER_CARDS: ReadonlyArray<{
             "externalImport.guideGeminiStep3",
         ],
     },
+    {
+        // Perplexity has no account-wide export; each thread exports itself
+        // as Markdown from the Export button under an answer, one file per
+        // thread. Share links are not an option: perplexity.ai answers a
+        // server-side fetch with a bot challenge.
+        provider: "perplexity",
+        titleKey: "externalImport.guidePerplexityTitle",
+        stepKeys: [
+            "externalImport.guidePerplexityStep1",
+            "externalImport.guidePerplexityStep2",
+            "externalImport.guidePerplexityStep3",
+        ],
+    },
 ];
 
 export function ProviderGuideStep({
@@ -82,7 +95,9 @@ export function ProviderGuideStep({
             "https://help.openai.com/en/articles/7260999-exporting-your-chatgpt-history-and-data",
         claude: "https://support.claude.com/en/articles/9450526-export-your-claude-data",
         gemini: "https://support.google.com/accounts/answer/3024190",
-    };
+        perplexity:
+            "https://www.perplexity.ai/help-center/en/articles/10354769-what-is-a-thread",
+    } satisfies Record<ExternalImportGuidanceProvider, string>;
     return (
         <div data-testid="external-import-guide" className="space-y-5">
             <header>
@@ -92,7 +107,7 @@ export function ProviderGuideStep({
             <div
                 role="group"
                 aria-label={t("externalImport.guideTitle")}
-                className="grid grid-cols-3 gap-2"
+                className="grid grid-cols-2 gap-2 sm:grid-cols-4"
             >
                 {PROVIDER_CARDS.map((item) => (
                     <button

@@ -43,6 +43,7 @@ export const PROVIDER_LABELS: Record<ExternalImportProvider, string> = {
     chatgpt: "ChatGPT",
     claude: "Claude",
     gemini: "Gemini",
+    perplexity: "Perplexity",
 };
 
 export const providerLabel = (provider: string) =>

@@ -11,7 +11,12 @@ import { createConnection, createServer } from "node:net";
 import { join } from "node:path";
 
 import { createDecisionMakerBroker } from "../../lib/amux/decisionMakerBroker.ts";
-import { DM_RESULT_LINE_MAX_BYTES } from "../../lib/amux/decisionMakerBrokerCore.ts";
+import {
+  DM_RESULT_LINE_MAX_BYTES,
+  dmEncodeAbortLine,
+  dmEncodePartLine,
+} from "../../lib/amux/decisionMakerBrokerCore.ts";
+import { amuxV22TransferChunkCount, amuxV22TransferChunkRange } from "../../lib/amux/v22TransferCore.ts";
 import { serveDecisionMakerLauncherConnection } from "../../lib/amux/decisionMakerLauncherService.ts";
 import { dmReadLine, dmWriteLine } from "../../lib/amux/decisionMakerSocketLine.ts";
 import { PAYLOAD, REQUEST_ID, REQUEST_KEY, makeLauncherFixture } from "./amuxDmLauncherFixture.mjs";
@@ -53,6 +58,89 @@ export const bridgeCall = (path, message) =>
       const read = await dmReadLine(socket, DM_RESULT_LINE_MAX_BYTES, 60_000);
       socket.destroy();
       resolve(read.ok ? JSON.parse(read.line) : read);
+    });
+  });
+
+/**
+ * The fake bridge in the parts protocol: the launch line, then -- when the broker
+ * answers `send_parts` -- each file's chunks, one line each, each acknowledged
+ * before the next. `files` is `Map<name, Buffer>`. `options.plan(name, index,
+ * bytes)` may change what is sent: it returns the chunk line's value, the string
+ * "abort" to send an abort instead, or "stop" to say nothing more. Resolves
+ * `{ answer, transcript }`: the broker's lines in order (the last is the answer
+ * when it is a `result`).
+ */
+export const bridgeCallParts = (path, message, files, options = {}) =>
+  new Promise((resolve, reject) => {
+    const socket = createConnection({ path, allowHalfOpen: true });
+    const transcript = [];
+    socket.once("error", reject);
+    // The broker may answer right behind an acknowledgement (a refusal needs no
+    // work), and both lines can arrive in one read: keep what follows a line.
+    let pending = Buffer.alloc(0);
+    let closed = false;
+    let wake = null;
+    socket.on("data", (chunk) => {
+      pending = Buffer.concat([pending, chunk]);
+      wake?.();
+    });
+    const onClosed = () => {
+      closed = true;
+      wake?.();
+    };
+    socket.once("end", onClosed);
+    socket.once("close", onClosed);
+    socket.once("connect", async () => {
+      await dmWriteLine(socket, message, 5_000);
+      const finish = (answer) => {
+        socket.destroy();
+        resolve({ answer, transcript });
+      };
+      const readOne = () =>
+        new Promise((done) => {
+          const timer = setTimeout(() => {
+            wake = null;
+            done({ ok: false, error: "timeout" });
+          }, options.readTimeoutMs ?? 60_000);
+          const settle = () => {
+            const newline = pending.indexOf(10);
+            // As dmReadLine: the bytes before the newline, or all of them when none came yet.
+            if ((newline === -1 ? pending.length : newline) > DM_RESULT_LINE_MAX_BYTES) {
+              clearTimeout(timer);
+              wake = null;
+              return done({ ok: false, error: "too_large" });
+            }
+            if (newline === -1 && !closed) return;
+            clearTimeout(timer);
+            wake = null;
+            if (newline === -1) return done({ ok: false, error: "closed" });
+            const line = pending.subarray(0, newline).toString("utf8");
+            pending = pending.subarray(newline + 1);
+            const value = JSON.parse(line);
+            transcript.push(value);
+            return done(value);
+          };
+          wake = settle;
+          settle();
+        });
+      const first = await readOne();
+      if (first.type !== "send_parts") return finish(first);
+      for (const part of message.workspace.parts) {
+        const bytes = files.get(part.name) ?? Buffer.alloc(0);
+        for (let index = 0; index < amuxV22TransferChunkCount(part.bytes); index += 1) {
+          const { start, end } = amuxV22TransferChunkRange(part.bytes, index);
+          const chunk = bytes.subarray(start, end);
+          const planned = (await options.plan?.(part.name, index, chunk)) ?? dmEncodePartLine(message.requestId, part.name, index, chunk);
+          if (planned === "stop") {
+            // Say nothing more: either wait for the broker's own answer, or go away.
+            return finish(options.hangUp ? { ok: false, error: "bridge_gone" } : await readOne());
+          }
+          await dmWriteLine(socket, planned === "abort" ? dmEncodeAbortLine(message.requestId) : planned, 10_000);
+          const ack = await readOne();
+          if (ack.type !== "part_stored") return finish(ack);
+        }
+      }
+      return finish(await readOne());
     });
   });
 
@@ -105,6 +193,7 @@ export const startBroker = async (
     served,
     logs,
     call: (message) => bridgeCall(brokerPath, message),
+    callParts: (message, files, options) => bridgeCallParts(brokerPath, message, files, options),
     requestDirectory: () => fixture.at(fixture.paths.requestDirectory),
     stop: async () => {
       for (const socket of launcherConnections) socket.destroy();

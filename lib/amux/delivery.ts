@@ -24,6 +24,8 @@ import { AMUX_V22_CONCLUSION_ENV, AMUX_V22_CONCLUSION_RULES,
 import { AMUX_V22_CONTEXT_DIR, AMUX_V22_CONTEXT_FILES,
   amuxV22ContextPromptSection, amuxV22EmbedContextFiles,
   type AmuxV22ContextFile } from "@/lib/amux/v22LocalCliFlowCore";
+import { splitAmuxV22ContextFiles, type AmuxV22ContextPart } from
+  "@/lib/amux/v22ContextPartsCore";
 import { AMUX_V22_PRIOR_CONCLUSION_ROWS_PRISMA_CALLS,
   openAmuxV22PriorConclusions, readAmuxV22PriorConclusionRows } from
   "@/lib/amux/v22PriorConclusionService";
@@ -298,6 +300,9 @@ export type AmuxPulledDelivery =
           reviewAvoidVendors?: string[];
           readOnlyRetry?: AmuxV22ReadOnlyDeliveryBinding;
         } | null;
+        /** Context files the bridge fetches in chunks (v22ContextPartsCore.ts);
+         * present only when the pull asked for them and some file went this way. */
+        contextParts?: AmuxV22ContextPart[];
         receiptId: string;
         leaseExpiresAt: Date;
       };
@@ -311,6 +316,10 @@ export async function pullAmuxWorkDelivery(input: {
   worker: string;
   instanceId: string;
   generation: number;
+  /** The bridge can fetch `prior.patch` and `prior-conclusions.md` in chunks
+   * (header `x-amux-bridge-features: context_chunks`); without it they ride in
+   * the prompt as before. */
+  contextChunks?: boolean;
   now?: Date;
 }): Promise<AmuxPulledDelivery> {
   // Key-store I/O is outside the DB transaction. The locked row below must
@@ -670,14 +679,20 @@ export async function pullAmuxWorkDelivery(input: {
             resumedAttemptId: delivery.attemptId } });
           if (marked.count !== 1) throw new Error("v22 resume question changed");
         }
-        // The files ride at the end of the prompt in one bounded block that
-        // only the sidecar's exact boundary opens: a bridge passes the prompt
-        // through unchanged, and an earlier sidecar shows the same text inline.
+        // The files ride at the end of the prompt in one block that only the
+        // sidecar's exact boundary opens: a bridge passes the prompt through
+        // unchanged, and an earlier sidecar shows the same text inline. A
+        // bridge that asked for chunks (owner decision 2026-11-19) fetches the
+        // two files with no size set by their source from the context route
+        // instead; the list above still names them.
+        const { embedded, parts } = splitAmuxV22ContextFiles(contextFiles,
+          input.contextChunks === true);
         return {
           prompt: head + `${amuxV22ContextPromptSection(contextFiles)}\n\n` +
             `${AMUX_V22_OWNER_QUESTION_RULES}\n\n` + conclusionRules +
             AMUX_V22_WORKER_AUTHORITY_NOTICE + "\n\n" +
-            amuxV22EmbedContextFiles(contextFiles),
+            amuxV22EmbedContextFiles(embedded),
+          contextParts: parts,
           priorConclusionDigest: priorWhole?.digest ?? null,
           reviewFeedbackDigest: reviewFile ? sha256(reviewFile) : null,
           v22Execution: v22ExecutionProfile(),
@@ -852,6 +867,7 @@ export async function pullAmuxWorkDelivery(input: {
             taskRevision: delivery.taskRevision,
             prompt: content.prompt,
             v22Execution: content.v22Execution,
+            ...(content.contextParts?.length ? { contextParts: content.contextParts } : {}),
             receiptId,
             leaseExpiresAt,
           },
@@ -926,6 +942,7 @@ export async function pullAmuxWorkDelivery(input: {
           taskRevision: delivery.taskRevision,
           prompt: content.prompt,
           v22Execution: content.v22Execution,
+          ...(content.contextParts?.length ? { contextParts: content.contextParts } : {}),
           receiptId,
           leaseExpiresAt: deliveryLeaseExpiresAt,
         },
