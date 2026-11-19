@@ -170,6 +170,19 @@ const doctor = async (ctx: Context) => {
 
 // ---- models / usage --------------------------------------------------------------
 
+/**
+ * Credits per request as a person should read them. Smart Adaptive's catalogue
+ * figure is the most a request can cost; each request is charged as the model
+ * that answers it, so it is shown as a range from the cheapest model it can
+ * pick (as Settings > API keys shows it).
+ */
+export const creditsLabel = (model: CatalogModel, catalog: readonly CatalogModel[]) => {
+    if (model.id !== SMART_ADAPTIVE) return `${model.creditsPerRequest} credits/request`;
+    const others = catalog.filter((m) => m.id !== SMART_ADAPTIVE).map((m) => m.creditsPerRequest);
+    const floor = others.length ? Math.min(...others) : model.creditsPerRequest;
+    return floor < model.creditsPerRequest ? `${floor}-${model.creditsPerRequest} credits/request` : `${model.creditsPerRequest} credits/request`;
+};
+
 const models = async (ctx: Context) => {
     const { gateway } = await connect(ctx);
     const list = toolModels(await gateway.models());
@@ -179,7 +192,7 @@ const models = async (ctx: Context) => {
     }
     for (const m of list) {
         process.stdout.write(
-            `${safeLine(m.id).padEnd(28)} ${safeLine(m.provider).padEnd(10)} ${String(m.creditsPerRequest).padStart(4)} credits/request  context ${m.contextWindowTokens}  output ${m.maxOutputTokens}${m.id === SMART_ADAPTIVE ? "  (picks a model; the session stays on the first one picked)" : ""}\n`
+            `${safeLine(m.id).padEnd(28)} ${safeLine(m.provider).padEnd(10)} ${creditsLabel(m, list).padStart(20)}  context ${m.contextWindowTokens}  output ${m.maxOutputTokens}${m.id === SMART_ADAPTIVE ? "  (picks a model; the session stays on the first one picked and is charged as it)" : ""}\n`
         );
     }
     return EXIT_CODES.success;
@@ -442,7 +455,7 @@ const pickModel = async (ctx: Context, catalog: CatalogModel[], prompter: Prompt
         return entry;
     }
     if (!prompter) throw new UsageError("Choose a model with --model or `tomverse config set model <id>` (see `tomverse models`).");
-    catalog.forEach((m, i) => process.stderr.write(`  ${String(i + 1).padStart(2)}. ${safeLine(m.id)} (${safeLine(m.provider)}, ${m.creditsPerRequest} credits/request)\n`));
+    catalog.forEach((m, i) => process.stderr.write(`  ${String(i + 1).padStart(2)}. ${safeLine(m.id)} (${safeLine(m.provider)}, ${creditsLabel(m, catalog)})\n`));
     const answer = await askLine("Model number: ");
     const entry = catalog[Number(answer) - 1];
     if (!entry) throw new UsageError("No model chosen.");
