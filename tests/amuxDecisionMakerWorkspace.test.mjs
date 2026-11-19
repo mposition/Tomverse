@@ -7,6 +7,7 @@ import test from "node:test";
 
 import { dmSnapshotManifestDigest } from "../lib/amux/decisionMakerBodyCore.ts";
 import { DM_CARD_TEXT_MAX_BYTES } from "../lib/amux/decisionMakerCore.ts";
+import { constants as bufferConstants } from "node:buffer";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import {
@@ -79,6 +80,14 @@ test("no size of ours bounds the evidence: past 64 MiB whole, and only the strin
   const unreadable = { length: DM_WORKSPACE_TEXT_MAX_BYTES + 1, includes() { throw new Error("must not be scanned"); } };
   assert.deepEqual(dmWorkspaceAcceptFiles([{ name: "PATCH.diff", bytes: unreadable }]),
     { files: [], excluded: { too_large: 1 } });
+});
+
+test("the text limit is Node's string limit, written out so the core loads in the Admin client bundle", () => {
+  assert.equal(DM_WORKSPACE_TEXT_MAX_BYTES, bufferConstants.MAX_STRING_LENGTH);
+  // ownerQueueDmCore -> dmOwnerSettlementCore -> this core runs in the browser,
+  // whose buffer polyfill has no constants: a module-load read broke the owner queue.
+  const source = readFileSync(new URL("../lib/amux/decisionMakerWorkspaceCore.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /from "node:buffer"/);
 });
 
 test("the payload names the commit and each file by its blob id, never its text, and the launch must be exactly that", () => {

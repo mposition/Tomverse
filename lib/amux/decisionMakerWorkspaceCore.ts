@@ -1,4 +1,3 @@
-import { constants as bufferConstants } from "node:buffer";
 import { createHash } from "node:crypto";
 
 import { dmSnapshotManifestDigest } from "./decisionMakerBodyCore.ts";
@@ -71,8 +70,14 @@ export const DM_WORKSPACE_LEGACY_INLINE_MAX_BYTES = 64 * 1024 * 1024;
  * UTF-8 decode and the secret scan), and a string holds at most this many
  * characters. A file with more bytes cannot be shown clean and is left out as
  * `too_large`.
+ *
+ * Written out rather than read from `node:buffer`: this core reaches the Admin
+ * owner queue's client bundle (ownerQueueDmCore -> dmOwnerSettlementCore), whose
+ * `buffer` has no `constants`, and a read at module load would break that page.
+ * It is V8's 64-bit limit, (2^29 - 24); a test holds it equal to Node's
+ * `buffer.constants.MAX_STRING_LENGTH`.
  */
-export const DM_WORKSPACE_TEXT_MAX_BYTES = bufferConstants.MAX_STRING_LENGTH;
+export const DM_WORKSPACE_TEXT_MAX_BYTES = 2 ** 29 - 24;
 /**
  * The request directory on the box's disk after the checkout, a backstop for
  * the box's own disk (it was 4 GiB; owner direction 2026-11-16).
