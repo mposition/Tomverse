@@ -16,6 +16,7 @@ const BEARER_FILES = [
     "lib/externalApiInference.ts",
     "lib/externalApiAdmission.ts",
     "lib/externalApiKeys.ts",
+    "lib/externalApiAccess.ts",
     // Native protocols (Claude Code, Codex): the same condition.
     "app/api/v1/responses/route.ts",
     "app/api/anthropic/v1/messages/route.ts",
@@ -89,6 +90,25 @@ test("request status lookup is a read: GET only, key-scoped, no dispatch, reserv
     assert.match(lookup, /where: \{ id: selector\.requestId, keyId \}/, "a request id is looked up within this key only");
     assert.match(lookup, /keyId_idempotencyKeyDigest: \{ keyId,/);
     assert.ok(!/\.(create|update|upsert|delete|\$executeRaw)/.test(lookup));
+});
+
+test("every keyed front door checks the account and its paid plan through one function", () => {
+    // Chat Completions, the /models, /usage and /requests/status reads, and
+    // the native protocols: each accepts a key and then asks externalApiAccess.
+    for (const file of ["lib/externalApiInference.ts", "lib/externalApiRoutes.ts", "lib/externalApiNative.ts"]) {
+        const source = read(file);
+        const accepts = (source.match(/await authenticateExternalApiKey\(/g) ?? []).length;
+        assert.ok(accepts > 0, file);
+        assert.equal((source.match(/await externalApiAccountAccess\(key\.userId\)/g) ?? []).length, accepts, file);
+        assert.ok(!source.includes("externalApiUserAllowed(process.env, key.userId)"), `${file}: the allowlist alone is not the check`);
+    }
+    const access = read("lib/externalApiAccess.ts");
+    assert.match(access, /externalApiUserAllowed\(process\.env, userId\)/);
+    assert.match(access, /externalApiPlanAllowed\(plan\.tier\)/);
+    assert.match(access, /getUserBillingPlan\(userId\)/, "the effective plan, read per request");
+    // Creating a key checks the plan in the library, whoever calls it.
+    const create = read("lib/externalApiKeys.ts").match(/export const createExternalApiKey = [\s\S]*?\n};/)[0];
+    assert.match(create, /externalApiPlanAllowed\(plan\.tier\)/);
 });
 
 test("key management refuses any Authorization header instead of falling back to the cookie", () => {

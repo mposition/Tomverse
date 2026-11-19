@@ -28,6 +28,15 @@ export const externalApiUserAllowed = (env: ExternalApiEnv, userId: string) => {
 };
 
 /**
+ * The API is a paid-plan feature (owner decision 2026-11-19): a Free account
+ * can neither make a key nor use one it made on a paid plan. Read from the
+ * account's effective plan, so a lapsed subscription counts as Free.
+ */
+export const externalApiPlanAllowed = (tier: ModelTier) => tier === "Pro" || tier === "Max";
+
+export const EXTERNAL_API_PLAN_REQUIRED_MESSAGE = "The Tomverse API needs a paid plan.";
+
+/**
  * Usage classes the stateless API can serve. Research classes depend on the
  * application's own search loop and are never exposed, even if listed.
  */
