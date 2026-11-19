@@ -126,12 +126,13 @@ export const AMENDED_DOCUMENT_EVIDENCE: Readonly<
   // 2026-11-19: accuracy pass from the policy-page review (Tomverse-chosen
   // helper calls, image tools, scanned-PDF OCR, Google Drive, API keys,
   // service providers, OAIC complaint route, share links, locks, and that a
-  // lock does not close an existing share link). Observation
+  // lock does not close an existing share link; zh/fr/de/es/pt fallback and
+  // refusal lines brought in line with en). Observation
   // only; the effective date did not move, nothing is added to
   // APPROVED_AMENDED_DIGESTS and no email is authorized.
   "/privacy": {
     date: "2026-11-16",
-    contentSha256: "1e8694c0ab2556905e3d42cc3e54715e4f3a3e4e8c5b6f04f8bb5da03f9605cc",
+    contentSha256: "fa1aab271be288816cf7dd66e7cb7c4cfb00b406439b6271805278a0f7c4114b",
   },
   // 2026-11-19: terms gain the API-key clause, the app-store billing and
   // non-expiring store credit sentences, and the missing zh clauses.
