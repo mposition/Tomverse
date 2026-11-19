@@ -530,6 +530,7 @@ export async function handleNativeGeneration(request: Request, spec: NativeProto
                       userId: key.userId,
                       requestId,
                       routerAllowed: () => smartAdaptiveRouterAllowed(key),
+                      prepare: (candidate) => spec.prepare(body, candidate),
                   }
                 : undefined
         );
@@ -706,7 +707,16 @@ export async function handleNativeFreeCall(
             plan.tier,
             isRecord(body) ? body.model : undefined,
             isRecord(body)
-                ? { request, body, keyId: key.keyId, userId: key.userId, requestId, routerAllowed: async () => false, free: true }
+                ? {
+                      request,
+                      body,
+                      keyId: key.keyId,
+                      userId: key.userId,
+                      requestId,
+                      routerAllowed: async () => false,
+                      prepare: (candidate) => options.prepare(body, candidate),
+                      free: true,
+                  }
                 : undefined
         );
         const prepared = options.prepare(body, { apiModel: entry.model.apiModel, maxOutputTokens: entry.capabilities.maxOutputTokens });

@@ -133,6 +133,12 @@ export const routeNativeSmartAdaptive = async (input: {
     requestId: string;
     /** Asked only when a router call is next; false makes none. */
     routerAllowed: () => Promise<boolean>;
+    /**
+     * The protocol's own request check and rewrite for one model (the same
+     * `prepare` dispatch uses): throws when that model would refuse the
+     * request (e.g. a thinking budget above its output limit).
+     */
+    prepare: (model: { apiModel: string; maxOutputTokens: number }) => { payload: unknown; outputLimit: number };
     /** A free call (token count) reads the pin but never routes or pins. */
     free?: boolean;
     now?: number;
@@ -142,17 +148,20 @@ export const routeNativeSmartAdaptive = async (input: {
         (entry) => entry.model.provider === provider && entry.capabilities.protocols.includes(input.protocol)
     );
     if (pool.length === 0) return null;
-    const estimate = estimateNativeInput(input.body, provider);
-    // The output the gateway will reserve on each model: the client's limit
-    // within the model's own, or the model's limit when it sends none.
-    const asked = [input.body.max_tokens, input.body.max_output_tokens].find(
-        (value): value is number => typeof value === "number" && Number.isFinite(value) && value > 0
-    );
-    const fits = pool.filter(({ capabilities }) => {
-        const output = Math.min(asked ?? capabilities.maxOutputTokens, capabilities.maxOutputTokens);
+    // A candidate is a model this request passes on, exactly as it would be
+    // sent: its own validation, then the estimate of the rewritten body plus
+    // the output the gateway would reserve on it within its window.
+    const fits = pool.filter(({ model, capabilities }) => {
+        let prepared: { payload: unknown; outputLimit: number };
+        try {
+            prepared = input.prepare({ apiModel: model.apiModel, maxOutputTokens: capabilities.maxOutputTokens });
+        } catch {
+            return false;
+        }
+        const estimate = estimateNativeInput(prepared.payload, provider);
         return (
             (estimate.images === 0 || capabilities.vision) &&
-            estimate.breakdown.rawTotal + output <= capabilities.contextWindowTokens
+            estimate.breakdown.rawTotal + prepared.outputLimit <= capabilities.contextWindowTokens
         );
     });
     // Nothing fits: the default answers, and its own limits refuse the request.
@@ -186,9 +195,14 @@ export const routeNativeSmartAdaptive = async (input: {
     if (nativeConversationUnderWay(input.protocol, input.body) || candidates.length < 2 || !prompt) {
         return settle({ entry: fallback, routedBy: "default" });
     }
-    // Concurrent first requests of one conversation share one router call.
+    // Concurrent first requests of one conversation share one router call;
+    // each still takes the shared pick only if it is one of its own candidates.
     const pending = routing.get(pinKey);
-    if (pending) return pending;
+    if (pending) {
+        const shared = await pending;
+        const entry = candidates.find((candidate) => candidate.model.id === shared.entry.model.id);
+        return entry ? { entry, routedBy: shared.routedBy } : { entry: fallback, routedBy: "default" };
+    }
     const decision = (async () =>
         settle(
             (await input.routerAllowed())

@@ -61,10 +61,12 @@ test("native protocols over the real shared credit ledger", { skip: !databaseUrl
     // The router (a paid call) is faked: `routerPick` is what it answers.
     const routerCalls = [];
     let routerPick = null;
+    let routerDelayMs = 0;
     mock.module(mod("lib/autoLlmRouter.ts"), {
         namedExports: {
             pickAutoModelWithLlm: async (input) => {
                 routerCalls.push(input);
+                if (routerDelayMs) await new Promise((r) => setTimeout(r, routerDelayMs));
                 return routerPick ? { modelId: routerPick, rewrite: null } : null;
             },
         },
@@ -775,6 +777,7 @@ test("native protocols over the real shared credit ledger", { skip: !databaseUrl
             userId,
             requestId: "r",
             routerAllowed: async () => false,
+            prepare: (model) => prepareAnthropicMessages(body, model),
         });
         assert.equal(decision.entry.model.id, "large-window", "input plus reserved output must fit the window");
         const tiny = await routeNativeSmartAdaptive({
@@ -786,8 +789,68 @@ test("native protocols over the real shared credit ledger", { skip: !databaseUrl
             userId,
             requestId: "r",
             routerAllowed: async () => false,
+            prepare: (model) => prepareAnthropicMessages({ ...body, max_tokens: 1 }, model),
         });
         assert.equal(tiny.entry.model.id, "small-window", "the input alone fits the small model (the default by credits)");
+
+        // The model's own request check applies to each candidate: a thinking
+        // budget the short-output model cannot hold leaves it out.
+        const shortOut = synthetic("short-output", 200_000, 1);
+        const longOut = { ...synthetic("long-output", 200_000, 2) };
+        longOut.capabilities = { ...longOut.capabilities, maxOutputTokens: 64_000 };
+        const thinkingBody = { model: "smart-adaptive", max_tokens: 32_000, thinking: { type: "enabled", budget_tokens: 10_000 }, messages: [{ role: "user", content: "think" }] };
+        assert.throws(() => prepareAnthropicMessages(thinkingBody, { apiModel: "short-output", maxOutputTokens: 4_000 }), "the short model refuses it");
+        const thinking = await routeNativeSmartAdaptive({
+            protocol: "anthropic_messages",
+            request: new Request("http://localhost/x", { headers: { "x-claude-code-session-id": "fit-thinking" } }),
+            body: thinkingBody,
+            runnable: [shortOut, longOut],
+            keyId: "k",
+            userId,
+            requestId: "r",
+            routerAllowed: async () => false,
+            prepare: (model) => prepareAnthropicMessages(thinkingBody, model),
+        });
+        assert.equal(thinking.entry.model.id, "long-output");
+
+        // Concurrent first requests share one router call, and each takes the
+        // shared pick only if it is one of its own candidates.
+        process.env.EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED = "true";
+        const textOnly = synthetic("text-only", 200_000, 1);
+        textOnly.capabilities = { ...textOnly.capabilities, vision: false };
+        const seesA = synthetic("sees-a", 200_000, 2);
+        const seesB = synthetic("sees-b", 200_000, 3);
+        const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+        const textBody = { model: "smart-adaptive", max_tokens: 1_000, messages: [{ role: "user", content: "Plan the change" }] };
+        const imageBody = {
+            ...textBody,
+            messages: [{ role: "user", content: [{ type: "text", text: "Plan the change" }, { type: "image", source: { type: "base64", media_type: "image/png", data: png } }] }],
+        };
+        const route = (payload) =>
+            routeNativeSmartAdaptive({
+                protocol: "anthropic_messages",
+                request: new Request("http://localhost/x", { headers: { "x-claude-code-session-id": "concurrent" } }),
+                body: payload,
+                runnable: [textOnly, seesA, seesB],
+                keyId: "k-concurrent",
+                userId,
+                requestId: "r",
+                routerAllowed: async () => true,
+                prepare: (model) => prepareAnthropicMessages(payload, model),
+            });
+        try {
+            routerPick = "text-only";
+            routerDelayMs = 50;
+            const callsBefore = routerCalls.length;
+            const [textDecision, imageDecision] = await Promise.all([route(textBody), route(imageBody)]);
+            assert.equal(textDecision.entry.model.id, "text-only");
+            assert.equal(imageDecision.entry.model.id, "sees-a", "the shared pick cannot read the image: this request's own default");
+            assert.equal(routerCalls.length, callsBefore + 1, "one router call for both");
+        } finally {
+            routerPick = null;
+            routerDelayMs = 0;
+            delete process.env.EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED;
+        }
     });
 
     await t.test("Codex Smart Adaptive: OpenAI candidates only, pinned by the thread's prompt_cache_key, encrypted reasoning kept on its model", async () => {
