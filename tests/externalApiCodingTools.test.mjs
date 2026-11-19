@@ -120,51 +120,6 @@ test("a request names a model by Tomverse id or by one offered model's provider 
     assert.equal(pickRequestedModel(entries, "gpt-5.6-sol"), null);
 });
 
-test("the request shape log keeps names, types and numbers, never content", async () => {
-    const { describeRequestShape, describeStreamFailure, requestShapeLogEnabled } = await import("../lib/externalApiRequestShape.ts");
-    assert.equal(requestShapeLogEnabled({}), false);
-    assert.equal(requestShapeLogEnabled({ EXTERNAL_API_REQUEST_SHAPE_LOG: "true" }), true);
-    const SECRET_TEXT = "my private code with spaces";
-    const body = {
-        model: "gpt-5-6-luna",
-        stream: true,
-        max_tokens: 4096,
-        user: SECRET_TEXT,
-        metadata: { note: SECRET_TEXT },
-        messages: [
-            { role: "system", content: SECRET_TEXT },
-            { role: "user", content: [{ type: "text", text: SECRET_TEXT }] },
-            { role: "assistant", content: null, tool_calls: [{ id: "c1", type: "function", function: { name: "read_file", arguments: SECRET_TEXT } }] },
-            { role: "tool", tool_call_id: "c1", content: SECRET_TEXT },
-        ],
-        tools: [
-            { type: "function", function: { name: "read_file", description: SECRET_TEXT, parameters: { type: "object", description: SECRET_TEXT } } },
-            { type: "custom", name: "apply_patch", description: SECRET_TEXT, format: { type: "grammar", syntax: "lark", definition: SECRET_TEXT } },
-        ],
-    };
-    const shape = describeRequestShape(body, ["authorization", "content-type"]);
-    const text = JSON.stringify(shape);
-    assert.doesNotMatch(text, /private code/);
-    assert.equal(shape.top.model, "gpt-5-6-luna");
-    assert.equal(shape.top.max_tokens, 4096);
-    assert.equal(shape.top.user, "string");
-    assert.deepEqual(shape.top.metadata, { note: "string" });
-    assert.deepEqual(shape.tools.map((tool) => [tool.type, tool.name, tool.format?.keys]), [["function", "read_file", undefined], ["custom", "apply_patch", ["type", "syntax", "definition"]]]);
-    assert.deepEqual(shape.messages.map((message) => message.role), ["system", "user", "assistant", "tool"]);
-    assert.deepEqual(shape.messages[1].content, ["text"]);
-    assert.equal(shape.messages[2].toolCalls[0].name, "read_file");
-    assert.deepEqual(shape.headers, ["authorization", "content-type"]);
-    const failure = new TypeError("Invalid state: Controller is already closed");
-    failure.code = "ERR_INVALID_STATE";
-    const described = describeStreamFailure(failure);
-    assert.equal(described.code, "ERR_INVALID_STATE");
-    assert.match(described.message, /Controller is already closed/);
-    assert.ok(described.frames.length > 0);
-    const withContent = describeStreamFailure(new Error(SECRET_TEXT));
-    assert.equal(withContent.message, undefined);
-    assert.doesNotMatch(JSON.stringify(withContent), /private code/);
-});
-
 test("Tomverse CLI guide: off until published; key in the shell only; endpoint only when not the default", () => {
     assert.equal(tomverseCliGuide({}, "https://tomverse.app/api/v1"), null);
     assert.equal(tomverseCliGuide({ TOMVERSE_CLI_GUIDE_ENABLED: "1" }, "https://tomverse.app/api/v1"), null);
@@ -176,20 +131,4 @@ test("Tomverse CLI guide: off until published; key in the shell only; endpoint o
     assert.match(staging.posix, /tomverse config set endpoint 'https:\/\/dev\.tomverse\.app\/api\/v1'/);
     assert.match(tomverseCliGuide({ TOMVERSE_CLI_GUIDE_ENABLED: "true" }, "https://x.example/api/v1;rm -rf ~").posix, /endpoint 'https:\/\/x\.example\/api\/v1;rm -rf ~'/, "quoted as one argument");
     assert.ok(!/--api-key/.test(staging.posix + staging.powershell), "the key is never a command-line argument");
-});
-
-test("the response shape log keeps chunk kinds and tool names, never text or input", async () => {
-    const { describeChunk, collapseKinds } = await import("../lib/externalApiRequestShape.ts");
-    const SECRET = "private patch text";
-    const chunks = [
-        { choices: [{ index: 0, delta: { role: "assistant", content: SECRET }, finish_reason: null }] },
-        { choices: [{ index: 0, delta: { content: SECRET }, finish_reason: null }] },
-        { choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: "c", type: "custom", custom: { name: "ApplyPatch", input: "" } }] }, finish_reason: null }] },
-        { choices: [{ index: 0, delta: { tool_calls: [{ index: 0, custom: { input: SECRET } }] }, finish_reason: null }] },
-        { choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }] },
-        { choices: [], usage: { prompt_tokens: 1 } },
-    ];
-    const kinds = collapseKinds(chunks.flatMap(describeChunk));
-    assert.deepEqual(kinds, ["role", "text×2", "tool:custom:ApplyPatch:input", "tool:+::input", "finish:tool_calls", "usage"]);
-    assert.doesNotMatch(JSON.stringify(kinds), /private/);
 });
