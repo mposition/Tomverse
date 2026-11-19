@@ -727,6 +727,69 @@ test("native protocols over the real shared credit ledger", { skip: !databaseUrl
         }
     });
 
+    await t.test("Smart Adaptive: a request refused anyway spends no router call; candidates leave room for the output", async () => {
+        process.env.EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED = "true";
+        resetNativeSmartAdaptivePins();
+        const pool = await providerPool("anthropic", "anthropic_messages");
+        const userId = await newUser();
+        allow(userId);
+        const { key } = await issueKey(userId);
+        try {
+            routerPick = pool[0].model.id;
+            const before = routerCalls.length;
+            const sentBefore = sent.length;
+            const cases = [
+                [claudeBody({ model: "smart-adaptive", tools: [{ type: "web_search_20250305", name: "web_search" }] }), {}, "server_tool_unsupported"],
+                [claudeBody({ model: "smart-adaptive", system: [{ type: "text", text: "s", cache_control: { type: "ephemeral", ttl: "1h" } }] }), {}, "unsupported_cache_ttl"],
+                [claudeBody({ model: "smart-adaptive" }), { headers: { "anthropic-beta": "context-management-2025-06-27,é" } }, "invalid_header"],
+            ];
+            for (const [payload, init, code] of cases) {
+                const response = await claude(key, payload, init);
+                assert.equal(response.status, 400, code);
+                assert.equal((await response.json()).tomverse.code, code);
+            }
+            assert.equal(routerCalls.length, before, "no router call for a request refused anyway");
+            assert.equal(sent.length, sentBefore);
+            assert.equal((await reservationsFor(userId)).length, 0);
+        } finally {
+            routerPick = null;
+            delete process.env.EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED;
+        }
+
+        // Two synthetic Anthropic models: the small one takes the input but
+        // not the input plus the output it would reserve.
+        const { routeNativeSmartAdaptive } = await import(mod("lib/externalApiNativeSmartAdaptive.ts"));
+        const synthetic = (id, contextWindowTokens, creditWeight) => ({
+            model: { id, apiModel: id, provider: "anthropic" },
+            capabilities: { id, protocols: ["chat_completions", "anthropic_messages"], vision: true, contextWindowTokens, maxOutputTokens: 4_000, creditWeight },
+        });
+        const small = synthetic("small-window", 6_000, 1);
+        const large = synthetic("large-window", 200_000, 2);
+        const body = { model: "smart-adaptive", max_tokens: 4_000, messages: [{ role: "user", content: "word ".repeat(3_000) }] };
+        const decision = await routeNativeSmartAdaptive({
+            protocol: "anthropic_messages",
+            request: new Request("http://localhost/x", { headers: { "x-claude-code-session-id": "fit" } }),
+            body,
+            runnable: [small, large],
+            keyId: "k",
+            userId,
+            requestId: "r",
+            routerAllowed: async () => false,
+        });
+        assert.equal(decision.entry.model.id, "large-window", "input plus reserved output must fit the window");
+        const tiny = await routeNativeSmartAdaptive({
+            protocol: "anthropic_messages",
+            request: new Request("http://localhost/x", { headers: { "x-claude-code-session-id": "fit-small" } }),
+            body: { ...body, max_tokens: 1 },
+            runnable: [small, large],
+            keyId: "k",
+            userId,
+            requestId: "r",
+            routerAllowed: async () => false,
+        });
+        assert.equal(tiny.entry.model.id, "small-window", "the input alone fits the small model (the default by credits)");
+    });
+
     await t.test("Codex Smart Adaptive: OpenAI candidates only, pinned by the thread's prompt_cache_key, encrypted reasoning kept on its model", async () => {
         process.env.EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED = "true";
         resetNativeSmartAdaptivePins();

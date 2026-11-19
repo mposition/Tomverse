@@ -508,6 +508,14 @@ export async function handleNativeGeneration(request: Request, spec: NativeProto
         const plan = await getUserBillingPlan(key.userId);
         const requestedModel = isRecord(body) ? body.model : undefined;
         const smartAdaptive = requestedModel === SMART_ADAPTIVE_MODEL_ID;
+        if (smartAdaptive) {
+            // Every refusal that does not depend on the model (provider-run
+            // tools, cache TTL, stored state, a header fetch could not send)
+            // comes before the paid router call, so a request that would be
+            // refused anyway never spends one.
+            const probe = spec.prepare(body, { apiModel: SMART_ADAPTIVE_MODEL_ID, maxOutputTokens: Number.MAX_SAFE_INTEGER });
+            checkForwardedHeaders(spec.upstreamHeaders(request, probe));
+        }
         // Smart Adaptive picks before admission, so the reservation, the
         // receipt and the credits are the picked model's own.
         const entry = await resolveNativeModel(

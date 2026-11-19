@@ -143,10 +143,18 @@ export const routeNativeSmartAdaptive = async (input: {
     );
     if (pool.length === 0) return null;
     const estimate = estimateNativeInput(input.body, provider);
-    const fits = pool.filter(
-        ({ capabilities }) =>
-            (estimate.images === 0 || capabilities.vision) && estimate.breakdown.rawTotal <= capabilities.contextWindowTokens
+    // The output the gateway will reserve on each model: the client's limit
+    // within the model's own, or the model's limit when it sends none.
+    const asked = [input.body.max_tokens, input.body.max_output_tokens].find(
+        (value): value is number => typeof value === "number" && Number.isFinite(value) && value > 0
     );
+    const fits = pool.filter(({ capabilities }) => {
+        const output = Math.min(asked ?? capabilities.maxOutputTokens, capabilities.maxOutputTokens);
+        return (
+            (estimate.images === 0 || capabilities.vision) &&
+            estimate.breakdown.rawTotal + output <= capabilities.contextWindowTokens
+        );
+    });
     // Nothing fits: the default answers, and its own limits refuse the request.
     const candidates = fits.length > 0 ? fits : pool;
     const defaultId = nativeSmartAdaptiveDefaultId(
