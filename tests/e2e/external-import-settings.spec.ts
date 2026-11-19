@@ -289,17 +289,6 @@ async function mockImportApi(
   );
 
   await page.route(
-    (url) => url.pathname === "/api/imports/external/perplexity-split",
-    (route) => {
-      state.splitBodies.push(route.request().postDataJSON());
-      if (!options.perplexitySplitHints) {
-        return route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ code: "PERPLEXITY_SPLIT_DISABLED" }) });
-      }
-      return route.fulfill(json({ hints: options.perplexitySplitHints }));
-    }
-  );
-
-  await page.route(
     (url) => url.pathname === "/api/imports/external",
     (route) => {
       if (route.request().method() === "GET") {
@@ -567,6 +556,20 @@ async function mockImportApi(
       }
       if (options.importDetail) return route.fulfill(json(options.importDetail));
       return route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ error: "Import not found." }) });
+    }
+  );
+
+
+  // Registered last: the import-detail pattern above also matches this path,
+  // and Playwright tries the most recently registered handler first.
+  await page.route(
+    (url) => url.pathname === "/api/imports/external/perplexity-split",
+    (route) => {
+      state.splitBodies.push(route.request().postDataJSON());
+      if (!options.perplexitySplitHints) {
+        return route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ code: "PERPLEXITY_SPLIT_DISABLED" }) });
+      }
+      return route.fulfill(json({ hints: options.perplexitySplitHints }));
     }
   );
 

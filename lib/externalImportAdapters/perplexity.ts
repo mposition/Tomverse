@@ -264,10 +264,12 @@ export const PERPLEXITY_SPLIT_LIMITS = {
     excerptChars: 600,
 } as const;
 
+/** Cut to the limit in UTF-16 units (what the route checks), never mid-pair. */
 const excerpt = (text: string, from: "start" | "end" = "start"): string => {
     const limit = PERPLEXITY_SPLIT_LIMITS.excerptChars;
     if (text.length <= limit) return text;
-    return from === "start" ? text.slice(0, limit) : text.slice(text.length - limit);
+    const cut = from === "start" ? text.slice(0, limit) : text.slice(text.length - limit);
+    return from === "start" ? cut.replace(/[\uD800-\uDBFF]$/, "") : cut.replace(/^[\uDC00-\uDFFF]/, "");
 };
 
 /** Structural lines that end the run of leading prose. */

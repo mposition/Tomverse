@@ -39,9 +39,14 @@ import { calculateProviderUsageCost } from "@/lib/providerUsageCost";
 export const PERPLEXITY_SPLIT_DEFAULT_MODEL_ID = "gpt-6-luna";
 const MAX_OUTPUT_TOKENS = 4_000;
 const TIMEOUT_MS = 20_000;
-/** Worst-case input tokens per character: generous, so the hold is an upper bound. */
-const TOKENS_PER_CHAR_BOUND = 1;
-const SYSTEM_PROMPT_TOKEN_BOUND = 1_000;
+/**
+ * Input tokens are bounded by UTF-8 bytes: no tokenizer the catalogue uses
+ * spends more than one token per byte. Plus room for message framing.
+ */
+const FRAMING_TOKEN_BOUND = 1_000;
+const utf8Bytes = (text: string) => new TextEncoder().encode(text).length;
+/** The disclosures name OpenAI, so only an OpenAI model may receive the excerpts. */
+const SPLIT_PROVIDER = "openai";
 
 export const perplexitySplitEnabled = (env: NodeJS.ProcessEnv = process.env): boolean =>
     env.EXTERNAL_IMPORT_PERPLEXITY_LLM_SPLIT?.trim().toLowerCase() !== "false";
@@ -114,7 +119,7 @@ const providerHasApiKey = (model: AiModel) =>
 const resolveSplitModel = (): AiModel | null => {
     const id = process.env.EXTERNAL_IMPORT_PERPLEXITY_SPLIT_MODEL_ID?.trim() || PERPLEXITY_SPLIT_DEFAULT_MODEL_ID;
     const model = getEnabledModel(id);
-    return model && providerHasApiKey(model) ? model : null;
+    return model && model.provider === SPLIT_PROVIDER && providerHasApiKey(model) ? model : null;
 };
 
 const promptOf = (questions: PerplexitySplitQuestions) =>
@@ -148,7 +153,7 @@ export async function requestPerplexitySplitHints(
 
     const prompt = promptOf(questions);
     const worstCase = callCostMicroUsd({
-        inputTokens: (SYSTEM_PROMPT.length + prompt.length) * TOKENS_PER_CHAR_BOUND + SYSTEM_PROMPT_TOKEN_BOUND,
+        inputTokens: utf8Bytes(SYSTEM_PROMPT) + utf8Bytes(prompt) + FRAMING_TOKEN_BOUND,
         outputTokens: MAX_OUTPUT_TOKENS,
         ...prices,
     });

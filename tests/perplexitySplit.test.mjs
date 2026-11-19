@@ -18,6 +18,8 @@ import {
     perplexitySplitRequestSchema,
     requestPerplexitySplitHints,
 } from "../lib/perplexitySplitHints.ts";
+import { ENABLED_MODELS } from "../lib/models.ts";
+import { PROVIDER_API_KEY_ENV } from "../lib/providerMonitoring.ts";
 
 // The split hints: what the file cannot decide is asked of the import route,
 // only excerpts go up, only counts and yes/no come back, and anything that
@@ -317,6 +319,39 @@ test("output that does not fit is discarded; a failed call keeps its hold", asyn
         { ok: false, reason: "provider_error" }
     );
     assert.equal(failed.calls.settle.length, 0, "a failed call may still have been billed");
+});
+
+test("only an OpenAI model may receive the excerpts, whatever the override names", async () => {
+    const other = ENABLED_MODELS.find((model) => model.provider !== "openai" && model.usageClass === "standard");
+    assert.ok(other, "the catalogue has a non-OpenAI model to try");
+    const keys = Object.fromEntries((PROVIDER_API_KEY_ENV[other.provider] ?? []).map((key) => [key, "test-key"]));
+    let called = false;
+    const outcome = await withEnv({ ...keys, OPENAI_API_KEY: "test-key", EXTERNAL_IMPORT_PERPLEXITY_SPLIT_MODEL_ID: other.id }, () =>
+        requestPerplexitySplitHints(perplexitySplitQuestions(THREAD), { generate: async () => { called = true; } })
+    );
+    assert.deepEqual(outcome, { ok: false, reason: "no_model" });
+    assert.equal(called, false);
+});
+
+test("the hold bounds input by UTF-8 bytes, so non-Latin text cannot exceed it", async () => {
+    const korean = `${LOGO}\n\n# ${"가".repeat(500)}\n\n${"나".repeat(500)}\n`;
+    const questions = perplexitySplitQuestions(korean);
+    const { calls, deps } = ledger();
+    await withEnv({ OPENAI_API_KEY: "test-key", EXTERNAL_IMPORT_PERPLEXITY_SPLIT_MODEL_ID: undefined }, () =>
+        requestPerplexitySplitHints(questions, { ...deps, generate: async () => ({ output: null, usage: { inputTokens: 1, outputTokens: 1 } }) })
+    );
+    const promptBytes = new TextEncoder().encode(JSON.stringify(questions)).length;
+    // 0.10 USD per million input tokens = 0.1 micro-USD per token.
+    assert.ok(calls.reserve[0].micro >= Math.ceil(promptBytes * 0.1), "at least one token per prompt byte is held");
+});
+
+test("an excerpt never ends or starts on half of a surrogate pair", () => {
+    const emoji = "😀".repeat(400); // 800 UTF-16 units
+    const questions = perplexitySplitQuestions(`${LOGO}\n\n# x${emoji}\n\n${emoji}\n`);
+    for (const text of [questions.turns[0].question, questions.turns[0].paragraphs[0]]) {
+        assert.ok(text.length <= PERPLEXITY_SPLIT_LIMITS.excerptChars);
+        assert.ok(!/[\uD800-\uDBFF]$/.test(text) && !/^[\uDC00-\uDFFF]/.test(text));
+    }
 });
 
 test("no provider key, no model and no call", async () => {
