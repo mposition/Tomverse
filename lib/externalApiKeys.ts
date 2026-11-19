@@ -293,61 +293,112 @@ export const authenticateExternalApiKey = async (
     };
 };
 
+const receiptSelect = {
+    id: true,
+    modelId: true,
+    stream: true,
+    protocol: true,
+    clientName: true,
+    finishReason: true,
+    errorCode: true,
+    createdAt: true,
+    completedAt: true,
+    reservation: {
+        select: {
+            status: true,
+            outcome: true,
+            reservedCredits: true,
+            settledCredits: true,
+            settledInputTokens: true,
+            settledCachedInputTokens: true,
+            settledCacheWriteInputTokens: true,
+            settledOutputTokens: true,
+        },
+    },
+} as const;
+
+type ReceiptRow = {
+    id: string;
+    modelId: string;
+    stream: boolean;
+    protocol: string;
+    clientName: string | null;
+    finishReason: string | null;
+    errorCode: string | null;
+    createdAt: Date;
+    completedAt: Date | null;
+    reservation: {
+        status: string;
+        outcome: string | null;
+        reservedCredits: number;
+        settledCredits: number;
+        settledInputTokens: number;
+        settledCachedInputTokens: number;
+        settledCacheWriteInputTokens: number;
+        settledOutputTokens: number;
+    };
+};
+
+const toReceipt = (row: ReceiptRow) => {
+    const held = row.reservation.status === "reserved";
+    return {
+        requestId: row.id,
+        modelId: row.modelId,
+        stream: row.stream,
+        protocol: row.protocol,
+        client: row.clientName,
+        createdAt: row.createdAt.toISOString(),
+        completedAt: row.completedAt?.toISOString() ?? null,
+        finishReason: row.finishReason,
+        errorCode: row.errorCode,
+        // `held` is in flight or unresolved; its numbers are not final and
+        // are reported as null rather than as zero.
+        status: held ? "held" : row.reservation.status,
+        outcome: row.reservation.outcome,
+        heldCredits: held ? row.reservation.reservedCredits : 0,
+        chargedCredits: held ? null : row.reservation.settledCredits,
+        usage: held
+            ? null
+            : {
+                  inputTokens: row.reservation.settledInputTokens,
+                  cachedInputTokens: row.reservation.settledCachedInputTokens,
+                  cacheWriteInputTokens: row.reservation.settledCacheWriteInputTokens,
+                  outputTokens: row.reservation.settledOutputTokens,
+              },
+    };
+};
+
 export const externalApiKeyUsage = async (keyId: string, limit = 50) => {
     const rows = await prisma.externalApiRequest.findMany({
         where: { keyId },
         orderBy: { createdAt: "desc" },
         take: Math.min(200, Math.max(1, limit)),
-        select: {
-            id: true,
-            modelId: true,
-            stream: true,
-            protocol: true,
-            clientName: true,
-            finishReason: true,
-            errorCode: true,
-            createdAt: true,
-            completedAt: true,
-            reservation: {
-                select: {
-                    status: true,
-                    outcome: true,
-                    reservedCredits: true,
-                    settledCredits: true,
-                    settledInputTokens: true,
-                    settledCachedInputTokens: true,
-                    settledCacheWriteInputTokens: true,
-                    settledOutputTokens: true,
-                },
-            },
-        },
+        select: receiptSelect,
     });
-    return rows.map((row) => {
-        const held = row.reservation.status === "reserved";
-        return {
-            requestId: row.id,
-            modelId: row.modelId,
-            stream: row.stream,
-            protocol: row.protocol,
-            client: row.clientName,
-            createdAt: row.createdAt.toISOString(),
-            completedAt: row.completedAt?.toISOString() ?? null,
-            finishReason: row.finishReason,
-            errorCode: row.errorCode,
-            // `held` is in flight or unresolved; its numbers are not final and
-            // are reported as null rather than as zero.
-            status: held ? "held" : row.reservation.status,
-            outcome: row.reservation.outcome,
-            heldCredits: held ? row.reservation.reservedCredits : 0,
-            chargedCredits: held ? null : row.reservation.settledCredits,
-            usage: held
-                ? null
-                : {
-                      inputTokens: row.reservation.settledInputTokens,
-                      cachedInputTokens: row.reservation.settledCachedInputTokens,
-                      cacheWriteInputTokens: row.reservation.settledCacheWriteInputTokens,
-                      outputTokens: row.reservation.settledOutputTokens,
-                  },
-        };
-    });
+    return rows.map(toReceipt);
+};
+
+export type ExternalApiRequestSelector =
+    | { kind: "request_id"; requestId: string }
+    | { kind: "idempotency_key"; idempotencyKeyDigest: string };
+
+/**
+ * One request of this key, by its receipt id or by the digest of the
+ * Idempotency-Key the client sent with it -- the lookup a client uses to
+ * recover after it lost a response, however old the request is. A read only:
+ * no reservation, no dispatch, no state change. A request of another key, of
+ * another account, or of nobody answers null alike.
+ */
+export const externalApiRequestStatus = async (keyId: string, selector: ExternalApiRequestSelector) => {
+    const row =
+        selector.kind === "request_id"
+            ? await prisma.externalApiRequest.findFirst({
+                  where: { id: selector.requestId, keyId },
+                  select: receiptSelect,
+              })
+            : await prisma.externalApiRequest.findUnique({
+                  where: { keyId_idempotencyKeyDigest: { keyId, idempotencyKeyDigest: selector.idempotencyKeyDigest } },
+                  select: receiptSelect,
+              });
+    return row ? toReceipt(row) : null;
 };

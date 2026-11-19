@@ -1,0 +1,29 @@
+{
+  "name": "@tomverse/cli",
+  "version": "0.1.0",
+  "description": "Tomverse coding CLI: work on your own folder with a Tomverse API key.",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "bin": {
+    "tomverse": "dist/cli.js"
+  },
+  "files": [
+    "dist/**/*.js",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22 <23"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "node scripts/build.mjs",
+    "test": "node --import tsx --test --test-concurrency=1 tests/*.test.ts",
+    "pack:verify": "node scripts/pack-verify.mjs"
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "4.0.114",
+    "ai": "7.0.169",
+    "zod": "4.6.7"
+  }
+}

@@ -160,3 +160,24 @@ export const codingToolModels = (models: readonly ExternalApiModelCapabilities[]
     // offered on Chat Completions but not recommended here until verified.
     cursor: models.filter((model) => (model.protocols?.includes("chat_completions") ?? true) && model.id !== "smart-adaptive"),
 });
+
+/**
+ * The Tomverse CLI (apps/tomverse-cli): what Settings shows once the package
+ * is published. Off by default (TOMVERSE_CLI_GUIDE_ENABLED) so the page never
+ * tells anyone to install a package that is not on the registry yet. The key
+ * goes into an environment variable for the current shell only; the CLI also
+ * asks for it, hidden, when it is not set.
+ */
+export const TOMVERSE_CLI_DEFAULT_ENDPOINT = "https://tomverse.app/api/v1";
+
+export const tomverseCliGuide = (env: Record<string, string | undefined>, openAiBaseUrl: string) => {
+    if (env.TOMVERSE_CLI_GUIDE_ENABLED !== "true") return null;
+    // Single-quoted for both shells, so the URL is one argument whatever it contains.
+    const quoted = `'${openAiBaseUrl.replaceAll("'", "")}'`;
+    const endpoint = openAiBaseUrl === TOMVERSE_CLI_DEFAULT_ENDPOINT ? [] : [`tomverse config set endpoint ${quoted}`];
+    return {
+        install: "npm install -g @tomverse/cli",
+        powershell: [`$env:TOMVERSE_API_KEY = "${KEY_PLACEHOLDER}"`, ...endpoint, "tomverse doctor"].join("\n"),
+        posix: [`export TOMVERSE_API_KEY="${KEY_PLACEHOLDER}"`, ...endpoint, "tomverse doctor"].join("\n"),
+    };
+};
