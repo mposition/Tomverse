@@ -261,3 +261,23 @@ test("the bytes one process checked are held for two minutes for one file, and n
   assert.equal((await ask("held")).ok, true);
   assert.equal(loads, 4, "an expired entry is opened and checked again");
 });
+
+test("the held bytes are dropped when the two minutes end, with no later request to notice", async (t) => {
+  const { readDecisionMakerWorkspaceChunk } = await service;
+  const patch = `diff --git a/a b/a\n${"+held line\n".repeat(1000)}`;
+  const sha256 = sha256Of(patch);
+  let loads = 0;
+  const load = async () => { loads += 1; return { kind: "t2_draft" as const, patchBody: patch, baseSha: SHA }; };
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  // The default clock is the real one, so only the timer can have emptied the hold.
+  const ask = () => readDecisionMakerWorkspaceChunk({ requestId: "timer", name: "PATCH.diff", sha256, index: 0 }, load);
+  assert.equal((await ask()).ok, true);
+  assert.equal((await ask()).ok, true);
+  assert.equal(loads, 1, "held");
+  t.mock.timers.tick(2 * 60 * 1000 - 1);
+  assert.equal((await ask()).ok, true);
+  assert.equal(loads, 1, "still held just before the end");
+  t.mock.timers.tick(2);
+  assert.equal((await ask()).ok, true);
+  assert.equal(loads, 2, "dropped by the timer, then opened and checked again");
+});

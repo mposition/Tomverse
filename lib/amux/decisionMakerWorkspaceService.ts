@@ -237,10 +237,30 @@ export async function openDecisionMakerWorkspaceEvidence(
  * the caller asks for: a hit is bytes that already passed the whole-file
  * checks in this process, and a miss (another process, a later request, an
  * expired entry) opens and checks again. One entry, so what is held is one
- * file.
+ * file. The two minutes end on their own: an unref'd timer drops the entry
+ * whether or not another request comes, so the bytes never outlive them. The
+ * buffer is dropped, not zeroed: the chunk a caller is still encoding is a view
+ * of it.
  */
 const CHUNK_HOLD_MS = 2 * 60 * 1000;
 let held: { requestId: string; name: DmWorkspaceEvidenceName; sha256: string; bytes: Buffer; until: number } | null = null;
+let heldTimer: ReturnType<typeof setTimeout> | null = null;
+
+const dropHeld = () => {
+  if (heldTimer !== null) clearTimeout(heldTimer);
+  heldTimer = null;
+  held = null;
+};
+
+const holdFile = (entry: NonNullable<typeof held>) => {
+  dropHeld();
+  held = entry;
+  heldTimer = setTimeout(() => {
+    heldTimer = null;
+    if (held === entry) held = null;
+  }, CHUNK_HOLD_MS);
+  heldTimer.unref?.();
+};
 
 const sha256Of = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
@@ -283,7 +303,7 @@ export async function readDecisionMakerWorkspaceChunk(
   if (held !== null && held.until > now() && held.requestId === input.requestId && held.name === name && held.sha256 === input.sha256) {
     bytes = held.bytes;
   } else {
-    held = null;
+    dropHeld();
     const source = await loadSource();
     if (source === null) return { ok: false, reason: "request_unknown" };
     const evidence = await openDecisionMakerWorkspaceEvidence(source);
@@ -291,7 +311,7 @@ export async function readDecisionMakerWorkspaceChunk(
     if (file === undefined) return { ok: false, reason: "evidence_absent" };
     const opened = Buffer.from(file.text, "utf8");
     if (sha256Of(opened) !== input.sha256) return { ok: false, reason: "evidence_changed" };
-    held = { requestId: input.requestId, name, sha256: input.sha256, bytes: opened, until: now() + CHUNK_HOLD_MS };
+    holdFile({ requestId: input.requestId, name, sha256: input.sha256, bytes: opened, until: now() + CHUNK_HOLD_MS });
     bytes = opened;
   }
   const chunkCount = amuxV22TransferChunkCount(bytes.length);

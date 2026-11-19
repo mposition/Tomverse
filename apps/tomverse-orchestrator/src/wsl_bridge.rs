@@ -3497,15 +3497,62 @@ fn v22_context_unavailable_warning(attempt_id: &str, reason: &str) -> String {
     format!("amux wsl bridge warn: context for attempt {attempt_id} could not be staged ({reason}); the delivery is not sent and the attempt is settled unverified, not halted")
 }
 
-/// What an unverified settlement says of a delivery that was never sent for
-/// want of its context: a failure before the CLI started, which the app files
-/// as an infrastructure failure (it uses no card attempt, and the card goes
-/// back to the queue; lib/amux/infraFailureCore.ts), as the sidecar's own
-/// pre-start failures are (`cliStarted:false`).
-fn v22_context_failure_report() -> crate::tomverse_api::V22FailureReport {
+/// What an unverified settlement says of a delivery that was never sent: a
+/// failure before the CLI started, which the app files as an infrastructure
+/// failure (it uses no card attempt, and the card goes back to the queue;
+/// lib/amux/infraFailureCore.ts), as the sidecar's own pre-start failures are
+/// (`cliStarted:false`).
+fn v22_unsent_failure_report(code: &str) -> crate::tomverse_api::V22FailureReport {
     crate::tomverse_api::V22FailureReport {
-        code: "context_unavailable".to_owned(), cli_started: Some(false),
-        exit_code: None, elapsed_ms: None }
+        code: code.to_owned(), cli_started: Some(false), exit_code: None, elapsed_ms: None }
+}
+
+/// ... for want of its context.
+fn v22_context_failure_report() -> crate::tomverse_api::V22FailureReport {
+    v22_unsent_failure_report("context_unavailable")
+}
+
+/// What a failed `send_v22` of a delivery with staged context means for the
+/// run loop. An error from before the execute exchange (`execute_attempted`
+/// false: `send_v22` marks the delivery sent only right before it) left no
+/// record in the sidecar, so reading back would find nothing and halt: it is a
+/// delivery that was not sent, never an unknown outcome.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum V22SendFailure {
+    /// The files are still being staged: wait.
+    Staging,
+    /// A context file could not be staged: not sent, not halted.
+    Context(&'static str),
+    /// The earlier review's findings could not be read: not sent. Settled as
+    /// the tick's send settles it (plain unverified), and the bridge halts as
+    /// it does there.
+    Feedback,
+    /// Anything else before the execute went out (an invalid delivery, a
+    /// disabled sidecar, a payload that could not be built): not sent, not halted.
+    Prepare,
+    /// The execute's own exchange failed: its outcome is read back first.
+    Unknown,
+}
+
+fn classify_v22_send_failure(error: &anyhow::Error, execute_attempted: bool) -> V22SendFailure {
+    if error.is::<V22ContextStagingWait>() {
+        V22SendFailure::Staging
+    } else if let Some(unavailable) = error.downcast_ref::<V22ContextUnavailable>() {
+        V22SendFailure::Context(unavailable.0)
+    } else if error.is::<V52ReviewFeedbackUnavailable>() {
+        V22SendFailure::Feedback
+    } else if !execute_attempted {
+        V22SendFailure::Prepare
+    } else {
+        V22SendFailure::Unknown
+    }
+}
+
+/// The one stderr line for a staged delivery that is not sent, whatever the
+/// cause; `halts` says whether the bridge halts for it too.
+fn v22_unsent_warning(attempt_id: &str, reason: &str, halts: bool) -> String {
+    format!("amux wsl bridge warn: delivery for attempt {attempt_id} is not sent ({reason}); the attempt is settled unverified{}",
+        if halts { "; the bridge halts" } else { ", not halted" })
 }
 
 /// The exact keys of the sidecar's `put_context` op (10.1).
@@ -4927,10 +4974,13 @@ async fn run_bridge(mut scope: WorkerScope) -> i32 {
                         still_running.push(entry);
                         continue;
                     };
-                    // Why this delivery is given up instead of sent, if it is.
-                    let mut give_up: Option<&'static str> = None;
+                    // Why this delivery is given up instead of sent, if it is: the
+                    // reason, what the settlement says of it, and whether the
+                    // bridge halts for it too.
+                    let mut give_up: Option<(&'static str, Option<crate::tomverse_api::V22FailureReport>, bool)> = None;
                     if halted {
-                        give_up = Some("the bridge halted before it was sent");
+                        give_up = Some(("the bridge halted before it was sent",
+                            Some(v22_context_failure_report()), false));
                     } else {
                         match local.send_v22(&entry.delivery, &session.instance_id,
                             session.generation).await {
@@ -4942,35 +4992,52 @@ async fn run_bridge(mut scope: WorkerScope) -> i32 {
                                 still_running.push(entry);
                                 continue;
                             },
-                            Err(error) if error.is::<V22ContextStagingWait>() => {
-                                still_running.push(entry);
-                                continue;
-                            },
-                            Err(error) => match error.downcast_ref::<V22ContextUnavailable>() {
-                                Some(unavailable) => give_up = Some(unavailable.0),
-                                // The execute's own exchange failed: read back what the
-                                // sidecar holds before anything else, as a tick's send does.
-                                None => match local.readback_v22(&entry.delivery.attempt_id).await {
-                                    Ok(V22SidecarState::InProgress | V22SidecarState::Succeeded |
-                                        V22SidecarState::Failed | V22SidecarState::OutcomeUnknown) => {},
-                                    _ => {
-                                        halted = true;
-                                        note_halt(&mut halt_cause, "dispatch_outcome_unknown");
+                            Err(error) => {
+                                // `send_v22` marks the delivery sent right before the
+                                // execute exchange: still unsent means it never went out.
+                                let attempted =
+                                    !local.v22_context_unsent(&entry.delivery.attempt_id);
+                                match classify_v22_send_failure(&error, attempted) {
+                                    V22SendFailure::Staging => {
                                         still_running.push(entry);
                                         continue;
                                     },
-                                },
+                                    V22SendFailure::Context(reason) => give_up =
+                                        Some((reason, Some(v22_context_failure_report()), false)),
+                                    V22SendFailure::Feedback => give_up = Some((
+                                        "the review feedback could not be read", None, true)),
+                                    V22SendFailure::Prepare => give_up = Some((
+                                        "the execute could not be prepared",
+                                        Some(v22_unsent_failure_report("execute_not_sent")), false)),
+                                    // The execute's own exchange failed: read back what the
+                                    // sidecar holds before anything else, as a tick's send does.
+                                    V22SendFailure::Unknown =>
+                                        match local.readback_v22(&entry.delivery.attempt_id).await {
+                                            Ok(V22SidecarState::InProgress | V22SidecarState::Succeeded |
+                                                V22SidecarState::Failed | V22SidecarState::OutcomeUnknown) => {},
+                                            _ => {
+                                                halted = true;
+                                                note_halt(&mut halt_cause, "dispatch_outcome_unknown");
+                                                still_running.push(entry);
+                                                continue;
+                                            },
+                                        },
+                                }
                             },
                         }
                     }
-                    if let Some(reason) = give_up {
-                        // Nothing was sent: settle the attempt unverified, one warning
-                        // line, and nothing halts for it.
-                        eprintln!("{}", v22_context_unavailable_warning(
-                            &entry.delivery.attempt_id, reason));
+                    if let Some((reason, report, halts)) = give_up {
+                        // Nothing was sent: settle the attempt unverified and say so on
+                        // one warning line. Only the review feedback halts for it, as in a
+                        // tick's send (its settlement is the tick's plain unverified one).
+                        eprintln!("{}", v22_unsent_warning(&entry.delivery.attempt_id, reason, halts));
+                        if halts {
+                            halted = true;
+                            note_halt(&mut halt_cause, "review_feedback_unavailable");
+                        }
                         let settled = api.v22_execution_settle_unverified_with_failure(
                             &entry.delivery, &session.instance_id, session.generation, None,
-                            Some(&v22_context_failure_report())).await
+                            report.as_ref()).await
                             .map(|response| response.settled);
                         let result = plan_settle_answer(&settled);
                         if result == SettleResult::HaltForReadBack {
@@ -10371,6 +10438,80 @@ mod v22_transfer_tests {
         assert!(accepted.is_empty() && !halted && awaiting.is_empty() && undelivered.is_empty());
         let warning = bridge_tick_warning(&unavailable).unwrap();
         assert!(warning.contains(ATT) && warning.contains("not halted") && warning.contains("absent"), "{warning}");
+    }
+
+    #[test]
+    fn a_failed_send_before_the_execute_is_a_delivery_not_sent_never_an_unknown_outcome() {
+        let attempted = |error: anyhow::Error, execute_attempted: bool|
+            classify_v22_send_failure(&error, execute_attempted);
+        assert_eq!(attempted(V22ContextStagingWait.into(), false), V22SendFailure::Staging);
+        assert_eq!(attempted(V22ContextUnavailable("absent").into(), false),
+            V22SendFailure::Context("absent"));
+        // The feedback is read before the execute, so it is never an unknown outcome.
+        assert_eq!(attempted(V52ReviewFeedbackUnavailable.into(), false), V22SendFailure::Feedback);
+        assert_eq!(attempted(V52ReviewFeedbackUnavailable.into(), true), V22SendFailure::Feedback);
+        // Any other error before the exchange left nothing in the sidecar to read back.
+        assert_eq!(attempted(anyhow::anyhow!("invalid v22 one-shot delivery"), false),
+            V22SendFailure::Prepare);
+        // Only an error after the execute was attempted is read back first.
+        assert_eq!(attempted(anyhow::anyhow!("v22 sidecar transport timed out"), true),
+            V22SendFailure::Unknown);
+        // Not sent, and the settlement says the CLI never started.
+        let report = v22_unsent_failure_report("execute_not_sent");
+        assert!(crate::tomverse_api::V22FailureReport::valid_code(&report.code));
+        assert_eq!(report.cli_started, Some(false));
+        let warning = v22_unsent_warning(ATT, "the review feedback could not be read", true);
+        assert!(warning.contains(ATT) && warning.contains("not sent") && warning.contains("halts"));
+        assert!(v22_unsent_warning(ATT, "x", false).contains("not halted"));
+        // The loop classifies; it never reads an error before the execute back as an outcome.
+        let source = include_str!("wsl_bridge.rs");
+        let production = &source[..source.find("mod tests {").unwrap()];
+        let run_loop = &production[production.find("async fn run_bridge(").unwrap()..];
+        assert!(run_loop.contains("classify_v22_send_failure(&error, attempted)"));
+        assert!(run_loop.contains("let attempted ="));
+        assert!(run_loop.contains("!local.v22_context_unsent(&entry.delivery.attempt_id)"));
+    }
+
+    #[tokio::test]
+    async fn a_send_that_fails_before_the_execute_exchange_leaves_the_delivery_unsent() {
+        let files = ContextFiles::new();
+        let app = files.app(FakeApp::default());
+        let profile = |feedback: Option<&str>| crate::tomverse_api::V22ExecutionProfile {
+            model_id: "claude-opus-5-5".into(), role: "implement".into(), budget_microusd: 1_000_000,
+            base_sha: None, grade_guard: false, execution_grade: None, review_author: None,
+            review_author_vendor: None, review_scope: None,
+            review_feedback_job_id: feedback.map(str::to_owned), review_avoid_vendors: None,
+            read_only_retry: None };
+        let local_with = |socket: &str| {
+            let mut local = HttpLocal { client: reqwest::Client::new(),
+                base: "http://127.0.0.1:1".into(), v22_socket: Some(socket.into()),
+                api: app.api(),
+                contexts: V22ContextStaging::new(Arc::new(tokio::sync::Notify::new())) };
+            // The files are staged; the execute is still to go.
+            local.contexts.slots.insert(ATT.to_owned(), V22ContextSlot {
+                handle: None, end: Some(V22ContextEnd::Staged), sent: false });
+            local
+        };
+        let mut delivery = context_delivery(files.parts());
+        let instance = "00000000-0000-4000-8000-000000000001";
+
+        // A delivery the execute cannot be built from fails before the exchange:
+        // the delivery is still unsent, and the loop settles it instead of halting.
+        delivery.v22_execution = Some(profile(Some("job-1")));
+        let mut local = local_with("/run/amux/v22.sock");
+        let error = local.send_v22(&delivery, instance, 3).await.unwrap_err();
+        assert!(local.v22_context_unsent(ATT));
+        assert_eq!(classify_v22_send_failure(&error, !local.v22_context_unsent(ATT)),
+            V22SendFailure::Prepare);
+
+        // An error from the exchange itself comes after the delivery was marked sent:
+        // it is read back, and the delivery is never sent twice.
+        delivery.v22_execution = Some(profile(None));
+        let mut local = local_with("relative/socket");
+        let error = local.send_v22(&delivery, instance, 3).await.unwrap_err();
+        assert!(!local.v22_context_unsent(ATT));
+        assert_eq!(classify_v22_send_failure(&error, !local.v22_context_unsent(ATT)),
+            V22SendFailure::Unknown);
     }
 
     #[tokio::test]
