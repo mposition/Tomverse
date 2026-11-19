@@ -63,15 +63,20 @@ const STRICT_TOOL_PROVIDERS = new Set(["openai", "mistral", "moonshot"]);
 const IMAGE_DETAIL_PROVIDERS = new Set(["openai"]);
 
 const textContent = z.union([z.string(), z.array(textPart)]);
+// A call's `index` is its position in the stream that delivered it; Cursor
+// echoes it back with the history. It carries nothing the conversion needs.
+const toolCallIndex = z.number().int().nonnegative().optional();
 const toolCall = z.discriminatedUnion("type", [
     z.strictObject({
         id: z.string().min(1).max(200),
+        index: toolCallIndex,
         type: z.literal("function"),
         function: z.strictObject({ name: z.string().min(1), arguments: z.string() }),
     }),
     // A custom (free-form input) tool's call, as a client echoes it back.
     z.strictObject({
         id: z.string().min(1).max(200),
+        index: toolCallIndex,
         type: z.literal("custom"),
         custom: z.strictObject({ name: z.string().min(1), input: z.string() }),
     }),
@@ -81,9 +86,11 @@ type ToolCallWire = z.infer<typeof toolCall>;
 export const toolCallText = (call: ToolCallWire) => (call.type === "custom" ? call.custom.input : call.function.arguments);
 
 const message = z.discriminatedUnion("role", [
-    // No `name` on any message: the providers behind this API have no
-    // participant names, so a request that relies on one is refused rather
-    // than answered as if every turn came from the same speaker.
+    // No `name` on a system, user or assistant message: the providers behind
+    // this API have no participant names, so a request that relies on one is
+    // refused rather than answered as if every turn came from the same
+    // speaker. A tool message's `name` (Cursor sends one) is the tool's name,
+    // which its tool_call_id already says; it is accepted and not used.
     z.strictObject({ role: z.literal("system"), content: textContent }),
     z.strictObject({ role: z.literal("developer"), content: textContent }),
     z.strictObject({
@@ -102,6 +109,7 @@ const message = z.discriminatedUnion("role", [
     z.strictObject({
         role: z.literal("tool"),
         tool_call_id: z.string().min(1).max(200),
+        name: z.string().max(200).optional(),
         content: textContent,
     }),
 ]);
@@ -221,7 +229,7 @@ const normalizeCustomShapes = (body: unknown) => {
     if (Array.isArray(body.messages)) {
         next.messages = body.messages.map((message) =>
             isRecord(message) && Array.isArray(message.tool_calls)
-                ? { ...message, tool_calls: message.tool_calls.map((call) => nestCustom(call, ["id"])) }
+                ? { ...message, tool_calls: message.tool_calls.map((call) => nestCustom(call, ["id", "index"])) }
                 : message
         );
     }
