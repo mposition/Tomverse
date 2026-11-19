@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import {
     PERPLEXITY_SPLIT_LIMITS,
@@ -7,7 +8,11 @@ import {
     perplexitySplitHintsFit,
     perplexitySplitQuestions,
 } from "../lib/externalImportAdapters/perplexity.ts";
-import { fetchPerplexitySplitHints, PERPLEXITY_SPLIT_ROUTE } from "../lib/perplexitySplitClient.ts";
+import {
+    askPerplexitySplitHints,
+    PERPLEXITY_SPLIT_ROUTE,
+    sameOriginPerplexitySplitSend,
+} from "../lib/perplexitySplitClient.ts";
 import {
     perplexitySplitEnabled,
     perplexitySplitRequestSchema,
@@ -144,22 +149,28 @@ test("hints that do not fit are ignored, and the lineage never depends on them",
 
 const response = (status, body) => ({ ok: status >= 200 && status < 300, status, json: async () => body });
 
-test("the client posts only the questions and returns hints that fit", async () => {
+test("the web sender posts only the questions, same-origin, and hints that fit come back", async () => {
     const calls = [];
     const hints = { questionParagraphs: [2, 0, 0], continuesAnswer: [true] };
-    const result = await fetchPerplexitySplitHints(THREAD, async (url, init) => {
-        calls.push({ url, body: JSON.parse(init.body), method: init.method });
-        return response(200, { hints });
-    });
+    const questions = perplexitySplitQuestions(THREAD);
+    const result = await askPerplexitySplitHints(
+        questions,
+        sameOriginPerplexitySplitSend(async (url, init) => {
+            calls.push({ url, body: JSON.parse(init.body), method: init.method, credentials: init.credentials });
+            return response(200, { hints });
+        })
+    );
     assert.deepEqual(result, hints);
     assert.equal(calls.length, 1);
     assert.equal(calls[0].url, PERPLEXITY_SPLIT_ROUTE);
     assert.equal(calls[0].method, "POST");
-    assert.deepEqual(calls[0].body, perplexitySplitQuestions(THREAD));
+    assert.equal(calls[0].credentials, "same-origin");
+    assert.deepEqual(calls[0].body, questions);
     assert.ok(!JSON.stringify(calls[0].body).includes("pplx-full-logo"), "the file itself is not sent");
 });
 
-test("any refusal, failure or misfit leaves the client with no hints", async () => {
+test("any refusal, failure or misfit leaves no hints", async () => {
+    const questions = perplexitySplitQuestions(THREAD);
     for (const fetchImpl of [
         async () => response(404, { code: "PERPLEXITY_SPLIT_DISABLED" }),
         async () => response(429, {}),
@@ -167,11 +178,20 @@ test("any refusal, failure or misfit leaves the client with no hints", async () 
         async () => response(200, {}),
         async () => { throw new TypeError("network"); },
     ]) {
-        assert.equal(await fetchPerplexitySplitHints(THREAD, fetchImpl), undefined);
+        assert.equal(await askPerplexitySplitHints(questions, sameOriginPerplexitySplitSend(fetchImpl)), null);
     }
-    let called = false;
-    await fetchPerplexitySplitHints(`${LOGO}\n\n# q\n\n\`\`\`\nx\n\`\`\`\n`, async () => { called = true; });
-    assert.equal(called, false, "nothing to ask, nothing sent");
+    // Any other sender (the iOS transport) goes through the same fit check.
+    assert.equal(await askPerplexitySplitHints(questions, async () => ({ hints: { questionParagraphs: [9, 0, 0], continuesAnswer: [true] } })), null);
+    assert.deepEqual(
+        await askPerplexitySplitHints(questions, async () => ({ hints: { questionParagraphs: [0, 0, 0], continuesAnswer: [false] } })),
+        { questionParagraphs: [0, 0, 0], continuesAnswer: [false] }
+    );
+});
+
+test("the import worker never calls the network itself", () => {
+    const worker = readFileSync(new URL("../lib/workers/externalImportWorker.ts", import.meta.url), "utf8");
+    assert.ok(!/\bfetch\s*\(/.test(worker), "the page asks, with its own credentials");
+    assert.match(worker, /type: "split_questions"/);
 });
 
 /* ------------------------------------------------------------ server - */

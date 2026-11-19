@@ -185,6 +185,7 @@ export async function requestPerplexitySplitHints(
         Number.isSafeInteger(inputTokens) && Number.isSafeInteger(outputTokens) &&
         (inputTokens as number) >= 0 && (outputTokens as number) >= 0;
     if (reported) await settleAndRecord(model, prices, worstCase, reservedAt, inputTokens as number, outputTokens as number, deps);
+    else console.warn(JSON.stringify({ event: "perplexity_split_usage_missing", provider: model.provider, modelId: model.id, heldMicroUsd: worstCase }));
 
     let output: unknown;
     try {

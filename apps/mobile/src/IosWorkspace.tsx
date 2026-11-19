@@ -8,6 +8,7 @@ import { Sheet } from "./Sheet";
 import type { ChatTransport, AssistantSummary, MemoryPreferences } from "./chatTransport";
 import type { AssistantDetail, AssistantEntry, AssistantInput, ExternalDetail, ExternalSnapshot, IosPanel, KnowledgeListing, KnowledgeFile, WorkspaceFeatures } from "./iosWorkspaceContract";
 import type { WorkerResponse } from "../../../lib/workers/externalImportWorker";
+import { askPerplexitySplitHints } from "../../../lib/perplexitySplitClient";
 import type { ImportPreview } from "../../../lib/externalImportPipeline";
 import type { ParsedExternalConversation } from "../../../lib/externalImportAdapters/types";
 import { EXTERNAL_IMPORT_PROVIDERS } from "../../../lib/externalImportProviders";
@@ -126,6 +127,7 @@ export function IosWorkspacePanel({ entry, language, transport, imageEnabled, on
     const task = new Worker(new URL("../../../lib/workers/externalImportWorker.ts", import.meta.url), { type: "module" }); worker.current = task;
     task.onmessage = (event: MessageEvent<WorkerResponse>) => {
       if (!live.current || worker.current !== task) return;
+      if (event.data.type === "split_questions") { void askPerplexitySplitHints(event.data.questions, questions => workspace!.perplexitySplit(questions)).then(hints => { if (worker.current === task) task.postMessage({ type: "split_hints", hints }); }); return; }
       if (event.data.type === "preview") { setPreview(event.data.preview); setParsed(event.data.conversations); setProvider(event.data.preview.provider); setBusy(false); task.terminate(); }
       if (event.data.type === "error" || event.data.type === "cancelled") { setError(c.failedParse); setBusy(false); task.terminate(); }
     };

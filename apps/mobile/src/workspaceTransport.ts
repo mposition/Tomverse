@@ -3,6 +3,7 @@ import type { MobileCapabilities } from "./chatTransport";
 import { buildBatchPayloads } from "../../../lib/externalImportPipeline";
 import { EXTERNAL_IMPORT_PARSER_VERSION } from "../../../lib/externalImportAdapters";
 import { externalImportSelectionDigest } from "../../../lib/externalImportSelectionDigest";
+import { PERPLEXITY_SPLIT_ROUTE } from "../../../lib/perplexitySplitClient";
 
 type Request = <T>(path: string, init?: RequestInit) => Promise<T>;
 const json = (body: unknown, method = "POST"): RequestInit => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -47,6 +48,7 @@ export function createWorkspaceTransport(request: Request, capabilities: () => P
     importCapacity: async () => { await requireFeature("externalImport"); return request("/api/imports/external/capacity", { cache: "no-store" }); },
     imports: async (offset = 0) => { await requireFeature("externalImport"); return request(`/api/external-conversations?offset=${offset}&limit=50`, { cache: "no-store" }); },
     source: async id => { await requireFeature("externalImport"); return request(`/api/external-conversations/${encodeURIComponent(id)}`, { cache: "no-store" }); },
+    perplexitySplit: async questions => { await requireFeature("externalImport"); return request(PERPLEXITY_SPLIT_ROUTE, json(questions)); },
     importText: async (provider, selected) => {
       await requireFeature("externalImport");
       const payloads = buildBatchPayloads(selected);
