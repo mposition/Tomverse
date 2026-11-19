@@ -419,6 +419,7 @@ pullChangeDigest({ mergeBaseSha, headSha, headTreeSha }) =
 ## 9. 범위 밖
 
 - 내려가는 방향(재개 때 이전 patch 32 MiB, DM workspace 증거 64 MiB)은 10절에서 같은 조각 기법으로 없앴다(2026-11-19).
+- sidecar에 남았던 두 값도 운영자 결정(2026-11-19)으로 없앴다. 읽기 역할이 checkout에 남긴 diff는 크기와 관계없이 보고에 그대로 싣는다(`READ_ROLE_DIFF_INLINE_MAX_BYTES` 4 MiB 제거, 보고는 조각으로 올라간다). 문자열 하나로 읽을 수 없는 diff(V8 한계)만 ref와 파일 이름으로 가리킨다. transcript 파일이 없는 실행은 출력을 받은 조각 그대로 메모리에 두고 합치지 않고 읽는다(32 MiB에서 CLI를 멈추던 값 제거). 출력 한도는 위험을 받아들인 read-only 재시도의 서명된 실행에만 남는다.
 - 후보 재구성은 바뀐 파일마다 GitHub blob을 읽으므로 아주 큰 patch는 GitHub API 속도 한도(외부)에 걸릴 수 있다.
 
 ## 10. 내려가는 방향의 조각 전송 (2026-11-19)
