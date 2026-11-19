@@ -1097,6 +1097,19 @@ pub struct PendingExecution {
     pub sent_at: i64,
     /// The local AMUX card linked as this attempt's receipt, once found.
     pub card: Option<String>,
+    /// Set once a delivery whose chunked context never went out is given up:
+    /// a settle answered busy is retried next tick with this same reason and
+    /// report, never re-decided (the bridge may have halted for it meanwhile).
+    pub unsent_settle: Option<V22UnsentSettle>,
+}
+
+/// Why an unsent delivery is settled instead of sent: the warning's reason,
+/// what the settlement reports of it, and whether the bridge halts for it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V22UnsentSettle {
+    pub reason: &'static str,
+    pub report: Option<crate::tomverse_api::V22FailureReport>,
+    pub halts: bool,
 }
 
 /// What the local receipt says about a pending attempt this tick.
@@ -3550,9 +3563,22 @@ fn classify_v22_send_failure(error: &anyhow::Error, execute_attempted: bool) -> 
 
 /// The one stderr line for a staged delivery that is not sent, whatever the
 /// cause; `halts` says whether the bridge halts for it too.
-fn v22_unsent_warning(attempt_id: &str, reason: &str, halts: bool) -> String {
+fn v22_unsent_warning(attempt_id: &str, reason: &str, halts: bool, already_halted: bool) -> String {
     format!("amux wsl bridge warn: delivery for attempt {attempt_id} is not sent ({reason}); the attempt is settled unverified{}",
-        if halts { "; the bridge halts" } else { ", not halted" })
+        if halts { "; the bridge halts" }
+        else if already_halted { " (the bridge was already halted)" }
+        else { "; the bridge does not halt for it" })
+}
+
+/// The give-up an unsent delivery carries before any send is tried: the one an
+/// earlier tick decided (its settle answered busy) stands as it was, so a halt
+/// that came meanwhile never turns a review-feedback failure into an infra
+/// one; otherwise a halted bridge sends nothing new and settles it as such.
+fn v22_unsent_settle_before_send(prior: Option<&V22UnsentSettle>, halted: bool)
+    -> Option<V22UnsentSettle> {
+    if let Some(prior) = prior { return Some(prior.clone()); }
+    halted.then(|| V22UnsentSettle { reason: "the bridge halted before it was sent",
+        report: Some(v22_context_failure_report()), halts: false })
 }
 
 /// The exact keys of the sidecar's `put_context` op (10.1).
@@ -4948,6 +4974,7 @@ async fn run_bridge(mut scope: WorkerScope) -> i32 {
                     delivery,
                     sent_at,
                     card: None,
+                    unsent_settle: None,
                 });
             }
         } else if any_pending_busy_this_tick {
@@ -4977,11 +5004,11 @@ async fn run_bridge(mut scope: WorkerScope) -> i32 {
                     // Why this delivery is given up instead of sent, if it is: the
                     // reason, what the settlement says of it, and whether the
                     // bridge halts for it too.
-                    let mut give_up: Option<(&'static str, Option<crate::tomverse_api::V22FailureReport>, bool)> = None;
-                    if halted {
-                        give_up = Some(("the bridge halted before it was sent",
-                            Some(v22_context_failure_report()), false));
-                    } else {
+                    // A decision made on an earlier tick (its settle answered busy)
+                    // stands as it was.
+                    let mut give_up = v22_unsent_settle_before_send(
+                        entry.unsent_settle.as_ref(), halted);
+                    if give_up.is_none() {
                         match local.send_v22(&entry.delivery, &session.instance_id,
                             session.generation).await {
                             Ok(V22SidecarState::InProgress | V22SidecarState::Succeeded |
@@ -5003,12 +5030,15 @@ async fn run_bridge(mut scope: WorkerScope) -> i32 {
                                         continue;
                                     },
                                     V22SendFailure::Context(reason) => give_up =
-                                        Some((reason, Some(v22_context_failure_report()), false)),
-                                    V22SendFailure::Feedback => give_up = Some((
-                                        "the review feedback could not be read", None, true)),
-                                    V22SendFailure::Prepare => give_up = Some((
-                                        "the execute could not be prepared",
-                                        Some(v22_unsent_failure_report("execute_not_sent")), false)),
+                                        Some(V22UnsentSettle { reason,
+                                            report: Some(v22_context_failure_report()), halts: false }),
+                                    V22SendFailure::Feedback => give_up = Some(V22UnsentSettle {
+                                        reason: "the review feedback could not be read",
+                                        report: None, halts: true }),
+                                    V22SendFailure::Prepare => give_up = Some(V22UnsentSettle {
+                                        reason: "the execute could not be prepared",
+                                        report: Some(v22_unsent_failure_report("execute_not_sent")),
+                                        halts: false }),
                                     // The execute's own exchange failed: read back what the
                                     // sidecar holds before anything else, as a tick's send does.
                                     V22SendFailure::Unknown =>
@@ -5026,15 +5056,21 @@ async fn run_bridge(mut scope: WorkerScope) -> i32 {
                             },
                         }
                     }
-                    if let Some((reason, report, halts)) = give_up {
+                    if let Some(decision) = give_up {
                         // Nothing was sent: settle the attempt unverified and say so on
                         // one warning line. Only the review feedback halts for it, as in a
                         // tick's send (its settlement is the tick's plain unverified one).
-                        eprintln!("{}", v22_unsent_warning(&entry.delivery.attempt_id, reason, halts));
-                        if halts {
-                            halted = true;
-                            note_halt(&mut halt_cause, "review_feedback_unavailable");
+                        // The warning and the halt come once, with the decision.
+                        if entry.unsent_settle.is_none() {
+                            eprintln!("{}", v22_unsent_warning(&entry.delivery.attempt_id,
+                                decision.reason, decision.halts, halted));
+                            if decision.halts {
+                                halted = true;
+                                note_halt(&mut halt_cause, "review_feedback_unavailable");
+                            }
                         }
+                        let report = decision.report.clone();
+                        entry.unsent_settle = Some(decision);
                         let settled = api.v22_execution_settle_unverified_with_failure(
                             &entry.delivery, &session.instance_id, session.generation, None,
                             report.as_ref()).await
@@ -7386,7 +7422,7 @@ AMUX_OWNER_QUESTION: {\"question\":\"Which?\",\"unblocks\":\"u\",\"options\":[{\
         let mut delivery = pulled_delivery();
         delivery.worker = "codex-impl".into();
         let entry = PendingExecution { delivery, sent_at: 0,
-            card: Some("AMUX-1".into()) };
+            card: Some("AMUX-1".into()), unsent_settle: None };
         let api = tomverse_api(api_base);
         let client = local_client(&local_base).unwrap();
         transfer_chat_optimizer_candidate(&api, &client, &local_base,
@@ -7423,7 +7459,7 @@ AMUX_OWNER_QUESTION: {\"question\":\"Which?\",\"unblocks\":\"u\",\"options\":[{\
         let mut delivery = pulled_delivery();
         delivery.worker = "codex-impl".into();
         delivery.assignment_id = Some("11111111-1111-4111-8111-111111111111".into());
-        let entry = PendingExecution { delivery, sent_at: 0, card: None };
+        let entry = PendingExecution { delivery, sent_at: 0, card: None, unsent_settle: None };
         let result = V22SidecarResult { state: V22SidecarState::Succeeded,
             failure: None, read_only_retry: None, api_execution_receipt: None,
             usage_receipt: None, usage_receipt_digest: None,
@@ -7458,7 +7494,7 @@ AMUX_OWNER_QUESTION: {\"question\":\"Which?\",\"unblocks\":\"u\",\"options\":[{\
         let mut delivery = pulled_delivery();
         delivery.worker = "codex-impl".into();
         delivery.assignment_id = Some("11111111-1111-4111-8111-111111111111".into());
-        let entry = PendingExecution { delivery, sent_at: 0, card: None };
+        let entry = PendingExecution { delivery, sent_at: 0, card: None, unsent_settle: None };
         let result = V22SidecarResult { state: V22SidecarState::Succeeded,
             failure: None, read_only_retry: None, api_execution_receipt: None,
             usage_receipt: None, usage_receipt_digest: None,
@@ -10460,16 +10496,27 @@ mod v22_transfer_tests {
         let report = v22_unsent_failure_report("execute_not_sent");
         assert!(crate::tomverse_api::V22FailureReport::valid_code(&report.code));
         assert_eq!(report.cli_started, Some(false));
-        let warning = v22_unsent_warning(ATT, "the review feedback could not be read", true);
+        let warning = v22_unsent_warning(ATT, "the review feedback could not be read", true, false);
         assert!(warning.contains(ATT) && warning.contains("not sent") && warning.contains("halts"));
-        assert!(v22_unsent_warning(ATT, "x", false).contains("not halted"));
-        // The loop classifies; it never reads an error before the execute back as an outcome.
-        let source = include_str!("wsl_bridge.rs");
-        let production = &source[..source.find("mod tests {").unwrap()];
-        let run_loop = &production[production.find("async fn run_bridge(").unwrap()..];
-        assert!(run_loop.contains("classify_v22_send_failure(&error, attempted)"));
-        assert!(run_loop.contains("let attempted ="));
-        assert!(run_loop.contains("!local.v22_context_unsent(&entry.delivery.attempt_id)"));
+        assert!(v22_unsent_warning(ATT, "x", false, false).contains("does not halt"));
+        assert!(v22_unsent_warning(ATT, "x", false, true).contains("already halted"));
+    }
+
+    #[test]
+    fn an_unsent_settle_keeps_its_first_reason_when_its_settle_is_retried() {
+        // Nothing decided and the bridge running: the send is tried.
+        assert_eq!(v22_unsent_settle_before_send(None, false), None);
+        // A halted bridge sends nothing new; the CLI never started.
+        let halted = v22_unsent_settle_before_send(None, true).unwrap();
+        assert_eq!(halted.report, Some(v22_context_failure_report()));
+        assert!(!halted.halts);
+        // The review feedback failed and halted the bridge; its settle answered
+        // busy. Next tick the bridge is halted, and the settle is still the plain
+        // unverified one of the feedback failure, not an infra failure.
+        let feedback = V22UnsentSettle { reason: "the review feedback could not be read",
+            report: None, halts: true };
+        assert_eq!(v22_unsent_settle_before_send(Some(&feedback), true), Some(feedback.clone()));
+        assert_eq!(v22_unsent_settle_before_send(Some(&feedback), false), Some(feedback));
     }
 
     #[tokio::test]

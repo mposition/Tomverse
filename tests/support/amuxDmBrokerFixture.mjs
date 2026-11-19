@@ -104,6 +104,11 @@ export const bridgeCallParts = (path, message, files, options = {}) =>
           }, options.readTimeoutMs ?? 60_000);
           const settle = () => {
             const newline = pending.indexOf(10);
+            if (newline === -1 && pending.length > DM_RESULT_LINE_MAX_BYTES) {
+              clearTimeout(timer);
+              wake = null;
+              return done({ ok: false, error: "too_large" });
+            }
             if (newline === -1 && !closed) return;
             clearTimeout(timer);
             wake = null;
