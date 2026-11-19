@@ -2391,6 +2391,22 @@ test("the quota card shows each reviewer's quota as the review server read it, a
   assert.ok(silent.rows.every((row) => row.status === "waiting"));
   assert.equal(silent.rows[0].amount, "62% 남음");
   assert.equal(silent.note, "10-09 10:58 AEST 기준 · 이후 보고 없음");
+  // One agy login, one lane per model: a spent Argon week is that lane's row
+  // only, never the reading for Antigravity as a whole (owner, 2026-11-19).
+  const agyLanes = [
+    { id: "antigravity-argon", vendor: "google", enabled: true, running: 0, maxConcurrent: 1, quota: { state: "exhausted", remaining: 0, unit: "percent" } },
+    { id: "antigravity-hydrogen", vendor: "google", enabled: true, running: 0, maxConcurrent: 1, quota: { state: "available", remaining: 98.4, unit: "percent" } },
+    { id: "antigravity-opus", vendor: "anthropic", enabled: true, running: 0, maxConcurrent: 1, quota: { state: "available", remaining: 100, unit: "percent" } },
+  ];
+  assert.equal(reviewStatusSnapshotSchema.safeParse(reviewSnapshot({ providers: [...quotaProviders, ...agyLanes] })).success, true);
+  assert.deepEqual(
+    reviewQuotaView(state(agyLanes), copy).rows.map((row) => [row.id, row.status, row.amount]),
+    [
+      ["antigravity-argon", "attention", "0% 남음"],
+      ["antigravity-hydrogen", "done", "98% 남음"],
+      ["antigravity-opus", "done", "100% 남음"],
+    ]
+  );
   // No quota field at all: the card says the server needs the update.
   assert.deepEqual(reviewQuotaView(state(reviewSnapshot().providers), copy), { rows: [], note: copy.notSent });
   assert.deepEqual(reviewQuotaView({ kind: "not_reporting" }, copy), { rows: [], note: copy.notReporting });
