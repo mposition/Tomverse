@@ -158,6 +158,22 @@ test("an answer's own rule and level-one heading stay in the answer when its cit
     assert.ok(answer.endsWith("Sources:\n[1] https://example.com/a\n[2] https://example.com/b"));
 });
 
+test("a cited answer split twice by rules and headings of its own comes back whole", () => {
+    const conversation = parse(
+        [
+            LOGO, "", "# plan a trip", "",
+            "Day one.[^1_1]", "", "---", "", "# Day two", "", "Museums.", "", "---", "", "# Day three", "",
+            "Beach.[^1_2]", "", "[^1_1]: https://example.com/1", "", "[^1_2]: https://example.com/2", "",
+            "---", "", "# budget?", "", "Modest.[^2_1]", "", "[^2_1]: https://example.com/b", "",
+        ].join("\n")
+    );
+    assert.deepEqual(
+        conversation.messages.map((m) => [m.role, m.content.split("\n")[0]]),
+        [["user", "plan a trip"], ["assistant", "Day one.[1]"], ["user", "budget?"], ["assistant", "Modest.[1]"]]
+    );
+    assert.match(conversation.messages[1].content, /# Day two\n\nMuseums\.\n\n---\n\n# Day three/);
+});
+
 test("a follow-up quoting the previous answer's marks stays its own turn", () => {
     const conversation = parse(
         `${LOGO}\n\n# first\n\nOne.[^1_1]\n\n[^1_1]: https://example.com/1\n\n---\n\n# why does [^1_1] say that?\n\nIt is a guess.\n`

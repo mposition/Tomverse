@@ -190,17 +190,23 @@ function splitTurns(text: string): Turn[] {
     for (const candidate of candidateTurns(lines)) {
         const previous = turns[turns.length - 1];
         const defined = definedTurns(candidate);
-        if (
-            previous &&
-            !previous.defines &&
-            defined.length > 0 &&
-            defined.every((number) => number === previous.number)
-        ) {
-            // The sources defined here are the previous turn's own, and it
-            // had none yet: this is the rest of that answer, split at a rule
-            // and heading of its own.
-            previous.body.push(candidate.heading, ...candidate.body);
-            previous.defines = true;
+        let owner = -1;
+        if (defined.length > 0 && defined.every((number) => number === defined[0])) {
+            // Searched from the end; the mobile build's lib has no findLastIndex.
+            for (let index = turns.length - 1; index >= 0 && owner < 0; index -= 1) {
+                if (turns[index].number === defined[0]) owner = index;
+            }
+        }
+        if (owner >= 0 && turns.slice(owner).every((turn) => !turn.defines)) {
+            // The sources defined here belong to an earlier turn that has
+            // defined none yet, and nothing since has: everything from that
+            // turn on is one answer, split at rules and headings of its own.
+            const merged = turns[owner];
+            for (const fragment of [...turns.slice(owner + 1), candidate]) {
+                merged.body.push(fragment.heading, ...fragment.body);
+            }
+            turns.length = owner + 1;
+            merged.defines = true;
             continue;
         }
         turns.push({
