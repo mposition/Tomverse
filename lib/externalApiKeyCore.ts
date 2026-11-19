@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomInt } from "node:crypto";
 
 /**
  * External inference API keys: format, digest and input rules.
@@ -35,10 +35,10 @@ export const digestExternalApiKey = (key: string) =>
 export const generateExternalApiKey = (
     random: (size: number) => Buffer = randomBytes
 ) => {
-    const prefixBytes = random(8);
+    // randomInt draws each character uniformly; a byte modulo 36 would not.
     let prefixBody = "";
-    for (const byte of prefixBytes) {
-        prefixBody += PREFIX_ALPHABET[byte % PREFIX_ALPHABET.length];
+    for (let i = 0; i < 8; i += 1) {
+        prefixBody += PREFIX_ALPHABET[randomInt(PREFIX_ALPHABET.length)];
     }
     const keyPrefix = `tvk_${prefixBody}`;
     const secret = random(32).toString("base64url");

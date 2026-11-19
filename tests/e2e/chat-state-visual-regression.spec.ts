@@ -1,3 +1,4 @@
+import { writeFile } from "node:fs/promises";
 import { expect, test, type Page } from "@playwright/test";
 import {
   createQaPdfBuffer,
@@ -847,7 +848,8 @@ test.describe("Deep Research state", () => {
 // ===========================================================================
 const actionMenuTrigger = (page: Page) => page.getByTestId("composer-tools-button");
 
-async function attachFromComputer(page: Page, file: { name: string; mimeType: string; buffer: Buffer }) {
+// A path is for files past Playwright's 50 MB in-memory buffer limit.
+async function attachFromComputer(page: Page, file: string | { name: string; mimeType: string; buffer: Buffer }) {
   await actionMenuTrigger(page).click();
   // Two steps now: the root menu asks *whether* to attach, and the source view
   // asks where from. The chooser opens on the second click, so the wait is armed
@@ -1159,10 +1161,13 @@ test.describe("File attachment states", () => {
     await expect(toast).toBeVisible();
   });
 
-  test("oversized file is rejected before upload starts", async ({ page }) => {
+  test("oversized file is rejected before upload starts", async ({ page }, testInfo) => {
     await enterConversation(page, { theme: "light", viewport: DESKTOP_VIEWPORT });
-    const oversized = Buffer.alloc(50 * 1024 * 1024 + 1, 1);
-    await attachFromComputer(page, { name: "qa-huge.png", mimeType: "image/png", buffer: oversized });
+    // One byte past the 50 MB per-file limit is also past Playwright's buffer
+    // limit, so the file goes through disk.
+    const oversized = testInfo.outputPath("qa-huge.png");
+    await writeFile(oversized, Buffer.alloc(50 * 1024 * 1024 + 1, 1));
+    await attachFromComputer(page, oversized);
     const toast = page.getByRole("alert").filter({ hasText: "각 파일은 50MB 이하여야 합니다." });
     await expect(toast).toBeVisible();
   });
