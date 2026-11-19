@@ -237,6 +237,53 @@ test("external inference API over the real shared credit ledger", { skip: !datab
         assert.equal((await reservationsFor(userId)).length, 0);
     });
 
+    await t.test("paid plans only: Free cannot make a key, and a key made on a paid plan stops when the account is Free", async () => {
+        process.env.EXTERNAL_API_READS_PER_MINUTE = "1000";
+        const { GET: modelsRoute } = await import(mod("app/api/v1/models/route.ts"));
+        const { GET: usageRoute } = await import(mod("app/api/v1/usage/route.ts"));
+        const { GET: statusRoute } = await import(mod("app/api/v1/requests/status/route.ts"));
+        const bearer = (key) => ({ headers: { authorization: `Bearer ${key}` } });
+        const reads = (key) => [
+            modelsRoute(new Request("http://localhost/api/v1/models", bearer(key))),
+            usageRoute(new Request("http://localhost/api/v1/usage", bearer(key))),
+            statusRoute(new Request("http://localhost/api/v1/requests/status?request_id=req_x", bearer(key))),
+        ];
+        // `*` opens the API to every account, but still only to paid ones.
+        allow("*");
+        const free = await newUser("Free");
+        await assert.rejects(issueKey(free), (error) => error.status === 403 && error.code === "PLAN_NOT_ELIGIBLE");
+        assert.equal(await db.externalApiKey.count({ where: { userId: free } }), 0, "no key row");
+
+        const userId = await newUser("Pro");
+        const { key } = await issueKey(userId);
+        assert.equal((await call(key, body())).status, 200);
+        for (const response of await Promise.all(reads(key))) assert.notEqual(response.status, 403);
+
+        await db.user.update({ where: { id: userId }, data: { plan: "Free" } });
+        const before = dispatches;
+        const held = (await reservationsFor(userId)).length;
+        const refused = await call(key, body());
+        assert.equal(refused.status, 403);
+        const refusal = await refused.json();
+        assert.equal(refusal.error.code, "plan_not_eligible");
+        assert.equal(refusal.error.message, "The Tomverse API needs a paid plan.");
+        for (const response of await Promise.all(reads(key))) {
+            assert.equal(response.status, 403);
+            assert.equal((await response.json()).error.code, "plan_not_eligible");
+        }
+        assert.equal(dispatches, before, "nothing dispatched");
+        assert.equal((await reservationsFor(userId)).length, held, "nothing held");
+        // The key itself is untouched: it can still be listed and revoked.
+        const [summary] = await keys.listExternalApiKeys(userId);
+        assert.equal(summary.state, "active");
+
+        // Read per request: back on a paid plan, the same key works again.
+        await db.user.update({ where: { id: userId }, data: { plan: "Max" } });
+        assert.equal((await call(key, body())).status, 200);
+        await keys.revokeExternalApiKey({ userId, keyId: summary.id }, { session: sessionFor(userId), request: auditRequest() });
+        allow();
+    });
+
     await t.test("text completion: one dispatch, one settled reservation, linked receipt, no conversation", async () => {
         const userId = await newUser();
         allow(userId);
@@ -885,7 +932,7 @@ test("external inference API over the real shared credit ledger", { skip: !datab
     });
 
     await t.test("web and API requests draw on one balance and never over-reserve it", async () => {
-        const userId = await newUser("Free");
+        const userId = await newUser();
         allow(userId);
         const { key } = await issueKey(userId);
         const security = await import(mod("lib/chatSecurity.ts"));
@@ -899,7 +946,10 @@ test("external inference API over the real shared credit ledger", { skip: !datab
         const savedMinute = [process.env.CHAT_USER_PER_MINUTE, process.env.CHAT_IP_PER_MINUTE];
         process.env.CHAT_USER_PER_MINUTE = "1000";
         process.env.CHAT_IP_PER_MINUTE = "1000";
-        assert.ok(limit > 0 && limit < 200, "a small, finite Free allowance to exhaust");
+        // The API is paid plans only, and a paid allowance is too large to use
+        // up request by request: web holds first take all but a small remainder.
+        const remainder = 30;
+        assert.ok(limit > remainder, "a finite allowance to exhaust");
         // The web side: Chat's own admission, held and never settled, so every
         // credit it takes stays committed while the API competes for the rest.
         const web = async () => {
@@ -921,6 +971,7 @@ test("external inference API over the real shared credit ledger", { skip: !datab
         };
         const committed = async () =>
             (await reservationsFor(userId)).reduce((total, row) => total + (row.status === "reserved" ? row.reservedCredits : row.settledCredits), 0);
+        for (let i = 0; i < limit - remainder; i += 1) assert.equal(await web(), "ok");
         await Promise.all(Array.from({ length: 24 }, (_, i) => (i % 2 ? web() : api())));
         assert.ok((await committed()) <= limit);
         let refusalsInARow = 0;
@@ -934,7 +985,8 @@ test("external inference API over the real shared credit ledger", { skip: !datab
             }
         }
         const total = await committed();
-        const perRequest = (await reservationsFor(userId))[0].reservedCredits;
+        // The prefill rows are one-credit web holds; the step to compare is an API request.
+        const perRequest = (await reservationsFor(userId)).find((row) => row.source === "external_api").reservedCredits;
         const diagnosis = JSON.stringify({ total, limit, perRequest, lastRefusal, rows: (await reservationsFor(userId)).length });
         assert.ok(total <= limit, diagnosis);
         assert.ok(limit - total < perRequest, `the allowance was used up, not stranded: ${diagnosis}`);
@@ -970,7 +1022,7 @@ test("external inference API over the real shared credit ledger", { skip: !datab
     });
 
     await t.test("a twin refused by the shared allowance its original just used up gets the original's receipt", async () => {
-        const userId = await newUser("Free");
+        const userId = await newUser();
         allow(userId);
         const { key } = await issueKey(userId);
         const security = await import(mod("lib/chatSecurity.ts"));

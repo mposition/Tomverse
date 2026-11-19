@@ -208,6 +208,29 @@ test("native protocols over the real shared credit ledger", { skip: !databaseUrl
         assert.equal((await reservationsFor(userId)).length, 0);
     });
 
+    await t.test("paid plans only: a key made on a paid plan is refused on every native route once the account is Free", async () => {
+        const { GET: anthropicModels } = await import(mod("app/api/anthropic/v1/models/route.ts"));
+        const userId = await newUser();
+        allow("*");
+        const { key } = await issueKey(userId);
+        await db.user.update({ where: { id: userId }, data: { plan: "Free" } });
+        const claudeRefusal = await claude(key, claudeBody());
+        assert.equal(claudeRefusal.status, 403);
+        const claudeJson = await claudeRefusal.json();
+        assert.equal(claudeJson.type, "error", "Anthropic-shaped error");
+        assert.equal(claudeJson.tomverse.code, "plan_not_eligible");
+        const viaXApiKey = await claude(null, claudeBody(), { headers: { "x-api-key": key } });
+        assert.equal(viaXApiKey.status, 403);
+        const codexRefusal = await codex(key, codexBody());
+        assert.equal(codexRefusal.status, 403);
+        assert.equal((await codexRefusal.json()).error.code, "plan_not_eligible");
+        const models = await anthropicModels(new Request("http://localhost/api/anthropic/v1/models", { headers: { "x-api-key": key, "anthropic-version": "2023-06-01" } }));
+        assert.equal(models.status, 403);
+        assert.equal(sent.length, 0, "nothing reached a provider");
+        assert.equal((await reservationsFor(userId)).length, 0, "nothing held");
+        allow();
+    });
+
     await t.test("Claude Code stream: one dispatch, body and betas passed through, cache usage settled, bytes relayed", async () => {
         const userId = await newUser();
         allow(userId);

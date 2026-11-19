@@ -12,7 +12,6 @@ import {
     type ToolSet,
 } from "ai";
 import { getActiveAiModel } from "@/lib/activeAiModel";
-import { getUserBillingPlan } from "@/lib/billingEntitlements";
 import { estimateImageInputTokens, readImageDimensions } from "@/lib/chatImageInputTokens";
 import { estimateNativeAttachmentTokens } from "@/lib/chatAttachmentTokens";
 import {
@@ -31,11 +30,8 @@ import {
 } from "@/lib/chatSecurity";
 import { atLeastOneToken, createTokenEstimateAccumulator, estimateTextTokens } from "@/lib/chatTokenEstimate";
 import { ApiSecurityError, consumeApiRateLimit, readLimitedText } from "@/lib/apiSecurity";
-import {
-    externalApiEnabled,
-    externalApiUserAllowed,
-    SMART_ADAPTIVE_MODEL_ID,
-} from "@/lib/externalApiCatalogCore";
+import { externalApiAccountAccess } from "@/lib/externalApiAccess";
+import { externalApiEnabled, SMART_ADAPTIVE_MODEL_ID } from "@/lib/externalApiCatalogCore";
 import { getRuntimeModel } from "@/lib/modelRegistry";
 import { noteSmartAdaptiveRefusal, rememberSmartAdaptiveToolCalls, routeSmartAdaptive, smartAdaptiveRouterAllowed } from "@/lib/externalApiSmartAdaptive";
 import { externalApiRunnableModels } from "@/lib/externalApiCatalog";
@@ -234,9 +230,8 @@ export async function handleChatCompletions(request: Request): Promise<Response>
     let disposeDispatch: (() => void) | null = null;
     try {
         const key = await authenticateExternalApiKey(request.headers.get("authorization"));
-        if (!externalApiUserAllowed(process.env, key.userId)) {
-            return externalApiErrorResponse(403, "The Tomverse API is not enabled for this account.", "account_not_enabled", { requestId });
-        }
+        const account = await externalApiAccountAccess(key.userId);
+        if (!account.allowed) return externalApiErrorResponse(403, account.message, account.code, { requestId });
         // An abuse guard on request rate, generous and per account: credits,
         // the key cap and concurrency are what bound what an account can use.
         await consumeApiRateLimit(request, key.userId, "external-api-completions", {
@@ -266,7 +261,7 @@ export async function handleChatCompletions(request: Request): Promise<Response>
             if (replay) return replay;
         }
 
-        const plan = await getUserBillingPlan(key.userId);
+        const { plan } = account;
         const runnable = await externalApiRunnableModels(plan.tier);
         // Smart Adaptive: Tomverse picks one of the runnable models, and the
         // response says which one answered (the `model` field and a header).

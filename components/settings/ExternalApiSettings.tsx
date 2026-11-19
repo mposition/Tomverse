@@ -46,7 +46,8 @@ type ModelSummary = ExternalApiModelCapabilities;
 type TomverseCliGuide = { install: string; powershell: string; posix: string };
 
 type Overview =
-    | { enabled: false; keys?: KeySummary[] }
+    // `plan_not_eligible`: a Free account; the API needs a paid plan.
+    | { enabled: false; reason?: "plan_not_eligible"; keys?: KeySummary[] }
     | {
           enabled: true;
           baseUrl: string;
@@ -952,9 +953,18 @@ export function ExternalApiSettings() {
             {!failed && !overview ? <p className="mt-8 text-sm text-zinc-500">{t("externalApi.loading")}</p> : null}
             {overview && !overview.enabled ? (
                 <>
-                    <p className={`${card} text-sm`} data-testid="external-api-unavailable">
-                        {t("externalApi.unavailable")}
-                    </p>
+                    {overview.reason === "plan_not_eligible" ? (
+                        <section className={card} data-testid="external-api-paid-plan">
+                            <p className="text-sm text-zinc-600 dark:text-zinc-300">{t("externalApi.paidPlanRequired")}</p>
+                            <Link href={settingsHrefForProduct(`${SETTINGS_HOME_PATH}?${SETTINGS_TAB_QUERY_PARAM}=plan`, product)} data-testid="external-api-upgrade" className={`mt-3 inline-flex ${primary}`}>
+                                {t("externalApi.paidPlanUpgrade")}
+                            </Link>
+                        </section>
+                    ) : (
+                        <p className={`${card} text-sm`} data-testid="external-api-unavailable">
+                            {t("externalApi.unavailable")}
+                        </p>
+                    )}
                     {overview.keys?.length ? (
                         // Still listed so a key issued earlier can be revoked.
                         <section className={card}>
