@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
 import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -262,7 +262,12 @@ test("Tomverse CLI over the real gateway and shared credit ledger", { skip: !dat
         journal.release();
     });
 
-    await t.test("the built CLI process, read-only, over the real gateway: exit 0 and receipts", { skip: !existsSync(resolve(root, "apps/tomverse-cli/dist/cli.js")) && "build the CLI first" }, async () => {
+    await t.test("the built CLI process, read-only, over the real gateway: exit 0 and receipts", async () => {
+        // CI has no dist/: build it here rather than skip, so this process test runs there too.
+        if (!existsSync(resolve(root, "apps/tomverse-cli/dist/cli.js"))) {
+            const built = spawnSync(process.execPath, [resolve(root, "apps/tomverse-cli/scripts/build.mjs")], { cwd: root, encoding: "utf8" });
+            assert.equal(built.status, 0, `CLI build failed: ${built.stdout}${built.stderr}`);
+        }
         const userId = await newUser();
         process.env.EXTERNAL_API_ALLOWED_USER_IDS = userId;
         const { key, summary } = await keys.createExternalApiKey({ userId, name: "process", creditCap: null, expiresAt: null }, { session: sessionFor(userId), request: audit() });

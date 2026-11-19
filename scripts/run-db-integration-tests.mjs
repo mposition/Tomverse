@@ -1149,6 +1149,17 @@ run(
     "tests/integration/external-api.db.test.mjs"],
   "Running the external API key, reservation, cap, idempotency and failure scenarios",
 );
+// The Tomverse CLI over the real external API handlers and shared ledger: one
+// reservation and receipt per step, session cost = its receipts, key cap and
+// revocation stops, and the built CLI process (built by the suite if absent).
+// Fakes only the model provider; own process for its module mocks.
+run(
+  ["--conditions=react-server", "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
+    "--test-concurrency=1",
+    "tests/integration/tomverse-cli.db.test.mjs"],
+  "Running the Tomverse CLI receipt, cost, cap, revocation and process scenarios over the real gateway",
+);
 // The native protocols (Claude Code Messages, Codex Responses) fake only the
 // one upstream module and run on the same ledger, key cap and receipts.
 run(
