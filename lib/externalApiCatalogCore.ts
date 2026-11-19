@@ -1,6 +1,6 @@
 import type { AiModel, ModelTier } from "@/lib/models";
 import { canUseModelWithPlan } from "@/lib/models";
-import { protocolsForProvider, type ExternalApiProtocol } from "@/lib/externalApiProtocols";
+import { EXTERNAL_API_PROTOCOLS, protocolsForProvider, type ExternalApiProtocol } from "@/lib/externalApiProtocols";
 
 /**
  * Which models the external API exposes, and the client configuration built
@@ -134,10 +134,46 @@ export const smartAdaptiveCapabilities = (
                   candidates.find((candidate) => candidate.id === defaultModelId)?.maxOutputTokens ??
                   Math.min(...candidates.map((candidate) => candidate.maxOutputTokens)),
               creditWeight: Math.max(...candidates.map((candidate) => candidate.creditWeight)),
-              // Routing is a Chat Completions feature: a native request keeps
-              // the model that produced its signed or encrypted state.
-              protocols: ["chat_completions"],
+              // Every protocol a candidate speaks. Chat Completions routes over
+              // all of them; a native protocol only over its own provider's
+              // models (lib/externalApiNativeSmartAdaptive.ts), so signed or
+              // encrypted state never crosses providers.
+              protocols: EXTERNAL_API_PROTOCOLS.filter((protocol) =>
+                  candidates.some((candidate) => (candidate.protocols ?? ["chat_completions"]).includes(protocol))
+              ),
           };
+
+/**
+ * The model a native Smart Adaptive request takes when the router does not
+ * pick (switch off, no answer, a conversation already under way): the
+ * catalogue default when this provider has it, otherwise the lower-median
+ * model by credits -- the middle of the line-up, not its cheapest or dearest.
+ */
+export const nativeSmartAdaptiveDefaultId = (
+    candidates: readonly Pick<ExternalApiModelCapabilities, "id" | "creditWeight">[],
+    defaultModelId?: string
+): string | null => {
+    if (candidates.length === 0) return null;
+    if (defaultModelId && candidates.some((candidate) => candidate.id === defaultModelId)) return defaultModelId;
+    const sorted = [...candidates].sort((a, b) => a.creditWeight - b.creditWeight || a.id.localeCompare(b.id));
+    return sorted[Math.floor((sorted.length - 1) / 2)].id;
+};
+
+/**
+ * Smart Adaptive as one native protocol sees it: only that provider's models.
+ * A native conversation keeps the model it started on, so a coding tool must
+ * plan for the smallest window any of them offers, not the largest; the
+ * output limit is the provider default's (the gateway clamps a larger
+ * request to the model's own).
+ */
+export const nativeSmartAdaptiveCapabilities = (
+    providerModels: readonly ExternalApiModelCapabilities[],
+    defaultModelId?: string
+): ExternalApiModelCapabilities | null => {
+    const fixed = providerModels.filter((model) => model.id !== SMART_ADAPTIVE_MODEL_ID);
+    const smart = smartAdaptiveCapabilities(fixed, nativeSmartAdaptiveDefaultId(fixed, defaultModelId) ?? undefined);
+    return smart && { ...smart, contextWindowTokens: Math.min(...fixed.map((model) => model.contextWindowTokens)) };
+};
 
 /** OpenAI-shaped `GET /models` entry. Tomverse fields sit under `tomverse`. */
 export const toOpenAiModelEntry = (model: ExternalApiModelCapabilities) => ({

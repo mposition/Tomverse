@@ -136,4 +136,16 @@ test("Smart Adaptive is offered with any model, its router call is off by defaul
     assert.equal(smart.creditWeight, 3, "the most a request can cost");
     assert.equal(smart.vision, true, "images are routed to a model that reads them");
     assert.equal(vscodeCustomEndpointConfig("https://x/api/v1", [smart])[0].models[0].name, "Smart Adaptive (Tomverse)");
+    assert.deepEqual(smart.protocols, ["chat_completions"], "candidates without native protocols: Chat Completions only");
+    const claude = { ...a, id: "c", provider: "anthropic", protocols: ["chat_completions", "anthropic_messages"] };
+    assert.deepEqual(smartAdaptiveCapabilities([a, claude]).protocols, ["chat_completions", "anthropic_messages"], "every protocol a candidate speaks");
+});
+
+test("native Smart Adaptive default: the catalogue default if the provider has it, else the lower-median model by credits", async () => {
+    const { nativeSmartAdaptiveDefaultId } = await import("../lib/externalApiCatalogCore.ts");
+    const m = (id, creditWeight) => ({ id, creditWeight });
+    assert.equal(nativeSmartAdaptiveDefaultId([]), null);
+    assert.equal(nativeSmartAdaptiveDefaultId([m("haiku", 1), m("sonnet", 6), m("opus", 12)]), "sonnet");
+    assert.equal(nativeSmartAdaptiveDefaultId([m("haiku", 1), m("sonnet", 6), m("opus", 12), m("fable", 20)]), "sonnet");
+    assert.equal(nativeSmartAdaptiveDefaultId([m("luna", 2), m("sol", 8), m("astra", 9)], "luna"), "luna");
 });

@@ -58,7 +58,21 @@ test("native protocols over the real shared credit ledger", { skip: !databaseUrl
             },
         },
     });
+    // The router (a paid call) is faked: `routerPick` is what it answers.
+    const routerCalls = [];
+    let routerPick = null;
+    mock.module(mod("lib/autoLlmRouter.ts"), {
+        namedExports: {
+            pickAutoModelWithLlm: async (input) => {
+                routerCalls.push(input);
+                return routerPick ? { modelId: routerPick, rewrite: null } : null;
+            },
+        },
+    });
     const { handleNativeGeneration, handleNativeFreeCall } = await import(mod("lib/externalApiNative.ts"));
+    const { resetNativeSmartAdaptivePins } = await import(mod("lib/externalApiNativeSmartAdaptive.ts"));
+    const { externalApiRunnableModels } = await import(mod("lib/externalApiCatalog.ts"));
+    const { nativeSmartAdaptiveDefaultId } = await import(mod("lib/externalApiCatalogCore.ts"));
     const { anthropicMessagesSpec, responsesSpec, anthropicCountTokensPath } = await import(mod("lib/externalApiNativeSpecs.ts"));
     const { prepareAnthropicMessages } = await import(mod("lib/anthropicMessagesProtocol.ts"));
     const { handleChatCompletions } = await import(mod("lib/externalApiInference.ts"));
@@ -263,7 +277,7 @@ test("native protocols over the real shared credit ledger", { skip: !databaseUrl
         assert.ok(cost[marked.id] > cost[plain.id], "the marked request holds the write premium");
     });
 
-    await t.test("Claude Code refusals before dispatch: server tool, 1h cache, other provider's model, Smart Adaptive", async () => {
+    await t.test("Claude Code refusals before dispatch: server tool, 1h cache, other provider's model", async () => {
         const userId = await newUser();
         allow(userId);
         const { key } = await issueKey(userId);
@@ -272,7 +286,6 @@ test("native protocols over the real shared credit ledger", { skip: !databaseUrl
             [claudeBody({ tools: [{ type: "web_search_20250305", name: "web_search" }] }), 400, "server_tool_unsupported"],
             [claudeBody({ system: [{ type: "text", text: "s", cache_control: { type: "ephemeral", ttl: "1h" } }] }), 400, "unsupported_cache_ttl"],
             [claudeBody({ model: "gpt-6-luna" }), 400, "model_unsupported_protocol"],
-            [claudeBody({ model: "smart-adaptive" }), 400, "model_unsupported_protocol"],
             [claudeBody({ model: "no-such-model" }), 404, "model_not_found"],
             ["{not json", 400, "invalid_json"],
         ];
@@ -555,6 +568,225 @@ test("native protocols over the real shared credit ledger", { skip: !databaseUrl
         assert.ok(admitted >= 1);
         const refused = responses.filter((response) => response.status === 429);
         assert.ok(refused.length >= 1, "the rest are refused by the key cap");
+    });
+
+    // Smart Adaptive on the native protocols: one provider's models, one pick
+    // per conversation, never a failed request when the pin is missed.
+    const providerPool = async (provider, protocol) =>
+        (await externalApiRunnableModels("Pro")).filter(
+            (entry) => entry.model.provider === provider && entry.capabilities.protocols.includes(protocol)
+        );
+    const poolDefault = (pool) =>
+        pool.find((entry) => entry.model.id === nativeSmartAdaptiveDefaultId(pool.map((e) => e.capabilities), "gpt-6-luna"));
+    const routed = (response) => [response.headers.get("x-tomverse-routed-model"), response.headers.get("x-tomverse-routed-by")];
+    const claudeTurn2 = (extra = {}) =>
+        claudeBody({
+            model: "smart-adaptive",
+            messages: [
+                { role: "user", content: [{ type: "text", text: "Fix src/sum.ts" }] },
+                {
+                    role: "assistant",
+                    content: [
+                        { type: "thinking", thinking: "look at the file", signature: "sig_bound_to_its_model" },
+                        { type: "tool_use", id: "toolu_1", name: "Edit", input: { path: "src/sum.ts" } },
+                    ],
+                },
+                { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "ok" }] },
+            ],
+            ...extra,
+        });
+
+    await t.test("Claude Code Smart Adaptive, router off: the provider default answers, credits are its own", async () => {
+        delete process.env.EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED;
+        resetNativeSmartAdaptivePins();
+        const pool = await providerPool("anthropic", "anthropic_messages");
+        assert.ok(pool.length >= 1, "an Anthropic model to route to");
+        const fallback = poolDefault(pool);
+        const userId = await newUser();
+        allow(userId);
+        const { key } = await issueKey(userId);
+        reply = ({ signal }) => streamResponse(anthropicStream(), {}, signal);
+        const callsBefore = routerCalls.length;
+        const response = await claude(key, claudeBody({ model: "smart-adaptive" }), { headers: { "x-claude-code-session-id": "sess-off" } });
+        assert.equal(response.status, 200);
+        await response.text();
+        assert.deepEqual(routed(response), [fallback.model.id, "default"]);
+        assert.equal(sent.at(-1).body.model, fallback.model.apiModel, "the provider gets its own model id");
+        assert.equal(routerCalls.length, callsBefore, "no router call with the switch off");
+        const [reservation] = await reservationsFor(userId);
+        assert.equal(reservation.status, "settled");
+        assert.equal((await receiptFor(reservation.id)).modelId, fallback.model.id, "reserved and settled as the model that answered");
+    });
+
+    await t.test("Claude Code Smart Adaptive, router on: Anthropic candidates only, one pick per session, a missed pin never fails", async () => {
+        process.env.EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED = "true";
+        resetNativeSmartAdaptivePins();
+        const pool = await providerPool("anthropic", "anthropic_messages");
+        const fallback = poolDefault(pool);
+        const other = pool.find((entry) => entry.model.id !== fallback.model.id);
+        assert.ok(other, "the fixture catalogue has two Anthropic models to route between");
+        const userId = await newUser();
+        allow(userId);
+        const { key } = await issueKey(userId);
+        reply = ({ signal }) => streamResponse(anthropicStream(), {}, signal);
+        const session = { headers: { "x-claude-code-session-id": "sess-on" } };
+        try {
+            // A router answer naming another provider's model is never taken.
+            routerPick = "gpt-6-luna";
+            const crossed = await claude(key, claudeBody({ model: "smart-adaptive" }), { headers: { "x-claude-code-session-id": "sess-cross" } });
+            await crossed.text();
+            assert.equal(crossed.status, 200);
+            assert.equal(routed(crossed)[0], fallback.model.id);
+            const crossCall = routerCalls.at(-1);
+            assert.ok(crossCall.eligibleModelIds.length >= 2);
+            assert.ok(
+                crossCall.eligibleModelIds.every((id) => pool.some((entry) => entry.model.id === id)),
+                "the router sees Anthropic models only"
+            );
+
+            routerPick = other.model.id;
+            const before = routerCalls.length;
+            const first = await claude(key, claudeBody({ model: "smart-adaptive" }), session);
+            await first.text();
+            assert.equal(first.status, 200);
+            assert.deepEqual(routed(first), [other.model.id, "router"]);
+            assert.equal(sent.at(-1).body.model, other.model.apiModel);
+            assert.equal(routerCalls.length, before + 1, "one router call, on the conversation's first request");
+
+            // Later rounds carry signed thinking and tool results: same model, no router call.
+            routerPick = fallback.model.id;
+            for (let round = 0; round < 2; round += 1) {
+                const next = await claude(key, claudeTurn2(), session);
+                await next.text();
+                assert.equal(next.status, 200);
+                assert.deepEqual(routed(next), [other.model.id, "continued"]);
+                assert.equal(sent.at(-1).body.model, other.model.apiModel);
+                assert.equal(sent.at(-1).body.messages[1].content[0].signature, "sig_bound_to_its_model", "signed thinking passed through");
+            }
+            assert.equal(routerCalls.length, before + 1, "the pick holds for the whole conversation");
+
+            // Another instance (or a restart) never saw the pin: the request
+            // still succeeds, on the provider default, without routing again.
+            resetNativeSmartAdaptivePins();
+            const missed = await claude(key, claudeTurn2(), session);
+            await missed.text();
+            assert.equal(missed.status, 200);
+            assert.deepEqual(routed(missed), [fallback.model.id, "default"]);
+            assert.equal(routerCalls.length, before + 1, "a conversation under way is never routed again");
+            const after = await claude(key, claudeTurn2(), session);
+            await after.text();
+            assert.deepEqual(routed(after), [fallback.model.id, "continued"], "and the default is pinned from there");
+
+            // The free token count reads the pin and never routes.
+            const callsBeforeCount = routerCalls.length;
+            reply = () => Response.json({ input_tokens: 42 });
+            const countRequest = new Request("http://localhost/api/anthropic/v1/messages/count_tokens?beta=true", {
+                method: "POST",
+                headers: {
+                    authorization: `Bearer ${key}`,
+                    "content-type": "application/json",
+                    "anthropic-version": "2023-06-01",
+                    "x-claude-code-session-id": "sess-on",
+                },
+                body: JSON.stringify({ model: "smart-adaptive", messages: [{ role: "user", content: "hi" }] }),
+            });
+            const counted = await handleNativeFreeCall(countRequest, anthropicMessagesSpec, {
+                upstreamPath: anthropicCountTokensPath(countRequest),
+                prepare: (body, model) => prepareAnthropicMessages(body, model, { countTokens: true }),
+            });
+            assert.equal(counted.status, 200);
+            assert.equal(sent.at(-1).body.model, fallback.model.apiModel, "the session's pinned model");
+            assert.equal(routerCalls.length, callsBeforeCount);
+
+            // Without a session id, the conversation is known by its opening.
+            resetNativeSmartAdaptivePins();
+            reply = ({ signal }) => streamResponse(anthropicStream(), {}, signal);
+            routerPick = other.model.id;
+            const opening = [{ role: "user", content: [{ type: "text", text: "Rename foo" }] }];
+            const anon = await claude(key, claudeBody({ model: "smart-adaptive", messages: opening }));
+            await anon.text();
+            assert.deepEqual(routed(anon), [other.model.id, "router"]);
+            routerPick = fallback.model.id;
+            const anonNext = await claude(
+                key,
+                claudeTurn2({
+                    messages: [
+                        ...opening,
+                        { role: "assistant", content: [{ type: "thinking", thinking: "t", signature: "s" }, { type: "text", text: "Done." }] },
+                        { role: "user", content: [{ type: "text", text: "Now bar" }] },
+                    ],
+                })
+            );
+            await anonNext.text();
+            assert.deepEqual(routed(anonNext), [other.model.id, "continued"]);
+            const reservations = await reservationsFor(userId);
+            assert.ok(reservations.every((row) => row.status === "settled"), "every request settled");
+        } finally {
+            routerPick = null;
+            delete process.env.EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED;
+        }
+    });
+
+    await t.test("Codex Smart Adaptive: OpenAI candidates only, pinned by the thread's prompt_cache_key, encrypted reasoning kept on its model", async () => {
+        process.env.EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED = "true";
+        resetNativeSmartAdaptivePins();
+        const pool = await providerPool("openai", "responses");
+        const fallback = poolDefault(pool);
+        const other = pool.find((entry) => entry.model.id !== fallback.model.id);
+        assert.ok(other, "the fixture catalogue has two OpenAI models to route between");
+        const userId = await newUser();
+        allow(userId);
+        const { key } = await issueKey(userId);
+        reply = ({ signal }) => streamResponse(responsesStream(), {}, signal);
+        // Codex 0.146 with model "smart-adaptive" (captured 2026-11-19): its
+        // generic function tools, the thread id as prompt_cache_key.
+        const firstBody = codexBody({
+            model: "smart-adaptive",
+            // Assembled, so the scanner does not read a thread id as a credential.
+            prompt_cache_key: ["thread", "fixture", "1"].join("-"),
+            input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Fix the test" }] }],
+            tools: [{ type: "function", name: "shell_command", parameters: { type: "object", properties: { command: { type: "string" } } } }],
+        });
+        try {
+            routerPick = other.model.id;
+            const before = routerCalls.length;
+            const first = await codex(key, firstBody);
+            await first.text();
+            assert.equal(first.status, 200);
+            assert.deepEqual(routed(first), [other.model.id, "router"]);
+            assert.equal(sent.at(-1).body.model, other.model.apiModel);
+            assert.ok(routerCalls.at(-1).eligibleModelIds.every((id) => pool.some((entry) => entry.model.id === id)), "OpenAI models only");
+
+            routerPick = fallback.model.id;
+            const nextBody = {
+                ...firstBody,
+                input: [
+                    ...firstBody.input,
+                    { type: "reasoning", id: "rs_1", summary: [], encrypted_content: "gAAAAABencrypted" },
+                    { type: "function_call", call_id: "c1", name: "shell_command", arguments: '{"command":"npm test"}' },
+                    { type: "function_call_output", call_id: "c1", output: "ok" },
+                ],
+            };
+            const next = await codex(key, nextBody);
+            await next.text();
+            assert.equal(next.status, 200);
+            assert.deepEqual(routed(next), [other.model.id, "continued"]);
+            assert.deepEqual(sent.at(-1).body.input, nextBody.input, "the encrypted reasoning goes back to the model that made it");
+            assert.equal(routerCalls.length, before + 1);
+
+            // A missed pin on a thread under way: the default, no router call, no failure.
+            resetNativeSmartAdaptivePins();
+            const missed = await codex(key, nextBody);
+            await missed.text();
+            assert.equal(missed.status, 200);
+            assert.deepEqual(routed(missed), [fallback.model.id, "default"]);
+            assert.equal(routerCalls.length, before + 1);
+            const [reservation] = await reservationsFor(userId);
+            assert.equal((await receiptFor(reservation.id)).modelId, other.model.id, "the receipt names the routed model");
+        } finally {
+            routerPick = null;
+            delete process.env.EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED;
+        }
     });
 
     await t.test("non-streaming Messages and the free token count", async () => {

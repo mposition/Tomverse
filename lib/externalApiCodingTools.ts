@@ -1,4 +1,10 @@
-import { KEY_PLACEHOLDER, type ExternalApiModelCapabilities } from "@/lib/externalApiCatalogCore";
+import {
+    KEY_PLACEHOLDER,
+    nativeSmartAdaptiveCapabilities,
+    SMART_ADAPTIVE_MODEL_ID,
+    type ExternalApiModelCapabilities,
+} from "@/lib/externalApiCatalogCore";
+import { DEFAULT_MODEL_ID } from "@/lib/models";
 
 /**
  * Copyable configurations for the coding tools that run their own agent on a
@@ -46,7 +52,10 @@ export const claudeCodeConfig = (
     available: readonly ExternalApiModelCapabilities[],
     apiKey: string = KEY_PLACEHOLDER
 ): ClaudeCodeConfig => {
-    const small = byCredits(available)[0] ?? main;
+    // Claude Code's background work (titles, summaries) goes to the Haiku
+    // alias: the cheapest fixed Anthropic model, never Smart Adaptive, so it
+    // makes no router call and never takes the main conversation's pin.
+    const small = byCredits(available.filter((model) => model.id !== SMART_ADAPTIVE_MODEL_ID))[0] ?? main;
     const window = Math.min(1_000_000, Math.max(100_000, plannedInputWindow(main)));
     const env: [string, string][] = [
         ["ANTHROPIC_BASE_URL", anthropicBaseUrl(openAiBaseUrl)],
@@ -91,7 +100,10 @@ export type CodexConfig = {
 /**
  * The model id Codex should send: the provider's own id when it names exactly
  * one runnable model (Codex keys its tool set -- the freeform apply_patch --
- * on it), otherwise the Tomverse id. The gateway accepts both.
+ * on it), otherwise the Tomverse id. The gateway accepts both. Smart Adaptive
+ * has no provider id: Codex 0.146 then sends its generic function tools
+ * (shell_command, update_plan, ...; no freeform tool), which every OpenAI
+ * model takes, whichever one the gateway picks (captured 2026-11-19).
  */
 export const codexModelId = (
     model: ExternalApiModelCapabilities,
@@ -152,13 +164,27 @@ export const codexConfig = (
 export const cursorConfig = (openAiBaseUrl: string, model: ExternalApiModelCapabilities, apiKey: string = KEY_PLACEHOLDER) =>
     [`OpenAI API Key: ${apiKey}`, `Override OpenAI Base URL: ${openAiBaseUrl}`, `Custom model: ${model.id}`].join("\n");
 
+/**
+ * One native protocol's models, Smart Adaptive first and scoped to that
+ * protocol's provider (nativeSmartAdaptiveCapabilities): Claude Code routes
+ * among Anthropic models, Codex among OpenAI models.
+ */
+const nativeToolModels = (models: readonly ExternalApiModelCapabilities[], protocol: "anthropic_messages" | "responses") => {
+    const fixed = models.filter((model) => model.id !== SMART_ADAPTIVE_MODEL_ID && model.protocols?.includes(protocol));
+    const smart = models.find((model) => model.id === SMART_ADAPTIVE_MODEL_ID && model.protocols?.includes(protocol));
+    // With only the Smart Adaptive entry to hand (which tools a model serves),
+    // it stands as it is.
+    const scoped = smart && (fixed.length ? nativeSmartAdaptiveCapabilities(fixed, DEFAULT_MODEL_ID) : smart);
+    return scoped ? [scoped, ...fixed] : fixed;
+};
+
 /** The models each tool can use: its protocol's, in the order offered. */
 export const codingToolModels = (models: readonly ExternalApiModelCapabilities[]) => ({
-    claudeCode: models.filter((model) => model.protocols?.includes("anthropic_messages")),
-    codex: models.filter((model) => model.protocols?.includes("responses")),
+    claudeCode: nativeToolModels(models, "anthropic_messages"),
+    codex: nativeToolModels(models, "responses"),
     // Cursor's Agent is verified with a fixed model first; Smart Adaptive is
     // offered on Chat Completions but not recommended here until verified.
-    cursor: models.filter((model) => (model.protocols?.includes("chat_completions") ?? true) && model.id !== "smart-adaptive"),
+    cursor: models.filter((model) => (model.protocols?.includes("chat_completions") ?? true) && model.id !== SMART_ADAPTIVE_MODEL_ID),
 });
 
 /**
