@@ -123,13 +123,22 @@ export const AMENDED_DOCUMENT_EVIDENCE: Readonly<
   // 2026-11-17: the provider table gains unverified rows for the image-only
   // providers fal and Black Forest Labs (enabled FLUX 3 models). Observation
   // only; not added to APPROVED_AMENDED_DIGESTS and authorizes no email.
+  // 2026-11-19: accuracy pass from the policy-page review (Tomverse-chosen
+  // helper calls, image tools, scanned-PDF OCR, Google Drive, API keys,
+  // service providers, OAIC complaint route, share links, locks). Observation
+  // only; the effective date did not move, nothing is added to
+  // APPROVED_AMENDED_DIGESTS and no email is authorized.
   "/privacy": {
     date: "2026-11-16",
-    contentSha256: "dbae6fa41ce1756146d28eea5202ffc566519dfc7f1a2fdbb47449bd46dbb3cc",
+    contentSha256: "ae9b1154eed21aeee9f8b5aea6534d930996373eab391d24f8e88a7c93967324",
   },
+  // 2026-11-19: terms gain the API-key clause, the app-store billing and
+  // non-expiring store credit sentences, and the missing zh clauses.
+  // Observation only, like the privacy entry above; its "Last updated" line
+  // did not move.
   "/terms": {
     date: "2026-11-16",
-    contentSha256: "c3dfd8bbb90a8da7f3f81c43d74b973abe205331b5d13938d64569404c456ffb",
+    contentSha256: "bac70ced1f7468914835335f877bca60e879e4186982d7d40dfee3931411ef26",
   },
 };
 

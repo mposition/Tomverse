@@ -625,11 +625,11 @@ export const infoPages = {
         },
         {
           title: "Additional credit packs",
-          body: "An additional credit pack is a one-time purchase that is separate from a subscription and its monthly credits. Additional credits expire 365 days after purchase, are not transferable, and cannot be redeemed for cash. Tomverse deducts available monthly plan credits first and then additional-credit lots in order of earliest expiry. A pack increases only the credit balance available for usage: it does not upgrade the plan or increase model access, features, daily limits, plan-specific higher-cost model limits, fair-use limits, or other safeguards.",
+          body: "An additional credit pack is a one-time purchase that is separate from a subscription and its monthly credits. Additional credits bought on the web expire 365 days after purchase; credits bought through an app store do not expire. Additional credits are not transferable and cannot be redeemed for cash. Tomverse deducts available monthly plan credits first and then additional-credit lots in order of earliest expiry. A pack increases only the credit balance available for usage: it does not upgrade the plan or increase model access, features, daily limits, plan-specific higher-cost model limits, fair-use limits, or other safeguards.",
         },
         {
           title: "Monthly and annual subscriptions; automatic renewal",
-          body: "Pro and Max are recurring subscriptions processed by Stripe. Monthly subscriptions are charged in advance and renew each month. Annual subscriptions are charged in advance for the year and renew each year. Unless you cancel before the next renewal, you authorise Stripe to charge the payment method on file for the amount and currency shown at checkout. We will give reasonable notice of a material price change where required and you may cancel before it takes effect.",
+          body: "Pro and Max are recurring subscriptions. Purchases on the web are processed by Stripe. Purchases in the Android or iOS app are processed by Google Play or the App Store, whose own screens and policies govern the price, cancellation and refunds of that purchase, and an app-store subscription is not cancelled by deleting your Tomverse account. Monthly subscriptions are charged in advance and renew each month. Annual subscriptions are charged in advance for the year and renew each year. Unless you cancel before the next renewal, you authorise Stripe, or the app store for an in-app purchase, to charge the payment method on file for the amount and currency shown at checkout. We will give reasonable notice of a material price change where required and you may cancel before it takes effect.",
         },
         {
           title: "Promotions and annual discounts",
@@ -650,6 +650,10 @@ export const infoPages = {
         {
           title: "Acceptable use and rights in content",
           body: "Do not use Tomverse to violate law, infringe rights, abuse providers, bypass limits, upload malicious material, or process content you are not entitled to use. You retain rights you hold in your input. You grant Tomverse the limited rights necessary to process that input, operate requested features, and send relevant context to the AI providers you select.",
+        },
+        {
+          title: "API keys and coding tools",
+          body: "You can create API keys in Settings to connect coding tools and other apps to Tomverse. Keep a key secret like a password: requests sent with your key are treated as use of your account and are charged to the same monthly and additional credits. Each request is charged separately, including a follow-up request that returns a tool result. A failed or empty response is not charged; if the connection drops during a response, the output already generated may be charged. You can set a credit limit and expiry for a key and revoke it at any time. Do not sell or share a key, or offer it to others as a service. We may limit request rates to prevent abuse, and the terms of the AI provider that serves a request also apply.",
         },
         {
           title: "Consumer rights, governing law, and disputes",
@@ -686,11 +690,11 @@ export const infoPages = {
         },
         {
           title: "추가 크레딧 팩",
-          body: "추가 크레딧 팩은 구독 및 구독에 포함된 월 크레딧과 분리된 일회성 구매 상품입니다. 추가 크레딧은 구매일로부터 365일 후 만료되며 양도하거나 현금으로 교환할 수 없습니다. Tomverse는 사용 가능한 월 플랜 크레딧을 먼저 차감한 뒤 만료일이 빠른 추가 크레딧 묶음부터 차감합니다. 추가 크레딧은 사용 가능한 크레딧 잔액만 늘리며, 플랜을 업그레이드하거나 모델 접근권한, 기능, 일일 제한, 플랜별 고비용 모델 제한, 공정사용 한도 또는 기타 안전장치를 늘리지 않습니다.",
+          body: "추가 크레딧 팩은 구독 및 구독에 포함된 월 크레딧과 분리된 일회성 구매 상품입니다. 웹에서 구매한 추가 크레딧은 구매일로부터 365일 후 만료되며, 앱 스토어에서 구매한 추가 크레딧은 만료되지 않습니다. 추가 크레딧은 양도하거나 현금으로 교환할 수 없습니다. Tomverse는 사용 가능한 월 플랜 크레딧을 먼저 차감한 뒤 만료일이 빠른 추가 크레딧 묶음부터 차감합니다. 추가 크레딧은 사용 가능한 크레딧 잔액만 늘리며, 플랜을 업그레이드하거나 모델 접근권한, 기능, 일일 제한, 플랜별 고비용 모델 제한, 공정사용 한도 또는 기타 안전장치를 늘리지 않습니다.",
         },
         {
           title: "월간·연간 구독과 자동 갱신",
-          body: "Pro와 Max는 Stripe가 처리하는 정기 구독입니다. 월간 구독은 매월 선결제 후 매월 자동 갱신되고, 연간 구독은 1년분을 선결제한 후 매년 자동 갱신됩니다. 다음 갱신 전에 취소하지 않으면 결제 화면에 표시된 금액과 통화로 저장된 결제수단에 청구하는 데 동의한 것으로 봅니다. 중대한 가격 변경은 법이 요구하는 경우 합리적인 기간 전에 안내하며, 적용 전에 취소할 수 있습니다.",
+          body: "Pro와 Max는 정기 구독입니다. 웹에서 구매하면 Stripe가 결제를 처리하고, Android·iOS 앱에서 구매하면 Google Play 또는 App Store가 처리하며 그 구매의 가격·취소·환불은 해당 스토어의 화면과 정책을 따릅니다. 스토어 구독은 Tomverse 계정을 삭제해도 취소되지 않습니다. 월간 구독은 매월 선결제 후 매월 자동 갱신되고, 연간 구독은 1년분을 선결제한 후 매년 자동 갱신됩니다. 다음 갱신 전에 취소하지 않으면 결제 화면에 표시된 금액과 통화로 저장된 결제수단에 청구하는 데 동의한 것으로 봅니다. 중대한 가격 변경은 법이 요구하는 경우 합리적인 기간 전에 안내하며, 적용 전에 취소할 수 있습니다.",
         },
         {
           title: "프로모션과 연간 할인",
@@ -713,6 +717,10 @@ export const infoPages = {
           body: "법 위반, 권리 침해, 제공자 남용, 한도 우회, 악성 콘텐츠 업로드 또는 권한 없는 데이터 처리를 위해 Tomverse를 사용해서는 안 됩니다. 사용자는 자신이 보유한 입력 콘텐츠의 권리를 유지하며, 요청한 기능 수행과 선택한 AI 제공자에게 필요한 맥락을 전송하는 데 필요한 제한적 처리 권한을 Tomverse에 부여합니다.",
         },
         {
+          title: "API 키와 코딩 도구",
+          body: "설정에서 API 키를 만들어 코딩 도구와 다른 앱을 Tomverse에 연결할 수 있습니다. 키는 비밀번호처럼 보관해야 합니다. 키로 보낸 요청은 계정 사용으로 보며 같은 월 크레딧과 추가 크레딧에서 차감합니다. 도구 실행 결과를 담아 다시 보내는 요청을 포함해 요청마다 따로 차감됩니다. 실패하거나 빈 응답은 차감하지 않으며, 응답 중 연결이 끊기면 이미 생성된 출력만큼 차감될 수 있습니다. 키마다 크레딧 한도와 만료일을 정할 수 있고 언제든 폐기할 수 있습니다. 키를 판매·공유하거나 다른 사람에게 서비스로 제공해서는 안 됩니다. 남용을 막기 위해 요청 속도를 제한할 수 있으며, 요청을 처리하는 AI 공급자의 이용 조건도 함께 적용됩니다.",
+        },
+        {
           title: "소비자 권리, 준거법 및 분쟁 처리",
           body: "본 약관은 호주 소비자법을 포함해 법률상 배제할 수 없는 보증, 구제수단 또는 권리를 제한하지 않습니다. 법이 허용하는 범위에서 본 약관에는 호주 퀸즐랜드주 법률이 적용됩니다. 분쟁이 발생하면 먼저 지원팀에 문의해 해결을 시도할 수 있으며, 이는 관할 규제기관, 재판소 또는 법원에 문제를 제기할 권리를 제한하지 않습니다.",
         },
@@ -728,14 +736,16 @@ export const infoPages = {
         { title: "协议、运营方和联系方式", body: "Tomverse 是 tomverse.app 使用的服务和运营名称（‘我们’），旗下运营 Tomverse Review 等 Tomverse 产品。付费交易的法定销售方或合同运营方，是相应 Stripe 结账页、收据或发票上标明的实体。账单和法律通知可发送至 support@tomverse.app，或通过 tomverse.app/support 的支持表单提交。" },
         { title: "账户和服务使用", body: "你必须提供准确的账户信息、保护账户访问，并对账户活动、提示词、上传文件以及使用或分享的内容负责。为处理滥用、安全风险、未付款、法律要求或重大违约，我们可在合理必要范围内限制、暂停或终止访问。" },
         { title: "营销邮件同意", body: "您的同意在您撤回之前一直有效，没有固定的到期时间。您可以随时在邮件设置中，或通过任何营销邮件中的退订链接撤回同意，无需登录。撤回同意不会停止登录验证码、账单收据或服务通知的发送。" },
-        { title: "第三方 AI 提供商和输出", body: "Tomverse 会把提示词和所选上下文发送给第三方 AI 提供商并显示其响应。AI 输出可能不准确、不完整、过时、不安全或不适合你的情况，也不构成法律、医疗、金融、安全或其他专业建议。" },
+        { title: "第三方 AI 提供商和输出", body: "Tomverse 会把提示词和所选上下文发送给第三方 AI 提供商并显示其响应。AI 输出可能不准确、不完整、过时、不安全或不适合你的情况，也不构成法律、医疗、金融、安全或其他专业建议。在作出重大决定前，请核实重要输出并寻求合格专业人士的意见。" },
         { title: "方案、AI 积分和公平使用", body: "Free、Pro 和 Max 适用价格页及账户页显示的功能和月度积分额度。积分消耗因模型、推理方式和输入规模而异。月度积分在每个自然月开始时按 UTC 重置，不结转、不可转让且无现金价值。公平使用、防滥用、模型、提供商成本、文件和上下文限制仍然适用。" },
-        { title: "附加积分包", body: "附加积分包是与订阅及其月度积分分开的单次购买。附加积分自购买之日起 365 天后到期，不可转让，也不可兑换现金。Tomverse 先扣除可用的月度方案积分，再按最早到期顺序扣除附加积分。积分包只增加可用积分余额，不会升级方案，也不会增加模型访问、功能、每日限制、方案特定的高成本模型限制、公平使用限制或其他保障。" },
-        { title: "月付、年付和自动续订", body: "Pro 和 Max 是由 Stripe 处理的定期订阅。月付按月预付并每月续订；年付按年预付并每年续订。除非你在下次续订前取消，否则即授权 Stripe 按结账时显示的金额和币种向已保存的付款方式收费。" },
+        { title: "附加积分包", body: "附加积分包是与订阅及其月度积分分开的单次购买。网页购买的附加积分自购买之日起 365 天后到期；通过应用商店购买的附加积分不会过期。附加积分不可转让，也不可兑换现金。Tomverse 先扣除可用的月度方案积分，再按最早到期顺序扣除附加积分。积分包只增加可用积分余额，不会升级方案，也不会增加模型访问、功能、每日限制、方案特定的高成本模型限制、公平使用限制或其他保障。" },
+        { title: "月付、年付和自动续订", body: "Pro 和 Max 是定期订阅。网页购买由 Stripe 处理；在 Android 或 iOS 应用内购买由 Google Play 或 App Store 处理，该购买的价格、取消和退款以相应商店的页面和政策为准。删除 Tomverse 账户不会取消商店订阅。月付按月预付并每月续订；年付按年预付并每年续订。除非你在下次续订前取消，否则即授权 Stripe（应用内购买时为相应应用商店）按结账时显示的金额和币种向已保存的付款方式收费。如有重大价格变更，我们会在法律要求时提前合理通知，您可在生效前取消。" },
         { title: "促销和年付折扣", body: "促销仅适用于该代码披露的方案、计费周期、期限、兑换上限和到期日。除非特定促销明确允许，否则不与年付折扣叠加。限时促销结束后，订阅会按已披露的常规价格续订，除非取消。折扣本身没有现金价值。" },
         { title: "取消和付费访问结束", body: "你可以在账户的账单控制中安排取消。取消会停止下一次自动续订，通常不会立即终止访问。付费功能持续到当前月度或年度周期结束，之后账户转为可用的 Free 方案。没有提前解约费，单纯取消不会自动产生按比例退款。取消或降级订阅本身不会删除仍有效的附加积分；积分保留至标示的到期日，但只能在账户届时方案的模型访问、功能、每日限制和保障范围内使用。" },
         { title: "退款和提供商故障", body: "订阅和附加积分退款请求适用 tomverse.app/refund 的退款政策及法律不得排除的权利。提供商请求失败或返回空响应时，预留积分通常会自动释放；如果用户取消前已生成可用输出，可能按实际生成量扣除积分。附加积分的全部或部分退款获批，或发生拒付时，相应比例的积分权益会被撤销。系统先收回可用积分；已使用而无法收回的部分可记为积分债务，并从未来月度积分或附加积分发放中优先抵扣，付款争议未解决期间也可临时限制访问。若故障似乎错误消耗了积分，请附上 trace ID 联系支持。" },
         { title: "币种、税费和付款处理", body: "结账前显示的本地币种换算仅供参考。Stripe 最终确认页显示的金额、计费周期、币种和适用税费是交易依据。银行、发卡机构、钱包或付款服务商可能使用自己的汇率或收取费用。Tomverse 不直接存储完整银行卡信息。" },
+        { title: "可接受使用与内容权利", body: "不得利用 Tomverse 违反法律、侵犯权利、滥用提供商、绕过限制、上传恶意内容，或处理您无权使用的内容。您保留对自己输入内容所拥有的权利，并授予 Tomverse 处理该输入、运行您请求的功能以及向您选择的 AI 提供商发送相关上下文所需的有限权利。" },
+        { title: "API 密钥与编程工具", body: "您可以在设置中创建 API 密钥，把编程工具和其他应用连接到 Tomverse。请像保管密码一样保管密钥：使用您的密钥发送的请求视为您账户的使用，并从同一月度积分和附加积分中扣除。每个请求单独计费，包括返回工具结果的后续请求。失败或空的响应不扣积分；如果响应过程中连接中断，可能按已生成的输出扣除积分。您可以为密钥设置积分上限和到期时间，并可随时撤销。不得出售或共享密钥，也不得将其作为服务提供给他人。为防止滥用，我们可能限制请求频率，处理请求的 AI 提供商的条款也同样适用。" },
         { title: "消费者权利、适用法律和争议", body: "本条款不排除法律不得排除的保证、救济或其他权利，包括可能适用的澳大利亚消费者法权利。在法律允许的范围内，本条款受澳大利亚昆士兰州法律管辖。请先联系支持尝试解决争议；这不限制你联系有管辖权的监管机构、仲裁庭或法院。" },
       ],
       cta: { label: "联系支持", href: "/support" },
@@ -750,7 +760,7 @@ export const infoPages = {
       sections: [
         {
           title: "Scope and non-excludable consumer rights",
-          body: "This policy applies to Pro and Max subscriptions and to one-time additional credit packs purchased through Tomverse and processed by Stripe, including a Starter Credit Pack purchased by a Free-plan user. It does not exclude remedies or guarantees that cannot be excluded by law. Where the Australian Consumer Law applies, you may be entitled to cancellation, a refund for an unused portion, correction, or compensation for a major service failure or another failure that is not remedied within a reasonable time.",
+          body: "This policy applies to Pro and Max subscriptions and to one-time additional credit packs purchased through Tomverse and processed by Stripe, including a Starter Credit Pack purchased by a Free-plan user. Purchases made in the Android or iOS app through Google Play or the App Store follow the app-store section below. It does not exclude remedies or guarantees that cannot be excluded by law. Where the Australian Consumer Law applies, you may be entitled to cancellation, a refund for an unused portion, correction, or compensation for a major service failure or another failure that is not remedied within a reasonable time.",
         },
         {
           title: "When a refund or billing correction may be available",
@@ -763,11 +773,11 @@ export const infoPages = {
         },
         {
           title: "Monthly and annual cancellation",
-          body: "Cancellation from the account area stops the next renewal. A monthly subscription normally remains active through the current paid month; an annual subscription normally remains active through the current paid year. Cancellation alone does not produce an automatic prorated refund. If a refund is approved, the current implementation cancels the paid subscription and moves the account to Free when the approval is processed.",
+          body: "Cancellation from the account area stops the next renewal. A monthly subscription normally remains active through the current paid month; an annual subscription normally remains active through the current paid year. Cancellation alone does not produce an automatic prorated refund. If a subscription refund is approved, that subscription is cancelled immediately and the account moves to Free.",
         },
         {
           title: "Monthly credits and additional credits",
-          body: "AI credits are a service allowance, not stored money. Monthly plan credits reset each calendar month in UTC, do not roll over, and remain tied to the applicable plan period. Additional credits are a separate one-time purchase, expire 365 days after purchase, and do not reset with the monthly allowance. Both balances are non-transferable and cannot be redeemed for cash. Tomverse deducts available monthly plan credits first and then additional-credit lots in order of earliest expiry.",
+          body: "AI credits are a service allowance, not stored money. Monthly plan credits reset each calendar month in UTC, do not roll over, and remain tied to the applicable plan period. Additional credits are a separate one-time purchase and do not reset with the monthly allowance. Credits bought on the web expire 365 days after purchase; credits bought through an app store do not expire. Both balances are non-transferable and cannot be redeemed for cash. Tomverse deducts available monthly plan credits first and then additional-credit lots in order of earliest expiry.",
         },
         {
           title: "Plan cancellation and additional-credit access",
@@ -790,8 +800,12 @@ export const infoPages = {
           body: "Refunds cannot exceed the amount and currency actually captured by Stripe. Local price estimates may differ from the final amount because Stripe, your bank, card issuer, wallet, or payment provider may apply taxes, exchange rates, or fees. The Stripe receipt or invoice is the record of the captured amount and merchant identity. Third-party exchange or payment fees are governed by that provider.",
         },
         {
+          title: "App-store purchases",
+          body: "Subscriptions and credit packs bought in the Android or iOS app are processed by Google Play or the App Store, so refunds for them are requested from that store under its policy, and cancellation is managed in that store's subscription settings. Deleting your Tomverse account does not cancel an app-store subscription. If the store refunds a purchase, Tomverse revokes the unused credits from it and may record credits already used as credit debt, offset against later credit grants. These rules do not limit rights that cannot be excluded by law.",
+        },
+        {
           title: "How to request and how we process it",
-          body: "Subscription and credit-pack purchasers can submit a refund review from the account billing area or contact support@tomverse.app. Include the account email, plan, pack if applicable, charge date, transaction or receipt reference, reason, and any trace ID. Requests are reviewed individually. If approved, Tomverse submits the eligible refund to Stripe. A subscription refund may cancel or downgrade the related paid plan; a credit-pack refund reverses only the corresponding pack entitlement and does not by itself cancel a subscription. The time for funds to appear depends on Stripe and the payment provider.",
+          body: "Pro and Max subscribers can submit a refund review from the account billing area. Anyone who bought a subscription or credit pack, including a Starter Credit Pack on the Free plan, can also email support@tomverse.app. Include the account email, plan, pack if applicable, charge date, transaction or receipt reference, reason, and any trace ID. Requests are reviewed individually. If approved, Tomverse submits the eligible refund to Stripe. A subscription refund may cancel or downgrade the related paid plan; a credit-pack refund reverses only the corresponding pack entitlement and does not by itself cancel a subscription. The time for funds to appear depends on Stripe and the payment provider.",
         },
         {
           title: "Operator and disputes",
@@ -808,7 +822,7 @@ export const infoPages = {
       sections: [
         {
           title: "적용 범위와 배제할 수 없는 소비자 권리",
-          body: "본 정책은 Tomverse에서 구매하고 Stripe가 처리한 Pro·Max 구독과 일회성 추가 크레딧 팩에 적용되며, Free 플랜 사용자가 구매한 Starter Credit Pack도 포함합니다. 본 정책은 법률상 배제할 수 없는 보증이나 구제수단을 제한하지 않습니다. 호주 소비자법이 적용되는 경우 중대한 서비스 실패 또는 합리적인 기간 안에 해결되지 않은 문제에 대해 계약 취소, 미사용 부분 환불, 문제 시정 또는 손해 배상을 받을 권리가 있을 수 있습니다.",
+          body: "본 정책은 Tomverse에서 구매하고 Stripe가 처리한 Pro·Max 구독과 일회성 추가 크레딧 팩에 적용되며, Free 플랜 사용자가 구매한 Starter Credit Pack도 포함합니다. Android·iOS 앱에서 Google Play 또는 App Store로 구매한 경우에는 아래 ‘앱 스토어 구매’ 항목을 따릅니다. 본 정책은 법률상 배제할 수 없는 보증이나 구제수단을 제한하지 않습니다. 호주 소비자법이 적용되는 경우 중대한 서비스 실패 또는 합리적인 기간 안에 해결되지 않은 문제에 대해 계약 취소, 미사용 부분 환불, 문제 시정 또는 손해 배상을 받을 권리가 있을 수 있습니다.",
         },
         {
           title: "환불 또는 결제 정정이 가능한 경우",
@@ -821,11 +835,11 @@ export const infoPages = {
         },
         {
           title: "월간·연간 구독 취소",
-          body: "계정 영역에서 취소하면 다음 갱신이 중단됩니다. 월간 구독은 일반적으로 현재 결제 월 말까지, 연간 구독은 현재 결제 연도 말까지 유지됩니다. 단순 취소로 자동 일할 환불이 발생하지 않습니다. 환불이 승인되면 현재 시스템은 승인 처리 시 유료 구독을 취소하고 계정을 Free로 전환합니다.",
+          body: "계정 영역에서 취소하면 다음 갱신이 중단됩니다. 월간 구독은 일반적으로 현재 결제 월 말까지, 연간 구독은 현재 결제 연도 말까지 유지됩니다. 단순 취소로 자동 일할 환불이 발생하지 않습니다. 구독 환불이 승인되면 그 구독은 즉시 해지되고 계정은 Free로 바뀝니다.",
         },
         {
           title: "월 크레딧과 추가 크레딧",
-          body: "AI 크레딧은 예치금이 아닌 서비스 사용 한도입니다. 월 플랜 크레딧은 매월 1일 00:00 UTC에 초기화되고 이월되지 않으며 해당 플랜 기간에 귀속됩니다. 추가 크레딧은 월 크레딧과 분리된 일회성 구매분으로, 구매일로부터 365일 후 만료되고 월 초기화 때 사라지지 않습니다. 두 잔액 모두 양도하거나 현금으로 교환할 수 없습니다. Tomverse는 사용 가능한 월 플랜 크레딧을 먼저 차감한 뒤 만료일이 빠른 추가 크레딧 묶음부터 차감합니다.",
+          body: "AI 크레딧은 예치금이 아닌 서비스 사용 한도입니다. 월 플랜 크레딧은 매월 1일 00:00 UTC에 초기화되고 이월되지 않으며 해당 플랜 기간에 귀속됩니다. 추가 크레딧은 월 크레딧과 분리된 일회성 구매분으로 월 초기화 때 사라지지 않습니다. 웹에서 구매한 추가 크레딧은 구매일로부터 365일 후 만료되고, 앱 스토어에서 구매한 추가 크레딧은 만료되지 않습니다. 두 잔액 모두 양도하거나 현금으로 교환할 수 없습니다. Tomverse는 사용 가능한 월 플랜 크레딧을 먼저 차감한 뒤 만료일이 빠른 추가 크레딧 묶음부터 차감합니다.",
         },
         {
           title: "플랜 해지 후 추가 크레딧 이용",
@@ -848,8 +862,12 @@ export const infoPages = {
           body: "환불액은 Stripe가 실제 승인한 금액과 통화를 초과할 수 없습니다. 현지 가격 환산값은 Stripe, 은행, 카드사, 지갑 또는 결제 제공자가 적용하는 세금, 환율이나 수수료로 인해 최종 금액과 다를 수 있습니다. 실제 결제 금액과 판매자 정보는 Stripe 영수증 또는 인보이스를 기준으로 합니다. 제3자의 환전·결제 수수료에는 해당 제공자 정책이 적용됩니다.",
         },
         {
+          title: "앱 스토어 구매",
+          body: "Android·iOS 앱에서 구매한 구독과 크레딧 팩은 Google Play 또는 App Store가 결제를 처리하므로, 환불은 해당 스토어의 정책에 따라 그 스토어에 요청하고 해지는 그 스토어의 구독 설정에서 관리합니다. Tomverse 계정을 삭제해도 스토어 구독은 해지되지 않습니다. 스토어가 구매를 환불하면 Tomverse는 그 구매에서 남은 크레딧을 회수하고, 이미 사용한 크레딧은 크레딧 부채로 기록해 이후 지급되는 크레딧에서 상계할 수 있습니다. 이 기준은 법률상 배제할 수 없는 권리를 제한하지 않습니다.",
+        },
+        {
           title: "환불 요청 및 처리 절차",
-          body: "구독 또는 크레딧 팩 구매자는 계정 결제 영역에서 환불 심사를 요청하거나 support@tomverse.app으로 문의할 수 있습니다. 계정 이메일, 플랜, 해당하는 경우 팩 이름, 결제일, 거래 또는 영수증 번호, 사유 및 관련 추적 ID를 포함해주세요. 요청은 개별 심사됩니다. 승인되면 Tomverse가 Stripe에 환불을 제출합니다. 구독 환불은 관련 유료 플랜을 취소하거나 하향 전환할 수 있고, 크레딧 팩 환불은 해당 팩 권리만 취소하며 그 자체로 구독을 취소하지 않습니다. 실제 입금 시점은 Stripe와 결제 제공자 처리 기간에 따라 달라집니다.",
+          body: "Pro·Max 구독자는 계정 결제 영역에서 환불 심사를 요청할 수 있습니다. Free 플랜에서 산 Starter Credit Pack을 포함해 구독이나 크레딧 팩을 구매한 분은 누구나 support@tomverse.app으로도 요청할 수 있습니다. 계정 이메일, 플랜, 해당하는 경우 팩 이름, 결제일, 거래 또는 영수증 번호, 사유 및 관련 추적 ID를 포함해주세요. 요청은 개별 심사됩니다. 승인되면 Tomverse가 Stripe에 환불을 제출합니다. 구독 환불은 관련 유료 플랜을 취소하거나 하향 전환할 수 있고, 크레딧 팩 환불은 해당 팩 권리만 취소하며 그 자체로 구독을 취소하지 않습니다. 실제 입금 시점은 Stripe와 결제 제공자 처리 기간에 따라 달라집니다.",
         },
         {
           title: "운영 주체와 분쟁",
@@ -864,17 +882,18 @@ export const infoPages = {
       description: "适用于 Tomverse 订阅和附加积分购买的退款、账单更正、取消、积分、促销和提供商故障规则。",
       updated: "最后更新：2026 年 7 月 15 日",
       sections: [
-        { title: "范围和不可排除的消费者权利", body: "本政策适用于通过 Tomverse 购买并由 Stripe 处理的 Pro、Max 订阅和一次性附加积分包，包括 Free 方案用户购买的 Starter Credit Pack。本政策不排除法律不得排除的保证或救济。在澳大利亚消费者法适用时，重大服务故障或未在合理时间内纠正的问题可能使你有权取消、获得未使用部分退款、纠正或赔偿。" },
+        { title: "范围和不可排除的消费者权利", body: "本政策适用于通过 Tomverse 购买并由 Stripe 处理的 Pro、Max 订阅和一次性附加积分包，包括 Free 方案用户购买的 Starter Credit Pack。在 Android 或 iOS 应用中通过 Google Play 或 App Store 购买的，适用下文“应用商店购买”一节。本政策不排除法律不得排除的保证或救济。在澳大利亚消费者法适用时，重大服务故障或未在合理时间内纠正的问题可能使你有权取消、获得未使用部分退款、纠正或赔偿。" },
         { title: "可能退款或更正账单的情况", body: "我们会审查重复、未授权或错误收费；付费方案或购买的积分包未交付；重大服务故障；或法律要求退款的情况。其他请求可根据收费时间、计费周期或积分包、已使用的付费权益及提交的事实，酌情批准全部或部分退款。", bullets: ["重复、未授权或错误收费", "未提供付费访问或购买的积分，或发生重大服务故障", "适用消费者法要求的救济"] },
         { title: "通常不退款的情况", body: "除非法律要求，改变主意、忘记在续订前取消、对有效 AI 回答的风格或内容不满意、正常取消后的未使用时间、未使用月度积分，或正确发放后仅未使用的附加积分，通常不予退款。提交请求不保证批准，也不会自动取消订阅或积分包权益。" },
-        { title: "月付和年付取消", body: "账户区域取消会停止下一次续订。月付通常持续到当前付费月结束，年付持续到当前付费年结束。取消本身不会自动按比例退款。批准退款时，当前系统会取消付费订阅并把账户转为 Free。" },
-        { title: "月度积分和附加积分", body: "AI 积分是服务额度，不是储值资金。月度方案积分按 UTC 在每个自然月开始时重置，不结转，并归属于相应方案周期。附加积分是独立的一次性购买，自购买之日起 365 天后到期，不会随月度额度重置。两种余额均不可转让或兑换现金。Tomverse 先扣除可用月度方案积分，再按最早到期顺序扣除附加积分。" },
+        { title: "月付和年付取消", body: "账户区域取消会停止下一次续订。月付通常持续到当前付费月结束，年付持续到当前付费年结束。取消本身不会自动按比例退款。订阅退款获批后，该订阅会立即取消，账户转为 Free。" },
+        { title: "月度积分和附加积分", body: "AI 积分是服务额度，不是储值资金。月度方案积分按 UTC 在每个自然月开始时重置，不结转，并归属于相应方案周期。附加积分是独立的一次性购买，不会随月度额度重置。网页购买的附加积分自购买之日起 365 天后到期；通过应用商店购买的附加积分不会过期。两种余额均不可转让或兑换现金。Tomverse 先扣除可用月度方案积分，再按最早到期顺序扣除附加积分。" },
         { title: "取消方案后的附加积分", body: "取消或降级 Pro、Max 本身不会删除仍有效的附加积分。即使账户转为 Free，积分仍保留至标示的到期日。附加积分只增加用量，不会解锁更高方案、模型、文件或其他功能，也不会提高每日限制、方案特定的高成本模型限制、公平使用限制或其他保障；只能在账户当前方案的权限和限制内使用。" },
         { title: "附加积分的全额退款、部分退款和拒付", body: "附加积分的全部或部分退款获批时，Tomverse 会按相应比例撤销购买权益，并先收回该购买中尚未使用的积分。已经使用而无法收回的积分及相关资助用量可记为积分债务，并在未来月度积分或附加积分购买可用前优先抵扣。拒付或付款争议可触发相同的临时撤销，并在争议未解决期间临时限制 AI 使用。若争议最终对购买者有利，系统会在记录范围内恢复或清除相关临时撤销和债务。本规则不限制法律不得排除的权利或救济。" },
         { title: "促销购买", body: "获批退款不超过促销后实际支付的金额；原价差额和折扣本身不退款。零元促销没有现金退款价值。除法律要求或 Tomverse 账单错误外，不保证重新发放已使用或已退款的促销代码。" },
         { title: "提供商故障和积分恢复", body: "AI 提供商在生成可用回答前失败或返回空响应时，Tomverse 通常会自动释放预留积分。可用输出开始后由用户取消时，可能保留按生成量计算的积分消耗。若积分似乎错误扣除，请附 trace ID 联系支持。" },
         { title: "税费、汇率和付款币种", body: "退款不超过 Stripe 实际收取的金额和币种。本地价格换算可能因税费、汇率或第三方费用与最终金额不同。实际金额和销售方身份以 Stripe 收据或发票为准。" },
-        { title: "如何申请和处理", body: "订阅或积分包购买者可从账户账单区域申请退款审查，或联系 support@tomverse.app。请提供账户邮箱、方案、适用时的积分包名称、收费日期、交易或收据编号、原因和相关 trace ID。批准后，Tomverse 会向 Stripe 提交退款。订阅退款可能取消或降级相关付费方案；积分包退款只撤销对应积分包权益，不会因此自动取消订阅。到账时间取决于 Stripe 和付款服务商。" },
+        { title: "应用商店购买", body: "在 Android 或 iOS 应用中购买的订阅和积分包由 Google Play 或 App Store 处理付款，因此退款需按该商店的政策向该商店申请，取消则在该商店的订阅设置中管理。删除 Tomverse 账户不会取消商店订阅。如果商店退款，Tomverse 会收回该购买中未使用的积分，并可将已使用的积分记为积分债务，从之后发放的积分中抵扣。本规则不限制法律不得排除的权利。" },
+        { title: "如何申请和处理", body: "Pro 和 Max 订阅者可从账户账单区域申请退款审查。购买了订阅或积分包的任何人（包括在 Free 方案中购买 Starter Credit Pack 的用户）也可以发送邮件至 support@tomverse.app 申请。请提供账户邮箱、方案、适用时的积分包名称、收费日期、交易或收据编号、原因和相关 trace ID。批准后，Tomverse 会向 Stripe 提交退款。订阅退款可能取消或降级相关付费方案；积分包退款只撤销对应积分包权益，不会因此自动取消订阅。到账时间取决于 Stripe 和付款服务商。" },
         { title: "运营方和争议", body: "Tomverse 运营 tomverse.app，每笔交易的法定销售方标示在 Stripe 收据或发票上。问题或争议可发送至 support@tomverse.app 或 tomverse.app/support，也可使用适用法律提供的监管机构、仲裁庭或法院程序。" },
       ],
       cta: { label: "联系账单支持", href: "/support" },
@@ -892,11 +911,13 @@ export const infoPages = {
       },
       {
         "title": "보안과 데이터 처리",
-        "body": "선택한 AI 제공자는 답변에 필요한 질문과 자료를 처리합니다. 잠금은 저장된 대화에 대한 접근을 제어하고, 공유는 당시 내용의 읽기 전용 링크를 만듭니다. 자세한 데이터 처리 범위는 안전 안내에서 확인하세요."
+        "body": "답변을 만드는 AI 공급자는 그 답변에 필요한 질문과 자료를 처리합니다. Auto를 쓰면 Tomverse가 공급자를 고르고, 대화 제목 만들기 같은 일부 보조 단계는 Tomverse가 정한 공급자가 처리합니다. 대화를 잠그면 비밀번호를 입력해야 열고 공유·다운로드할 수 있으며, 잠금은 대화를 암호화하지 않습니다. 공유 링크는 만든 시점의 대화 텍스트를 보여 주고, 일정 기간 뒤 자동으로 만료되며, 공유를 끄면 삭제됩니다. 공급자와 국가, 보관과 삭제는 개인정보 처리방침에서 확인하세요.",
+        "link": { "label": "개인정보 처리방침 보기", "href": "/privacy" }
       },
       {
         "title": "AI의 한계와 서비스 상태",
-        "body": "답변은 선택한 외부 AI 모델이 생성하며 틀리거나 빠진 내용이 있을 수 있습니다. AI Review는 답변끼리 비교하는 기능입니다. 추가 사실 확인과 웹 검색은 별도 작업이며, 현재 모델 제공 상태는 서비스 상태 페이지에서 확인할 수 있습니다."
+        "body": "답변은 선택한 외부 AI 모델이 생성하며 틀리거나 빠진 내용이 있을 수 있습니다. AI Review는 답변끼리 비교하는 기능입니다. 추가 사실 확인과 웹 검색은 별도 작업이며, 현재 모델 제공 상태는 서비스 상태 페이지에서 확인할 수 있습니다.",
+        "bodyLinks": [{ "text": "서비스 상태 페이지", "href": "/status?lang=ko" }]
       }
     ]
   },
@@ -911,7 +932,7 @@ export const infoPages = {
       },
       {
         "title": "Security and data handling",
-        "body": "Your selected AI provider processes the question and material needed to answer. Locks control access to saved conversations; sharing creates a read-only link to the content at that time. Read the privacy policy for processing, retention and deletion details.",
+        "body": "The AI provider that writes an answer processes the question and material needed for it. With Auto, Tomverse chooses that provider, and some helper steps such as conversation titles use a provider Tomverse chooses. Locking a conversation means its password is needed to open, share or download it; locking does not encrypt it. A share link shows the conversation's text as it was when you created it, expires automatically and is deleted when you turn sharing off. Read the privacy policy for providers, countries, retention and deletion.",
         "link": { "label": "Read the privacy policy", "href": "/privacy" }
       },
       {
@@ -932,11 +953,13 @@ export const infoPages = {
       },
       {
         "title": "安全与数据处理",
-        "body": "所选 AI 提供商会处理回答所需的问题与资料。锁定控制已保存对话的访问；分享会生成当时内容的只读链接。数据处理详情请查看安全说明。"
+        "body": "生成回答的 AI 提供商会处理该回答所需的问题和资料。使用 Auto 时由 Tomverse 选择提供商，生成对话标题等部分辅助步骤由 Tomverse 选定的提供商处理。锁定对话后，需要输入密码才能打开、分享或下载；锁定不会加密对话。分享链接显示创建时的对话文字，会自动过期，关闭分享后即删除。提供商、所在国家、保留和删除详情请查看隐私政策。",
+        "link": { "label": "查看隐私政策", "href": "/privacy" }
       },
       {
         "title": "AI 局限与服务状态",
-        "body": "回答由所选外部 AI 模型生成，可能错误或遗漏。AI Review 比较这些回答，外部核实与网页搜索是独立操作。当前可用状态请查看服务状态页。"
+        "body": "回答由所选外部 AI 模型生成，可能错误或遗漏。AI Review 比较这些回答，外部核实与网页搜索是独立操作。当前可用状态请查看服务状态页。",
+        "bodyLinks": [{ "text": "服务状态页", "href": "/status?lang=zh" }]
       }
     ]
   },
@@ -951,11 +974,13 @@ export const infoPages = {
       },
       {
         "title": "安全與資料處理",
-        "body": "所選的 AI 供應商會處理回答所需的問題與資料。鎖定功能控管已儲存對話的存取；分享會產生當時內容的唯讀連結。資料處理的詳情請查看安全說明。"
+        "body": "生成回答的 AI 供應商會處理該回答所需的問題和資料。使用 Auto 時由 Tomverse 選擇供應商，產生對話標題等部分輔助步驟由 Tomverse 選定的供應商處理。鎖定對話後，需要輸入密碼才能開啟、分享或下載；鎖定不會加密對話。分享連結顯示建立時的對話文字，會自動過期，關閉分享後即刪除。供應商、所在國家、保留與刪除詳情請查看隱私權政策。",
+        "link": { "label": "查看隱私權政策", "href": "/privacy" }
       },
       {
         "title": "AI 限制與服務狀態",
-        "body": "回答由所選的外部 AI 模型生成，可能有誤或遺漏。AI Review 會比較這些回答，外部查證與網頁搜尋則是獨立的操作。目前的可用狀態請查看服務狀態頁。"
+        "body": "回答由所選的外部 AI 模型生成，可能有誤或遺漏。AI Review 會比較這些回答，外部查證與網頁搜尋則是獨立的操作。目前的可用狀態請查看服務狀態頁。",
+        "bodyLinks": [{ "text": "服務狀態頁", "href": "/status?lang=zh-Hant" }]
       }
     ]
   },
@@ -970,11 +995,13 @@ export const infoPages = {
       },
       {
         "title": "Sécurité et traitement des données",
-        "body": "Le fournisseur IA choisi traite la question et les documents nécessaires à la réponse. Le verrou contrôle l’accès aux conversations enregistrées ; le partage crée un lien en lecture seule vers leur contenu à cet instant. Consultez les informations de sécurité pour le traitement des données."
+        "body": "Le fournisseur d’IA qui rédige une réponse traite la question et les documents nécessaires. Avec Auto, Tomverse choisit ce fournisseur, et certaines étapes d’assistance, comme les titres de conversation, utilisent un fournisseur choisi par Tomverse. Une conversation verrouillée ne s’ouvre, ne se partage et ne se télécharge qu’avec son mot de passe ; le verrou ne la chiffre pas. Un lien de partage montre le texte tel qu’il était à sa création, expire automatiquement et est supprimé quand vous désactivez le partage. Consultez la politique de confidentialité pour les fournisseurs, les pays, la conservation et la suppression.",
+        "link": { "label": "Lire la politique de confidentialité", "href": "/privacy" }
       },
       {
         "title": "Limites de l’IA et état du service",
-        "body": "Les modèles externes choisis génèrent les réponses, qui peuvent être erronées ou incomplètes. AI Review compare ces réponses. Vérifications externes et recherche web sont distinctes ; consultez l’état du service."
+        "body": "Les modèles externes choisis génèrent les réponses, qui peuvent être erronées ou incomplètes. AI Review compare ces réponses. Vérifications externes et recherche web sont distinctes ; consultez l’état du service.",
+        "bodyLinks": [{ "text": "l’état du service", "href": "/status?lang=fr" }]
       }
     ]
   },
@@ -989,11 +1016,13 @@ export const infoPages = {
       },
       {
         "title": "Sicherheit und Datenverarbeitung",
-        "body": "Der gewählte KI-Anbieter verarbeitet die nötige Frage und das Material. Sperren regelt den Zugriff auf gespeicherte Gespräche; Teilen erstellt einen Nur-Lese-Link zum damaligen Inhalt. Details finden Sie in den Sicherheitsinformationen."
+        "body": "Der KI-Anbieter, der eine Antwort schreibt, verarbeitet die dafür nötige Frage und das Material. Mit Auto wählt Tomverse diesen Anbieter, und einige Hilfsschritte wie Unterhaltungstitel nutzen einen von Tomverse gewählten Anbieter. Eine gesperrte Unterhaltung lässt sich nur mit ihrem Passwort öffnen, teilen oder herunterladen; die Sperre verschlüsselt sie nicht. Ein Freigabelink zeigt den Text so, wie er beim Erstellen war, läuft automatisch ab und wird gelöscht, wenn Sie das Teilen beenden. Anbieter, Länder, Aufbewahrung und Löschung finden Sie in der Datenschutzerklärung.",
+        "link": { "label": "Datenschutzerklärung lesen", "href": "/privacy" }
       },
       {
         "title": "KI-Grenzen und Servicestatus",
-        "body": "Ausgewählte externe Modelle erzeugen Antworten, die falsch oder unvollständig sein können. AI Review vergleicht diese Antworten. Externe Prüfung und Websuche sind separate Schritte; die Verfügbarkeit steht auf der Statusseite."
+        "body": "Ausgewählte externe Modelle erzeugen Antworten, die falsch oder unvollständig sein können. AI Review vergleicht diese Antworten. Externe Prüfung und Websuche sind separate Schritte; die Verfügbarkeit steht auf der Statusseite.",
+        "bodyLinks": [{ "text": "Statusseite", "href": "/status?lang=de" }]
       }
     ]
   },
@@ -1008,11 +1037,13 @@ export const infoPages = {
       },
       {
         "title": "Seguridad y tratamiento de datos",
-        "body": "El proveedor de IA seleccionado procesa la pregunta y el material necesarios. El bloqueo controla el acceso a conversaciones guardadas; compartir crea un enlace de solo lectura al contenido de ese momento. Consulta los detalles en la información de seguridad."
+        "body": "El proveedor de IA que redacta una respuesta procesa la pregunta y el material necesarios. Con Auto, Tomverse elige ese proveedor, y algunos pasos auxiliares, como los títulos de conversación, usan un proveedor elegido por Tomverse. Una conversación bloqueada solo se abre, comparte o descarga con su contraseña; el bloqueo no la cifra. Un enlace compartido muestra el texto tal como estaba al crearlo, caduca automáticamente y se elimina al desactivar el uso compartido. Consulta la política de privacidad para ver proveedores, países, conservación y eliminación.",
+        "link": { "label": "Leer la política de privacidad", "href": "/privacy" }
       },
       {
         "title": "Límites de la IA y estado del servicio",
-        "body": "Los modelos externos elegidos generan respuestas que pueden ser incorrectas o incompletas. AI Review compara esas respuestas. La verificación externa y búsqueda web son acciones separadas; consulta el estado del servicio."
+        "body": "Los modelos externos elegidos generan respuestas que pueden ser incorrectas o incompletas. AI Review compara esas respuestas. La verificación externa y búsqueda web son acciones separadas; consulta el estado del servicio.",
+        "bodyLinks": [{ "text": "el estado del servicio", "href": "/status?lang=es" }]
       }
     ]
   },
@@ -1027,11 +1058,13 @@ export const infoPages = {
       },
       {
         "title": "Segurança e tratamento de dados",
-        "body": "O provedor de IA escolhido processa a pergunta e o material necessários. O bloqueio controla o acesso a conversas salvas; compartilhar cria um link somente leitura do conteúdo daquele momento. Veja os detalhes nas informações de segurança."
+        "body": "O provedor de IA que escreve uma resposta processa a pergunta e o material necessários. Com Auto, a Tomverse escolhe esse provedor, e algumas etapas auxiliares, como os títulos das conversas, usam um provedor escolhido pela Tomverse. Uma conversa bloqueada só abre, é compartilhada ou baixada com a senha; o bloqueio não a criptografa. Um link de compartilhamento mostra o texto como estava ao ser criado, expira automaticamente e é excluído quando você desativa o compartilhamento. Veja a política de privacidade para provedores, países, retenção e exclusão.",
+        "link": { "label": "Ler a política de privacidade", "href": "/privacy" }
       },
       {
         "title": "Limites da IA e status do serviço",
-        "body": "Os modelos externos escolhidos geram respostas que podem estar erradas ou incompletas. O AI Review compara essas respostas. Verificação externa e busca na web são ações separadas; consulte o status do serviço."
+        "body": "Os modelos externos escolhidos geram respostas que podem estar erradas ou incompletas. O AI Review compara essas respostas. Verificação externa e busca na web são ações separadas; consulte o status do serviço.",
+        "bodyLinks": [{ "text": "status do serviço", "href": "/status?lang=pt" }]
       }
     ]
   }
@@ -1369,88 +1402,96 @@ export const focusedSafetyPages = {
     "ko": {
       "eyebrow": "안전과 데이터 처리",
       "title": "보안과 데이터 처리",
-      "description": "선택한 AI 제공자는 답변에 필요한 질문과 자료를 처리합니다. 잠금은 저장된 대화에 대한 접근을 제어하고, 공유는 당시 내용의 읽기 전용 링크를 만듭니다. 자세한 데이터 처리 범위는 안전 안내에서 확인하세요.",
+      "description": "답변을 만드는 AI 공급자는 그 답변에 필요한 질문과 자료를 처리합니다. Auto를 쓰면 Tomverse가 공급자를 고르고, 대화 제목 만들기 같은 일부 보조 단계는 Tomverse가 정한 공급자가 처리합니다. 대화를 잠그면 비밀번호를 입력해야 열고 공유·다운로드할 수 있으며, 잠금은 대화를 암호화하지 않습니다. 공유 링크는 만든 시점의 대화 텍스트를 보여 주고, 일정 기간 뒤 자동으로 만료되며, 공유를 끄면 삭제됩니다. 공급자와 국가, 보관과 삭제는 개인정보 처리방침에서 확인하세요.",
       "sections": [
         {
           "title": "보안과 데이터 처리",
-          "body": "선택한 AI 제공자는 답변에 필요한 질문과 자료를 처리합니다. 잠금은 저장된 대화에 대한 접근을 제어하고, 공유는 당시 내용의 읽기 전용 링크를 만듭니다. 자세한 데이터 처리 범위는 안전 안내에서 확인하세요."
+          "body": "답변을 만드는 AI 공급자는 그 답변에 필요한 질문과 자료를 처리합니다. Auto를 쓰면 Tomverse가 공급자를 고르고, 대화 제목 만들기 같은 일부 보조 단계는 Tomverse가 정한 공급자가 처리합니다. 대화를 잠그면 비밀번호를 입력해야 열고 공유·다운로드할 수 있으며, 잠금은 대화를 암호화하지 않습니다. 공유 링크는 만든 시점의 대화 텍스트를 보여 주고, 일정 기간 뒤 자동으로 만료되며, 공유를 끄면 삭제됩니다. 공급자와 국가, 보관과 삭제는 개인정보 처리방침에서 확인하세요.",
+          "link": { "label": "개인정보 처리방침 보기", "href": "/privacy" }
         }
       ]
     },
     "en": {
       "eyebrow": "Safety and data handling",
       "title": "Security and data handling",
-      "description": "Your selected AI provider processes the question and material needed to answer. Locks control access to saved conversations; sharing creates a read-only link to the content at that time. See the safety information for data-handling details.",
+      "description": "The AI provider that writes an answer processes the question and material needed for it. With Auto, Tomverse chooses that provider, and some helper steps such as conversation titles use a provider Tomverse chooses. Locking a conversation means its password is needed to open, share or download it; locking does not encrypt it. A share link shows the conversation's text as it was when you created it, expires automatically and is deleted when you turn sharing off. Read the privacy policy for providers, countries, retention and deletion.",
       "sections": [
         {
           "title": "Security and data handling",
-          "body": "Your selected AI provider processes the question and material needed to answer. Locks control access to saved conversations; sharing creates a read-only link to the content at that time. See the safety information for data-handling details."
+          "body": "The AI provider that writes an answer processes the question and material needed for it. With Auto, Tomverse chooses that provider, and some helper steps such as conversation titles use a provider Tomverse chooses. Locking a conversation means its password is needed to open, share or download it; locking does not encrypt it. A share link shows the conversation's text as it was when you created it, expires automatically and is deleted when you turn sharing off. Read the privacy policy for providers, countries, retention and deletion.",
+          "link": { "label": "Read the privacy policy", "href": "/privacy" }
         }
       ]
     },
     "zh": {
       "eyebrow": "安全与数据处理",
       "title": "安全与数据处理",
-      "description": "所选 AI 提供商会处理回答所需的问题与资料。锁定控制已保存对话的访问；分享会生成当时内容的只读链接。数据处理详情请查看安全说明。",
+      "description": "生成回答的 AI 提供商会处理该回答所需的问题和资料。使用 Auto 时由 Tomverse 选择提供商，生成对话标题等部分辅助步骤由 Tomverse 选定的提供商处理。锁定对话后，需要输入密码才能打开、分享或下载；锁定不会加密对话。分享链接显示创建时的对话文字，会自动过期，关闭分享后即删除。提供商、所在国家、保留和删除详情请查看隐私政策。",
       "sections": [
         {
           "title": "安全与数据处理",
-          "body": "所选 AI 提供商会处理回答所需的问题与资料。锁定控制已保存对话的访问；分享会生成当时内容的只读链接。数据处理详情请查看安全说明。"
+          "body": "生成回答的 AI 提供商会处理该回答所需的问题和资料。使用 Auto 时由 Tomverse 选择提供商，生成对话标题等部分辅助步骤由 Tomverse 选定的提供商处理。锁定对话后，需要输入密码才能打开、分享或下载；锁定不会加密对话。分享链接显示创建时的对话文字，会自动过期，关闭分享后即删除。提供商、所在国家、保留和删除详情请查看隐私政策。",
+          "link": { "label": "查看隐私政策", "href": "/privacy" }
         }
       ]
     },
     "zh-Hant": {
       "eyebrow": "安全與資料處理",
       "title": "安全與資料處理",
-      "description": "所選的 AI 供應商會處理回答所需的問題與資料。鎖定功能控管已儲存對話的存取；分享會產生當時內容的唯讀連結。資料處理的詳情請查看安全說明。",
+      "description": "生成回答的 AI 供應商會處理該回答所需的問題和資料。使用 Auto 時由 Tomverse 選擇供應商，產生對話標題等部分輔助步驟由 Tomverse 選定的供應商處理。鎖定對話後，需要輸入密碼才能開啟、分享或下載；鎖定不會加密對話。分享連結顯示建立時的對話文字，會自動過期，關閉分享後即刪除。供應商、所在國家、保留與刪除詳情請查看隱私權政策。",
       "sections": [
         {
           "title": "安全與資料處理",
-          "body": "所選的 AI 供應商會處理回答所需的問題與資料。鎖定功能控管已儲存對話的存取；分享會產生當時內容的唯讀連結。資料處理的詳情請查看安全說明。"
+          "body": "生成回答的 AI 供應商會處理該回答所需的問題和資料。使用 Auto 時由 Tomverse 選擇供應商，產生對話標題等部分輔助步驟由 Tomverse 選定的供應商處理。鎖定對話後，需要輸入密碼才能開啟、分享或下載；鎖定不會加密對話。分享連結顯示建立時的對話文字，會自動過期，關閉分享後即刪除。供應商、所在國家、保留與刪除詳情請查看隱私權政策。",
+          "link": { "label": "查看隱私權政策", "href": "/privacy" }
         }
       ]
     },
     "fr": {
       "eyebrow": "Sécurité et traitement des données",
       "title": "Sécurité et traitement des données",
-      "description": "Le fournisseur IA choisi traite la question et les documents nécessaires à la réponse. Le verrou contrôle l’accès aux conversations enregistrées ; le partage crée un lien en lecture seule vers leur contenu à cet instant. Consultez les informations de sécurité pour le traitement des données.",
+      "description": "Le fournisseur d’IA qui rédige une réponse traite la question et les documents nécessaires. Avec Auto, Tomverse choisit ce fournisseur, et certaines étapes d’assistance, comme les titres de conversation, utilisent un fournisseur choisi par Tomverse. Une conversation verrouillée ne s’ouvre, ne se partage et ne se télécharge qu’avec son mot de passe ; le verrou ne la chiffre pas. Un lien de partage montre le texte tel qu’il était à sa création, expire automatiquement et est supprimé quand vous désactivez le partage. Consultez la politique de confidentialité pour les fournisseurs, les pays, la conservation et la suppression.",
       "sections": [
         {
           "title": "Sécurité et traitement des données",
-          "body": "Le fournisseur IA choisi traite la question et les documents nécessaires à la réponse. Le verrou contrôle l’accès aux conversations enregistrées ; le partage crée un lien en lecture seule vers leur contenu à cet instant. Consultez les informations de sécurité pour le traitement des données."
+          "body": "Le fournisseur d’IA qui rédige une réponse traite la question et les documents nécessaires. Avec Auto, Tomverse choisit ce fournisseur, et certaines étapes d’assistance, comme les titres de conversation, utilisent un fournisseur choisi par Tomverse. Une conversation verrouillée ne s’ouvre, ne se partage et ne se télécharge qu’avec son mot de passe ; le verrou ne la chiffre pas. Un lien de partage montre le texte tel qu’il était à sa création, expire automatiquement et est supprimé quand vous désactivez le partage. Consultez la politique de confidentialité pour les fournisseurs, les pays, la conservation et la suppression.",
+          "link": { "label": "Lire la politique de confidentialité", "href": "/privacy" }
         }
       ]
     },
     "de": {
       "eyebrow": "Sicherheit und Datenverarbeitung",
       "title": "Sicherheit und Datenverarbeitung",
-      "description": "Der gewählte KI-Anbieter verarbeitet die nötige Frage und das Material. Sperren regelt den Zugriff auf gespeicherte Gespräche; Teilen erstellt einen Nur-Lese-Link zum damaligen Inhalt. Details finden Sie in den Sicherheitsinformationen.",
+      "description": "Der KI-Anbieter, der eine Antwort schreibt, verarbeitet die dafür nötige Frage und das Material. Mit Auto wählt Tomverse diesen Anbieter, und einige Hilfsschritte wie Unterhaltungstitel nutzen einen von Tomverse gewählten Anbieter. Eine gesperrte Unterhaltung lässt sich nur mit ihrem Passwort öffnen, teilen oder herunterladen; die Sperre verschlüsselt sie nicht. Ein Freigabelink zeigt den Text so, wie er beim Erstellen war, läuft automatisch ab und wird gelöscht, wenn Sie das Teilen beenden. Anbieter, Länder, Aufbewahrung und Löschung finden Sie in der Datenschutzerklärung.",
       "sections": [
         {
           "title": "Sicherheit und Datenverarbeitung",
-          "body": "Der gewählte KI-Anbieter verarbeitet die nötige Frage und das Material. Sperren regelt den Zugriff auf gespeicherte Gespräche; Teilen erstellt einen Nur-Lese-Link zum damaligen Inhalt. Details finden Sie in den Sicherheitsinformationen."
+          "body": "Der KI-Anbieter, der eine Antwort schreibt, verarbeitet die dafür nötige Frage und das Material. Mit Auto wählt Tomverse diesen Anbieter, und einige Hilfsschritte wie Unterhaltungstitel nutzen einen von Tomverse gewählten Anbieter. Eine gesperrte Unterhaltung lässt sich nur mit ihrem Passwort öffnen, teilen oder herunterladen; die Sperre verschlüsselt sie nicht. Ein Freigabelink zeigt den Text so, wie er beim Erstellen war, läuft automatisch ab und wird gelöscht, wenn Sie das Teilen beenden. Anbieter, Länder, Aufbewahrung und Löschung finden Sie in der Datenschutzerklärung.",
+          "link": { "label": "Datenschutzerklärung lesen", "href": "/privacy" }
         }
       ]
     },
     "es": {
       "eyebrow": "Seguridad y tratamiento de datos",
       "title": "Seguridad y tratamiento de datos",
-      "description": "El proveedor de IA seleccionado procesa la pregunta y el material necesarios. El bloqueo controla el acceso a conversaciones guardadas; compartir crea un enlace de solo lectura al contenido de ese momento. Consulta los detalles en la información de seguridad.",
+      "description": "El proveedor de IA que redacta una respuesta procesa la pregunta y el material necesarios. Con Auto, Tomverse elige ese proveedor, y algunos pasos auxiliares, como los títulos de conversación, usan un proveedor elegido por Tomverse. Una conversación bloqueada solo se abre, comparte o descarga con su contraseña; el bloqueo no la cifra. Un enlace compartido muestra el texto tal como estaba al crearlo, caduca automáticamente y se elimina al desactivar el uso compartido. Consulta la política de privacidad para ver proveedores, países, conservación y eliminación.",
       "sections": [
         {
           "title": "Seguridad y tratamiento de datos",
-          "body": "El proveedor de IA seleccionado procesa la pregunta y el material necesarios. El bloqueo controla el acceso a conversaciones guardadas; compartir crea un enlace de solo lectura al contenido de ese momento. Consulta los detalles en la información de seguridad."
+          "body": "El proveedor de IA que redacta una respuesta procesa la pregunta y el material necesarios. Con Auto, Tomverse elige ese proveedor, y algunos pasos auxiliares, como los títulos de conversación, usan un proveedor elegido por Tomverse. Una conversación bloqueada solo se abre, comparte o descarga con su contraseña; el bloqueo no la cifra. Un enlace compartido muestra el texto tal como estaba al crearlo, caduca automáticamente y se elimina al desactivar el uso compartido. Consulta la política de privacidad para ver proveedores, países, conservación y eliminación.",
+          "link": { "label": "Leer la política de privacidad", "href": "/privacy" }
         }
       ]
     },
     "pt": {
       "eyebrow": "Segurança e tratamento de dados",
       "title": "Segurança e tratamento de dados",
-      "description": "O provedor de IA escolhido processa a pergunta e o material necessários. O bloqueio controla o acesso a conversas salvas; compartilhar cria um link somente leitura do conteúdo daquele momento. Veja os detalhes nas informações de segurança.",
+      "description": "O provedor de IA que escreve uma resposta processa a pergunta e o material necessários. Com Auto, a Tomverse escolhe esse provedor, e algumas etapas auxiliares, como os títulos das conversas, usam um provedor escolhido pela Tomverse. Uma conversa bloqueada só abre, é compartilhada ou baixada com a senha; o bloqueio não a criptografa. Um link de compartilhamento mostra o texto como estava ao ser criado, expira automaticamente e é excluído quando você desativa o compartilhamento. Veja a política de privacidade para provedores, países, retenção e exclusão.",
       "sections": [
         {
           "title": "Segurança e tratamento de dados",
-          "body": "O provedor de IA escolhido processa a pergunta e o material necessários. O bloqueio controla o acesso a conversas salvas; compartilhar cria um link somente leitura do conteúdo daquele momento. Veja os detalhes nas informações de segurança."
+          "body": "O provedor de IA que escreve uma resposta processa a pergunta e o material necessários. Com Auto, a Tomverse escolhe esse provedor, e algumas etapas auxiliares, como os títulos das conversas, usam um provedor escolhido pela Tomverse. Uma conversa bloqueada só abre, é compartilhada ou baixada com a senha; o bloqueio não a criptografa. Um link de compartilhamento mostra o texto como estava ao ser criado, expira automaticamente e é excluído quando você desativa o compartilhamento. Veja a política de privacidade para provedores, países, retenção e exclusão.",
+          "link": { "label": "Ler a política de privacidade", "href": "/privacy" }
         }
       ]
     }
