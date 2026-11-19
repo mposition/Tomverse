@@ -47,7 +47,7 @@ tomverse exec --json "explain src/index.ts" --read-only
 
 | Command | What it does |
 |---|---|
-| `tomverse [task]` | Interactive session. `/help`, `/diff`, `/usage`, `/compact`, `/model`, `/exit` inside. |
+| `tomverse [task]` | Interactive session. `/help`, `/diff`, `/usage`, `/compact`, `/model`, `/approvals [clear]`, `/exit` inside. |
 | `tomverse exec <task> [--json]` | One task, no prompts. Stops with exit code 3 at the first action that needs approval. |
 | `tomverse resume <session> [task]` | Continue a saved session (and answer pending approvals in a terminal). |
 | `tomverse models` | Models this key can use. |
@@ -113,6 +113,17 @@ per task".
   cannot run that way (cmd.exe would re-read the arguments); they run as a
   shell line in Windows PowerShell, and the approval says so. Elsewhere shell
   lines run in your `bash`/`zsh` (or `/bin/sh`).
+- **Answers:** `y` allows once, `n` (or Enter) declines. `a` allows it and
+  stops asking for the same kind of action for the rest of this run of the CLI:
+  for a change, every later create or update of files in this folder; for a
+  command, exactly the same program, arguments, folder and environment names
+  (only the time limit may differ — any other command is asked). Deleting a
+  file is always asked. What runs without asking is still shown, and every
+  check above (paths, credential files, file content at that moment, the
+  resolved program) still applies. An `a` answer is not saved: a resumed
+  session asks again. `/approvals` lists what is allowed, `/approvals clear`
+  makes everything ask again. The session records which approvals came from
+  an earlier `a`.
 - `--read-only` gives the model no patch or command tool at all.
 - Without a terminal (`exec`, pipes, CI) nothing can be approved: the run stops
   with exit code 3 and the pending actions in the output. Review them with

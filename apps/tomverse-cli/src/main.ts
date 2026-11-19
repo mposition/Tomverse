@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { EXIT_CODES, Runner, SMART_ADAPTIVE, type Outcome, type Prompter } from "./agent.js";
 import { AuthError, keyPrefix, maskKey, readKey } from "./auth.js";
+import type { ApprovalMemory } from "./approvals.js";
 import { UndoError, renderChange, undoChange, viewChanges } from "./changes.js";
 import { userShell } from "./commands.js";
 import { ConfigError, ensureHome, readConfig, resolveEndpoint, tomverseHome, writeConfig, type CliConfig } from "./config.js";
@@ -527,7 +528,7 @@ const startSession = async (ctx: Context, task: string | null, interactive: bool
             outcome = await runner.runTask(task);
             await finalEvent(ctx, runner, gateway, outcome);
         }
-        if (interactive) outcome = await repl(ctx, runner, gateway, outcome);
+        if (interactive) outcome = await repl(ctx, runner, gateway, outcome, prompter?.memory ?? null);
         return exitFor(outcome);
     } finally {
         removeSigint();
@@ -535,7 +536,7 @@ const startSession = async (ctx: Context, task: string | null, interactive: bool
     }
 };
 
-const repl = async (ctx: Context, runner: Runner, gateway: Gateway, initial: Outcome = "success"): Promise<Outcome> => {
+const repl = async (ctx: Context, runner: Runner, gateway: Gateway, initial: Outcome = "success", memory: ApprovalMemory | null = null): Promise<Outcome> => {
     // The exit code is the last task's outcome, so `tomverse && …` never goes on after one that failed.
     let last: Outcome = initial;
     ctx.output.info("Type a task, or /help. Ctrl+D or /exit to leave.");
@@ -545,7 +546,7 @@ const repl = async (ctx: Context, runner: Runner, gateway: Gateway, initial: Out
         const text = line.trim();
         if (!text) continue;
         if (text === "/help") {
-            ctx.output.info("/diff  changes this session made   /usage  credits of this session   /compact  summarise history now   /model  current model   /exit");
+            ctx.output.info("/diff  changes this session made   /usage  credits of this session   /compact  summarise history now   /model  current model   /approvals [clear]  what is allowed without asking   /exit");
             continue;
         }
         if (text === "/diff") {
@@ -559,6 +560,20 @@ const repl = async (ctx: Context, runner: Runner, gateway: Gateway, initial: Out
         if (text === "/model") {
             const m = runner.journal.state.model;
             ctx.output.info(`${m.pinned ?? m.requested}${m.pinnedFrom === "smart_adaptive_first_response" ? " (picked by Smart Adaptive, kept for this session)" : ""}. To use another model, start a new session with --model.`);
+            continue;
+        }
+        if (text === "/approvals" || text === "/approvals clear") {
+            if (text === "/approvals clear") {
+                memory?.clear();
+                ctx.output.info("Every action is asked again from now on.");
+            } else {
+                const rules = memory?.describe() ?? [];
+                if (!rules.length) ctx.output.info("Nothing is allowed without asking: every change and command is asked.");
+                else {
+                    ctx.output.info("Allowed without asking for the rest of this run (not saved; a resumed session asks again):");
+                    for (const rule of rules) ctx.output.info(`  - ${safeLine(rule)}`);
+                }
+            }
             continue;
         }
         if (text === "/compact") {
@@ -637,7 +652,7 @@ const resume = async (ctx: Context, args: string[], interactive: boolean) => {
             if (task) outcome = await runner.runTask(task);
             else if (wasMidTask && state.tasks.length) outcome = await runner.loop();
             if (task || (wasMidTask && state.tasks.length)) await finalEvent(ctx, runner, gateway, outcome);
-            if (interactive) outcome = await repl(ctx, runner, gateway, outcome);
+            if (interactive) outcome = await repl(ctx, runner, gateway, outcome, prompter?.memory ?? null);
             return exitFor(outcome);
         } finally {
             removeSigint();

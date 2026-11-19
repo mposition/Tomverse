@@ -1,6 +1,7 @@
 import { createInterface } from "node:readline/promises";
 import { renderFileDiff, safeLine, safeText } from "./display.js";
 import type { ApprovalView, Prompter } from "./agent.js";
+import { ApprovalMemory, type RememberedRule } from "./approvals.js";
 
 /**
  * Questions to the person at the terminal. Answers are read from the TTY
@@ -61,12 +62,55 @@ export const renderApproval = (view: ApprovalView) => {
     return lines.map((l) => safeText(l)).join("\n");
 };
 
-export const terminalPrompter = (): Prompter => ({
+/** What is done without asking, shown so the person still sees every action. */
+export const renderRemembered = (view: ApprovalView, rule: RememberedRule) => {
+    if (rule === "file_edits") {
+        const body = renderApproval(view).split("\n").slice(1).join("\n");
+        return [`── Changing ${view.patch!.length} file(s) without asking: you allowed file edits for this run (/approvals clear to stop) ──`, body].join("\n");
+    }
+    return safeText(`  · running without asking (you allowed this exact command for this run): ${safeLine(view.command!.display)}`);
+};
+
+/** The question for one approval, with "always" only where it can be remembered. */
+export const approvalQuestion = (view: ApprovalView, canRemember: boolean) => {
+    if (view.patch) {
+        return canRemember
+            ? "Apply these changes? [y] yes  [a] yes, and allow file edits without asking for the rest of this run  [N] no: "
+            : "Apply these changes? (deleting a file is always asked) [y/N] ";
+    }
+    return canRemember ? "Run it? [y] yes  [a] yes, and run this exact command again without asking in this run  [N] no: " : "Run it? [y/N] ";
+};
+
+/** y / a / anything else (no). "a" counts only where it was offered. */
+export const parseApprovalAnswer = (answer: string | null, canRemember: boolean): "once" | "always" | "no" => {
+    const text = answer?.trim().toLowerCase() ?? "";
+    if (text === "y" || text === "yes") return "once";
+    if (canRemember && (text === "a" || text === "always")) return "always";
+    return "no";
+};
+
+export type TerminalPrompter = Prompter & { memory: ApprovalMemory };
+
+/** `ask` and `write` are the terminal; tests pass stand-ins. */
+export const terminalPrompter = (
+    memory = new ApprovalMemory(),
+    ask: (question: string) => Promise<string | null> = askLine,
+    write: (text: string) => void = (text) => void process.stderr.write(text)
+): TerminalPrompter => ({
+    memory,
     async approve(view) {
-        process.stderr.write(`\n${renderApproval(view)}\n`);
-        return yes(await askLine(view.patch ? "Apply these changes? [y/N] " : "Run it? [y/N] "));
+        const rule = memory.match(view);
+        if (rule) {
+            write(`\n${renderRemembered(view, rule)}\n`);
+            return { approved: true, remembered: rule };
+        }
+        const canRemember = memory.canRemember(view);
+        write(`\n${renderApproval(view)}\n`);
+        const answer = parseApprovalAnswer(await ask(approvalQuestion(view, canRemember)), canRemember);
+        if (answer === "always") return { approved: true, remember: memory.remember(view) ?? undefined };
+        return { approved: answer === "once" };
     },
     async confirm(question) {
-        return yes(await askLine(`${safeLine(question)} [y/N] `));
+        return yes(await ask(`${safeLine(question)} [y/N] `));
     },
 });

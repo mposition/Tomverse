@@ -588,7 +588,11 @@ output contract are in `apps/tomverse-cli/README.md`.
   execute, no re-run of a call that started, credential paths and `.git/`
   never read, commands get a fixed short list of environment variables (PATH,
   HOME, temp, locale, …) plus names the user adds, never a Tomverse one, and no
-  approval without a terminal. Commands run with the user's
+  approval without a terminal. At the terminal the user can answer "always"
+  for the rest of that process: all file creates and updates (a delete is
+  always asked), or one exact command (program, arguments, folder,
+  environment names). It is not saved, so a resumed session asks again, and
+  it skips only the question, not the checks. Commands run with the user's
   own permissions; the CLI does not claim a sandbox.
 - **Smart Adaptive.** The first answer's `x-tomverse-routed-model` is pinned for
   the session before any tool of that answer runs; later requests name it.

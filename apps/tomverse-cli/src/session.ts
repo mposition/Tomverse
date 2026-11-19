@@ -75,6 +75,11 @@ export type ApprovalRecord = {
     /** What the decision was bound to, checked again right before execution. */
     binding: { files?: Array<{ path: string; preimage: string | null }>; cwd?: string; program?: string };
     decision: "approved" | "denied";
+    /** Approved without asking, by an earlier "always" answer in the same process. */
+    by?: "remembered_answer";
+    rule?: "file_edits" | "same_command";
+    /** This answer was "always" for the rest of that process. */
+    remember?: "file_edits" | "same_command";
     decidedAt: string;
 };
 

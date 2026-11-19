@@ -3,6 +3,7 @@ import { GatewayError, type CatalogModel, type Gateway, type GenerationHooks } f
 import { safeLine, type Output } from "./display.js";
 import { JournalError, canonicalDigest, type GenerationRecord, type Journal, type PendingApproval } from "./session.js";
 import { createTools, planCommandCall, planPatchCall, type ToolContext } from "./tools.js";
+import type { RememberedRule } from "./approvals.js";
 import type { CommandPlan } from "./commands.js";
 import type { PlannedEdit } from "./patch.js";
 import type { Workspace } from "./workspace.js";
@@ -36,11 +37,19 @@ export type ApprovalView = {
     patch?: PlannedEdit[];
     command?: CommandPlan;
     error?: string;
+    /** The workspace root the action is in. */
+    root?: string;
 };
+
+/**
+ * The person's answer. `remembered`: given without asking, by an earlier
+ * "always" answer in this process. `remember`: this answer was "always".
+ */
+export type ApprovalDecision = { approved: boolean; remembered?: RememberedRule; remember?: RememberedRule };
 
 export type Prompter = {
     /** Asks the person at the terminal. Only ever a TTY; model text never answers it. */
-    approve(view: ApprovalView): Promise<boolean>;
+    approve(view: ApprovalView): Promise<boolean | ApprovalDecision>;
     confirm(question: string): Promise<boolean>;
 };
 
@@ -579,7 +588,7 @@ export class Runner {
     }
 
     private viewFor(request: PendingApproval): ApprovalView {
-        const view: ApprovalView = { ...request };
+        const view: ApprovalView = { ...request, root: this.options.workspace.root };
         try {
             if (request.toolName === "apply_patch") {
                 view.patch = planPatchCall(this.toolContext, request.input as never);
@@ -624,11 +633,14 @@ export class Runner {
         for (const view of views) {
             let approved = false;
             let reason: string | undefined;
+            let decision: ApprovalDecision = { approved: false };
             if (view.error) {
                 reason = `Not offered to the user: ${view.error}`;
                 options.output.info(`  · ${view.toolName} could not be prepared: ${view.error}`);
             } else {
-                approved = await options.prompter!.approve(view);
+                const answer = await options.prompter!.approve(view);
+                decision = typeof answer === "boolean" ? { approved: answer } : answer;
+                approved = decision.approved;
                 reason = approved ? undefined : "The user declined.";
             }
             journal.state.approvals.push({
@@ -642,6 +654,8 @@ export class Runner {
                       ? { cwd: view.command.cwd, program: view.command.file }
                       : {},
                 decision: approved ? "approved" : "denied",
+                ...(approved && decision.remembered ? { by: "remembered_answer" as const, rule: decision.remembered } : {}),
+                ...(approved && decision.remember ? { remember: decision.remember } : {}),
                 decidedAt: new Date().toISOString(),
             });
             responses.push({ type: "tool-approval-response", approvalId: view.approvalId, approved, ...(reason ? { reason } : {}) });
