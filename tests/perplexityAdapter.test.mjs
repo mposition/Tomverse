@@ -158,6 +158,31 @@ test("an answer's own rule and level-one heading stay in the answer when its cit
     assert.ok(answer.endsWith("Sources:\n[1] https://example.com/a\n[2] https://example.com/b"));
 });
 
+test("a follow-up quoting the previous answer's marks stays its own turn", () => {
+    const conversation = parse(
+        `${LOGO}\n\n# first\n\nOne.[^1_1]\n\n[^1_1]: https://example.com/1\n\n---\n\n# why does [^1_1] say that?\n\nIt is a guess.\n`
+    );
+    assert.deepEqual(conversation.messages.map((m) => m.role), ["user", "assistant", "user", "assistant"]);
+    assert.equal(conversation.messages[3].content, "It is a guess.");
+});
+
+test("an uncited turn followed by a cited one keeps both questions", () => {
+    const conversation = parse(
+        `${LOGO}\n\n# first\n\nNo sources here.\n\n---\n\n# second\n\nCited.[^2_1]\n\n[^2_1]: https://example.com/2\n`
+    );
+    assert.deepEqual(
+        conversation.messages.map((m) => m.content.split("\n")[0]),
+        ["first", "No sources here.", "second", "Cited.[1]"]
+    );
+});
+
+test("blank lines inside a code block are kept as they are", () => {
+    const answer = parse(
+        `${LOGO}\n\n# q\n\n\`\`\`python\nx = 1\n\n\n\ny = 2\n\`\`\`\n\n\n\nAfter.\n`
+    ).messages[1].content;
+    assert.equal(answer, "```python\nx = 1\n\n\n\ny = 2\n```\n\nAfter.");
+});
+
 test("threads that open with the same question but differ are separate lineages", () => {
     const thread = (answer) => parse(`${LOGO}\n\n# What should I cook tonight?\n\n${answer}\n`);
     const one = thread("Try a risotto.");
@@ -168,10 +193,10 @@ test("threads that open with the same question but differ are separate lineages"
 
 test("hidden citation spans are recognised in other attribute spellings", () => {
     const answer = parse(
-        `${LOGO}\n\n# q\n\nA.[^1_1]\n<span class="hidden" style="display: none;">[^1_2]</span>\n\n[^1_1]: https://example.com/1\n\n[^1_2]: https://example.com/2\n`
+        `${LOGO}\n\n# q\n\nA.[^1_1]\n<span class="hidden" style="display: none;">[^1_2] [^1_3]</span>\n\n[^1_1]: https://example.com/1\n\n[^1_2]: https://example.com/2\n\n[^1_3]: https://example.com/3\n`
     ).messages[1].content;
     assert.ok(!answer.includes("<span"));
-    assert.ok(answer.endsWith("[2] https://example.com/2"));
+    assert.ok(answer.endsWith("[3] https://example.com/3"));
 });
 
 test("an answer ending on a rule of its own does not keep it", () => {

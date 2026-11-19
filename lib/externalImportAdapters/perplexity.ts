@@ -36,10 +36,12 @@ import {
  * A turn starts at a level-one heading that opens the file or follows a `---`
  * rule, outside a code fence. An answer may also hold a `---` and a `#`
  * heading of its own, so a candidate turn is checked against the export's
- * footnote numbering: Perplexity numbers citations per turn (`[^3_1]` is the
- * third turn's first source), and a candidate whose citations all belong to
- * the turns before it is the rest of the previous answer. An uncited answer
- * carries no such evidence; that case stays a known limitation.
+ * footnote numbering: Perplexity numbers sources per turn (`[^3_1]` is the
+ * third turn's first) and defines them at the end of that answer. A
+ * candidate that defines only the previous turn's sources, when that turn
+ * defined none yet, is the rest of the previous answer. An uncited answer
+ * carries no such evidence, so a rule-and-heading inside one still splits it
+ * -- and can shift the numbering for the turn after. Known limitation.
  *
  * Citations are kept. The footnote marks become `[n]` and the definitions a
  * "Sources" list at the end of the answer, because a footnote definition
@@ -61,10 +63,10 @@ const TITLE_CODE_POINTS = 80;
 
 const LOGO = /^<img\s[^>]*perplexity\.ai[^>]*\/?>$/i;
 const DIVIDER = /^<div\b[^>]*>\s*⁂\s*<\/div>$/;
-const HIDDEN_CITATIONS = /^<span\b[^>]*display:\s*none[^>]*>(?:\[\^\d+_\d+\])*<\/span>$/;
+const HIDDEN_CITATIONS = /^<span\b[^>]*display:\s*none[^>]*>(?:\s*,?\s*\[\^\d+_\d+\])*\s*<\/span>$/;
 const FOOTNOTE_DEFINITION = /^\[\^\d+_(\d+)\]:\s*(.+)$/;
 const FOOTNOTE_MARK = /\[\^\d+_(\d+)\]/g;
-const FOOTNOTE_TURN = /\[\^(\d+)_\d+\]/g;
+const FOOTNOTE_DEFINITION_TURN = /^\[\^(\d+)_\d+\]:\s/;
 const FENCE = /^\s*(```|~~~)/;
 const HEADING = /^# (?!#)(.*)$/;
 
@@ -131,11 +133,22 @@ function candidateTurns(lines: readonly string[]): Turn[] {
     return turns;
 }
 
-/** The turn numbers a candidate's citations belong to. */
-const citedTurns = (turn: Turn): number[] =>
-    [turn.heading, ...turn.body].flatMap((line) =>
-        [...line.matchAll(FOOTNOTE_TURN)].map((match) => Number(match[1]))
-    );
+/**
+ * The turn numbers of the footnote definitions (`[^3_1]: url`) a candidate
+ * holds, outside code. Only definitions count: they sit at the end of the
+ * answer that cites them, while a mark can appear anywhere -- a follow-up
+ * question quoting the previous answer carries its marks.
+ */
+function definedTurns(turn: Turn): number[] {
+    const numbers: number[] = [];
+    let inFence = false;
+    for (const line of turn.body) {
+        if (FENCE.test(line)) inFence = !inFence;
+        const match = inFence ? null : FOOTNOTE_DEFINITION_TURN.exec(line.trim());
+        if (match) numbers.push(Number(match[1]));
+    }
+    return numbers;
+}
 
 /** Drops the `---` that separated a turn from the next one. */
 function dropSeparator(body: string[]): void {
@@ -145,17 +158,28 @@ function dropSeparator(body: string[]): void {
 
 function splitTurns(text: string): Turn[] {
     const lines = text.replace(/\r\n?/g, "\n").split("\n");
-    const turns: Turn[] = [];
+    const turns: Array<Turn & { number: number; defines: boolean }> = [];
     for (const candidate of candidateTurns(lines)) {
         const previous = turns[turns.length - 1];
-        const cited = citedTurns(candidate);
-        if (previous && cited.length > 0 && Math.max(...cited) <= turns.length) {
-            // Its sources are the earlier turns': an answer's own rule and
-            // heading, not a new question.
+        const defined = definedTurns(candidate);
+        if (
+            previous &&
+            !previous.defines &&
+            defined.length > 0 &&
+            defined.every((number) => number === previous.number)
+        ) {
+            // The sources defined here are the previous turn's own, and it
+            // had none yet: this is the rest of that answer, split at a rule
+            // and heading of its own.
             previous.body.push(candidate.heading, ...candidate.body);
+            previous.defines = true;
             continue;
         }
-        turns.push(candidate);
+        turns.push({
+            ...candidate,
+            number: defined[0] ?? (previous?.number ?? 0) + 1,
+            defines: defined.length > 0,
+        });
     }
     for (const turn of turns.slice(0, -1)) dropSeparator(turn.body);
     return turns;
@@ -180,6 +204,9 @@ function cleanAnswer(body: readonly string[]): string {
                 sources.set(Number(definition[1]), definition[2].trim());
                 continue;
             }
+            // Blank runs left by the removed lines collapse to one -- outside
+            // code only, where whitespace is the content.
+            if (!trimmed && kept.length > 0 && !kept[kept.length - 1].trim()) continue;
             kept.push(line.replace(FOOTNOTE_MARK, "[$1]"));
             continue;
         }
@@ -187,7 +214,6 @@ function cleanAnswer(body: readonly string[]): string {
     }
     let answer = kept
         .join("\n")
-        .replace(/\n{3,}/g, "\n\n")
         .trim()
         // A closing rule of the answer's own, left once the separator is gone.
         .replace(/(?:\n+---)+$/, "")
