@@ -12,6 +12,21 @@ What a release consists of:
   arm64/x64, Linux x64/arm64), attached to a GitHub Release `cli-v<version>`
   on `mposition/Tomverse`.
 
+## Before anything: production runs the server side
+
+The published CLI talks to `https://tomverse.app/api/v1` (production). Publish
+only after production is running the release that has the paid-plan gate for
+the API and CLI (PR #4092) and Smart Adaptive on Claude Code and Codex
+(PR #4094). Check with a Pro account's key, from any folder:
+
+```powershell
+$env:TOMVERSE_API_KEY = "<a Pro account's key>"
+npx --yes ./tomverse-cli-<version>.tgz doctor   # the tarball from pack:verify; all checks pass
+npx --yes ./tomverse-cli-<version>.tgz models   # smart-adaptive is listed
+```
+
+A Free account's key must get "The Tomverse API and CLI need a paid plan."
+
 ## 0. Once: the npm organisation
 
 Where: a browser, signed in to the npm account that will own the package.

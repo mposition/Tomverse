@@ -5,6 +5,9 @@ code, proposes changes as diffs you approve, runs the commands you approve
 (tests, builds), and tells you what it did and what it cost. No Claude Code,
 Codex or repository checkout is needed.
 
+Needs a Tomverse Pro plan or above: API keys and the CLI are not available on
+the Free plan.
+
 ## Install
 
 Works on Windows, macOS and Linux. Pick one:
