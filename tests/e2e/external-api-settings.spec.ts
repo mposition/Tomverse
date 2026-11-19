@@ -290,5 +290,41 @@ test("API keys: Claude Code, Codex and Cursor each get their own configuration @
     // The model list says which tools take each model.
     await page.getByTestId("external-api-models-search").fill("sonnet");
     await expect(page.getByTestId("external-api-models")).toContainText("Claude Code · Cursor");
+    // The Tomverse CLI choice stays hidden until the package is published.
+    await expect(page.getByTestId("external-api-platform-tomverse-cli")).toHaveCount(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+});
+
+test("API keys: the Tomverse CLI choice, once enabled, shows install and a key for this terminal only @ui-risk", async ({ page, isMobile }) => {
+    await page.setViewportSize({ width: isMobile ? 320 : 1280, height: 900 });
+    await prepareGuestPage(page, "ko");
+    await page.route(
+        (url) => url.pathname === "/api/user/api-keys",
+        (route) =>
+            route.fulfill({
+                json: {
+                    enabled: true,
+                    baseUrl,
+                    limits: { maxKeys: 10, maxCreditCap: 1000000, expiryDays: [7, 30, 90, 365] },
+                    models: [smartAdaptive, model],
+                    keys: [],
+                    tomverseCli: {
+                        install: "npm install -g @tomverse/cli",
+                        powershell: '$env:TOMVERSE_API_KEY = "<YOUR_TOMVERSE_API_KEY>"\ntomverse doctor',
+                        posix: 'export TOMVERSE_API_KEY="<YOUR_TOMVERSE_API_KEY>"\ntomverse doctor',
+                    },
+                },
+            })
+    );
+    await page.goto("/settings/api");
+    await page.getByTestId("external-api-platform-tomverse-cli").click();
+    const panel = page.getByTestId("external-api-tool-tomverse-cli");
+    await expect(page.getByTestId("external-api-connect").getByRole("heading", { name: "Tomverse CLI" })).toBeVisible();
+    await expect(page.getByTestId("external-api-tomverse-cli-install")).toContainText("npm install -g @tomverse/cli");
+    await expect(page.getByTestId("external-api-tomverse-cli-powershell")).toContainText("$env:TOMVERSE_API_KEY");
+    await page.getByTestId("external-api-shell-posix").click();
+    await expect(page.getByTestId("external-api-tomverse-cli-powershell")).toHaveCount(0);
+    await expect(page.getByTestId("external-api-tomverse-cli-posix")).toContainText("export TOMVERSE_API_KEY");
+    await expect(panel).toContainText("격리(sandbox)되지 않습니다");
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
 });
