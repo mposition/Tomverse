@@ -42,6 +42,9 @@ type KeySummary = {
 
 type ModelSummary = ExternalApiModelCapabilities;
 
+/** Install and connect lines for the Tomverse CLI; absent until the package is published. */
+type TomverseCliGuide = { install: string; powershell: string; posix: string };
+
 type Overview =
     | { enabled: false; keys?: KeySummary[] }
     | {
@@ -50,6 +53,7 @@ type Overview =
           limits: { maxKeys: number; maxCreditCap: number; expiryDays: number[] };
           models: ModelSummary[];
           keys: KeySummary[];
+          tomverseCli?: TomverseCliGuide | null;
       };
 
 type RequestRow = {
@@ -590,8 +594,8 @@ function Notes({ children }: { children: ReactNode }) {
     );
 }
 
-type Platform = "claude-code" | "codex" | "cursor" | "aside" | "vscode" | "other";
-const PLATFORMS: Platform[] = ["claude-code", "codex", "cursor", "aside", "vscode", "other"];
+type Platform = "tomverse-cli" | "claude-code" | "codex" | "cursor" | "aside" | "vscode" | "other";
+const PLATFORMS: Platform[] = ["tomverse-cli", "claude-code", "codex", "cursor", "aside", "vscode", "other"];
 type Shell = "powershell" | "posix";
 type Surface = "terminal" | "extension";
 const SHELLS: [Shell, string][] = [
@@ -605,7 +609,17 @@ const SHELLS: [Shell, string][] = [
  * it and a placeholder otherwise. Native protocols never offer Smart Adaptive
  * (codingToolModels).
  */
-function ConnectSection({ baseUrl, models, apiKey }: { baseUrl: string; models: ModelSummary[]; apiKey: string | null }) {
+function ConnectSection({
+    baseUrl,
+    models,
+    apiKey,
+    tomverseCli,
+}: {
+    baseUrl: string;
+    models: ModelSummary[];
+    apiKey: string | null;
+    tomverseCli?: TomverseCliGuide | null;
+}) {
     const { t } = useLanguage();
     const key = apiKey ?? KEY_PLACEHOLDER;
     const [platform, setPlatform] = useState<Platform | null>(null);
@@ -633,9 +647,10 @@ function ConnectSection({ baseUrl, models, apiKey }: { baseUrl: string; models: 
         ["extension", t("externalApi.vscodeExtension")],
     ];
     const platformName = (id: Platform) =>
-        ({ "claude-code": "Claude Code", codex: "Codex", cursor: "Cursor", aside: "Aside", vscode: "VS Code", other: t("externalApi.platformOther") })[id];
+        ({ "tomverse-cli": "Tomverse CLI", "claude-code": "Claude Code", codex: "Codex", cursor: "Cursor", aside: "Aside", vscode: "VS Code", other: t("externalApi.platformOther") })[id];
     const platformHint = (id: Platform) =>
         ({
+            "tomverse-cli": t("externalApi.terminal"),
             "claude-code": `${t("externalApi.terminal")} · ${t("externalApi.vscodeExtension")}`,
             codex: `${t("externalApi.terminal")} · ${t("externalApi.vscodeExtension")}`,
             cursor: "Chat · Agent",
@@ -647,6 +662,25 @@ function ConnectSection({ baseUrl, models, apiKey }: { baseUrl: string; models: 
 
     const panel = (() => {
         switch (platform) {
+            case "tomverse-cli":
+                if (!tomverseCli) return null;
+                return (
+                    <div data-testid="external-api-tool-tomverse-cli">
+                        <p className="text-xs text-zinc-500">{t("externalApi.tomverseCliHint")}</p>
+                        <CopyBlock label={t("externalApi.tomverseCliInstall")} value={tomverseCli.install} testId="external-api-tomverse-cli-install" />
+                        <div className="mt-3 flex flex-wrap gap-2">
+                            <Segmented options={SHELLS} value={shell} onChange={setShell} testId="external-api-shell" />
+                        </div>
+                        <CopyBlock
+                            label={t("externalApi.tomverseCliConnect")}
+                            value={(shell === "powershell" ? tomverseCli.powershell : tomverseCli.posix).replace(KEY_PLACEHOLDER, key)}
+                            testId={`external-api-tomverse-cli-${shell}`}
+                        />
+                        <Notes>
+                            <p>{t("externalApi.tomverseCliNotes")}</p>
+                        </Notes>
+                    </div>
+                );
             case "claude-code": {
                 const claude = lists.claudeCode.find((model) => model.id === claudeId) ?? lists.claudeCode[0];
                 if (!claude) return noModels;
@@ -764,7 +798,7 @@ function ConnectSection({ baseUrl, models, apiKey }: { baseUrl: string; models: 
                 </p>
             ) : null}
             <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3" role="group" aria-label={t("externalApi.connectTitle")}>
-                {PLATFORMS.map((id) => (
+                {PLATFORMS.filter((id) => id !== "tomverse-cli" || tomverseCli).map((id) => (
                     <button
                         key={id}
                         type="button"
@@ -950,7 +984,7 @@ export function ExternalApiSettings() {
                         </Link>
                     </section>
 
-                    <ConnectSection baseUrl={overview.baseUrl} models={overview.models} apiKey={newKey} />
+                    <ConnectSection baseUrl={overview.baseUrl} models={overview.models} apiKey={newKey} tomverseCli={overview.tomverseCli} />
 
                     <section className={card} data-testid="external-api-allowed-models">
                         <div className="flex items-center justify-between gap-3">

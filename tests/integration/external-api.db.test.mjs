@@ -1434,6 +1434,125 @@ test("external inference API over the real shared credit ledger", { skip: !datab
         assert.deepEqual(await keys.externalApiKeyUsage(otherKey.summary.id), []);
     });
 
+    await t.test("request status lookup: own key only, by receipt id or Idempotency-Key, read only", async () => {
+        process.env.EXTERNAL_API_READS_PER_MINUTE = "1000";
+        const { GET: statusRoute } = await import(mod("app/api/v1/requests/status/route.ts"));
+        const lookup = (key, { requestId, idempotencyKey } = {}) =>
+            statusRoute(
+                new Request(
+                    `http://localhost/api/v1/requests/status${requestId !== undefined ? `?request_id=${encodeURIComponent(requestId)}` : ""}`,
+                    { headers: { authorization: `Bearer ${key}`, ...(idempotencyKey !== undefined ? { "idempotency-key": idempotencyKey } : {}) } }
+                )
+            );
+        const userId = await newUser();
+        const stranger = await newUser();
+        allow(userId, stranger);
+        const { key } = await issueKey(userId);
+        const sibling = await issueKey(userId);
+        const foreign = await issueKey(stranger);
+
+        const sent = await call(key, body(), { headers: { "idempotency-key": "cli-step-1" } });
+        assert.equal(sent.status, 200);
+        const requestId = sent.headers.get("x-request-id");
+        const dispatchesBefore = dispatches;
+        const reservationsBefore = (await reservationsFor(userId)).length;
+
+        const byId = await lookup(key, { requestId });
+        assert.equal(byId.status, 200);
+        const byIdJson = await byId.json();
+        assert.equal(byIdJson.object, "tomverse.request_status");
+        assert.equal(byIdJson.request.requestId, requestId);
+        assert.equal(byIdJson.request.status, "settled");
+        assert.equal(byIdJson.request.outcome, "completed");
+        assert.equal(byIdJson.request.protocol, "chat_completions");
+        const [reservation] = await reservationsFor(userId);
+        assert.equal(byIdJson.request.chargedCredits, reservation.settledCredits);
+        assert.equal(byIdJson.usage_source, "server_settlement");
+        assert.equal(byIdJson.output_stored, false);
+        assert.ok(!JSON.stringify(byIdJson).includes("Hello from the fixture"), "no output is returned");
+
+        const byIdem = await (await lookup(key, { idempotencyKey: "cli-step-1" })).json();
+        assert.deepEqual(byIdem.request, byIdJson.request);
+
+        // Another key of the same account, another account and no request at
+        // all answer the same 404, so the lookup is no existence oracle.
+        const misses = [
+            await lookup(sibling.key, { requestId }),
+            await lookup(sibling.key, { idempotencyKey: "cli-step-1" }),
+            await lookup(foreign.key, { requestId }),
+            await lookup(key, { requestId: `req_${"0".repeat(32)}` }),
+            await lookup(key, { idempotencyKey: "never-sent" }),
+        ];
+        const missBodies = [];
+        for (const miss of misses) {
+            assert.equal(miss.status, 404);
+            missBodies.push(await miss.json());
+        }
+        for (const missBody of missBodies) assert.deepEqual(missBody, missBodies[0]);
+        assert.equal(missBodies[0].error.code, "request_not_found");
+        assert.match(missBodies[0].error.message, /does not show it was never sent or charged/);
+
+        // Selector errors.
+        for (const [selector, code] of [
+            [{}, "invalid_request_selector"],
+            [{ requestId, idempotencyKey: "cli-step-1" }, "invalid_request_selector"],
+            [{ requestId: "chatcmpl-123" }, "invalid_request_selector"],
+            [{ idempotencyKey: "x".repeat(256) }, "invalid_idempotency_key"],
+        ]) {
+            const refused = await lookup(key, selector);
+            assert.equal(refused.status, 400);
+            assert.equal((await refused.json()).error.code, code);
+        }
+
+        // Nothing above dispatched, reserved or wrote.
+        assert.equal(dispatches, dispatchesBefore);
+        assert.equal((await reservationsFor(userId)).length, reservationsBefore);
+
+        // Older than the 100 receipts /usage lists: still found by its key.
+        for (let i = 0; i < 100; i += 1) assert.equal((await call(key, body())).status, 200);
+        const listed = await keys.externalApiKeyUsage((await keys.listExternalApiKeys(userId)).find((k) => k.keyPrefix === key.slice(0, 12)).id, 100);
+        assert.ok(!listed.some((receipt) => receipt.requestId === requestId), "pushed out of the recent list");
+        assert.equal((await lookup(key, { idempotencyKey: "cli-step-1" })).status, 200);
+
+        // A request whose client left before reading the response: the
+        // client never saw x-request-id, but finds it by the key it recorded.
+        const controller = new AbortController();
+        script = (options) =>
+            streamOf(
+                [
+                    { type: "stream-start", warnings: [] },
+                    { type: "text-start", id: "t" },
+                    ...Array.from({ length: 40 }, () => ({ type: "text-delta", id: "t", delta: "word " })),
+                    finish("stop"),
+                ],
+                { delayMs: 20, signal: options.abortSignal }
+            );
+        const inFlight = call(key, body({ stream: true }), { signal: controller.signal, headers: { "idempotency-key": "cli-step-lost" } });
+        const response = await inFlight;
+        // While it streams it is held, with no charged amount yet.
+        const held = await (await lookup(key, { idempotencyKey: "cli-step-lost" })).json();
+        assert.equal(held.request.status, "held");
+        assert.equal(held.request.chargedCredits, null);
+        assert.ok(held.request.heldCredits > 0);
+        assert.equal(held.usage_source, null);
+        controller.abort();
+        await response.body.cancel().catch(() => undefined);
+        let settled;
+        for (let i = 0; i < 200; i += 1) {
+            settled = await (await lookup(key, { idempotencyKey: "cli-step-lost" })).json();
+            if (settled.request.status !== "held" && settled.request.completedAt) break;
+            await new Promise((r) => setTimeout(r, 25));
+        }
+        assert.equal(settled.request.outcome, "cancelled");
+        assert.equal(typeof settled.request.chargedCredits, "number");
+        script = textScript("Hello from the fixture.");
+
+        // A revoked key cannot look anything up.
+        const keyId = (await keys.listExternalApiKeys(userId)).find((k) => k.keyPrefix === key.slice(0, 12)).id;
+        await keys.revokeExternalApiKey({ userId, keyId }, { session: sessionFor(userId), request: auditRequest() });
+        assert.equal((await lookup(key, { requestId })).status, 401);
+    });
+
     await t.test("database guards and account deletion", async () => {
         const userId = await newUser();
         allow(userId);
