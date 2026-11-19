@@ -615,6 +615,14 @@ output contract are in `apps/tomverse-cli/README.md`.
   tool names, result states, the credential path list, argv-first commands --
   so a later shared executor can replace the CLI's local tools.
 
+- **Distribution** (owner decision 2026-11-19). The npm package
+  `@tomverse/cli` (Node.js 22 or later) under a proprietary use-only license
+  (`apps/tomverse-cli/LICENSE`), plus standalone executables (Node.js single
+  executable applications) for Windows, macOS and Linux on x64 and arm64,
+  attached to a GitHub Release `cli-v<version>`. The workflow
+  `tomverse-cli-release-check.yml` (run by hand) builds and tests all of them
+  and publishes nothing. The steps are in `apps/tomverse-cli/RELEASING.md`.
+
 Verification state, publication and the operating systems actually run are
 reported per change (the PR); package publication and enabling
 `TOMVERSE_CLI_GUIDE_ENABLED` are separate approved steps.

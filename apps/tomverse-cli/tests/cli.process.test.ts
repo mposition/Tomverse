@@ -11,8 +11,11 @@ import { makeRepo, tempDir } from "./helpers.js";
 /**
  * The built CLI as a user runs it: a separate process, its stdout/stderr and
  * exit code. Run after `npm run build` (npm run cli:test does both).
+ * TOMVERSE_CLI_BIN may name an installed cli.js or a standalone executable
+ * (`npm run build:binary`); an executable is started directly, without node.
  */
 const CLI = process.env.TOMVERSE_CLI_BIN ?? join(dirname(fileURLToPath(import.meta.url)), "..", "dist", "cli.js");
+const [PROGRAM, PROGRAM_ARGS] = CLI.endsWith(".js") ? [process.execPath, [CLI]] : [CLI, []];
 const pkg = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "package.json"), "utf8"));
 
 type Run = { code: number | null; stdout: string; stderr: string };
@@ -22,7 +25,7 @@ const run = (args: string[], options: { cwd: string; env?: Record<string, string
         for (const [k, v] of Object.entries(process.env)) if (v !== undefined && !/^(TOMVERSE_|OPENAI_|AI_GATEWAY)/.test(k)) env[k] = v;
         Object.assign(env, { TOMVERSE_HOME: options.home }, options.env ?? {});
         for (const [k, v] of Object.entries(options.env ?? {})) if (v === undefined) delete env[k];
-        const child = spawn(process.execPath, [CLI, ...args], { cwd: options.cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+        const child = spawn(PROGRAM, [...PROGRAM_ARGS, ...args], { cwd: options.cwd, env, stdio: ["ignore", "pipe", "pipe"] });
         let stdout = "";
         let stderr = "";
         child.stdout.on("data", (d) => (stdout += d));

@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { isSea } from "node:sea";
 import { parseArgs } from "node:util";
 import { EXIT_CODES, Runner, SMART_ADAPTIVE, type Outcome, type Prompter } from "./agent.js";
 import { AuthError, keyPrefix, maskKey, readKey } from "./auth.js";
@@ -103,7 +104,8 @@ const doctor = async (ctx: Context) => {
     const checks: Array<{ name: string; status: "pass" | "warn" | "fail"; detail: string }> = [];
     const add = (name: string, status: "pass" | "warn" | "fail", detail: string) => checks.push({ name, status, detail });
     const major = Number(process.versions.node.split(".")[0]);
-    add("node", major === 22 ? "pass" : "warn", `Node ${process.versions.node}${major === 22 ? "" : " (supported: 22.x)"}`);
+    const runtime = isSea() ? " (built into this executable)" : major >= 22 ? "" : " (supported: 22 or later)";
+    add("node", major >= 22 ? "pass" : "fail", `Node ${process.versions.node}${runtime}`);
     add("platform", "pass", `${process.platform} ${process.arch}; commands use ${userShell()}`);
     add("git", gitAvailable() ? "pass" : "warn", gitAvailable() ? "git found" : "git not found: file lists use a bounded walk, no .gitignore");
     add("ripgrep", ripgrepAvailable() ? "pass" : "warn", ripgrepAvailable() ? "rg found" : "rg not found: search uses the built-in scanner");
