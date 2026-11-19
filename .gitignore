@@ -112,6 +112,7 @@ promotion-metadata-snapshot-*.json
 # Vite build output for the Capacitor shell spike. `cap sync` copies it into
 # the native projects; it is a build artefact, not source.
 /apps/*/dist/
+/apps/tomverse-cli/release/
 
 # Claude Code worktrees. `EnterWorktree` registers a real git worktree here
 # (`git worktree list` knows it); to the parent checkout it is an untracked

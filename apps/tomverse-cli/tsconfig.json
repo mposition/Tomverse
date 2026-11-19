@@ -14,7 +14,8 @@
     "declaration": false,
     "sourceMap": false,
     "esModuleInterop": true,
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+    "newLine": "lf"
   },
   "include": ["src/**/*.ts"]
 }

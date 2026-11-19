@@ -31,10 +31,10 @@ if (!fromRepo.startsWith("..") && !isAbsolute(fromRepo)) fail("the install folde
 const packed = JSON.parse(run("npm", ["pack", "--json", "--pack-destination", work], { cwd: app }))[0];
 const tarball = join(work, packed.filename);
 const files = packed.files.map((f) => f.path).sort();
-const allowed = (path) => path === "package.json" || path === "README.md" || /^dist\/[a-z]+\.js$/.test(path);
+const allowed = (path) => path === "package.json" || path === "README.md" || path === "LICENSE" || /^dist\/[a-z]+\.js$/.test(path);
 const unexpected = files.filter((f) => !allowed(f));
 if (unexpected.length) fail(`unexpected files in the package: ${unexpected.join(", ")}`);
-for (const required of ["package.json", "README.md", "dist/cli.js", "dist/main.js"]) if (!files.includes(required)) fail(`missing ${required}`);
+for (const required of ["package.json", "README.md", "LICENSE", "dist/cli.js", "dist/main.js"]) if (!files.includes(required)) fail(`missing ${required}`);
 const sha256 = createHash("sha256").update(readFileSync(tarball)).digest("hex");
 
 // 2. Install into an empty project outside the repository.
@@ -87,7 +87,15 @@ const FORBIDDEN = [
     [/sourceMappingURL/, "a source map reference"],
 ];
 for (const [file, text] of code) for (const [pattern, what] of FORBIDDEN) if (pattern.test(text)) fail(`${file} contains ${what}`);
-if (/license/i.test(manifest.license ?? "") === false && manifest.license !== "UNLICENSED") fail("license field missing");
+// A CR anywhere breaks the shebang on macOS and Linux ("env: node\r"), which a
+// tarball packed on a Windows clone with autocrlf would otherwise carry.
+for (const [file, text] of code) if (text.includes("\r")) fail(`${file} has CR line endings`);
+if (!code.find(([f]) => f === "dist/cli.js")[1].startsWith("#!/usr/bin/env node\n")) fail("dist/cli.js does not start with '#!/usr/bin/env node'");
+if (manifest.private) fail("the manifest is still private");
+if (manifest.license !== "SEE LICENSE IN LICENSE") fail(`license field is ${JSON.stringify(manifest.license)}, expected "SEE LICENSE IN LICENSE"`);
+if (!readFileSync(join(installed, "LICENSE"), "utf8").includes("Tomverse CLI License")) fail("LICENSE is not the Tomverse CLI license");
+if (manifest.publishConfig?.access !== "public") fail("publishConfig.access must be public for a scoped package");
+if (manifest.engines?.node !== ">=22") fail(`engines.node is ${JSON.stringify(manifest.engines?.node)}`);
 
 // 5. The bin shim and the process suite against the installed copy.
 const shim = join(project, "node_modules", ".bin", process.platform === "win32" ? "tomverse.cmd" : "tomverse");
