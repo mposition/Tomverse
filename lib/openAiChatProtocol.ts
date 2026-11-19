@@ -424,7 +424,7 @@ export type ConvertedRequest = {
     textSegments: string[];
     images: DecodedImage[];
     tools: { name: string; description?: string; parameters: Record<string, unknown>; strict?: boolean }[];
-    /** Tools the client declared as custom: their calls go back as custom calls. */
+    /** Tools the client declared as custom: their calls carry raw input, not JSON arguments. */
     customTools: Set<string>;
     toolChoice:
         | "none"
@@ -695,18 +695,9 @@ export const toOpenAiUsage = (usage: UsageView | null) => {
 
 /**
  * One call the model made. `arguments` is a function's JSON arguments, or a
- * custom tool's raw input when `custom` is set.
+ * custom tool's raw input (see `createChunkTranslator`).
  */
-export type CollectedToolCall = { id: string; name: string; arguments: string; custom?: boolean };
-
-/**
- * EXTERNAL_API_CUSTOM_CALLS_AS_FUNCTION (default off, for client testing on
- * dev): a custom tool's call goes back as a function call whose `arguments`
- * is the raw input, instead of a `custom` call. Requests take either form
- * back in history.
- */
-export const customCallsAsFunction = (env: Record<string, string | undefined>) =>
-    env.EXTERNAL_API_CUSTOM_CALLS_AS_FUNCTION === "true";
+export type CollectedToolCall = { id: string; name: string; arguments: string };
 
 /** A custom tool's input from the `{ input }` object its function form took. */
 const customInputOf = (input: unknown) => {
@@ -750,11 +741,11 @@ export const buildChatCompletion = (input: {
                 ...(input.reasoning ? { reasoning_content: input.reasoning } : {}),
                 ...(input.toolCalls.length
                     ? {
-                          tool_calls: input.toolCalls.map((call) =>
-                              call.custom
-                                  ? { id: call.id, type: "custom" as const, custom: { name: call.name, input: call.arguments } }
-                                  : { id: call.id, type: "function" as const, function: { name: call.name, arguments: call.arguments } }
-                          ),
+                          tool_calls: input.toolCalls.map((call) => ({
+                              id: call.id,
+                              type: "function" as const,
+                              function: { name: call.name, arguments: call.arguments },
+                          })),
                       }
                     : {}),
             },
@@ -809,12 +800,14 @@ export const openAiError = (
 export const createChunkTranslator = (
     base: { id: string; created: number; model: string },
     /**
-     * Custom tools (see `toolDefinition`). Their function-form JSON fragments
-     * are held back and the decoded input is sent once, when the call is
-     * complete: a prefix of `{"input":"…` is not a prefix of the input.
+     * Custom tools (see `toolDefinition`). A custom tool's call goes back as
+     * a function call whose `arguments` is the raw input, not JSON: Cursor's
+     * Agent does not read a `custom` call from a Chat Completions stream.
+     * The model's `{"input":"…` fragments are held back and the decoded input
+     * is sent once, when the call is complete: a prefix of that JSON is not a
+     * prefix of the input.
      */
-    customTools: ReadonlySet<string> = new Set(),
-    options: { customCallsAsFunction?: boolean } = {}
+    customTools: ReadonlySet<string> = new Set()
 ) => {
     let roleSent = false;
     const toolIndexById = new Map<string, number>();
@@ -836,9 +829,7 @@ export const createChunkTranslator = (
         toolIndexById.set(id, index);
         namesById.set(id, name);
         argumentsById.set(id, "");
-        const call = customTools.has(name) && !options.customCallsAsFunction
-            ? { index, id, type: "custom", custom: { name, input: "" } }
-            : { index, id, type: "function", function: { name, arguments: "" } };
+        const call = { index, id, type: "function", function: { name, arguments: "" } };
         return buildChunk(base, withRole({ tool_calls: [call] }));
     };
     const isCustom = (id: string) => customTools.has(namesById.get(id) ?? "");
@@ -890,11 +881,7 @@ export const createChunkTranslator = (
                         if (input) {
                             chunks.push(
                                 buildChunk(base, {
-                                    tool_calls: [
-                                        options.customCallsAsFunction
-                                            ? { index: toolIndexById.get(id), function: { arguments: input } }
-                                            : { index: toolIndexById.get(id), custom: { input } },
-                                    ],
+                                    tool_calls: [{ index: toolIndexById.get(id), function: { arguments: input } }],
                                 })
                             );
                         }
@@ -933,7 +920,6 @@ export const createChunkTranslator = (
                         id,
                         name: namesById.get(id) ?? "",
                         arguments: argumentsById.get(id) ?? "",
-                        ...(isCustom(id) && !options.customCallsAsFunction ? { custom: true } : {}),
                         /** False when the provider started the call and never finished it. */
                         complete: completedIds.has(id),
                     })),
