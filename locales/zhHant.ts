@@ -1701,6 +1701,8 @@ export const zhHant = {
         guideContinue: "選擇匯出檔案",
         providerMismatchNotice:
             "辨識出這是 {detected} 的匯出檔案，將依 {detected} 繼續。",
+        perplexityStructureNotice:
+            "Perplexity 匯出不會標示問題在哪裡結束。多行問題從第二行起的內容，以及無來源回答中分隔線後的標題，可能被歸到錯誤的一方。匯入後請開啟對話檢查，如拆分有誤可將其刪除。",
         // 建議使用桌上型電腦的狀態
         desktopRecommendedTitle: "此裝置難以安全地開啟該檔案",
         desktopRecommendedNoUpload: "匯出檔案沒有被上傳。",

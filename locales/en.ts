@@ -1716,6 +1716,8 @@ export const en = {
         guideContinue: "Choose the export file",
         providerMismatchNotice:
             "This is a {detected} export, so we will continue with {detected}.",
+        perplexityStructureNotice:
+            "A Perplexity export does not mark where a question ends. Lines after the first in a multi-line question, and a heading after a rule inside an answer without sources, can land on the wrong side. Open the conversation after importing to check it, and delete it if it was split wrongly.",
         // Desktop-recommended state
         desktopRecommendedTitle: "This device cannot open the file safely",
         desktopRecommendedNoUpload: "The export file was not uploaded.",

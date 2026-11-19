@@ -1706,6 +1706,8 @@ export const zh = {
         guideContinue: "选择导出文件",
         providerMismatchNotice:
             "识别到这是 {detected} 的导出文件，将按 {detected} 继续。",
+        perplexityStructureNotice:
+            "Perplexity 导出不会标记问题在哪里结束。多行问题从第二行起的内容，以及无来源回答中分隔线后的标题，可能被归到错误的一方。导入后请打开对话检查，如拆分有误可将其删除。",
         // 建议使用桌面端的状态
         desktopRecommendedTitle: "此设备难以安全地打开该文件",
         desktopRecommendedNoUpload: "导出文件没有被上传。",

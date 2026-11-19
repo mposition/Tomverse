@@ -1707,6 +1707,8 @@ export const pt = {
         guideContinue: "Escolher o arquivo de exportação",
         providerMismatchNotice:
             "Este é um arquivo do {detected}, então vamos continuar com {detected}.",
+        perplexityStructureNotice:
+            "Uma exportação do Perplexity não marca onde uma pergunta termina. As linhas depois da primeira em uma pergunta de várias linhas, e um título após um separador numa resposta sem fontes, podem ficar do lado errado. Abra a conversa depois de importar para conferir e exclua-a se tiver sido dividida errado.",
         // Estado de desktop recomendado
         desktopRecommendedTitle:
             "Este aparelho não consegue abrir o arquivo com segurança",

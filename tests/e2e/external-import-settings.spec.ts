@@ -803,6 +803,10 @@ test.describe("external import settings", () => {
     await expect(
       page.getByTestId("external-import-provider-mismatch")
     ).toHaveCount(0);
+    // The split the parser cannot be sure of is disclosed before saving.
+    await expect(
+      page.getByTestId("external-import-perplexity-structure-notice")
+    ).toContainText("가져온 뒤 대화를 열어 확인");
 
     await page.getByTestId("external-import-continue-to-review").click();
     await expect(page.getByTestId("external-import-review")).toBeVisible();

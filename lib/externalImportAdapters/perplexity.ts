@@ -97,7 +97,8 @@ function codeLines(): (line: string) => boolean {
         return true;
     };
 }
-const HEADING = /^# (?!#)(.*)$/;
+/** A level-one heading with text: an empty `# ` cannot be a question. */
+const HEADING = /^# (?!#)(.*\S.*)$/;
 
 const markdownOf = (value: unknown): string | null =>
     isRecord(value) && typeof value.perplexityMarkdown === "string"

@@ -1706,6 +1706,8 @@ export const fr = {
         guideContinue: "Choisir le fichier d'export",
         providerMismatchNotice:
             "Il s'agit d'un export {detected} : nous continuons donc avec {detected}.",
+        perplexityStructureNotice:
+            "Un export Perplexity n'indique pas où une question se termine. Les lignes suivant la première d'une question sur plusieurs lignes, et un titre après un séparateur dans une réponse sans sources, peuvent se retrouver du mauvais côté. Ouvrez la conversation après l'import pour la vérifier, et supprimez-la si elle a été mal découpée.",
         // État « ordinateur recommandé »
         desktopRecommendedTitle:
             "Cet appareil ne peut pas ouvrir le fichier en toute sécurité",

@@ -1705,6 +1705,8 @@ export const ko = {
         guideContinue: "내보내기 파일 선택하기",
         providerMismatchNotice:
             "{detected} 내보내기 파일로 확인되어 {detected} 기준으로 진행합니다.",
+        perplexityStructureNotice:
+            "Perplexity 내보내기에는 질문이 끝나는 표시가 없습니다. 여러 줄 질문의 둘째 줄부터, 그리고 출처 없는 답변 속 구분선 뒤 제목은 질문과 답변이 바뀌어 들어갈 수 있습니다. 가져온 뒤 대화를 열어 확인하고, 잘못 나뉘었으면 삭제할 수 있습니다.",
         // 데스크톱 권장 상태
         desktopRecommendedTitle: "이 기기에서는 파일을 열기 어렵습니다",
         desktopRecommendedNoUpload: "원본 파일은 업로드되지 않았습니다.",

@@ -1708,6 +1708,8 @@ export const de = {
         guideContinue: "Exportdatei auswählen",
         providerMismatchNotice:
             "Dies ist ein {detected}-Export, daher fahren wir mit {detected} fort.",
+        perplexityStructureNotice:
+            "Ein Perplexity-Export markiert nicht, wo eine Frage endet. Weitere Zeilen einer mehrzeiligen Frage und eine Überschrift nach einer Trennlinie in einer Antwort ohne Quellen können auf der falschen Seite landen. Öffnen Sie die Unterhaltung nach dem Import zur Kontrolle und löschen Sie sie, falls sie falsch aufgeteilt wurde.",
         // Zustand „Desktop empfohlen“
         desktopRecommendedTitle:
             "Dieses Gerät kann die Datei nicht sicher öffnen",
