@@ -39,15 +39,15 @@ import {
  * footnote numbering: Perplexity numbers sources per turn (`[^3_1]` is the
  * third turn's first) and defines them at the end of that answer. A
  * candidate that defines only the previous turn's sources, when that turn
- * defined none yet, is the rest of the previous answer. An uncited answer
- * carries no such evidence, so a rule-and-heading inside one still splits it
- * -- and can shift the numbering for the turn after. Known limitation.
+ * defined none yet, is the rest of the previous answer.
  *
- * The question is the heading line. A multi-line question exports its later
- * lines as plain paragraphs under the heading, with nothing marking where the
- * answer begins, so those lines arrive at the top of the answer. Known
- * limitation; telling them apart is a semantic call (an LLM split), which
- * would be a new paid call on the raw export.
+ * Two calls are left that the file cannot make: a heading after an uncited
+ * answer (new question, or the answer's own?) and a multi-line question,
+ * whose later lines export as plain paragraphs under the heading with nothing
+ * marking where the answer begins. Those are semantic calls, so the worker
+ * asks the import route, which asks a model (see "split hints" below). Without
+ * hints -- switch off, call failed -- the heading line is the question and
+ * every rule-and-heading is a turn, and the preview says the split may be off.
  *
  * Citations are kept. The footnote marks become `[n]` and the definitions a
  * "Sources" list at the end of the answer, because a footnote definition
@@ -57,12 +57,21 @@ import {
  * Pure and isomorphic, like every adapter.
  */
 
-/** The shape the worker hands over for a Markdown file. */
-export type PerplexityMarkdownEntry = { perplexityMarkdown: string };
+/**
+ * The shape the worker hands over for a Markdown file. `splitHints`, when
+ * present, are the import route's answers to `perplexitySplitQuestions(text)`;
+ * hints that do not fit those questions are ignored.
+ */
+export type PerplexityMarkdownEntry = {
+    perplexityMarkdown: string;
+    splitHints?: PerplexitySplitHints;
+};
 
 export const perplexityMarkdownEntry = (
-    text: string
-): PerplexityMarkdownEntry => ({ perplexityMarkdown: text });
+    text: string,
+    splitHints?: PerplexitySplitHints
+): PerplexityMarkdownEntry =>
+    splitHints ? { perplexityMarkdown: text, splitHints } : { perplexityMarkdown: text };
 
 /** How much of the first question stands in for a title the export never had. */
 const TITLE_CODE_POINTS = 80;
@@ -184,9 +193,15 @@ function dropSeparator(body: string[]): void {
     if (body.length > 0 && body[body.length - 1].trim() === "---") body.pop();
 }
 
-function splitTurns(text: string): Turn[] {
+type NumberedTurn = Turn & { number: number; defines: boolean };
+
+/**
+ * Turns as far as the file alone can tell them apart, separators still in
+ * place (the split hints below need them as written).
+ */
+function deterministicTurns(text: string): NumberedTurn[] {
     const lines = text.replace(/\r\n?/g, "\n").split("\n");
-    const turns: Array<Turn & { number: number; defines: boolean }> = [];
+    const turns: NumberedTurn[] = [];
     for (const candidate of candidateTurns(lines)) {
         const previous = turns[turns.length - 1];
         const defined = definedTurns(candidate);
@@ -215,9 +230,180 @@ function splitTurns(text: string): Turn[] {
             defines: defined.length > 0,
         });
     }
-    for (const turn of turns.slice(0, -1)) dropSeparator(turn.body);
     return turns;
 }
+
+/* ---------------------------------------------------------- split hints - */
+
+/**
+ * The two calls the file cannot make, put to a model by the import route
+ * (app/api/imports/external/perplexity-split). Only these excerpts leave the
+ * device, and only an index or a yes/no comes back: the stored text is always
+ * the export's own, cut where the hints say.
+ *
+ * - `turns[i].paragraphs`: the first paragraphs under turn i's heading. How
+ *   many of them are the rest of a multi-line question (0 = none)?
+ * - `boundaries`: a heading after an answer that defined no sources. Is it a
+ *   new question, or the answer's own heading?
+ */
+export type PerplexitySplitQuestions = {
+    turns: Array<{ question: string; paragraphs: string[] }>;
+    boundaries: Array<{ turn: number; before: string; heading: string; after: string }>;
+};
+
+export type PerplexitySplitHints = {
+    questionParagraphs: number[];
+    continuesAnswer: boolean[];
+};
+
+/** Bounds on what is sent, per excerpt and in count. */
+export const PERPLEXITY_SPLIT_LIMITS = {
+    maxTurns: 200,
+    maxParagraphsPerTurn: 3,
+    excerptChars: 600,
+} as const;
+
+const excerpt = (text: string, from: "start" | "end" = "start"): string => {
+    const limit = PERPLEXITY_SPLIT_LIMITS.excerptChars;
+    if (text.length <= limit) return text;
+    return from === "start" ? text.slice(0, limit) : text.slice(text.length - limit);
+};
+
+/** Structural lines that end the run of leading prose. */
+const isStructural = (trimmed: string): boolean =>
+    LOGO.test(trimmed) ||
+    DIVIDER.test(trimmed) ||
+    HIDDEN_CITATIONS.test(trimmed) ||
+    FOOTNOTE_DEFINITION.test(trimmed) ||
+    trimmed === "---";
+
+/**
+ * The first prose paragraphs of a body, as line ranges. A paragraph is a run
+ * of non-blank lines; code, a rule or a footnote definition ends the search,
+ * because a question continues in prose.
+ */
+function leadingParagraphs(body: readonly string[]): Array<{ start: number; end: number }> {
+    const found: Array<{ start: number; end: number }> = [];
+    const isCode = codeLines();
+    let start = -1;
+    for (let index = 0; index <= body.length; index += 1) {
+        const line = index < body.length ? body[index] : "";
+        const code = index < body.length && isCode(line);
+        const trimmed = line.trim();
+        if (trimmed && !code && !isStructural(trimmed)) {
+            if (start < 0) start = index;
+            continue;
+        }
+        if (start >= 0) {
+            found.push({ start, end: index });
+            start = -1;
+            if (found.length === PERPLEXITY_SPLIT_LIMITS.maxParagraphsPerTurn) break;
+        }
+        if (code || (trimmed && isStructural(trimmed))) break;
+    }
+    return found;
+}
+
+const paragraphText = (body: readonly string[], range: { start: number; end: number }) =>
+    body.slice(range.start, range.end).join("\n");
+
+/** Indices of the turns whose heading might be the previous answer's own. */
+const ambiguousBoundaries = (turns: readonly NumberedTurn[]): number[] =>
+    turns.flatMap((_, index) => (index > 0 && !turns[index - 1].defines ? [index] : []));
+
+/**
+ * What to ask about a Perplexity export, or null when there is nothing the
+ * file leaves open, or more than the route accepts (the file split is used).
+ */
+export function perplexitySplitQuestions(text: string): PerplexitySplitQuestions | null {
+    const turns = deterministicTurns(text);
+    if (turns.length === 0 || turns.length > PERPLEXITY_SPLIT_LIMITS.maxTurns) return null;
+    const questions: PerplexitySplitQuestions = {
+        turns: turns.map((turn) => ({
+            question: excerpt(turn.question),
+            paragraphs: leadingParagraphs(turn.body).map((range) =>
+                excerpt(paragraphText(turn.body, range))
+            ),
+        })),
+        boundaries: ambiguousBoundaries(turns).map((index) => {
+            const previous = [...turns[index - 1].body];
+            dropSeparator(previous);
+            return {
+                turn: index,
+                before: excerpt(previous.join("\n").trim(), "end"),
+                heading: excerpt(turns[index].question),
+                after: excerpt(turns[index].body.join("\n").trim()),
+            };
+        }),
+    };
+    const open =
+        questions.turns.some((turn) => turn.paragraphs.length > 0) ||
+        questions.boundaries.length > 0;
+    return open ? questions : null;
+}
+
+/**
+ * True when hints answer exactly these questions: one in-range count per
+ * turn and one yes/no per boundary. The one check on model output before it
+ * decides anything about stored text.
+ */
+export function perplexitySplitHintsFit(
+    questions: PerplexitySplitQuestions,
+    hints: unknown
+): hints is PerplexitySplitHints {
+    if (!isRecord(hints)) return false;
+    const { questionParagraphs, continuesAnswer } = hints;
+    return (
+        Array.isArray(questionParagraphs) &&
+        Array.isArray(continuesAnswer) &&
+        questionParagraphs.length === questions.turns.length &&
+        continuesAnswer.length === questions.boundaries.length &&
+        questionParagraphs.every(
+            (count, index) =>
+                Number.isInteger(count) &&
+                count >= 0 &&
+                count <= questions.turns[index].paragraphs.length
+        ) &&
+        continuesAnswer.every((value) => typeof value === "boolean")
+    );
+}
+
+type SplitTurn = Turn & { extraQuestion: string[] };
+
+function splitTurns(text: string, hints: PerplexitySplitHints | null): SplitTurn[] {
+    const turns = deterministicTurns(text);
+    const continues = new Set<number>();
+    if (hints) {
+        ambiguousBoundaries(turns).forEach((index, position) => {
+            if (hints.continuesAnswer[position]) continues.add(index);
+        });
+    }
+    const result: SplitTurn[] = [];
+    turns.forEach((turn, index) => {
+        const previous = result[result.length - 1];
+        if (previous && continues.has(index)) {
+            // The answer's own rule and heading: back into that answer.
+            previous.body.push(turn.heading, ...turn.body);
+            return;
+        }
+        const count = hints?.questionParagraphs[index] ?? 0;
+        const ranges = leadingParagraphs(turn.body).slice(0, count);
+        const extraQuestion = ranges.map((range) => paragraphText(turn.body, range));
+        const body = ranges.length > 0 ? turn.body.slice(ranges[ranges.length - 1].end) : [...turn.body];
+        result.push({ question: turn.question, heading: turn.heading, body, extraQuestion });
+    });
+    for (const turn of result.slice(0, -1)) dropSeparator(turn.body);
+    return result;
+}
+
+const hintsOf = (entry: unknown): PerplexitySplitHints | null => {
+    const text = markdownOf(entry);
+    if (text === null || !isRecord(entry) || entry.splitHints === undefined) return null;
+    const questions = perplexitySplitQuestions(text);
+    return questions && perplexitySplitHintsFit(questions, entry.splitHints)
+        ? entry.splitHints
+        : null;
+};
 
 const cleanQuestion = (raw: string): string =>
     raw.replace(/<q>([\s\S]*?)<\/q>/g, "“$1”").trim();
@@ -273,11 +459,16 @@ export const perplexityAdapter: ExternalConversationAdapter = {
     parseConversation(entry: unknown): ParsedExternalConversation | null {
         const text = markdownOf(entry);
         if (text === null) return null;
-        const turns = splitTurns(text);
+        const turns = splitTurns(text, hintsOf(entry));
         if (turns.length === 0) return null;
 
-        const firstQuestion = cleanQuestion(turns[0].question);
-        const rawId = lineageId(firstQuestion, cleanAnswer(turns[0].body));
+        // Lineage comes from the file split, so a re-export lands in the same
+        // lineage whether or not hints were available for either one.
+        const fileFirst = splitTurns(text, null)[0];
+        const rawId = lineageId(cleanQuestion(fileFirst.question), cleanAnswer(fileFirst.body));
+        const questionOf = (turn: SplitTurn) =>
+            cleanQuestion([turn.question, ...turn.extraQuestion].join("\n\n"));
+        const firstQuestion = questionOf(turns[0]);
         const warnings = emptyWarnings();
         const messages: ParsedExternalMessage[] = [];
         const push = (role: "user" | "assistant", content: string) => {
@@ -296,7 +487,7 @@ export const perplexityAdapter: ExternalConversationAdapter = {
             });
         };
         for (const turn of turns) {
-            push("user", cleanQuestion(turn.question));
+            push("user", questionOf(turn));
             push("assistant", cleanAnswer(turn.body));
         }
         if (messages.length === 0) return null;

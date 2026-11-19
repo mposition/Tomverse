@@ -1692,7 +1692,7 @@ export const zhHant = {
         guidePerplexityTitle: "匯出 Perplexity 討論串",
         guidePerplexityStep1: "在 Perplexity 中開啟要匯入的討論串",
         guidePerplexityStep2: "按下回答下方的匯出按鈕並選擇 Markdown",
-        guidePerplexityStep3: "上傳取得的 .md 檔案。一個檔案對應一個討論串，回答中的來源連結也會一併匯入",
+        guidePerplexityStep3: "上傳取得的 .md 檔案。一個檔案對應一個討論串，回答中的來源連結也會一併匯入。為判斷每個問題在哪裡結束，會將每輪開頭的少量摘錄傳送給 AI 模型（OpenAI）。",
         guideFormats:
             "支援 ZIP、JSON 檔案以及 Perplexity 的 Markdown（.md）檔案。Gemini 匯出必須是 JSON 格式，HTML 無法讀取。",
         guideStaysLocal: "匯出檔案不會離開你的裝置，只會在瀏覽器中開啟。",
@@ -1702,7 +1702,7 @@ export const zhHant = {
         providerMismatchNotice:
             "辨識出這是 {detected} 的匯出檔案，將依 {detected} 繼續。",
         perplexityStructureNotice:
-            "Perplexity 匯出不會標示問題在哪裡結束。多行問題從第二行起的內容，以及無來源回答中分隔線後的標題，可能被歸到錯誤的一方。匯入後請開啟對話檢查，如拆分有誤可將其刪除。",
+            "Perplexity 匯出不會標示問題在哪裡結束，問題和回答可能被拆錯。匯入後請開啟對話檢查，如拆分有誤可將其刪除。",
         // 建議使用桌上型電腦的狀態
         desktopRecommendedTitle: "此裝置難以安全地開啟該檔案",
         desktopRecommendedNoUpload: "匯出檔案沒有被上傳。",

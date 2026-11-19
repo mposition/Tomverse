@@ -5,6 +5,7 @@ import {
     detectExternalImportAdapter,
 } from "@/lib/externalImportAdapters";
 import { perplexityMarkdownEntry } from "@/lib/externalImportAdapters/perplexity";
+import { fetchPerplexitySplitHints } from "@/lib/perplexitySplitClient";
 import type {
     ExternalAdapterProvider,
     ParsedExternalConversation,
@@ -126,15 +127,20 @@ async function parseArchive(file: File): Promise<{
     // reads the text rather than a parsed JSON value.
     if (!lowerName.endsWith(".zip")) {
         const text = await file.text();
-        const value: unknown = /\.(md|markdown)$/.test(lowerName)
-            ? [perplexityMarkdownEntry(text)]
-            : JSON.parse(text);
+        const markdown = /\.(md|markdown)$/.test(lowerName);
+        let value: unknown = markdown ? [perplexityMarkdownEntry(text)] : JSON.parse(text);
         const adapter = detectExternalImportAdapter(value);
         if (!adapter) {
             throw new ExternalImportArchiveError(
                 "The file is not a supported export.",
                 "no_conversation_data"
             );
+        }
+        if (markdown && adapter.provider === "perplexity") {
+            // Where the file cannot tell a question from an answer, ask the
+            // import route (excerpts only). No answer keeps the file split.
+            post({ type: "progress", phase: "parsing", bytesRead: file.size, conversationsFound: 0 });
+            value = [perplexityMarkdownEntry(text, await fetchPerplexitySplitHints(text))];
         }
         const { conversations, extras } = parseConversationItems(
             adapter.provider,
