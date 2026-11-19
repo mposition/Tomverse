@@ -4,6 +4,7 @@ import { Unzip, UnzipInflate } from "fflate";
 import {
     detectExternalImportAdapter,
 } from "@/lib/externalImportAdapters";
+import { perplexityMarkdownEntry } from "@/lib/externalImportAdapters/perplexity";
 import type {
     ExternalAdapterProvider,
     ParsedExternalConversation,
@@ -120,10 +121,14 @@ async function parseArchive(file: File): Promise<{
         );
     }
 
-    // A bare .json export skips the archive path entirely.
+    // A bare .json export skips the archive path entirely. So does a
+    // Markdown file: Perplexity exports one thread per .md, and the adapter
+    // reads the text rather than a parsed JSON value.
     if (!lowerName.endsWith(".zip")) {
         const text = await file.text();
-        const value = JSON.parse(text);
+        const value: unknown = /\.(md|markdown)$/.test(lowerName)
+            ? [perplexityMarkdownEntry(text)]
+            : JSON.parse(text);
         const adapter = detectExternalImportAdapter(value);
         if (!adapter) {
             throw new ExternalImportArchiveError(

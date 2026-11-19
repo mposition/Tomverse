@@ -1555,13 +1555,13 @@ export const en = {
     externalImport: {
         dataTabTitle: "Import from another AI service",
         dataTabDescription:
-            "Store past conversations from a ChatGPT, Claude or Gemini (Google Takeout) export file in your Tomverse account. The export file is read only in your browser.",
+            "Store past conversations from a ChatGPT, Claude, Gemini (Google Takeout) or Perplexity export file in your Tomverse account. The export file is read only in your browser.",
         dataTabUsage: "{conversations} imported conversations · {storage} stored",
         dataTabOpen: "Manage imports",
         dataTabUsageEmpty: "No imported conversations yet",
         pageTitle: "Import conversations from another AI service",
         pageDescription:
-            "Upload an official data export from ChatGPT, Claude or Gemini, review what it contains, and choose which conversations to keep in your Tomverse account.",
+            "Upload an official data export from ChatGPT, Claude, Gemini or Perplexity, review what it contains, and choose which conversations to keep in your Tomverse account.",
         backToImports: "Back to imports",
         signInRequired: "Sign in to import conversations from another AI service.",
         disabledNotice: "External conversation import is not available right now.",
@@ -1572,7 +1572,7 @@ export const en = {
         capacityConversations: "{used} of {limit} imported conversations",
         selectFile: "Choose export file",
         selectFileHint:
-            "ChatGPT, Claude or Gemini data export (.zip or .json), up to 1GB. A Gemini export has to be Google Takeout's My Activity → Gemini Apps in the JSON format. Large archives are fine — media files are skipped without being read.",
+            "ChatGPT, Claude or Gemini data export (.zip or .json), or a Perplexity thread exported as Markdown (.md), up to 1GB. A Gemini export has to be Google Takeout's My Activity → Gemini Apps in the JSON format. Large archives are fine — media files are skipped without being read.",
         parsing: "Reading the export in your browser…",
         parsingProgress: "{conversations} conversations found",
         cancel: "Cancel",
@@ -1703,8 +1703,12 @@ export const en = {
             "Select My Activity, then inside it choose Gemini Apps and set the format to JSON — the Gemini product itself holds Gems, not conversations",
         guideGeminiStep3:
             "Export, then upload the .zip once Google emails you the download link",
+        guidePerplexityTitle: "Export a Perplexity thread",
+        guidePerplexityStep1: "Open the thread you want to bring over in Perplexity",
+        guidePerplexityStep2: "Press the Export button under an answer and choose Markdown",
+        guidePerplexityStep3: "Upload the .md file. One file is one thread, and the answers' source links come with it",
         guideFormats:
-            "Both ZIP and JSON files are supported. A Gemini export has to be in the JSON format — HTML cannot be read.",
+            "ZIP and JSON files are supported, and Markdown (.md) files from Perplexity. A Gemini export has to be in the JSON format — HTML cannot be read.",
         guideStaysLocal:
             "The export file never leaves your device — it is opened inside your browser.",
         guideMediaExcluded: "Images, audio and attachments are not imported.",
@@ -2366,7 +2370,7 @@ export const en = {
         attachmentsTitle: "Attachments",
         attachments: "Attachments are stored in encrypted object storage for model delivery and document extraction. For signed-in accounts they are retained with the conversation and deleted when you delete that conversation or your account. Files attached without an account are temporary and are removed automatically.",
         externalImportTitle: "Conversations imported from other AI services",
-        externalImport: "You can store past conversations you select from an export file downloaded from another AI service, such as ChatGPT, Claude or Gemini (Google Takeout), in your Tomverse account. The export file is opened only in your browser; the original archive is never uploaded to or retained by Tomverse servers or storage. Only the normalized text of the conversations you select, together with provenance details (source service, original timestamps, display-only model names), is stored as account-private material. Images, audio and attachments are not imported. Imported conversations may contain other people's personal information, so it is your responsibility to confirm that you are entitled to import that data. You can view, delete and export imported material at any time, and it is deleted with your account. Deleting it from Tomverse does not delete the data held by the original service.",
+        externalImport: "You can store past conversations you select from an export file downloaded from another AI service, such as ChatGPT, Claude, Gemini (Google Takeout) or Perplexity, in your Tomverse account. The export file is opened only in your browser; the original archive is never uploaded to or retained by Tomverse servers or storage. Only the normalized text of the conversations you select, together with provenance details (source service, original timestamps, display-only model names), is stored as account-private material. Images, audio and attachments are not imported. Imported conversations may contain other people's personal information, so it is your responsibility to confirm that you are entitled to import that data. You can view, delete and export imported material at any time, and it is deleted with your account. Deleting it from Tomverse does not delete the data held by the original service.",
         memoryTitle: "Account long-term memory",
         memory: "When you save imported conversations to your Tomverse account, Tomverse automatically organises memories from them while the memory feature is on. To do this, the content of those conversations is sent to an AI provider chosen by Tomverse, and no credits are charged for it. Sensitive content such as health information is not saved as a memory; only content that passes validation is saved, and it is used straight away. On the same topic, what a more recent conversation says replaces the earlier memory. Memories and their evidence are retained in your account until you delete them or your account data is deleted. Memories and answer-style preferences are sent as reference material to the AI provider that generates each new answer, which means to each model's provider when you compare several models. You can view, edit and delete stored memories at any time, download the full list as a file, or delete all of them at once. Turning memory off stops it being used in new chats and stops new memories being made from imported conversations.",
         assistantProfilesTitle: "Custom AI assistants and knowledge files",

@@ -1552,13 +1552,13 @@ export const zh = {
     externalImport: {
         dataTabTitle: "从其他 AI 服务导入",
         dataTabDescription:
-            "将 ChatGPT、Claude 或 Gemini（Google Takeout）导出文件中的历史对话保存到您的 Tomverse 账户。导出文件仅在您的浏览器中读取。",
+            "将 ChatGPT、Claude、Gemini（Google Takeout）或 Perplexity 导出文件中的历史对话保存到您的 Tomverse 账户。导出文件仅在您的浏览器中读取。",
         dataTabUsage: "已导入 {conversations} 个对话 · 已存储 {storage}",
         dataTabOpen: "管理导入",
         dataTabUsageEmpty: "尚未导入任何对话",
         pageTitle: "从其他 AI 服务导入对话",
         pageDescription:
-            "上传 ChatGPT、Claude 或 Gemini 的官方数据导出文件，查看其内容，然后选择要保存到 Tomverse 账户的对话。",
+            "上传 ChatGPT、Claude、Gemini 或 Perplexity 的官方数据导出文件，查看其内容，然后选择要保存到 Tomverse 账户的对话。",
         backToImports: "返回导入列表",
         signInRequired: "登录后即可从其他 AI 服务导入对话。",
         disabledNotice: "外部对话导入功能目前不可用。",
@@ -1569,7 +1569,7 @@ export const zh = {
         capacityConversations: "已导入 {used} 个对话（上限 {limit} 个）",
         selectFile: "选择导出文件",
         selectFileHint:
-            "ChatGPT、Claude 或 Gemini 数据导出（.zip 或 .json），最大 1GB。Gemini 需要在 Google Takeout 中导出「我的活动 → Gemini 应用」的 JSON 格式文件。文件较大也没关系 — 媒体文件会直接跳过，不会读取。",
+            "ChatGPT、Claude 或 Gemini 数据导出（.zip 或 .json），或以 Markdown（.md）导出的 Perplexity 话题，最大 1GB。Gemini 需要在 Google Takeout 中导出「我的活动 → Gemini 应用」的 JSON 格式文件。文件较大也没关系 — 媒体文件会直接跳过，不会读取。",
         parsing: "正在浏览器中读取导出文件…",
         parsingProgress: "已发现 {conversations} 个对话",
         cancel: "取消",
@@ -1694,8 +1694,12 @@ export const zh = {
             "选择「我的活动」，在其中勾选 Gemini 应用并将格式设为 JSON — Gemini 产品项里放的是 Gem，不是对话",
         guideGeminiStep3:
             "导出后，收到 Google 的下载链接再上传该 .zip",
+        guidePerplexityTitle: "导出 Perplexity 话题",
+        guidePerplexityStep1: "在 Perplexity 中打开要导入的话题",
+        guidePerplexityStep2: "点击回答下方的导出按钮并选择 Markdown",
+        guidePerplexityStep3: "上传得到的 .md 文件。一个文件对应一个话题，回答中的来源链接也会一并导入",
         guideFormats:
-            "同时支持 ZIP 文件和 JSON 文件。Gemini 导出必须是 JSON 格式，HTML 无法读取。",
+            "支持 ZIP、JSON 文件以及 Perplexity 的 Markdown（.md）文件。Gemini 导出必须是 JSON 格式，HTML 无法读取。",
         guideStaysLocal: "导出文件不会离开你的设备，只在浏览器中打开。",
         guideMediaExcluded: "图片、音频和附件不会被导入。",
         guidePrivacyDisclosure: "查看数据处理方式",
@@ -2333,7 +2337,7 @@ export const zh = {
         attachmentsTitle: "附件",
         attachments: "附件存储在加密对象存储中，用于发送给模型和提取文档内容。登录账户的附件与对话一同保留，在你删除该对话或账户时删除。未登录时添加的附件为临时存储，会被自动清除。",
         externalImportTitle: "从其他 AI 服务导入的对话",
-        externalImport: "您可以将从 ChatGPT、Claude、Gemini（Google Takeout）等其他 AI 服务下载的导出文件中所选的历史对话保存到 Tomverse 账户。导出文件仅在您的浏览器中打开，原始压缩包不会上传或保存到 Tomverse 的服务器或存储中。仅保存您所选对话的规范化文本及来源信息（来源服务、原始时间、仅供显示的模型名称），图片、音频和附件不会被导入。导入的对话可能包含他人的个人信息，因此您有责任确认自己有权导入这些数据。您可以随时查看、删除和导出导入的资料，删除账户时这些资料也会一并删除。在 Tomverse 中删除并不会删除原服务中保存的数据。",
+        externalImport: "您可以将从 ChatGPT、Claude、Gemini（Google Takeout）、Perplexity 等其他 AI 服务下载的导出文件中所选的历史对话保存到 Tomverse 账户。导出文件仅在您的浏览器中打开，原始压缩包不会上传或保存到 Tomverse 的服务器或存储中。仅保存您所选对话的规范化文本及来源信息（来源服务、原始时间、仅供显示的模型名称），图片、音频和附件不会被导入。导入的对话可能包含他人的个人信息，因此您有责任确认自己有权导入这些数据。您可以随时查看、删除和导出导入的资料，删除账户时这些资料也会一并删除。在 Tomverse 中删除并不会删除原服务中保存的数据。",
         memoryTitle: "账户长期记忆",
         memory: "当您把导入的对话保存到 Tomverse 账户后，只要记忆功能处于开启状态，Tomverse 会自动从这些对话中整理记忆。为此，这些对话的内容会发送给 Tomverse 选定的 AI 提供方，此处理不会扣除额度。健康信息等敏感内容不会保存为记忆；只有通过校验的内容才会保存为记忆并立即使用。对于同一主题，较新对话中的内容会取代之前的记忆。记忆及其依据会保存在您的账户中，直到您删除它们或您的账户数据被删除。记忆和回答风格偏好会作为参考资料发送给生成每个新回答的 AI 提供方；在比较多个模型时，会分别发送给各模型的提供方。您可以随时查看、修改和删除已保存的记忆，将完整列表下载为文件，或一次性全部删除。关闭记忆后，新对话将不再使用记忆，也不会再从导入的对话中生成新的记忆。",
         assistantProfilesTitle: "自定义 AI 配置与知识文件",

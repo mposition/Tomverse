@@ -1536,14 +1536,14 @@ export const es = {
     externalImport: {
         dataTabTitle: "Importar desde otro servicio de IA",
         dataTabDescription:
-            "Guarda en tu cuenta de Tomverse conversaciones de un archivo de exportación de ChatGPT, Claude o Gemini (Google Takeout). El archivo de exportación solo se lee en tu navegador.",
+            "Guarda en tu cuenta de Tomverse conversaciones de un archivo de exportación de ChatGPT, Claude, Gemini (Google Takeout) o Perplexity. El archivo de exportación solo se lee en tu navegador.",
         dataTabUsage:
             "{conversations} conversaciones importadas · {storage} almacenados",
         dataTabOpen: "Gestionar importaciones",
         dataTabUsageEmpty: "Aún no hay conversaciones importadas",
         pageTitle: "Importar conversaciones desde otro servicio de IA",
         pageDescription:
-            "Sube una exportación oficial de datos de ChatGPT, Claude o Gemini, revisa su contenido y elige qué conversaciones conservar en tu cuenta de Tomverse.",
+            "Sube una exportación oficial de datos de ChatGPT, Claude, Gemini o Perplexity, revisa su contenido y elige qué conversaciones conservar en tu cuenta de Tomverse.",
         backToImports: "Volver a las importaciones",
         signInRequired:
             "Inicia sesión para importar conversaciones desde otro servicio de IA.",
@@ -1556,7 +1556,7 @@ export const es = {
         capacityConversations: "{used} de {limit} conversaciones importadas",
         selectFile: "Elegir archivo de exportación",
         selectFileHint:
-            "Exportación de datos de ChatGPT, Claude o Gemini (.zip o .json), hasta 1 GB. Para Gemini hace falta la exportación en JSON de Mi actividad → Aplicaciones de Gemini, obtenida en Google Takeout. Los archivos grandes no son problema: los archivos multimedia se omiten sin leerse.",
+            "Exportación de datos de ChatGPT, Claude o Gemini (.zip o .json), o un hilo de Perplexity exportado en Markdown (.md), hasta 1 GB. Para Gemini hace falta la exportación en JSON de Mi actividad → Aplicaciones de Gemini, obtenida en Google Takeout. Los archivos grandes no son problema: los archivos multimedia se omiten sin leerse.",
         parsing: "Leyendo la exportación en tu navegador…",
         parsingProgress: "{conversations} conversaciones encontradas",
         cancel: "Cancelar",
@@ -1693,8 +1693,12 @@ export const es = {
             "Selecciona Mi actividad, dentro elige Aplicaciones de Gemini y usa el formato JSON: el producto Gemini contiene Gems, no conversaciones",
         guideGeminiStep3:
             "Exporta y sube el .zip cuando Google te envíe el enlace de descarga",
+        guidePerplexityTitle: "Exportar un hilo de Perplexity",
+        guidePerplexityStep1: "Abre en Perplexity el hilo que quieres traer",
+        guidePerplexityStep2: "Pulsa el botón Exportar bajo una respuesta y elige Markdown",
+        guidePerplexityStep3: "Sube el archivo .md. Un archivo es un hilo, y los enlaces a las fuentes de las respuestas vienen incluidos",
         guideFormats:
-            "Se admiten archivos ZIP y JSON. Una exportación de Gemini debe estar en formato JSON: el HTML no se puede leer.",
+            "Se admiten archivos ZIP y JSON, y archivos Markdown (.md) de Perplexity. Una exportación de Gemini debe estar en formato JSON: el HTML no se puede leer.",
         guideStaysLocal:
             "El archivo exportado nunca sale de tu dispositivo: se abre dentro del navegador.",
         guideMediaExcluded:
@@ -2351,7 +2355,7 @@ export const es = {
         attachmentsTitle: "Adjuntos",
         attachments: "Los adjuntos se almacenan en almacenamiento de objetos cifrado para la entrega al modelo y la extracción de documentos. En cuentas con sesión iniciada se conservan con la conversación y se eliminan cuando borras esa conversación o tu cuenta. Los archivos adjuntados sin cuenta son temporales y se eliminan automáticamente.",
         externalImportTitle: "Conversaciones importadas de otros servicios de IA",
-        externalImport: "Puedes guardar en tu cuenta de Tomverse las conversaciones anteriores que selecciones de un archivo de exportación descargado de otro servicio de IA, como ChatGPT, Claude o Gemini (Google Takeout). El archivo de exportación se abre únicamente en tu navegador; el archivo original nunca se sube ni se conserva en los servidores o el almacenamiento de Tomverse. Solo se guarda como material privado de la cuenta el texto normalizado de las conversaciones que selecciones, junto con los datos de procedencia (servicio de origen, marcas de tiempo originales, nombres de modelo solo para mostrar). Las imágenes, el audio y los archivos adjuntos no se importan. Las conversaciones importadas pueden contener información personal de otras personas, por lo que es tu responsabilidad confirmar que tienes derecho a importar esos datos. Puedes consultar, eliminar y exportar el material importado en cualquier momento, y se elimina junto con tu cuenta. Eliminarlo de Tomverse no elimina los datos que conserva el servicio original.",
+        externalImport: "Puedes guardar en tu cuenta de Tomverse las conversaciones anteriores que selecciones de un archivo de exportación descargado de otro servicio de IA, como ChatGPT, Claude, Gemini (Google Takeout) o Perplexity. El archivo de exportación se abre únicamente en tu navegador; el archivo original nunca se sube ni se conserva en los servidores o el almacenamiento de Tomverse. Solo se guarda como material privado de la cuenta el texto normalizado de las conversaciones que selecciones, junto con los datos de procedencia (servicio de origen, marcas de tiempo originales, nombres de modelo solo para mostrar). Las imágenes, el audio y los archivos adjuntos no se importan. Las conversaciones importadas pueden contener información personal de otras personas, por lo que es tu responsabilidad confirmar que tienes derecho a importar esos datos. Puedes consultar, eliminar y exportar el material importado en cualquier momento, y se elimina junto con tu cuenta. Eliminarlo de Tomverse no elimina los datos que conserva el servicio original.",
         memoryTitle: "Memoria a largo plazo de la cuenta",
         memory: "Cuando guardas conversaciones importadas en tu cuenta de Tomverse, Tomverse organiza automáticamente recuerdos a partir de ellas mientras la función de memoria esté activada. Para ello, el contenido de esas conversaciones se envía a un proveedor de IA elegido por Tomverse, sin descontar créditos. El contenido sensible, como la información de salud, no se guarda como recuerdo; solo se guarda el contenido que supera la validación, y se usa de inmediato. Sobre un mismo tema, lo que dice una conversación más reciente sustituye al recuerdo anterior. Los recuerdos y sus fundamentos se conservan en tu cuenta hasta que los elimines o se eliminen los datos de tu cuenta. Los recuerdos y las preferencias de estilo de respuesta se envían como material de referencia al proveedor de IA que genera cada nueva respuesta, es decir, al proveedor de cada modelo cuando comparas varios. Puedes consultar, editar y eliminar los recuerdos guardados en cualquier momento, descargar la lista completa como archivo o eliminarlos todos de una vez. Si desactivas la memoria, deja de usarse en los chats nuevos y no se crean recuerdos nuevos a partir de las conversaciones importadas.",
         assistantProfilesTitle: "Asistentes de IA personalizados y archivos de conocimiento",

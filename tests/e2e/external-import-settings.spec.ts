@@ -99,6 +99,12 @@ const chatgptExportFile = (conversationCount: number) => ({
   ),
 });
 
+/**
+ * A Perplexity thread export: one Markdown file, parsed by the real worker.
+ * Playwright resolves the path from the repository root it runs in.
+ */
+const perplexityThreadFile = "tests/fixtures/perplexityMarkdown/thread.md";
+
 /** What GET /api/imports/external/[importId] returns to the owner. */
 type ImportDetail = {
   id: string;
@@ -129,6 +135,8 @@ type ImportDetail = {
 
 type ImportApiState = {
   createCount: number;
+  /** The provider each create request named. */
+  createProviders: string[];
   batchBodies: Array<{
     sequence: number;
     conversations: Array<{
@@ -225,6 +233,7 @@ async function mockImportApi(
 ): Promise<ImportApiState> {
   const state: ImportApiState = {
     createCount: 0,
+    createProviders: [],
     batchBodies: [],
     finalizeBody: null,
     finalizeCount: 0,
@@ -283,6 +292,9 @@ async function mockImportApi(
       }
       if (options.disabled) return route.fulfill(disabledResponse);
       state.createCount += 1;
+      state.createProviders.push(
+        String((route.request().postDataJSON() as { provider?: unknown })?.provider)
+      );
       return route.fulfill({
         status: 201,
         contentType: "application/json",
@@ -763,6 +775,51 @@ test.describe("external import settings", () => {
       expect(body).not.toContain("current_node");
       expect(body).not.toContain("mapping");
     }
+  });
+
+  test("a Perplexity thread exported as Markdown imports with its sources", async ({
+    page,
+  }) => {
+    await prepareGuestPage(page, "ko");
+    await mockAuthenticatedApi(page);
+    const api = await mockImportApi(page);
+
+    await page.goto("/settings/imports/new");
+    await page.getByTestId("external-import-guide-perplexity").click();
+    await expect(page.getByTestId("external-import-guide")).toContainText(
+      "Perplexity 스레드 내보내기"
+    );
+    await page
+      .getByTestId("external-import-file-input")
+      .setInputFiles(perplexityThreadFile);
+
+    await expect(page.getByTestId("external-import-selection")).toBeVisible();
+    await expect(
+      page.getByTestId("external-import-conversation-toggle")
+    ).toHaveCount(1);
+    await expect(
+      page.getByText("How do I keep a sourdough starter alive while travelling?")
+    ).toBeVisible();
+    await expect(
+      page.getByTestId("external-import-provider-mismatch")
+    ).toHaveCount(0);
+
+    await page.getByTestId("external-import-continue-to-review").click();
+    await expect(page.getByTestId("external-import-review")).toBeVisible();
+    expect(api.createProviders).toEqual(["perplexity"]);
+    const [conversation] = api.batchBodies[0].conversations;
+    expect(conversation.messages.map((m) => m.role)).toEqual([
+      "user",
+      "assistant",
+      "user",
+      "assistant",
+      "user",
+      "assistant",
+    ]);
+    expect(conversation.messages[1].content).toContain(
+      "Sources:\n[1] https://example.com/starter-care"
+    );
+    expect(conversation.messages[1].content).not.toContain("[^1_");
   });
 
   test("a guidance provider that disagrees with the file is a notice, not a failure", async ({

@@ -51,6 +51,7 @@ approvalTicket: N/A
 |---|---|---|
 | **A — Import** | ChatGPT·Claude 공식 export의 브라우저 파싱, 선택 대화의 정규화 저장, account-private read-only viewer, 삭제·export | Gemini, memory 추출·주입, 이어서 대화하기, password lock, 공유 링크, `Conversation` 변환 |
 | **A2 — Gemini Import** | Google Takeout `My Activity → Gemini Apps`의 JSON parser. **scope 승인됨 (2026-08-14, §23)** — 계약은 `docs/policy/external-import-gemini-a2.md`이며, 분기별 독립 대화·내용 형태 인식·중첩 아카이브 미해제·첨부 누락 표시가 그 핵심입니다. 승인은 **구현 착수까지**이고 production 활성화는 별도입니다 | HTML export, Gems, scheduled actions, 첨부 파일 복제 |
+| **A3 — Perplexity Import** | 스레드별 Markdown export(`.md`, 답변 아래 Export → Markdown) 하나를 한 대화로 읽는 parser(`lib/externalImportAdapters/perplexity.ts`). 출처 각주는 `[n]` 표시와 답변 끝 "Sources" 목록으로 보존합니다. 운영자 요청(2026-11-19 채팅)으로 구현하며 별도 scope token은 두지 않습니다(AGENTS.md Frontier 절). DB CHECK 확장 migration `20261119120000`이 함께 갑니다 | 공유 링크 Import(perplexity.ai는 서버 요청에 Cloudflare 봇 검사로 답해 가져올 수 없음), 계정 전체 일괄 export(Perplexity가 제공하지 않음), PDF·DOCX export, 첨부·이미지 |
 | **B — 계정 장기 메모리** | 메모리 후보 추출·검토·승인, 서버 주도 retrieval·주입, context bundle, external conversation lock 일반화 + memory suspension | Assistant Profile, knowledge, 외부 embedding(§9a의 기본 꺼진 스위치 뒤 경로는 예외) |
 | **C — Assistant Profile** | private 프로필(지시문·모델·도구·memory 범위·지식 파일), 버전 고정, searchTerms 기반 knowledge RAG | public marketplace, 공유·판매, Actions, OAuth connector, 코드 실행, 외부 embedding(§9a의 기본 꺼진 스위치 뒤 경로는 예외) |
 
@@ -182,7 +183,7 @@ MEMORY_EXTRACTION_PROVIDER_<PROVIDER>_COST_MICROUSD_PER_MONTH (절대값 overrid
 
 ### 5.1 파싱 위치 — 브라우저 Web Worker (확정)
 
-- 원본 ZIP/JSON은 Tomverse API·R2·로그 어디로도 전송하지 않습니다.
+- 원본 ZIP/JSON/Markdown은 Tomverse API·R2·로그 어디로도 전송하지 않습니다.
 - 서버에는 사용자가 선택한 정규화 텍스트 batch만 전송합니다.
 - 서버 raw archive staging fallback은 구현하지 않습니다.
 - media entry는 압축 해제 없이 skip하고, 필요한 JSON·metadata entry만 streaming
@@ -2315,6 +2316,9 @@ Data 탭(`AuthButton.tsx`)에는 진입점·요약만 두고 대형 UI를 modal�
   lexical이므로 의미 검색 품질에 한계가 있습니다. 의미 검색은 §9a의 기본 꺼진
   스위치 뒤에 구현돼 있고(2026-11-12), 켜는 것이 별도 승인입니다.
 - 모바일 대형 archive Import는 데스크톱 권장으로 제한됩니다.
+- Perplexity는 스레드마다 `.md` 파일 하나를 올립니다(한 번에 한 스레드). export에
+  시각·모델명이 없어 출처 시각과 모델 표시는 비어 있고, 같은 첫 질문으로 시작하는
+  두 스레드는 같은 lineage의 snapshot으로 묶입니다.
 - media·첨부는 Import되지 않습니다.
 
 ### 릴리스 A scope 승인에 필요한 항목

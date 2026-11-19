@@ -7,8 +7,8 @@ import {
 /**
  * Which model-catalogue brand stands for an imported conversation's service.
  *
- * The three services this deployment can import from are the same three
- * companies whose models it serves, and `lib/modelBranding.ts` already holds
+ * The services this deployment can import from are companies whose models
+ * it also serves, and `lib/modelBranding.ts` already holds
  * their marks and logo assets. So this is a two-column table and nothing else:
  * no new SVG, no second copy of a logo, and no hard-coded brand colour, all of
  * which would be a second source of truth for something the catalogue already
@@ -25,6 +25,7 @@ const BRAND_PROVIDER: Record<ExternalImportProvider, AiProvider> = {
     chatgpt: "openai",
     claude: "anthropic",
     gemini: "google",
+    perplexity: "perplexity",
 };
 
 export function externalProviderBrand(

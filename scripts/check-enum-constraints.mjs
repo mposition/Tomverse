@@ -622,13 +622,17 @@ const REGISTRY = {
 
   // --- the constraint is the only closed list there is ---------------------
   ExternalImport_provider_check: {
-    owner: "database",
+    owner: "list",
+    module: "lib/externalImportProviders.ts",
+    list: "EXTERNAL_IMPORT_PROVIDERS",
     reason:
-      "The two importable providers. They appear as bare string literals across the import adapters and as a zod enum in the analytics payload schema, with no shared runtime list to compare against.",
+      "The importable providers. The adapters, the create route schema and the analytics payload all read the canonical list, so the constraint is compared against it.",
   },
   ExternalConversation_provider_check: {
-    owner: "database",
-    reason: "The same two providers, denormalised onto the conversation.",
+    owner: "list",
+    module: "lib/externalImportProviders.ts",
+    list: "EXTERNAL_IMPORT_PROVIDERS",
+    reason: "The same providers, denormalised onto the conversation.",
   },
   ConversationContinuationBridge_provider_check: {
     owner: "list",
