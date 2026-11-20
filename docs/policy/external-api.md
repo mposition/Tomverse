@@ -328,7 +328,9 @@ improved by its own optimizer, as Chat's router is.
   (`ExternalApiRequest`) records `routedBy` (`router`, `continued`,
   `default`), `routedHeld` and `routeConversation`, a SHA-256 prefix of the
   conversation's routing key (never the key). A request that names a model
-  leaves them null. No request text is stored.
+  leaves them null. No request text is stored. Receipts written before these
+  columns existed have them null too, so for the first week the report counts
+  those Smart Adaptive requests among the requests that named a model.
 - **Report.** `lib/externalApiRoutingReportCore.ts` counts Smart Adaptive
   requests per model and protocol, `topModelShare` (1 means one model took
   everything), the held share, conversations that changed model, the error

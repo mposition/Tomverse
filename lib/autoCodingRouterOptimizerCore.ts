@@ -91,6 +91,8 @@ export const codingGeneratorEvidence = (input: {
                   topModelShare: input.liveRouting.topModelShare,
                   conversations: input.liveRouting.conversations,
                   errorShare: input.liveRouting.errorShare,
+                  // The window held more requests than were read: these counts are of the newest only.
+                  truncated: input.liveRouting.truncated === true,
               }
             : null,
     });
