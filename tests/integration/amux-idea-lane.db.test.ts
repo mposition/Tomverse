@@ -298,8 +298,12 @@ test("the PR observer records how a lane PR stands, only for the run's own branc
   assert.ok([...stored.values()].every((row) => row.prObservedAt !== null), "every read is stamped");
   assert.equal((await round()).has(merged.id), false, "a recorded merge is not read again");
 
+  // A finished idea leaves the Ideas list unless it is the opened one (#4129).
+  const requestOf = async (ideaId: string) => (await prisma.amuxIdeaSubmission.findUniqueOrThrow({
+    where: { id: ideaId }, select: { requestId: true } })).requestId;
+  const done = (await readAmuxIdeaProgressForOwner(owner, await requestOf(merged.ideaId)))
+    .find((row) => row.ideaId === merged.ideaId);
   let rows = await readAmuxIdeaProgressForOwner(owner);
-  const done = rows.find((row) => row.ideaId === merged.ideaId);
   assert.equal(done?.stage, "done");
   assert.equal(done?.lane?.state, "merged");
   assert.equal(done?.closable, false, "a merged idea has nothing left to close");
@@ -314,7 +318,7 @@ test("the PR observer records how a lane PR stands, only for the run's own branc
   assert.equal(rows.find((row) => row.ideaId === closed.ideaId)?.lane?.state, "pr_open", "a reopened PR is back in review");
   pulls[9_000_005] = pull(closed.id, "merged");
   assert.equal((await round()).get(closed.id), "merged");
-  rows = await readAmuxIdeaProgressForOwner(owner);
+  rows = await readAmuxIdeaProgressForOwner(owner, await requestOf(closed.ideaId));
   assert.equal(rows.find((row) => row.ideaId === closed.ideaId)?.stage, "done", "and its later merge is seen");
 
   assert.equal(await amuxIdeaLaneTook(merged.ideaId), true);
