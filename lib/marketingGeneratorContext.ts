@@ -12,7 +12,7 @@
 
 import "server-only";
 
-import { launchHomepageContent } from "@/components/marketing/launchHomepageContent";
+import { homeV2Content } from "@/components/marketing/home/homeV2Content";
 import { infoPages } from "@/components/marketing/marketingInfoContent";
 import { getBillingPlansWithFieldSources } from "@/lib/billingConfig";
 import {
@@ -221,9 +221,13 @@ export function generatorClaimContext(
 
 /** The homepage, About and FAQ copy in English: what Tomverse says about itself. */
 const ownPages = (): Record<string, unknown> => {
-  const home = launchHomepageContent.en;
+  // The console and terminal samples are code, not claims about Tomverse, and
+  // the API facts are endpoint URLs: the approved tracked pages are the
+  // context's only URLs (tests/integration/marketing-generator-context.db.test.ts).
+  const { api: { console: _console, facts: _facts, ...api }, cli: { term: _term, ...cli }, ...home } = homeV2Content.en;
+  void _console; void _term; void _facts;
   return {
-    home: { hero: home.hero, adaptive: home.adaptive, review: home.review, tools: home.tools, plans: home.plans, guest: home.guest },
+    home: { ...home, api, cli },
     about: infoPages.about.en,
     faq: infoPages.faq.en,
   };

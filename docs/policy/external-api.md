@@ -50,7 +50,7 @@ All default off. Server-side; hiding UI is never the gate.
 | `EXTERNAL_API_ANTHROPIC_ENABLED` | Exactly `true` (and `EXTERNAL_API_ENABLED`) turns on the Anthropic Messages routes for Claude Code: `POST /api/anthropic/v1/messages`, its `count_tokens` and `GET /api/anthropic/v1/models`. Off: 503 `feature_unavailable`, nothing dispatched. |
 | `EXTERNAL_API_RESPONSES_ENABLED` | Exactly `true` (and `EXTERNAL_API_ENABLED`) turns on `POST /api/v1/responses` for Codex. Off: 503, nothing dispatched. |
 | `TOMVERSE_CLI_GUIDE_ENABLED` | Exactly `true` shows the Tomverse CLI install and connect card in Settings > API keys (section 11). Off until the package is published, so the page never points at a package that is not on the registry. It turns nothing on in the API. |
-| `EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED` | Exactly `true` lets Smart Adaptive (section 5.1) ask Chat's router model which candidate answers. Off by default, because each routed request adds one router call, held against the provider operational budget rather than the user's credits. Off, `smart-adaptive` still works and every request goes to the default model. |
+| `EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED` | Exactly `true` lets Smart Adaptive (section 5.1) ask Chat's router model which candidate answers. Off by default, because each routed request adds one router call, held against the provider operational budget rather than the user's credits. Off, `smart-adaptive` still works and every request goes to the default model (on a native protocol, that provider's default, section 10.6). |
 
 **Kill switch.** The Admin operational pause for AI chat
 (`feature.aiChatEnabled`) stops every new external dispatch at once (503
@@ -170,7 +170,11 @@ model accepts a temperature, including models registered with reasoning `none`;
 for a model that takes none of them they are left out of the call and named in
 the `x-tomverse-ignored-parameters` response header, because coding clients send
 them on every request -- VS Code always sends a temperature), `stop` (up to 4), `n: 1`, `store: false`,
-`user` (accepted, no effect), `reasoning_effort` (OpenAI reasoning models only).
+`user` (accepted, no effect), `reasoning_effort` (OpenAI reasoning models only), and its
+Responses-API spelling `reasoning: { effort, summary }`, which Cursor sends for a model name it
+recognises (seen with `gpt-6-luna` on production, 2026-11-20): `effort` is read as `reasoning_effort`
+(both sent and different is refused), and `summary`, which has no place in a Chat Completions answer, is
+left out and named in `x-tomverse-ignored-parameters`.
 The request body may be up to 12 MB.
 
 **Refused with a typed 400:** any other field (`unsupported_parameter`, naming
@@ -238,7 +242,13 @@ it is the id the settings page puts in a copied configuration by default:
 the id stays the same while models are added to or retired from the
 catalogue, so a customer never has to recopy it.
 
-- **Candidates:** the offered models that fit the request -- images only to a
+- **Candidates:** the offered models, plus the `frontier` and `apex` models
+  this plan reaches (owner decision 2026-11-20: Smart Adaptive may route to
+  them, no client may name them, and each request is charged that model's own
+  credits under the key's cap; they join only beside a model of their
+  provider a client can name, and are only ever the router's pick, never the
+  default and never the one model left),
+  that fit the request -- images only to a
   model that reads them, the requested output within the model's limit, a
   rough input estimate plus that output within its window, and the optional
   features the request uses (`strict` tools, image `detail`,
@@ -257,8 +267,17 @@ catalogue, so a customer never has to recopy it.
   from the window to size the input), and the largest credits per request. A request
   beyond every candidate gets the default model's ordinary limit error.
 - **Router input:** the latest user message's text and the assistant text
-  before it, bounded by the router itself. Nothing is stored: the external API
-  passes no conversation id, so the router writes no `AutoRouterDecision` row.
+  before it, bounded by the router itself, and the coding signals
+  (`CodingRouterContext`): the client's User-Agent, the number of tools, the
+  model turns so far, the input size, the end of the latest tool result
+  (600 characters, where errors and test summaries print) and the model
+  already working on the conversation. The router reads them with the coding
+  head and guidance (`AUTO_LLM_ROUTER_CODING_GUIDANCE`, version `coding-v1`):
+  quality first, credits only between candidates expected to do the work
+  equally well, strength by tier then credits, apex only for the hardest work.
+  The guidance is fixed in code; the router optimizer measures and replaces
+  Chat's guidance only. Nothing is stored: the external API passes no
+  conversation id, so the router writes no `AutoRouterDecision` row.
 - **Tool loops:** a request that carries tool results back goes to the model
   that made those tool calls. When a Smart Adaptive answer ends with tool
   calls, its model is remembered in process for ten minutes under the key and
@@ -267,7 +286,22 @@ catalogue, so a customer never has to recopy it.
   requests with the same history, refused requests and answers without calls
   never overwrite each other. A miss (another instance, a restart) routes
   again and shows as `routed-by: router`, so across instances a tool loop can
-  change model. A new user message is routed again.
+  change model.
+- **A new user message** is routed again, and within a conversation the model
+  only moves up (`escalateOnly`): a pick with fewer credits than the model
+  already working on the conversation keeps that model (`routed-by:
+  continued`), an equal or stronger one moves. The conversation is known by
+  the opening of its history (everything before the first assistant message)
+  under the key; its model is remembered in process for six hours once
+  admission accepted a request on it, so a pick the account could not pay for
+  is never held. With the router gate closed it keeps its model too. A miss
+  (another instance, a restart, a client that rewrites the opening) routes
+  freely.
+- **Log:** every Smart Adaptive decision, on every protocol, is one
+  `external_api_smart_adaptive_routed` line (request id, protocol,
+  `routedBy`, model, `held`, the client's User-Agent cut to 40 characters),
+  and the router's own `chat_auto_llm_router` line carries
+  `taskKind: external_api`. No request text is logged.
 - **No answer** (router switch off, no router model configured, provider budget
   refused, timeout, invalid output, one candidate left): the default model
   (`DEFAULT_MODEL_ID`) if it fits, otherwise the first candidate in catalogue
@@ -441,12 +475,13 @@ Refused before dispatch, with nothing held (`lib/anthropicMessagesProtocol.ts`,
   hold, so a request fetch could not send never consumes provider budget);
 - stored or server-side state: `previous_response_id`, `conversation`,
   stored `prompt`, `background`, `item_reference`;
-- Smart Adaptive and models of another provider: a native request stays on
-  the model that produced its state. The model list per protocol is the same
-  runtime registry, plan and credential filter as `/models`, narrowed by
-  provider (`protocols` on each `/models` entry). A Responses request may
-  name the provider's model id (`gpt-5.6-luna`) when it maps to exactly one
-  offered model; Codex picks its patch tool by it.
+- models of another provider: a native request stays on its own provider.
+  The model list per protocol is the same runtime registry, plan and
+  credential filter as `/models`, narrowed by provider (`protocols` on each
+  `/models` entry). A Responses request may name the provider's model id
+  (`gpt-5.6-luna`) when it maps to exactly one offered model; Codex picks its
+  patch tool by it. `smart-adaptive` is accepted and routed among the
+  provider's own models (section 10.6).
 
 `anthropic-beta` is forwarded unchanged (filtering one half of a header/body
 pair yields a provider 400); the cost-bearing features are checked in the body.
@@ -579,9 +614,107 @@ was retried. Before the function form of section 6, each `ApplyPatch` call
 sent as a `custom` call completed and was charged while Cursor retried it four
 times and reported a server error.
 
+Cursor, 2026-11-20, against production (`https://tomverse.app/api/v1`), same
+steps, model `smart-adaptive` on Chat Completions (it picked DeepSeek V4 Pro for
+every request): Chat, Agent fix and re-run, a refused then approved command,
+and a stopped reply all passed -- 15 requests, each answered 200 once, no
+retries and no server errors; the stopped reply settled as cancelled at 1
+credit, and the receipts matched the server's request times. With model
+`gpt-6-luna` the first request was refused with 400 until the `reasoning`
+object (section 6) was accepted: Cursor sends it for a model name it
+recognises.
+
 Not yet verified, each a separate step: other operating systems, Claude Code
 and Codex against a deployed environment (their runs above called the handlers
-directly, not through the Next.js server), and any client against production.
+directly, not through the Next.js server), Cursor against production with a
+named model once the `reasoning` object is deployed, and native Smart Adaptive
+(section 10.6) with real models or real clients end to end.
+
+### 10.6 Smart Adaptive on the native protocols (`lib/externalApiNativeSmartAdaptive.ts`)
+
+`model: "smart-adaptive"` on Anthropic Messages routes among the Anthropic
+models this key can run, on Responses among the OpenAI models -- never across
+providers, so signed or encrypted state is never sent to another provider.
+
+- **Constraint checked (provider docs, 2026-11-19).** Anthropic binds each
+  thinking block to the model that produced it; a model that cannot read an
+  earlier block drops it and the request still succeeds. OpenAI omits
+  incompatible encrypted reasoning when the model family changes, also without
+  failing. So a model switch mid-task costs reasoning and the prompt cache,
+  not the request; the gateway still avoids it.
+- **One pick per conversation, moving only up.** The first request of a
+  conversation (no model output in its history) is routed with the same
+  router call, gate, switch and coding guidance as Chat Completions (section
+  5.1, `pickWithSmartAdaptiveRouter`); every tool round of that conversation
+  goes to the same model (`x-tomverse-routed-by: continued`). A later message
+  the user wrote (the history ends with a user message carrying no
+  `tool_result`, or a Responses user message rather than a tool output; read
+  from the structure, never the text) is routed again with the pinned model
+  as `currentModelId`: a cheaper pick keeps the pin, a stronger one answers.
+  Every pin is written only once admission accepted the request, so a model
+  the account cannot pay for never takes the conversation, and the rule is
+  checked again when it is written, so of two messages routed at once the
+  cheaper one admitted last cannot lower it. A request that opens a new
+  history on the same session (a Claude Code subagent) keeps the session's
+  model and is not routed, so it cannot move the model under the main loop's
+  tool rounds; identical concurrent requests share one router call. The
+  switch costs the reasoning and the cache, the trade the user's harder
+  request asks for. The provider default is never a frontier or apex model,
+  and a request only they fit is refused as it was before they were candidates.
+  Known limit: one pin per session holds one model. Two different messages
+  the user sends on one session at the same moment (pinned or not) pick
+  independently, the dearer one admitted first keeps the pin, and the
+  other's tool rounds then run on it (reasoning and cache lost, never the
+  request). Claude Code and Codex send one user message per session at a
+  time, and a subagent never re-routes; per-tool-call stickiness on the
+  native protocols would remove the limit. The conversation is the client's own id: Codex's
+  `prompt_cache_key` (its thread id; `session-id`/`thread-id` headers),
+  Claude Code's `x-claude-code-session-id` or the session in
+  `metadata.user_id`; otherwise a digest of the history's opening. The pin is
+  kept in this process for six hours from the conversation's last generation
+  request (a token count reads it without extending it).
+- **Candidates** are the provider's models the request fits: images only to a
+  model that reads them, and the input estimate plus the output the gateway
+  would reserve on that model (the client's limit within the model's own)
+  within its window, after the protocol's own check for that model (a
+  thinking budget above its output limit leaves it out). When no model of the
+  provider fits, the request is refused (`image_input_unsupported`,
+  `context_length_exceeded`, or the model check's own error) before any
+  router call or hold. Every refusal that does not depend on the model
+  (provider-run tools, cache TTL, stored state, forwarded headers) is checked
+  before the router call, so a request refused anyway never spends one.
+- **A missed pin never fails.** A tool round whose history already carries
+  model output and whose pin this process does not have (another instance, a
+  restart) takes the provider default and pins it; a message the user wrote
+  is routed like a first request. The body
+  names no producing model to recover, and both providers accept the switch.
+  If the pinned model can no longer take the request (window, retirement),
+  another fitting model of the provider answers and the pin moves.
+- **Provider default:** the catalogue default (`gpt-6-luna`) when the
+  provider has it, otherwise the lower-median model by credits
+  (`nativeSmartAdaptiveDefaultId`). It also answers with the router switch
+  off, when the router gives no answer or names a model outside the
+  candidates, and for the free `count_tokens` call, which never routes and
+  reads the pin only.
+- **Money:** the pick happens before admission, so the reservation, receipt
+  and credits are the picked model's; billing code is unchanged. A refused
+  admission pauses router calls for the key for two minutes, as in section 5.1.
+  Responses carry `x-tomverse-routed-model` and `x-tomverse-routed-by`.
+- **Settings:** Claude Code and Codex offer Smart Adaptive first, scoped to
+  their provider (`nativeSmartAdaptiveCapabilities`): the smallest window
+  among those models (the conversation keeps its first model, so the tool
+  compacts before the smallest window), the default's output limit, the
+  dearest model's credits. Claude Code's Haiku alias stays on the cheapest
+  fixed Anthropic model, so background work makes no router call. Codex 0.146
+  given `smart-adaptive` (a slug it does not know) sends its generic function
+  tools (`shell_command`, `update_plan`, ...) and no freeform tool, captured
+  2026-11-19 against a local server; every OpenAI model takes those.
+- **Verified 2026-11-19** with a fake provider and a faked router over the real
+  ledger (`tests/integration/external-api-native.db.test.mjs`): Anthropic-only
+  and OpenAI-only candidate lists, a cross-provider router answer ignored, the
+  pick kept across tool rounds that carry thinking signatures and encrypted
+  reasoning, a dropped pin answered by the default with no router call and no
+  failure, every request settled.
 
 ## 11. Tomverse CLI (`apps/tomverse-cli`)
 
@@ -625,6 +758,14 @@ output contract are in `apps/tomverse-cli/README.md`.
   runtime with its own providers and store). The CLI follows its contracts --
   tool names, result states, the credential path list, argv-first commands --
   so a later shared executor can replace the CLI's local tools.
+
+- **Distribution** (owner decision 2026-11-19). The npm package
+  `@tomverse/cli` (Node.js 22 or later) under a proprietary use-only license
+  (`apps/tomverse-cli/LICENSE`), plus standalone executables (Node.js single
+  executable applications) for Windows, macOS and Linux on x64 and arm64,
+  attached to a GitHub Release `cli-v<version>`. The workflow
+  `tomverse-cli-release-check.yml` (run by hand) builds and tests all of them
+  and publishes nothing. The steps are in `apps/tomverse-cli/RELEASING.md`.
 
 Verification state, publication and the operating systems actually run are
 reported per change (the PR); package publication and enabling

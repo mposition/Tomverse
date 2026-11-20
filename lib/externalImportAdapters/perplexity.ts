@@ -91,7 +91,7 @@ const TITLE_CODE_POINTS = 80;
 
 const LOGO = /^<img\s[^>]*perplexity\.ai[^>]*\/?>$/i;
 const DIVIDER = /^<div\b[^>]*>\s*⁂\s*<\/div>$/;
-const HIDDEN_CITATIONS = /^<span\b[^>]*display:\s*none[^>]*>(?:\s*,?\s*\[\^\d+_\d+\])*\s*<\/span>$/;
+const HIDDEN_CITATIONS = /^<span\b[^>]*display:\s*none[^>]*>(?:\s*(?:,\s*)?\[\^\d+_\d+\])*\s*<\/span>$/;
 const FOOTNOTE_DEFINITION = /^\[\^\d+_(\d+)\]:\s*(.+)$/;
 const FOOTNOTE_MARK = /\[\^\d+_(\d+)\]/g;
 const FOOTNOTE_DEFINITION_TURN = /^\[\^(\d+)_\d+\]:\s/;

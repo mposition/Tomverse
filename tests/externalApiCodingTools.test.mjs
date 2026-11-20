@@ -35,7 +35,8 @@ const haiku = model("claude-haiku-4-5", { provider: "anthropic", creditWeight: 1
 const luna = model("gpt-5-6-luna", { provider: "openai", maxOutputTokens: 128_000, contextWindowTokens: 256_000, protocols: ["chat_completions", "responses"], providerModelId: "gpt-5.6-luna" });
 const gpt55 = model("gpt-5-5", { provider: "openai", protocols: ["chat_completions", "responses"], providerModelId: "gpt-5.5" });
 const gpt55Thinking = model("gpt-5-5-thinking", { provider: "openai", protocols: ["chat_completions", "responses"], providerModelId: "gpt-5.5" });
-const smart = model("smart-adaptive", { provider: "tomverse", protocols: ["chat_completions"] });
+const smart = model("smart-adaptive", { provider: "tomverse", protocols: ["chat_completions", "anthropic_messages", "responses"], creditWeight: 9 });
+const opus = model("claude-opus-5", { provider: "anthropic", creditWeight: 12, contextWindowTokens: 1_000_000, maxOutputTokens: 128_000, protocols: ["chat_completions", "anthropic_messages"], providerModelId: "claude-opus-5" });
 const BASE = "https://tomverse.example/api/v1";
 
 test("Claude Code: Anthropic namespace, every model alias pinned, 5-minute cache, placeholder key", () => {
@@ -99,10 +100,36 @@ test("Cursor and the per-tool model lists", () => {
     assert.match(text, /Custom model: gpt-5-6-luna/);
     assert.match(text, /<YOUR_TOMVERSE_API_KEY>/);
     const lists = codingToolModels([smart, sonnet, haiku, luna]);
-    assert.deepEqual(lists.claudeCode.map((m) => m.id), ["claude-sonnet-5", "claude-haiku-4-5"]);
-    assert.deepEqual(lists.codex.map((m) => m.id), ["gpt-5-6-luna"]);
+    assert.deepEqual(lists.claudeCode.map((m) => m.id), ["smart-adaptive", "claude-sonnet-5", "claude-haiku-4-5"]);
+    assert.deepEqual(lists.codex.map((m) => m.id), ["smart-adaptive", "gpt-5-6-luna"]);
     assert.ok(!lists.cursor.some((m) => m.id === "smart-adaptive"), "Agent starts on a fixed model");
-    assert.ok(![...lists.claudeCode, ...lists.codex].some((m) => m.id === "smart-adaptive"), "never on a native protocol");
+});
+
+test("Smart Adaptive on Claude Code and Codex: scoped to the tool's provider, haiku alias fixed", () => {
+    const lists = codingToolModels([smart, opus, sonnet, haiku, luna, gpt55]);
+    const claudeSmart = lists.claudeCode[0];
+    assert.equal(claudeSmart.id, "smart-adaptive");
+    // Only Anthropic models count: the window every one of them offers (a
+    // conversation keeps the model it started on), the default's output limit
+    // (the lower-median Anthropic model by credits), the dearest's credits.
+    assert.equal(claudeSmart.contextWindowTokens, 192_000);
+    assert.equal(claudeSmart.maxOutputTokens, 64_000);
+    assert.equal(claudeSmart.creditWeight, 12);
+    const env = Object.fromEntries(claudeCodeConfig(BASE, claudeSmart, lists.claudeCode).env);
+    for (const name of ["ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL"]) {
+        assert.equal(env[name], "smart-adaptive", name);
+    }
+    assert.equal(env.ANTHROPIC_DEFAULT_HAIKU_MODEL, "claude-haiku-4-5", "background work on the cheapest fixed model, no router call");
+    assert.ok(Number(env.CLAUDE_CODE_AUTO_COMPACT_WINDOW) <= sonnet.contextWindowTokens - sonnet.maxOutputTokens, "compacts before the smallest window");
+    const codexSmart = lists.codex[0];
+    assert.equal(codexSmart.contextWindowTokens, 192_000, "the smaller of the OpenAI windows");
+    const codex = codexConfig(BASE, codexSmart, lists.codex);
+    assert.ok(codex.profileToml.includes('model = "smart-adaptive"'), "no provider id: Codex sends its generic function tools");
+    assert.ok(codex.profileToml.includes('review_model = "smart-adaptive"'));
+    assert.ok(codex.profileToml.includes("model_context_window = 192000"));
+    // Asked which tools one Smart Adaptive entry serves, with nothing else to hand.
+    const alone = codingToolModels([smart]);
+    assert.deepEqual([alone.claudeCode.length, alone.codex.length, alone.cursor.length], [1, 1, 0]);
 });
 
 test("a request names a model by Tomverse id or by one offered model's provider id, never another model", async () => {

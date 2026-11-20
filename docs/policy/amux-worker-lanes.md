@@ -104,7 +104,7 @@ box: bridge → sidecar → worker CLI (worker checkout, develop 기준, 로컬 
 | 살아 있다는 신호가 3시간 없으면 실행을 끊음 | 없앴다. 실행은 CLI가 끝나거나 운영자가 멈출 때만 끝난다. 마지막 진행 시각은 worker 건강 신호(`run_progress`)로 남긴다 |
 | 같은 결과 실패 3번이면 사람·DM에게 넘김, 30번 폭주 방지선 | 없앤다. 결과 실패는 대기 후 다시 배정된다. 유료 재시도의 자기 한도는 실제 돈이라 남는다 |
 | transaction마다 DB call 수 상한 | 없앴다. 선언한 call 수는 시간 예산 계산에만 쓰고, 최악의 계획이 route보다 길면 남은 시간 안에서 돈다 |
-| patch 4 MiB, 한 번의 전송 32 MiB | 설계 중. 실제로는 앱 앞단의 10 MiB 요청 한도와 PR diff 1 MiB 묶기가 먼저 걸린다. 조각 전송, DB CHECK, 게시 단계, 승인 digest를 함께 바꿔야 한다 |
+| patch 4 MiB, 한 번의 전송 32 MiB | 없앴다. 결과 방향은 #4077(조각 전송, DB CHECK, 게시 단계, 승인 digest v2), 내려가는 방향(재개 context, DM 증거)과 sidecar의 표시 4 MiB·메모리 32 MiB는 #4089에서 같은 조각 기법으로 없앴다(`docs/policy/amux-v22-result-transfer.md` 9·10절). 남는 것은 외부 한계뿐이다 |
 
 ## 5. 2026-11-18에 확인한 것
 

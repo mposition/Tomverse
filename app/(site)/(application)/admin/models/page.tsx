@@ -1,5 +1,6 @@
 export const dynamic = "force-dynamic";
 
+import { AdminCodingCatalogPanel } from "@/components/admin/AdminCodingCatalogPanel";
 import { AdminModelCatalogPanel } from "@/components/admin/AdminModelCatalogPanel";
 import { AdminModelDiscoveryPanel } from "@/components/admin/AdminModelDiscoveryPanel";
 import { AdminModelRegistryPanel } from "@/components/admin/AdminModelRegistryPanel";
@@ -34,7 +35,7 @@ async function DefaultModelsTab() {
 }
 
 /**
- * Four sections, and only the open one is mounted.
+ * Five sections, and only the open one is mounted.
  *
  * The registry was previously the whole page; discovery joins it here rather
  * than as its own route because they are one subject -- what the catalogue
@@ -45,6 +46,10 @@ async function DefaultModelsTab() {
  * Default models (2026-11-07) is the fallback model, the guest lineup and the
  * account default, moved out of Platform settings: a model decision is made
  * on the Models page. It is the same panel, drawing that part of it.
+ *
+ * The coding catalogue (2026-11-20) split from the image one: it reads chat
+ * models and per-provider conditions the image catalogue has no use for, and
+ * `?tab=catalog` keeps meaning the image catalogue so old links still land.
  *
  * The registry, discovery and catalogue panels fetch their own rows, so the
  * section in `?tab=` decides which request is made at all.
@@ -68,6 +73,8 @@ export default async function AdminModelsPage({
         <AdminModelDiscoveryPanel />
       ) : tab.id === "catalog" ? (
         <AdminModelCatalogPanel />
+      ) : tab.id === "coding" ? (
+        <AdminCodingCatalogPanel />
       ) : tab.id === "defaults" ? (
         <DefaultModelsTab />
       ) : (

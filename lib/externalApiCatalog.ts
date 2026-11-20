@@ -1,8 +1,10 @@
 import "server-only";
 import { chatUserMaxInputTokens } from "@/lib/chatInputLimits";
+import { externalChannelAllowlist, type ExternalCodingChannel } from "@/lib/codingCatalogChannels";
 import {
     externalApiModelCapabilities,
     isExternalApiServableModel,
+    isSmartAdaptiveOnlyModel,
     smartAdaptiveCapabilities,
     type ExternalApiModelCapabilities,
 } from "@/lib/externalApiCatalogCore";
@@ -17,13 +19,36 @@ import type { ExternalApiProtocol } from "@/lib/externalApiProtocols";
  * validated against, so the list and execution cannot disagree. A model whose
  * provider has no credential on this deployment could only fail, so it is not
  * offered.
+ *
+ * `smartAdaptive` adds the classes only Smart Adaptive routes to (frontier and
+ * apex, lib/externalApiCatalogCore.ts); a client naming one of those directly
+ * is still refused.
+ *
+ * With CODING_CATALOG_EXTERNAL_CHANNELS_ENABLED on, only the chat models the
+ * newest coding snapshot lists for this channel and the coding judge still
+ * admits now (lib/codingCatalogChannels.ts); off, the allow-list is null and
+ * nothing else is read.
  */
 export const externalApiRunnableModels = async (
-    plan: ModelTier
+    plan: ModelTier,
+    options: { channel?: ExternalCodingChannel; smartAdaptive?: boolean } = {}
 ): Promise<{ model: AiModel; capabilities: ExternalApiModelCapabilities }[]> => {
     const runtime = await getRuntimeModels();
-    return runtime
-        .filter((model) => isExternalApiServableModel(model, plan) && isProviderApiKeyConfigured(model.provider))
+    const allowed = await externalChannelAllowlist(options.channel ?? "api", plan, { runtime });
+    const servable = runtime.filter(
+        (model) =>
+            isExternalApiServableModel(model, plan, { smartAdaptive: options.smartAdaptive }) &&
+            isProviderApiKeyConfigured(model.provider) &&
+            (allowed === null || allowed.has(model.id))
+    );
+    // A router-only model joins only beside a model of its provider a client
+    // can name, so it is never the default, never the one model left, and a
+    // native protocol never offers Smart Adaptive over router-only models alone.
+    const nameableProviders = new Set(
+        servable.filter((model) => !isSmartAdaptiveOnlyModel(model)).map((model) => model.provider)
+    );
+    return servable
+        .filter((model) => !isSmartAdaptiveOnlyModel(model) || nameableProviders.has(model.provider))
         .map((model) => ({
             model,
             capabilities: externalApiModelCapabilities(model, {
@@ -36,19 +61,30 @@ export const externalApiRunnableModels = async (
 
 /**
  * What `GET /models` and the settings page offer: Smart Adaptive first, then
- * every runnable model.
+ * every runnable model. Smart Adaptive's limits and credits are over its own
+ * candidates, which include the classes only it routes to.
  */
-export const externalApiOfferedModels = async (plan: ModelTier): Promise<ExternalApiModelCapabilities[]> => {
-    const runnable = (await externalApiRunnableModels(plan)).map((entry) => entry.capabilities);
-    const smart = smartAdaptiveCapabilities(runnable, DEFAULT_MODEL_ID);
+export const externalApiOfferedModels = async (
+    plan: ModelTier,
+    options: { channel?: ExternalCodingChannel } = {}
+): Promise<ExternalApiModelCapabilities[]> => {
+    const pool = await externalApiRunnableModels(plan, { ...options, smartAdaptive: true });
+    const runnable = pool
+        .filter((entry) => isExternalApiServableModel(entry.model, plan))
+        .map((entry) => entry.capabilities);
+    const smart = smartAdaptiveCapabilities(
+        pool.map((entry) => entry.capabilities),
+        DEFAULT_MODEL_ID
+    );
     return smart ? [smart, ...runnable] : runnable;
 };
 
 /** The runnable models one wire protocol carries, for its model list and settings. */
 export const externalApiProtocolModels = async (
     plan: ModelTier,
-    protocol: ExternalApiProtocol
+    protocol: ExternalApiProtocol,
+    options: { channel?: ExternalCodingChannel } = {}
 ): Promise<ExternalApiModelCapabilities[]> =>
-    (await externalApiRunnableModels(plan))
+    (await externalApiRunnableModels(plan, options))
         .map((entry) => entry.capabilities)
         .filter((capabilities) => capabilities.protocols.includes(protocol));

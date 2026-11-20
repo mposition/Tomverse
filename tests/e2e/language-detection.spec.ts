@@ -22,10 +22,11 @@ test("a fresh private-style session uses the browser language before opening a p
   // for whichever product is currently offered to this visitor.
   const guestChatAvailable = await page.getByTestId("launch-homepage")
     .getAttribute("data-guest-chat-trial-available") === "true";
-  const startHref = guestChatAvailable ? `${CHAT_WORKSPACE_PATH}?lang=ko` : "/review?lang=ko";
+  // Chat is the hero's second button when it is available; answer comparison is always the first.
+  const startHref = guestChatAvailable ? `${CHAT_WORKSPACE_PATH}?lang=ko` : "/review?lang=ko&entry=guest-preview";
   const destination = new URL(startHref, page.url()).href;
-  const startProduct = page.getByTestId("landing-primary-cta");
-  await expect(startProduct).toContainText(guestChatAvailable ? "채팅 시작하기" : "리뷰 시작하기");
+  const startProduct = page.getByTestId(guestChatAvailable ? "landing-secondary-cta" : "landing-primary-cta");
+  await expect(startProduct).toContainText(guestChatAvailable ? "채팅 시작하기" : "세 AI에 물어보기");
   await expect(startProduct).toHaveAttribute("href", startHref);
 
   await startProduct.click();

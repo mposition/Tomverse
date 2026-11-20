@@ -19,7 +19,7 @@ import { ApiSecurityError, consumeApiRateLimit, readLimitedText } from "@/lib/ap
 import { externalApiAdmissionHook } from "@/lib/externalApiAdmission";
 import { externalApiRunnableModels } from "@/lib/externalApiCatalog";
 import { externalApiAccountAccess } from "@/lib/externalApiAccess";
-import { externalApiEnabled, SMART_ADAPTIVE_MODEL_ID } from "@/lib/externalApiCatalogCore";
+import { externalApiChannelFor, externalApiEnabled, SMART_ADAPTIVE_MODEL_ID } from "@/lib/externalApiCatalogCore";
 import { externalApiErrorResponse, idempotentReplay, positiveInteger } from "@/lib/externalApiInference";
 import { authenticateExternalApiKey, ExternalApiKeyError, type AuthenticatedExternalApiKey } from "@/lib/externalApiKeys";
 import { sha256Hex } from "@/lib/externalApiKeyCore";
@@ -37,7 +37,9 @@ import {
     upstreamRefusedBeforeWork,
     type NativeObservation,
 } from "@/lib/externalApiNativeCore";
+import { routeNativeSmartAdaptive, type NativeSmartDecision } from "@/lib/externalApiNativeSmartAdaptive";
 import { nativeUpstreamFetch, NativeUpstreamUnavailable, type NativeUpstreamProvider } from "@/lib/externalApiNativeUpstream";
+import { noteSmartAdaptiveRefusal, smartAdaptiveRouterAllowed } from "@/lib/externalApiSmartAdaptive";
 import { getRuntimeModel } from "@/lib/modelRegistry";
 import { PROTOCOL_LIMITS } from "@/lib/openAiChatProtocol";
 import { prisma } from "@/lib/prisma";
@@ -172,22 +174,32 @@ type RunnableEntry = Awaited<ReturnType<typeof externalApiRunnableModels>>[numbe
  * credential filter as every other route, narrowed to the models this
  * protocol carries natively. A Tomverse id or, when it names exactly one of
  * them, the provider's own model id (Codex keys its tool behaviour on it).
- * Never Smart Adaptive: signed thinking and encrypted reasoning belong to the
- * model that produced them, so a native request is never re-routed.
+ * Smart Adaptive picks among this protocol's own provider's models, once per
+ * conversation (lib/externalApiNativeSmartAdaptive.ts), so signed thinking
+ * and encrypted reasoning never cross providers or change model mid-task.
  */
-export const resolveNativeModel = async (protocol: NativeProtocol, plan: Parameters<typeof externalApiRunnableModels>[0], requested: unknown): Promise<RunnableEntry> => {
+export const resolveNativeModel = async (
+    protocol: NativeProtocol,
+    plan: Parameters<typeof externalApiRunnableModels>[0],
+    requested: unknown,
+    smart?: Omit<Parameters<typeof routeNativeSmartAdaptive>[0], "protocol" | "runnable">,
+    /** The coding-catalogue channel the request belongs to (read only while the external channels are on). */
+    channel: "api" | "cli" = "api"
+): Promise<RunnableEntry & { routedBy?: NativeSmartDecision["routedBy"]; commit?: NativeSmartDecision["commit"] }> => {
     if (typeof requested !== "string" || !requested) {
         throw new NativeProtocolError(400, "invalid_request", "model is required.", "model");
     }
+    const runnable = await externalApiRunnableModels(plan, { channel, smartAdaptive: requested === SMART_ADAPTIVE_MODEL_ID });
     if (requested === SMART_ADAPTIVE_MODEL_ID) {
+        const decision = smart ? await routeNativeSmartAdaptive({ ...smart, protocol, runnable }) : null;
+        if (decision) return { ...decision.entry, routedBy: decision.routedBy, commit: decision.commit };
         throw new NativeProtocolError(
-            400,
-            "model_unsupported_protocol",
-            `Smart Adaptive is offered on Chat Completions only. Choose a fixed model for ${PROTOCOL_LABEL[protocol]} in Tomverse Settings > API keys.`,
+            404,
+            "model_not_found",
+            `Smart Adaptive has no ${PROTOCOL_LABEL[protocol]} model available to this key.`,
             "model"
         );
     }
-    const runnable = await externalApiRunnableModels(plan);
     const eligible = runnable.filter((entry) => entry.capabilities.protocols.includes(protocol));
     const byId = eligible.find((entry) => entry.model.id === requested);
     if (byId) return byId;
@@ -496,8 +508,41 @@ export async function handleNativeGeneration(request: Request, spec: NativeProto
         }
 
         const plan = await getUserBillingPlan(key.userId);
-        const entry = await resolveNativeModel(spec.protocol, plan.tier, isRecord(body) ? body.model : undefined);
+        const requestedModel = isRecord(body) ? body.model : undefined;
+        const smartAdaptive = requestedModel === SMART_ADAPTIVE_MODEL_ID;
+        if (smartAdaptive) {
+            // Every refusal that does not depend on the model (provider-run
+            // tools, cache TTL, stored state, a header fetch could not send)
+            // comes before the paid router call, so a request that would be
+            // refused anyway never spends one. `prepare` checks and rewrites the
+            // body only; the model it is given is written into the copy, never
+            // looked up, and each candidate is prepared again for itself.
+            const probe = spec.prepare(body, { apiModel: SMART_ADAPTIVE_MODEL_ID, maxOutputTokens: Number.MAX_SAFE_INTEGER });
+            checkForwardedHeaders(spec.upstreamHeaders(request, probe));
+        }
+        // Smart Adaptive picks before admission, so the reservation, the
+        // receipt and the credits are the picked model's own.
+        const entry = await resolveNativeModel(
+            spec.protocol,
+            plan.tier,
+            requestedModel,
+            isRecord(body)
+                ? {
+                      request,
+                      body,
+                      keyId: key.keyId,
+                      userId: key.userId,
+                      requestId,
+                      routerAllowed: () => smartAdaptiveRouterAllowed(key),
+                      prepare: (candidate) => spec.prepare(body, candidate),
+                  }
+                : undefined,
+            externalApiChannelFor(request.headers.get("user-agent"))
+        );
         const { model, capabilities } = entry;
+        const routedHeaders: Record<string, string> = entry.routedBy
+            ? { "x-tomverse-routed-model": model.id, "x-tomverse-routed-by": entry.routedBy }
+            : {};
         let prepared = spec.prepare(body, { apiModel: model.apiModel, maxOutputTokens: capabilities.maxOutputTokens });
 
         // Everything that reaches the provider is in the estimate, including
@@ -544,14 +589,21 @@ export async function handleNativeGeneration(request: Request, spec: NativeProto
                 }),
             });
         } catch (error) {
+            // A twin of a request already recorded under this key gets its
+            // receipt, and does not pause the key's router calls.
             if (idempotencyKeyDigest && (isChatAccessError(error) || error instanceof ApiSecurityError)) {
                 const replay = await idempotentReplay(key.keyId, idempotencyKeyDigest, requestDigest, render);
                 if (replay) return replay;
             }
+            // As on Chat Completions: no router call for this key for a while.
+            if (smartAdaptive && isChatAccessError(error)) noteSmartAdaptiveRefusal(key.keyId);
             throw error;
         }
         leaseId = grant.leaseId;
         reservation = grant.usageReservation;
+        // Smart Adaptive: the conversation's pin is written now that admission
+        // accepted this model.
+        entry.commit?.();
 
         if (request.signal?.aborted) {
             throw new NativeProtocolError(499, "request_cancelled", "The request was cancelled before it was sent.");
@@ -568,6 +620,7 @@ export async function handleNativeGeneration(request: Request, spec: NativeProto
         const infoHeaders: Record<string, string> = {
             ...NO_STORE,
             "x-request-id": requestId,
+            ...routedHeaders,
             ...(spec.responseHeaders?.(requestId) ?? {}),
             ...(prepared.outputLimitClamped ? { "x-tomverse-output-limit": String(prepared.outputLimit) } : {}),
         };
@@ -657,7 +710,26 @@ export async function handleNativeFreeCall(
         const key = await authenticateNative(request, spec, "external-api-reads");
         const { body } = await readNativeJson(request);
         const plan = await getUserBillingPlan(key.userId);
-        const entry = await resolveNativeModel(spec.protocol, plan.tier, isRecord(body) ? body.model : undefined);
+        // Smart Adaptive here only reads the conversation's pin (or takes the
+        // default): a free call never makes the paid router call.
+        const entry = await resolveNativeModel(
+            spec.protocol,
+            plan.tier,
+            isRecord(body) ? body.model : undefined,
+            isRecord(body)
+                ? {
+                      request,
+                      body,
+                      keyId: key.keyId,
+                      userId: key.userId,
+                      requestId,
+                      routerAllowed: async () => false,
+                      prepare: (candidate) => options.prepare(body, candidate),
+                      free: true,
+                  }
+                : undefined,
+            externalApiChannelFor(request.headers.get("user-agent"))
+        );
         const prepared = options.prepare(body, { apiModel: entry.model.apiModel, maxOutputTokens: entry.capabilities.maxOutputTokens });
         const upstreamHeaders = checkForwardedHeaders(spec.upstreamHeaders(request, prepared));
         const controller = new AbortController();
@@ -673,7 +745,14 @@ export async function handleNativeFreeCall(
                 const shown = publicUpstreamError(upstream.status, upstreamErrorMessage(text));
                 return spec.render(shown.status, shown.message, `upstream_${shown.kind}`, { requestId });
             }
-            return new Response(text, { headers: { ...NO_STORE, "Content-Type": "application/json", "x-request-id": requestId } });
+            return new Response(text, {
+                headers: {
+                    ...NO_STORE,
+                    "Content-Type": "application/json",
+                    "x-request-id": requestId,
+                    ...(entry.routedBy ? { "x-tomverse-routed-model": entry.model.id, "x-tomverse-routed-by": entry.routedBy } : {}),
+                },
+            });
         } finally {
             clearTimeout(timeout);
         }

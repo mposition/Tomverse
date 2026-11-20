@@ -414,6 +414,7 @@ mod tests {
             prompt: "test prompt".into(),
             receipt_id: "receipt-1".into(),
             lease_expires_at: "2026-09-21T00:00:00Z".into(),
+            context_parts: Vec::new(),
         }
     }
 

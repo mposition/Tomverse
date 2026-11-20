@@ -65,3 +65,18 @@ test("/help reaches the help centre rather than any 404 at all", async () => {
   // before, and a 308 is not something a later move can take back.
   assert.equal(help.permanent, false);
 });
+
+test("the retired chat workspace guide redirects permanently to the help centre hub", async () => {
+  const redirects = await nextConfig.redirects();
+  const plain = redirects.find((rule) => rule.source === "/support/help-centre/chat-workspace");
+  assert.ok(plain, "the unlocalized guide URL has no redirect");
+  assert.equal(plain.destination, HELP_CENTRE_PATH);
+  assert.equal(plain.permanent, true);
+  const localized = redirects.find((rule) => rule.source.endsWith("/support/help-centre/chat-workspace") && rule.source.startsWith("/:locale"));
+  assert.ok(localized, "the localized guide URL has no redirect");
+  assert.equal(localized.destination, `/:locale${HELP_CENTRE_PATH}`);
+  assert.equal(localized.permanent, true);
+  for (const language of ["en", "ko", "zh", "zh-Hant", "fr", "de", "es", "pt"]) {
+    assert.ok(localized.source.includes(language), `${language} is missing from the localized redirect`);
+  }
+});

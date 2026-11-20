@@ -1591,6 +1591,12 @@ const REGISTRY = {
     list: "STORED_CATALOG_CATEGORIES",
     reason: "Price revisions exist for the categories that have rows.",
   },
+  CodingProviderTerms_draftSource_check: {
+    owner: "list",
+    module: "lib/modelCatalogCore.ts",
+    list: "CATALOG_DRAFT_SOURCES",
+    reason: "A provider-conditions re-check is drafted by one model call, like a catalogue row's draft; nothing else writes it.",
+  },
   ModelCatalogSnapshot_category_check: {
     owner: "list",
     module: "lib/modelCatalogCore.ts",

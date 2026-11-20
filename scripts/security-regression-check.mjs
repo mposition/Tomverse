@@ -1853,7 +1853,7 @@ const checks = [
     name: "Chat sidebar exposes accessible new-tab workspace help",
     file: "components/chat/ChatSidebar.tsx",
     test: (source) =>
-      source.includes("chatWorkspaceGuideHref(lang)") &&
+      source.includes("helpCentreHref(lang)") &&
       source.includes('target="_blank"') &&
       source.includes('rel="noopener noreferrer"') &&
       source.includes('trackProductEvent("help_opened"') &&
@@ -2739,7 +2739,7 @@ const checks = [
       source.includes('/model-icons/chatgpt.png') &&
       source.includes('/model-icons/claude.png') &&
       read("app/(site)/(marketing)/chatgpt-vs-claude/page.tsx").includes(
-        'template="chatgpt-vs-claude"'
+        'slug="chatgpt-vs-claude"'
       ),
   },
   {

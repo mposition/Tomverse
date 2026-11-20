@@ -2,6 +2,17 @@ import type { Language } from "@/components/LanguageProvider";
 import type { MarketingInfoCopy } from "./MarketingInfoPage";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { GUEST_MAX_ATTACHMENTS_PER_MESSAGE, GUEST_MAX_ATTACHMENT_BYTES } from "@/lib/guestAttachmentPolicy";
+import { CHAT_MAX_ATTACHMENTS_PER_MESSAGE, CHAT_MAX_ATTACHMENT_BYTES, CHAT_MAX_TOTAL_ATTACHMENT_BYTES } from "@/lib/chatAttachmentLimits";
+
+const FAQ_MB = 1024 * 1024;
+/** Attachment limits quoted by the FAQ; read from the same constants the composer enforces. */
+const L = {
+  gf: GUEST_MAX_ATTACHMENTS_PER_MESSAGE,
+  gMb: GUEST_MAX_ATTACHMENT_BYTES / FAQ_MB,
+  f: CHAT_MAX_ATTACHMENTS_PER_MESSAGE,
+  mb: CHAT_MAX_ATTACHMENT_BYTES / FAQ_MB,
+  totalMb: CHAT_MAX_TOTAL_ATTACHMENT_BYTES / FAQ_MB,
+};
 
 export const infoPages = {
   faq: {
@@ -10,30 +21,30 @@ export const infoPages = {
     mobileAccordion: true,
     "eyebrow": "FAQ",
     "title": "자주 묻는 질문",
-    "description": "채팅(Chat)과 리뷰(Review)의 차이, 무료 시작, 모델 선택과 크레딧 등 사용 전 궁금한 점을 확인하세요.",
+    "description": "채팅(Chat)과 답변 비교(Review)의 차이, 무료 시작, 모델 선택과 크레딧 등 사용 전 궁금한 점을 확인하세요.",
     "sections": [
       {
-        "title": "채팅과 리뷰는 언제 쓰면 좋나요?",
-        "body": "한 모델과 질문을 이어가거나 모델 선택의 도움을 받고 싶을 때는 채팅(Chat)을 사용하세요. 같은 질문에 대한 여러 모델의 답변을 읽고 차이와 놓친 조건을 살펴보고 싶을 때는 리뷰(Review)가 맞습니다."
+        "title": "채팅과 답변 비교는 언제 쓰면 좋나요?",
+        "body": "한 모델과 질문을 이어가거나 모델 선택의 도움을 받고 싶을 때는 채팅(Chat)을 사용하세요. 같은 질문에 대한 여러 모델의 답변을 읽고 차이와 놓친 조건을 살펴보고 싶을 때는 답변 비교(Review)가 맞습니다."
       },
       {
         "title": "가입 없이 무엇을 해볼 수 있나요?",
-        "body": "리뷰 비회원 체험에는 모델과 일일 크레딧 제한이 적용됩니다. 채팅은 아래 현재 제공 상태가 ‘제공 중’일 때 비회원으로 시작할 수 있습니다. 로그인하지 않은 상태의 체험 화면에서 실제 선택 가능한 모델과 잔여 사용량을 확인하세요. 모델 목록의 ‘이용 시작 플랜’과 현재 상태도 함께 확인할 수 있습니다. 계정에 대화 저장·공유 및 Google Drive 연결은 로그인이 필요합니다.",
+        "body": "답변 비교 비회원 체험에는 모델과 일일 크레딧 제한이 적용됩니다. 채팅은 아래 현재 제공 상태가 ‘제공 중’일 때 비회원으로 시작할 수 있습니다. 로그인하지 않은 상태의 체험 화면에서 실제 선택 가능한 모델과 잔여 사용량을 확인하세요. 모델 목록의 ‘이용 시작 플랜’과 현재 상태도 함께 확인할 수 있습니다. 계정에 대화 저장·공유 및 Google Drive 연결은 로그인이 필요합니다.",
         "guestTrialLinks": {
           "available": "현재 비회원 채팅 체험: 제공 중",
           "unavailable": "현재 비회원 채팅 체험: 제공하지 않음",
           "chat": "채팅에서 현재 비회원 모델·사용량 확인",
-          "review": "리뷰에서 현재 비회원 모델·사용량 확인",
+          "review": "답변 비교에서 현재 비회원 모델·사용량 확인",
           "models": "모델별 이용 시작 플랜 확인"
         }
       },
       {
-        "title": "Smart Adaptive를 써도 모델을 직접 고를 수 있나요?",
-        "body": "직접 모델을 선택하는 방식도 사용할 수 있습니다. Smart Adaptive는 질문과 필요한 기능, 모델의 비용·품질을 고려한 선택을 돕는 방식입니다. 실제 이용 가능 모델은 계정과 플랜에 따라 달라집니다."
+        "title": "스마트 자동(Smart Adaptive)을 써도 모델을 직접 고를 수 있나요?",
+        "body": "직접 모델을 선택하는 방식도 사용할 수 있습니다. 스마트 자동은 질문과 필요한 기능, 모델의 비용·품질을 고려한 선택을 돕는 방식입니다. 실제 이용 가능 모델은 계정과 플랜에 따라 달라집니다."
       },
       {
-        "title": "질문 다듬기 제안은 자동으로 적용되나요?",
-        "body": "제안이 제공되면 내용을 확인한 뒤 채택할 수 있습니다. 원하는 뜻이나 조건과 다른 제안은 적용하지 않아도 됩니다. 원래 질문에 없는 정보가 필요한 경우에는 직접 보완해 주세요."
+        "title": "질문 다듬기는 어떻게 작동하나요?",
+        "body": "스마트 자동을 켠 채팅에서는 Tomverse가 질문을 더 분명한 문장으로 다듬어 답할 모델에 보냅니다. 화면과 대화 기록에는 직접 쓰신 메시지가 그대로 남습니다. 모든 메시지를 다듬지는 않으며, 모델을 직접 고르면 자동으로 다듬지 않습니다."
       },
       {
         "title": "AI 교차검토가 정답을 골라주나요?",
@@ -41,12 +52,12 @@ export const infoPages = {
       },
       {
         "title": "모델을 여러 개 쓰면 크레딧도 늘어나나요?",
-        "body": "선택한 모델의 사용량이 각각 반영됩니다. 모델별 기본 크레딧과 긴 문맥·파일에 따른 적용 범위를 확인하고, 필요한 모델 수만 선택하세요. AI 교차검토는 실행 전에 별도 예상 크레딧을 확인할 수 있습니다.",
-        "link": { "label": "모델별 크레딧 확인", "href": "/models" }
+        "body": "고른 모델마다 크레딧이 듭니다. 긴 대화와 첨부파일은 입력 길이에 포함돼 1.5배·2배·3배가 붙을 수 있고, 웹 검색이 실행된 모델은 모델당 8크레딧이 더해집니다. AI 교차검토는 한 번에 보통 8크레딧 안팎이 들고, 완료하지 못하면 돌려받습니다.",
+        "link": { "label": "요금제의 크레딧 안내 보기", "href": "/pricing" }
       },
       {
         "title": "파일을 첨부하면 어디에서 처리하나요?",
-        "body": "선택한 AI 제공자는 답변에 필요한 파일 또는 발췌 내용을 처리합니다. 잠금과 비공개 저장은 접근 제어에 관한 기능이며 공급자 처리를 없애는 기능은 아닙니다. 최신 보관·삭제 범위는 안전 안내와 개인정보 처리방침에서 확인하세요.",
+        "body": "선택한 AI 제공자는 답변에 필요한 파일 또는 발췌 내용을 처리합니다. 잠금과 비공개 저장은 접근 제어에 관한 기능이며 공급자 처리를 없애는 기능은 아닙니다. 최신 보관·삭제 범위는 안전 안내와 개인정보 처리방침에서 확인하세요. 글자를 읽을 수 없는 스캔 PDF는 글자를 읽기 위해 Mistral AI의 OCR 서비스로 보냅니다.",
         "links": [
           { "label": "안전한 데이터 처리", "href": "/safety/security-privacy" },
           { "label": "개인정보 처리방침", "href": "/privacy" }
@@ -57,7 +68,7 @@ export const infoPages = {
         "body": "간단한 질문만 한다면 지금 쓰는 도구로 충분할 수도 있습니다. 모델을 바꿔가며 쓰거나 같은 질문의 답변을 비교하고, 자료와 대화를 다시 활용하고 싶을 때 Tomverse의 가치가 커집니다. 먼저 체험한 뒤 필요한 사용량과 기능에 맞춰 선택하세요."
       },
       {
-        "title": "리뷰에서 몇 개 모델을 비교할 수 있나요?",
+        "title": "답변 비교에서 몇 개 모델을 비교할 수 있나요?",
         "body": "같은 질문에 최대 3개 모델의 답변을 나란히 읽을 수 있습니다. 비교할 모델은 이용 가능한 목록에서 직접 선택하며, 선택한 각 모델의 사용량이 반영됩니다."
       },
       {
@@ -70,19 +81,28 @@ export const infoPages = {
       },
       {
         "title": "다른 AI 서비스의 대화를 가져올 수 있나요?",
-        "body": "제공되는 환경에서는 로그인하면 다른 AI 서비스의 과거 대화를 공식 데이터 내보내기 파일로 가져오고, Tomverse에서 대화를 이어갈 수 있습니다. 과거 대화의 맥락과 사용자가 승인한 기억·답변 스타일을 참고합니다. 새 답변은 현재 선택한 Tomverse 모델이 생성하므로 원래 AI 서비스와 동일하지 않을 수 있습니다."
+        "body": "제공되는 환경에서는 로그인하면 ChatGPT, Claude, Gemini의 데이터 내보내기 파일(Gemini는 Google Takeout)이나 Perplexity 스레드의 Markdown(.md) 파일로 과거 대화를 가져오고, Tomverse에서 대화를 이어갈 수 있습니다. 과거 대화의 맥락과 사용자가 승인한 기억·답변 스타일을 참고합니다. 새 답변은 현재 선택한 Tomverse 모델이 생성하므로 원래 AI 서비스와 동일하지 않을 수 있습니다."
       },
       {
         "title": "이미지도 만들 수 있나요?",
-        "body": "제공되는 환경에서는 로그인하면 원하는 이미지를 한 번 설명하고 하나 이상의 이미지 모델로 생성해 결과를 나란히 비교할 수 있습니다. 선택한 모델마다 크레딧이 사용되며, 생성 전에 예상 크레딧을 확인할 수 있습니다."
+        "body": "로그인하면 채팅에 원하는 이미지를 적어 보내거나, 이미지 화면에서 한 번 설명하고 여러 이미지 모델의 결과를 나란히 비교할 수 있습니다. 첨부한 사진을 말로 고칠 수도 있습니다. 이미지 화면에서는 생성 전에 모델별 크레딧이 보이고, 채팅에서 이미지로 답할 때는 확인 없이 이미지 크레딧이 쓰입니다."
       },
       {
         "title": "내 파일에 대해 질문할 수 있나요?",
-        "body": "제공되는 환경에서는 파일을 첨부하거나 로그인 후 Google Drive에서 파일을 골라 그 내용에 대해 질문할 수 있습니다. 파일 형식과 크기, 개수 제한은 플랜에 따라 다르니 화면의 안내를 확인하세요."
+        "body": `제공되는 환경에서는 파일을 첨부하거나 로그인 후 Google Drive에서 파일을 골라 그 내용에 대해 질문할 수 있습니다. 로그인하지 않으면 메시지당 ${L.gf}개·${L.gMb}MB, 로그인하면 메시지당 ${L.f}개·파일당 ${L.mb}MB·합계 ${L.totalMb}MB까지 올릴 수 있으며, 한도는 플랜이 아니라 로그인 여부로 다릅니다. 첨부한 사진·PDF·엑셀을 다른 형식으로 바꾸거나 합치고 나누는 일도 말로 요청할 수 있습니다.`
       },
       {
-        "title": "리뷰의 Easy와 Professional은 무엇이 다른가요?",
-        "body": "리뷰에는 두 가지 모드가 있습니다. Easy는 AI가 처음인 분을 위한 모드로, 답을 받을 회사만 고르면 제공되는 환경에서 Tomverse가 질문마다 모델을 골라 드립니다. Professional은 모델마다 무엇을 잘하는지 아는 분을 위한 모드로, 비교할 모델을 직접 고르고 Deep Research와 이미지 모델도 직접 정합니다."
+        "title": "답변 비교의 간편과 전문가는 무엇이 다른가요?",
+        "body": "답변 비교에는 두 가지 모드가 있습니다. 간편은 AI가 처음인 분을 위한 모드로, 답을 받을 회사만 고르면 제공되는 환경에서 Tomverse가 질문마다 모델을 골라 드립니다. 전문가는 모델마다 무엇을 잘하는지 아는 분을 위한 모드로, 비교할 모델을 직접 고르고 Deep Research와 이미지 모델도 직접 정합니다."
+      },
+      {
+        "title": "Claude Code나 Codex에서 Tomverse를 쓸 수 있나요?",
+        "body": "Pro 이상에서 쓸 수 있습니다. 설정의 API 키 화면에서 키(tvk_로 시작)를 만들어 Claude Code, Codex, Cursor 같은 코딩 도구에 연결하면 같은 크레딧으로 모델을 씁니다. Claude Code와 Codex는 각자 공급자(Claude, OpenAI)의 모델만 쓰고, Cursor 같은 OpenAI 호환 도구는 모든 공급자의 모델을 쓸 수 있습니다.",
+        "link": { "label": "개발자 페이지 보기", "href": "/developers" }
+      },
+      {
+        "title": "웹 검색을 켜면 크레딧이 더 드나요?",
+        "body": "웹 검색이 실제로 실행된 모델마다 8크레딧이 더해집니다(검색 횟수와 상관없이 같음). 검색하지 않은 모델은 돌려받고, Perplexity 모델은 추가 크레딧이 없습니다."
       }
     ],
     "cta": {
@@ -115,8 +135,8 @@ export const infoPages = {
         "body": "You can also select a model yourself. Smart Adaptive helps with selection based on your question, required capabilities, cost and quality. Available models depend on your account and plan."
       },
       {
-        "title": "Are question-refinement suggestions applied automatically?",
-        "body": "When suggestions are offered, you can review them and choose whether to apply them. You can leave suggestions unused if they change your meaning or conditions, and add missing information yourself."
+        "title": "How does question refinement work?",
+        "body": "In Chat with Smart Adaptive on, Tomverse refines your question into a clearer one before sending it to the model that answers. The screen and conversation history keep the message exactly as you wrote it. Not every message is refined, and choosing a model yourself turns off automatic refinement."
       },
       {
         "title": "Does AI Review choose the correct answer?",
@@ -124,12 +144,12 @@ export const infoPages = {
       },
       {
         "title": "Does using more models use more credits?",
-        "body": "Usage from each selected model is counted. Check base credits and how long context or files can affect usage, and select the models you need. AI Review shows a separate estimate before it runs."
+        "body": "Each model you select uses credits. Long conversations and attachments count toward input length and can multiply usage by 1.5, 2 or 3, and each model that runs a web search adds 8 credits. AI Review usually takes around 8 credits per run, and the credits are returned if it cannot finish."
       },
       {
         "title": "Where are attached files processed?",
         bodyLinks: [{ text: "safety information", href: "/safety" }, { text: "privacy policy", href: "/privacy" }],
-        "body": "The selected AI provider processes the file or excerpts needed to answer. Locks and private storage control access; they do not remove provider processing. See the safety information and privacy policy for current retention and deletion details."
+        "body": "The selected AI provider processes the file or excerpts needed to answer. Locks and private storage control access; they do not remove provider processing. See the safety information and privacy policy for current retention and deletion details. Scanned PDFs whose text cannot be read are sent to Mistral AI's OCR service to read the text."
       },
       {
         "title": "I already use a free AI. Why try Tomverse?",
@@ -149,19 +169,28 @@ export const infoPages = {
       },
       {
         "title": "Can I bring conversations from another AI service?",
-        "body": "Where available, sign in to import past conversations from another AI service using its official data export, then continue a conversation in Tomverse. We draw on the context of your past conversations and the memories and answer style you have approved. New answers are generated by the Tomverse model you have selected, so they may differ from the original AI service."
+        "body": "Where available, sign in to import past conversations from ChatGPT, Claude or Gemini (Google Takeout) using the official data export, or from a Perplexity thread exported as Markdown (.md), then continue a conversation in Tomverse. We draw on the context of your past conversations and the memories and answer style you have approved. New answers are generated by the Tomverse model you have selected, so they may differ from the original AI service."
       },
       {
         "title": "Can I create images?",
-        "body": "Where available, sign in to describe an image once, generate it with one or more image models and compare the results side by side. Each selected model uses credits, and you can check the estimate before you generate."
+        "body": "Where available, sign in to send Chat a description of the image you want, or describe it once on the image screen and compare the results of several image models side by side. You can also edit an attached photo by describing the change. The image screen shows each model's credits before you generate; when Chat answers with an image, the image credits are used without a confirmation step."
       },
       {
         "title": "Can I ask about my own files?",
-        "body": "Where available, attach a file, or choose one from Google Drive after signing in, and ask questions about it. File types, sizes and counts depend on your plan; check the limits shown on screen."
+        "body": `Where available, attach a file, or choose one from Google Drive after signing in, and ask questions about it. Without signing in you can attach ${L.gf} file of up to ${L.gMb} MB per message; signed in, up to ${L.f} files per message, ${L.mb} MB each and ${L.totalMb} MB in total. The limits depend on whether you are signed in, not on your plan. You can also ask in plain words to convert, merge or split attached photos, PDFs and spreadsheets.`
       },
       {
         "title": "What is the difference between Easy and Professional in Review?",
         "body": "Review has two modes. Easy is for people new to AI: pick the companies you want answers from, and Tomverse chooses a model for each question, where available. Professional is for people who know what each model is good at: choose the exact models yourself, and decide on Deep Research and image models too."
+      },
+      {
+        "title": "Can I use Tomverse in Claude Code or Codex?",
+        "body": "Yes, on Pro or higher. Create a key (starting with tvk_) under API keys in Settings and connect it to a coding tool such as Claude Code, Codex or Cursor; models then use the same credits. Claude Code and Codex use only their own provider's models (Claude and OpenAI), while OpenAI-compatible tools such as Cursor can use models from every provider.",
+        "link": { "label": "See the developer page", "href": "/developers" }
+      },
+      {
+        "title": "Does turning on web search use more credits?",
+        "body": "Each model that actually runs a web search adds 8 credits, no matter how many searches it makes. Models that did not search get the 8 credits back, and Perplexity models have no extra charge."
       }
     ],
     "cta": {
@@ -187,8 +216,8 @@ export const infoPages = {
         "body": "也可以手动选择模型。Smart Adaptive 根据问题、所需功能、费用与质量帮助选择。可用模型取决于账户与套餐。"
       },
       {
-        "title": "提问优化建议会自动应用吗？",
-        "body": "提供建议时，你可以查看后决定是否采用。与原意或条件不符的建议可以不应用；缺少的信息可自行补充。"
+        "title": "提问优化是如何工作的？",
+        "body": "在开启 Smart Adaptive 的 Chat 中，Tomverse 会把你的问题整理得更清晰，再发送给负责回答的模型。界面和对话记录中保留的仍是你写的原始消息。不会优化每一条消息；自己选择模型时不会自动优化。"
       },
       {
         "title": "AI Review 会选出正确答案吗？",
@@ -196,11 +225,11 @@ export const infoPages = {
       },
       {
         "title": "使用多个模型会消耗更多积分吗？",
-        "body": "每个所选模型的用量都会计算。请查看基础积分及长上下文、文件的影响，只选择所需模型。AI Review 运行前会显示单独预估。"
+        "body": "每个所选模型都会消耗积分。较长的对话和附件会计入输入长度，可能按 1.5 倍、2 倍或 3 倍计算；运行了网页搜索的模型每个额外增加 8 积分。AI Review 每次运行通常约 8 积分，若未能完成会退还。"
       },
       {
         "title": "附加文件会在哪里处理？",
-        "body": "所选 AI 提供商会处理回答所需的文件或摘录。锁定与私有存储用于访问控制，不代表没有供应商处理。当前保留与删除范围请查看安全说明及隐私政策。"
+        "body": "所选 AI 提供商会处理回答所需的文件或摘录。锁定与私有存储用于访问控制，不代表没有供应商处理。当前保留与删除范围请查看安全说明及隐私政策。无法读取文字的扫描版 PDF 会发送到 Mistral AI 的 OCR 服务以识别文字。"
       },
       {
         "title": "我已经在用免费 AI，为什么还要试 Tomverse？",
@@ -220,19 +249,28 @@ export const infoPages = {
       },
       {
         "title": "可以导入其他 AI 服务的对话吗？",
-        "body": "在提供该功能的环境中，登录后可以通过官方数据导出文件导入其他 AI 服务的历史对话，并在 Tomverse 中继续对话。我们会参考你过往对话的上下文，以及你认可的记忆和回答风格。新回答由你当前选择的 Tomverse 模型生成，可能与原 AI 服务不同。"
+        "body": "在提供该功能的环境中，登录后可以通过官方数据导出文件导入 ChatGPT、Claude、Gemini（Google Takeout）的历史对话（Perplexity 的对话串可用 Markdown (.md) 文件导入），并在 Tomverse 中继续对话。我们会参考你过往对话的上下文，以及你认可的记忆和回答风格。新回答由你当前选择的 Tomverse 模型生成，可能与原 AI 服务不同。"
       },
       {
         "title": "可以生成图像吗？",
-        "body": "在提供该功能的环境中，登录后只需描述一次想要的图像，即可用一个或多个图像模型生成，并将结果并排比较。每个所选模型都会消耗积分，生成前可以查看预估积分。"
+        "body": "在提供该功能的环境中，登录后可以在 Chat 中直接描述想要的图像，或在图像页面只描述一次，并将多个图像模型的结果并排比较。也可以用文字修改已附加的照片。图像页面会在生成前显示各模型的积分；在 Chat 中以图像回答时，会直接扣除图像积分，不再确认。"
       },
       {
         "title": "可以就自己的文件提问吗？",
-        "body": "在提供该功能的环境中，附加文件或登录后从 Google Drive 选择文件，即可就文件内容提问。文件类型、大小和数量限制取决于套餐，请查看屏幕上的说明。"
+        "body": `在提供该功能的环境中，附加文件或登录后从 Google Drive 选择文件，即可就文件内容提问。未登录时每条消息可附加 ${L.gf} 个、最大 ${L.gMb}MB 的文件；登录后每条消息最多 ${L.f} 个，每个 ${L.mb}MB，合计 ${L.totalMb}MB。限制取决于是否登录，而不是套餐。也可以直接用文字要求把附加的照片、PDF、表格转换成其他格式，或合并、拆分。`
       },
       {
         "title": "Review 中的 Easy 和 Professional 有什么区别？",
         "body": "Review 有两种模式。Easy 适合刚接触 AI 的人：选择想获得回答的公司，在提供该功能的环境中，Tomverse 会为每个问题选择模型。Professional 适合了解各个模型擅长什么的人：自己选择要比较的具体模型，并自行决定是否使用 Deep Research 和图像模型。"
+      },
+      {
+        "title": "可以在 Claude Code 或 Codex 中使用 Tomverse 吗？",
+        "body": "可以，需要 Pro 或更高套餐。在设置的 API 密钥页面创建密钥（以 tvk_ 开头），连接到 Claude Code、Codex、Cursor 等编程工具，即可使用同一份积分。Claude Code 和 Codex 只使用各自供应商（Claude、OpenAI）的模型，而 Cursor 等兼容 OpenAI 的工具可以使用所有供应商的模型。",
+        "link": { "label": "查看开发者页面", "href": "/developers" }
+      },
+      {
+        "title": "开启网页搜索会多消耗积分吗？",
+        "body": "每个实际执行了网页搜索的模型会额外增加 8 积分，与搜索次数无关。没有搜索的模型会退还这 8 积分，Perplexity 模型不另外收费。"
       }
     ],
     "cta": {
@@ -258,8 +296,8 @@ export const infoPages = {
         "body": "也可以手動選擇模型。Smart Adaptive 會依問題、所需功能、費用與品質協助選擇。可用的模型取決於帳戶與方案。"
       },
       {
-        "title": "提問優化建議會自動套用嗎？",
-        "body": "提供建議時，你可以先查看，再決定是否採用。與原意或條件不符的建議可以不套用；缺少的資訊可以自行補充。"
+        "title": "提問優化是如何運作的？",
+        "body": "在開啟 Smart Adaptive 的 Chat 中，Tomverse 會把你的問題整理得更清楚，再傳送給負責回答的模型。畫面與對話紀錄中保留的仍是你寫的原始訊息。並非每則訊息都會優化；自行選擇模型時不會自動優化。"
       },
       {
         "title": "AI Review 會選出正確答案嗎？",
@@ -267,11 +305,11 @@ export const infoPages = {
       },
       {
         "title": "使用多個模型會消耗更多點數嗎？",
-        "body": "每個所選模型的用量都會計算。請查看基礎點數，以及長上下文、檔案的影響，只選擇需要的模型。AI Review 執行前會顯示另外的預估。"
+        "body": "每個所選模型都會使用點數。較長的對話與附件會計入輸入長度，可能依 1.5 倍、2 倍或 3 倍計算；實際執行網路搜尋的模型每個額外增加 8 點數。AI Review 每次執行通常約 8 點數，若未能完成會退還。"
       },
       {
         "title": "附加檔案會在哪裡處理？",
-        "body": "所選的 AI 供應商會處理回答所需的檔案或摘錄。鎖定與私有儲存用於存取控制，並不代表沒有供應商處理。目前的保留與刪除範圍，請查看安全說明及隱私權政策。"
+        "body": "所選的 AI 供應商會處理回答所需的檔案或摘錄。鎖定與私有儲存用於存取控制，並不代表沒有供應商處理。目前的保留與刪除範圍，請查看安全說明及隱私權政策。無法讀取文字的掃描版 PDF 會傳送到 Mistral AI 的 OCR 服務以辨識文字。"
       },
       {
         "title": "我已經在用免費 AI，為什麼還要試 Tomverse？",
@@ -291,19 +329,28 @@ export const infoPages = {
       },
       {
         "title": "可以匯入其他 AI 服務的對話嗎？",
-        "body": "在提供此功能的環境中，登入後可以透過官方資料匯出檔案匯入其他 AI 服務的過往對話，並在 Tomverse 中繼續對話。我們會參考你過往對話的脈絡，以及你認可的記憶和回答風格。新回答由你目前選擇的 Tomverse 模型產生，可能與原 AI 服務不同。"
+        "body": "在提供此功能的環境中，登入後可以透過官方資料匯出檔案匯入 ChatGPT、Claude、Gemini（Google Takeout）的過往對話（Perplexity 的討論串可用 Markdown (.md) 檔案匯入），並在 Tomverse 中繼續對話。我們會參考你過往對話的脈絡，以及你認可的記憶和回答風格。新回答由你目前選擇的 Tomverse 模型產生，可能與原 AI 服務不同。"
       },
       {
         "title": "可以產生圖像嗎？",
-        "body": "在提供此功能的環境中，登入後只要描述一次想要的圖像，就能用一個或多個圖像模型產生，並將結果並排比較。每個所選模型都會使用點數，產生前可以查看預估點數。"
+        "body": "在提供此功能的環境中，登入後可以在 Chat 中直接描述想要的圖像，或在圖像頁面只描述一次，並將多個圖像模型的結果並排比較。也可以用文字修改已附加的照片。圖像頁面會在產生前顯示各模型的點數；在 Chat 中以圖像回答時，會直接扣除圖像點數，不再確認。"
       },
       {
         "title": "可以針對自己的檔案提問嗎？",
-        "body": "在提供此功能的環境中，附加檔案或登入後從 Google Drive 選擇檔案，就能針對檔案內容提問。檔案類型、大小和數量限制取決於方案，請查看畫面上的說明。"
+        "body": `在提供此功能的環境中，附加檔案或登入後從 Google Drive 選擇檔案，就能針對檔案內容提問。未登入時每則訊息可附加 ${L.gf} 個、最大 ${L.gMb}MB 的檔案；登入後每則訊息最多 ${L.f} 個，每個 ${L.mb}MB，合計 ${L.totalMb}MB。限制取決於是否登入，而不是方案。也可以直接用文字要求把附加的照片、PDF、試算表轉換成其他格式，或合併、拆分。`
       },
       {
         "title": "Review 中的 Easy 與 Professional 有什麼不同？",
         "body": "Review 有兩種模式。Easy 適合剛接觸 AI 的人：選擇想獲得回答的公司，在提供此功能的環境中，Tomverse 會為每個問題挑選模型。Professional 適合了解各個模型擅長什麼的人：自行選擇要比較的具體模型，並自行決定是否使用 Deep Research 與圖像模型。"
+      },
+      {
+        "title": "可以在 Claude Code 或 Codex 中使用 Tomverse 嗎？",
+        "body": "可以，需要 Pro 或更高方案。在設定的 API 金鑰頁面建立金鑰（以 tvk_ 開頭），連接到 Claude Code、Codex、Cursor 等程式開發工具，即可使用同一份點數。Claude Code 與 Codex 只使用各自供應商（Claude、OpenAI）的模型，而 Cursor 等相容 OpenAI 的工具可以使用所有供應商的模型。",
+        "link": { "label": "查看開發者頁面", "href": "/developers" }
+      },
+      {
+        "title": "開啟網路搜尋會多使用點數嗎？",
+        "body": "每個實際執行了網路搜尋的模型會額外增加 8 點數，與搜尋次數無關。沒有搜尋的模型會退還這 8 點數，Perplexity 模型不另外加收。"
       }
     ],
     "cta": {
@@ -329,8 +376,8 @@ export const infoPages = {
         "body": "Vous pouvez aussi choisir un modèle vous-même. Smart Adaptive tient compte de la question, des fonctions, du coût et de la qualité. Les modèles accessibles dépendent du compte et de l’offre."
       },
       {
-        "title": "Les reformulations s’appliquent-elles automatiquement ?",
-        "body": "Lorsqu’une suggestion est proposée, vous décidez de l’appliquer après lecture. Vous pouvez l’ignorer si elle change votre intention ou vos conditions, et compléter vous-même les informations manquantes."
+        "title": "Comment fonctionne la reformulation des questions ?",
+        "body": "Dans Chat avec Smart Adaptive activé, Tomverse reformule votre question de façon plus claire avant de l’envoyer au modèle qui répond. L’écran et l’historique conservent votre message tel que vous l’avez écrit. Tous les messages ne sont pas reformulés, et choisir vous-même un modèle désactive la reformulation automatique."
       },
       {
         "title": "AI Review choisit-il la bonne réponse ?",
@@ -338,11 +385,11 @@ export const infoPages = {
       },
       {
         "title": "Plusieurs modèles consomment-ils plus de crédits ?",
-        "body": "L’usage de chaque modèle sélectionné est compté. Consultez les crédits de base et l’effet des fichiers ou longs contextes, puis choisissez les modèles nécessaires. AI Review affiche une estimation distincte avant exécution."
+        "body": "Chaque modèle sélectionné consomme des crédits. Les longues conversations et les pièces jointes comptent dans la longueur d’entrée et peuvent multiplier l’usage par 1,5, 2 ou 3, et chaque modèle qui effectue une recherche web ajoute 8 crédits. Une exécution d’AI Review coûte en général environ 8 crédits, restitués si elle ne peut pas aboutir."
       },
       {
         "title": "Où sont traités les fichiers joints ?",
-        "body": "Le fournisseur choisi traite le fichier ou les extraits nécessaires. Verrouillage et stockage privé contrôlent l’accès, sans supprimer le traitement par le fournisseur. Consultez les informations de sécurité et de confidentialité pour la conservation et la suppression."
+        "body": "Le fournisseur choisi traite le fichier ou les extraits nécessaires. Verrouillage et stockage privé contrôlent l’accès, sans supprimer le traitement par le fournisseur. Consultez les informations de sécurité et de confidentialité pour la conservation et la suppression. Les PDF numérisés dont le texte est illisible sont envoyés au service OCR de Mistral AI pour en lire le texte."
       },
       {
         "title": "J’utilise déjà une IA gratuite. Pourquoi essayer Tomverse ?",
@@ -362,19 +409,28 @@ export const infoPages = {
       },
       {
         "title": "Puis-je importer des conversations d’un autre service d’IA ?",
-        "body": "Là où c’est proposé, connectez-vous pour importer vos conversations passées d’un autre service d’IA à partir de son export de données officiel, puis poursuivre une conversation dans Tomverse. Nous nous appuyons sur le contexte de vos conversations passées ainsi que sur les souvenirs et le style de réponse que vous avez approuvés. Les nouvelles réponses sont générées par le modèle Tomverse sélectionné et peuvent donc différer du service d’IA d’origine."
+        "body": "Là où c’est proposé, connectez-vous pour importer vos conversations passées de ChatGPT, Claude ou Gemini (Google Takeout) à partir de leur export de données officiel, ou d’un fil Perplexity exporté en Markdown (.md), puis poursuivre une conversation dans Tomverse. Nous nous appuyons sur le contexte de vos conversations passées ainsi que sur les souvenirs et le style de réponse que vous avez approuvés. Les nouvelles réponses sont générées par le modèle Tomverse sélectionné et peuvent donc différer du service d’IA d’origine."
       },
       {
         "title": "Puis-je créer des images ?",
-        "body": "Là où c’est proposé, connectez-vous pour décrire une image une seule fois, la générer avec un ou plusieurs modèles d’image et comparer les résultats côte à côte. Chaque modèle sélectionné utilise des crédits, et vous pouvez vérifier l’estimation avant de générer."
+        "body": "Là où c’est proposé, connectez-vous pour décrire dans Chat l’image souhaitée, ou la décrire une seule fois sur l’écran d’images et comparer côte à côte les résultats de plusieurs modèles d’image. Vous pouvez aussi modifier une photo jointe en décrivant le changement. L’écran d’images affiche les crédits de chaque modèle avant la génération ; quand Chat répond par une image, les crédits d’image sont utilisés sans étape de confirmation."
       },
       {
         "title": "Puis-je poser des questions sur mes fichiers ?",
-        "body": "Là où c’est proposé, joignez un fichier, ou choisissez-en un dans Google Drive après connexion, et posez des questions sur son contenu. Les types, tailles et nombres de fichiers dépendent de votre offre ; consultez les limites affichées à l’écran."
+        "body": `Là où c’est proposé, joignez un fichier, ou choisissez-en un dans Google Drive après connexion, et posez des questions sur son contenu. Sans connexion, vous pouvez joindre ${L.gf} fichier de ${L.gMb} Mo maximum par message ; connecté, jusqu’à ${L.f} fichiers par message, ${L.mb} Mo chacun et ${L.totalMb} Mo au total. Les limites dépendent de la connexion, pas de l’offre. Vous pouvez aussi demander en langage courant de convertir, fusionner ou diviser des photos, PDF et feuilles de calcul joints.`
       },
       {
         "title": "Quelle est la différence entre Easy et Professional dans Review ?",
         "body": "Review propose deux modes. Easy s’adresse aux personnes qui découvrent l’IA : choisissez les entreprises dont vous voulez les réponses et, là où c’est proposé, Tomverse choisit un modèle pour chaque question. Professional s’adresse aux personnes qui savent ce que chaque modèle fait bien : choisissez vous-même les modèles exacts et décidez aussi de Deep Research et des modèles d’image."
+      },
+      {
+        "title": "Puis-je utiliser Tomverse dans Claude Code ou Codex ?",
+        "body": "Oui, à partir de l’offre Pro. Créez une clé (commençant par tvk_) dans les clés API des réglages et connectez-la à un outil de codage comme Claude Code, Codex ou Cursor ; les modèles utilisent alors les mêmes crédits. Claude Code et Codex n’utilisent que les modèles de leur propre fournisseur (Claude et OpenAI), tandis que les outils compatibles OpenAI comme Cursor peuvent utiliser les modèles de tous les fournisseurs.",
+        "link": { "label": "Voir la page développeurs", "href": "/developers" }
+      },
+      {
+        "title": "Activer la recherche web consomme-t-il plus de crédits ?",
+        "body": "Chaque modèle qui effectue réellement une recherche web ajoute 8 crédits, quel que soit le nombre de recherches. Les modèles qui n’ont pas cherché récupèrent ces 8 crédits, et les modèles Perplexity n’entraînent aucun supplément."
       }
     ],
     "cta": {
@@ -400,8 +456,8 @@ export const infoPages = {
         "body": "Sie können ein Modell selbst wählen. Smart Adaptive berücksichtigt Frage, Funktionen, Kosten und Qualität. Verfügbare Modelle hängen von Konto und Tarif ab."
       },
       {
-        "title": "Werden Vorschläge zur Frage automatisch übernommen?",
-        "body": "Sie prüfen angebotene Vorschläge und entscheiden selbst. Vorschläge, die Ihre Absicht oder Bedingungen ändern, müssen Sie nicht übernehmen. Fehlende Informationen können Sie ergänzen."
+        "title": "Wie funktioniert die Optimierung von Fragen?",
+        "body": "In Chat mit aktiviertem Smart Adaptive formuliert Tomverse Ihre Frage klarer, bevor sie an das antwortende Modell geht. Bildschirm und Unterhaltungsverlauf behalten Ihre Nachricht unverändert. Nicht jede Nachricht wird umformuliert; wenn Sie ein Modell selbst wählen, entfällt die automatische Umformulierung."
       },
       {
         "title": "Wählt AI Review die richtige Antwort?",
@@ -409,11 +465,11 @@ export const infoPages = {
       },
       {
         "title": "Verbrauchen mehrere Modelle mehr Credits?",
-        "body": "Der Verbrauch jedes gewählten Modells wird berücksichtigt. Prüfen Sie Basis-Credits sowie Datei- und Langkontexteffekte und wählen Sie benötigte Modelle. AI Review zeigt vorab eine separate Schätzung."
+        "body": "Jedes gewählte Modell verbraucht Credits. Lange Unterhaltungen und Anhänge zählen zur Eingabelänge und können den Verbrauch mit 1,5, 2 oder 3 multiplizieren; jedes Modell, das eine Websuche ausführt, kostet zusätzlich 8 Credits. Ein AI-Review-Lauf kostet meist etwa 8 Credits und wird zurückerstattet, wenn er nicht abgeschlossen werden kann."
       },
       {
         "title": "Wo werden Anhänge verarbeitet?",
-        "body": "Der gewählte Anbieter verarbeitet nötige Dateien oder Auszüge. Sperren und private Speicherung steuern den Zugriff, verhindern aber nicht die Anbieter-Verarbeitung. Aktuelle Aufbewahrungs- und Löschdetails stehen in den Sicherheits- und Datenschutzinformationen."
+        "body": "Der gewählte Anbieter verarbeitet nötige Dateien oder Auszüge. Sperren und private Speicherung steuern den Zugriff, verhindern aber nicht die Anbieter-Verarbeitung. Aktuelle Aufbewahrungs- und Löschdetails stehen in den Sicherheits- und Datenschutzinformationen. Gescannte PDFs, deren Text nicht lesbar ist, werden zum Auslesen an den OCR-Dienst von Mistral AI gesendet."
       },
       {
         "title": "Ich nutze schon eine kostenlose KI. Warum Tomverse testen?",
@@ -433,19 +489,28 @@ export const infoPages = {
       },
       {
         "title": "Kann ich Unterhaltungen aus einem anderen KI-Dienst übernehmen?",
-        "body": "Wo verfügbar, melden Sie sich an, um frühere Unterhaltungen aus einem anderen KI-Dienst über dessen offiziellen Datenexport zu importieren und eine Unterhaltung in Tomverse fortzusetzen. Wir berücksichtigen den Kontext Ihrer früheren Unterhaltungen sowie die Erinnerungen und den Antwortstil, die Sie bestätigt haben. Neue Antworten erzeugt das ausgewählte Tomverse-Modell, daher können sie vom ursprünglichen KI-Dienst abweichen."
+        "body": "Wo verfügbar, melden Sie sich an, um frühere Unterhaltungen aus ChatGPT, Claude oder Gemini (Google Takeout) über deren offiziellen Datenexport oder aus einem als Markdown (.md) exportierten Perplexity-Thread zu importieren und eine Unterhaltung in Tomverse fortzusetzen. Wir berücksichtigen den Kontext Ihrer früheren Unterhaltungen sowie die Erinnerungen und den Antwortstil, die Sie bestätigt haben. Neue Antworten erzeugt das ausgewählte Tomverse-Modell, daher können sie vom ursprünglichen KI-Dienst abweichen."
       },
       {
         "title": "Kann ich Bilder erstellen?",
-        "body": "Wo verfügbar, melden Sie sich an, um ein Bild einmal zu beschreiben, es mit einem oder mehreren Bildmodellen zu erzeugen und die Ergebnisse nebeneinander zu vergleichen. Jedes ausgewählte Modell verbraucht Credits; die Schätzung sehen Sie vor dem Erzeugen."
+        "body": "Wo verfügbar, melden Sie sich an und beschreiben Sie das gewünschte Bild im Chat – oder einmal auf dem Bildschirm für Bilder – und vergleichen Sie die Ergebnisse mehrerer Bildmodelle nebeneinander. Ein angehängtes Foto können Sie ebenfalls per Beschreibung bearbeiten. Der Bildschirm für Bilder zeigt die Credits jedes Modells vor dem Erzeugen; antwortet der Chat mit einem Bild, werden die Bild-Credits ohne Bestätigung verbraucht."
       },
       {
         "title": "Kann ich Fragen zu meinen eigenen Dateien stellen?",
-        "body": "Wo verfügbar, hängen Sie eine Datei an oder wählen Sie nach der Anmeldung eine aus Google Drive und stellen Sie Fragen zu ihrem Inhalt. Dateitypen, Größen und Anzahl hängen von Ihrem Tarif ab; beachten Sie die Grenzen auf dem Bildschirm."
+        "body": `Wo verfügbar, hängen Sie eine Datei an oder wählen Sie nach der Anmeldung eine aus Google Drive und stellen Sie Fragen zu ihrem Inhalt. Ohne Anmeldung können Sie pro Nachricht ${L.gf} Datei mit bis zu ${L.gMb} MB anhängen; angemeldet bis zu ${L.f} Dateien pro Nachricht, je ${L.mb} MB und insgesamt ${L.totalMb} MB. Die Grenzen hängen davon ab, ob Sie angemeldet sind, nicht vom Tarif. Sie können auch in einfachen Worten bitten, angehängte Fotos, PDFs und Tabellen umzuwandeln, zusammenzuführen oder aufzuteilen.`
       },
       {
         "title": "Worin unterscheiden sich Easy und Professional in Review?",
         "body": "Review hat zwei Modi. Easy ist für Menschen, die neu bei KI sind: Wählen Sie die Unternehmen, von denen Sie Antworten möchten, und Tomverse wählt, wo verfügbar, für jede Frage ein Modell aus. Professional ist für Menschen, die wissen, wofür sich jedes Modell eignet: Wählen Sie die Modelle selbst und entscheiden Sie auch über Deep Research und Bildmodelle."
+      },
+      {
+        "title": "Kann ich Tomverse in Claude Code oder Codex nutzen?",
+        "body": "Ja, ab dem Tarif Pro. Erstellen Sie in den Einstellungen unter API-Schlüssel einen Schlüssel (beginnt mit tvk_) und verbinden Sie ihn mit einem Coding-Tool wie Claude Code, Codex oder Cursor; die Modelle nutzen dann dieselben Credits. Claude Code und Codex verwenden nur die Modelle ihres eigenen Anbieters (Claude und OpenAI), OpenAI-kompatible Tools wie Cursor können Modelle aller Anbieter nutzen.",
+        "link": { "label": "Zur Entwicklerseite", "href": "/developers" }
+      },
+      {
+        "title": "Verbraucht eine eingeschaltete Websuche mehr Credits?",
+        "body": "Jedes Modell, das tatsächlich eine Websuche ausführt, kostet 8 Credits zusätzlich, unabhängig von der Anzahl der Suchen. Modelle, die nicht gesucht haben, erhalten die 8 Credits zurück; bei Perplexity-Modellen fällt kein Aufpreis an."
       }
     ],
     "cta": {
@@ -471,8 +536,8 @@ export const infoPages = {
         "body": "También puedes seleccionar un modelo. Smart Adaptive considera la pregunta, las funciones necesarias, el coste y la calidad. Los modelos disponibles dependen de tu cuenta y plan."
       },
       {
-        "title": "¿Las sugerencias se aplican automáticamente?",
-        "body": "Revisa las sugerencias y decide si las aplicas. Puedes ignorarlas si cambian tu intención o condiciones y añadir tú mismo la información que falta."
+        "title": "¿Cómo funciona la mejora de preguntas?",
+        "body": "En Chat con Smart Adaptive activado, Tomverse reformula tu pregunta de forma más clara antes de enviarla al modelo que responde. La pantalla y el historial conservan tu mensaje tal como lo escribiste. No se reformulan todos los mensajes, y si eliges un modelo tú mismo no se reformula automáticamente."
       },
       {
         "title": "¿AI Review elige la respuesta correcta?",
@@ -480,11 +545,11 @@ export const infoPages = {
       },
       {
         "title": "¿Usar más modelos consume más créditos?",
-        "body": "Se cuenta el uso de cada modelo. Consulta los créditos base y el efecto de archivos o contextos largos y elige los modelos que necesitas. AI Review muestra una estimación separada antes de ejecutarse."
+        "body": "Cada modelo seleccionado consume créditos. Las conversaciones largas y los archivos adjuntos cuentan en la longitud de entrada y pueden multiplicar el uso por 1,5, 2 o 3, y cada modelo que ejecuta una búsqueda web suma 8 créditos. Una ejecución de AI Review suele costar unos 8 créditos, que se devuelven si no se puede completar."
       },
       {
         "title": "¿Dónde se procesan los archivos adjuntos?",
-        "body": "El proveedor elegido procesa el archivo o los extractos necesarios. El bloqueo y almacenamiento privado controlan el acceso, pero no eliminan el procesamiento del proveedor. Consulta seguridad y privacidad para retención y borrado."
+        "body": "El proveedor elegido procesa el archivo o los extractos necesarios. El bloqueo y almacenamiento privado controlan el acceso, pero no eliminan el procesamiento del proveedor. Consulta seguridad y privacidad para retención y borrado. Los PDF escaneados cuyo texto no se puede leer se envían al servicio de OCR de Mistral AI para leerlo."
       },
       {
         "title": "Ya uso una IA gratuita. ¿Por qué probar Tomverse?",
@@ -504,19 +569,28 @@ export const infoPages = {
       },
       {
         "title": "¿Puedo traer conversaciones de otro servicio de IA?",
-        "body": "Donde esté disponible, inicia sesión para importar conversaciones anteriores de otro servicio de IA con su exportación oficial de datos y continuar una conversación en Tomverse. Tenemos en cuenta el contexto de tus conversaciones anteriores y los recuerdos y el estilo de respuesta que has aprobado. Las nuevas respuestas las genera el modelo de Tomverse seleccionado, por lo que pueden diferir del servicio de IA original."
+        "body": "Donde esté disponible, inicia sesión para importar conversaciones anteriores de ChatGPT, Claude o Gemini (Google Takeout) con su exportación oficial de datos, o de un hilo de Perplexity exportado en Markdown (.md), y continuar una conversación en Tomverse. Tenemos en cuenta el contexto de tus conversaciones anteriores y los recuerdos y el estilo de respuesta que has aprobado. Las nuevas respuestas las genera el modelo de Tomverse seleccionado, por lo que pueden diferir del servicio de IA original."
       },
       {
         "title": "¿Puedo crear imágenes?",
-        "body": "Donde esté disponible, inicia sesión para describir una imagen una sola vez, generarla con uno o varios modelos de imagen y comparar los resultados uno al lado del otro. Cada modelo seleccionado usa créditos y puedes consultar la estimación antes de generar."
+        "body": "Donde esté disponible, inicia sesión para describir en Chat la imagen que quieres, o describirla una sola vez en la pantalla de imágenes y comparar lado a lado los resultados de varios modelos de imagen. También puedes editar una foto adjunta describiendo el cambio. La pantalla de imágenes muestra los créditos de cada modelo antes de generar; cuando Chat responde con una imagen, los créditos de imagen se usan sin paso de confirmación."
       },
       {
         "title": "¿Puedo hacer preguntas sobre mis archivos?",
-        "body": "Donde esté disponible, adjunta un archivo, o elige uno de Google Drive después de iniciar sesión, y haz preguntas sobre su contenido. Los tipos, tamaños y cantidad de archivos dependen de tu plan; consulta los límites que se muestran en pantalla."
+        "body": `Donde esté disponible, adjunta un archivo, o elige uno de Google Drive después de iniciar sesión, y haz preguntas sobre su contenido. Sin iniciar sesión puedes adjuntar ${L.gf} archivo de hasta ${L.gMb} MB por mensaje; con sesión iniciada, hasta ${L.f} archivos por mensaje, ${L.mb} MB cada uno y ${L.totalMb} MB en total. Los límites dependen de si has iniciado sesión, no del plan. También puedes pedir con palabras sencillas que se conviertan, unan o dividan las fotos, los PDF y las hojas de cálculo adjuntos.`
       },
       {
         "title": "¿Qué diferencia hay entre Easy y Professional en Review?",
         "body": "Review tiene dos modos. Easy es para quienes empiezan con la IA: elige las empresas de las que quieres respuestas y, donde esté disponible, Tomverse elige un modelo para cada pregunta. Professional es para quienes saben en qué es bueno cada modelo: elige tú mismo los modelos exactos y decide también sobre Deep Research y los modelos de imagen."
+      },
+      {
+        "title": "¿Puedo usar Tomverse en Claude Code o Codex?",
+        "body": "Sí, con el plan Pro o superior. Crea una clave (empieza por tvk_) en Claves de API de los ajustes y conéctala a una herramienta de programación como Claude Code, Codex o Cursor; los modelos usan los mismos créditos. Claude Code y Codex solo usan los modelos de su propio proveedor (Claude y OpenAI), mientras que las herramientas compatibles con OpenAI, como Cursor, pueden usar modelos de todos los proveedores.",
+        "link": { "label": "Ver la página para desarrolladores", "href": "/developers" }
+      },
+      {
+        "title": "¿Activar la búsqueda web consume más créditos?",
+        "body": "Cada modelo que realmente ejecuta una búsqueda web suma 8 créditos, sin importar cuántas búsquedas haga. Los modelos que no buscaron recuperan esos 8 créditos, y los modelos de Perplexity no tienen cargo adicional."
       }
     ],
     "cta": {
@@ -542,8 +616,8 @@ export const infoPages = {
         "body": "Você também pode selecionar um modelo. O Smart Adaptive considera a pergunta, os recursos necessários, o custo e a qualidade. Os modelos disponíveis dependem da conta e do plano."
       },
       {
-        "title": "As sugestões são aplicadas automaticamente?",
-        "body": "Analise as sugestões e decida se as aplica. Você pode ignorá-las se mudarem sua intenção ou condições e acrescentar as informações que faltam."
+        "title": "Como funciona a melhoria de perguntas?",
+        "body": "No Chat com o Smart Adaptive ativado, o Tomverse reformula sua pergunta de forma mais clara antes de enviá-la ao modelo que responde. A tela e o histórico mantêm sua mensagem exatamente como você a escreveu. Nem todas as mensagens são reformuladas, e escolher um modelo por conta própria desativa a reformulação automática."
       },
       {
         "title": "O AI Review escolhe a resposta correta?",
@@ -551,11 +625,11 @@ export const infoPages = {
       },
       {
         "title": "Usar mais modelos consome mais créditos?",
-        "body": "O uso de cada modelo é contado. Confira créditos-base e efeitos de arquivos ou contextos longos e escolha os modelos necessários. O AI Review mostra uma estimativa separada antes da execução."
+        "body": "Cada modelo selecionado consome créditos. Conversas longas e anexos entram no tamanho da entrada e podem multiplicar o uso por 1,5, 2 ou 3, e cada modelo que executa uma busca na web soma 8 créditos. Uma execução do AI Review costuma custar cerca de 8 créditos, devolvidos se ela não puder ser concluída."
       },
       {
         "title": "Onde os anexos são processados?",
-        "body": "O provedor escolhido processa o arquivo ou os trechos necessários. Bloqueio e armazenamento privado controlam o acesso, mas não eliminam o processamento do provedor. Veja segurança e privacidade para retenção e exclusão."
+        "body": "O provedor escolhido processa o arquivo ou os trechos necessários. Bloqueio e armazenamento privado controlam o acesso, mas não eliminam o processamento do provedor. Veja segurança e privacidade para retenção e exclusão. PDFs escaneados cujo texto não pode ser lido são enviados ao serviço de OCR da Mistral AI para ler o texto."
       },
       {
         "title": "Já uso uma IA gratuita. Por que experimentar o Tomverse?",
@@ -575,19 +649,28 @@ export const infoPages = {
       },
       {
         "title": "Posso trazer conversas de outro serviço de IA?",
-        "body": "Onde disponível, entre na sua conta para importar conversas anteriores de outro serviço de IA usando a exportação oficial de dados e continuar uma conversa no Tomverse. Consideramos o contexto das suas conversas anteriores e as memórias e o estilo de resposta que você aprovou. As novas respostas são geradas pelo modelo do Tomverse selecionado, por isso podem ser diferentes do serviço de IA original."
+        "body": "Onde disponível, entre na sua conta para importar conversas anteriores do ChatGPT, do Claude ou do Gemini (Google Takeout) usando a exportação oficial de dados, ou de um thread do Perplexity exportado em Markdown (.md), e continuar uma conversa no Tomverse. Consideramos o contexto das suas conversas anteriores e as memórias e o estilo de resposta que você aprovou. As novas respostas são geradas pelo modelo do Tomverse selecionado, por isso podem ser diferentes do serviço de IA original."
       },
       {
         "title": "Posso criar imagens?",
-        "body": "Onde disponível, entre na sua conta para descrever uma imagem uma vez, gerá-la com um ou mais modelos de imagem e comparar os resultados lado a lado. Cada modelo selecionado usa créditos, e você pode conferir a estimativa antes de gerar."
+        "body": "Onde disponível, entre na sua conta para descrever no Chat a imagem que você quer, ou descrevê-la uma vez na tela de imagens e comparar lado a lado os resultados de vários modelos de imagem. Você também pode editar uma foto anexada descrevendo a mudança. A tela de imagens mostra os créditos de cada modelo antes de gerar; quando o Chat responde com uma imagem, os créditos de imagem são usados sem etapa de confirmação."
       },
       {
         "title": "Posso fazer perguntas sobre meus arquivos?",
-        "body": "Onde disponível, anexe um arquivo, ou escolha um no Google Drive depois de entrar, e faça perguntas sobre o conteúdo. Tipos, tamanhos e quantidade de arquivos dependem do seu plano; confira os limites mostrados na tela."
+        "body": `Onde disponível, anexe um arquivo, ou escolha um no Google Drive depois de entrar, e faça perguntas sobre o conteúdo. Sem entrar na conta, você pode anexar ${L.gf} arquivo de até ${L.gMb} MB por mensagem; com a conta, até ${L.f} arquivos por mensagem, ${L.mb} MB cada e ${L.totalMb} MB no total. Os limites dependem de você estar conectado, não do plano. Você também pode pedir em palavras simples para converter, juntar ou dividir fotos, PDFs e planilhas anexados.`
       },
       {
         "title": "Qual é a diferença entre Easy e Professional no Review?",
         "body": "O Review tem dois modos. Easy é para quem está começando com IA: escolha as empresas de quem você quer respostas e, onde disponível, o Tomverse escolhe um modelo para cada pergunta. Professional é para quem sabe em que cada modelo é bom: escolha você mesmo os modelos exatos e decida também sobre Deep Research e os modelos de imagem."
+      },
+      {
+        "title": "Posso usar o Tomverse no Claude Code ou no Codex?",
+        "body": "Sim, no plano Pro ou superior. Crie uma chave (começa com tvk_) em Chaves de API nas configurações e conecte-a a uma ferramenta de programação como Claude Code, Codex ou Cursor; os modelos usam os mesmos créditos. Claude Code e Codex usam apenas os modelos do próprio provedor (Claude e OpenAI), enquanto ferramentas compatíveis com OpenAI, como o Cursor, podem usar modelos de todos os provedores.",
+        "link": { "label": "Ver a página para desenvolvedores", "href": "/developers" }
+      },
+      {
+        "title": "Ativar a busca na web consome mais créditos?",
+        "body": "Cada modelo que realmente executa uma busca na web soma 8 créditos, independentemente de quantas buscas faça. Os modelos que não pesquisaram recebem os 8 créditos de volta, e os modelos da Perplexity não têm cobrança extra."
       }
     ],
     "cta": {

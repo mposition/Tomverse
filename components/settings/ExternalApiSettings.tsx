@@ -607,8 +607,8 @@ const SHELLS: [Shell, string][] = [
 /**
  * One tool at a time: the person picks where the key is used and sees only
  * that tool's setup. Configurations carry the new key while this page holds
- * it and a placeholder otherwise. Native protocols never offer Smart Adaptive
- * (codingToolModels).
+ * it and a placeholder otherwise. Claude Code and Codex offer Smart Adaptive
+ * scoped to their own provider's models (codingToolModels).
  */
 function ConnectSection({
     baseUrl,
@@ -690,6 +690,7 @@ function ConnectSection({
                     <div data-testid="external-api-tool-claude-code">
                         <p className="text-xs text-zinc-500">{t("externalApi.claudeCodeHint")}</p>
                         <ToolModelSelect models={lists.claudeCode} value={claude.id} onChange={setClaudeId} testId="external-api-claude-code-model" />
+                        {claude.id === SMART_ADAPTIVE_MODEL_ID ? <p className="mt-1 text-xs text-zinc-500" data-testid="external-api-native-smart-hint">{t("externalApi.nativeSmartAdaptiveHint")}</p> : null}
                         <div className="mt-3 flex flex-wrap gap-2">
                             <Segmented options={surfaces} value={surface} onChange={setSurface} testId="external-api-surface" />
                             {surface === "terminal" ? <Segmented options={SHELLS} value={shell} onChange={setShell} testId="external-api-shell" /> : null}
@@ -718,6 +719,7 @@ function ConnectSection({
                     <div data-testid="external-api-tool-codex">
                         <p className="text-xs text-zinc-500">{t("externalApi.codexHint")}</p>
                         <ToolModelSelect models={lists.codex} value={codex.id} onChange={setCodexId} testId="external-api-codex-model" />
+                        {codex.id === SMART_ADAPTIVE_MODEL_ID ? <p className="mt-1 text-xs text-zinc-500" data-testid="external-api-native-smart-hint">{t("externalApi.nativeSmartAdaptiveHint")}</p> : null}
                         <div className="mt-3 flex flex-wrap gap-2">
                             <Segmented options={surfaces} value={surface} onChange={setSurface} testId="external-api-surface" />
                             <Segmented options={SHELLS} value={shell} onChange={setShell} testId="external-api-shell" />

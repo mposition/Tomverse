@@ -3,10 +3,14 @@ import test from "node:test";
 import { SEO_LOCALES } from "../lib/seo.ts";
 import { infoPages, focusedSafetyPages } from "../components/marketing/marketingInfoContent.ts";
 import { searchIntentPages } from "../components/marketing/searchIntentContent.ts";
-import { launchHomepageContent } from "../components/marketing/launchHomepageContent.ts";
+import { homeV2Content, homeV2SourceCopy } from "../components/marketing/home/homeV2Content.ts";
 import { chatWorkspaceGuideContent } from "../components/marketing/chatWorkspaceGuideContent.ts";
 import { assistantKnowledgeGuideContent } from "../components/marketing/assistantKnowledgeGuideContent.ts";
 import { landingCopy } from "../components/marketing/landingContent.ts";
+import { chatPageContent } from "../components/marketing/v2/chat/chatPageContent.ts";
+import { cliPageContent } from "../components/marketing/v2/cli/cliPageContent.ts";
+import { developersPageContent, developersPageSeo } from "../components/marketing/v2/developers/developersPageContent.ts";
+import { helpCentreCopy } from "../lib/helpCentre/copy/index.ts";
 
 test("two-reviewer explanation reports quote evidence without promising provider independence or a correct-answer consensus", () => {
   const copy = landingCopy.en.loop;
@@ -40,15 +44,24 @@ test("public information and guides have complete localized bodies rather than E
   }
 });
 
-test("Review illustration quotes are exact excerpts of the displayed answers in every language", () => {
+// Homepage V2: every locale has the same shape as the approved Korean copy, keeps
+// the live provider count placeholder where Korean has it, and keeps the notes
+// that say the demo screens are illustrations.
+test("homepage copy is complete in every language, keeps {n} and its illustration notes", () => {
+  const shape = (value) => Array.isArray(value) ? value.map(shape)
+    : value && typeof value === "object" ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, shape(value[key])]))
+    : typeof value;
+  const placeholders = (value, path = "") => Array.isArray(value) || (value && typeof value === "object")
+    ? Object.entries(value).flatMap(([key, child]) => placeholders(child, `${path}.${key}`))
+    : typeof value === "string" && value.includes("{n}") ? [path] : [];
+  const ko = homeV2SourceCopy.ko;
   for (const locale of SEO_LOCALES) {
-    const review = launchHomepageContent[locale].review;
-    assert.equal(review.answers.length, 3);
-    for (const answer of review.answers) {
-      assert.ok(answer.quote.trim());
-      assert.ok(answer.body.includes(answer.quote), `${locale}: unsupported quote`);
+    const copy = homeV2Content[locale];
+    assert.deepEqual(shape(copy), shape(ko), `${locale}: homepage copy shape differs from Korean`);
+    assert.deepEqual(placeholders(copy), placeholders(ko), `${locale}: {n} placeholders differ from Korean`);
+    for (const note of [copy.adaptive.note, copy.continue.note, copy.review.caption, copy.plugins.note]) {
+      assert.ok(note.trim(), `${locale}: missing illustration or trademark note`);
     }
-    assert.ok(review.note.trim(), `${locale}: missing illustration disclosure`);
   }
 });
 
@@ -72,15 +85,39 @@ test("Korean FAQ names products like the header menu and gives English names onl
     const bare = text.replace(/\((?:AI )?(?:Chat|Review)\)/g, "");
     assert.doesNotMatch(bare, /\b(?:Chat|Review)\b/, text);
   }
-  assert.match(ko.sections[0].title, /채팅과 리뷰/);
+  assert.match(ko.sections[0].title, /채팅과 답변 비교/);
 });
 
 test("Korean homepage action buttons name products like the header menu", () => {
-  const { chat, review, reviewInfo } = launchHomepageContent.ko.actions;
-  for (const label of [chat, review, reviewInfo]) {
+  const { hero, final } = homeV2Content.ko;
+  for (const label of [hero.primary, hero.secondary, final.chat, final.review]) {
     assert.doesNotMatch(label, /\b(?:Chat|Review)\b/, label);
   }
-  assert.match(chat, /^채팅/);
-  assert.match(review, /^리뷰/);
-  assert.match(reviewInfo, /^리뷰/);
+  assert.match(hero.secondary, /^채팅/);
+  assert.match(final.chat, /^채팅/);
+  assert.match(final.review, /^답변 비교/);
+});
+
+test("Korean public copy and help centre name the product 스마트 자동(Smart Adaptive), never a bare English name", () => {
+  const surfaces = {
+    home: homeV2Content.ko,
+    chat: chatPageContent.ko,
+    cli: cliPageContent.ko,
+    developers: developersPageContent.ko,
+    developersSeo: developersPageSeo.ko,
+    faq: infoPages.faq.ko,
+    help: helpCentreCopy("ko"),
+  };
+  for (const [surface, copy] of Object.entries(surfaces)) {
+    const text = JSON.stringify(copy);
+    for (const match of text.matchAll(/Smart Adaptive/g)) {
+      assert.equal(
+        text.slice(Math.max(0, match.index - 7), match.index),
+        "스마트 자동(",
+        `${surface}: bare "Smart Adaptive" in Korean copy`
+      );
+    }
+  }
+  // The first mention in the FAQ introduces the English name once.
+  assert.ok(JSON.stringify(infoPages.faq.ko).includes("스마트 자동(Smart Adaptive)"));
 });

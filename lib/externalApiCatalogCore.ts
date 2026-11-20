@@ -1,6 +1,6 @@
 import type { AiModel, ModelTier } from "@/lib/models";
 import { canUseModelWithPlan } from "@/lib/models";
-import { protocolsForProvider, type ExternalApiProtocol } from "@/lib/externalApiProtocols";
+import { EXTERNAL_API_PROTOCOLS, protocolsForProvider, type ExternalApiProtocol } from "@/lib/externalApiProtocols";
 
 /**
  * Which models the external API exposes, and the client configuration built
@@ -48,11 +48,42 @@ const EXPOSABLE_USAGE_CLASSES = new Set<AiModel["usageClass"]>([
     "premium-reasoning",
 ]);
 
-export const isExternalApiServableModel = (model: AiModel, plan: ModelTier) =>
+/**
+ * Which coding-catalogue channel a request belongs to: the tomverse CLI names
+ * itself in its User-Agent (apps/tomverse-cli/src/gateway.ts); everything else
+ * is the API. Only read while CODING_CATALOG_EXTERNAL_CHANNELS_ENABLED is on,
+ * and it only narrows a list: a spoofed header gets the CLI's models, on the
+ * same plan check and billing.
+ */
+export const externalApiChannelFor = (userAgent: string | null | undefined): "api" | "cli" =>
+    typeof userAgent === "string" && userAgent.startsWith("tomverse-cli/") ? "cli" : "api";
+
+/**
+ * Usage classes Smart Adaptive may route to but no client may name directly
+ * (owner decision 2026-11-20): the coding guidance sends only the hardest
+ * work to them (AUTO_LLM_ROUTER_CODING_GUIDANCE), each request is charged
+ * that model's own credits, and the key's cap and the account's credits still
+ * refuse what they do not cover.
+ */
+const SMART_ADAPTIVE_ONLY_USAGE_CLASSES = new Set<AiModel["usageClass"]>(["frontier", "apex"]);
+
+/**
+ * A model only Smart Adaptive routes to. Never a default: the model a request
+ * takes when the router does not pick is chosen among the others.
+ */
+export const isSmartAdaptiveOnlyModel = (model: Pick<AiModel, "usageClass">) =>
+    SMART_ADAPTIVE_ONLY_USAGE_CLASSES.has(model.usageClass);
+
+export const isExternalApiServableModel = (
+    model: AiModel,
+    plan: ModelTier,
+    options: { smartAdaptive?: boolean } = {}
+) =>
     model.enabled &&
     !model.catalogDeleted &&
     (model.status === "enabled" || model.status === "limited") &&
-    EXPOSABLE_USAGE_CLASSES.has(model.usageClass) &&
+    (EXPOSABLE_USAGE_CLASSES.has(model.usageClass) ||
+        (options.smartAdaptive === true && SMART_ADAPTIVE_ONLY_USAGE_CLASSES.has(model.usageClass))) &&
     canUseModelWithPlan(plan, model);
 
 export type ExternalApiModelCapabilities = {
@@ -76,6 +107,11 @@ export type ExternalApiModelCapabilities = {
      * (Codex picks its patch tool by model). Absent for Smart Adaptive.
      */
     providerModelId?: string;
+    /**
+     * Smart Adaptive only: the most one request can cost on each protocol. A
+     * native protocol routes among its own provider's models only.
+     */
+    creditWeightByProtocol?: Partial<Record<ExternalApiProtocol, number>>;
 };
 
 export const externalApiModelCapabilities = (
@@ -143,10 +179,54 @@ export const smartAdaptiveCapabilities = (
                   candidates.find((candidate) => candidate.id === defaultModelId)?.maxOutputTokens ??
                   Math.min(...candidates.map((candidate) => candidate.maxOutputTokens)),
               creditWeight: Math.max(...candidates.map((candidate) => candidate.creditWeight)),
-              // Routing is a Chat Completions feature: a native request keeps
-              // the model that produced its signed or encrypted state.
-              protocols: ["chat_completions"],
+              // Every protocol a candidate speaks. Chat Completions routes over
+              // all of them; a native protocol only over its own provider's
+              // models (lib/externalApiNativeSmartAdaptive.ts), so signed or
+              // encrypted state never crosses providers.
+              protocols: EXTERNAL_API_PROTOCOLS.filter((protocol) =>
+                  candidates.some((candidate) => (candidate.protocols ?? ["chat_completions"]).includes(protocol))
+              ),
+              creditWeightByProtocol: Object.fromEntries(
+                  EXTERNAL_API_PROTOCOLS.flatMap((protocol) => {
+                      const weights = candidates
+                          .filter((candidate) => (candidate.protocols ?? ["chat_completions"]).includes(protocol))
+                          .map((candidate) => candidate.creditWeight);
+                      return weights.length ? [[protocol, Math.max(...weights)]] : [];
+                  })
+              ),
           };
+
+/**
+ * The model a native Smart Adaptive request takes when the router does not
+ * pick (switch off, no answer, a conversation already under way): the
+ * catalogue default when this provider has it, otherwise the lower-median
+ * model by credits -- the middle of the line-up, not its cheapest or dearest.
+ */
+export const nativeSmartAdaptiveDefaultId = (
+    candidates: readonly Pick<ExternalApiModelCapabilities, "id" | "creditWeight">[],
+    defaultModelId?: string
+): string | null => {
+    if (candidates.length === 0) return null;
+    if (defaultModelId && candidates.some((candidate) => candidate.id === defaultModelId)) return defaultModelId;
+    const sorted = [...candidates].sort((a, b) => a.creditWeight - b.creditWeight || a.id.localeCompare(b.id));
+    return sorted[Math.floor((sorted.length - 1) / 2)].id;
+};
+
+/**
+ * Smart Adaptive as one native protocol sees it: only that provider's models.
+ * A native conversation keeps the model it started on, so a coding tool must
+ * plan for the smallest window any of them offers, not the largest; the
+ * output limit is the provider default's (the gateway clamps a larger
+ * request to the model's own).
+ */
+export const nativeSmartAdaptiveCapabilities = (
+    providerModels: readonly ExternalApiModelCapabilities[],
+    defaultModelId?: string
+): ExternalApiModelCapabilities | null => {
+    const fixed = providerModels.filter((model) => model.id !== SMART_ADAPTIVE_MODEL_ID);
+    const smart = smartAdaptiveCapabilities(fixed, nativeSmartAdaptiveDefaultId(fixed, defaultModelId) ?? undefined);
+    return smart && { ...smart, contextWindowTokens: Math.min(...fixed.map((model) => model.contextWindowTokens)) };
+};
 
 /** OpenAI-shaped `GET /models` entry. Tomverse fields sit under `tomverse`. */
 export const toOpenAiModelEntry = (model: ExternalApiModelCapabilities) => ({

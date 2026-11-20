@@ -17,8 +17,11 @@ import {
   imageExecutionDrift,
   imageExecutionProfile,
   isOfficialSourceUrl,
+  DEFAULT_CODING_CAPABILITY_SOURCES,
   DEFAULT_PRICE_SOURCES,
+  defaultCodingCapabilitySources,
   defaultPriceSources,
+  OFFICIAL_SOURCE_HOSTS,
   judgeCodingModel,
   judgeImageModel,
   judgeVideoModel,
@@ -41,6 +44,7 @@ import {
   MAX_DRAFT_SOURCES,
   pageToText,
 } from "../lib/modelCatalogDraftLlm.ts";
+import { AI_PROVIDERS } from "../lib/modelRegistryShared.ts";
 
 const NOW = new Date("2026-10-19T12:00:00Z");
 const enabledSeed = IMAGE_MODEL_REGISTRY.find((model) => model.disabledReason === null);
@@ -455,6 +459,19 @@ test("default price sources are official for their provider and fit the draft li
   assert.deepEqual(defaultPriceSources("unknown"), []);
 });
 
+test("every chat draft provider has an official tool calling and structured output page", () => {
+  const draftProviders = AI_PROVIDERS.filter((provider) => Object.hasOwn(OFFICIAL_SOURCE_HOSTS, provider));
+  assert.deepEqual(Object.keys(DEFAULT_CODING_CAPABILITY_SOURCES).sort(), [...draftProviders].sort());
+  for (const [provider, sources] of Object.entries(DEFAULT_CODING_CAPABILITY_SOURCES)) {
+    assert.notEqual(sources.toolCalling, sources.structuredOutput, provider);
+    for (const url of [sources.toolCalling, sources.structuredOutput]) assert.equal(isOfficialSourceUrl(provider, url), true, url);
+  }
+  assert.equal(defaultCodingCapabilitySources("toString"), null);
+  assert.equal(defaultCodingCapabilitySources("openrouter"), null);
+  // platform.claude.com also serves the Console; only /docs/ there is documentation.
+  assert.equal(isOfficialSourceUrl("anthropic", "https://platform.claude.com/settings/keys"), false);
+});
+
 test("the registry lookups read the active catalogue and fall back to the seed", () => {
   try {
     setActiveImageModelCatalog([]);
@@ -675,6 +692,15 @@ test("the scheduled renewal extends identical content inside the last week and n
   assert.equal(decideSnapshotRenewal(snapshot(29), other, NOW), "content_changed");
   assert.equal(decideSnapshotRenewal(snapshot(2), other, NOW), "content_changed");
   assert.equal(decideSnapshotRenewal(snapshot(-3), other, NOW), "content_changed");
+  // A snapshot written before a row gained defaulted fields: its stored hash
+  // differs, its rows read through today's schema match, so it is renewed.
+  const legacy = (daysLeft) => ({ ...snapshot(daysLeft, other), normalizedHash: same });
+  assert.equal(decideSnapshotRenewal(legacy(2), same, NOW), "renew");
+  assert.equal(decideSnapshotRenewal(legacy(-3), same, NOW), "renew");
+  assert.equal(decideSnapshotRenewal(legacy(29), same, NOW), "not_due");
+  // Normalised content that still differs is not renewed.
+  assert.equal(decideSnapshotRenewal({ ...snapshot(2, other), normalizedHash: "c".repeat(64) }, same, NOW), "content_changed");
+  assert.equal(decideSnapshotRenewal({ ...snapshot(2, other), normalizedHash: null }, same, NOW), "content_changed");
 });
 
 test("page text drops scripts and tags", () => {

@@ -11,17 +11,21 @@ import {
   DM_WORKSPACE_CLONE_URL,
   DM_WORKSPACE_DISK_MAX_BYTES,
   DM_WORKSPACE_HISTORY_DEPTH,
+  DM_WORKSPACE_LEGACY_INLINE_MAX_BYTES,
   DM_WORKSPACE_TIME_LIMIT_MS,
   DM_WORKSPACE_PATCH_NAME,
   DM_WORKSPACE_REPOSITORY,
   DM_WORKSPACE_TARGET_BRANCH,
   dmWorkspaceAcceptFiles,
+  dmWorkspaceAcceptParts,
   dmWorkspaceGuide,
   dmWorkspaceHasPatch,
+  dmWorkspaceOutline,
   type DmLaunchWorkspace,
   type DmWorkspace,
   type DmWorkspaceExclusion,
   type DmWorkspaceNoneReason,
+  type DmWorkspaceOutline,
   type DmWorkspaceRequest,
 } from "./decisionMakerWorkspaceCore.ts";
 
@@ -82,18 +86,30 @@ export async function resolveDmWorkspaceTarget(
   return again.sha === head.sha ? { state: "develop", targetSha: head.sha } : { state: "none", targetSha: null };
 }
 
-/** The broker's answer to a `workspace` request: the target and the accepted files. Never throws. */
+/**
+ * The broker's answer to a `workspace` request: the target and what the payload
+ * names of each accepted file. A request with its files inline has them
+ * checked here (the older protocol); one with only their descriptions names
+ * them as described, and the bytes are checked when they arrive with the
+ * launch (`dmAssembleWorkspace`). Never throws.
+ */
 export async function prepareDmWorkspace(
   request: DmWorkspaceRequest,
   http: DmWorkspaceHttp,
-): Promise<{ workspace: DmWorkspace; excluded: Partial<Record<DmWorkspaceExclusion, number>>; reason: DmWorkspaceNoneReason | null }> {
-  const accepted = dmWorkspaceAcceptFiles(request.files);
+): Promise<{ workspace: DmWorkspaceOutline; excluded: Partial<Record<DmWorkspaceExclusion, number>>; reason: DmWorkspaceNoneReason | null }> {
   const target = await resolveDmWorkspaceTarget(request.targetSha, http).catch(() => ({ state: "none" as const, targetSha: null }));
-  return {
-    workspace: { state: target.state, targetSha: target.targetSha, files: accepted.files },
-    excluded: accepted.excluded,
-    reason: target.targetSha === null ? "target_unavailable" : null,
-  };
+  const head = { state: target.state, targetSha: target.targetSha };
+  const reason = target.targetSha === null ? ("target_unavailable" as const) : null;
+  if (request.parts !== null) {
+    const accepted = dmWorkspaceAcceptParts(request.parts);
+    return {
+      workspace: { ...head, entries: accepted.parts.map((part) => ({ name: part.name, blob: part.blob, bytes: part.bytes })) },
+      excluded: accepted.excluded,
+      reason,
+    };
+  }
+  const accepted = dmWorkspaceAcceptFiles(request.files ?? [], { totalMaxBytes: DM_WORKSPACE_LEGACY_INLINE_MAX_BYTES });
+  return { workspace: dmWorkspaceOutline({ ...head, files: accepted.files }), excluded: accepted.excluded, reason };
 }
 
 /**
@@ -277,7 +293,14 @@ const handOver = (root: string, groupId: number | null, owners: boolean): { ok: 
  */
 export async function buildDmWorkspace(
   host: DmLauncherHost,
-  input: { instance: DmInstanceScope; requestId: string; workspace: DmLaunchWorkspace; groupId: number | null },
+  input: {
+    instance: DmInstanceScope;
+    requestId: string;
+    workspace: DmLaunchWorkspace;
+    groupId: number | null;
+    /** When the workspace's one time limit ends (epoch ms): the parts' arrival has spent part of it. Default: one limit from now. */
+    deadlineAt?: number;
+  },
   options: DmWorkspaceBuildOptions = {},
 ): Promise<DmWorkspaceBuild> {
   if (host.root === null && options.git !== undefined) {
@@ -298,7 +321,7 @@ export async function buildDmWorkspace(
   const cloneUrl = options.git?.cloneUrl ?? DM_WORKSPACE_CLONE_URL;
   // One budget for every step (DM_WORKSPACE_TIME_LIMIT_MS): a step that would
   // run past it is not started, and the one running is cut at it.
-  const buildDeadline = Date.now() + DM_WORKSPACE_TIME_LIMIT_MS;
+  const buildDeadline = input.deadlineAt ?? Date.now() + DM_WORKSPACE_TIME_LIMIT_MS;
   // The disk cap holds while git writes, not only after: the directory is
   // measured every second, and the running git is stopped once it passes
   // DM_WORKSPACE_DISK_MAX_BYTES (it can overshoot by what it writes in that

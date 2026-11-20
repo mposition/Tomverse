@@ -7,9 +7,12 @@ const exactMarketingPaths = new Set([
   "/ai-for-file-analysis",
   "/chatgpt-vs-claude",
   "/compare-ai-models",
+  "/developers",
+  "/developers/cli",
   "/faq",
   "/models",
   "/pricing",
+  "/products/chat",
   "/products/review",
   "/privacy",
   "/refund",
@@ -19,7 +22,6 @@ const exactMarketingPaths = new Set([
   "/safety/trust-transparency",
   "/support",
   "/support/help-centre",
-  "/support/help-centre/chat-workspace",
   "/terms",
 ]);
 
@@ -44,6 +46,9 @@ export const LOCALIZED_MARKETING_BASE_PATHS = [
   "/chatgpt-vs-claude",
   "/ai-for-file-analysis",
   "/products/review",
+  "/products/chat",
+  "/developers",
+  "/developers/cli",
   "/about",
   "/faq",
   "/pricing",
@@ -54,11 +59,14 @@ export const LOCALIZED_MARKETING_BASE_PATHS = [
   "/safety/trust-transparency",
   "/support",
   "/support/help-centre",
-  "/support/help-centre/chat-workspace",
 ] as const;
 const localizedMarketingBasePaths = new Set<string>(LOCALIZED_MARKETING_BASE_PATHS);
 
 export const REVIEW_PRODUCT_PATH = "/products/review";
+/** Homepage V2 detail pages (owner approval 2026-11-20). */
+export const CHAT_PRODUCT_PATH = "/products/chat";
+export const DEVELOPERS_PATH = "/developers";
+export const CLI_DOWNLOAD_PATH = "/developers/cli";
 
 const normalizePathname = (pathname: string) => {
   if (!pathname || pathname === "/") return "/";
