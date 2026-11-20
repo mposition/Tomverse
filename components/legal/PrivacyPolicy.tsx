@@ -1,14 +1,13 @@
 "use client";
 
-import Link from "next/link";
+import { useRef, useState } from "react";
 import { ProviderDestinationTable } from "@/components/legal/ProviderDestinationTable";
-import { ArrowLeft, BarChart3, Bot, Building2, Database, FileUp, ImageIcon, KeyRound, Mail, MapPin, MessageSquare, Mic, Scale, Search, Send, ShieldCheck, Share2, UserRound, Workflow } from "lucide-react";
+import { BarChart3, Bot, Building2, Database, FileUp, ImageIcon, KeyRound, Mail, MapPin, MessageSquare, Mic, Scale, Search, Send, ShieldCheck, Share2, UserRound, Workflow } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { englishLocationNotice } from "@/locales/privacyLocation";
-import {
-    MarketingFooter,
-    MarketingHeader,
-} from "@/components/marketing/MarketingChrome";
+import { LegalDocumentPage } from "@/components/marketing/v2/policy/LegalDocumentPage";
+import { fill } from "@/components/marketing/v2/policy/PolicyChrome";
+import { policyPageContent } from "@/components/marketing/v2/policy/policyPageContent";
 import { COMMENTS_PRIVACY_NOTICE_CONFIRMED } from "@/lib/privacyNoticeStatus";
 import { SEMANTIC_SEARCH_PRIVACY_NOTICE_CONFIRMED } from "@/lib/privacyNoticeStatus";
 import {
@@ -155,6 +154,77 @@ const sections = [
     ["changesTitle", "changes", Scale],
 ] as const;
 
+/**
+ * An itemized notice drawn as the rows of a card. Each item is a "Label: text"
+ * sentence; the label (with its own colon) and the rest are printed exactly as
+ * written, so a row reads as the same sentence. An item without a short label
+ * is printed whole.
+ */
+function ItemizedNotice({ titleKey, itemKeys, t }: { titleKey: string; itemKeys: readonly string[]; t: (key: string) => string }) {
+    return (
+        <div className="legal-dl">
+            <h3 className="dl-head">{t(`privacyPolicy.${titleKey}`)}</h3>
+            <ul className="legal-items">
+                {itemKeys.map((itemKey) => {
+                    const text = t(`privacyPolicy.${itemKey}`);
+                    const labelled = /^([^:：\n]{1,60}?[:：])(\s*)([\s\S]+)$/.exec(text);
+                    return labelled ? (
+                        <li key={itemKey}><b>{labelled[1]}</b>{labelled[2]}{labelled[3]}</li>
+                    ) : (
+                        <li key={itemKey} className="plain">{text}</li>
+                    );
+                })}
+            </ul>
+        </div>
+    );
+}
+
+/**
+ * The provider table with a search box. Searching only hides the rows that do
+ * not contain the query: every row is still rendered, and says what it said
+ * before. A language change remounts it (`key`), which clears the search.
+ */
+function SearchableProviderTable({ rows, t, copy }: {
+    rows: typeof PROVIDER_DATA_DESTINATIONS;
+    t: (key: string) => string;
+    copy: { label: string; placeholder: string; empty: string; count: string };
+}) {
+    const tableRef = useRef<HTMLDivElement>(null);
+    const [query, setQuery] = useState("");
+    const [shown, setShown] = useState<number>(rows.length);
+    const search = (value: string) => {
+        setQuery(value);
+        const needle = value.trim().toLowerCase();
+        let count = 0;
+        tableRef.current?.querySelectorAll<HTMLTableRowElement>("tbody tr").forEach((row) => {
+            const match = !needle || (row.textContent ?? "").toLowerCase().includes(needle);
+            row.hidden = !match;
+            if (match) count += 1;
+        });
+        setShown(count);
+    };
+    return (
+        <div className="min-w-0 legal-table" ref={tableRef}>
+            <div className="prov-tools">
+                <label>
+                    <Search className="legal-icon" aria-hidden="true" />
+                    <span className="sr-only">{copy.label}</span>
+                    <input
+                        type="search"
+                        value={query}
+                        onChange={(event) => search(event.target.value)}
+                        placeholder={copy.placeholder}
+                        data-testid="privacy-provider-search"
+                    />
+                </label>
+            </div>
+            <ProviderDestinationTable rows={rows} t={t} />
+            {shown === 0 ? <p className="prov-empty">{copy.empty}</p> : null}
+            <p className="sr-only" role="status">{query.trim() ? fill(copy.count, shown) : ""}</p>
+        </div>
+    );
+}
+
 export function PrivacyPolicy() {
     const { t, lang } = useLanguage();
     const localizedContentAvailable = lang === "en" || lang === "ko" || lang === "zh";
@@ -168,164 +238,80 @@ export function PrivacyPolicy() {
         ([, bodyKey]) => bodyKey !== "semanticSearch" || SEMANTIC_SEARCH_PRIVACY_NOTICE_CONFIRMED
     );
     const showProviderTable = destinations.length > 0;
+    const copy = policyPageContent[lang];
+    // The rights section keeps the anchor it had before every section got one.
+    const sectionId = (bodyKey: string) => (bodyKey === "rights" ? "account-deletion" : bodyKey);
 
     return (
-        <main className="min-h-screen overflow-y-auto bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
-            <MarketingHeader
-                maxWidth="max-w-7xl"
-                localizedContentAvailable={localizedContentAvailable}
-            />
-
-            <article
-                lang={localizedContentAvailable ? lang : "en"}
-                className="mx-auto max-w-4xl px-5 py-12"
-            >
-                <div className="border-b border-zinc-200 pb-8 dark:border-zinc-800">
-                    <h1 className="text-3xl font-bold">{t("privacyPolicy.title")}</h1>
-                    <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">{t("privacyPolicy.effective")}</p>
-                    <p className="mt-6 max-w-3xl text-base leading-7 text-zinc-600 dark:text-zinc-300">
-                        {t("privacyPolicy.intro")}
-                    </p>
-                </div>
-
-                <div className="divide-y divide-zinc-200 dark:divide-zinc-800">
-                    {visibleSections.map(([titleKey, bodyKey, Icon]) => (
-                        <section
-                            key={titleKey}
-                            id={bodyKey === "rights" ? "account-deletion" : undefined}
-                            className="grid scroll-mt-24 gap-4 py-7 md:grid-cols-[180px_1fr]"
-                        >
-                            <h2 className="flex self-start items-center gap-2 text-sm font-semibold">
-                                <Icon className="h-4 w-4 text-blue-500" />
-                                {t(`privacyPolicy.${titleKey}`)}
-                            </h2>
-                            {/*
-                                min-w-0: without it this grid item takes the
-                                720px min-width of the provider table as its own
-                                minimum, so the whole section -- paragraphs and
-                                list included -- grew past a 320px viewport and
-                                its sentences were cut off instead of wrapping.
-                                With it, only the table scrolls.
-                            */}
-                            <div className="min-w-0 text-sm leading-7 text-zinc-600 dark:text-zinc-300">
-                                {bodyKey === "location" && lang === "en" ? (
-                                    <div className="space-y-5" data-testid="privacy-location-sections">
-                                        {englishLocationNotice.map(group => (
-                                            <div key={group.title}>
-                                                <h3 className="font-semibold text-zinc-900 dark:text-zinc-100">{group.title}</h3>
-                                                {"items" in group ? (
-                                                    <ul className="mt-2 list-disc space-y-2 pl-5">
-                                                        {group.items.map(item => <li key={item}>{item}</li>)}
-                                                    </ul>
-                                                ) : (
-                                                    <div className="mt-2 space-y-3">
-                                                        {group.paragraphs.map(paragraph => <p key={paragraph}>{paragraph}</p>)}
-                                                    </div>
-                                                )}
-                                            </div>
-                                        ))}
-                                    </div>
-                                ) : bodyKey === "location" ? t("privacyPolicy.location").split("\n\n").map((paragraph, index) => (<p key={paragraph} className={index ? "mt-4" : undefined}>{paragraph}</p>)) : <p>{t(`privacyPolicy.${bodyKey}`)}</p>}
-                                {bodyKey === "rights" && (
-                                    <div className="mt-5 space-y-3">
-                                        <h3 className="font-semibold text-zinc-900 dark:text-zinc-100">{t("auth.deleteAccount")}</h3>
-                                        <p>{t("privacyPolicy.deletionRequest")}</p>
-                                        <a href="mailto:support@tomverse.app?subject=Tomverse%20account%20and%20data%20deletion%20request" className="inline-flex items-center gap-2 font-semibold text-blue-600 underline underline-offset-4 dark:text-blue-400">
-                                            <Mail className="h-4 w-4" aria-hidden="true" />
-                                            {t("auth.deleteAccount")} · support@tomverse.app
-                                        </a>
-                                        <p>{t("privacyPolicy.deletionSubscriptions")}</p>
-                                    </div>
-                                )}
-                                {bodyKey === "providers" && (
-                                    <>
-                                        <h3 className="mt-5 font-semibold text-zinc-900 dark:text-zinc-100">
-                                            {t("privacyPolicy.providerTransferTitle")}
-                                        </h3>
-                                        <ul className="mt-2 list-disc space-y-1.5 pl-5">
-                                            {PROVIDER_TRANSFER_ITEMS.map((itemKey) => (
-                                                <li key={itemKey}>
-                                                    {t(`privacyPolicy.${itemKey}`)}
-                                                </li>
-                                            ))}
-                                        </ul>
-                                    </>
-                                )}
-                                {bodyKey === "comments" && (
-                                    <>
-                                        <h3 className="mt-5 font-semibold text-zinc-900 dark:text-zinc-100">
-                                            {t("privacyPolicy.commentsTransferTitle")}
-                                        </h3>
-                                        <ul className="mt-2 list-disc space-y-1.5 pl-5">
-                                            {COMMENTS_ITEMS.map((itemKey) => (
-                                                <li key={itemKey}>
-                                                    {t(`privacyPolicy.${itemKey}`)}
-                                                </li>
-                                            ))}
-                                        </ul>
-                                    </>
-                                )}
-                                {bodyKey === "semanticSearch" && (
-                                    <>
-                                        <h3 className="mt-5 font-semibold text-zinc-900 dark:text-zinc-100">
-                                            {t("privacyPolicy.semanticSearchTransferTitle")}
-                                        </h3>
-                                        <ul className="mt-2 list-disc space-y-1.5 pl-5">
-                                            {SEMANTIC_SEARCH_TRANSFER_ITEMS.map((itemKey) => (
-                                                <li key={itemKey}>
-                                                    {t(`privacyPolicy.${itemKey}`)}
-                                                </li>
-                                            ))}
-                                        </ul>
-                                    </>
-                                )}
-                                {bodyKey === "analytics" && (
-                                    <>
-                                        <h3 className="mt-5 font-semibold text-zinc-900 dark:text-zinc-100">
-                                            {t("privacyPolicy.analyticsUserIdTitle")}
-                                        </h3>
-                                        <ul className="mt-2 list-disc space-y-1.5 pl-5">
-                                            {ANALYTICS_USER_ID_ITEMS.map((itemKey) => (
-                                                <li key={itemKey}>
-                                                    {t(`privacyPolicy.${itemKey}`)}
-                                                </li>
-                                            ))}
-                                        </ul>
-                                    </>
-                                )}
-                                {bodyKey === "voiceInput" && (
-                                    <>
-                                        <h3 className="mt-5 font-semibold text-zinc-900 dark:text-zinc-100">
-                                            {t("privacyPolicy.voiceInputTransferTitle")}
-                                        </h3>
-                                        <ul className="mt-2 list-disc space-y-1.5 pl-5">
-                                            {VOICE_TRANSFER_ITEMS.map((itemKey) => (
-                                                <li key={itemKey}>
-                                                    {t(`privacyPolicy.${itemKey}`)}
-                                                </li>
-                                            ))}
-                                        </ul>
-                                    </>
-                                )}
-                            </div>
-                            {bodyKey === "providers" && showProviderTable ? (
-                                <div className="min-w-0 text-sm leading-7 text-zinc-600 md:col-span-2 dark:text-zinc-300">
-                                    <ProviderDestinationTable rows={destinations} t={t} />
-                                </div>
-                            ) : null}
-                        </section>
-                    ))}
-                </div>
-
-                <Link
-                    href="/"
-                    className="mt-8 inline-flex items-center gap-2 rounded-md bg-zinc-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
+        <LegalDocumentPage
+            document="privacy"
+            contentLang={localizedContentAvailable ? lang : "en"}
+            localizedContentAvailable={localizedContentAvailable}
+            eyebrow={copy.privacyEyebrow}
+            title={t("privacyPolicy.title")}
+            lead={t("privacyPolicy.intro")}
+            date={t("privacyPolicy.effective")}
+            sections={visibleSections.map(([titleKey, bodyKey]) => ({ id: sectionId(bodyKey), title: t(`privacyPolicy.${titleKey}`) }))}
+            actions={[{ href: "/", label: t("privacyPolicy.back") }, { href: "/support", label: copy.support }]}
+        >
+            {visibleSections.map(([titleKey, bodyKey, Icon], index) => (
+                <section
+                    key={titleKey}
+                    id={sectionId(bodyKey)}
+                    className="legal-sec"
+                    aria-labelledby={`${sectionId(bodyKey)}-title`}
                 >
-                    <ArrowLeft className="h-4 w-4" />
-                    {t("privacyPolicy.back")}
-                </Link>
-            </article>
-            <MarketingFooter maxWidth="max-w-4xl" />
-        </main>
+                    <h2 id={`${sectionId(bodyKey)}-title`}>
+                        <span aria-hidden="true"><Icon className="legal-icon" />{String(index + 1).padStart(2, "0")}</span>
+                        {t(`privacyPolicy.${titleKey}`)}
+                    </h2>
+                    {/*
+                        min-w-0: the provider table below is wider than a
+                        phone; without it the section's sentences would take
+                        the table's minimum width instead of wrapping. With it,
+                        only the table scrolls.
+                    */}
+                    <div className="min-w-0 legal-text">
+                        {bodyKey === "location" && lang === "en" ? (
+                            <div className="legal-groups" data-testid="privacy-location-sections">
+                                {englishLocationNotice.map(group => (
+                                    <div key={group.title}>
+                                        <h3>{group.title}</h3>
+                                        {"items" in group ? (
+                                            <ul className="bullets">
+                                                {group.items.map(item => <li key={item}>{item}</li>)}
+                                            </ul>
+                                        ) : (
+                                            <div>
+                                                {group.paragraphs.map(paragraph => <p key={paragraph}>{paragraph}</p>)}
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        ) : bodyKey === "location" ? t("privacyPolicy.location").split("\n\n").map((paragraph) => (<p key={paragraph}>{paragraph}</p>)) : <p>{t(`privacyPolicy.${bodyKey}`)}</p>}
+                        {bodyKey === "rights" && (
+                            <>
+                                <h3>{t("auth.deleteAccount")}</h3>
+                                <p>{t("privacyPolicy.deletionRequest")}</p>
+                                <a href="mailto:support@tomverse.app?subject=Tomverse%20account%20and%20data%20deletion%20request" className="legal-mail">
+                                    <Mail className="legal-icon" aria-hidden="true" />
+                                    {t("auth.deleteAccount")} · support@tomverse.app
+                                </a>
+                                <p>{t("privacyPolicy.deletionSubscriptions")}</p>
+                            </>
+                        )}
+                        {bodyKey === "providers" && <ItemizedNotice titleKey="providerTransferTitle" itemKeys={PROVIDER_TRANSFER_ITEMS} t={t} />}
+                        {bodyKey === "comments" && <ItemizedNotice titleKey="commentsTransferTitle" itemKeys={COMMENTS_ITEMS} t={t} />}
+                        {bodyKey === "semanticSearch" && <ItemizedNotice titleKey="semanticSearchTransferTitle" itemKeys={SEMANTIC_SEARCH_TRANSFER_ITEMS} t={t} />}
+                        {bodyKey === "analytics" && <ItemizedNotice titleKey="analyticsUserIdTitle" itemKeys={ANALYTICS_USER_ID_ITEMS} t={t} />}
+                        {bodyKey === "voiceInput" && <ItemizedNotice titleKey="voiceInputTransferTitle" itemKeys={VOICE_TRANSFER_ITEMS} t={t} />}
+                    </div>
+                    {bodyKey === "providers" && showProviderTable ? (
+                        <SearchableProviderTable key={lang} rows={destinations} t={t} copy={copy.providerSearch} />
+                    ) : null}
+                </section>
+            ))}
+        </LegalDocumentPage>
     );
 }
