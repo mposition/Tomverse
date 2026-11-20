@@ -584,10 +584,21 @@ was retried. Before the function form of section 6, each `ApplyPatch` call
 sent as a `custom` call completed and was charged while Cursor retried it four
 times and reported a server error.
 
+Cursor, 2026-11-20, against production (`https://tomverse.app/api/v1`), same
+steps, model `smart-adaptive` on Chat Completions (it picked DeepSeek V4 Pro for
+every request): Chat, Agent fix and re-run, a refused then approved command,
+and a stopped reply all passed -- 15 requests, each answered 200 once, no
+retries and no server errors; the stopped reply settled as cancelled at 1
+credit, and the receipts matched the server's request times. With model
+`gpt-6-luna` the first request was refused with 400 until the `reasoning`
+object (section 6) was accepted: Cursor sends it for a model name it
+recognises.
+
 Not yet verified, each a separate step: other operating systems, Claude Code
 and Codex against a deployed environment (their runs above called the handlers
-directly, not through the Next.js server), any client against production, and
-native Smart Adaptive (section 10.6) with real models or real clients end to end.
+directly, not through the Next.js server), Cursor against production with a
+named model once the `reasoning` object is deployed, and native Smart Adaptive
+(section 10.6) with real models or real clients end to end.
 
 ### 10.6 Smart Adaptive on the native protocols (`lib/externalApiNativeSmartAdaptive.ts`)
 
