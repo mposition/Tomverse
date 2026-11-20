@@ -18,7 +18,9 @@ test("only a percentage promotion is shown on the pricing page", () => {
   assert.equal(displayablePromotion(percent), percent);
   // A fixed-amount promotion would read as 0% off at full price while checkout charged less.
   assert.equal(displayablePromotion(promotion(0, 500)), null);
-  assert.equal(displayablePromotion(promotion(100)), null);
+  // A full discount is still a percentage the copy can state.
+  assert.equal(displayablePromotion(promotion(100)).discountPercent, 100);
+  assert.equal(displayablePromotion(promotion(150)), null);
   assert.equal(displayablePromotion(promotion(Number.NaN)), null);
   assert.equal(displayablePromotion(null), null);
   assert.equal(displayablePromotion(undefined), null);
@@ -31,4 +33,6 @@ test("the pricing page states paid prices and savings only from the live billing
   assert.match(page, /displayablePromotion\(billing\.config\?\.featuredPromotion\)/);
   assert.match(page, /const livePrice = planId === "free" \|\| Boolean\(publicPlan\);/);
   assert.match(page, /const PRICE_PENDING = "—";/);
+  // No sale block without a sale price to state.
+  assert.match(page, /promotionEligible && salePrice && !annualSelected \? <div data-testid="pricing-sale-block"/);
 });

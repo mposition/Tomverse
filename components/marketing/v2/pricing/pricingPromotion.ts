@@ -47,7 +47,7 @@ type PromotionTargets = Pick<FeaturedBillingPromotion, "appliesToPlanIds" | "bil
  * read as "0% off" at full price while checkout charged less, so it is not shown at all.
  */
 export const displayablePromotion = <T extends { discountPercent: number }>(promotion: T | null | undefined): T | null =>
-  promotion && Number.isFinite(promotion.discountPercent) && promotion.discountPercent > 0 && promotion.discountPercent < 100
+  promotion && Number.isFinite(promotion.discountPercent) && promotion.discountPercent > 0 && promotion.discountPercent <= 100
     ? promotion
     : null;
 
