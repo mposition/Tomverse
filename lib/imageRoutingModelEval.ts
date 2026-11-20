@@ -439,6 +439,9 @@ export type ImageEvalCost = {
   known: boolean;
 };
 
+/** What a paid call in the evaluation is, for the caller's budget. */
+export type ImageEvalPaidCall = { kind: "image"; provider: string; modelId: string } | { kind: "judge" };
+
 export type RunImageModelEvalInput = {
   requests: readonly SyntheticImageRequest[];
   /** The current criteria's choice for a request; null or an unknown model fails the case. */
@@ -449,10 +452,12 @@ export type RunImageModelEvalInput = {
   generate?: (input: GenerateEvalImageInput) => Promise<GenerateEvalImageResult>;
   judge?: (input: JudgeImagePairInput) => Promise<JudgeImagePairResult>;
   /**
-   * Checked before every paid call with that call's worst case in micro-USD.
-   * False stops the run; a call already made is not interrupted.
+   * Checked before every paid call with that call's worst case in micro-USD
+   * and what it is: an image (its provider, so the caller can reserve that
+   * provider's budget) or the judged pair. False stops the run; a call already
+   * made is not interrupted.
    */
-  shouldContinue: (worstCaseMicroUsd: number) => boolean | Promise<boolean>;
+  shouldContinue: (worstCaseMicroUsd: number, call: ImageEvalPaidCall) => boolean | Promise<boolean>;
   /** Called after every paid call, including a failed one, so cost is recorded as it accrues. */
   onCost: (cost: ImageEvalCost) => void | Promise<void>;
   /** Worst case of one judged pair (both vision calls), micro-USD. Default 0. */
@@ -501,8 +506,8 @@ export const runImageModelEval = async (input: RunImageModelEvalInput): Promise<
     cases.push(evalCase);
     await input.onCase?.(evalCase);
   };
-  const allowed = async (worstCase: number) =>
-    !input.signal?.aborted && (await input.shouldContinue(worstCase)) === true;
+  const allowed = async (worstCase: number, call: ImageEvalPaidCall) =>
+    !input.signal?.aborted && (await input.shouldContinue(worstCase, call)) === true;
   const modelById = (id: string) => input.candidates.find((candidate) => candidate.model.id === id) ?? null;
 
   const failedCase = (
@@ -532,7 +537,7 @@ export const runImageModelEval = async (input: RunImageModelEvalInput): Promise<
         worstCaseMicroUsd: null,
       };
     }
-    if (!(await allowed(worst))) return null;
+    if (!(await allowed(worst, { kind: "image", provider: model.provider, modelId: model.id }))) return null;
     let result: GenerateEvalImageResult;
     try {
       result = await generate({ model, prompt: request.text, preset, ...(input.signal ? { signal: input.signal } : {}) });
@@ -627,7 +632,7 @@ export const runImageModelEval = async (input: RunImageModelEvalInput): Promise<
     const pickSide = sideOf(pick.modelId, pickImage);
     const challengerSide = sideOf(challenger.id, challengerImage);
     const judgeWorst = Math.max(0, input.judgeWorstCaseMicroUsd ?? 0);
-    if (!(await allowed(judgeWorst))) {
+    if (!(await allowed(judgeWorst, { kind: "judge" }))) {
       stopped = true;
       break;
     }

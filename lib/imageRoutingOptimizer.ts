@@ -22,7 +22,10 @@ import { optimizerCycleView, promotedRouterGuidance, rolledBackRouterGuidance, t
 import { writeAutoRouterOptimizerSystemAudit } from "@/lib/autoRouterOptimizerSystemAudit";
 import { chatImageRoutingCandidates, chatImageTriageModelId, probeChatImageRouting } from "@/lib/chatImageIntent";
 import { CHAT_IMAGE_INTENT_MAX_OUTPUT_TOKENS, buildChatImageIntentSystem, chatImageIntentUserMessage } from "@/lib/chatImageIntentCore";
-import { listEnabledImageModels } from "@/lib/imageModelRegistry";
+import { holdChatUsageBucket, usagePeriodStart } from "@/lib/chatSecurity";
+import { refundProviderBudget } from "@/lib/imageGenerationService";
+import { imageProviderBudgetBucketKey, resolveImageProviderBudget } from "@/lib/imageProviderBudget";
+import { listEnabledImageModels, type ImageModelProvider } from "@/lib/imageModelRegistry";
 import { readImageRoutingReport } from "@/lib/imageRoutingReport";
 import { runImageModelEval } from "@/lib/imageRoutingModelEval";
 import {
@@ -116,6 +119,44 @@ const MODEL_EVAL_REQUESTS = 12;
 const MODEL_EVAL_BUDGET_SHARE = 0.5;
 /** The image adapter retries a failed request up to twice: an image of unknown cost is charged three worst cases. */
 const IMAGE_ATTEMPTS_BOUND = 3;
+
+type ImageEvalProviderHold = { provider: string; microUsd: number; at: Date };
+
+/**
+ * Holds an evaluation image's worst case in its provider's day and month
+ * buckets, refused at the same floor-clamped limits a person's image is
+ * (lib/imageGenerationService.ts), in one transaction: both windows or none.
+ * Null when the provider has no usable budget or either window is full.
+ */
+async function holdImageEvalProviderBudget(provider: string, microUsd: number): Promise<ImageEvalProviderHold | null> {
+    const limits = resolveImageProviderBudget(process.env, { provider: provider as ImageModelProvider }).limits;
+    if (!limits || microUsd <= 0) return null;
+    const at = new Date();
+    try {
+        return await prisma.$transaction(async (tx) => {
+            for (const window of [
+                { period: "provider-cost-day", start: usagePeriodStart("day", at), limit: limits.day },
+                { period: "provider-cost-month", start: usagePeriodStart("month", at), limit: limits.month },
+            ]) {
+                const held = await holdChatUsageBucket(tx, imageProviderBudgetBucketKey(provider), window.period, window.start, window.limit, microUsd);
+                if (!held) throw new ImageEvalBudgetRefused();
+            }
+            return { provider, microUsd, at };
+        });
+    } catch (error) {
+        if (error instanceof ImageEvalBudgetRefused) return null;
+        throw error;
+    }
+}
+
+class ImageEvalBudgetRefused extends Error {}
+
+/** Gives back the part of a hold the image did not cost. */
+async function releaseImageEvalProviderBudget(hold: ImageEvalProviderHold, paidMicroUsd: number) {
+    const unused = hold.microUsd - Math.max(0, paidMicroUsd);
+    if (unused <= 0) return;
+    await prisma.$transaction((tx) => refundProviderBudget(tx, hold.provider, unused, hold.at));
+}
 const GENERATOR_MAX_OUTPUT_TOKENS = 8_000;
 /**
  * One vision judge call: two 1024x1024 images (no provider bills one above
@@ -317,6 +358,8 @@ async function runImageCycle(input: {
                     JUDGE_CALL_INPUT_TOKENS_BOUND * input.optimizerPrices.inputUsdPerMillionTokens +
                         JUDGE_CALL_OUTPUT_TOKENS * input.optimizerPrices.outputUsdPerMillionTokens
                 );
+            // The image hold not yet settled (one image at a time).
+            let pendingImageHold: ImageEvalProviderHold | null = null;
             const result = await runImageModelEval({
                 requests: modelRequests,
                 pickFor: async (request) => {
@@ -327,12 +370,28 @@ async function runImageCycle(input: {
                 judgeModel: input.optimizerModel,
                 judgeWorstCaseMicroUsd: judgeWorst,
                 judgeUsdPerMillionTokens: { input: input.optimizerPrices.inputUsdPerMillionTokens, output: input.optimizerPrices.outputUsdPerMillionTokens },
-                // An image's worst case covers the adapter's retries.
-                shouldContinue: (worst) => !stop && spend.total + worst * IMAGE_ATTEMPTS_BOUND <= evalBudget && spend.fits(worst * IMAGE_ATTEMPTS_BOUND),
-                onCost: (cost) => {
+                // An image's worst case covers the adapter's retries; a judged
+                // pair's is already both calls. An image also holds its worst
+                // case in the image provider's day and month buckets, under the
+                // same operational limits as a person's image, before the call.
+                shouldContinue: async (worst, call) => {
+                    const need = call.kind === "image" ? worst * IMAGE_ATTEMPTS_BOUND : worst;
+                    if (stop || spend.total + need > evalBudget || !spend.fits(need)) return false;
+                    if (call.kind !== "image") return true;
+                    const held = await holdImageEvalProviderBudget(call.provider, Math.ceil(need));
+                    if (!held) return false;
+                    pendingImageHold = held;
+                    return true;
+                },
+                onCost: async (cost) => {
                     const amount = cost.known ? cost.microUsd : cost.kind === "image" ? cost.microUsd * IMAGE_ATTEMPTS_BOUND : cost.microUsd;
                     spend.add(cost.kind === "image" ? "image" : "model", cost.provider, amount, cost.known);
                     if (!cost.known) stop = "cost_unknown";
+                    // The hold becomes what was paid: the rest goes back.
+                    if (cost.kind === "image" && pendingImageHold?.provider === cost.provider) {
+                        await releaseImageEvalProviderBudget(pendingImageHold, Math.ceil(amount));
+                        pendingImageHold = null;
+                    }
                 },
             });
             modelCases = result.cases;
@@ -420,7 +479,7 @@ async function runImageCycle(input: {
                 finishedAt: new Date(),
             },
             spentByProvider: spend.model,
-            imageSpentByProvider: spend.image,
+            // Image spend is already in the image provider buckets (held, then settled).
         });
         let autoPromoted: boolean | string = false;
         if (recorded && status === "passed" && (await readImageOptimizerAutomation()).autoPromote) {
@@ -446,7 +505,7 @@ async function runImageCycle(input: {
             cycleId: input.cycleId,
             data: { status: "error", failure: "run_error", spentMicroUsd: spend.total, finishedAt: new Date() },
             spentByProvider: spend.model,
-            imageSpentByProvider: spend.image,
+            // Image spend is already in the image provider buckets (held, then settled).
         }).catch(() => undefined);
         return { recorded: false, status: "error", failure: "run_error" };
     }

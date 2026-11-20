@@ -19,6 +19,9 @@ test("an image routing cycle's run over the real cycle table", { skip: !database
     // The runner's NEXTAUTH_SECRET signs the audit rows, as for every suite sharing the chain.
     process.env.NEXTAUTH_SECRET ??= "image-optimizer-local-synthetic-secret";
     process.env.OPENAI_API_KEY ??= "sk-fixture-openai-server";
+    // The image provider's operational limits, which the evaluation's holds obey.
+    process.env.IMAGE_PROVIDER_OPENAI_COST_MICROUSD_PER_DAY ??= "50000000";
+    process.env.IMAGE_PROVIDER_OPENAI_COST_MICROUSD_PER_MONTH ??= "500000000";
     const root = resolve(import.meta.dirname, "../..");
     const mod = (path) => pathToFileURL(resolve(root, path)).href;
 
@@ -75,13 +78,17 @@ test("an image routing cycle's run over the real cycle table", { skip: !database
     });
     // The image evaluation: one case, and an image whose cost is reported or not.
     let imageCostKnown = true;
+    let heldDuring = null;
     let evalRuns = 0;
     mock.module(mod("lib/imageRoutingModelEval.ts"), {
         namedExports: {
             runImageModelEval: async (input) => {
                 evalRuns += 1;
                 await input.pickFor(input.requests[0]);
-                if (!(await input.shouldContinue(53_000))) return { cases: [], stopped: true, unfinished: 1 };
+                if (!(await input.shouldContinue(53_000, { kind: "image", provider: "openai", modelId: "gpt-image-2" }))) {
+                    return { cases: [], stopped: true, unfinished: 1 };
+                }
+                heldDuring = await imageBucket();
                 await input.onCost({ kind: "image", provider: "openai", modelId: "gpt-image-2", microUsd: 53_000, known: imageCostKnown });
                 return {
                     cases: [
@@ -115,6 +122,8 @@ test("an image routing cycle's run over the real cycle table", { skip: !database
     assert.ok(routerModel);
     const routerModelId = routerModel.id;
     await updateOptimizerModel(actor, routerModel.id);
+    const imageBucket = async () =>
+        Number((await prisma.chatUsageBucket.findFirst({ where: { key: "image-provider:openai", period: "provider-cost-day" } }))?.count ?? 0);
     const spendBefore = await prisma.chatUsageBucket.findMany({ where: { OR: [{ key: { startsWith: "provider:" } }, { key: { startsWith: "image-provider:" } }] } });
     const reset = async () => {
         await prisma.autoRouterOptimizerCycle.deleteMany({});
@@ -166,7 +175,23 @@ test("an image routing cycle's run over the real cycle table", { skip: !database
             assert.equal(row.summary.modelEvaluation.models.length > 0, true);
             const after = await prisma.chatUsageBucket.findFirst({ where: { key: "image-provider:openai", period: "provider-cost-day" } });
             assert.equal(Number(after?.count ?? 0) - Number(before?.count ?? 0), 53_000, "the image's cost, in the image provider's bucket");
+            assert.equal(heldDuring - Number(before?.count ?? 0), 53_000 * 3, "the worst case is held in the provider's bucket before the image");
 
+            // A provider whose day budget is spent stops the image before it is made.
+            await reset();
+            const { resolveImageProviderBudget } = await import(mod("lib/imageProviderBudget.ts"));
+            const { limits } = resolveImageProviderBudget(process.env, { provider: "openai" });
+            await prisma.chatUsageBucket.updateMany({
+                where: { key: "image-provider:openai", period: "provider-cost-day" },
+                data: { count: BigInt(limits.day) },
+            });
+            heldDuring = null;
+            const refused = await run();
+            assert.equal(heldDuring, null, "no image without a hold");
+            assert.equal(await imageBucket(), limits.day, "nothing held past the limit");
+            assert.equal(refused.summary.mode, "intent_and_models");
+
+            await prisma.chatUsageBucket.updateMany({ where: { key: "image-provider:openai", period: "provider-cost-day" }, data: { count: 0n } });
             await reset();
             imageCostKnown = false;
             const unknown = await run();
