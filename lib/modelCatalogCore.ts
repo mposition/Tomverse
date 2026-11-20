@@ -1190,6 +1190,23 @@ export const catalogContentHash = (rows: readonly CodingCatalogRow[]): string =>
     .update(canonicalJson([...rows].sort((a, b) => (a.modelId < b.modelId ? -1 : 1))))
     .digest("hex");
 
+/**
+ * The hash of a stored snapshot's rows read through today's row schema, so a
+ * snapshot written before a field gained a default compares as the content it
+ * still is. Null when any row no longer parses (that content did change).
+ */
+export const normalizedSnapshotContentHash = (payload: unknown): string | null => {
+  const models = (payload as { models?: unknown } | null)?.models;
+  if (!Array.isArray(models)) return null;
+  const rows: CodingCatalogRow[] = [];
+  for (const model of models) {
+    const parsed = codingCatalogRowSchema.safeParse(model);
+    if (!parsed.success) return null;
+    rows.push(parsed.data);
+  }
+  return catalogContentHash(rows);
+};
+
 export const SNAPSHOT_COVERAGE_DAYS = 30;
 
 export const snapshotCoverageUntil = (now: Date): Date =>
@@ -1219,12 +1236,16 @@ export type SnapshotRenewalDecision =
  * content is judged current today, which is all coverage claims.
  */
 export const decideSnapshotRenewal = (
-  latest: { contentHash: string; coverageUntil: Date } | null,
+  latest: { contentHash: string; coverageUntil: Date; normalizedHash?: string | null } | null,
   currentHash: string,
   now: Date
 ): SnapshotRenewalDecision => {
   if (!latest) return "no_snapshot";
-  if (latest.contentHash !== currentHash) return "content_changed";
+  // A snapshot published before a row gained defaulted fields (links added
+  // `source` and `channels`) hashes differently from the same content today;
+  // its rows read through the current schema are what the managed path
+  // compares, so that hash counts as the same content too.
+  if (latest.contentHash !== currentHash && latest.normalizedHash !== currentHash) return "content_changed";
   return latest.coverageUntil.getTime() - now.getTime() > SNAPSHOT_RENEWAL_WINDOW_MS
     ? "not_due"
     : "renew";

@@ -26,6 +26,7 @@ import {
   codingCatalogRowSchema,
   codingProviderTermsSchema,
   decideSnapshotRenewal,
+  normalizedSnapshotContentHash,
   judgeCodingModel,
   judgeCodingResolution,
   judgeImageModel,
@@ -462,7 +463,11 @@ export const renewCodingSnapshotIfUnchanged = async (
       where: { category: "coding" },
       orderBy: { version: "desc" },
     });
-    const decision = decideSnapshotRenewal(latest, contentHash, now);
+    const decision = decideSnapshotRenewal(
+      latest ? { ...latest, normalizedHash: normalizedSnapshotContentHash(latest.payload) } : null,
+      contentHash,
+      now
+    );
     if (decision !== "renew" || !latest) {
       return {
         decision,
