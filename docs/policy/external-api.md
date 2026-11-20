@@ -365,7 +365,7 @@ improved by its own optimizer, as Chat's router is.
     current coding guidance routes the task. Its pick and the next candidate
     up each work it as an agent with `list_files`, `read_file`,
     `write_file` and `run_tests` (the visible examples only), for at most
-    10 steps.
+    8 steps, with a 32 KB workspace and 32 KB of tool output.
   - Pass or fail is decided in the trusted parent. A runner written by the
     harness calls the model's exports in a child and returns their values.
     The parent compares them with hidden expectations that never enter the
