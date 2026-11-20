@@ -221,9 +221,11 @@ export function generatorClaimContext(
 
 /** The homepage, About and FAQ copy in English: what Tomverse says about itself. */
 const ownPages = (): Record<string, unknown> => {
-  // The console and terminal samples are code, not claims about Tomverse.
-  const { api: { console: _console, ...api }, cli: { term: _term, ...cli }, ...home } = homeV2Content.en;
-  void _console; void _term;
+  // The console and terminal samples are code, not claims about Tomverse, and
+  // the API facts are endpoint URLs: the approved tracked pages are the
+  // context's only URLs (tests/integration/marketing-generator-context.db.test.ts).
+  const { api: { console: _console, facts: _facts, ...api }, cli: { term: _term, ...cli }, ...home } = homeV2Content.en;
+  void _console; void _term; void _facts;
   return {
     home: { ...home, api, cli },
     about: infoPages.about.en,
