@@ -130,3 +130,15 @@ revision에 더해 발견 테이블(provider 카탈로그 관찰, 문서 근거,
   자격증명이 아닙니다. 쓰기를 켤 때만 staging과 dev에 `MODEL_CATALOG_ENV_SYNC_APPLY=true`를 더합니다.
 - **지금 한 번 돌리기:** 대상 환경의 `MAINTENANCE_SECRET`로 `POST /api/internal/model-catalog/env-sync`를 호출합니다.
   응답은 표별 `create`·`update`·`unchanged`·`conflicts`·`localOnly`·`held` 건수입니다.
+- **돌았는지 확인:** 일요일 03:00 UTC 직후 웹 서비스 로그의 `model_catalog_env_sync` 한 줄입니다. `skipped`
+  `export_secret_missing`이면 그 환경에 `MODEL_CATALOG_EXPORT_SECRET`이 없는 것이고, `planned`이면 쓰기 스위치가 꺼진
+  것입니다. Test는 `test` 브랜치가 이 기능 이후로 옮겨진 뒤에야 돕니다.
+
+## 6. 일일 provider 카탈로그 스캔은 production에서만
+
+결정: 운영자, 2026-11-11. dev와 Test는 위 5절의 주간 복사로 발견 큐를 받으므로 자기 스캔을 하지 않습니다. 스캔이 돌면
+두 번째·세 번째 발견 큐와 일일 `Model lifecycle` 이메일이 생깁니다. `/api/internal/provider-model-catalog/check`는
+production이 아니면 스캔 없이 `{"skipped":"not_production"}`을 돌려주고, 무소식 감시가 울리지 않도록 실행 기록만
+남깁니다(`lib/providerModelCatalogScanGate.ts`). 수동 `?test=true` 실행은 어느 환경에서나 그대로 돕니다. cron의 시작
+명령을 대시보드에서 바꾸는 것만으로는 부족합니다 — IaC(`.railway/scheduled-jobs.ts`)가 모든 환경에 같은 명령을
+선언하므로 apply가 되돌리고, Railway redeploy는 이전 배포의 시작 명령을 그대로 씁니다.
