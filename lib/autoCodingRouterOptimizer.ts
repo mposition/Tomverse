@@ -309,18 +309,24 @@ async function runCodingCycle(input: {
                 evalStop = "deadline";
                 break;
             }
+            // The router call's worst case -- the request with generous room
+            // for the fixed instructions, at the call's output ceiling -- must
+            // fit before it is made, and is what it costs if its usage is unknown.
+            const worstRoute =
+                autoLlmRouterWorstCaseMicroUsd({
+                    system: " ".repeat(ROUTER_INSTRUCTIONS_BOUND_BYTES),
+                    prompt: JSON.stringify(candidatesFor()) + task.prompt,
+                    maxOutputTokens: AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS,
+                    ...input.routerPrices,
+                }) ?? Number.POSITIVE_INFINITY;
+            if (evalTotal + worstRoute > evalBudget) {
+                evalStop = "budget";
+                break;
+            }
             const routed = await routeWith(input.incumbentGuidance, task.prompt, `task-${task.id}`);
             if (routed.usage?.inputTokens === undefined || routed.usage.outputTokens === undefined) {
-                // A router call with unknown usage is charged its worst case --
-                // the request with generous room for the fixed instructions,
-                // at the call's output ceiling -- and the evaluation stops.
-                const worst =
-                    autoLlmRouterWorstCaseMicroUsd({
-                        system: " ".repeat(ROUTER_INSTRUCTIONS_BOUND_BYTES),
-                        prompt: JSON.stringify(candidatesFor()) + task.prompt,
-                        maxOutputTokens: AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS,
-                        ...input.routerPrices,
-                    }) ?? 0;
+                // Usage unknown: charged its worst case, and the evaluation stops.
+                const worst = worstRoute;
                 addEvalSpend(input.routerModel.provider, worst);
                 evalCalls.push({ known: false, microUsd: worst });
                 evalStop = "cost_unknown";
