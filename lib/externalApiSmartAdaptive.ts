@@ -4,7 +4,7 @@ import { pickAutoModelWithLlm } from "@/lib/autoLlmRouter";
 import type { CodingRouterContext } from "@/lib/autoLlmRouterCore";
 import { keyCreditTotals } from "@/lib/externalApiAdmission";
 import type { externalApiRunnableModels } from "@/lib/externalApiCatalog";
-import { smartAdaptiveRouterEnabled } from "@/lib/externalApiCatalogCore";
+import { isSmartAdaptiveOnlyModel, smartAdaptiveRouterEnabled } from "@/lib/externalApiCatalogCore";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { DEFAULT_MODEL_ID } from "@/lib/models";
 import {
@@ -257,7 +257,10 @@ const decideSmartAdaptive = async (
     // Nothing fits: the default model answers, and its own limits refuse the
     // request with the usual error.
     const pool = eligible.length > 0 ? eligible : input.runnable;
-    const fallback = pool.find((entry) => entry.model.id === DEFAULT_MODEL_ID) ?? pool[0];
+    // Never a frontier or apex model only the router may pick.
+    const nameable = pool.filter((entry) => !isSmartAdaptiveOnlyModel(entry.model));
+    const fallbackPool = nameable.length > 0 ? nameable : pool;
+    const fallback = fallbackPool.find((entry) => entry.model.id === DEFAULT_MODEL_ID) ?? fallbackPool[0];
     const turn = latestTurn(input.request);
     if (!turn || eligible.length < 2) return { entry: fallback, routedBy: "default" };
 

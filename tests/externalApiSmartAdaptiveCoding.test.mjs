@@ -9,7 +9,11 @@ import {
     boundedToolResult,
     buildAutoLlmRouterSystem,
 } from "../lib/autoLlmRouterCore.ts";
-import { isExternalApiServableModel, smartAdaptiveCapabilities } from "../lib/externalApiCatalogCore.ts";
+import {
+    isExternalApiServableModel,
+    isSmartAdaptiveOnlyModel,
+    smartAdaptiveCapabilities,
+} from "../lib/externalApiCatalogCore.ts";
 import { codingToolModels } from "../lib/externalApiCodingTools.ts";
 import {
     conversationModelMayMove,
@@ -56,6 +60,10 @@ test("frontier and apex models are Smart Adaptive candidates only", () => {
         assert.equal(isExternalApiServableModel(model(usageClass), "Max", { smartAdaptive: true }), false, `${usageClass} never`);
     }
     assert.equal(isExternalApiServableModel(model("premium"), "Pro", { smartAdaptive: true }), true);
+    // Never a default (lib/externalApiSmartAdaptive.ts, lib/externalApiNativeSmartAdaptive.ts).
+    assert.equal(isSmartAdaptiveOnlyModel(model("frontier")), true);
+    assert.equal(isSmartAdaptiveOnlyModel(model("apex")), true);
+    assert.equal(isSmartAdaptiveOnlyModel(model("premium")), false);
 });
 
 const caps = (id, creditWeight, protocols) => ({

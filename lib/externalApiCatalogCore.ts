@@ -67,6 +67,13 @@ export const externalApiChannelFor = (userAgent: string | null | undefined): "ap
  */
 const SMART_ADAPTIVE_ONLY_USAGE_CLASSES = new Set<AiModel["usageClass"]>(["frontier", "apex"]);
 
+/**
+ * A model only Smart Adaptive routes to. Never a default: the model a request
+ * takes when the router does not pick is chosen among the others.
+ */
+export const isSmartAdaptiveOnlyModel = (model: Pick<AiModel, "usageClass">) =>
+    SMART_ADAPTIVE_ONLY_USAGE_CLASSES.has(model.usageClass);
+
 export const isExternalApiServableModel = (
     model: AiModel,
     plan: ModelTier,

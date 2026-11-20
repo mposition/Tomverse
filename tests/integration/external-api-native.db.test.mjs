@@ -1022,6 +1022,16 @@ test("native protocols over the real shared credit ledger", { skip: !databaseUrl
             assert.deepEqual(routed(light), [strong.model.id, "continued"]);
             assert.equal(routerCalls.length, before + 3);
 
+            // A new history on the same session (a Claude Code subagent) keeps
+            // the session's model and makes no router call.
+            const subagentBefore = routerCalls.length;
+            routerPick = cheap.model.id;
+            const subagent = await claude(key, claudeBody({ model: "smart-adaptive", messages: [{ role: "user", content: [{ type: "text", text: "Search the repo for parse()" }] }] }), session);
+            await subagent.text();
+            assert.deepEqual(routed(subagent), [strong.model.id, "continued"]);
+            assert.equal(routerCalls.length, subagentBefore);
+            routerPick = strong.model.id;
+
             // Two identical requests for one message at once share one router call.
             const twinsBefore = routerCalls.length;
             routerDelayMs = 50;

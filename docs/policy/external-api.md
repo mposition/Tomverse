@@ -632,10 +632,16 @@ providers, so signed or encrypted state is never sent to another provider.
   the user wrote (the history ends with a user message carrying no
   `tool_result`, or a Responses user message rather than a tool output; read
   from the structure, never the text) is routed again with the pinned model
-  as `currentModelId`: a cheaper pick keeps the pin, a stronger one answers
-  and is pinned only once admission accepted it, so a model the account
-  cannot pay for never takes the conversation. The switch costs the
-  reasoning and the cache, the trade the user's harder request asks for. The conversation is the client's own id: Codex's
+  as `currentModelId`: a cheaper pick keeps the pin, a stronger one answers.
+  Every pin is written only once admission accepted the request, so a model
+  the account cannot pay for never takes the conversation, and the rule is
+  checked again when it is written, so of two messages routed at once the
+  cheaper one admitted last cannot lower it. A request that opens a new
+  history on the same session (a Claude Code subagent) keeps the session's
+  model and is not routed, so it cannot move the model under the main loop's
+  tool rounds; identical concurrent requests share one router call. The
+  switch costs the reasoning and the cache, the trade the user's harder
+  request asks for. The provider default is never a frontier or apex model. The conversation is the client's own id: Codex's
   `prompt_cache_key` (its thread id; `session-id`/`thread-id` headers),
   Claude Code's `x-claude-code-session-id` or the session in
   `metadata.user_id`; otherwise a digest of the history's opening. The pin is

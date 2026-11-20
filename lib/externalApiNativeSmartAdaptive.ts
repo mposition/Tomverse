@@ -1,7 +1,7 @@
 import "server-only";
 import { createHash } from "node:crypto";
 import type { externalApiRunnableModels } from "@/lib/externalApiCatalog";
-import { nativeSmartAdaptiveDefaultId } from "@/lib/externalApiCatalogCore";
+import { isSmartAdaptiveOnlyModel, nativeSmartAdaptiveDefaultId } from "@/lib/externalApiCatalogCore";
 import { estimateNativeInput, isRecord, NativeProtocolError } from "@/lib/externalApiNativeCore";
 import { NATIVE_PROTOCOL_PROVIDER } from "@/lib/externalApiProtocols";
 import { pickWithSmartAdaptiveRouter } from "@/lib/externalApiSmartAdaptive";
@@ -201,16 +201,21 @@ const decideNativeSmartAdaptive = async (input: {
               );
     }
     const candidates = fits;
+    // The default is chosen among the models a client can name, never a
+    // frontier or apex model only the router may pick.
+    const nameable = candidates.filter((entry) => !isSmartAdaptiveOnlyModel(entry.model));
+    const defaultPool = nameable.length > 0 ? nameable : candidates;
     const defaultId = nativeSmartAdaptiveDefaultId(
-        candidates.map((entry) => entry.capabilities),
+        defaultPool.map((entry) => entry.capabilities),
         DEFAULT_MODEL_ID
     );
-    const fallback = candidates.find((entry) => entry.model.id === defaultId) ?? candidates[0];
+    const fallback = defaultPool.find((entry) => entry.model.id === defaultId) ?? defaultPool[0];
     const now = input.now ?? Date.now();
     const pinKey = `${input.keyId}\0${input.protocol}\0${nativeConversationId(input.protocol, input.request, input.body)}`;
 
     const prompt = nativeLatestPrompt(input.protocol, input.body);
     const userTurn = nativeUserTurn(input.protocol, input.body);
+    const underWay = nativeConversationUnderWay(input.protocol, input.body);
     const router = (current: RunnableEntry | undefined) =>
         pickWithSmartAdaptiveRouter({
             userId: input.userId,
@@ -231,14 +236,17 @@ const decideNativeSmartAdaptive = async (input: {
         if (current) {
             if (input.free) return { entry: current, routedBy: "continued" };
             const keep: NativeSmartDecision = { entry: current, routedBy: "continued", commit: commitFor(current, null) };
-            if (!userTurn || candidates.length < 2 || !prompt) return keep;
-            // A message the user wrote: the router may move the conversation
-            // to a stronger model, never to a cheaper one.
-            if (!(await input.routerAllowed())) return keep;
+            // A message the user wrote in a conversation under way: the router
+            // may move it to a stronger model, never to a cheaper one. A request
+            // that opens a new history on the same session (a Claude Code
+            // subagent) keeps the session's model, so it cannot move the model
+            // under the main loop's tool rounds.
+            if (!userTurn || !underWay || candidates.length < 2 || !prompt) return keep;
             // An identical concurrent request (a retry, an Idempotency-Key twin)
             // shares this router call rather than making its own.
             const flight = `${pinKey}\0turn:${digest(JSON.stringify(input.body))}`;
             const shared = routing.get(flight);
+            if (!shared && !(await input.routerAllowed())) return keep;
             const call = shared ?? router(current);
             if (!shared) routing.set(flight, call);
             let routed: Awaited<typeof call>;
@@ -264,14 +272,17 @@ const decideNativeSmartAdaptive = async (input: {
 
     // A tool round with no pin keeps to the default; a message the user wrote
     // is routed like a first request.
-    if ((nativeConversationUnderWay(input.protocol, input.body) && !userTurn) || candidates.length < 2 || !prompt) {
+    if ((underWay && !userTurn) || candidates.length < 2 || !prompt) {
         return { entry: fallback, routedBy: "default", commit: commitFor(fallback, unfit) };
     }
     // Concurrent first requests of one conversation share one router call;
     // each still takes the shared pick only if it is one of its own candidates.
     // A waiter that cannot take it answers on its own default without moving
-    // the pin; its next request re-checks the pin like any other.
-    const pending = routing.get(pinKey);
+    // the pin; its next request re-checks the pin like any other. A message in
+    // a conversation under way whose pin was lost shares only with an
+    // identical request: two different messages each get their own pick.
+    const flight = underWay ? `${pinKey}\0turn:${digest(JSON.stringify(input.body))}` : pinKey;
+    const pending = routing.get(flight);
     if (pending) {
         const shared = await pending;
         const entry = candidates.find((candidate) => candidate.model.id === shared.entry.model.id);
@@ -281,12 +292,12 @@ const decideNativeSmartAdaptive = async (input: {
     }
     const decision: Promise<NativeSmartDecision> = (async () =>
         (await input.routerAllowed()) ? await router(undefined) : { entry: fallback, routedBy: "default" as const })();
-    routing.set(pinKey, decision);
+    routing.set(flight, decision);
     try {
         const decided = await decision;
         return { ...decided, commit: commitFor(decided.entry, unfit) };
     } finally {
-        routing.delete(pinKey);
+        routing.delete(flight);
     }
 };
 
