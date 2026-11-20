@@ -160,6 +160,7 @@ export function AdminAutoCodingOptimizerPanel({ canWrite = true }: { canWrite?: 
           <p>
             {value.requests} {m.requests} · {value.namedRequests} {m.named}
           </p>
+          {value.truncated ? <p className="text-amber-300">{m.truncated}</p> : null}
           <p>
             {m.topModel} {percent(value.topModelShare)} · {m.held} {percent(value.heldShare)} · {m.errors} {percent(value.errorShare)}
           </p>
